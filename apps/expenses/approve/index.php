@@ -7,7 +7,7 @@
  * Lists pending claims that the current user is authorised to approve.  Shows
  * summary info, status badges, and opens a modal to approve / decline each.
  * -----------------------------------------------------------------------------
- * Version: Phase‑5 scaffold (UI only – action handler in approve/save.php).
+ * Version: Phase-5 scaffold (UI only – action handler in approve/save.php).
  * -----------------------------------------------------------------------------
  */
 
