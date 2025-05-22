@@ -1,0 +1,86 @@
+# ===============================
+# GitHub Action · FTP Deploy
+# ===============================
+# Syncs only changed files to DreamHost on each push.
+# • develop  → alpha_html  (auto)
+# • main     → public_html (manual or tagged release)
+# -----------------------------------------------
+name: Deploy to DreamHost
+
+on:
+  push:
+    branches: [ develop ]
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "Deploy branch to target (alpha | beta | live)"
+        required: false
+        default: "live"
+        type: choice
+        options:
+          - live
+          - beta
+          - alpha
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    # Map branch → remote path
+    env:
+      FTP_HOST: ${{ secrets.DH_HOST }}
+      FTP_USER: ${{ secrets.DH_USER }}
+      FTP_PASS: ${{ secrets.DH_PASS }}
+      REMOTE_ALPHA: portal.millrdsdacambridge.uk/alpha_html
+      REMOTE_BETA: portal.millrdsdacambridge.uk/beta_html
+      REMOTE_LIVE: portal.millrdsdacambridge.uk/public_html
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Select target path
+        id: set-path
+        run: |
+          echo "::group::Select remote path"
+          if [[ "${{ github.event_name }}" == "push" ]]; then
+            # Auto rules
+            if [[ "${{ github.ref }}" == "refs/heads/develop" ]]; then
+              echo "path=${REMOTE_ALPHA}" >> $GITHUB_OUTPUT
+            elif [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+              echo "path=${REMOTE_LIVE}" >> $GITHUB_OUTPUT
+            else
+              echo "::error::Unsupported branch for auto-deploy" && exit 1
+            fi
+          else
+            # Manual dispatch
+            case "${{ github.event.inputs.target }}" in
+              alpha) echo "path=${REMOTE_ALPHA}" >> $GITHUB_OUTPUT;;
+              beta)  echo "path=${REMOTE_BETA}"  >> $GITHUB_OUTPUT;;
+              live)  echo "path=${REMOTE_LIVE}"  >> $GITHUB_OUTPUT;;
+              *) echo "::error::Invalid target" && exit 1;;
+            esac
+          fi
+          echo "Deploying to: $(cat $GITHUB_OUTPUT | cut -d= -f2)" 
+          echo "::endgroup::"
+
+      - name: Lint PHP
+        run: |
+          echo "::group::PHP Lint"
+          find . -type f -name "*.php" -not -path "*/vendor/*" -print0 | xargs -0 -n1 -P4 php -l
+          echo "::endgroup::"
+
+      - name: Sync via lftp
+        uses: sebastianpopp/ftp-action@v1
+        with:
+          host:   ${{ env.FTP_HOST }}
+          user:   ${{ env.FTP_USER }}
+          pass:   ${{ env.FTP_PASS }}
+          local:  ./
+          remote: ${{ steps.set-path.outputs.path }}
+          args:   "--verbose --parallel=4 --delete --exclude .git* --exclude vendor/"
+
+      - name: Health check
+        run: |
+          URL="https://${{ steps.set-path.outputs.path | sed 's/portal\.millrdsdacambridge\.uk\///' }}health" || true
+          curl -fsSL "$URL" || echo "Health endpoint not responding; continue"
