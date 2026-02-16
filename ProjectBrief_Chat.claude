@@ -1,0 +1,870 @@
+I want to create an (internal) "portal" web software/platform for a website of an organisation (in this case a non-profit, church/religious organisation - but the final project must not be limited to this and be flexible for use an all kinds of organisations, of all sizes).
+
+The name will be "WebMS Intra" ('Intra' indicating intended for Intranet/internal use)
+
+========================
+*TECH STACK and specific instructions*
+========================
+Please use the following technologies for development of the entire 'Portal' project
+* PHP (minimum PHP 8.3, but aiming for PHP 8.4 for longevity purposes
+	* PHP code should
+		* Use PHP Predefined Constants wherever possible to aid with host platform neutrality (ie, use DIRECTORY_SEPARATOR instead of '/' in paths)
+		* Full notation for code blocks such as (but not limited to) IF statements, no shortened notation
+		* be indented appropriately with detailed inline comments/annotations to assith with code readibility, understanding, debugging and future learning/maintenance of code (where applicable include reference links to documentation to help explain understand the concept)
+		* Minimise code duplication but grouping shared code and reusing them via PHP REQUIRE, REQUIRE_ONCE, INCLUDE & INCLUDE_ONCE
+		
+		  appropriate checks and error handling for REQUIRED and INCLUDED components should be done to avoid errors should files not exist/not be retrievable
+		* provide switches  to enable detailed PHP error visiblity by use of a URL Param such as &debug=true (for dev purposes only)
+		* log PHP errors/notifictions/warnings (including severity, PHP error code, PHP Error title, error detail, backtrace) to a table in the backend database along with any other errors from components and requested page URL and request headers to assist with debugging/trouble shooting
+* MySQL Backend Database
+	* Interactions between PHP & MySQL/MariaDB via MySQLi only
+	* Use Prepared Statements for all SQL run in PHP
+	* Backend database to be used for ALL settings and config as well as records pertaining to the portal and its individual sub-apps
+	* Settings should also be stored in the database, including credentials (keys, secrets etc) for third-party services/libraries (like MS365 etc)
+	* any confidential secrets/keys (labelled as "isSensitive") must be cryptographically encrypted before entry into the database to ensure data security. Encryption of these confidential info should also use SALT methodology for added security, to current industry standard levels. When retrieving these fields, they should also be decrypted for use.
+	* Pre-existing database structure (with some data) is included further down this outline
+	
+		We are however happy for this structure to be modified as seen fit to improve functionality, flexibility, performance and/or security
+* HTML5
+	* Must be fully HTML5 compliant, and using modern HTML5 elements
+	* Must be fully responsive, and useable on a range of devices, display aspect ratios and display sizes (Hi Res PCs/TV, regular PCs/TV, Tablets, Phones etc)
+		* As <table> tags and the like dont work well in a modern responsive web era, please dont use them
+* For bot projection of form submission (support for both, with definable order of preference, but the service used depends on provision of required API Keys/secrets)
+	* CloudFlare Turnstile
+	* ReCapture
+* Microsoft 365
+	* Used for sending emails using from a Shared Microsoft 365 mailbox (Send As)
+	* used for user login, especially for staff/admins/global admins/devs etc
+* Google Workspace (future use, but functionality built now)
+	* Used for sending emails using from a Shared Microsoft 365 mailbox (SendAs)
+	* used for user login, especially for staff/admins/global admins/devs etc
+* Support for future implementation/integration of SIGNula (https://github.com/MWBMPartners/SIGNula.id) via its API
+	
+
+========================	
+*FILE & DATA STRUCTURE*
+========================
+
+------------------------	
+*Server Files*
+------------------------
+The Portal will be (in this case) hosted at portal.millrdsdacambridge.uk. the actual Portal files will be hosted on the same webserver as the main application (millrdsdacambridge.uk). BRIEF/HIGH-LEVEL server structure is given below:
+
+<server>
+├── _auth_keys/                 	← Site/Server-Wide 🔐 MS365 / DB creds / reCapture / Cloudflare Turnstile & other API Keys (outside web root)
+│   ├── auth_creds.php				← Stored securely (not accessible via web)
+├── _includes/                  	← Stores Site/Server-wide shared 'includes' that are not directly publically accessible
+├── _functions/                		← Stores Site/Server-wide shared 'functions' (PHP or other) that used via php include/require and are not directly publically accessible
+├── _libraries/                 	← Stores Site/Server-wide shared 'libraries' (dompdf, Parsedown etc)
+├── _uploads/                 		← Stores Site/Server-wide 'uploads' that are not directly publically accessible
+├── _backups/                 		← Stores Site/Server-wide 'backups' that are not directly publically accessible
+├── millrdsdacambridge.uk/			← Main Website 
+│   ├── _auth_keys/                 ← Main Website specific DB creds (outside web root) IF different from side wide
+│   │   ├── auth_creds.php          ← Stored securely (not accessible via web)
+│   ├── _includes/                  ← Main website specific shared 'includes' that are not directly publically accessible
+│   ├── _functions/                 ← Main website specific shared 'functions' (PHP or other) that used via php include/require and are not directly publically accessible
+│   ├── _libraries/                 ← Main website specific shared 'libraries' (dompdf, Parsedown etc)
+│   ├── _uploads/                 	← Main website specific 'uploads' that are not directly publically accessible
+│   ├── _backups/                 	← Main website specific 'backups' that are not directly publically accessible
+│   ├── private_html/               ← Main Website public web root
+│   ├── public_html/                ← Main Website public web root
+│   ├── public_html_dev/			← Main Website Development web root
+│   ├── public_html_landing/		← Main Website landing web root
+│   ├── public_html_redir/			← Main Website redirection web root
+├── portal.millrdsdacambridge.uk/	← Portal (THIS PROJECT, DONT GENERATE ANYTHING FOR OTHER DIRECTORIES, THEYRE JUST PROVIDED FOR SERVER FOLDER STRUCTURE PURPOSES)
+│   ├── web/                 		← All Files to be uploaded to server for web-hosting
+│   │   ├── _auth_keys/             ← Portal specific DB creds (outside web root) IF different from side wide (not accessible via web)
+│   │   │   ├── auth_creds.php      ← Stored securely (not accessible via web)
+│   │   ├── _includes/                  ← Portal specific shared 'includes' that are not directly publically accessible (eg CSRF) (not accessible via web)
+│   │   ├── _functions/                 ← Portal specific shared 'functions' (PHP or other) that used via php include/require and are not directly publically accessible (not accessible via web)
+│   │   ├── _libraries/                 ← Portal specific self-hosted 'libraries' (not accessible via web)
+│   │   ├── _uploads/                 	← Portal specific 'uploads' that are not directly publically accessible (not accessible via web)
+│   │   ├── _backups/                 	← Portal specific 'backups' that are not directly publically accessible (not accessible via web)
+│   │   │   
+│   │   ├── private_html/          	← Private HTML (placeholder structure element, may never be used)
+│   │   │   ├── assets/            	← Static assets (CSS/JS/SVG/PNG fallback)
+│   │   │   ├── css/                ← Compiled CSS (e.g. Bootstrap manually added)
+│   │   │   ├── js/                	← JS (e.g. AJAX logic, timezone helpers)
+│   │   │   ├── images/             ← SVGs (primary) + PNG fallbacks (if not base64 datauri encoded)
+│   │   │   ├── fonts/              ← Fonts
+│   │   ├── README.md               ← Internal alpha dev notes
+│   │   ├── CHANGE.md              	← Internal alpha dev changelog
+│   │   │   
+│   │   ├── public_html/          	← Public Main Web Root (publicly accessible via web)
+│   │   │   ├── assets/            	← Static assets (CSS/JS/SVG/PNG fallback)
+│   │   │   ├── css/                ← Compiled CSS (e.g. Bootstrap manually added)
+│   │   │   ├── js/                	← JS (e.g. AJAX logic, timezone helpers)
+│   │   │   ├── images/             ← SVGs (primary) + PNG fallbacks (if not base64 datauri encoded)
+│   │   │   ├── fonts/              ← Fonts
+│   │   ├── README.md               ← Internal alpha dev notes
+│   │   ├── CHANGE.md             	← Internal alpha dev changelog
+│   │   ├── {app}/                	← Public app-specific root
+│   │   │   ├── assets/             ← Static app-specific assets (CSS/JS/SVG/PNG fallback)
+│   │   │   │   ├── css/            ← Compiled app-specific CSS (e.g. Bootstrap manually added)
+│   │   │   │   ├── js/             ← app-specific JS (e.g. AJAX logic, timezone helpers)
+│   │   │   │   ├── images/         ← app-specificSVGs (primary) + PNG fallbacks (if not base64 datauri encoded)
+│   │   │   │   ├── fonts/          ← app-specific Fonts
+│   │   │   ├── README.md               ← Internal notes
+│   │   │   ├── CHANGE.log              ← Internal changelog
+│   │   │   
+│   │   ├── public_html_dev/        ← Public Development Web Root (publicly accessible via web, but may have auth restrictions via either .htaccess or other mechanisms)
+│   │   │   ├── assets/            	← Static assets (CSS/JS/SVG/PNG fallback)
+│   │   │   ├── css/                ← Compiled CSS (e.g. Bootstrap manually added)
+│   │   │   ├── js/                	← JS (e.g. AJAX logic, timezone helpers)
+│   │   │   ├── images/             ← SVGs (primary) + PNG fallbacks (if not base64 datauri encoded)
+│   │   │   ├── fonts/              ← Fonts
+│   │   ├── README.md               ← Internal alpha dev notes
+│   │   ├── CHANGE.md             	← Internal alpha dev changelog
+│   │   ├── {app}/                	← Public app-specific root
+│   │   │   ├── assets/             ← Static app-specific assets (CSS/JS/SVG/PNG fallback)
+│   │   │   │   ├── css/            ← Compiled app-specific CSS (e.g. Bootstrap manually added)
+│   │   │   │   ├── js/             ← app-specific JS (e.g. AJAX logic, timezone helpers)
+│   │   │   │   ├── images/         ← app-specificSVGs (primary) + PNG fallbacks (if not base64 datauri encoded)
+│   │   │   │   ├── fonts/          ← app-specific Fonts
+│   │   │   ├── README.md               ← Internal notes
+│   │   │   ├── CHANGE.log              ← Internal changelog
+│   │   │   
+│   │   ├── public_html_landing/    ← Public Landing Web Root (publicly accessible via web, but only used in pre-launch to show landing/coming soon page)
+│   │   │   ├── assets/            	← Static assets (CSS/JS/SVG/PNG fallback)
+│   │   │   ├── css/                ← Compiled CSS (e.g. Bootstrap manually added)
+│   │   │   ├── js/                	← JS (e.g. AJAX logic, timezone helpers)
+│   │   │   ├── images/             ← SVGs (primary) + PNG fallbacks (if not base64 datauri encoded)
+│   │   │   ├── fonts/              ← Fonts
+│   │   ├── README.md               ← Internal alpha dev notes
+│   │   ├── CHANGE.md             	← Internal alpha dev changelog
+│   │   │   
+│   │   ├── public_html_redir/    	← Public Redirection Web Root (publicly accessible via web, but only used in limited cases where a redirection is needed.)
+│   │   │   ├── assets/            	← Static assets (CSS/JS/SVG/PNG fallback)
+│   │   │   ├── css/                ← Compiled CSS (e.g. Bootstrap manually added)
+│   │   │   ├── js/                	← JS (e.g. AJAX logic, timezone helpers)
+│   │   │   ├── images/             ← SVGs (primary) + PNG fallbacks (if not base64 datauri encoded)
+│   │   │   ├── fonts/              ← Fonts
+│   │   ├── README.md               ← Internal alpha dev notes
+│   │   ├── CHANGE.md             	← Internal alpha dev changelog
+│   ├── README.md                   ← Internal "Portal"-wide  notes
+│   └── CHANGE.log              	← Internal "Portal"-wide changelog
+├── README.md                       ← Internal notes
+└── CHANGE.log              		← Internal changelog
+
+------------------------	
+*Existing MySQL Database Structure*
+------------------------
+Below is the current MySQL Database structure. Happy for this however to be tweaked/adjusted as required to support the project
+
+-- --------------------------------------------------------
+-- Host:                         mysql.mwhost.online
+-- Server version:               8.0.28-0ubuntu0.20.04.3 - (Ubuntu)
+-- Server OS:                    Linux
+-- HeidiSQL Version:             11.0.0.5919
+-- --------------------------------------------------------
+
+/*!40101 SET @OLD_CHARACTER_SET_CLIENT=@@CHARACTER_SET_CLIENT */;
+/*!40101 SET NAMES utf8 */;
+/*!50503 SET NAMES utf8mb4 */;
+/*!40014 SET @OLD_FOREIGN_KEY_CHECKS=@@FOREIGN_KEY_CHECKS, FOREIGN_KEY_CHECKS=0 */;
+/*!40101 SET @OLD_SQL_MODE=@@SQL_MODE, SQL_MODE='NO_AUTO_VALUE_ON_ZERO' */;
+
+
+-- Dumping database structure for millrdsdacambridge_manageportal
+CREATE DATABASE IF NOT EXISTS `millrdsdacambridge_manageportal` /*!40100 DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci */ /*!80016 DEFAULT ENCRYPTION='N' */;
+USE `millrdsdacambridge_manageportal`;
+
+-- Dumping structure for table millrdsdacambridge_manageportal.tblActivityLogs
+CREATE TABLE IF NOT EXISTS `tblActivityLogs` (
+  `logID` int NOT NULL AUTO_INCREMENT,
+  `userID` int DEFAULT NULL,
+  `activityType` varchar(100) COLLATE utf8mb4_general_ci DEFAULT NULL,
+  `activityDescription` text COLLATE utf8mb4_general_ci,
+  `claimID` int DEFAULT NULL,
+  `requestHeaders` longtext COLLATE utf8mb4_general_ci COMMENT 'Request headers from the request which triggerd the action',
+  `sessionID` varchar(255) COLLATE utf8mb4_general_ci DEFAULT NULL,
+  `visitorIP` varchar(100) COLLATE utf8mb4_general_ci DEFAULT NULL,
+  `userAgent` text COLLATE utf8mb4_general_ci,
+  `sessionDataSnapshot` text COLLATE utf8mb4_general_ci,
+  `timestamp` datetime DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`logID`),
+  KEY `userID` (`userID`),
+  KEY `claimID` (`claimID`),
+  CONSTRAINT `tblActivityLogs_ibfk_1` FOREIGN KEY (`userID`) REFERENCES `tblUsers` (`userID`),
+  CONSTRAINT `tblActivityLogs_ibfk_2` FOREIGN KEY (`claimID`) REFERENCES `tblExpenseClaims` (`claimID`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='Table looking all activity within the system/Portal for auditing and troubleshooting purposes.';
+
+-- Dumping data for table millrdsdacambridge_manageportal.tblActivityLogs: ~0 rows (approximately)
+/*!40000 ALTER TABLE `tblActivityLogs` DISABLE KEYS */;
+/*!40000 ALTER TABLE `tblActivityLogs` ENABLE KEYS */;
+
+-- Dumping structure for table millrdsdacambridge_manageportal.tblDepts
+CREATE TABLE IF NOT EXISTS `tblDepts` (
+  `deptID` int NOT NULL AUTO_INCREMENT,
+  `deptName` varchar(100) COLLATE utf8mb4_general_ci DEFAULT NULL,
+  `deptCode` varchar(50) COLLATE utf8mb4_general_ci DEFAULT NULL,
+  `isActive` tinyint(1) DEFAULT '1',
+  PRIMARY KEY (`deptID`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- Dumping data for table millrdsdacambridge_manageportal.tblDepts: ~0 rows (approximately)
+/*!40000 ALTER TABLE `tblDepts` DISABLE KEYS */;
+/*!40000 ALTER TABLE `tblDepts` ENABLE KEYS */;
+
+-- Dumping structure for table millrdsdacambridge_manageportal.tblExpenseClaimFiles
+CREATE TABLE IF NOT EXISTS `tblExpenseClaimFiles` (
+  `fileID` int NOT NULL AUTO_INCREMENT,
+  `claimID` int NOT NULL,
+  `originalFilename` varchar(255) COLLATE utf8mb4_general_ci DEFAULT NULL,
+  `storedFilename` varchar(255) COLLATE utf8mb4_general_ci DEFAULT NULL,
+  `fileSize` int DEFAULT NULL,
+  `fileType` varchar(100) COLLATE utf8mb4_general_ci DEFAULT NULL,
+  `uploadedAt` datetime DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`fileID`),
+  KEY `claimID` (`claimID`),
+  CONSTRAINT `tblExpenseClaimFiles_ibfk_1` FOREIGN KEY (`claimID`) REFERENCES `tblExpenseClaims` (`claimID`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- Dumping data for table millrdsdacambridge_manageportal.tblExpenseClaimFiles: ~0 rows (approximately)
+/*!40000 ALTER TABLE `tblExpenseClaimFiles` DISABLE KEYS */;
+/*!40000 ALTER TABLE `tblExpenseClaimFiles` ENABLE KEYS */;
+
+-- Dumping structure for table millrdsdacambridge_manageportal.tblExpenseClaimItems
+CREATE TABLE IF NOT EXISTS `tblExpenseClaimItems` (
+  `itemID` int NOT NULL AUTO_INCREMENT,
+  `claimID` int NOT NULL,
+  `itemName` varchar(255) COLLATE utf8mb4_general_ci DEFAULT NULL,
+  `description` text COLLATE utf8mb4_general_ci,
+  `unitCost` decimal(10,2) DEFAULT NULL,
+  `quantity` int DEFAULT NULL,
+  `lineTotal` decimal(10,2) DEFAULT NULL,
+  `purchaseDate` date DEFAULT NULL,
+  `supplier` varchar(255) COLLATE utf8mb4_general_ci DEFAULT NULL,
+  PRIMARY KEY (`itemID`),
+  KEY `claimID` (`claimID`),
+  CONSTRAINT `tblExpenseClaimItems_ibfk_1` FOREIGN KEY (`claimID`) REFERENCES `tblExpenseClaims` (`claimID`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- Dumping data for table millrdsdacambridge_manageportal.tblExpenseClaimItems: ~0 rows (approximately)
+/*!40000 ALTER TABLE `tblExpenseClaimItems` DISABLE KEYS */;
+/*!40000 ALTER TABLE `tblExpenseClaimItems` ENABLE KEYS */;
+
+-- Dumping structure for table millrdsdacambridge_manageportal.tblExpenseClaims
+CREATE TABLE IF NOT EXISTS `tblExpenseClaims` (
+  `claimID` int NOT NULL AUTO_INCREMENT,
+  `userID` int NOT NULL,
+  `deptID` int NOT NULL,
+  `claimTitle` varchar(255) COLLATE utf8mb4_general_ci DEFAULT NULL,
+  `claimDate` date DEFAULT NULL,
+  `totalAmount` decimal(10,2) DEFAULT NULL,
+  `status` enum('Pending','Approved','Rejected','Reimbursed') COLLATE utf8mb4_general_ci DEFAULT 'Pending',
+  `fileName` varchar(255) COLLATE utf8mb4_general_ci DEFAULT NULL,
+  `createdAt` datetime DEFAULT CURRENT_TIMESTAMP,
+  `updatedAt` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`claimID`),
+  KEY `userID` (`userID`),
+  KEY `deptID` (`deptID`),
+  CONSTRAINT `tblExpenseClaims_ibfk_1` FOREIGN KEY (`userID`) REFERENCES `tblUsers` (`userID`),
+  CONSTRAINT `tblExpenseClaims_ibfk_2` FOREIGN KEY (`deptID`) REFERENCES `tblDepts` (`deptID`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- Dumping data for table millrdsdacambridge_manageportal.tblExpenseClaims: ~0 rows (approximately)
+/*!40000 ALTER TABLE `tblExpenseClaims` DISABLE KEYS */;
+/*!40000 ALTER TABLE `tblExpenseClaims` ENABLE KEYS */;
+
+-- Dumping structure for table millrdsdacambridge_manageportal.tblGroups
+CREATE TABLE IF NOT EXISTS `tblGroups` (
+  `groupID` int NOT NULL AUTO_INCREMENT,
+  `groupName` varchar(100) COLLATE utf8mb4_general_ci DEFAULT NULL,
+  `description` text COLLATE utf8mb4_general_ci,
+  `dateAdded` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+  `dateLastUpdated` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`groupID`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- Dumping data for table millrdsdacambridge_manageportal.tblGroups: ~0 rows (approximately)
+/*!40000 ALTER TABLE `tblGroups` DISABLE KEYS */;
+/*!40000 ALTER TABLE `tblGroups` ENABLE KEYS */;
+
+-- Dumping structure for table millrdsdacambridge_manageportal.tblLocalAccounts
+CREATE TABLE IF NOT EXISTS `tblLocalAccounts` (
+  `localID` int NOT NULL AUTO_INCREMENT,
+  `userID` int NOT NULL,
+  `username` varchar(50) COLLATE utf8mb4_general_ci NOT NULL,
+  `passwordHash` varchar(255) COLLATE utf8mb4_general_ci NOT NULL,
+  `lastLogin` datetime DEFAULT NULL,
+  PRIMARY KEY (`localID`),
+  UNIQUE KEY `username` (`username`),
+  KEY `userID` (`userID`),
+  CONSTRAINT `tblLocalAccounts_ibfk_1` FOREIGN KEY (`userID`) REFERENCES `tblUsers` (`userID`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- Dumping data for table millrdsdacambridge_manageportal.tblLocalAccounts: ~0 rows (approximately)
+/*!40000 ALTER TABLE `tblLocalAccounts` DISABLE KEYS */;
+/*!40000 ALTER TABLE `tblLocalAccounts` ENABLE KEYS */;
+
+-- Dumping structure for table millrdsdacambridge_manageportal.tblRoles
+CREATE TABLE IF NOT EXISTS `tblRoles` (
+  `roleID` int NOT NULL AUTO_INCREMENT,
+  `roleKey` varchar(50) COLLATE utf8mb4_general_ci NOT NULL,
+  `roleName` varchar(100) COLLATE utf8mb4_general_ci NOT NULL,
+  PRIMARY KEY (`roleID`),
+  UNIQUE KEY `roleKey` (`roleKey`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- Dumping data for table millrdsdacambridge_manageportal.tblRoles: ~0 rows (approximately)
+/*!40000 ALTER TABLE `tblRoles` DISABLE KEYS */;
+/*!40000 ALTER TABLE `tblRoles` ENABLE KEYS */;
+
+-- Dumping structure for table millrdsdacambridge_manageportal.tblRoutes
+CREATE TABLE IF NOT EXISTS `tblRoutes` (
+  `routeID` int NOT NULL AUTO_INCREMENT,
+  `routeKey` varchar(100) COLLATE utf8mb4_general_ci NOT NULL,
+  `targetFile` varchar(255) COLLATE utf8mb4_general_ci NOT NULL,
+  `isProtected` tinyint(1) DEFAULT '1',
+  `lastUpdated` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`routeID`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- Dumping data for table millrdsdacambridge_manageportal.tblRoutes: ~0 rows (approximately)
+/*!40000 ALTER TABLE `tblRoutes` DISABLE KEYS */;
+/*!40000 ALTER TABLE `tblRoutes` ENABLE KEYS */;
+
+-- Dumping structure for table millrdsdacambridge_manageportal.tblSettings
+CREATE TABLE IF NOT EXISTS `tblSettings` (
+  `settingID` int NOT NULL AUTO_INCREMENT,
+  `settingKey` varchar(150) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'Setting Name, with a period (.) separated hierarchy/structure',
+  `settingValue` mediumtext CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci COMMENT 'Current value for this setting',
+  `updatedAt` datetime DEFAULT CURRENT_TIMESTAMP COMMENT 'Timestamp of when setting was last updated',
+  `isSensitive` tinyint(1) NOT NULL DEFAULT '0' COMMENT 'Boolean value indicating if this setting contains sensitive data.',
+  `defaultValue` mediumtext CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci COMMENT 'Optional default value for this setting item',
+  PRIMARY KEY (`settingID`),
+  UNIQUE KEY `settingKey` (`settingKey`)
+) ENGINE=InnoDB AUTO_INCREMENT=132 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Dumping data for table millrdsdacambridge_manageportal.tblSettings: ~87 rows (approximately)
+/*!40000 ALTER TABLE `tblSettings` DISABLE KEYS */;
+REPLACE INTO `tblSettings` (`settingID`, `settingKey`, `settingValue`, `updatedAt`, `isSensitive`, `defaultValue`) VALUES
+	(1, 'auth.allowWordPressLogin', 'true', '2025-05-21 01:23:48', 0, 'false');
+REPLACE INTO `tblSettings` (`settingID`, `settingKey`, `settingValue`, `updatedAt`, `isSensitive`, `defaultValue`) VALUES
+	(2, 'auth.allowMS365Login', 'true', '2025-05-20 15:03:15', 0, NULL);
+REPLACE INTO `tblSettings` (`settingID`, `settingKey`, `settingValue`, `updatedAt`, `isSensitive`, `defaultValue`) VALUES
+	(3, 'auth.passkeySupport', 'true', '2025-05-20 15:03:15', 0, NULL);
+REPLACE INTO `tblSettings` (`settingID`, `settingKey`, `settingValue`, `updatedAt`, `isSensitive`, `defaultValue`) VALUES
+	(4, 'features.darkModeEnabled', 'true', '2025-05-20 15:03:15', 0, NULL);
+REPLACE INTO `tblSettings` (`settingID`, `settingKey`, `settingValue`, `updatedAt`, `isSensitive`, `defaultValue`) VALUES
+	(5, 'features.timezoneAwareness', 'true', '2025-05-20 15:03:15', 0, NULL);
+REPLACE INTO `tblSettings` (`settingID`, `settingKey`, `settingValue`, `updatedAt`, `isSensitive`, `defaultValue`) VALUES
+	(6, 'site.timezone', 'Europe/London', '2025-05-21 01:23:48', 0, 'UTC');
+REPLACE INTO `tblSettings` (`settingID`, `settingKey`, `settingValue`, `updatedAt`, `isSensitive`, `defaultValue`) VALUES
+	(7, 'site.name', 'Cambridge Mill Road Seventh-day Adventist Portal', '2025-05-21 01:25:16', 0, 'Portal');
+REPLACE INTO `tblSettings` (`settingID`, `settingKey`, `settingValue`, `updatedAt`, `isSensitive`, `defaultValue`) VALUES
+	(8, 'site.tagline', 'Staff and Volunteer Admin Portal', '2025-05-20 15:11:58', 0, NULL);
+REPLACE INTO `tblSettings` (`settingID`, `settingKey`, `settingValue`, `updatedAt`, `isSensitive`, `defaultValue`) VALUES
+	(9, 'site.defaultFromEmail', 'donotreply.millrd@cambridgesdachurch.uk', '2025-05-20 15:11:58', 0, 'donotreply.millrd@cambridgesdachurch.uk');
+REPLACE INTO `tblSettings` (`settingID`, `settingKey`, `settingValue`, `updatedAt`, `isSensitive`, `defaultValue`) VALUES
+	(10, 'site.replyToEmail', 'admin.millrd@cambridgesdachurch.uk', '2025-05-21 01:25:28', 0, NULL);
+REPLACE INTO `tblSettings` (`settingID`, `settingKey`, `settingValue`, `updatedAt`, `isSensitive`, `defaultValue`) VALUES
+	(11, 'site.brandLogoURL', '/assets/images/logo.svg', '2025-05-21 01:23:48', 0, '/assets/images/logo.svg');
+REPLACE INTO `tblSettings` (`settingID`, `settingKey`, `settingValue`, `updatedAt`, `isSensitive`, `defaultValue`) VALUES
+	(12, 'site.footerText', '© 2025 Cambridge Mill Road Seventh-day Adventist Church - All Rights Reserved', '2025-05-21 01:25:35', 0, NULL);
+REPLACE INTO `tblSettings` (`settingID`, `settingKey`, `settingValue`, `updatedAt`, `isSensitive`, `defaultValue`) VALUES
+	(13, 'api.expenses.list.enabled', 'true', '2025-05-21 01:23:48', 0, 'true');
+REPLACE INTO `tblSettings` (`settingID`, `settingKey`, `settingValue`, `updatedAt`, `isSensitive`, `defaultValue`) VALUES
+	(14, 'api.expenses.stats.enabled', 'true', '2025-05-21 01:23:48', 0, 'true');
+REPLACE INTO `tblSettings` (`settingID`, `settingKey`, `settingValue`, `updatedAt`, `isSensitive`, `defaultValue`) VALUES
+	(15, 'api.expenses.attachments.enabled', 'true', '2025-05-20 15:12:21', 0, NULL);
+REPLACE INTO `tblSettings` (`settingID`, `settingKey`, `settingValue`, `updatedAt`, `isSensitive`, `defaultValue`) VALUES
+	(16, 'api.expenses.updateStatus.enabled', 'false', '2025-05-20 15:12:21', 0, NULL);
+REPLACE INTO `tblSettings` (`settingID`, `settingKey`, `settingValue`, `updatedAt`, `isSensitive`, `defaultValue`) VALUES
+	(17, 'api.expenses.delete.enabled', 'false', '2025-05-21 01:23:48', 1, 'false');
+REPLACE INTO `tblSettings` (`settingID`, `settingKey`, `settingValue`, `updatedAt`, `isSensitive`, `defaultValue`) VALUES
+	(18, 'mail.defaultFromName', 'Cambridge Mill Road Seventh-day Adventist Church Portal', '2025-05-21 01:25:51', 0, NULL);
+REPLACE INTO `tblSettings` (`settingID`, `settingKey`, `settingValue`, `updatedAt`, `isSensitive`, `defaultValue`) VALUES
+	(19, 'mail.defaultFromAddress', 'donotreply.millrd@cambridgesdachurch.uk', '2025-05-20 15:12:45', 0, 'donotreply.millrd@cambridgesdachurch.uk');
+REPLACE INTO `tblSettings` (`settingID`, `settingKey`, `settingValue`, `updatedAt`, `isSensitive`, `defaultValue`) VALUES
+	(20, 'mail.defaultReplyTo', 'admin.millrd@cambridgesdachurch.uk', '2025-05-21 01:26:06', 0, 'admin.millrd@cambridgesdachurch.uk');
+REPLACE INTO `tblSettings` (`settingID`, `settingKey`, `settingValue`, `updatedAt`, `isSensitive`, `defaultValue`) VALUES
+	(21, 'mail.useGraphAPI', 'true', '2025-05-20 15:12:45', 0, NULL);
+REPLACE INTO `tblSettings` (`settingID`, `settingKey`, `settingValue`, `updatedAt`, `isSensitive`, `defaultValue`) VALUES
+	(22, 'mail.sendFromSharedMailbox', 'true', '2025-05-20 15:12:45', 0, NULL);
+REPLACE INTO `tblSettings` (`settingID`, `settingKey`, `settingValue`, `updatedAt`, `isSensitive`, `defaultValue`) VALUES
+	(28, 'expenses.email.fromName', 'Treasury & Expenses (Cambridge Mill Road Seventh-day Adventist Church)', '2025-05-21 01:26:43', 0, NULL);
+REPLACE INTO `tblSettings` (`settingID`, `settingKey`, `settingValue`, `updatedAt`, `isSensitive`, `defaultValue`) VALUES
+	(29, 'expenses.email.fromAddress', 'treasury.millrd@cambridgesdachurch.uk', '2025-05-20 15:22:15', 0, 'treasury.millrd@cambridgesdachurch.uk');
+REPLACE INTO `tblSettings` (`settingID`, `settingKey`, `settingValue`, `updatedAt`, `isSensitive`, `defaultValue`) VALUES
+	(30, 'expenses.email.replyTo', 'treasury.millrd@cambridgesdachurch.uk', '2025-05-20 15:22:15', 0, 'treasury.millrd@cambridgesdachurch.uk');
+REPLACE INTO `tblSettings` (`settingID`, `settingKey`, `settingValue`, `updatedAt`, `isSensitive`, `defaultValue`) VALUES
+	(31, 'expenses.allowMultipleApprovers', 'true', '2025-05-20 15:22:26', 0, NULL);
+REPLACE INTO `tblSettings` (`settingID`, `settingKey`, `settingValue`, `updatedAt`, `isSensitive`, `defaultValue`) VALUES
+	(32, 'expenses.reminderThrottleHours', '6', '2025-05-20 15:22:26', 0, NULL);
+REPLACE INTO `tblSettings` (`settingID`, `settingKey`, `settingValue`, `updatedAt`, `isSensitive`, `defaultValue`) VALUES
+	(33, 'expenses.allowAutoPDFOnReimburse', 'true', '2025-05-20 15:22:26', 0, NULL);
+REPLACE INTO `tblSettings` (`settingID`, `settingKey`, `settingValue`, `updatedAt`, `isSensitive`, `defaultValue`) VALUES
+	(34, 'expenses.showInlineLogsInDashboard', 'true', '2025-05-20 15:22:26', 0, NULL);
+REPLACE INTO `tblSettings` (`settingID`, `settingKey`, `settingValue`, `updatedAt`, `isSensitive`, `defaultValue`) VALUES
+	(35, 'expenses.displayName', 'Expense Claims', '2025-05-20 15:22:30', 0, NULL);
+REPLACE INTO `tblSettings` (`settingID`, `settingKey`, `settingValue`, `updatedAt`, `isSensitive`, `defaultValue`) VALUES
+	(36, 'expenses.displayIcon', 'expenses-icon.svg', '2025-05-20 15:22:30', 0, NULL);
+REPLACE INTO `tblSettings` (`settingID`, `settingKey`, `settingValue`, `updatedAt`, `isSensitive`, `defaultValue`) VALUES
+	(37, 'expenses.brandColor', '#007B55', '2025-05-20 15:22:30', 0, NULL);
+REPLACE INTO `tblSettings` (`settingID`, `settingKey`, `settingValue`, `updatedAt`, `isSensitive`, `defaultValue`) VALUES
+	(48, 'attendance.displayName', 'Event Check-in', '2025-05-20 15:36:22', 0, NULL);
+REPLACE INTO `tblSettings` (`settingID`, `settingKey`, `settingValue`, `updatedAt`, `isSensitive`, `defaultValue`) VALUES
+	(49, 'attendance.displayIcon', 'attendance-icon.svg', '2025-05-20 15:36:22', 0, NULL);
+REPLACE INTO `tblSettings` (`settingID`, `settingKey`, `settingValue`, `updatedAt`, `isSensitive`, `defaultValue`) VALUES
+	(50, 'attendance.brandColor', '#0066cc', '2025-05-20 15:36:22', 0, NULL);
+REPLACE INTO `tblSettings` (`settingID`, `settingKey`, `settingValue`, `updatedAt`, `isSensitive`, `defaultValue`) VALUES
+	(51, 'attendance.allowManualEntry', 'true', '2025-05-20 15:36:22', 0, NULL);
+REPLACE INTO `tblSettings` (`settingID`, `settingKey`, `settingValue`, `updatedAt`, `isSensitive`, `defaultValue`) VALUES
+	(52, 'attendance.allowSelfCheckIn', 'false', '2025-05-20 15:36:22', 0, NULL);
+REPLACE INTO `tblSettings` (`settingID`, `settingKey`, `settingValue`, `updatedAt`, `isSensitive`, `defaultValue`) VALUES
+	(53, 'attendance.trackByUser', 'true', '2025-05-20 15:36:22', 0, NULL);
+REPLACE INTO `tblSettings` (`settingID`, `settingKey`, `settingValue`, `updatedAt`, `isSensitive`, `defaultValue`) VALUES
+	(54, 'attendancecount.displayName', 'Attendance Count', '2025-05-20 15:36:32', 0, NULL);
+REPLACE INTO `tblSettings` (`settingID`, `settingKey`, `settingValue`, `updatedAt`, `isSensitive`, `defaultValue`) VALUES
+	(55, 'attendancecount.displayIcon', 'count-icon.svg', '2025-05-20 15:36:32', 0, NULL);
+REPLACE INTO `tblSettings` (`settingID`, `settingKey`, `settingValue`, `updatedAt`, `isSensitive`, `defaultValue`) VALUES
+	(56, 'attendancecount.brandColor', '#663399', '2025-05-20 15:36:32', 0, NULL);
+REPLACE INTO `tblSettings` (`settingID`, `settingKey`, `settingValue`, `updatedAt`, `isSensitive`, `defaultValue`) VALUES
+	(57, 'attendancecount.allowMultipleServices', 'true', '2025-05-20 15:36:32', 0, NULL);
+REPLACE INTO `tblSettings` (`settingID`, `settingKey`, `settingValue`, `updatedAt`, `isSensitive`, `defaultValue`) VALUES
+	(58, 'attendancecount.allowAnonymousEntry', 'false', '2025-05-20 15:36:32', 0, NULL);
+REPLACE INTO `tblSettings` (`settingID`, `settingKey`, `settingValue`, `updatedAt`, `isSensitive`, `defaultValue`) VALUES
+	(59, 'leadership.displayName', 'Leadership & Ministry', '2025-05-20 15:36:42', 0, NULL);
+REPLACE INTO `tblSettings` (`settingID`, `settingKey`, `settingValue`, `updatedAt`, `isSensitive`, `defaultValue`) VALUES
+	(60, 'leadership.displayIcon', 'leadership-icon.svg', '2025-05-20 15:36:42', 0, NULL);
+REPLACE INTO `tblSettings` (`settingID`, `settingKey`, `settingValue`, `updatedAt`, `isSensitive`, `defaultValue`) VALUES
+	(61, 'leadership.brandColor', '#ff9900', '2025-05-20 15:36:42', 0, NULL);
+REPLACE INTO `tblSettings` (`settingID`, `settingKey`, `settingValue`, `updatedAt`, `isSensitive`, `defaultValue`) VALUES
+	(62, 'leadership.enableDocumentUpload', 'true', '2025-05-20 15:36:42', 0, NULL);
+REPLACE INTO `tblSettings` (`settingID`, `settingKey`, `settingValue`, `updatedAt`, `isSensitive`, `defaultValue`) VALUES
+	(63, 'leadership.enableVoting', 'false', '2025-05-20 15:36:42', 0, NULL);
+REPLACE INTO `tblSettings` (`settingID`, `settingKey`, `settingValue`, `updatedAt`, `isSensitive`, `defaultValue`) VALUES
+	(64, 'calendar.displayName', 'Church Calendar', '2025-05-20 15:36:55', 0, NULL);
+REPLACE INTO `tblSettings` (`settingID`, `settingKey`, `settingValue`, `updatedAt`, `isSensitive`, `defaultValue`) VALUES
+	(65, 'calendar.displayIcon', 'calendar-icon.svg', '2025-05-20 15:36:55', 0, NULL);
+REPLACE INTO `tblSettings` (`settingID`, `settingKey`, `settingValue`, `updatedAt`, `isSensitive`, `defaultValue`) VALUES
+	(66, 'calendar.brandColor', '#3399ff', '2025-05-20 15:36:55', 0, NULL);
+REPLACE INTO `tblSettings` (`settingID`, `settingKey`, `settingValue`, `updatedAt`, `isSensitive`, `defaultValue`) VALUES
+	(67, 'calendar.enablePublicView', 'true', '2025-05-20 15:36:55', 0, NULL);
+REPLACE INTO `tblSettings` (`settingID`, `settingKey`, `settingValue`, `updatedAt`, `isSensitive`, `defaultValue`) VALUES
+	(68, 'calendar.allowRecurringEvents', 'true', '2025-05-20 15:36:55', 0, NULL);
+REPLACE INTO `tblSettings` (`settingID`, `settingKey`, `settingValue`, `updatedAt`, `isSensitive`, `defaultValue`) VALUES
+	(69, 'preachingplan.displayName', 'Preaching Plan', '2025-05-20 15:37:05', 0, NULL);
+REPLACE INTO `tblSettings` (`settingID`, `settingKey`, `settingValue`, `updatedAt`, `isSensitive`, `defaultValue`) VALUES
+	(70, 'preachingplan.displayIcon', 'preach-icon.svg', '2025-05-20 15:37:05', 0, NULL);
+REPLACE INTO `tblSettings` (`settingID`, `settingKey`, `settingValue`, `updatedAt`, `isSensitive`, `defaultValue`) VALUES
+	(71, 'preachingplan.brandColor', '#cc0000', '2025-05-20 15:37:05', 0, NULL);
+REPLACE INTO `tblSettings` (`settingID`, `settingKey`, `settingValue`, `updatedAt`, `isSensitive`, `defaultValue`) VALUES
+	(72, 'preachingplan.showPastDates', 'true', '2025-05-20 15:37:05', 0, NULL);
+REPLACE INTO `tblSettings` (`settingID`, `settingKey`, `settingValue`, `updatedAt`, `isSensitive`, `defaultValue`) VALUES
+	(73, 'preachingplan.allowSpeakerSignup', 'false', '2025-05-20 15:37:05', 0, NULL);
+REPLACE INTO `tblSettings` (`settingID`, `settingKey`, `settingValue`, `updatedAt`, `isSensitive`, `defaultValue`) VALUES
+	(74, 'notifications.allowSMS', 'false', '2025-05-20 15:37:12', 0, NULL);
+REPLACE INTO `tblSettings` (`settingID`, `settingKey`, `settingValue`, `updatedAt`, `isSensitive`, `defaultValue`) VALUES
+	(75, 'notifications.allowEmail', 'true', '2025-05-20 15:37:12', 0, NULL);
+REPLACE INTO `tblSettings` (`settingID`, `settingKey`, `settingValue`, `updatedAt`, `isSensitive`, `defaultValue`) VALUES
+	(76, 'notifications.enableDigestMode', 'true', '2025-05-20 15:37:12', 0, NULL);
+REPLACE INTO `tblSettings` (`settingID`, `settingKey`, `settingValue`, `updatedAt`, `isSensitive`, `defaultValue`) VALUES
+	(77, 'notifications.senderName', 'Mill Rd SDA Notifications', '2025-05-20 15:37:12', 0, NULL);
+REPLACE INTO `tblSettings` (`settingID`, `settingKey`, `settingValue`, `updatedAt`, `isSensitive`, `defaultValue`) VALUES
+	(78, 'auth.method', 'ms365', '2025-05-21 01:23:48', 0, 'ms365');
+REPLACE INTO `tblSettings` (`settingID`, `settingKey`, `settingValue`, `updatedAt`, `isSensitive`, `defaultValue`) VALUES
+	(79, 'auth.ms365.tenantOnly', 'true', '2025-05-21 01:23:48', 1, 'true');
+REPLACE INTO `tblSettings` (`settingID`, `settingKey`, `settingValue`, `updatedAt`, `isSensitive`, `defaultValue`) VALUES
+	(80, 'auth.ms365.defaultFrom', 'donotreply.millrd@cambridgesdachurch.uk', '2025-05-21 01:23:48', 1, 'donotreply.millrd@cambridgesdachurch.uk');
+REPLACE INTO `tblSettings` (`settingID`, `settingKey`, `settingValue`, `updatedAt`, `isSensitive`, `defaultValue`) VALUES
+	(81, 'auth.ms365.defaultReplyTo', 'admin.millrd@cambridgesdachurch.uk', '2025-05-21 01:23:48', 0, 'admin.millrd@cambridgesdachurch.uk');
+REPLACE INTO `tblSettings` (`settingID`, `settingKey`, `settingValue`, `updatedAt`, `isSensitive`, `defaultValue`) VALUES
+	(82, 'api.expenses.update-status.enabled', 'false', '2025-05-21 01:23:48', 0, 'false');
+REPLACE INTO `tblSettings` (`settingID`, `settingKey`, `settingValue`, `updatedAt`, `isSensitive`, `defaultValue`) VALUES
+	(83, 'expenses.reminder.throttleHours', '6', '2025-05-21 01:23:48', 0, '12');
+REPLACE INTO `tblSettings` (`settingID`, `settingKey`, `settingValue`, `updatedAt`, `isSensitive`, `defaultValue`) VALUES
+	(84, 'expenses.replyToEmail', 'treasury.millrd@cambridgesdachurch.uk', '2025-05-21 01:23:48', 0, 'treasury.millrd@cambridgesdachurch.uk');
+REPLACE INTO `tblSettings` (`settingID`, `settingKey`, `settingValue`, `updatedAt`, `isSensitive`, `defaultValue`) VALUES
+	(85, 'expenses.autoGeneratePDF', 'true', '2025-05-21 01:23:48', 0, 'true');
+REPLACE INTO `tblSettings` (`settingID`, `settingKey`, `settingValue`, `updatedAt`, `isSensitive`, `defaultValue`) VALUES
+	(86, 'attendance.enabled', 'false', '2025-05-21 01:23:48', 0, 'false');
+REPLACE INTO `tblSettings` (`settingID`, `settingKey`, `settingValue`, `updatedAt`, `isSensitive`, `defaultValue`) VALUES
+	(87, 'attendancecount.enabled', 'false', '2025-05-21 01:23:48', 0, 'false');
+REPLACE INTO `tblSettings` (`settingID`, `settingKey`, `settingValue`, `updatedAt`, `isSensitive`, `defaultValue`) VALUES
+	(88, 'calendar.enabled', 'false', '2025-05-21 01:23:48', 0, 'false');
+REPLACE INTO `tblSettings` (`settingID`, `settingKey`, `settingValue`, `updatedAt`, `isSensitive`, `defaultValue`) VALUES
+	(89, 'leadership.enabled', 'false', '2025-05-21 01:23:48', 0, 'false');
+REPLACE INTO `tblSettings` (`settingID`, `settingKey`, `settingValue`, `updatedAt`, `isSensitive`, `defaultValue`) VALUES
+	(90, 'preachingplan.enabled', 'false', '2025-05-21 01:23:48', 0, 'false');
+REPLACE INTO `tblSettings` (`settingID`, `settingKey`, `settingValue`, `updatedAt`, `isSensitive`, `defaultValue`) VALUES
+	(98, 'auth.ms365.enduser.clientID', '', '2025-05-21 01:23:48', 1, '');
+REPLACE INTO `tblSettings` (`settingID`, `settingKey`, `settingValue`, `updatedAt`, `isSensitive`, `defaultValue`) VALUES
+	(99, 'auth.ms365.enduser.clientSecret', '', '2025-05-21 01:23:48', 1, '');
+REPLACE INTO `tblSettings` (`settingID`, `settingKey`, `settingValue`, `updatedAt`, `isSensitive`, `defaultValue`) VALUES
+	(101, 'auth.ms365.enduser.redirectURI', '', '2025-05-21 01:23:48', 1, '');
+REPLACE INTO `tblSettings` (`settingID`, `settingKey`, `settingValue`, `updatedAt`, `isSensitive`, `defaultValue`) VALUES
+	(102, 'auth.ms365.appwide.clientID', '', '2025-05-21 01:23:48', 1, '');
+REPLACE INTO `tblSettings` (`settingID`, `settingKey`, `settingValue`, `updatedAt`, `isSensitive`, `defaultValue`) VALUES
+	(103, 'auth.ms365.appwide.clientSecret', '', '2025-05-21 01:23:48', 1, '');
+REPLACE INTO `tblSettings` (`settingID`, `settingKey`, `settingValue`, `updatedAt`, `isSensitive`, `defaultValue`) VALUES
+	(104, 'auth.ms365.tenantID', '', '2025-05-21 12:44:18', 1, '');
+REPLACE INTO `tblSettings` (`settingID`, `settingKey`, `settingValue`, `updatedAt`, `isSensitive`, `defaultValue`) VALUES
+	(105, 'auth.ms365.appwide.redirectURI', '', '2025-05-21 01:23:48', 1, '');
+REPLACE INTO `tblSettings` (`settingID`, `settingKey`, `settingValue`, `updatedAt`, `isSensitive`, `defaultValue`) VALUES
+	(106, 'auth.recaptcha.siteKey', '', '2025-05-21 01:23:48', 1, '');
+REPLACE INTO `tblSettings` (`settingID`, `settingKey`, `settingValue`, `updatedAt`, `isSensitive`, `defaultValue`) VALUES
+	(107, 'auth.recaptcha.secretKey', '', '2025-05-21 01:23:48', 1, '');
+REPLACE INTO `tblSettings` (`settingID`, `settingKey`, `settingValue`, `updatedAt`, `isSensitive`, `defaultValue`) VALUES
+	(108, 'auth.recaptcha.version', 'v2', '2025-05-21 01:23:48', 0, 'v2');
+REPLACE INTO `tblSettings` (`settingID`, `settingKey`, `settingValue`, `updatedAt`, `isSensitive`, `defaultValue`) VALUES
+	(109, 'auth.turnstile.siteKey', '', '2025-05-21 01:23:48', 1, '');
+REPLACE INTO `tblSettings` (`settingID`, `settingKey`, `settingValue`, `updatedAt`, `isSensitive`, `defaultValue`) VALUES
+	(110, 'auth.turnstile.secretKey', '', '2025-05-21 01:23:48', 1, '');
+/*!40000 ALTER TABLE `tblSettings` ENABLE KEYS */;
+
+-- Dumping structure for table millrdsdacambridge_manageportal.tblUserDepts
+CREATE TABLE IF NOT EXISTS `tblUserDepts` (
+  `userDeptID` int NOT NULL AUTO_INCREMENT,
+  `userID` int NOT NULL,
+  `deptID` int NOT NULL,
+  `isDeptLead` tinyint(1) DEFAULT '0',
+  `isDeptAssistant` tinyint(1) DEFAULT '0',
+  `isDeptSecretary` tinyint(1) DEFAULT '0',
+  `isApprover` tinyint(1) DEFAULT '0',
+  `isMandatoryApprover` tinyint(1) DEFAULT '0',
+  PRIMARY KEY (`userDeptID`),
+  KEY `userID` (`userID`),
+  KEY `deptID` (`deptID`),
+  CONSTRAINT `tblUserDepts_ibfk_1` FOREIGN KEY (`userID`) REFERENCES `tblUsers` (`userID`) ON DELETE CASCADE,
+  CONSTRAINT `tblUserDepts_ibfk_2` FOREIGN KEY (`deptID`) REFERENCES `tblDepts` (`deptID`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- Dumping data for table millrdsdacambridge_manageportal.tblUserDepts: ~0 rows (approximately)
+/*!40000 ALTER TABLE `tblUserDepts` DISABLE KEYS */;
+/*!40000 ALTER TABLE `tblUserDepts` ENABLE KEYS */;
+
+-- Dumping structure for table millrdsdacambridge_manageportal.tblUserGroups
+CREATE TABLE IF NOT EXISTS `tblUserGroups` (
+  `userGroupID` int NOT NULL AUTO_INCREMENT,
+  `userID` int NOT NULL,
+  `groupID` int NOT NULL,
+  PRIMARY KEY (`userGroupID`),
+  KEY `userID` (`userID`),
+  KEY `groupID` (`groupID`),
+  CONSTRAINT `tblUserGroups_ibfk_1` FOREIGN KEY (`userID`) REFERENCES `tblUsers` (`userID`) ON DELETE CASCADE,
+  CONSTRAINT `tblUserGroups_ibfk_2` FOREIGN KEY (`groupID`) REFERENCES `tblGroups` (`groupID`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- Dumping data for table millrdsdacambridge_manageportal.tblUserGroups: ~0 rows (approximately)
+/*!40000 ALTER TABLE `tblUserGroups` DISABLE KEYS */;
+/*!40000 ALTER TABLE `tblUserGroups` ENABLE KEYS */;
+
+-- Dumping structure for table millrdsdacambridge_manageportal.tblUserRoles
+CREATE TABLE IF NOT EXISTS `tblUserRoles` (
+  `userRoleID` int NOT NULL AUTO_INCREMENT,
+  `userID` int NOT NULL,
+  `roleID` int NOT NULL,
+  PRIMARY KEY (`userRoleID`),
+  KEY `userID` (`userID`),
+  KEY `roleID` (`roleID`),
+  CONSTRAINT `tblUserRoles_ibfk_1` FOREIGN KEY (`userID`) REFERENCES `tblUsers` (`userID`) ON DELETE CASCADE,
+  CONSTRAINT `tblUserRoles_ibfk_2` FOREIGN KEY (`roleID`) REFERENCES `tblRoles` (`roleID`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- Dumping data for table millrdsdacambridge_manageportal.tblUserRoles: ~0 rows (approximately)
+/*!40000 ALTER TABLE `tblUserRoles` DISABLE KEYS */;
+/*!40000 ALTER TABLE `tblUserRoles` ENABLE KEYS */;
+
+-- Dumping structure for table millrdsdacambridge_manageportal.tblUsers
+CREATE TABLE IF NOT EXISTS `tblUsers` (
+  `userID` int NOT NULL AUTO_INCREMENT,
+  `fullName` varchar(255) COLLATE utf8mb4_general_ci DEFAULT NULL,
+  `emailAddress` varchar(255) COLLATE utf8mb4_general_ci NOT NULL,
+  `phoneNumber` varchar(50) COLLATE utf8mb4_general_ci DEFAULT NULL,
+  `avatarPath` varchar(255) COLLATE utf8mb4_general_ci DEFAULT NULL,
+  `isActive` tinyint(1) DEFAULT '1',
+  `isAdmin` tinyint(1) DEFAULT '0',
+  `isRootAdmin` tinyint(1) DEFAULT '0',
+  `createdAt` datetime DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`userID`),
+  UNIQUE KEY `emailAddress` (`emailAddress`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- Dumping data for table millrdsdacambridge_manageportal.tblUsers: ~0 rows (approximately)
+/*!40000 ALTER TABLE `tblUsers` DISABLE KEYS */;
+/*!40000 ALTER TABLE `tblUsers` ENABLE KEYS */;
+
+/*!40101 SET SQL_MODE=IFNULL(@OLD_SQL_MODE, '') */;
+/*!40014 SET FOREIGN_KEY_CHECKS=IF(@OLD_FOREIGN_KEY_CHECKS IS NULL, 1, @OLD_FOREIGN_KEY_CHECKS) */;
+/*!40101 SET CHARACTER_SET_CLIENT=@OLD_CHARACTER_SET_CLIENT */;
+
+
+
+========================	
+*SPECIFIC REQUIREMENTS*
+========================
+
+------------------------	
+*Overall*
+------------------------
+* While this will be hosted on Dreamhost shared hosting initially, please include flexibility for hosting on other PHP/MySQL supporting platforms, as such please use PHP constants and predefined constants (such as dirname(), __FILE__, etc for folder defining) wherever possible for platform neutrality/flexibility.
+* Given the project will (at least) initially be hosted on Dreamhost's Shared Hosting platform, access to CLI is not possible, as such access to tools like Composer cannot be relied upon. This means any third-party libraries that need to be installed/self-hosted (and cant just be used via referencing CDNs) need to be specifically called out and hosted on local server, often installed/uploaded manually.
+
+
+
+------------------------	
+*'Mini' Apps within the Portal*
+------------------------
+The portal will contain various "apps", the first of which is planned for claimants to submit expense claims (app name "Expenses", hosted on the server under '/portal.millrdsdacambridge.uk/public_html/expenses')
+Apps should
+	* written in such as way so that they support being used as a Web App where beneficial and feasible/practically possible.
+	* Provide API endpoints to use/interact with the app
+		* Apps should not expose sensitive information, including secrets, keys, passwords, personal email addresses (personal email address will be any email address that does not match with a specified list of suffixes - the bit after the @), or any fields marked in the database as isSensitive
+	* Apps that have a need to provide realtime updates/notifications on the website (not via email) may need to utilise websocks or similar technology (compatible with shared hosts such as those provided by Dreamhost)
+	* All apps will be assigned a "version number" for internal tracking and have their own changelog
+	* Be able to have restricted access, not just for development (beta/alpha) but even "live" version
+	* Note this Portal, and its apps are intended for "managing" or recording information. Information from some "apps" may be visible only within the Portal (attendance count), while others (like the "Events" app) could be visible on the main website, but editing only via the portal.
+
+
+------------------------
+	*Calendar of Events* (name: "calendar", possibly suitable as a Web App/PWA)
+------------------------
+A Calendar events (and "church services" when the Portal is used by Churches) app. Events app provides the following functionlity/workflow:
+* List/manage upcoming organisation events, including defining the following info
+	* EVENT PARAMETERS
+		* Event Name
+		* Event Series Name (if its specific scheduled date/event is part of a series) - with series being linkable
+		* Event Date & Time (with timezone specified)
+		* event end time (with timzeone specified)
+		* Event recurrence
+			* is event recurring (therefore, it becomes a "Series" which itself can be part of another Series (ie nested Series)
+				
+				Possible Recurring frequency options:
+					* Weekly (Day of the week)
+					* Weekdays (Monday-Friday)[Week days could also be defineable for non-western cultures that are traditionally Mon-Fri]
+					* Every Weekend Day (Sat-Sun) [Weekend days could also be defineable for cultures that do not follow "western country norms/traditions]
+					* Evert nth Day (Sun-Sat) of xth Month (ie every 2nd Monday of the month, or Every 3rd Tuesday, every 3rd Month)
+					* Every nth Date of xth Month (ie 2nd of every month, or Every 15th of every 3rd Month)
+					* Every nth Day (Sun-Sat) of the Quarter (where quarter is Q1=Jan-Mar; Q2=Apr-Jun; Q3=Jul-Sep; Q4=Oct-Dec)
+					* Every nth Date of every xth Year (ie every 24 of March, Every 2nd Year)
+					
+				Each Event series with recurrence can have individual events that fall outside of the recurrence frequency, but must still be linked.
+		* Event Host Org - Organisation hosting/putting on the event)
+		* Event Partner Org - Any additional organisations that are involved 'partnersing' with the Host Org to put on the event
+		* Event Location
+			* Physical Address
+			* Web Address
+			* Geo-Corodinates
+			* What3Words
+			* Phone Number
+			* contact Email
+		
+			In the case of a series of events, any individual event part of a series can also be held at a different physical location to the rest of the series
+		* Event Theme (multiple themes allowed)
+		* Event Type (list of types, that can be added to by admin) - including sub-types
+		* Event Category (list of types, that can be added to by admin) - including sub-categories
+		* Event Host Person - Person leading the event/main host (could be a special guest)
+		* event Other Host People
+		* Hero Image (SVG, PNG, JPG or any combination of these)
+		* Poster Image (SVG, PNG, JPG, PDF or any combination of these)
+		* Profile Picture Image (SVG, PNG, JPG or any combination of these)
+		* Event Materials (downloadable documents such as "notes", PDF, Word, PowerPoint, Keynote, Video, Audio or any combination of these)
+		* Event Links
+			Links relating to the event. Can include anything, including social media pages, booking/rsvp pages etc
+		
+* Events should be able to be listed/embedable as follows
+	* Direct link to single scheduled event
+	* Direct link to Series of events, listing each item in the series in a fully responsive table
+	* Direct link to All events, in a given day/week/month/year, displayed as:
+		* Table
+		* Calendar display
+		* Year-planner style layout with multiple events per day, each highlighted according to category (lowest level category in case of sub/nested-categories)
+		
+		Click on each of these items goes to the scheduled event itself.
+	* List ALL events in a fully responsive table (regardless of timeframe, but with toggles to show only future events vs also including past and events currently taking place)
+	* Add/Subscribe to any event to your local Calendar (Google Calendar, Outlook Calendar, Email client calendar), including support for dynamic updating of local calendar listing if event date/time changes. Include support for linked/series events
+	
+* Future integration with another upcoming MWBM Partners Ltd Events "platform"
+
+
+------------------------
+	*Attendance Tracker* (name: attendance - possible suitable as a Web App/PWA)
+------------------------
+This project/portal will first be used by a church.
+
+The would like to be able to track attendance count (not necessarily individual people/names for their services/events.
+
+People a Form to track attendance to any event (from Events "app") or regular church service. As the first use-case will be a Seventh-day Adventist church, common Seventh-day Adventist Church service-types should be included/defined, among others that can be mannually added by admins:
+	* Sabbath School
+		* Children (in each case, count/enter number of children & Adults/teachers etc)
+			* Babies
+			* Beginner
+			* Kindergarten
+			* Primary
+			* PowerPoints
+			* RealtTime Faith
+			* Cornerstone Connections
+		* Youth/Young Adult
+		* Adults
+		* Baptismal Class
+	* Family Worship Service
+	* Afternoon Service
+	* Prayer Meeting
+
+
+------------------------
+	*Expenses App* (probably not suitable as a Web App?)
+------------------------
+The Expenses app (to be developed) must allow the following workflow:
+1) Claimant fill in an online form to submit claim. Form includes ability to upload multiple forms of evidence (ie invoice/bill) paperwork
+2) Upon submission, the Treasury dept receives an email confirming a new claim has been submitted. The relevant authorisors also receive an email advising that new claims need authorisation. A PDF of the claim should be attached.
+3) Authorisors (there can be multiple, this is defined by which department the claim is logged under and can also be determined by the value of the claim) can click a link in the email to "login" and Authorise or Decline a claim. This triggers an action to the Treasury to advise of an update, and to the claimant
+4A) If Authorised, the Treasury responses by clicking a link in their notification email to log and complete reimbursement, where they can also enter one (or more) internal reference numbers for the reimbursed payment. A PDF of the claim and progress up to this point should be saved, ut not emailed
+4B) If not authorised, no further action is required, but the record remains for audit purposes. Claimant and Authorisers should however be emailed to confirming the Declined authorisation, with a PDF of the claim form with a "NOT APPROVED" Diagonal watermark overlayed attached to the email and saved for record purposes on the server.
+5) Once Reimbursement has been issued, the both the authoriser and the claimant receive confirmation that payment has been initiated, and the claim has been closed. This confirmation email should have a PDF of the claim updated status of the claim form attached, including "COMPLETE" overlayed as a diagnoal watermark. The email should lso allow the claimant to raise a follow-up query (after 7 working days) if payment has not yet been received.
+Local and MS365/Google Workspace connected functionality should apply not just to the Portal subdomain but to the entire domain name.
+			
+
+------------------------
+*Use of Database*
+------------------------
+All records must be logged in the backend database
+
+------------------------
+	*Activity Logging/Audit Trail*
+------------------------
+All activity also logged in an ActivityLog (tblActivityLog) in the backend database, including:
+* Action taken,
+* User account who performed the action
+* date/time action was performed
+* Was action successful or errored
+* IP Address from which action was initiated (both IPv4 & IPv6). Take into account use of proxies and services similar to CloudFlare, and try to log the users action IP not CloudFlare/proxy IP
+* Browser/client useragent where action was initiated
+* Original requested URL
+* Original Request Header
+tblActivityLog is nOT just for logging errors, but ALL activity. Given some apps will handle financial or other confidential info, data integrity, data quality and data auditing is crucial - hence the need for tblActivity. Details of errors should be logged in tblErrors
+Logging all Activity in the ActivityLog would assist with troubleshooting, and allow for developers/Admins/Global Admins to identify and fix issues, or simply use as an audit trail if any malicious activity is suspected.
+
+
+
+------------------------
+	*Log All Errors/Warning/Notificaions*
+------------------------
+All Errors/Warnings/Notifications from PHP or any other service/library/tool used should be looked to a tblErrors table. Like tblActivityLog, the following data points must be logged
+* Error Platform (the Platform/tool Libary where the error occured: ie PHP, MySQL, dompdf, MS365, Google Workspace, Paypal, faceID, Javascript etc)
+* Error Severity (such as, but not limited to: Notification, Warning, Error, Fatal etc)
+* Platform Specific Error Code
+* Platform returned error description
+* Platform returned error detail
+* Timestamp of error 
+* User account who performed the action
+* IP Address from which action was initiated (both IPv4 & IPv6). Take into account use of proxies and services similar to CloudFlare, and try to log the users action IP not CloudFlare/proxy IP
+* Browser/client useragent where action was initiated
+* Original requested URL
+* Original Request Header
+* Whether or not error has been reviewed/resolved (for tracking fixes etc - will be managed via a Error Log UI available to Global Admins within the Portal)
+
+------------------------
+	*Sending E-mails*
+------------------------
+Emails should be sent with Microsoft Graph via a Microsoft 365 account using a shared mailbox (with appropriate permissions), not standard PHP Send especially as we want to ensure all mail is appropriately secure via DKIM, DMARC and other requirements
+
+------------------------
+	*Security & User Authentication*
+------------------------
+ * User authentication is key! CSRF, sessions, cookies and other security methods should be used throughout to ensure only the appropriate people can do certain tasks.
+ * User logins should primarily be (Especially for authorisors, admins, Root/Global Admins and Finance/Treasury team) via Microsoft 365 user account, where username, full name, email address and avatar are collected.
+	* This should then also create a "local" account (linked to the MS365 account) for future/backup use.
+	* Claimants can login using either local or MS365 account, though its important to note that NOT all claimants will have a valid MS365 account.
+ * Support for Google accounts should also be prepared for, though this may only be implemented later, as we do not have a Google Workspace account/tenant yet.
+ * It should be possible to link a LOCAL ACCOUNT, MS365 & Google Workspace account together to allow (eventual) login with either and still use the system as the same single user.
+	* We may also integrate login via other third-party platform accounts in future
+		* Meta (Facebook, Instagra, Threads, WhatsApp)
+		* Apple Account
+		* Google Account
+		* WordPress
+		* Microsoft Account (personal)
+		* LastPass
+	  in all cases they should be linked to a local account, and if one does not already exist, one should be created (and again, for key roles, linked to a valid/appropriate MS365).
+	* Local User Accounts (when not using third-party services for login) should also support the following technologies on supported devices/platforms
+		* Windows Hello
+		* Fingerprint (Touch ID)
+		* Facial Recognition (Face ID) login should also be supported on all supported devices.
+
+
+
+------------------------
+	*Web Page Design*
+------------------------
+* Web pages should be fully responsive, and accommodate all screen sizes & orientations
+* Should also be compliant with all current standards
+* Should take accessibilty into WCAG compliant to support users with impairements, including a toggle for colour blind users and screenreader support.
+* Fully HTML5 compliant and use the latest and greatest HTML5 features, whilst also "gracefully" falling back for browsers that do not support them.
+* Styling of the UI should use modern CSS including CSS 3+ and can make use of modern/advanced switches and even animations.
+* Pages should indicate to the user that they're logged in, by showing something in the top-right corner (as is commonly the norm in the industry).
+  This should display
+	* User avatar (in this priority order: MS365/Google Workspace etc > Locally stored profile picture from tblUSers in database > Gravatar > default/placeholder avatar)
+	* Name of user
+	* A means to change user profile settings (possible via drop-down menu when clicking on Name and Avatar)
+* ALL config (with the exception of database connection credentials) should be stored in the Backend MySQL Database (tblSettings table).
+* Some settings, like MS365/Google Workspace etc credentials should also be able to be stored in a private location on the server as a fallback.
+* It should also be possible for new settings to be added at any time by a Global Admin using the Web UI, and minimised requirement to have to manually update PHP Code too much to take these new settings to account.
+* Values for settings marked as 'isSensitive' (as well as fields storing ANY user passwords) should be appropriately cryptographically encrypted/hashed to current industry standards, also using a salt for increased security, to ensure these are safe/secure - but also allow them to be internally decrypted for use as/when required.
+* Whilst PHP will be used, the end user should not see this even in places like webpage/form/processor URLs. Not only is this unprofessional but it could also be a security risk as it exposes to potential attackers that PHP is used. Therefore all URLs should be visible as /something/somepage. This can perhaps be achieved by either a router (managed/tored in SQL database), or by simply ensuring the content is in a a location like /something/somepage/index.php (as in the case of the above example)
+* Appropriate user-facing error handling should also be implemented, as well as backend error handling for server-side PHP scripts and log these into the Activity Log for later development and fixing by the development and Global Admin teams.
+* Form fields (for ALL apps) should
+	* Have dynamic field validation wherever possible
+	* Use datepickers to ensure consistent format for entered dates.
+	* Use ReCaptcha or CloudFlare Turnstile, provided the relevant API Keys are provided (preferred backend database, but fallback in auth.php). If no API Keys provided dont use these technologies for form submission.
+
+It would also be useful, and user-friendly to have the ability to design the PDF files produced by the system using wither a blocks-based WYSIWYG editor (where various 'sections' are represented by blocks than can be added/moved/resized into place) or the ability to upload the template as an HTML file. In both cases (WYSIWYG and html upload), their should be the ability to use 'placeholder text markers' that will be replaced by the relevant data (text or images) when the PDF is created/
+
+development versions for each app will be placed in public_html_dev folders (as opposed to public_html for "fully released versions"
+
+Can we also consider implementing access control for alpha and beta versions of app to limit who's can access.
+
+For further flexibility, some future apps may only be accessible via a payment (one-off or subscription). support for this also needs to be built, with payment accepted via PayPal (also via Apple Pay or Google Pay on supported platforms/devices), and payment records, status and access availability needs to also all be stored in the backend database
+
+A Portal "home page" should be created in public_html/ with a list of the various "app" users can browse to.
+
+Additional "Dashboards" should also be created as required.
+
+All code (including SQL) should be fully/completely commented/annotated in detail, to assist with understanding of code and functionality, make code readable and also assist with future learning and debugging. Code should also be properly indented for improved human readability. Happy to use emojis in comments to help "call-out" sections of comments. 
+
+We would also like to use AJAX where possible to dynamically load/change content to avoid entire page refreshes. However use of AJAX should not be a blocker if a browser doesnt support/have javascript/AJAX enabled. it should still be possible to use everything in the portal/sub-apps without AJAX
+Please use Bootstrap, and other technologies/libraries (FontAwesome etc) to achieve the required functionality, but please note the project will be hosted on Dreamhost Shared Hosting, so any libraries will need to be manually downloaded and uploaded as Compile and similar functionality is not available. Happy to use libraries from CDNs as a priority, but would be good to have a fallback to selfhosted should CDNs be down.
+
+Any graphics/icons should be in SVG (Vector) to improve scalability and should offer a Base64 encoded fallback for browsers/clients that do not support SVG. (SVG support should be detected dynamically wherever possible). Animated SVG (vector) are also acceptible for icons
+
+We're trying to achieve wide compatibility and a user friendly feel, especially some users may not be computer savvy.
+
+For users, each should be able the assigned to multiple Departments (abbrev Depts), and multiple Groups, where there is no necessary correlation/link between Dept and Groups. (think of Groups as Committees/working groups). Each Dept can have a Lead and some assistants/team members). In some cases a (such as the case for the Expenses app) Dept Lead must be the one of the authorised for expenses within that department. Some Departments may even require multiple two or more authorisations from within the department (with also the ability to make the lead a mandatory authorisor of these), this should also be definable and stored in the database as appropriate. In other cases, the Dept Lead AND Treeasury may need to authorise an expense claim (such as if claim value is above a threshold, also configurable held within the Settings)
+All of this should be stored in the structured backend database (an example of database structure SQL below)
+Database table named should have "tbl" prefix, followed by the Name of the App (eg Expenses) if that table is only used for that specific App. portal/side-wide tables (Users etc) do not need an 'App' prefix (again, see example db structure)
+
+
+You will note the existing MySQL Database's tblSettings table (which is used to store settings for the Portal as a whole as well as individual 'apps', uses a notation of '.' delimited hierarchy for the settings "keys". When retrieving all settings, plus can these be converted into a PHP multidimentional array $Settings[], split on the '.' delimiter.
+
+
+There should also be various types of users including:
+* User (default)
+* Claimant - same permissions as User type
+* Editor - for future use
+* Moderator - for future use
+* Admin - ability to edit some settings in the front end UI. Must use MS365/Google Workspace login, or a local account with 2FA and PassKey and an associated/already linked MS365/Google Workspace login.
+* Global Admin - (ie security and developers only) ability to edit all settings in the front end UI, including those settings labelled as 'isSenstive'. Also has the ability to add new settings via the front end UI.  Must use MS365/Google Workspace login, or a local account with 2FA/PassKey and an associated MS365/Google Workspace login
+
+There are likely to be additional apps launched in future, so please bear that in mind when building structure (directory, code, database and sql). We want to share/use the same content as much as possible and not have too much code/resource duplication.
+
+With this in mind, we're looking for a modular design/development structure with a focus on functionality, security, data integrity as well as flexibility/scalability
+
+Primary development environment will be on Mac OS (Windows occassionally) with Visual Studio Code as our IDE where we also intend to use the ftp-sync extension. Wee would like to have a GitHub repo to manage the development and staging of the project. please also suggest the best way to setup and manage this project within a GitHub repo (use of GitHub Secrets, GitHub Project, GitHub Issues, GitHub Actions, GitHub Agents, GitHub Wikis, GitHub Sponsorships, GitHub Discussions. Propose/Configure these as it would work best for a project like this.
+
+The Existing GitHub Repo/IDE evironment may already have files in them from a previous iteration. please feel free to make any changes necessary for this brief. Any files/folders no longer needed should be deleted.
+
+
+Please include intended file path in the "header comments" of this and every file going forward, alongside Copyright info, which should start in 2025 and end in the current year (that is dynamic and managed in the Repo). Copyright Organisation is "MWBM Partners Ltd (t/a MWservices)"
+
+Whilst this is mainly a web-portal platform, please also manage version numbering and keep references to this in file headers also.
+
+
+Before we start, can you summarise the current platform and a summary/build plan ahead of starting dev.
+
+I'd like to keep a track of build progress at each stage, and log these in Project_Status.md
+
+Please also produce a suitable README.md and and CHANGELOG.md and keep it up to date with every change/as we progress. 
+
+Please also store any Claude memory, or prompt history in .claude to help us as we progress.
