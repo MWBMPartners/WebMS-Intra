@@ -4,27 +4,29 @@
  * -----------------------------------------------------------------------------
  * Portal Core Auth 🔑
  * -----------------------------------------------------------------------------
- * Unified authentication helper – wraps Microsoft 365 OAuth, local accounts,
- * and (future) Google OAuth.  Provides session management, role checks, and
- * CSRF token utilities.
- * -----------------------------------------------------------------------------
- *  Public methods:
- *    • Auth::check()          → bool           – is user logged in?
- *    • Auth::requireLogin()   → void           – redirect if not logged in
- *    • Auth::loginMS365()     → void           – begin MS OAuth flow
- *    • Auth::callbackMS365()  → void           – handle OAuth redirect
- *    • Auth::logout()         → void           – destroy session
- *    • Auth::csrfToken()      → string         – get / create CSRF token
- *    • Auth::verifyCsrf($tok) → bool           – compare token constant‑time
- * -----------------------------------------------------------------------------
- * NOTE: This stub prepares the scaffolding; MS Graph specifics (tenant, client
- * ID / secret) are pulled from $SETTINGS.  Low‑level HTTP requests will use
- * simple cURL since Composer is unavailable.  A lightweight vendor lib for JWT
- * validation (php‑jwt) will be dropped into /vendor/ in a later sub‑phase.
- * -----------------------------------------------------------------------------
- * @package    Portal\Core
- * @author     Cambridge SDA
- * @license    MIT
+ * Unified authentication helper – wraps Microsoft 365 OAuth, local accounts,
+ * and (future) Google OAuth. Provides session management, role checks, CSRF
+ * token utilities, and rate limiting integration.
+ *
+ * Public methods:
+ *   Auth::check()               → bool   – is user logged in?
+ *   Auth::requireLogin()        → void   – redirect if not logged in
+ *   Auth::ensureSession()       → void   – start session with secure params
+ *   Auth::loginMS365()          → void   – begin MS OAuth flow
+ *   Auth::callbackMS365()       → void   – handle OAuth redirect & verify JWT
+ *   Auth::loginLocal($e, $p)    → bool   – authenticate with email + password
+ *   Auth::logout()              → void   – destroy session
+ *   Auth::csrfToken()           → string – get / create CSRF token
+ *   Auth::verifyCsrf($tok)      → bool   – compare token constant-time
+ *   Auth::curlPost($url, $data) → ?string – HTTP POST via cURL
+ *
+ * @see       https://owasp.org/www-community/controls/Session_Management_Cheat_Sheet
+ * @package   Portal\Core
+ * @author    MWBM Partners Ltd (t/a MWservices)
+ * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
+ * @license   MIT
+ * @version   0.1.0
+ * @link      https://github.com/MWBMPartners/WebMS-Intra
  * -----------------------------------------------------------------------------
  */
 
@@ -32,27 +34,62 @@ declare(strict_types=1);
 
 namespace Portal\Core;
 
-use mysqli_stmt;
 use RuntimeException;
+use SimpleJWT\JWT as SimpleJWT;
 
 class Auth
 {
-    /** Start session if not already started. */
-    private static function ensureSession(): void
+    /* ====================================================================== */
+    /* Session helpers                                                        */
+    /* ====================================================================== */
+
+    /**
+     * Start session with secure cookie parameters if not already active.
+     *
+     * Sets HttpOnly, Secure, SameSite=Lax flags on the session cookie to
+     * prevent XSS theft and CSRF attacks.
+     *
+     * @see https://owasp.org/www-community/controls/Session_Management_Cheat_Sheet
+     *
+     * @return void
+     */
+    public static function ensureSession(): void
     {
-        if (session_status() !== PHP_SESSION_ACTIVE) {
-            session_start();
+        if (session_status() === PHP_SESSION_ACTIVE) {
+            return;
         }
+
+        // 🔒 Set secure cookie parameters before starting the session
+        // See: https://www.php.net/manual/en/function.session-set-cookie-params.php
+        session_set_cookie_params([
+            'lifetime' => 0,            // Session cookie (expires when browser closes)
+            'path'     => '/',
+            'domain'   => '',           // Current domain only
+            'secure'   => (isset($_SERVER['HTTPS']) === true && $_SERVER['HTTPS'] !== 'off'),
+            'httponly'  => true,         // 🛡️ Prevents JavaScript access to session cookie
+            'samesite'  => 'Lax',       // 🛡️ Prevents CSRF via cross-origin requests
+        ]);
+
+        session_start();
     }
 
-    /** Is a user currently authenticated? */
+    /**
+     * Check if a user is currently authenticated.
+     *
+     * @return bool True if user is logged in
+     */
     public static function check(): bool
     {
         self::ensureSession();
         return isset($_SESSION['user_id']);
     }
 
-    /** Require login or redirect to /login. */
+    /**
+     * Require authentication or redirect to login page.
+     * Saves the current URL so the user can be redirected back after login.
+     *
+     * @return void (terminates with redirect if not authenticated)
+     */
     public static function requireLogin(): void
     {
         if (self::check() === false) {
@@ -62,44 +99,80 @@ class Auth
         }
     }
 
-    /* ---------------------------------------------------------------------- */
-    /* CSRF helpers                                                           */
-    /* ---------------------------------------------------------------------- */
+    /* ====================================================================== */
+    /* CSRF protection                                                        */
+    /* ====================================================================== */
 
+    /**
+     * Get or generate a CSRF token for form protection.
+     *
+     * @return string The CSRF token (64-character hex string)
+     */
     public static function csrfToken(): string
     {
         self::ensureSession();
+
         if (isset($_SESSION['csrf_token']) === false) {
             $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
         }
+
         return $_SESSION['csrf_token'];
     }
 
+    /**
+     * Verify a submitted CSRF token using constant-time comparison.
+     * Rotates the token after successful verification to prevent replay.
+     *
+     * @see https://owasp.org/www-community/attacks/csrf
+     *
+     * @param string $token The submitted token to verify
+     *
+     * @return bool True if the token is valid
+     */
     public static function verifyCsrf(string $token): bool
     {
         self::ensureSession();
+
         if (isset($_SESSION['csrf_token']) === false) {
             return false;
         }
-        return hash_equals($_SESSION['csrf_token'], $token);
+
+        $valid = hash_equals($_SESSION['csrf_token'], $token);
+
+        // 🔄 Rotate the token after successful verification to prevent replay attacks
+        if ($valid === true) {
+            $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+        }
+
+        return $valid;
     }
 
-    /* ---------------------------------------------------------------------- */
-    /* Microsoft 365 OAuth flow                                               */
-    /* ---------------------------------------------------------------------- */
+    /* ====================================================================== */
+    /* Microsoft 365 OAuth flow                                               */
+    /* ====================================================================== */
 
+    /**
+     * Begin the Microsoft 365 OAuth authorization flow.
+     * Redirects the user to Microsoft's login page.
+     *
+     * @see https://learn.microsoft.com/en-us/entra/identity-platform/v2-oauth2-auth-code-flow
+     *
+     * @return void (terminates with redirect)
+     */
     public static function loginMS365(): void
     {
         global $SETTINGS;
 
-        if (isset($SETTINGS['auth']['ms365']['enduser']['clientID']) === false) {
+        if (($SETTINGS['auth']['ms365']['enduser']['clientID'] ?? '') === '') {
             throw new RuntimeException('MS365 client ID not configured.');
         }
 
-        $clientId     = $SETTINGS['auth']['ms365']['enduser']['clientID'];
-        $redirectUri  = $SETTINGS['auth']['ms365']['enduser']['redirectURI'];
-        $tenantId     = $SETTINGS['auth']['ms365']['tenantID'];
-        $state        = bin2hex(random_bytes(8));
+        $clientId    = $SETTINGS['auth']['ms365']['enduser']['clientID'];
+        $redirectUri = $SETTINGS['auth']['ms365']['enduser']['redirectURI'];
+        $tenantId    = $SETTINGS['auth']['ms365']['tenantID'];
+
+        // 🔐 Generate state parameter for CSRF protection of the OAuth flow
+        $state = bin2hex(random_bytes(16));
         self::ensureSession();
         $_SESSION['oauth_state'] = $state;
 
@@ -117,137 +190,333 @@ class Auth
         exit();
     }
 
-    /** Handle Microsoft redirect after user consents. */
+    /**
+     * Handle the OAuth callback from Microsoft after user consent.
+     * Exchanges the authorization code for tokens, verifies the JWT ID token,
+     * upserts the user in the database, and creates a session.
+     *
+     * @see https://learn.microsoft.com/en-us/entra/identity-platform/id-tokens
+     *
+     * @return void (terminates with redirect on success or error message on failure)
+     */
     public static function callbackMS365(): void
     {
         self::ensureSession();
-        global $SETTINGS; global $mysqli;
+        global $SETTINGS, $mysqli;
 
-        // Basic CSRF check on state param
+        /* ----------------------- 1. Validate OAuth state ------------------- */
         if (isset($_GET['state']) === false || $_GET['state'] !== ($_SESSION['oauth_state'] ?? '')) {
+            Logger::errorPlatform('Auth', 'Error', 'OAUTH_STATE', 'Invalid OAuth state parameter', '');
             echo 'Invalid OAuth state.';
             exit();
         }
+
         if (isset($_GET['code']) === false) {
+            Logger::errorPlatform('Auth', 'Error', 'OAUTH_CODE', 'Authorization code missing from callback', '');
             echo 'Authorization code missing.';
             exit();
         }
 
-        $code        = $_GET['code'];
-        $clientId    = $SETTINGS['auth']['ms365']['enduser']['clientID'];
-        $clientSecret= $SETTINGS['auth']['ms365']['enduser']['clientSecret'];
-        $redirectUri = $SETTINGS['auth']['ms365']['enduser']['redirectURI'];
-        $tenantId    = $SETTINGS['auth']['ms365']['tenantID'];
+        // 🧹 Clear the OAuth state to prevent replay
+        unset($_SESSION['oauth_state']);
 
-        // Exchange code for tokens
+        $code         = $_GET['code'];
+        $clientId     = $SETTINGS['auth']['ms365']['enduser']['clientID'];
+        $clientSecret = $SETTINGS['auth']['ms365']['enduser']['clientSecret'];
+        $redirectUri  = $SETTINGS['auth']['ms365']['enduser']['redirectURI'];
+        $tenantId     = $SETTINGS['auth']['ms365']['tenantID'];
+
+        /* ----------------------- 2. Exchange code for tokens --------------- */
         $tokenEndpoint = 'https://login.microsoftonline.com/' . $tenantId . '/oauth2/v2.0/token';
-        $postFields    = [
+        $tokenResp = self::curlPost($tokenEndpoint, [
             'client_id'     => $clientId,
             'scope'         => 'openid email profile offline_access User.Read',
             'code'          => $code,
             'redirect_uri'  => $redirectUri,
             'grant_type'    => 'authorization_code',
             'client_secret' => $clientSecret,
-        ];
+        ]);
 
-        $response = self::curlPost($tokenEndpoint, $postFields);
-        if ($response === null) {
+        if ($tokenResp === null) {
             echo 'Token request failed.';
             exit();
         }
-        $tokenData = json_decode($response, true);
+
+        $tokenData = json_decode($tokenResp, true);
         if (json_last_error() !== JSON_ERROR_NONE || isset($tokenData['id_token']) === false) {
+            Logger::errorPlatform('Auth', 'Error', 'TOKEN_RESPONSE', 'Invalid token response from MS365', '');
             echo 'Invalid token response.';
             exit();
         }
 
-        // Decode JWT (header.payload.signature). We will not fully verify here –
-        // in production integrate vendor/php-jwt for signature validation.
-        [$headerB64, $payloadB64] = explode('.', $tokenData['id_token']);
-        $payloadJson = base64_decode(strtr($payloadB64, '-_', '+/')); // Add padding handled by PHP automatically
-        $payload     = json_decode($payloadJson, true);
-        if (isset($payload['sub']) === false) {
-            echo 'Unable to parse ID token.';
+        $idToken = $tokenData['id_token'];
+
+        /* ----------------------- 3. Verify ID token via JWKS --------------- */
+        // 🔐 Fetch the JWKS keys from Microsoft's discovery endpoint
+        // See: https://learn.microsoft.com/en-us/entra/identity-platform/access-tokens#validating-tokens
+        $jwksUri  = 'https://login.microsoftonline.com/' . $tenantId . '/discovery/v2.0/keys';
+        $jwksJson = file_get_contents($jwksUri);
+        if ($jwksJson === false) {
+            Logger::errorPlatform('Auth', 'Error', 'JWKS_FETCH', 'Unable to retrieve JWKS from ' . $jwksUri, '');
+            echo 'Unable to retrieve signing keys.';
             exit();
         }
 
-        // Upsert user in tblUsers
-        $email = strtolower($payload['preferred_username'] ?? $payload['email'] ?? '');
-        $name  = $payload['name'] ?? '';
-        $avatar= $payload['picture'] ?? '';
+        $jwks = json_decode($jwksJson, true);
+
+        try {
+            $payload = SimpleJWT::decode($idToken, $jwks, [
+                'aud' => $clientId,
+                'iss' => [
+                    'https://login.microsoftonline.com/' . $tenantId . '/v2.0',
+                    'https://sts.windows.net/' . $tenantId . '/',
+                ],
+            ]);
+        } catch (RuntimeException $ex) {
+            Logger::errorPlatform('JWT', 'Error', 'VERIFY_FAIL', $ex->getMessage(), '');
+            echo 'Token verification failed.';
+            exit();
+        }
+
+        /* ----------------------- 4. Upsert user in database ---------------- */
+        $email  = strtolower($payload['preferred_username'] ?? ($payload['email'] ?? ''));
+        $name   = $payload['name'] ?? '';
+        $avatar = $payload['picture'] ?? '';
+
+        if ($email === '') {
+            Logger::errorPlatform('Auth', 'Error', 'NO_EMAIL', 'No email in ID token payload', '');
+            echo 'Unable to determine user email from token.';
+            exit();
+        }
 
         $userId = self::upsertUserMS($mysqli, $email, $name, $avatar);
 
-        // Persist session
-        $_SESSION['user_id'] = $userId;
-        $_SESSION['user_name'] = $name;
+        /* ----------------------- 5. Create session & redirect -------------- */
+        // 🔄 Regenerate session ID to prevent session fixation attacks
+        // See: https://owasp.org/www-community/attacks/Session_fixation
+        session_regenerate_id(true);
+
+        $_SESSION['user_id']    = $userId;
+        $_SESSION['user_name']  = $name;
         $_SESSION['user_email'] = $email;
 
-        // Redirect to original target
+        // 📝 Log the successful login
+        Logger::activity('LoginMS365', 'User logged in via Microsoft 365');
+
         $target = $_GET['redirect'] ?? '/';
         header('Location: ' . $target, true, 302);
         exit();
     }
 
-    /** Destroy session and redirect to home. */
+    /* ====================================================================== */
+    /* Local account authentication                                           */
+    /* ====================================================================== */
+
+    /**
+     * Authenticate a user with email and password (local account).
+     * Checks rate limiting, verifies the password hash, and creates a session.
+     *
+     * @param string $email    The user's email address
+     * @param string $password The plaintext password to verify
+     *
+     * @return bool True if login succeeded, false otherwise
+     */
+    public static function loginLocal(string $email, string $password): bool
+    {
+        self::ensureSession();
+        global $mysqli;
+
+        $email = strtolower(trim($email));
+
+        // 🛡️ Check rate limiting before attempting authentication
+        if (RateLimiter::isBlocked() === true) {
+            $remaining = RateLimiter::lockoutRemaining();
+            Logger::activity('LoginBlocked', 'Rate-limited login attempt for: ' . $email);
+            return false;
+        }
+
+        // 🔍 Look up the user by email address
+        $stmt = $mysqli->prepare(
+            'SELECT userID, fullName, emailAddress, passwordHash, isActive '
+            . 'FROM tblUsers '
+            . 'WHERE emailAddress = ? '
+            . 'LIMIT 1'
+        );
+
+        if ($stmt === false) {
+            Logger::errorPlatform('Auth', 'Error', 'DB_PREPARE', 'Failed to prepare login query: ' . $mysqli->error, '');
+            return false;
+        }
+
+        $stmt->bind_param('s', $email);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        $user   = $result->fetch_assoc();
+        $stmt->close();
+
+        // 🔐 Verify the user exists, is active, and has a password hash
+        if ($user === null || (int) $user['isActive'] !== 1 || ($user['passwordHash'] ?? '') === '') {
+            // 📝 Log the failed attempt (used by RateLimiter)
+            Logger::activity('LoginFailed', 'Failed login attempt for: ' . $email);
+            return false;
+        }
+
+        // 🔑 Verify password using PHP's built-in password_verify
+        // See: https://www.php.net/manual/en/function.password-verify.php
+        if (password_verify($password, $user['passwordHash']) === false) {
+            Logger::activity('LoginFailed', 'Incorrect password for: ' . $email);
+            return false;
+        }
+
+        // 🔄 Regenerate session ID to prevent session fixation
+        session_regenerate_id(true);
+
+        // ✅ Create the user session
+        $_SESSION['user_id']    = (int) $user['userID'];
+        $_SESSION['user_name']  = $user['fullName'];
+        $_SESSION['user_email'] = $user['emailAddress'];
+
+        // 📝 Log the successful login
+        Logger::activity('LoginLocal', 'User logged in with local account');
+
+        return true;
+    }
+
+    /* ====================================================================== */
+    /* Logout                                                                 */
+    /* ====================================================================== */
+
+    /**
+     * Destroy the current session and redirect to the home page.
+     *
+     * @return void (terminates with redirect)
+     */
     public static function logout(): void
     {
         self::ensureSession();
-        session_unset();
+
+        // 📝 Log before destroying the session (need user_id for the log)
+        if (isset($_SESSION['user_id']) === true) {
+            Logger::activity('Logout', 'User logged out');
+        }
+
+        // 🧹 Clear all session data
+        $_SESSION = [];
+
+        // 🍪 Delete the session cookie
+        if (ini_get('session.use_cookies') === '1') {
+            $params = session_get_cookie_params();
+            setcookie(
+                session_name(),
+                '',
+                time() - 42000,
+                $params['path'],
+                $params['domain'],
+                $params['secure'],
+                $params['httponly']
+            );
+        }
+
         session_destroy();
+
         header('Location: /', true, 302);
         exit();
     }
 
-    /* ---------------------------------------------------------------------- */
-    /* Internal helpers                                                       */
-    /* ---------------------------------------------------------------------- */
+    /* ====================================================================== */
+    /* Internal utilities                                                     */
+    /* ====================================================================== */
 
-    private static function curlPost(string $url, array $data): ?string
+    /**
+     * Perform an HTTP POST request using cURL.
+     *
+     * @param string $url  The URL to POST to
+     * @param array  $data Key-value pairs for the POST body (form-encoded)
+     *
+     * @return string|null Response body, or null on failure
+     */
+    public static function curlPost(string $url, array $data): ?string
     {
         $ch = curl_init($url);
-        curl_setopt($ch, CURLOPT_POST, true);
-        curl_setopt($ch, CURLOPT_POSTFIELDS, http_build_query($data));
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_TIMEOUT, 15);
+
+        if ($ch === false) {
+            Logger::errorPlatform('cURL', 'Error', 'INIT_FAIL', 'curl_init() returned false for: ' . $url, '');
+            return null;
+        }
+
+        curl_setopt_array($ch, [
+            CURLOPT_POST           => true,
+            CURLOPT_POSTFIELDS     => http_build_query($data),
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT        => 15,
+            CURLOPT_FOLLOWLOCATION => true,
+            CURLOPT_MAXREDIRS      => 3,
+        ]);
+
         $resp = curl_exec($ch);
+
         if ($resp === false) {
             Logger::errorPlatform('cURL', 'Error', (string) curl_errno($ch), curl_error($ch), '');
             curl_close($ch);
             return null;
         }
+
         curl_close($ch);
         return $resp;
     }
 
-    private static function upsertUserMS($db, string $email, string $name, string $avatar): int
+    /**
+     * Upsert a user record for Microsoft 365 login.
+     * Creates a new user if they don't exist, or updates their name/avatar if they do.
+     *
+     * @param \mysqli $db     Database connection
+     * @param string  $email  User's email address (already lowercased)
+     * @param string  $name   User's display name from MS365
+     * @param string  $avatar User's avatar URL from MS365
+     *
+     * @return int The user's ID (new or existing)
+     *
+     * @throws RuntimeException If the database query fails
+     */
+    private static function upsertUserMS(\mysqli $db, string $email, string $name, string $avatar): int
     {
-        // Check if user exists
+        // 🔍 Check if the user already exists
         $stmt = $db->prepare('SELECT userID FROM tblUsers WHERE emailAddress = ? LIMIT 1');
         if ($stmt === false) {
             throw new RuntimeException('DB prepare failed: ' . $db->error);
         }
+
         $stmt->bind_param('s', $email);
         $stmt->execute();
         $res = $stmt->get_result();
+
         if ($row = $res->fetch_assoc()) {
+            // ♻️ Update existing user's name and avatar
             $userId = (int) $row['userID'];
             $stmt->close();
-            // Update name/avatar if changed
+
             $stmt = $db->prepare('UPDATE tblUsers SET fullName = ?, avatarPath = ?, isActive = 1 WHERE userID = ?');
+            if ($stmt === false) {
+                throw new RuntimeException('DB prepare failed: ' . $db->error);
+            }
             $stmt->bind_param('ssi', $name, $avatar, $userId);
             $stmt->execute();
             $stmt->close();
+
             return $userId;
         }
         $stmt->close();
 
-        // Insert new user
-        $stmt = $db->prepare('INSERT INTO tblUsers (fullName, emailAddress, avatarPath, isActive) VALUES (?,?,?,1)');
+        // ➕ Insert new user
+        $stmt = $db->prepare('INSERT INTO tblUsers (fullName, emailAddress, avatarPath, isActive) VALUES (?, ?, ?, 1)');
+        if ($stmt === false) {
+            throw new RuntimeException('DB prepare failed: ' . $db->error);
+        }
         $stmt->bind_param('sss', $name, $email, $avatar);
         $stmt->execute();
         $newId = $stmt->insert_id;
         $stmt->close();
+
         return $newId;
     }
 }

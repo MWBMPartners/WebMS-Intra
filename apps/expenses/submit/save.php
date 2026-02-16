@@ -1,25 +1,32 @@
 <?php
 // Path: apps/expenses/submit/save.php  (v2 with PDF generation)
 /**
- * Handles new expense claim submission → inserts DB rows, uploads files, creates
+ * -----------------------------------------------------------------------------
+ * Expenses -- Claim Submission Save Handler 💾
+ * -----------------------------------------------------------------------------
+ * Handles new expense claim submission: inserts DB rows, uploads files, creates
  * a "Pending" PDF via ExpensePdf helper, logs activity, and redirects.
+ * -----------------------------------------------------------------------------
  */
 
 declare(strict_types=1);
 require_once dirname(__DIR__, 3) . DIRECTORY_SEPARATOR . 'core' . DIRECTORY_SEPARATOR . 'bootstrap.php';
 
 use Portal\Core\Auth;
+use Portal\Core\Captcha;
 use Portal\Core\Logger;
 use Portal\Core\ExpensePdf;
 
+// 🛡️ Session and security checks
 Auth::ensureSession();
 if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
     exit('Invalid CSRF');
 }
-if (captchaVerify($_POST) === false) {
+if (Captcha::verify($_POST) === false) {
     exit('Captcha failed');
 }
 
+// 📝 Validate required fields
 $userId     = $_SESSION['user_id'];
 $deptID     = intval($_POST['deptID'] ?? 0);
 $claimTitle = trim($_POST['claimTitle'] ?? '');
@@ -30,18 +37,20 @@ if ($deptID === 0 || $claimTitle === '' || $totalAmt <= 0) {
 
 $mysqli->begin_transaction();
 try {
-    // 1. Insert claim header
+    // 1. 📋 Insert claim header
     $stmt = $mysqli->prepare('INSERT INTO tblExpenseClaims (userID, deptID, claimTitle, claimDate, totalAmount) VALUES (?,?,?,CURDATE(),?)');
     $stmt->bind_param('iisd', $userId, $deptID, $claimTitle, $totalAmt);
     $stmt->execute();
     $claimID = $stmt->insert_id;
     $stmt->close();
 
-    // 2. Items
+    // 2. 📦 Items
     $itemStmt = $mysqli->prepare('INSERT INTO tblExpenseClaimItems (claimID, itemName, quantity, unitCost, lineTotal) VALUES (?,?,?,?,?)');
     foreach ($_POST['itemDesc'] as $i => $desc) {
         $desc = trim($desc);
-        if ($desc === '') { continue; }
+        if ($desc === '') {
+            continue;
+        }
         $qty  = intval($_POST['itemQty'][$i] ?? 1);
         $unit = floatval($_POST['itemUnit'][$i] ?? 0);
         $line = $qty * $unit;
@@ -50,31 +59,36 @@ try {
     }
     $itemStmt->close();
 
-    // 3. File uploads
+    // 3. 📎 File uploads
     $upDir = PORTAL_ROOT . DIRECTORY_SEPARATOR . '_uploads' . DIRECTORY_SEPARATOR . 'expenses';
-    if (!is_dir($upDir)) { mkdir($upDir, 0755, true); }
+    if (is_dir($upDir) === false) {
+        mkdir($upDir, 0755, true);
+    }
     $fileStmt = $mysqli->prepare('INSERT INTO tblExpenseClaimFiles (claimID, originalFilename, storedFilename, fileSize, fileType) VALUES (?,?,?,?,?)');
     foreach ($_FILES['files']['error'] ?? [] as $i => $err) {
-        if ($err !== UPLOAD_ERR_OK) { continue; }
-        $orig = basename($_FILES['files']['name'][$i]);
-        $tmp  = $_FILES['files']['tmp_name'][$i];
-        $size = $_FILES['files']['size'][$i];
-        $type = $_FILES['files']['type'][$i];
+        if ($err !== UPLOAD_ERR_OK) {
+            continue;
+        }
+        $orig   = basename($_FILES['files']['name'][$i]);
+        $tmp    = $_FILES['files']['tmp_name'][$i];
+        $size   = $_FILES['files']['size'][$i];
+        $type   = $_FILES['files']['type'][$i];
         $stored = $claimID . '_' . time() . '_' . preg_replace('/[^a-zA-Z0-9._-]/', '', $orig);
-        if (move_uploaded_file($tmp, $upDir . DIRECTORY_SEPARATOR . $stored)) {
+        if (move_uploaded_file($tmp, $upDir . DIRECTORY_SEPARATOR . $stored) === true) {
             $fileStmt->bind_param('issis', $claimID, $orig, $stored, $size, $type);
             $fileStmt->execute();
         }
     }
     $fileStmt->close();
 
-    // 4. Pending PDF
+    // 4. 📄 Pending PDF
     ExpensePdf::generate($claimID, 'Pending');
 
     $mysqli->commit();
     Logger::activity('ExpenseSubmit', 'Claim #' . $claimID . ' created', $userId);
 
-    header('Location: /expenses/submit/success.php?claim=' . $claimID);
+    // ✅ Redirect to success view
+    header('Location: /expenses/submit?success=' . $claimID);
     exit();
 
 } catch (Throwable $ex) {
@@ -82,5 +96,3 @@ try {
     Logger::exception($ex);
     exit('Error saving claim');
 }
-
-function captchaVerify($p){return true;}

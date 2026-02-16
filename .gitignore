@@ -1,0 +1,42 @@
+# =============================================================================
+# WebMS Intra - .gitignore
+# =============================================================================
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE / editor
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Secrets and credentials (NEVER commit these)
+_auth_keys/
+.env
+*.key
+
+# User uploads
+_uploads/
+
+# Backups
+_backups/
+
+# Local asset fallbacks (downloaded, not committed)
+# These are fetched from CDNs and placed locally for fallback
+public_html/assets/css/bootstrap.min.css
+public_html/assets/js/bootstrap.bundle.min.js
+public_html/assets/css/fontawesome-all.min.css
+public_html/assets/webfonts/
+
+# Vendor libraries that should be manually managed
+# (vendor/simplejwt/ IS committed as it's our own code)
+
+# Logs
+*.log
+error_log
+
+# PHP
+*.php.bak

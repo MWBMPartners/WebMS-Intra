@@ -1,0 +1,25 @@
+# =============================================================================
+# Portal Front Controller - URL Rewriting
+# =============================================================================
+# Rewrites all requests to index.php (the front controller) unless the request
+# matches an existing file or directory. This enables clean URLs like
+# /expenses/submit instead of /expenses/submit/index.php
+#
+# @see https://httpd.apache.org/docs/2.4/mod/mod_rewrite.html
+# =============================================================================
+
+RewriteEngine On
+RewriteBase /
+
+# 🔒 Block access to hidden files (e.g. .htaccess, .git, .env)
+RewriteCond %{REQUEST_URI} (^|/)\.(?!well-known) [NC]
+RewriteRule ^ - [F]
+
+# 📁 Skip rewriting for existing files (CSS, JS, images, fonts etc)
+RewriteCond %{REQUEST_FILENAME} !-f
+
+# 📂 Skip rewriting for existing directories
+RewriteCond %{REQUEST_FILENAME} !-d
+
+# 🎯 Route everything else through the front controller
+RewriteRule ^(.*)$ index.php [QSA,L]

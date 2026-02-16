@@ -2,15 +2,16 @@
 // Path: apps/expenses/approve/save.php
 /**
  * -----------------------------------------------------------------------------
- * Expenses – Approval Save Handler 🔄
+ * Expenses -- Approval Save Handler 🔄
  * -----------------------------------------------------------------------------
  * Receives decision from approver, updates status, records audit trail, sends
  * notification emails (todo), and redirects back with a flash message.
  * -----------------------------------------------------------------------------
- * • Only authorised approvers can change status.
- * • Multiple approvers supported: inserts row into tblExpenseClaimApprovals
- *   (created here if not existing) and if final required approval reached,
- *   claim status flips to Approved / Rejected.
+ * - Only authorised approvers can change status.
+ * - Multiple approvers supported: inserts row into tblExpenseClaimApprovals
+ *   and if final required approval reached, claim status flips to
+ *   Approved / Rejected.
+ * - Table DDL is now handled by migration 002 (removed inline CREATE TABLE).
  * -----------------------------------------------------------------------------
  */
 
@@ -21,12 +22,14 @@ require_once dirname(__DIR__, 3) . DIRECTORY_SEPARATOR . 'core' . DIRECTORY_SEPA
 use Portal\Core\Auth;
 use Portal\Core\Logger;
 
+// 🛡️ Session and CSRF checks
 Auth::ensureSession();
 if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
     echo 'Invalid CSRF';
     exit();
 }
 
+// 📝 Extract and validate input
 $userId   = $_SESSION['user_id'] ?? 0;
 $claimID  = intval($_POST['claimID'] ?? 0);
 $decision = ($_POST['decision'] ?? '') === 'Rejected' ? 'Rejected' : 'Approved';
@@ -39,23 +42,13 @@ if ($claimID === 0) {
 
 $mysqli->begin_transaction();
 try {
-    // 1. Insert approval record (create table if not yet existing)
-    $mysqli->query('CREATE TABLE IF NOT EXISTS tblExpenseClaimApprovals (
-        approvalID INT AUTO_INCREMENT PRIMARY KEY,
-        claimID INT NOT NULL,
-        userID INT NOT NULL,
-        decision ENUM("Approved","Rejected") NOT NULL,
-        comments TEXT NULL,
-        decidedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (claimID) REFERENCES tblExpenseClaims(claimID) ON DELETE CASCADE,
-        FOREIGN KEY (userID) REFERENCES tblUsers(userID) ON DELETE CASCADE) ENGINE=InnoDB');
-
+    // 1. 📋 Insert approval record
     $stmt = $mysqli->prepare('INSERT INTO tblExpenseClaimApprovals (claimID, userID, decision, comments) VALUES (?,?,?,?)');
     $stmt->bind_param('iiss', $claimID, $userId, $decision, $comment);
     $stmt->execute();
     $stmt->close();
 
-    // 2. Check if all required approvers have approved (simplified: one approver only)
+    // 2. 🔍 Check if all required approvers have approved (simplified: one approver only)
     $final = true; // TODO multi-approver logic
     if ($final === true) {
         $stmt = $mysqli->prepare('UPDATE tblExpenseClaims SET status = ? , updatedAt = NOW() WHERE claimID = ?');

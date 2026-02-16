@@ -15,87 +15,92 @@
 
 declare(strict_types=1);
 
-require_once dirname(__DIR__, 3) . DIRECTORY_SEPARATOR . 'core' . DIRECTORY_SEPARATOR . 'bootstrap.php';
-
+use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Logger;
+use Portal\Core\Router;
 
-// Only Admins
-Auth::requireLogin();
-// TODO: role check to ensure current user is Admin or higher
+// 📌 Page metadata for the template system
+$pageTitle   = 'Settings';
+$pageSection = 'settings';
+$breadcrumbs = ['Dashboard' => '/', 'Settings' => ''];
+
+// 🛡️ Admin access check (Router handles isProtected login enforcement)
+if (App::isAdmin() === false) {
+    Router::renderError(403);
+    return;
+}
 
 // -----------------------------------------------------------------------------
-// 1. Fetch settings list
+// 1. 📋 Fetch settings list
 // -----------------------------------------------------------------------------
 $rows = [];
 $stmt = $mysqli->prepare('SELECT settingID, settingKey, settingValue, isSensitive, updatedAt FROM tblSettings ORDER BY settingKey');
-$stmt->execute();
-$result = $stmt->get_result();
-while ($r = $result->fetch_assoc()) {
-    $rows[] = $r;
+if ($stmt !== false) {
+    $stmt->execute();
+    $result = $stmt->get_result();
+    while ($r = $result->fetch_assoc()) {
+        $rows[] = $r;
+    }
+    $stmt->close();
 }
-$stmt->close();
 
-// -----------------------------------------------------------------------------
-// 2. Render page
-// -----------------------------------------------------------------------------
+// 📄 Include shared header template
+require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
-<!doctype html>
-<html lang="en" data-bs-theme="<?php echo ($SETTINGS['features']['darkModeEnabled'] ?? 'false') === 'true' ? 'dark' : 'light'; ?>">
-<head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Settings &bull; <?php echo htmlspecialchars($SETTINGS['site']['name']); ?></title>
-    <link rel="stylesheet" href="/assets/css/bootstrap.min.css">
-    <script src="/assets/js/bootstrap.bundle.min.js" defer></script>
-</head>
-<body>
-<div class="container py-4">
-    <h1 class="mb-4">Settings</h1>
-    <table class="table table-hover align-middle">
-        <thead class="table-light">
-        <tr>
-            <th scope="col">Key</th>
-            <th scope="col">Value</th>
-            <th scope="col">Updated</th>
-            <th scope="col">Actions</th>
-        </tr>
-        </thead>
-        <tbody>
-        <?php foreach ($rows as $row): ?>
-            <tr>
-                <td class="text-monospace small"><?php echo htmlspecialchars($row['settingKey']); ?></td>
-                <td>
-                    <?php if ($row['isSensitive'] == '1'): ?>
-                        <span class="text-muted">••••••</span>
-                    <?php else: ?>
-                        <?php echo htmlspecialchars(str_replace("\n", '⏎ ', $row['settingValue'])); ?>
-                    <?php endif; ?>
-                </td>
-                <td class="small text-secondary"><?php echo htmlspecialchars($row['updatedAt']); ?></td>
-                <td>
-                    <button class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#editModal"
-                            data-id="<?php echo $row['settingID']; ?>"
-                            data-key="<?php echo htmlspecialchars($row['settingKey']); ?>"
-                            data-value="<?php echo htmlspecialchars($row['settingValue']); ?>"
-                            data-sensitive="<?php echo $row['isSensitive']; ?>">
-                        Edit
-                    </button>
-                </td>
-            </tr>
-        <?php endforeach; ?>
-        </tbody>
-    </table>
 
-    <button class="btn btn-success" data-bs-toggle="modal" data-bs-target="#addModal">Add Setting</button>
+<!-- ⚙️ Settings Management -->
+<h1 class="mb-4">Settings</h1>
+
+<!-- 📋 Responsive data list (replaces <table>) -->
+<div class="portal-data-list">
+    <!-- 🏷️ Header row (visible on md+ screens) -->
+    <div class="portal-data-row portal-data-header d-none d-md-flex">
+        <div class="col-md-4">Key</div>
+        <div class="col-md-4">Value</div>
+        <div class="col-md-2">Updated</div>
+        <div class="col-md-2 text-end">Actions</div>
+    </div>
+
+    <?php foreach ($rows as $row): ?>
+        <div class="portal-data-row">
+            <div class="col-12 col-md-4">
+                <span class="d-md-none fw-semibold">Key: </span>
+                <code class="small"><?php echo htmlspecialchars($row['settingKey'], ENT_QUOTES, 'UTF-8'); ?></code>
+            </div>
+            <div class="col-12 col-md-4">
+                <span class="d-md-none fw-semibold">Value: </span>
+                <?php if ($row['isSensitive'] == '1'): ?>
+                    <span class="text-muted">------</span>
+                <?php else: ?>
+                    <?php echo htmlspecialchars(str_replace("\n", ' ', $row['settingValue']), ENT_QUOTES, 'UTF-8'); ?>
+                <?php endif; ?>
+            </div>
+            <div class="col-12 col-md-2 small text-secondary">
+                <span class="d-md-none fw-semibold">Updated: </span>
+                <?php echo htmlspecialchars($row['updatedAt'], ENT_QUOTES, 'UTF-8'); ?>
+            </div>
+            <div class="col-12 col-md-2 text-md-end mt-2 mt-md-0">
+                <button class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#editModal"
+                        data-id="<?php echo (int) $row['settingID']; ?>"
+                        data-key="<?php echo htmlspecialchars($row['settingKey'], ENT_QUOTES, 'UTF-8'); ?>"
+                        data-value="<?php echo htmlspecialchars($row['settingValue'], ENT_QUOTES, 'UTF-8'); ?>"
+                        data-sensitive="<?php echo htmlspecialchars($row['isSensitive'], ENT_QUOTES, 'UTF-8'); ?>">
+                    Edit
+                </button>
+            </div>
+        </div>
+    <?php endforeach; ?>
 </div>
 
-<!-- Edit Modal -->
+<button class="btn btn-success mt-3" data-bs-toggle="modal" data-bs-target="#addModal">Add Setting</button>
+
+<!-- 📝 Edit Modal -->
 <div class="modal fade" id="editModal" tabindex="-1" aria-labelledby="editLabel" aria-hidden="true">
     <div class="modal-dialog modal-lg">
         <div class="modal-content">
             <form method="post" action="/settings/save.php">
-                <input type="hidden" name="csrf_token" value="<?php echo Auth::csrfToken(); ?>">
+                <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
                 <input type="hidden" name="settingID" id="edit-settingID">
                 <div class="modal-header">
                     <h5 class="modal-title" id="editLabel">Edit Setting</h5>
@@ -120,12 +125,12 @@ $stmt->close();
     </div>
 </div>
 
-<!-- Add Modal -->
+<!-- ➕ Add Modal -->
 <div class="modal fade" id="addModal" tabindex="-1" aria-labelledby="addLabel" aria-hidden="true">
     <div class="modal-dialog modal-lg">
         <div class="modal-content">
             <form method="post" action="/settings/save.php">
-                <input type="hidden" name="csrf_token" value="<?php echo Auth::csrfToken(); ?>">
+                <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
                 <div class="modal-header">
                     <h5 class="modal-title" id="addLabel">Add New Setting</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
@@ -155,15 +160,18 @@ $stmt->close();
     </div>
 </div>
 
+<!-- 📦 Edit modal population script -->
 <script>
-// Populate edit modal with row data
 var editModal = document.getElementById('editModal');
 editModal.addEventListener('show.bs.modal', function (event) {
     var button = event.relatedTarget;
-    document.getElementById('edit-settingID').value   = button.getAttribute('data-id');
-    document.getElementById('edit-settingKey').value  = button.getAttribute('data-key');
-    document.getElementById('edit-settingValue').value= button.getAttribute('data-value');
+    document.getElementById('edit-settingID').value    = button.getAttribute('data-id');
+    document.getElementById('edit-settingKey').value   = button.getAttribute('data-key');
+    document.getElementById('edit-settingValue').value = button.getAttribute('data-value');
 });
 </script>
-</body>
-</html>
+
+<?php
+// 📄 Include shared footer template
+require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'footer.php';
+?>

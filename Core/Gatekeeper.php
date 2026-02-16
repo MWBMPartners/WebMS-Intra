@@ -2,18 +2,21 @@
 // Path: core/Gatekeeper.php
 /**
  * -----------------------------------------------------------------------------
- * Alpha/Beta Gatekeeper 🚧
+ * Channel Gatekeeper 🚧
  * -----------------------------------------------------------------------------
- * Restricts access to alpha_html and beta_html directories based on user roles.
- * By default only Admins (`isAdmin=1`) or Root Admins (`isRootAdmin=1`) are
- * allowed.  Additional roles can be configured via tblSettings key:
- *     portal.alphaAccessRoles   = "Admin,Developer"
- *     portal.betaAccessRoles    = "Admin,Tester"
+ * Restricts access to non-production directories (primarily public_html_dev/)
+ * based on user roles. By default only Admins (`isAdmin=1`) or Root Admins
+ * (`isRootAdmin=1`) are allowed. Additional roles can be configured via
+ * tblSettings key:
+ *     portal.devAccessRoles     = "Admin,Developer"
  * (comma-separated roleKey values from tblRoles)
+ *
+ * The primary channel is 'dev'. The legacy 'alpha' and 'beta' channels are
+ * retained in VALID_CHANNELS for backwards compatibility.
  * -----------------------------------------------------------------------------
- * Usage in alpha_html/index.php or beta_html/index.php:
- *     require '../../core/bootstrap.php';
- *     \Portal\Core\Gatekeeper::enforce('alpha'); // or 'beta'
+ * Usage in public_html_dev/index.php:
+ *     require '../core/bootstrap.php';
+ *     \Portal\Core\Gatekeeper::enforce('dev');
  *     \Portal\Core\Router::dispatch($mysqli);
  * -----------------------------------------------------------------------------
  */
@@ -27,12 +30,48 @@ use RuntimeException;
 class Gatekeeper
 {
     /**
-     * Enforce gate for given channel (alpha|beta).
+     * Channels that can bypass individual route auth (they handle it at the gate).
+     */
+    private const VALID_CHANNELS = ['alpha', 'beta', 'dev'];
+
+    /**
+     * Exact paths that must remain accessible without passing through the gate
+     * (login flow, OAuth callbacks, health check).
+     */
+    private const OPEN_PATHS = [
+        '',
+        'login',
+        'login/ms365',
+        'login/ms365/callback',
+        'logout',
+        'health',
+    ];
+
+    /**
+     * Path prefixes that bypass the gate (e.g. help centre, public API docs).
+     */
+    private const OPEN_PREFIXES = [
+        'help',
+    ];
+
+    /**
+     * Enforce gate for given channel (dev|alpha|beta).
      */
     public static function enforce(string $channel): void
     {
-        if ($channel !== 'alpha' && $channel !== 'beta') {
+        if (in_array($channel, self::VALID_CHANNELS, true) === false) {
             throw new RuntimeException('Invalid channel for gatekeeper.');
+        }
+
+        // 🔓 Allow login, auth, and public routes through without restriction
+        $path = Router::extractPath();
+        if (in_array($path, self::OPEN_PATHS, true) === true) {
+            return;
+        }
+        foreach (self::OPEN_PREFIXES as $prefix) {
+            if ($path === $prefix || str_starts_with($path, $prefix . '/') === true) {
+                return;
+            }
         }
 
         Auth::ensureSession();
@@ -63,10 +102,9 @@ class Gatekeeper
             }
         }
 
-        // 3. Deny
+        // 3. 🚫 Deny -- log and show the 403 error page
         Logger::activity('GatekeeperDenied', 'User denied to ' . $channel . ' area', $userId);
-        http_response_code(403);
-        echo 'Access to the ' . ucfirst($channel) . ' environment is restricted.';
+        Router::renderError(403);
         exit();
     }
 

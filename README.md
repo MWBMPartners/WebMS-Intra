@@ -1,113 +1,158 @@
-# Cambridge Mill Road Seventh-day Adventist Portal
+# WebMS Intra
 
-> **Project codename:** *PortMillSDA*
-> Target PHP **8.4** · MySQL **8.0+** · DreamHost shared hosting (no CLI)
+> **Version:** 0.1.0 | **PHP** 8.3/8.4 | **MySQL** 8.0+ | **DreamHost** shared hosting
 
-A modular, multi‑tenant administration portal designed for churches, charities, and any organisation that needs lightweight internal tools ("mini‑apps").  Initial release delivers an **Expenses** workflow followed by **Events** scheduling, with strong audit‑logging, OAuth‑based single‑sign‑on, and PDF reporting.
-
----
-
-## 1 · Tech stack
-
-| Layer        | Choice                                                                                      | Rationale                                         |
-| ------------ | ------------------------------------------------------------------------------------------- | ------------------------------------------------- |
-| **Backend**  | PHP 8.4 (strict types), MySQL 8.0                                                           | Ubiquitous LAMP stack; DreamHost‑friendly.        |
-| **Routing**  | Lightweight front‑controller (`public_html/index.php`) + DB‑backed router                   | Pretty URLs, app isolation, easy overrides.       |
-| **Auth**     | Microsoft 365 (Graph v1.0) · optional Google Workspace · local accounts (bcrypt + WebAuthn) | Secure SSO for staff, flexibility for volunteers. |
-| **UI**       | Bootstrap 5.3, Font Awesome 6, custom SCSS→CSS (pre‑compiled)                               | Responsive, WCAG 2.2 AA, dark‑mode.               |
-| **PDF**      | dompdf 2.0 (vendored)                                                                       | Server‑side PDF without external service.         |
-| **E‑mail**   | Microsoft Graph "SendAs" via shared mailbox                                                 | DKIM/DMARC compliance, modern auth.               |
-| **Realtime** | AJAX long‑polling → future WebSockets                                                       | Works on shared hosting, upgrade‑ready.           |
+A modular internal portal platform for organisations, providing centralised access to internal tools, expense management, and future modules (Calendar, Attendance, Leadership, Preaching Plan).
 
 ---
 
-## 2 · Repository layout (top‑level)
+## Tech Stack
+
+| Layer              | Choice                                                                           | Rationale                                        |
+| ------------------ | -------------------------------------------------------------------------------- | ------------------------------------------------ |
+| **Backend**        | PHP 8.4 (strict types), MySQL 8.0                                                | Ubiquitous LAMP stack; DreamHost-friendly        |
+| **Routing**        | Front-controller + DB-backed router (tblRoutes)                                  | Clean URLs, app isolation, easy overrides        |
+| **Auth**           | Microsoft 365 OAuth (primary), local accounts, Google Workspace (future)         | Secure SSO for staff, flexibility for volunteers |
+| **UI**             | Bootstrap 5.3.3, Font Awesome 6.5.1, custom CSS design system                   | Responsive, WCAG compliant, dark mode            |
+| **PDF**            | dompdf 2.0 (vendored)                                                            | Server-side PDF without external service         |
+| **Email**          | Microsoft Graph "SendAs" via shared mailbox                                      | DKIM/DMARC compliance, modern auth               |
+| **Bot Protection** | CloudFlare Turnstile (preferred) / reCAPTCHA                                     | Reduces spam without degrading UX                |
+
+---
+
+## Architecture
 
 ```
-/ (repo root)
-├── .github/
-│   └── workflows/deploy.yml   # CI/CD → DreamHost
-├── public_html/               # Production code (live)
-├── beta_html/                 # Staging (beta)
-├── alpha_html/                # Development (alpha)
-├── vendor/                    # Manually vendored libs
-├── docs/                      # Developer & admin docs
-├── sql/                       # Migration scripts
-├── tools/                     # Local helper scripts (no Composer)
-└── README.md                  # ← you are here
+WebMS-Intra/
+├── core/                    # Framework classes (Portal\Core namespace)
+│   ├── App.php              # Application registry (db, settings, user)
+│   ├── ApiResponse.php      # JSON API response builder
+│   ├── Asset.php            # CDN-with-fallback asset loader (SRI)
+│   ├── Auth.php             # Authentication (MS365, local, CSRF, JWT)
+│   ├── Avatar.php           # Avatar cascade (MS365 → local → Gravatar → SVG)
+│   ├── bootstrap.php        # Environment, DB, settings, autoloader
+│   ├── Captcha.php          # Turnstile / reCAPTCHA helper
+│   ├── Debug.php            # Debug panel (admin + ?debug=true)
+│   ├── ExpensePdf.php       # Expense claim PDF generator
+│   ├── Gatekeeper.php       # Dev/channel access control
+│   ├── Logger.php           # Activity and error logging
+│   ├── Mailer.php           # Email via Microsoft Graph API
+│   ├── Migrator.php         # Web-based SQL migration runner
+│   ├── Pdf.php              # dompdf wrapper
+│   ├── RateLimiter.php      # Login rate limiting
+│   ├── Router.php           # Front-controller URL dispatcher
+│   └── templates/           # Shared page templates
+│       ├── header.php       # DOCTYPE, head, navbar, breadcrumbs
+│       ├── footer.php       # Footer, JS, debug panel
+│       ├── nav.php          # Responsive navbar component
+│       └── error-{403,404,500}.php
+├── apps/                    # Modular application files
+│   ├── auth/login/          # Login page (MS365 SSO + local)
+│   ├── dashboard/           # Portal home with app cards
+│   ├── expenses/            # Expense claim lifecycle
+│   │   ├── submit/          # Claim submission form
+│   │   ├── approve/         # Approval dashboard
+│   │   ├── treasury/        # Reimbursement dashboard
+│   │   └── api/             # JSON API endpoints
+│   └── settings/            # Admin settings UI
+├── sql/                     # Numbered SQL migration files
+├── vendor/simplejwt/        # Lightweight RS256 JWT verifier
+├── public_html/             # Web root (production)
+│   ├── index.php            # Front controller
+│   ├── .htaccess            # URL rewriting
+│   └── assets/              # CSS, JS, images, webfonts
+├── public_html_dev/         # Web root (development)
+├── private_html/            # Private / non-live files
+├── public_html_landing/     # Temporary landing page
+└── public_html_redir/       # Temporary redirect page
 ```
 
-> **Heads‑up:** DreamHost deploys via FTP/SFTP.  GitHub Actions will mirror **only changed files** on push (see workflow).
+## Request Flow
+
+```text
+Browser → .htaccess → index.php → bootstrap.php → Router::dispatch()
+  ├── Special route? (login/ms365, logout, api/*, health) → handle directly
+  ├── Query tblRoutes for matching routeKey
+  ├── If isProtected=1, enforce Auth::requireLogin()
+  └── Include target app file → header.php → content → footer.php
+```
 
 ---
 
-## 3 · Branching & workflow
+## Setup
 
-* **main**   → production (`public_html`)
-* **develop** → alpha (`alpha_html`)
-* **release/** → beta (`beta_html`)
-* **feat/**, **fix/** → short‑lived feature branches
+### Prerequisites
 
-### CI → CD
+- PHP 8.3+ with extensions: `mysqli`, `openssl`, `sodium`, `curl`, `mbstring`
+- MySQL 8.0+
+- Apache with `mod_rewrite`
 
-1. **Lint** PHP (`php -l`) and run any `phpunit` tests.
-2. **Sync** files via `lftp` using secrets `DH_HOST`, `DH_USER`, `DH_PASS`.
-3. Post‑deploy health check hits `/health` route.
+### Configuration
 
----
+1. Create `_auth_keys/auth_creds.php` returning an array with `db_host`, `db_user`, `db_pass`, `db_name`, `db_port`
+2. Generate encryption key: `openssl rand -hex 32 > _auth_keys/enc.key`
+3. Access the portal and run pending migrations via admin UI
+4. Configure MS365 OAuth settings in the Settings admin page
 
-## 4 · Local setup (Mac / Windows)
+### Local Development
 
-1. Install PHP 8.3+ and MySQL 8 locally.
-2. Create a database matching `sql/000_init.sql`.
-3. Copy `.env.example` → `.env` and set your credentials.
-4. Run a local server:
-
-   ```bash
-   php -S localhost:8080 -t alpha_html
-   ```
-5. Sign in with a seeded admin account or via Microsoft 365 if tenant config is ready.
+```bash
+export PORTAL_ENV=dev
+php -S localhost:8080 -t public_html
+```
 
 ---
 
-## 5 · Coding conventions
+## Deployment Channels
 
-* **Strict types:** `declare(strict_types=1);` at the top of every PHP file.
-* **PSR‑12** formatting (4‑space indent, no shorthand control structures).
-* **Constants:** use PHP predefined constants (`DIRECTORY_SEPARATOR`, `PHP_EOL`, etc.).
-* **DB access:** `mysqli` prepared statements only.
-* **Logging:** all actions funnel through `Core\Logger` to `tblActivityLogs` / `tblErrors`.
-* **Comments:** full‑line docblocks, emoji call‑outs where helpful (e.g., `// 🛡️ CSRF check`).
+| Channel    | Directory              | Branch / Trigger | Purpose                  |
+| ---------- | ---------------------- | ---------------- | ------------------------ |
+| Production | `public_html/`         | Tagged `v*`      | Live users               |
+| Dev        | `public_html_dev/`     | Push to `main`   | Developer testing        |
+| Private    | `private_html/`        | --               | Non-live / internal      |
+| Landing    | `public_html_landing/` | --               | Temporary landing page   |
+| Redirect   | `public_html_redir/`   | --               | Temporary redirect page  |
 
----
-
-## 6 · Contributing
-
-1. Fork → feature branch → pull request.
-2. Write descriptive commits: `feat(expenses): add claim upload handler`.
-3. Keep code self‑contained; no Composer dependencies.  Vendored libs go under `/vendor/`.
-4. Ensure `php -l` and tests pass **before** pushing.
+CI/CD via GitHub Actions syncs files to DreamHost via FTP on push.
 
 ---
 
-## 7 · Roadmap
+## Security
 
-| Phase                           | Status        |
-| ------------------------------- | ------------- |
-| 0 · Repo & CI                   | ☐ In‑progress |
-| 1 · Core Framework              | ☐             |
-| 2 · Auth Module                 | ☐             |
-| 3 · Settings UI                 | ☐             |
-| 4 · Expenses v1 – Intake        | ☐             |
-| 5 · Expenses v2 – Approval      | ☐             |
-| 6 · Expenses v3 – Reimbursement | ☐             |
-| 7 · Portal Home                 | ☐             |
-| 8 · Alpha/Beta Gatekeeper       | ☐             |
-| 9 · Events scaffold             | ☐             |
-| 10 · Polish & Docs              | ☐             |
+- MySQLi prepared statements (no raw SQL interpolation)
+- Sensitive settings encrypted at rest (libsodium XSalsa20 + Poly1305)
+- Session cookies: `HttpOnly`, `Secure`, `SameSite=Lax`
+- CSRF tokens with rotation after use
+- Rate limiting on login attempts (configurable via settings)
+- RS256 JWT verification with JWKS key fetching for MS365 tokens
+- SRI integrity hashes on CDN resources
+- Security headers: `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`
 
 ---
 
-### Licence
+## Coding Conventions
 
-© 2025 Cambridge Mill Road Seven-day Adventist Church
+- `declare(strict_types=1)` at the top of every PHP file
+- Full IF notation (`if ($x === true)` not `if ($x)`)
+- Platform-neutral paths using `DIRECTORY_SEPARATOR`
+- Emoji-annotated comments for major code sections
+- No `<table>` tags for data display - use `portal-data-list` responsive component
+- MySQLi prepared statements only - never interpolate user input into SQL
+
+---
+
+## Roadmap
+
+| Phase                                                                        | Status  |
+| ---------------------------------------------------------------------------- | ------- |
+| 1 - Core Framework                                                           | Done    |
+| 2 - Auth Completion (Google OAuth, WebAuthn, 2FA)                            | Planned |
+| 3 - Admin UI (error logs, activity logs, user management, migration runner)  | Planned |
+| 4 - Expenses Completion (multi-approver, notifications, PDF at each stage)       | Planned |
+| 5 - New Apps (Calendar, Attendance, Leadership, Preaching Plan)              | Planned |
+
+---
+
+## Licence
+
+MIT License - Copyright 2025-present MWBM Partners Ltd (t/a MWservices)

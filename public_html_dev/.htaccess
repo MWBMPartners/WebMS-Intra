@@ -1,0 +1,24 @@
+# =============================================================================
+# Portal Front Controller - URL Rewriting (Dev Channel)
+# =============================================================================
+# Routes all requests through public_html_dev/index.php which applies
+# Gatekeeper dev-channel access restrictions before dispatching via Router.
+#
+# @see https://httpd.apache.org/docs/2.4/mod/mod_rewrite.html
+# =============================================================================
+
+RewriteEngine On
+RewriteBase /
+
+# Block access to hidden files (e.g. .htaccess, .git, .env)
+RewriteCond %{REQUEST_URI} (^|/)\.(?!well-known) [NC]
+RewriteRule ^ - [F]
+
+# Skip rewriting for existing files (CSS, JS, images, fonts etc)
+RewriteCond %{REQUEST_FILENAME} !-f
+
+# Skip rewriting for existing directories
+RewriteCond %{REQUEST_FILENAME} !-d
+
+# Route everything else through the front controller
+RewriteRule ^(.*)$ index.php [QSA,L]

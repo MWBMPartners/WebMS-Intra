@@ -1,38 +1,43 @@
 # ===============================
-# GitHub Action · FTP Deploy
+# GitHub Action - FTP Deploy
 # ===============================
-# Syncs only changed files to DreamHost on each push.
-# • develop  → alpha_html  (auto)
-# • main     → public_html (manual or tagged release)
+# Single-branch deployment model:
+#   - Push to main  -> public_html_dev/  (dev, automatic)
+#   - Tagged v*     -> public_html/      (production, automatic)
+#   - Manual        -> choice of target  (override)
+#
+# All development happens on main. The dev site always has the latest
+# code. Production only updates when a version tag is pushed.
+#
+# Required secrets: DH_HOST, DH_USER, DH_PASS
 # -----------------------------------------------
 name: Deploy to DreamHost
 
 on:
   push:
-    branches: [ develop ]
+    branches: [ main ]
+    tags: [ 'v*' ]
   workflow_dispatch:
     inputs:
       target:
-        description: "Deploy branch to target (alpha | beta | live)"
+        description: "Deploy target"
         required: false
-        default: "live"
+        default: "dev"
         type: choice
         options:
+          - dev
           - live
-          - beta
-          - alpha
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
 
-    # Map branch → remote path
+    # Map targets to remote paths
     env:
       FTP_HOST: ${{ secrets.DH_HOST }}
       FTP_USER: ${{ secrets.DH_USER }}
       FTP_PASS: ${{ secrets.DH_PASS }}
-      REMOTE_ALPHA: portal.millrdsdacambridge.uk/alpha_html
-      REMOTE_BETA: portal.millrdsdacambridge.uk/beta_html
+      REMOTE_DEV:  portal.millrdsdacambridge.uk/public_html_dev
       REMOTE_LIVE: portal.millrdsdacambridge.uk/public_html
 
     steps:
@@ -43,25 +48,20 @@ jobs:
         id: set-path
         run: |
           echo "::group::Select remote path"
-          if [[ "${{ github.event_name }}" == "push" ]]; then
-            # Auto rules
-            if [[ "${{ github.ref }}" == "refs/heads/develop" ]]; then
-              echo "path=${REMOTE_ALPHA}" >> $GITHUB_OUTPUT
-            elif [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
-              echo "path=${REMOTE_LIVE}" >> $GITHUB_OUTPUT
-            else
-              echo "::error::Unsupported branch for auto-deploy" && exit 1
-            fi
-          else
-            # Manual dispatch
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            # Manual dispatch -- respect user choice
             case "${{ github.event.inputs.target }}" in
-              alpha) echo "path=${REMOTE_ALPHA}" >> $GITHUB_OUTPUT;;
-              beta)  echo "path=${REMOTE_BETA}"  >> $GITHUB_OUTPUT;;
-              live)  echo "path=${REMOTE_LIVE}"  >> $GITHUB_OUTPUT;;
-              *) echo "::error::Invalid target" && exit 1;;
+              dev)  echo "path=${REMOTE_DEV}"  >> $GITHUB_OUTPUT;;
+              live) echo "path=${REMOTE_LIVE}" >> $GITHUB_OUTPUT;;
+              *)    echo "::error::Invalid target" && exit 1;;
             esac
+          elif [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            # Tagged release -- deploy to production
+            echo "path=${REMOTE_LIVE}" >> $GITHUB_OUTPUT
+          else
+            # Push to main -- deploy to dev
+            echo "path=${REMOTE_DEV}" >> $GITHUB_OUTPUT
           fi
-          echo "Deploying to: $(cat $GITHUB_OUTPUT | cut -d= -f2)" 
           echo "::endgroup::"
 
       - name: Lint PHP
@@ -78,9 +78,10 @@ jobs:
           pass:   ${{ env.FTP_PASS }}
           local:  ./
           remote: ${{ steps.set-path.outputs.path }}
-          args:   "--verbose --parallel=4 --delete --exclude .git* --exclude vendor/"
+          args:   "--verbose --parallel=4 --delete --exclude .git* --exclude .claude/"
 
       - name: Health check
         run: |
-          URL="https://${{ steps.set-path.outputs.path | sed 's/portal\.millrdsdacambridge\.uk\///' }}health" || true
-          curl -fsSL "$URL" || echo "Health endpoint not responding; continue"
+          # Extract domain from remote path for health check URL
+          DOMAIN=$(echo "${{ steps.set-path.outputs.path }}" | cut -d'/' -f1)
+          curl -fsSL "https://${DOMAIN}/health" || echo "Health endpoint not responding; continuing"

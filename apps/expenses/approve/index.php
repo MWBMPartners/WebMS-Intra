@@ -2,88 +2,106 @@
 // Path: apps/expenses/approve/index.php
 /**
  * -----------------------------------------------------------------------------
- * Expenses – Approval Dashboard ✔️
+ * Expenses -- Approval Dashboard ✔️
  * -----------------------------------------------------------------------------
  * Lists pending claims that the current user is authorised to approve.  Shows
  * summary info, status badges, and opens a modal to approve / decline each.
  * -----------------------------------------------------------------------------
- * Version: Phase-5 scaffold (UI only – action handler in approve/save.php).
+ * Version: Phase-5 scaffold (UI only -- action handler in approve/save.php).
  * -----------------------------------------------------------------------------
  */
 
 declare(strict_types=1);
 
-require_once dirname(__DIR__, 3) . DIRECTORY_SEPARATOR . 'core' . DIRECTORY_SEPARATOR . 'bootstrap.php';
-
 use Portal\Core\Auth;
 use Portal\Core\Logger;
 
-Auth::requireLogin();
+// 📌 Page metadata for the template system
+$pageTitle   = 'Approve Expense Claims';
+$pageSection = 'expenses';
+$breadcrumbs = ['Dashboard' => '/', 'Expenses' => '/expenses/approve', 'Approve' => ''];
 
 // TODO: derive approver list via Dept + tblUserDepts. For now, fetch all pending.
 $claims = [];
-$stmt = $mysqli->prepare('SELECT EC.claimID, EC.claimTitle, U.fullName, D.deptName, EC.totalAmount, EC.createdAt FROM tblExpenseClaims EC JOIN tblUsers U ON U.userID = EC.userID JOIN tblDepts D ON D.deptID = EC.deptID WHERE EC.status = "Pending" ORDER BY EC.createdAt DESC');
-$stmt->execute();
-$res = $stmt->get_result();
-while ($row = $res->fetch_assoc()) { $claims[] = $row; }
-$stmt->close();
+$stmt = $mysqli->prepare(
+    'SELECT EC.claimID, EC.claimTitle, U.fullName, D.deptName, EC.totalAmount, EC.createdAt '
+    . 'FROM tblExpenseClaims EC '
+    . 'JOIN tblUsers U ON U.userID = EC.userID '
+    . 'JOIN tblDepts D ON D.deptID = EC.deptID '
+    . 'WHERE EC.status = "Pending" '
+    . 'ORDER BY EC.createdAt DESC'
+);
+if ($stmt !== false) {
+    $stmt->execute();
+    $res = $stmt->get_result();
+    while ($row = $res->fetch_assoc()) {
+        $claims[] = $row;
+    }
+    $stmt->close();
+}
 
+// 📄 Include shared header template
+require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
-<!doctype html>
-<html lang="en" data-bs-theme="<?php echo ($SETTINGS['features']['darkModeEnabled'] ?? 'false') === 'true' ? 'dark' : 'light'; ?>">
-<head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Approve Expense Claims • <?php echo htmlspecialchars($SETTINGS['site']['name']); ?></title>
-    <link rel="stylesheet" href="/assets/css/bootstrap.min.css">
-    <script src="/assets/js/bootstrap.bundle.min.js" defer></script>
-</head>
-<body>
-<div class="container py-4">
-    <h1 class="mb-4">Pending Expense Approvals</h1>
 
-    <?php if (empty($claims)): ?>
-        <div class="alert alert-info">No claims awaiting your approval.</div>
-    <?php else: ?>
-        <div class="table-responsive">
-            <table class="table align-middle">
-                <thead class="table-light">
-                <tr>
-                    <th>ID</th>
-                    <th>Title</th>
-                    <th>Claimant</th>
-                    <th>Department</th>
-                    <th class="text-end">Total £</th>
-                    <th class="text-end">Submitted</th>
-                    <th></th>
-                </tr>
-                </thead>
-                <tbody>
-                <?php foreach ($claims as $c): ?>
-                    <tr>
-                        <td>#<?php echo $c['claimID']; ?></td>
-                        <td><?php echo htmlspecialchars($c['claimTitle']); ?></td>
-                        <td><?php echo htmlspecialchars($c['fullName']); ?></td>
-                        <td><?php echo htmlspecialchars($c['deptName']); ?></td>
-                        <td class="text-end">£<?php echo number_format($c['totalAmount'],2); ?></td>
-                        <td class="text-end small text-secondary"><?php echo date('d M Y', strtotime($c['createdAt'])); ?></td>
-                        <td class="text-end">
-                            <button class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#approveModal" data-claim='<?php echo json_encode($c, JSON_HEX_TAG); ?>'>Review</button>
-                        </td>
-                    </tr>
-                <?php endforeach; ?>
-                </tbody>
-            </table>
+<!-- ✔️ Pending Expense Approvals -->
+<h1 class="mb-4">Pending Expense Approvals</h1>
+
+<?php if (empty($claims) === true): ?>
+    <div class="alert alert-info">No claims awaiting your approval.</div>
+<?php else: ?>
+
+    <!-- 📋 Responsive data list (replaces <table>) -->
+    <div class="portal-data-list">
+        <!-- 🏷️ Header row (visible on md+ screens) -->
+        <div class="portal-data-row portal-data-header d-none d-md-flex">
+            <div class="col-md-1">ID</div>
+            <div class="col-md-3">Title</div>
+            <div class="col-md-2">Claimant</div>
+            <div class="col-md-2">Department</div>
+            <div class="col-md-1 text-end">Total &pound;</div>
+            <div class="col-md-2 text-end">Submitted</div>
+            <div class="col-md-1 text-end"></div>
         </div>
-    <?php endif; ?>
-</div>
 
-<!-- Modal -->
+        <?php foreach ($claims as $c): ?>
+            <div class="portal-data-row">
+                <div class="col-12 col-md-1">
+                    <span class="d-md-none fw-semibold">ID: </span>#<?php echo (int) $c['claimID']; ?>
+                </div>
+                <div class="col-12 col-md-3">
+                    <span class="d-md-none fw-semibold">Title: </span><?php echo htmlspecialchars($c['claimTitle'], ENT_QUOTES, 'UTF-8'); ?>
+                </div>
+                <div class="col-12 col-md-2">
+                    <span class="d-md-none fw-semibold">Claimant: </span><?php echo htmlspecialchars($c['fullName'], ENT_QUOTES, 'UTF-8'); ?>
+                </div>
+                <div class="col-12 col-md-2">
+                    <span class="d-md-none fw-semibold">Dept: </span><?php echo htmlspecialchars($c['deptName'], ENT_QUOTES, 'UTF-8'); ?>
+                </div>
+                <div class="col-12 col-md-1 text-md-end">
+                    <span class="d-md-none fw-semibold">Total: </span>&pound;<?php echo number_format((float) $c['totalAmount'], 2); ?>
+                </div>
+                <div class="col-12 col-md-2 text-md-end small text-secondary">
+                    <span class="d-md-none fw-semibold">Submitted: </span><?php echo date('d M Y', strtotime($c['createdAt'])); ?>
+                </div>
+                <div class="col-12 col-md-1 text-md-end mt-2 mt-md-0">
+                    <button class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#approveModal"
+                            data-claim='<?php echo htmlspecialchars(json_encode($c, JSON_HEX_TAG | JSON_HEX_APOS), ENT_QUOTES, 'UTF-8'); ?>'>
+                        Review
+                    </button>
+                </div>
+            </div>
+        <?php endforeach; ?>
+    </div>
+
+<?php endif; ?>
+
+<!-- 📝 Approval Modal -->
 <div class="modal fade" id="approveModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-lg modal-dialog-scrollable">
         <div class="modal-content">
             <form method="post" action="/expenses/approve/save.php">
-                <input type="hidden" name="csrf_token" value="<?php echo Auth::csrfToken(); ?>">
+                <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
                 <input type="hidden" name="claimID" id="claimID">
                 <div class="modal-header">
                     <h5 class="modal-title">Approve Claim</h5>
@@ -112,10 +130,11 @@ $stmt->close();
     </div>
 </div>
 
+<!-- 📦 Modal population script -->
 <script>
 const modal = document.getElementById('approveModal');
 modal.addEventListener('show.bs.modal', ev => {
-    const btn = ev.relatedTarget;
+    const btn  = ev.relatedTarget;
     const data = JSON.parse(btn.getAttribute('data-claim'));
     document.getElementById('claimID').value = data.claimID;
     document.getElementById('claimDetails').innerHTML = `
@@ -123,10 +142,13 @@ modal.addEventListener('show.bs.modal', ev => {
             <dt class="col-sm-4">Title</dt><dd class="col-sm-8">${data.claimTitle}</dd>
             <dt class="col-sm-4">Claimant</dt><dd class="col-sm-8">${data.fullName}</dd>
             <dt class="col-sm-4">Department</dt><dd class="col-sm-8">${data.deptName}</dd>
-            <dt class="col-sm-4">Total</dt><dd class="col-sm-8">£${parseFloat(data.totalAmount).toFixed(2)}</dd>
+            <dt class="col-sm-4">Total</dt><dd class="col-sm-8">\u00a3${parseFloat(data.totalAmount).toFixed(2)}</dd>
             <dt class="col-sm-4">Submitted</dt><dd class="col-sm-8">${data.createdAt}</dd>
         </dl>`;
 });
 </script>
-</body>
-</html>
+
+<?php
+// 📄 Include shared footer template
+require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'footer.php';
+?>
