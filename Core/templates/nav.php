@@ -135,6 +135,12 @@ $navSiteName = App::settings('site.name') ?? 'Portal';
                         </span></li>
                         <li><hr class="dropdown-divider"></li>
                         <li>
+                            <a class="dropdown-item" href="/account">
+                                <i class="fa-solid fa-user-gear me-1"></i> My Account
+                            </a>
+                        </li>
+                        <li><hr class="dropdown-divider"></li>
+                        <li>
                             <a class="dropdown-item" href="/logout">
                                 <i class="fa-solid fa-right-from-bracket me-1"></i> Sign Out
                             </a>

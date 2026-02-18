@@ -45,6 +45,10 @@ class Gatekeeper
         'login/ms365/callback',
         'logout',
         'health',
+        'forgot-password',
+        'forgot-password/save',
+        'reset-password',
+        'reset-password/save',
     ];
 
     /**

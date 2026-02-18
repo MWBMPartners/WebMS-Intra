@@ -4,19 +4,22 @@
  * -----------------------------------------------------------------------------
  * Login Page 🛂
  * -----------------------------------------------------------------------------
- * Presents Microsoft 365 SSO button and a local-account fallback form.  Uses
- * Cloudflare Turnstile or reCAPTCHA if keys are configured.  Handles POST for
- * local logins -- including CSRF, captcha, rate limiting, and password
- * verification.
+ * Presents a local-account login form as the primary authentication method.
+ * If Microsoft 365 OAuth credentials are configured, an MS365 sign-in button
+ * is shown below the local form as an alternative.  Uses Cloudflare Turnstile
+ * or reCAPTCHA if API keys are configured.
+ *
+ * Handles POST for local logins — including CSRF, captcha, rate limiting, and
+ * password verification — delegating to Auth::loginLocal().
  *
  * This page has its own centred layout (no navbar, just a card) and does NOT
- * use the header.php / footer.php templates.  It keeps its own require of
- * bootstrap.php because login is NOT routed through the Router (it is handled
- * as a tblRoutes entry with isProtected=0).
+ * use the header.php / footer.php templates.
  * -----------------------------------------------------------------------------
  * @package    Portal\Auth
- * @author     Cambridge SDA
+ * @author     MWBM Partners Ltd (t/a MWservices)
+ * @copyright  2025-2026 MWBM Partners Ltd (t/a MWservices)
  * @license    MIT
+ * @version    0.2.0
  * -----------------------------------------------------------------------------
  */
 
@@ -24,6 +27,7 @@ declare(strict_types=1);
 
 require_once dirname(__DIR__, 3) . DIRECTORY_SEPARATOR . 'core' . DIRECTORY_SEPARATOR . 'bootstrap.php';
 
+use Portal\Core\App;
 use Portal\Core\Asset;
 use Portal\Core\Auth;
 use Portal\Core\Captcha;
@@ -31,10 +35,27 @@ use Portal\Core\Logger;
 use Portal\Core\RateLimiter;
 
 // -----------------------------------------------------------------------------
-// 1. 🛡️ Handle local login POST
+// 1. 🔀 If already logged in, redirect to dashboard
 // -----------------------------------------------------------------------------
 
-$errorMsg = '';
+if (Auth::check() === true) {
+    $target = $_GET['redirect'] ?? '/';
+    header('Location: ' . $target, true, 302);
+    exit();
+}
+
+// -----------------------------------------------------------------------------
+// 2. 🛡️ Handle local login POST
+// -----------------------------------------------------------------------------
+
+$errorMsg  = '';
+$successMsg = '';
+$username   = '';
+
+// 📨 Flash messages from password-reset flow
+if (isset($_GET['reset']) === true && $_GET['reset'] === '1') {
+    $successMsg = 'Your password has been updated. Please sign in.';
+}
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
@@ -47,7 +68,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // 🔒 CSRF check
     if ($errorMsg === '') {
         if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
-            $errorMsg = 'Invalid session token.';
+            $errorMsg = 'Invalid session token. Please try again.';
         }
     }
 
@@ -63,43 +84,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $username = trim($_POST['username'] ?? '');
         $password = $_POST['password'] ?? '';
         if ($username === '' || $password === '') {
-            $errorMsg = 'Please enter username and password.';
+            $errorMsg = 'Please enter your username or email and password.';
         }
     }
 
-    // 🔑 Validate credentials against database
+    // 🔑 Authenticate via Auth::loginLocal() — handles tblLocalAccounts lookup,
+    // password verification, session creation, and lastLogin update
     if ($errorMsg === '') {
-        $stmt = $mysqli->prepare(
-            'SELECT LA.userID, LA.passwordHash, U.isActive '
-            . 'FROM tblLocalAccounts LA '
-            . 'JOIN tblUsers U ON U.userID = LA.userID '
-            . 'WHERE LA.username = ? LIMIT 1'
-        );
-        if ($stmt === false) {
-            $errorMsg = 'Database error.';
-            Logger::errorPlatform('MySQL', 'Error', 'LOGIN_PREP_FAIL', $mysqli->error, '');
-        } else {
-            $stmt->bind_param('s', $username);
-            $stmt->execute();
-            $res = $stmt->get_result();
-            if ($row = $res->fetch_assoc()) {
-                if ($row['isActive'] == '1' && password_verify($password, $row['passwordHash']) === true) {
-                    // ✅ Success -- start session
-                    Auth::csrfToken(); // ensure session
-                    $_SESSION['user_id']    = $row['userID'];
-                    $_SESSION['user_name']  = $username;
-                    $_SESSION['user_email'] = $username; // may be an email address
-                    Logger::activity('LoginLocal', 'User logged in');
-
-                    // 🔀 Redirect to dashboard or original target
-                    $target = $_GET['redirect'] ?? '/';
-                    header('Location: ' . $target, true, 302);
-                    exit();
-                }
-            }
-            $stmt->close();
-            $errorMsg = 'Invalid credentials.';
+        if (Auth::loginLocal($username, $password) === true) {
+            // 🔀 Redirect to dashboard or original target
+            $target = $_GET['redirect'] ?? '/';
+            header('Location: ' . $target, true, 302);
+            exit();
         }
+        $errorMsg = 'Invalid credentials.';
     }
 
     if ($errorMsg !== '') {
@@ -108,7 +106,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 // -----------------------------------------------------------------------------
-// 2. 🎨 Render page (Bootstrap 5)
+// 3. 🎨 Render page (Bootstrap 5)
 // -----------------------------------------------------------------------------
 ?>
 <!doctype html>
@@ -116,13 +114,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Login &bull; <?php echo htmlspecialchars($SETTINGS['site']['name'] ?? 'Portal', ENT_QUOTES, 'UTF-8'); ?></title>
+    <title>Sign In &bull; <?php echo htmlspecialchars($SETTINGS['site']['name'] ?? 'Portal', ENT_QUOTES, 'UTF-8'); ?></title>
 
     <!-- 🎨 Stylesheets (CDN with local fallback) -->
     <?php echo Asset::bootstrapCss(); ?>
-
     <?php echo Asset::fontAwesomeCss(); ?>
-
     <?php echo Asset::portalCss(); ?>
 
     <!-- 🌙 Prevent FOUC: apply saved theme before first paint -->
@@ -139,36 +135,71 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <?php echo Captcha::scriptTag(); ?>
 
 </head>
-<body class="d-flex align-items-center justify-content-center vh-100" style="background:#f8f9fa;">
-<div class="card shadow p-4" style="min-width:320px;max-width:400px;">
-    <h1 class="h4 mb-3 text-center">Sign in</h1>
+<body class="d-flex align-items-center justify-content-center vh-100">
+<div class="card shadow p-4" style="min-width:320px;max-width:420px;width:100%;">
 
-    <?php if ($errorMsg !== ''): ?>
-        <div class="alert alert-danger" role="alert"><?php echo htmlspecialchars($errorMsg, ENT_QUOTES, 'UTF-8'); ?></div>
+    <!-- 🏷️ Site branding -->
+    <div class="text-center mb-3">
+        <img src="/assets/images/logo.svg" alt="Logo" style="height:48px;" class="mb-2">
+        <h1 class="h4 mb-0">Sign In</h1>
+        <p class="text-muted small mb-0"><?php echo htmlspecialchars($SETTINGS['site']['name'] ?? 'Portal', ENT_QUOTES, 'UTF-8'); ?></p>
+    </div>
+
+    <!-- ✅ Success message (e.g. after password reset) -->
+    <?php if ($successMsg !== ''): ?>
+        <div class="alert alert-success small" role="alert">
+            <i class="fa-solid fa-circle-check me-1"></i>
+            <?php echo htmlspecialchars($successMsg, ENT_QUOTES, 'UTF-8'); ?>
+        </div>
     <?php endif; ?>
 
-    <!-- 🔑 Microsoft 365 SSO button -->
-    <a href="/login/ms365" class="btn btn-primary w-100 mb-3">
-        <i class="fa-brands fa-microsoft me-1"></i> Sign in with Microsoft 365
-    </a>
+    <!-- ❌ Error message -->
+    <?php if ($errorMsg !== ''): ?>
+        <div class="alert alert-danger small" role="alert">
+            <i class="fa-solid fa-circle-exclamation me-1"></i>
+            <?php echo htmlspecialchars($errorMsg, ENT_QUOTES, 'UTF-8'); ?>
+        </div>
+    <?php endif; ?>
 
-    <!-- 📝 Local account login form -->
+    <!-- 📝 Local account login form (primary) -->
     <form method="post" novalidate>
         <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
 
         <div class="mb-3">
             <label for="username" class="form-label">Username or Email</label>
-            <input type="text" class="form-control" id="username" name="username" required>
+            <input type="text" class="form-control" id="username" name="username"
+                   value="<?php echo htmlspecialchars($username, ENT_QUOTES, 'UTF-8'); ?>"
+                   autocomplete="username" required autofocus>
         </div>
-        <div class="mb-3">
+
+        <div class="mb-2">
             <label for="password" class="form-label">Password</label>
-            <input type="password" class="form-control" id="password" name="password" required>
+            <input type="password" class="form-control" id="password" name="password"
+                   autocomplete="current-password" required>
+        </div>
+
+        <!-- 🔗 Forgot password link -->
+        <div class="text-end mb-3">
+            <a href="/forgot-password" class="small text-decoration-none">Forgot your password?</a>
         </div>
 
         <?php echo Captcha::widget(); ?>
 
-        <button type="submit" class="btn btn-success w-100">Login</button>
+        <button type="submit" class="btn btn-success w-100">
+            <i class="fa-solid fa-right-to-bracket me-1"></i> Sign In
+        </button>
     </form>
+
+    <!-- 🔑 Microsoft 365 SSO (shown only when configured) -->
+    <?php if (Auth::isMS365Configured() === true): ?>
+        <div class="d-flex align-items-center my-3">
+            <hr class="flex-grow-1"><span class="px-2 text-muted small">or</span><hr class="flex-grow-1">
+        </div>
+        <a href="/login/ms365" class="btn btn-outline-primary w-100">
+            <i class="fa-brands fa-microsoft me-1"></i> Sign in with Microsoft 365
+        </a>
+    <?php endif; ?>
+
 </div>
 
 <!-- 📦 JavaScript (CDN with local fallback) -->

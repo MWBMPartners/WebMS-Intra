@@ -9,16 +9,18 @@
  * token utilities, and rate limiting integration.
  *
  * Public methods:
- *   Auth::check()               → bool   – is user logged in?
- *   Auth::requireLogin()        → void   – redirect if not logged in
- *   Auth::ensureSession()       → void   – start session with secure params
- *   Auth::loginMS365()          → void   – begin MS OAuth flow
- *   Auth::callbackMS365()       → void   – handle OAuth redirect & verify JWT
- *   Auth::loginLocal($e, $p)    → bool   – authenticate with email + password
- *   Auth::logout()              → void   – destroy session
- *   Auth::csrfToken()           → string – get / create CSRF token
- *   Auth::verifyCsrf($tok)      → bool   – compare token constant-time
- *   Auth::curlPost($url, $data) → ?string – HTTP POST via cURL
+ *   Auth::check()                  → bool   – is user logged in?
+ *   Auth::requireLogin()           → void   – redirect if not logged in
+ *   Auth::ensureSession()          → void   – start session with secure params
+ *   Auth::loginMS365()             → void   – begin MS OAuth flow (dormant until configured)
+ *   Auth::callbackMS365()          → void   – handle OAuth redirect & verify JWT
+ *   Auth::loginLocal($id, $pw)     → bool   – authenticate with username/email + password
+ *   Auth::validatePassword($pw)    → array  – check password against policy
+ *   Auth::isMS365Configured()      → bool   – are MS365 OAuth credentials set?
+ *   Auth::logout()                 → void   – destroy session
+ *   Auth::csrfToken()              → string – get / create CSRF token
+ *   Auth::verifyCsrf($tok)         → bool   – compare token constant-time
+ *   Auth::curlPost($url, $data)    → ?string – HTTP POST via cURL
  *
  * @see       https://owasp.org/www-community/controls/Session_Management_Cheat_Sheet
  * @package   Portal\Core
@@ -313,33 +315,39 @@ class Auth
     /* ====================================================================== */
 
     /**
-     * Authenticate a user with email and password (local account).
-     * Checks rate limiting, verifies the password hash, and creates a session.
+     * Authenticate a user with username or email and password (local account).
+     * Queries tblLocalAccounts (joined with tblUsers) for the password hash,
+     * checks rate limiting, verifies the hash, and creates a session.
      *
-     * @param string $email    The user's email address
-     * @param string $password The plaintext password to verify
+     * @see https://www.php.net/manual/en/function.password-verify.php
+     *
+     * @param string $identifier The user's username or email address
+     * @param string $password   The plaintext password to verify
      *
      * @return bool True if login succeeded, false otherwise
      */
-    public static function loginLocal(string $email, string $password): bool
+    public static function loginLocal(string $identifier, string $password): bool
     {
         self::ensureSession();
         global $mysqli;
 
-        $email = strtolower(trim($email));
+        $identifier = strtolower(trim($identifier));
 
         // 🛡️ Check rate limiting before attempting authentication
         if (RateLimiter::isBlocked() === true) {
-            $remaining = RateLimiter::lockoutRemaining();
-            Logger::activity('LoginBlocked', 'Rate-limited login attempt for: ' . $email);
+            Logger::activity('LoginBlocked', 'Rate-limited login attempt for: ' . $identifier);
             return false;
         }
 
-        // 🔍 Look up the user by email address
+        // 🔍 Look up the user via tblLocalAccounts joined with tblUsers
+        // Accepts either a username (tblLocalAccounts.username) or an email
+        // (tblUsers.emailAddress) so users can sign in with either one.
         $stmt = $mysqli->prepare(
-            'SELECT userID, fullName, emailAddress, passwordHash, isActive '
-            . 'FROM tblUsers '
-            . 'WHERE emailAddress = ? '
+            'SELECT LA.localID, LA.passwordHash, '
+            . 'U.userID, U.fullName, U.emailAddress, U.isActive '
+            . 'FROM tblLocalAccounts LA '
+            . 'JOIN tblUsers U ON U.userID = LA.userID '
+            . 'WHERE LA.username = ? OR U.emailAddress = ? '
             . 'LIMIT 1'
         );
 
@@ -348,38 +356,112 @@ class Auth
             return false;
         }
 
-        $stmt->bind_param('s', $email);
+        $stmt->bind_param('ss', $identifier, $identifier);
         $stmt->execute();
         $result = $stmt->get_result();
-        $user   = $result->fetch_assoc();
+        $row    = $result->fetch_assoc();
         $stmt->close();
 
         // 🔐 Verify the user exists, is active, and has a password hash
-        if ($user === null || (int) $user['isActive'] !== 1 || ($user['passwordHash'] ?? '') === '') {
+        if ($row === null || (int) $row['isActive'] !== 1 || ($row['passwordHash'] ?? '') === '') {
             // 📝 Log the failed attempt (used by RateLimiter)
-            Logger::activity('LoginFailed', 'Failed login attempt for: ' . $email);
+            Logger::activity('LoginFailed', 'Failed login attempt for: ' . $identifier);
             return false;
         }
 
         // 🔑 Verify password using PHP's built-in password_verify
         // See: https://www.php.net/manual/en/function.password-verify.php
-        if (password_verify($password, $user['passwordHash']) === false) {
-            Logger::activity('LoginFailed', 'Incorrect password for: ' . $email);
+        if (password_verify($password, $row['passwordHash']) === false) {
+            Logger::activity('LoginFailed', 'Incorrect password for: ' . $identifier);
             return false;
         }
 
         // 🔄 Regenerate session ID to prevent session fixation
+        // See: https://owasp.org/www-community/attacks/Session_fixation
         session_regenerate_id(true);
 
-        // ✅ Create the user session
-        $_SESSION['user_id']    = (int) $user['userID'];
-        $_SESSION['user_name']  = $user['fullName'];
-        $_SESSION['user_email'] = $user['emailAddress'];
+        // ✅ Create the user session using data from tblUsers
+        $_SESSION['user_id']    = (int) $row['userID'];
+        $_SESSION['user_name']  = $row['fullName'];
+        $_SESSION['user_email'] = $row['emailAddress'];
+
+        // 🕐 Update lastLogin timestamp on tblLocalAccounts
+        $updateStmt = $mysqli->prepare('UPDATE tblLocalAccounts SET lastLogin = NOW() WHERE localID = ?');
+        if ($updateStmt !== false) {
+            $localId = (int) $row['localID'];
+            $updateStmt->bind_param('i', $localId);
+            $updateStmt->execute();
+            $updateStmt->close();
+        }
 
         // 📝 Log the successful login
         Logger::activity('LoginLocal', 'User logged in with local account');
 
         return true;
+    }
+
+    /* ====================================================================== */
+    /* Password policy                                                        */
+    /* ====================================================================== */
+
+    /**
+     * Validate a password against the configurable policy stored in tblSettings.
+     *
+     * Settings used (all under auth.password.*):
+     *   minLength        – minimum character count (default 8)
+     *   requireUppercase – must contain A-Z and a-z (default true)
+     *   requireNumber    – must contain 0-9 (default true)
+     *   requireSpecial   – must contain a non-alphanumeric char (default true)
+     *
+     * @param string $password The password to validate
+     *
+     * @return array{valid: bool, errors: list<string>} Validation result
+     */
+    public static function validatePassword(string $password): array
+    {
+        $errors = [];
+
+        $minLength      = (int) (App::settings('auth.password.minLength') ?? '8');
+        $requireUpper   = (App::settings('auth.password.requireUppercase') ?? 'true') === 'true';
+        $requireNumber  = (App::settings('auth.password.requireNumber') ?? 'true') === 'true';
+        $requireSpecial = (App::settings('auth.password.requireSpecial') ?? 'true') === 'true';
+
+        if (strlen($password) < $minLength) {
+            $errors[] = 'Password must be at least ' . $minLength . ' characters.';
+        }
+
+        if ($requireUpper === true && preg_match('/[A-Z]/', $password) !== 1) {
+            $errors[] = 'Password must contain at least one uppercase letter.';
+        }
+
+        if ($requireUpper === true && preg_match('/[a-z]/', $password) !== 1) {
+            $errors[] = 'Password must contain at least one lowercase letter.';
+        }
+
+        if ($requireNumber === true && preg_match('/[0-9]/', $password) !== 1) {
+            $errors[] = 'Password must contain at least one number.';
+        }
+
+        if ($requireSpecial === true && preg_match('/[^a-zA-Z0-9]/', $password) !== 1) {
+            $errors[] = 'Password must contain at least one special character.';
+        }
+
+        return ['valid' => (count($errors) === 0), 'errors' => $errors];
+    }
+
+    /* ====================================================================== */
+    /* SSO configuration check                                                */
+    /* ====================================================================== */
+
+    /**
+     * Check whether Microsoft 365 OAuth credentials are configured.
+     * Used to conditionally show the MS365 sign-in button on the login page.
+     *
+     * @return bool True if the MS365 enduser client ID is non-empty
+     */
+    public static function isMS365Configured(): bool
+    {
+        return (App::settings('auth.ms365.enduser.clientID') ?? '') !== '';
     }
 
     /* ====================================================================== */
