@@ -5,6 +5,7 @@
 Internal portal platform (PHP 8.5, backward-compatible with 8.4, MySQL 8.0, Bootstrap 5.3.3) hosted on DreamHost shared hosting. No CLI, no Composer.
 
 - **Version:** 0.3.0
+- **Licence:** All Rights Reserved — MWBM Partners Ltd (t/a MWservices)
 - **Repo:** github.com/MWBMPartners/WebMS-Intra
 - **Server:** portal.millrdsdacambridge.uk
 - **Full brief:** `.claude/ProjectBrief_Chat.claude`
@@ -12,19 +13,25 @@ Internal portal platform (PHP 8.5, backward-compatible with 8.4, MySQL 8.0, Boot
 ## Directory Layout
 
 ```
-repo root/          ← NOT deployed (docs, CI/CD only)
-└── web/            ← ALL deployable files (synced to server via FTP)
-    ├── core/       ← Framework classes (Portal\Core namespace)
-    ├── vendor/     ← Vendored libs (simplejwt)
-    ├── sql/        ← Numbered SQL migrations
-    └── public_html/← Web root: front controller + assets + app controllers
-        ├── index.php, .htaccess, assets/
-        ├── auth/       ← Login, forgot/reset password, account
-        ├── dashboard/  ← Portal home
-        ├── expenses/   ← Expense claim lifecycle
-        ├── help/       ← Help centre
-        └── settings/   ← Admin settings
+repo root/          <- NOT deployed (docs, CI/CD only)
+web/                <- ALL deployable files (synced to server via FTP)
+  core/             <- Framework classes (Portal\Core namespace)
+  vendor/           <- Vendored libs (simplejwt)
+  sql/              <- Numbered SQL migrations
+  public_html/      <- Web root: front controller + assets + app controllers
+    index.php, .htaccess, assets/
+    auth/           <- Login, forgot/reset password, account
+    dashboard/      <- Portal home
+    expenses/       <- Expense claim lifecycle
+    help/           <- Help centre
+    settings/       <- Admin settings
 ```
+
+## Apps
+
+- Calendar/Events/Preaching Plan is ONE single app ("Events")
+- Calendar = viewing/listing/subscribing; Preaching Plan = worship service event types
+- Each app lives at `web/public_html/{appname}/`
 
 ## Code Style (MUST FOLLOW)
 
@@ -46,6 +53,15 @@ repo root/          ← NOT deployed (docs, CI/CD only)
 - `PORTAL_VENDOR` -- web/vendor/
 - `PORTAL_SQL` -- web/sql/
 - `PORTAL_ENV` -- 'dev' or 'prod'
+
+## GitHub Labels
+
+- `type:` -- feature, enhancement, bug, security, docs, infrastructure, refactor
+- `priority:` -- critical, high, medium, low
+- `scope:` (blue) -- core, admin, auth, ui, i18n (cross-cutting concerns)
+- `app:` (salmon) -- calendar, attendance, expenses, admin, dashboard, help, settings
+- `phase:` (purple) -- 3 through 9
+- `status:` -- blocked, in-progress, review
 
 ## Standing Instructions (per ProjectBrief)
 
