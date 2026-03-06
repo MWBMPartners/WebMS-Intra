@@ -5,24 +5,63 @@
 
 ---
 
+## Repository vs Server Structure
+
+The Git repository root contains documentation and CI/CD config. **All deployable
+code lives inside `web/`**, which maps directly to the server domain directory:
+
+```
+Git repo root (NOT deployed)          Server: portal.millrdsdacambridge.uk/
+├── .claude/                           ├── core/
+├── .github/workflows/deploy.yml       ├── vendor/
+├── CHANGELOG.md                       ├── sql/
+├── DEV_NOTES.md                       ├── _auth_keys/    (server-managed)
+├── README.md                          ├── _libraries/    (server-managed)
+└── web/ ─── contents deployed ──────► ├── _uploads/      (server-managed)
+    ├── core/                          ├── _backups/      (server-managed)
+    ├── vendor/                        ├── _includes/
+    ├── sql/                           ├── _functions/
+    ├── _includes/                     ├── public_html/   (web root + apps)
+    ├── _functions/                    ├── public_html_dev/
+    ├── _libraries/ (gitignored)       ├── private_html/
+    ├── public_html/                   ├── public_html_landing/
+    │   ├── auth/                      └── public_html_redir/
+    │   ├── dashboard/
+    │   ├── expenses/
+    │   ├── help/
+    │   └── settings/
+    ├── public_html_dev/
+    └── ...
+```
+
+**Key rule:** when referencing paths in PHP code, use `PORTAL_ROOT` and related
+constants (defined in `bootstrap.php`). When referencing paths in Git/CI, prefix
+with `web/`.
+
+---
+
 ## Deployment Model
 
-WebMS Intra uses a **single-branch deployment model** with two environments:
+WebMS Intra uses a **single-branch deployment model**. Only the `web/` directory
+is synced to the server via FTP.
 
-| Environment | Branch / Trigger | Remote Directory | URL |
-|-------------|-----------------|------------------|-----|
-| **Dev** | Every push to `main` | `public_html_dev/` | dev subdomain |
-| **Production** | Tagged release (`v*`) | `public_html/` | main domain |
+| Environment | Branch / Trigger | What Deploys | URL |
+| ----------- | --------------- | ------------ | --- |
+| **Dev** | Every push to `main` | `web/` → server root | dev subdomain |
+| **Production** | Tagged release (`v*`) | `web/` → server root | main domain |
 
 ### How It Works
 
 ```
-commit ──► push to main ──► GitHub Actions ──► FTP to public_html_dev/
+commit ──► push to main ──► GitHub Actions ──► FTP sync web/ to server
                                                   (automatic, every push)
 
-git tag v0.2.0 ──► push tag ──► GitHub Actions ──► FTP to public_html/
+git tag v0.3.0 ──► push tag ──► GitHub Actions ──► FTP sync web/ to server
                                                       (production release)
 ```
+
+Server-managed directories are **excluded** from sync:
+`_auth_keys/`, `_uploads/`, `_backups/`, `_libraries/`
 
 ### Day-to-Day Workflow
 
@@ -32,11 +71,11 @@ git tag v0.2.0 ──► push tag ──► GitHub Actions ──► FTP to publ
 4. When ready for production, tag a release:
 
 ```bash
-git tag v0.2.0
-git push origin v0.2.0
+git tag v0.3.0
+git push origin v0.3.0
 ```
 
-5. GitHub Actions deploys the tagged code to `public_html/`
+5. GitHub Actions deploys the tagged code to the server
 
 ### Manual Deploy Override
 
@@ -96,6 +135,7 @@ in your shell or hosting panel.
 ### Local Development
 
 ```bash
+cd web
 export PORTAL_ENV=dev
 php -S localhost:8080 -t public_html
 ```
@@ -124,8 +164,8 @@ Examples: `v0.1.0`, `v0.2.0`, `v1.0.0`
 4. Tag the release:
 
 ```bash
-git tag -a v0.2.0 -m "Add expense email notifications"
-git push origin v0.2.0
+git tag -a v0.3.0 -m "Directory restructure"
+git push origin v0.3.0
 ```
 
 5. Monitor the GitHub Actions deploy
@@ -150,12 +190,12 @@ These are enforced across the codebase. Follow them in all new code.
 
 ## SQL Migrations
 
-Migrations live in `sql/` as numbered `.sql` files. They are executed via
+Migrations live in `web/sql/` as numbered `.sql` files. They are executed via
 the web-based Migrator (admin-only) and tracked in `tblMigrations`.
 
 ### Adding a New Migration
 
-1. Create `sql/NNN_description.sql` (next sequential number)
+1. Create `web/sql/NNN_description.sql` (next sequential number)
 2. Write idempotent SQL (use `IF NOT EXISTS`, `IF EXISTS` where appropriate)
 3. Push to `main` -- it deploys to dev
 4. Run the migration on dev via the admin migration runner
@@ -171,27 +211,36 @@ the web-based Migrator (admin-only) and tracked in `tblMigrations`.
 | `002_create_expense_support_tables.sql` | Expense approvals + payments |
 | `003_add_missing_settings.sql` | Required settings entries |
 | `004_seed_routes.sql` | Initial route definitions |
+| `006_local_auth_enhancement.sql` | Password resets, password policy settings, auth routes |
+| `full_schema.sql` | Consolidated schema for fresh installs (all tables + seeds) |
 
 ---
 
 ## File Structure Quick Reference
 
+All paths below are relative to `web/` (the deployable root):
+
 | Path | Purpose |
 |------|---------|
 | `core/` | Framework classes (`Portal\Core` namespace) |
-| `apps/` | Modular application files (one directory per app) |
-| `vendor/` | Vendored dependencies (no Composer on hosting) |
+| `core/templates/` | Shared page templates (header, footer, nav, errors) |
+| `vendor/simplejwt/` | Vendored RS256 JWT verifier (no Composer) |
 | `sql/` | Numbered SQL migration files |
-| `public_html/` | Production web root |
+| `public_html/` | Production web root (front controller, assets, app controllers) |
+| `public_html/{app}/` | App controllers (e.g. `expenses/`, `auth/`, `dashboard/`) |
 | `public_html_dev/` | Dev web root (Gatekeeper-protected) |
-| `_auth_keys/` | Credentials and encryption keys (git-ignored) |
-| `_uploads/` | User file uploads (git-ignored) |
+| `_auth_keys/` | Credentials and encryption keys (gitignored) |
+| `_uploads/` | User file uploads (gitignored) |
+| `_backups/` | Server backups (gitignored) |
+| `_libraries/` | Self-hosted libs e.g. dompdf (gitignored) |
+| `_includes/` | Shared includes (future) |
+| `_functions/` | Shared functions (future) |
 
 ---
 
 ## Adding a New App Module
 
-1. Create directory: `apps/{appname}/index.php`
+1. Create directory: `web/public_html/{appname}/index.php`
 2. Add route to `tblRoutes` (or create a migration)
 3. In the app file, set page metadata and include templates:
 
@@ -243,4 +292,4 @@ Check that `isAdmin=1` or `isRootAdmin=1` on your user record.
 
 ---
 
-*Last updated: February 2026*
+Last updated: March 2026

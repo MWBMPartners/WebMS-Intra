@@ -13,26 +13,32 @@ Thumbs.db
 *.swo
 *~
 
+# Claude auto-memory symlink (local machine path, not portable)
+.claude/MEMORY.md
+
 # Secrets and credentials (NEVER commit these)
-_auth_keys/
+web/_auth_keys/
 .env
 *.key
 
-# User uploads
-_uploads/
+# User uploads (server-managed, not committed)
+web/_uploads/
 
-# Backups
-_backups/
+# Backups (server-managed, not committed)
+web/_backups/
 
-# Local asset fallbacks (downloaded, not committed)
-# These are fetched from CDNs and placed locally for fallback
-public_html/assets/css/bootstrap.min.css
-public_html/assets/js/bootstrap.bundle.min.js
-public_html/assets/css/fontawesome-all.min.css
-public_html/assets/webfonts/
+# Self-hosted libraries (manually uploaded to server, not committed)
+# dompdf etc. go in web/_libraries/ on the server
+web/_libraries/
+
+# Local asset fallbacks (downloaded from CDNs, placed locally for fallback)
+web/public_html/assets/css/bootstrap.min.css
+web/public_html/assets/js/bootstrap.bundle.min.js
+web/public_html/assets/css/fontawesome-all.min.css
+web/public_html/assets/webfonts/
 
 # Vendor libraries that should be manually managed
-# (vendor/simplejwt/ IS committed as it's our own code)
+# (web/vendor/simplejwt/ IS committed as it's our own code)
 
 # Logs
 *.log

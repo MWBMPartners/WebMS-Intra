@@ -5,9 +5,68 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-03-06
+
+### Changed - Directory Restructure (Phase 2.5)
+
+- **Consolidated all deployable files under `web/`** — `core/`, `vendor/`, `sql/` now live inside `web/` alongside `public_html/`, matching the ProjectBrief server structure
+- **App controllers inside web root** — app PHP files live in `web/public_html/{app}/` (e.g. `public_html/expenses/`, `public_html/auth/`) as specified by the ProjectBrief
+- **Deploy workflow** updated to sync only `web/` to the server (was syncing entire repo root)
+- **Added missing directories** from ProjectBrief: `_includes/`, `_functions/`, `_libraries/` with `.gitkeep` files
+- **Updated `.gitignore`** for new `web/` prefixed paths
+
+### Fixed
+
+- **`Pdf.php`** — dompdf `require_once` at class load time caused fatal error when dompdf wasn't installed; now loads conditionally inside `create()` with graceful error logging
+- **`Logger.php`** — `bind_param` type string `'sssssssiss'` had `i` at wrong position (8th param for `$ua` string); corrected to `'sssssissss'` (6th param for `$userId` int)
+- **`settings/save.php`** — `dirname(__DIR__, 3)` resolved to wrong directory after restructure; corrected to `dirname(__DIR__, 2)`
+- **Git case sensitivity** — removed duplicate `ProjectBrief_chat.claude` (lowercase) from tracking; only `ProjectBrief_Chat.claude` tracked
+
+---
+
+## [0.2.0] - 2026-03-06
+
+### Added - Local Auth Enhancement (Phase 2)
+
+- **Forgot Password** flow (`apps/auth/forgot-password/`) - email input, rate-limited token generation, timing-safe enumeration prevention, graceful Mailer fallback
+- **Reset Password** flow (`apps/auth/reset-password/`) - token validation, password policy enforcement, rate limiting, token invalidation after use
+- **Account/Profile** page (`apps/auth/account/`) - edit profile (name, email, phone), change password with policy validation, view roles and last login
+- **Password Policy** engine (`Auth::validatePassword()`) - configurable min length, uppercase, number, special char requirements via tblSettings
+- **MS365 Conditional UI** (`Auth::isMS365Configured()`) - login page shows MS365 button only when OAuth is configured
+- **Consolidated Schema** (`sql/full_schema.sql`) - single-file schema for fresh installs with safe `IF NOT EXISTS` / `ON DUPLICATE KEY` semantics
+- **Migration 006** (`sql/006_local_auth_enhancement.sql`) - tblPasswordResets, password policy settings, auth routes
+
+### Changed
+
+- **Login page** (`apps/auth/login/index.php`) - redesigned with local login as primary, MS365 conditional
+- **Auth::loginLocal()** - fixed to query `tblLocalAccounts JOIN tblUsers` (was incorrectly querying tblUsers for passwordHash)
+- **Nav dropdown** - added "My Account" link
+- **Gatekeeper** - added forgot-password and reset-password to OPEN_PATHS
+
+### Security - Full Codebase Audit (Issue #14)
+
+- **Open Redirect** fixed in `Auth.php` and `login/index.php` - all `$_GET['redirect']` values now validated
+- **Broken Authorization** fixed in `settings/save.php` - operator precedence bug allowed any user to edit settings; now requires `App::isAdmin()`
+- **DOM XSS** eliminated in `approve/index.php` and `treasury/index.php` - `innerHTML` replaced with safe DOM API (`textContent`)
+- **File Upload Validation** added to `submit/save.php` - extension allowlist, 10MB size limit, server-side MIME detection
+- **Server-side Total** - expense total now recalculated server-side instead of trusting client hidden field
+- **Gatekeeper bind_param bug** fixed - `$types` variable was defined but never used in dynamic query binding
+- **Session Data Logging** - sensitive keys (CSRF, OAuth state) now stripped before serializing to activity logs
+- **SSRF Prevention** - dompdf `isRemoteEnabled` set to `false`
+- **Role Authorization** added to `approve/save.php` (Approver) and `treasury/save.php` (Treasurer)
+- **Strict Comparisons** - all `==` changed to `===` in `App.php`, `Router.php`, `Gatekeeper.php`, `settings/index.php`
+- **Timing-safe OAuth** - state comparison now uses `hash_equals()`
+- **SSL Verification** explicitly enabled on all cURL calls (`Auth.php`, `Mailer.php`)
+- **Rate Limiting** added to `reset-password/save.php`
+- **htmlspecialchars Charset** - all calls now include `'UTF-8'` parameter
+- **Timezone Validation** - validated against `timezone_identifiers_list()` before setting
+- **Mailer Reformatted** - full code style compliance with SSL verification
+
+---
+
 ## [0.1.0] - 2025-present
 
-### Added
+### Added - Initial Build (Phase 1)
 
 #### Core Framework
 - **Router** (`core/Router.php`) - Front-controller dispatcher with clean URL routing via tblRoutes, hardcoded special routes (login, logout, MS365 OAuth, health check, API), and error page rendering
@@ -57,12 +116,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 #### API Endpoints
 - `GET /api/expenses/list` - Paginated expense claim listing with status filtering
 
-### Changed
+### Changed - Core Framework Refactor
+
 - `core/Auth.php` - `ensureSession()` made public, `curlPost()` made public, added JWT verification via JWKS, added local login, improved logout with proper cookie deletion
 - `core/bootstrap.php` - Integrated App registry, Debug timer, SimpleJWT autoloader, improved error handlers
 - All app files refactored to use template system
 
-### Fixed
+### Fixed - Initial Release Issues
+
 - Filesystem case-sensitivity bugs (`Core/` -> `core/`, `logger.php` -> `Logger.php`) that would break on Linux
 - `vendor/simplejwt/JWT.php` was a copy of Auth.php - replaced with real JWT library
 - Inline DDL (`CREATE TABLE IF NOT EXISTS`) in save handlers moved to proper migrations

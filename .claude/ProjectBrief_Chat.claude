@@ -6,7 +6,7 @@ The name will be "WebMS Intra" ('Intra' indicating intended for Intranet/interna
 *TECH STACK and specific instructions*
 ========================
 Please use the following technologies for development of the entire 'Portal' project
-* PHP (minimum PHP 8.3, but aiming for PHP 8.4 for longevity purposes
+* PHP (minimum PHP 8.5 (but with backward compatibility to to PHP 8.4)
 	* PHP code should
 		* Use PHP Predefined Constants wherever possible to aid with host platform neutrality (ie, use DIRECTORY_SEPARATOR instead of '/' in paths)
 		* Full notation for code blocks such as (but not limited to) IF statements, no shortened notation
@@ -81,14 +81,14 @@ The Portal will be (in this case) hosted at portal.millrdsdacambridge.uk. the ac
 │   │   ├── _uploads/                 	← Portal specific 'uploads' that are not directly publically accessible (not accessible via web)
 │   │   ├── _backups/                 	← Portal specific 'backups' that are not directly publically accessible (not accessible via web)
 │   │   │   
-│   │   ├── private_html/          	← Private HTML (placeholder structure element, may never be used)
+│   │   ├── private_html/          	← Private HTML (placeholder structure element, may never be used. Access restricted)
 │   │   │   ├── assets/            	← Static assets (CSS/JS/SVG/PNG fallback)
 │   │   │   ├── css/                ← Compiled CSS (e.g. Bootstrap manually added)
 │   │   │   ├── js/                	← JS (e.g. AJAX logic, timezone helpers)
 │   │   │   ├── images/             ← SVGs (primary) + PNG fallbacks (if not base64 datauri encoded)
 │   │   │   ├── fonts/              ← Fonts
-│   │   ├── README.md               ← Internal alpha dev notes
-│   │   ├── CHANGE.md              	← Internal alpha dev changelog
+│   │   │   ├── README.md               ← Internal alpha dev notes (NOT publicaally accessible, for documenation only!)
+│   │   │   ├── CHANGE.md              	← Internal alpha dev changelog (NOT publicaally accessible, for documenation only!)
 │   │   │   
 │   │   ├── public_html/          	← Public Main Web Root (publicly accessible via web)
 │   │   │   ├── assets/            	← Static assets (CSS/JS/SVG/PNG fallback)
@@ -96,16 +96,18 @@ The Portal will be (in this case) hosted at portal.millrdsdacambridge.uk. the ac
 │   │   │   ├── js/                	← JS (e.g. AJAX logic, timezone helpers)
 │   │   │   ├── images/             ← SVGs (primary) + PNG fallbacks (if not base64 datauri encoded)
 │   │   │   ├── fonts/              ← Fonts
-│   │   ├── README.md               ← Internal alpha dev notes
-│   │   ├── CHANGE.md             	← Internal alpha dev changelog
-│   │   ├── {app}/                	← Public app-specific root
-│   │   │   ├── assets/             ← Static app-specific assets (CSS/JS/SVG/PNG fallback)
+│   │   │   ├── README.md               ← Internal alpha dev notes (NOT publicaally accessible, for documenation only!)
+│   │   │   ├── CHANGE.md             	← Internal alpha dev changelog (NOT publicaally accessible, for documenation only!)
+│   │   │   ├── {app}/                	← Public app-specific root
+│   │   │   │   ├── assets/             ← Static app-specific assets (CSS/JS/SVG/PNG fallback)
 │   │   │   │   ├── css/            ← Compiled app-specific CSS (e.g. Bootstrap manually added)
 │   │   │   │   ├── js/             ← app-specific JS (e.g. AJAX logic, timezone helpers)
 │   │   │   │   ├── images/         ← app-specificSVGs (primary) + PNG fallbacks (if not base64 datauri encoded)
 │   │   │   │   ├── fonts/          ← app-specific Fonts
-│   │   │   ├── README.md               ← Internal notes
-│   │   │   ├── CHANGE.log              ← Internal changelog
+│   │   │   │   ├── README.md       ← Internal notes (NOT publicaally accessible, for documenation only!)
+│   │   │   │   ├── CHANGE.log      ← Internal changelog (NOT publicaally accessible, for documenation only!)
+│   │   │   ├── README.md           ← Internal notes (NOT publicaally accessible, for documenation only!)
+│   │   │   ├── CHANGE.log          ← Internal changelog (NOT publicaally accessible, for documenation only!)
 │   │   │   
 │   │   ├── public_html_dev/        ← Public Development Web Root (publicly accessible via web, but may have auth restrictions via either .htaccess or other mechanisms)
 │   │   │   ├── assets/            	← Static assets (CSS/JS/SVG/PNG fallback)
@@ -113,16 +115,18 @@ The Portal will be (in this case) hosted at portal.millrdsdacambridge.uk. the ac
 │   │   │   ├── js/                	← JS (e.g. AJAX logic, timezone helpers)
 │   │   │   ├── images/             ← SVGs (primary) + PNG fallbacks (if not base64 datauri encoded)
 │   │   │   ├── fonts/              ← Fonts
-│   │   ├── README.md               ← Internal alpha dev notes
-│   │   ├── CHANGE.md             	← Internal alpha dev changelog
-│   │   ├── {app}/                	← Public app-specific root
-│   │   │   ├── assets/             ← Static app-specific assets (CSS/JS/SVG/PNG fallback)
+│   │   │   ├── README.md               ← Internal alpha dev notes (NOT publicaally accessible, for documenation only!)
+│   │   │   ├── CHANGE.md             	← Internal alpha dev changelog (NOT publicaally accessible, for documenation only!)
+│   │   │   ├── {app}/                	← Public app-specific root
+│   │   │   │   ├── assets/             ← Static app-specific assets (CSS/JS/SVG/PNG fallback)
 │   │   │   │   ├── css/            ← Compiled app-specific CSS (e.g. Bootstrap manually added)
 │   │   │   │   ├── js/             ← app-specific JS (e.g. AJAX logic, timezone helpers)
 │   │   │   │   ├── images/         ← app-specificSVGs (primary) + PNG fallbacks (if not base64 datauri encoded)
 │   │   │   │   ├── fonts/          ← app-specific Fonts
-│   │   │   ├── README.md               ← Internal notes
-│   │   │   ├── CHANGE.log              ← Internal changelog
+│   │   │   │   ├── README.md       ← Internal notes (NOT publicaally accessible, for documenation only!)
+│   │   │   │   ├── CHANGE.log      ← Internal changelog (NOT publicaally accessible, for documenation only!)
+│   │   │   ├── README.md           ← Internal notes (NOT publicaally accessible, for documenation only!)
+│   │   │   ├── CHANGE.log          ← Internal changelog (NOT publicaally accessible, for documenation only!)
 │   │   │   
 │   │   ├── public_html_landing/    ← Public Landing Web Root (publicly accessible via web, but only used in pre-launch to show landing/coming soon page)
 │   │   │   ├── assets/            	← Static assets (CSS/JS/SVG/PNG fallback)
@@ -130,8 +134,8 @@ The Portal will be (in this case) hosted at portal.millrdsdacambridge.uk. the ac
 │   │   │   ├── js/                	← JS (e.g. AJAX logic, timezone helpers)
 │   │   │   ├── images/             ← SVGs (primary) + PNG fallbacks (if not base64 datauri encoded)
 │   │   │   ├── fonts/              ← Fonts
-│   │   ├── README.md               ← Internal alpha dev notes
-│   │   ├── CHANGE.md             	← Internal alpha dev changelog
+│   │   ├── README.md               ← Internal alpha dev notes (NOT publicaally accessible, for documenation only!)
+│   │   ├── CHANGE.md             	← Internal alpha dev changelog (NOT publicaally accessible, for documenation only!)
 │   │   │   
 │   │   ├── public_html_redir/    	← Public Redirection Web Root (publicly accessible via web, but only used in limited cases where a redirection is needed.)
 │   │   │   ├── assets/            	← Static assets (CSS/JS/SVG/PNG fallback)
@@ -139,8 +143,8 @@ The Portal will be (in this case) hosted at portal.millrdsdacambridge.uk. the ac
 │   │   │   ├── js/                	← JS (e.g. AJAX logic, timezone helpers)
 │   │   │   ├── images/             ← SVGs (primary) + PNG fallbacks (if not base64 datauri encoded)
 │   │   │   ├── fonts/              ← Fonts
-│   │   ├── README.md               ← Internal alpha dev notes
-│   │   ├── CHANGE.md             	← Internal alpha dev changelog
+│   │   ├── README.md               ← Internal alpha dev notes (NOT publicaally accessible, for documenation only!)
+│   │   ├── CHANGE.md             	← Internal alpha dev changelog (NOT publicaally accessible, for documenation only!)
 │   ├── README.md                   ← Internal "Portal"-wide  notes
 │   └── CHANGE.log              	← Internal "Portal"-wide changelog
 ├── README.md                       ← Internal notes
@@ -868,3 +872,18 @@ I'd like to keep a track of build progress at each stage, and log these in Proje
 Please also produce a suitable README.md and and CHANGELOG.md and keep it up to date with every change/as we progress. 
 
 Please also store any Claude memory, or prompt history in .claude to help us as we progress.
+
+this is a somewhat complex, multi-"module" project for a organisation "Intranet poral" for volunteers, staff and leaders.
+
+We want this to be well developed and organised. As such, please ensure the following Standing Instructions and tasks are actioned:
+
+* For each new action (which will either be to implement a fix, enhance functionality or brand new functionality) please ensure a GitHub Issue/task is created to help track all the tasks and keep our progress going. Give a thorough description within each GitHub Issue, along the lines of "Whats the problem, whaat are we adding/creating", including Proposed Scope checks, and Acceptance Criteria checks.
+* Once the work is completed, update the GitHub Issue/Task in question with the status and close if the task is fully complete. Also link/include the COMMIT number(s) that dealt with the issue/task in question
+* Run ALL code through thorough Syntax, Lint and similar checks, fixing ALL issues regardless of age (new or pre-exissting) or severity (fix warnings, issues, bugs, fatal errors, discrepancy warnings, recommendations etc). Security checks should be included, checking for all security "holes", including all user inputs are sanatised to prevent injections. Repeat until ZERO issues are found. We wnat CLEAN code, as this minimises further issues down the line.
+* Update GitHub Wiki, GitHub Project, GitHub Milestones alongside GitHub Issues.
+* Update local documents including CHANGELOG.md, DEV_NOTES.md, README.md
+* Update .claude/ memory, context and prompts
+* COMMIT Changes (DO NOT PUSH, we'll PUSH mannually)
+
+ALSO, ALWAYS ensure all code is well commented/annotated including inline comments as well as comment blocks. This will help with further development, maintenance, code learning and understanding.
+Ensure all PHP code blocks are written in there full annotation with suitable indentation,no shortened versions. This makes code more human readable. If we want to keep code to a minimum or somewhat obfuscated, we can always minify it as part of the code upload process via GitHub Actions

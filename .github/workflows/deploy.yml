@@ -2,12 +2,23 @@
 # GitHub Action - FTP Deploy
 # ===============================
 # Single-branch deployment model:
-#   - Push to main  -> public_html_dev/  (dev, automatic)
-#   - Tagged v*     -> public_html/      (production, automatic)
-#   - Manual        -> choice of target  (override)
+#   - Push to main  -> deploys web/ to server root (dev, automatic)
+#   - Tagged v*     -> deploys web/ to server root (production, automatic)
+#   - Manual        -> choice of target (override)
 #
-# All development happens on main. The dev site always has the latest
-# code. Production only updates when a version tag is pushed.
+# Only the web/ directory is deployed to the server. Repo-level files
+# (.github, .claude, README, etc.) are NOT uploaded.
+#
+# The remote server structure is:
+#   portal.millrdsdacambridge.uk/
+#     ├── core/              ← PHP framework (above web root)
+#     ├── vendor/            ← Self-hosted libraries
+#     ├── sql/               ← Migrations
+#     ├── _auth_keys/        ← Credentials (not deployed — managed on server)
+#     ├── _libraries/        ← Self-hosted libs like dompdf (not deployed)
+#     ├── public_html/       ← Production web root (app controllers + assets)
+#     ├── public_html_dev/   ← Dev web root (Gatekeeper-protected)
+#     └── ...
 #
 # Required secrets: DH_HOST, DH_USER, DH_PASS
 # -----------------------------------------------
@@ -32,13 +43,12 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
 
-    # Map targets to remote paths
+    # Remote base path — web/ contents are synced to this directory
     env:
       FTP_HOST: ${{ secrets.DH_HOST }}
       FTP_USER: ${{ secrets.DH_USER }}
       FTP_PASS: ${{ secrets.DH_PASS }}
-      REMOTE_DEV:  portal.millrdsdacambridge.uk/public_html_dev
-      REMOTE_LIVE: portal.millrdsdacambridge.uk/public_html
+      REMOTE_BASE: portal.millrdsdacambridge.uk
 
     steps:
       - name: Checkout repo
@@ -48,40 +58,27 @@ jobs:
         id: set-path
         run: |
           echo "::group::Select remote path"
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            # Manual dispatch -- respect user choice
-            case "${{ github.event.inputs.target }}" in
-              dev)  echo "path=${REMOTE_DEV}"  >> $GITHUB_OUTPUT;;
-              live) echo "path=${REMOTE_LIVE}" >> $GITHUB_OUTPUT;;
-              *)    echo "::error::Invalid target" && exit 1;;
-            esac
-          elif [[ "${{ github.ref }}" == refs/tags/v* ]]; then
-            # Tagged release -- deploy to production
-            echo "path=${REMOTE_LIVE}" >> $GITHUB_OUTPUT
-          else
-            # Push to main -- deploy to dev
-            echo "path=${REMOTE_DEV}" >> $GITHUB_OUTPUT
-          fi
+          # All targets deploy to the same base — the server structure
+          # inside web/ determines which web root is used
+          echo "path=${REMOTE_BASE}" >> $GITHUB_OUTPUT
           echo "::endgroup::"
 
       - name: Lint PHP
         run: |
           echo "::group::PHP Lint"
-          find . -type f -name "*.php" -not -path "*/vendor/*" -print0 | xargs -0 -n1 -P4 php -l
+          find ./web -type f -name "*.php" -not -path "*/vendor/*" -print0 | xargs -0 -n1 -P4 php -l
           echo "::endgroup::"
 
-      - name: Sync via lftp
+      - name: Sync web/ to server via lftp
         uses: sebastianpopp/ftp-action@v1
         with:
           host:   ${{ env.FTP_HOST }}
           user:   ${{ env.FTP_USER }}
           pass:   ${{ env.FTP_PASS }}
-          local:  ./
+          local:  ./web/
           remote: ${{ steps.set-path.outputs.path }}
-          args:   "--verbose --parallel=4 --delete --exclude .git* --exclude .claude/"
+          args:   "--verbose --parallel=4 --delete --exclude _auth_keys/ --exclude _uploads/ --exclude _backups/ --exclude _libraries/ --exclude .DS_Store"
 
       - name: Health check
         run: |
-          # Extract domain from remote path for health check URL
-          DOMAIN=$(echo "${{ steps.set-path.outputs.path }}" | cut -d'/' -f1)
-          curl -fsSL "https://${DOMAIN}/health" || echo "Health endpoint not responding; continuing"
+          curl -fsSL "https://portal.millrdsdacambridge.uk/health" || echo "Health endpoint not responding; continuing"
