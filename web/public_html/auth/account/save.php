@@ -11,7 +11,7 @@
  * @package    Portal\Auth
  * @author     MWBM Partners Ltd (t/a MWservices)
  * @copyright  2025-2026 MWBM Partners Ltd (t/a MWservices)
- * @license    MIT
+ * @license   All Rights Reserved
  * @version    0.2.0
  * -----------------------------------------------------------------------------
  */

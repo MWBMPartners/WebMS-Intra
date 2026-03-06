@@ -2,7 +2,7 @@
 
 ## Project
 
-Internal portal platform (PHP 8.4+, MySQL 8.0, Bootstrap 5.3.3) hosted on DreamHost shared hosting. No CLI, no Composer.
+Internal portal platform (PHP 8.5, backward-compatible with 8.4, MySQL 8.0, Bootstrap 5.3.3) hosted on DreamHost shared hosting. No CLI, no Composer.
 
 - **Version:** 0.3.0
 - **Repo:** github.com/MWBMPartners/WebMS-Intra
@@ -36,7 +36,7 @@ repo root/          ← NOT deployed (docs, CI/CD only)
 - **MySQLi prepared statements only** -- never interpolate user input
 - `htmlspecialchars($val, ENT_QUOTES, 'UTF-8')` for all output
 - Detailed inline comments with reference links where applicable
-- File header comments must include: file path, description, package, author, copyright, license, version
+- File header comments must include: file path, description, package, author, copyright (All Rights Reserved), version
 
 ## Key Constants (defined in core/bootstrap.php)
 

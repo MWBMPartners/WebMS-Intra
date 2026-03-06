@@ -9,7 +9,7 @@
  * Global Admin.  New settings can be added via a modal form.
  * -----------------------------------------------------------------------------
  * @package    Portal\Settings
- * @license    MIT
+ * @license   All Rights Reserved
  * -----------------------------------------------------------------------------
  */
 

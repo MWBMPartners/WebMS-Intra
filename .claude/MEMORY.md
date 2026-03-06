@@ -1,0 +1,1 @@
+/Users/lance.manasse/.claude/projects/-Users-lance-manasse-Projects-Coding-and-Development-MWBM-Partners-Ltd-GitHub-WebMS-Intra/memory/MEMORY.md

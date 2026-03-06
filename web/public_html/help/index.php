@@ -8,7 +8,7 @@
  * area and a responsive grid of clickable topic cards with icons.
  * -----------------------------------------------------------------------------
  * @package    Portal\Help
- * @license    MIT
+ * @license   All Rights Reserved
  * -----------------------------------------------------------------------------
  */
 

@@ -22,7 +22,7 @@
  * @package   Portal\App\Expenses
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
- * @license   MIT
+ * @license   All Rights Reserved
  * @version   0.1.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra
  * -----------------------------------------------------------------------------

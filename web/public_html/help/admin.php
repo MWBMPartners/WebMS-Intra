@@ -8,7 +8,7 @@
  * (dev/alpha/beta site access), and viewing system logs.
  * -----------------------------------------------------------------------------
  * @package    Portal\Help
- * @license    MIT
+ * @license   All Rights Reserved
  * -----------------------------------------------------------------------------
  */
 

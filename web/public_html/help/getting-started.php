@@ -8,7 +8,7 @@
  * portal (dashboard, sidebar, breadcrumbs), and the dark mode toggle.
  * -----------------------------------------------------------------------------
  * @package    Portal\Help
- * @license    MIT
+ * @license   All Rights Reserved
  * -----------------------------------------------------------------------------
  */
 

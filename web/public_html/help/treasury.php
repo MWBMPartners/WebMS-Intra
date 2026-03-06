@@ -8,7 +8,7 @@
  * reimbursements, entering payment references, and PDF generation.
  * -----------------------------------------------------------------------------
  * @package    Portal\Help
- * @license    MIT
+ * @license   All Rights Reserved
  * -----------------------------------------------------------------------------
  */
 

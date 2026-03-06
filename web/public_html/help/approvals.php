@@ -8,7 +8,7 @@
  * making decisions (approve / reject), and adding comments.
  * -----------------------------------------------------------------------------
  * @package    Portal\Help
- * @license    MIT
+ * @license   All Rights Reserved
  * -----------------------------------------------------------------------------
  */
 

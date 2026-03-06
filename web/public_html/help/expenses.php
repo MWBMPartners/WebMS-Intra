@@ -8,7 +8,7 @@
  * uploading receipts, and tracking reimbursements.
  * -----------------------------------------------------------------------------
  * @package    Portal\Help
- * @license    MIT
+ * @license   All Rights Reserved
  * -----------------------------------------------------------------------------
  */
 

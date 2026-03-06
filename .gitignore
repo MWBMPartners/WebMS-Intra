@@ -14,7 +14,7 @@ Thumbs.db
 *~
 
 # Claude auto-memory symlink (local machine path, not portable)
-.claude/MEMORY.md
+#.claude/MEMORY.md
 
 # Secrets and credentials (NEVER commit these)
 web/_auth_keys/

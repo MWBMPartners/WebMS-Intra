@@ -12,7 +12,7 @@
  *   • Logs activity and redirects back to settings list with flash status
  * -----------------------------------------------------------------------------
  * @package    Portal\Settings
- * @license    MIT
+ * @license   All Rights Reserved
  * -----------------------------------------------------------------------------
  */
 

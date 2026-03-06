@@ -1,6 +1,6 @@
 # WebMS Intra
 
-> **Version:** 0.3.0 | **PHP** 8.4+ (8.3 compatible) | **MySQL** 8.0+ | **DreamHost** shared hosting
+> **Version:** 0.3.0 | **PHP** 8.5 (backward-compatible with 8.4) | **MySQL** 8.0+ | **DreamHost** shared hosting
 
 A modular internal portal platform for organisations, providing centralised access to internal tools, expense management, and future modules (Calendar, Attendance, Leadership, Preaching Plan).
 
@@ -10,7 +10,7 @@ A modular internal portal platform for organisations, providing centralised acce
 
 | Layer              | Choice                                                                           | Rationale                                        |
 | ------------------ | -------------------------------------------------------------------------------- | ------------------------------------------------ |
-| **Backend**        | PHP 8.4 (strict types), MySQL 8.0                                                | Ubiquitous LAMP stack; DreamHost-friendly        |
+| **Backend**        | PHP 8.5 (strict types, backward-compatible with 8.4), MySQL 8.0                  | Ubiquitous LAMP stack; DreamHost-friendly        |
 | **Routing**        | Front-controller + DB-backed router (tblRoutes)                                  | Clean URLs, app isolation, easy overrides        |
 | **Auth**           | Local accounts (primary), MS365 OAuth (conditional), SIGNula SSO (future)        | Flexible auth, SSO integration planned           |
 | **UI**             | Bootstrap 5.3.3, Font Awesome 6.5.1, custom CSS design system                   | Responsive, WCAG compliant, dark mode            |
@@ -87,7 +87,7 @@ Browser -> .htaccess -> index.php -> bootstrap.php -> Router::dispatch()
 
 ### Prerequisites
 
-- PHP 8.3+ with extensions: `mysqli`, `openssl`, `sodium`, `curl`, `mbstring`
+- PHP 8.4+ with extensions: `mysqli`, `openssl`, `sodium`, `curl`, `mbstring`
 - MySQL 8.0+
 - Apache with `mod_rewrite`
 
@@ -148,17 +148,21 @@ Server-managed directories (`_auth_keys/`, `_uploads/`, `_backups/`, `_libraries
 
 ## Roadmap
 
-| Phase | Description                                                                     | Status  |
-| ----- | ------------------------------------------------------------------------------- | ------- |
-| 1     | Core Framework                                                                  | Done    |
-| 2     | Local Auth Enhancement (forgot/reset password, account page, policy engine)     | Done    |
-| 2.5   | Directory Restructure (web/ consolidation, deploy fix, bug fixes)               | Done    |
-| 3     | Admin UI (error logs, activity logs, user management, migration runner)         | Planned |
-| 4     | Expenses Completion (multi-approver, email notifications, PDF at each stage)    | Planned |
-| 5     | New Apps (Calendar, Attendance, Leadership, Preaching Plan)                     | Planned |
+| Phase | Description                                                                     | Status           |
+| ----- | ------------------------------------------------------------------------------- | ---------------- |
+| 1     | Core Framework                                                                  | Done             |
+| 2     | Local Auth Enhancement (forgot/reset password, account page, policy engine)     | Done             |
+| 2.5   | Directory Restructure (web/ consolidation, deploy fix, bug fixes)               | Done             |
+| 3     | Admin UI (error logs, activity logs, user management, migration runner)         | Planned          |
+| 4     | Calendar / Events / Preaching Plan                                              | Planned (LAUNCH) |
+| 5     | Attendance Tracker                                                              | Planned          |
+| 6     | Expenses — Claim Submission & Tracking                                          | Planned          |
+| 7     | SSO & Auth Enhancement (SIGNula, Google, WebAuthn)                              | Planned          |
+| 8     | Translations / i18n                                                             | Planned          |
+| 9     | Polish & Hardening                                                              | Planned          |
 
 ---
 
 ## Licence
 
-MIT License - Copyright 2025-present MWBM Partners Ltd (t/a MWservices)
+All Rights Reserved. Copyright 2025-present MWBM Partners Ltd (t/a MWservices). No licence is granted for use, modification, or distribution without explicit written permission.
