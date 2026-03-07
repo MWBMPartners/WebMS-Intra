@@ -218,6 +218,7 @@ the web-based Migrator (admin-only) and tracked in `tblMigrations`.
 | `010_expenses_phase6.sql` | Expense multi-approver settings, file stage column, approver role column, view route |
 | `011_auth_phase7.sql` | Linked accounts table, WebAuthn credentials table, Google/WebAuthn settings, account routes |
 | `012_i18n_phase8.sql` | Adds locale column to tblUsers, i18n settings (defaultLocale, enabled) |
+| `013_help_translations_route.sql` | Adds route for translations help page |
 | `full_schema.sql` | Consolidated schema for fresh installs (all tables + seeds) |
 
 ---
@@ -276,23 +277,233 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
 ---
 
+## Translations (i18n)
+
+The portal supports multiple languages via the `I18n` framework (`core/I18n.php`).
+All user-facing text is stored in **language files** under `web/lang/`, one file
+per locale. English (`en.php`) is the baseline — every other language file only
+needs to include the keys it translates; missing keys fall back to English automatically.
+
+### How It Works (The Big Picture)
+
+```
+User visits page
+  → I18n checks: user DB preference → session → browser Accept-Language → default
+  → Loads web/lang/{locale}.php (e.g. lang/fr.php)
+  → t('auth.sign_in') returns "Se connecter" instead of "Sign In"
+  → Missing keys fall back to English automatically
+```
+
+### Language File Format
+
+Each language file is a PHP file that returns a flat associative array.
+Keys use **dot-notation** for logical grouping (e.g. `nav.dashboard`, `auth.sign_in`).
+
+```php
+<?php
+// File: web/lang/fr.php
+declare(strict_types=1);
+
+return [
+    'nav.dashboard'    => 'Tableau de bord',
+    'nav.sign_in'      => 'Se connecter',
+    'auth.sign_in'     => 'Se connecter',
+    'auth.password'    => 'Mot de passe',
+    // ... only include keys you want to translate
+    // anything missing falls back to English
+];
+```
+
+### Key Naming Convention
+
+Keys follow the pattern `{section}.{description}` using lowercase and underscores:
+
+| Prefix         | Section                      | Example                                    |
+| -------------- | ---------------------------- | ------------------------------------------ |
+| `nav.`         | Navigation bar               | `nav.dashboard`, `nav.sign_out`            |
+| `auth.`        | Login, password, account     | `auth.sign_in`, `auth.forgot_password`     |
+| `dashboard.`   | Dashboard page               | `dashboard.welcome`                        |
+| `expenses.`    | Expense claims               | `expenses.submit_title`                    |
+| `calendar.`    | Calendar / Events            | `calendar.all_categories`                  |
+| `attendance.`  | Attendance tracker           | `attendance.record_title`                  |
+| `admin.`       | Admin panel                  | `admin.user_management`                    |
+| `settings.`    | Settings page                | `settings.add_setting`                     |
+| `help.`        | Help centre                  | `help.title`                               |
+| `error.`       | Error pages (403/404/500)    | `error.page_not_found`                     |
+| `common.`      | Shared UI elements           | `common.save`, `common.cancel`             |
+| `email.`       | Email templates              | `email.greeting`                           |
+| `format.`      | Date/number/currency formats | `format.date.short`                        |
+
+### Step-by-Step: Adding a New Language
+
+1. **Copy the English baseline** as a starting point:
+   ```bash
+   cp web/lang/en.php web/lang/fr.php
+   ```
+
+2. **Edit the file header** — update the language name and flag emoji:
+   ```php
+   /**
+    * French (fr) Translation File 🇫🇷
+    */
+   ```
+
+3. **Translate each string value** (the part after `=>`). Do NOT change the keys
+   (the part before `=>`):
+   ```php
+   // ✅ Correct — only change the value
+   'nav.dashboard' => 'Tableau de bord',
+
+   // ❌ Wrong — never change the key
+   'nav.tableau_de_bord' => 'Tableau de bord',
+   ```
+
+4. **Remove keys you haven't translated yet** — they'll fall back to English
+   automatically. This is better than leaving English text in a French file.
+
+5. **Check the locale is registered** in `core/I18n.php` in the `$locales` array.
+   All 13 currently supported locales are already registered:
+   `en, cy, fr, de, es, pt, ar, he, fa, ur, zh, ja, ko`
+
+6. **Test it** — visit any page and add `?lang=fr` to the URL, or use the
+   language switcher dropdown in the navigation bar.
+
+### Step-by-Step: Translating a String
+
+When you see a string you want to translate:
+
+1. **Find the key** — search `web/lang/en.php` for the English text:
+   ```bash
+   grep -n "Sign In" web/lang/en.php
+   ```
+   Result: `'auth.sign_in' => 'Sign In',`
+
+2. **Add the key to your language file** with the translated value:
+   ```php
+   'auth.sign_in' => 'Se connecter',
+   ```
+
+3. **Save and test** — the change is live immediately (no build step needed).
+
+### Parameterised Strings
+
+Some strings include dynamic values using `:param` syntax:
+
+```php
+// English
+'auth.too_many_attempts' => 'Too many attempts. Try again in :minutes minute(s).',
+
+// French
+'auth.too_many_attempts' => 'Trop de tentatives. Réessayez dans :minutes minute(s).',
+```
+
+The `:minutes` placeholder is replaced at runtime. Keep the `:param` names exactly
+as they are in the English file — only translate the surrounding text.
+
+### Pluralisation
+
+Strings that change based on a count use `|` as a separator:
+
+```php
+// Two forms: singular | plural
+'expenses.claim_count' => 'One claim|:count claims',
+
+// Three forms: zero | one | many
+'items.count' => 'No items|One item|:count items',
+```
+
+French example:
+
+```php
+'expenses.claim_count' => 'Une réclamation|:count réclamations',
+'items.count' => 'Aucun élément|Un élément|:count éléments',
+```
+
+### RTL (Right-to-Left) Languages
+
+RTL locales (Arabic, Hebrew, Farsi, Urdu) are handled automatically:
+
+- The `<html>` tag gets `dir="rtl"`
+- Bootstrap loads its RTL CSS variant
+- Portal CSS applies margin/text-alignment overrides
+
+No special action is needed when translating — just provide the translated text
+and the framework handles the layout direction.
+
+### Using Translations in PHP Code
+
+In any PHP file loaded after bootstrap:
+
+```php
+// Simple translation
+echo t('nav.dashboard');  // "Dashboard" or translated equivalent
+
+// With parameters
+echo t('auth.too_many_attempts', ['minutes' => 5]);
+
+// With pluralisation
+echo t('items.count', ['count' => 3]);
+
+// Always escape for HTML output
+echo htmlspecialchars(t('auth.sign_in'), ENT_QUOTES, 'UTF-8');
+```
+
+### Language Switcher
+
+Users change their language via the globe dropdown in the navigation bar.
+When a user switches language:
+
+1. A `?lang=fr` query parameter is sent
+2. The preference is stored in their session
+3. If logged in, it's also saved to `tblUsers.locale` in the database
+4. On next login, their preference is loaded from the database automatically
+
+### Admin Settings
+
+Two settings control i18n behaviour (in the portal Settings page):
+
+| Setting Key          | Purpose                                               | Default |
+| -------------------- | ----------------------------------------------------- | ------- |
+| `i18n.defaultLocale` | The default language for users who haven't chosen one | `en`    |
+| `i18n.enabled`       | Whether the i18n system is active                     | `true`  |
+
+### Translation Review / Approval Workflow
+
+There is no built-in approval UI — translations are managed as code:
+
+1. **Translator** creates or edits `web/lang/{locale}.php`
+2. **Developer** reviews the changes via Git pull request or code review
+3. **Merge to `main`** — translations deploy to dev automatically
+4. **Test on dev** — verify strings appear correctly in context
+5. **Tag a release** — translations deploy to production
+
+This keeps translations version-controlled, reviewable, and auditable.
+
+---
+
 ## Troubleshooting
 
 ### "CSRF" error on form submission
+
 The CSRF token has expired or was already used (tokens rotate after use).
 Reload the form page to get a fresh token.
 
 ### Changes not appearing on dev site
+
 Check GitHub Actions for deploy failures. Common causes:
+
 - PHP lint error (syntax issue blocks deploy)
 - FTP credentials expired (check DH_HOST/DH_USER/DH_PASS secrets)
 
 ### 403 on dev site after login
+
 Your user account lacks dev access. Either:
+
 - Set `isAdmin=1` on your user record in `tblUsers`, or
 - Add your role to `portal.devAccessRoles` in Settings
 
 ### Debug panel not showing
+
 Append `?debug=true` to the URL. Only visible to admin users.
 Check that `isAdmin=1` or `isRootAdmin=1` on your user record.
 

@@ -130,6 +130,21 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         </a>
     </div>
 
+    <!-- Translations & Languages -->
+    <div class="col-12 col-sm-6 col-lg-4">
+        <a href="/help/translations" class="text-decoration-none text-reset">
+            <div class="portal-card portal-card-branded h-100 p-4">
+                <div class="d-flex align-items-center gap-3 mb-3">
+                    <span class="d-inline-flex align-items-center justify-content-center rounded-3 bg-primary bg-opacity-10 text-primary" style="width:48px;height:48px;">
+                        <i class="fa-solid fa-globe fa-lg"></i>
+                    </span>
+                    <h5 class="mb-0">Translations</h5>
+                </div>
+                <p class="text-secondary mb-0 small">Changing your language, contributing translations, and managing multilingual support.</p>
+            </div>
+        </a>
+    </div>
+
     <!-- FAQ -->
     <div class="col-12 col-sm-6 col-lg-4">
         <a href="/help/faq" class="text-decoration-none text-reset">
