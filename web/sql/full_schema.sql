@@ -18,7 +18,7 @@
 -- @author    MWBM Partners Ltd (t/a MWservices)
 -- @copyright 2025-2026 MWBM Partners Ltd (t/a MWservices)
 -- @license   All Rights Reserved
--- @version   0.7.0
+-- @version   0.8.0
 -- =============================================================================
 
 

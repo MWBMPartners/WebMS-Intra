@@ -42,6 +42,8 @@ $siteName = App::settings('site.name') ?? 'Portal';
 header('X-Content-Type-Options: nosniff');
 header('X-Frame-Options: SAMEORIGIN');
 header('Referrer-Policy: strict-origin-when-cross-origin');
+header('Permissions-Policy: camera=(), microphone=(), geolocation=()');
+header("Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; font-src 'self' https://cdnjs.cloudflare.com; img-src 'self' data:; connect-src 'self'; frame-src https://challenges.cloudflare.com; base-uri 'self'; form-action 'self'");
 
 // 🎨 Determine initial theme from localStorage (handled by JS, default light)
 ?>
@@ -51,6 +53,11 @@ header('Referrer-Policy: strict-origin-when-cross-origin');
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="csrf-token" content="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
+    <meta name="theme-color" content="#0d6efd">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <link rel="manifest" href="/manifest.json">
+    <link rel="apple-touch-icon" href="/assets/images/icon-192.svg">
     <title><?php echo htmlspecialchars($pageTitle . ' - ' . $siteName, ENT_QUOTES, 'UTF-8'); ?></title>
 
     <!-- 🎨 Stylesheets (CDN with local fallback, RTL variant if needed) -->
@@ -72,12 +79,15 @@ header('Referrer-Policy: strict-origin-when-cross-origin');
 </head>
 <body>
 
+<!-- ♿ Skip to main content link (WCAG 2.4.1) -->
+<a href="#main-content" class="portal-skip-link">Skip to main content</a>
+
 <?php
 // 🧭 Include the navigation bar
 require __DIR__ . DIRECTORY_SEPARATOR . 'nav.php';
 ?>
 
-<main class="portal-main">
+<main class="portal-main" id="main-content" role="main">
 <div class="container">
 
 <?php

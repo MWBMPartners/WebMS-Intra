@@ -153,16 +153,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     <!-- ✅ Success message (e.g. after password reset) -->
     <?php if ($successMsg !== ''): ?>
-        <div class="alert alert-success small" role="alert">
-            <i class="fa-solid fa-circle-check me-1"></i>
+        <div class="alert alert-success small" role="alert" aria-live="polite">
+            <i class="fa-solid fa-circle-check me-1" aria-hidden="true"></i>
             <?php echo htmlspecialchars($successMsg, ENT_QUOTES, 'UTF-8'); ?>
         </div>
     <?php endif; ?>
 
     <!-- ❌ Error message -->
     <?php if ($errorMsg !== ''): ?>
-        <div class="alert alert-danger small" role="alert">
-            <i class="fa-solid fa-circle-exclamation me-1"></i>
+        <div class="alert alert-danger small" role="alert" aria-live="assertive">
+            <i class="fa-solid fa-circle-exclamation me-1" aria-hidden="true"></i>
             <?php echo htmlspecialchars($errorMsg, ENT_QUOTES, 'UTF-8'); ?>
         </div>
     <?php endif; ?>
@@ -192,7 +192,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         <?php echo Captcha::widget(); ?>
 
         <button type="submit" class="btn btn-success w-100">
-            <i class="fa-solid fa-right-to-bracket me-1"></i> <?php echo htmlspecialchars(t('auth.sign_in'), ENT_QUOTES, 'UTF-8'); ?>
+            <i class="fa-solid fa-right-to-bracket me-1" aria-hidden="true"></i> <?php echo htmlspecialchars(t('auth.sign_in'), ENT_QUOTES, 'UTF-8'); ?>
         </button>
     </form>
 
@@ -204,13 +204,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         <?php if (Auth::isMS365Configured() === true): ?>
             <a href="/login/ms365" class="btn btn-outline-primary w-100 mb-2">
-                <i class="fa-brands fa-microsoft me-1"></i> <?php echo htmlspecialchars(t('auth.sign_in_with_ms365'), ENT_QUOTES, 'UTF-8'); ?>
+                <i class="fa-brands fa-microsoft me-1" aria-hidden="true"></i> <?php echo htmlspecialchars(t('auth.sign_in_with_ms365'), ENT_QUOTES, 'UTF-8'); ?>
             </a>
         <?php endif; ?>
 
         <?php if (Auth::isGoogleConfigured() === true): ?>
             <a href="/login/google" class="btn btn-outline-danger w-100 mb-2">
-                <i class="fa-brands fa-google me-1"></i> <?php echo htmlspecialchars(t('auth.sign_in_with_google'), ENT_QUOTES, 'UTF-8'); ?>
+                <i class="fa-brands fa-google me-1" aria-hidden="true"></i> <?php echo htmlspecialchars(t('auth.sign_in_with_google'), ENT_QUOTES, 'UTF-8'); ?>
             </a>
         <?php endif; ?>
     <?php endif; ?>
@@ -221,7 +221,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             <hr class="flex-grow-1"><span class="px-2 text-muted small"><?php echo htmlspecialchars(t('auth.or_use_passkey'), ENT_QUOTES, 'UTF-8'); ?></span><hr class="flex-grow-1">
         </div>
         <button type="button" class="btn btn-outline-secondary w-100" id="btnPasskeyLogin">
-            <i class="fa-solid fa-fingerprint me-1"></i> <?php echo htmlspecialchars(t('auth.sign_in_with_passkey'), ENT_QUOTES, 'UTF-8'); ?>
+            <i class="fa-solid fa-fingerprint me-1" aria-hidden="true"></i> <?php echo htmlspecialchars(t('auth.sign_in_with_passkey'), ENT_QUOTES, 'UTF-8'); ?>
         </button>
         <div id="passkeyLoginStatus" class="small mt-2 text-center"></div>
     </div>

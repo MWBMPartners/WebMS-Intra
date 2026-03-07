@@ -59,5 +59,12 @@ if ($copyrightYear !== $currentYear) {
 echo Debug::renderPanel();
 ?>
 
+<!-- 📱 PWA: Service Worker registration -->
+<script>
+if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(function () {});
+}
+</script>
+
 </body>
 </html>

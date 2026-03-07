@@ -191,6 +191,12 @@ class Router
             return true; // logout() calls exit() after redirect
         }
 
+        // 📵 Offline fallback page (served by service worker when no network)
+        if ($path === 'offline') {
+            require PORTAL_APPS . DIRECTORY_SEPARATOR . 'offline' . DIRECTORY_SEPARATOR . 'index.php';
+            return true;
+        }
+
         // 💚 Health check endpoint (used by CI/CD deploy pipeline)
         if ($path === 'health') {
             self::healthCheck();

@@ -1,6 +1,6 @@
 # WebMS Intra
 
-> **Version:** 0.7.0 | **PHP** 8.5 (backward-compatible with 8.4) | **MySQL** 8.0+ | **DreamHost** shared hosting
+> **Version:** 0.8.0 | **PHP** 8.5 (backward-compatible with 8.4) | **MySQL** 8.0+ | **DreamHost** shared hosting
 
 A modular internal portal platform for organisations, providing centralised access to internal tools, expense management, and future modules (Calendar, Attendance, Leadership, Preaching Plan).
 
@@ -137,7 +137,7 @@ Server-managed directories (`_auth_keys/`, `_uploads/`, `_backups/`, `_libraries
 - Rate limiting on login attempts (configurable via settings)
 - RS256 JWT verification with JWKS key fetching for MS365 tokens
 - SRI integrity hashes on CDN resources
-- Security headers: `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`
+- Security headers: `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, `Content-Security-Policy`, `Permissions-Policy`
 
 ---
 
@@ -165,7 +165,7 @@ Server-managed directories (`_auth_keys/`, `_uploads/`, `_backups/`, `_libraries
 | 6     | Expenses — Multi-Approver, Email, PDF, Treasury                                 | Done             |
 | 7     | SSO & Auth Enhancement (Google OAuth, WebAuthn/PassKeys, Account Linking)       | Done             |
 | 8     | Translations / i18n (I18n framework, RTL support, language switcher)            | Done             |
-| 9     | Polish & Hardening                                                              | Planned          |
+| 9     | Polish & Hardening (PWA, WCAG 2.1, Security Hardening)                          | Done             |
 
 ---
 
