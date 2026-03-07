@@ -4,9 +4,9 @@
  * -----------------------------------------------------------------------------
  * Portal Core Auth 🔑
  * -----------------------------------------------------------------------------
- * Unified authentication helper – wraps Microsoft 365 OAuth, local accounts,
- * and (future) Google OAuth. Provides session management, role checks, CSRF
- * token utilities, and rate limiting integration.
+ * Unified authentication helper – wraps Microsoft 365 OAuth, Google OAuth,
+ * local accounts, WebAuthn/PassKeys, and account linking. Provides session
+ * management, role checks, CSRF token utilities, and rate limiting integration.
  *
  * Public methods:
  *   Auth::check()                  → bool   – is user logged in?
@@ -14,9 +14,16 @@
  *   Auth::ensureSession()          → void   – start session with secure params
  *   Auth::loginMS365()             → void   – begin MS OAuth flow (dormant until configured)
  *   Auth::callbackMS365()          → void   – handle OAuth redirect & verify JWT
+ *   Auth::loginGoogle()            → void   – begin Google OAuth flow
+ *   Auth::callbackGoogle()         → void   – handle Google OAuth redirect
  *   Auth::loginLocal($id, $pw)     → bool   – authenticate with username/email + password
  *   Auth::validatePassword($pw)    → array  – check password against policy
  *   Auth::isMS365Configured()      → bool   – are MS365 OAuth credentials set?
+ *   Auth::isGoogleConfigured()     → bool   – are Google OAuth credentials set?
+ *   Auth::linkAccount(...)         → bool   – link an external provider to a user
+ *   Auth::unlinkAccount(...)       → bool   – remove a provider link (safety-checked)
+ *   Auth::getLinkedAccounts(...)   → array  – list linked providers for a user
+ *   Auth::countLoginMethods(...)   → int    – count available login methods
  *   Auth::logout()                 → void   – destroy session
  *   Auth::csrfToken()              → string – get / create CSRF token
  *   Auth::verifyCsrf($tok)         → bool   – compare token constant-time
@@ -27,7 +34,7 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   0.1.0
+ * @version   0.5.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra
  * -----------------------------------------------------------------------------
  */
@@ -280,7 +287,8 @@ class Auth
             exit();
         }
 
-        /* ----------------------- 4. Upsert user in database ---------------- */
+        /* ----------------------- 4. Extract user info ---------------------- */
+        $sub    = $payload['sub'] ?? $payload['oid'] ?? '';
         $email  = strtolower($payload['preferred_username'] ?? ($payload['email'] ?? ''));
         $name   = $payload['name'] ?? '';
         $avatar = $payload['picture'] ?? '';
@@ -291,9 +299,41 @@ class Auth
             exit();
         }
 
-        $userId = self::upsertUserMS($mysqli, $email, $name, $avatar);
+        /* ----------------------- 5. Find or create user -------------------- */
+        // 🔍 Check if there's already a linked account for this MS365 sub
+        $userId = self::findUserByLink('ms365', $sub !== '' ? $sub : $email, $mysqli);
 
-        /* ----------------------- 5. Create session & redirect -------------- */
+        if ($userId === null) {
+            // 🔍 Try to match by email address (auto-link / legacy upsert)
+            $userId = self::findUserByEmail($email, $mysqli);
+
+            if ($userId !== null) {
+                // ♻️ Update existing user's name and avatar
+                $upd = $mysqli->prepare('UPDATE tblUsers SET fullName = ?, avatarPath = ?, isActive = 1 WHERE userID = ?');
+                if ($upd !== false) {
+                    $upd->bind_param('ssi', $name, $avatar, $userId);
+                    $upd->execute();
+                    $upd->close();
+                }
+
+                // 🔗 Auto-link the MS365 account
+                self::linkAccount($userId, 'ms365', $sub !== '' ? $sub : $email, $email, $mysqli);
+            } else {
+                // ➕ Create new user + link
+                $userId = self::createUser($name, $email, $avatar, $mysqli);
+                self::linkAccount($userId, 'ms365', $sub !== '' ? $sub : $email, $email, $mysqli);
+            }
+        } else {
+            // ♻️ Update name/avatar on existing linked user
+            $upd = $mysqli->prepare('UPDATE tblUsers SET fullName = ?, avatarPath = ? WHERE userID = ?');
+            if ($upd !== false) {
+                $upd->bind_param('ssi', $name, $avatar, $userId);
+                $upd->execute();
+                $upd->close();
+            }
+        }
+
+        /* ----------------------- 6. Create session & redirect -------------- */
         // 🔄 Regenerate session ID to prevent session fixation attacks
         // See: https://owasp.org/www-community/attacks/Session_fixation
         session_regenerate_id(true);
@@ -304,6 +344,214 @@ class Auth
 
         // 📝 Log the successful login
         Logger::activity('LoginMS365', 'User logged in via Microsoft 365');
+
+        $target = $_GET['redirect'] ?? '/';
+        if (str_starts_with($target, '/') === false || str_starts_with($target, '//') === true) {
+            $target = '/';
+        }
+        header('Location: ' . $target, true, 302);
+        exit();
+    }
+
+    /* ====================================================================== */
+    /* Google OAuth flow                                                      */
+    /* ====================================================================== */
+
+    /**
+     * Begin the Google OAuth authorization flow.
+     * Redirects the user to Google's consent screen.
+     *
+     * @see https://developers.google.com/identity/protocols/oauth2/web-server
+     *
+     * @return void (terminates with redirect)
+     */
+    public static function loginGoogle(): void
+    {
+        global $SETTINGS;
+
+        if (($SETTINGS['auth']['google']['clientID'] ?? '') === '') {
+            throw new RuntimeException('Google OAuth client ID not configured.');
+        }
+
+        $clientId    = $SETTINGS['auth']['google']['clientID'];
+        $redirectUri = $SETTINGS['auth']['google']['redirectURI'];
+
+        // 🔐 Generate state parameter for CSRF protection of the OAuth flow
+        $state = bin2hex(random_bytes(16));
+        self::ensureSession();
+        $_SESSION['oauth_state'] = $state;
+
+        $authUrl  = 'https://accounts.google.com/o/oauth2/v2/auth?';
+        $params   = [
+            'client_id'     => $clientId,
+            'response_type' => 'code',
+            'redirect_uri'  => $redirectUri,
+            'scope'         => 'openid email profile',
+            'state'         => $state,
+            'access_type'   => 'online',
+            'prompt'        => 'select_account',
+        ];
+
+        // 🏢 Restrict to a specific Google Workspace domain if configured
+        $hd = $SETTINGS['auth']['google']['hostedDomain'] ?? '';
+        if ($hd !== '') {
+            $params['hd'] = $hd;
+        }
+
+        $authUrl .= http_build_query($params);
+
+        header('Location: ' . $authUrl, true, 302);
+        exit();
+    }
+
+    /**
+     * Handle the OAuth callback from Google after user consent.
+     * Exchanges the authorization code for tokens, verifies the ID token via
+     * Google's JWKS, upserts the user, creates a linked account record, and
+     * starts a session.
+     *
+     * @see https://developers.google.com/identity/protocols/oauth2/openid-connect
+     *
+     * @return void (terminates with redirect on success or error message on failure)
+     */
+    public static function callbackGoogle(): void
+    {
+        self::ensureSession();
+        global $SETTINGS, $mysqli;
+
+        /* ----------------------- 1. Validate OAuth state ------------------- */
+        if (isset($_GET['state']) === false || hash_equals($_SESSION['oauth_state'] ?? '', $_GET['state'] ?? '') === false) {
+            Logger::errorPlatform('Auth', 'Error', 'OAUTH_STATE', 'Invalid Google OAuth state parameter', '');
+            echo 'Invalid OAuth state.';
+            exit();
+        }
+
+        if (isset($_GET['code']) === false) {
+            Logger::errorPlatform('Auth', 'Error', 'OAUTH_CODE', 'Google authorization code missing from callback', '');
+            echo 'Authorization code missing.';
+            exit();
+        }
+
+        // 🧹 Clear the OAuth state to prevent replay
+        unset($_SESSION['oauth_state']);
+
+        $code         = $_GET['code'];
+        $clientId     = $SETTINGS['auth']['google']['clientID'];
+        $clientSecret = $SETTINGS['auth']['google']['clientSecret'];
+        $redirectUri  = $SETTINGS['auth']['google']['redirectURI'];
+
+        /* ----------------------- 2. Exchange code for tokens --------------- */
+        $tokenResp = self::curlPost('https://oauth2.googleapis.com/token', [
+            'client_id'     => $clientId,
+            'client_secret' => $clientSecret,
+            'code'          => $code,
+            'redirect_uri'  => $redirectUri,
+            'grant_type'    => 'authorization_code',
+        ]);
+
+        if ($tokenResp === null) {
+            echo 'Token request failed.';
+            exit();
+        }
+
+        $tokenData = json_decode($tokenResp, true);
+        if (json_last_error() !== JSON_ERROR_NONE || isset($tokenData['id_token']) === false) {
+            Logger::errorPlatform('Auth', 'Error', 'TOKEN_RESPONSE', 'Invalid token response from Google', '');
+            echo 'Invalid token response.';
+            exit();
+        }
+
+        $idToken = $tokenData['id_token'];
+
+        /* ----------------------- 3. Verify ID token via JWKS --------------- */
+        // 🔐 Fetch Google's JWKS keys
+        // See: https://developers.google.com/identity/protocols/oauth2/openid-connect#validatinganidtoken
+        $jwksUri  = 'https://www.googleapis.com/oauth2/v3/certs';
+        $jwksJson = file_get_contents($jwksUri);
+        if ($jwksJson === false) {
+            Logger::errorPlatform('Auth', 'Error', 'JWKS_FETCH', 'Unable to retrieve JWKS from Google', '');
+            echo 'Unable to retrieve signing keys.';
+            exit();
+        }
+
+        $jwks = json_decode($jwksJson, true);
+
+        try {
+            $payload = SimpleJWT::decode($idToken, $jwks, [
+                'aud' => $clientId,
+                'iss' => ['https://accounts.google.com', 'accounts.google.com'],
+            ]);
+        } catch (RuntimeException $ex) {
+            Logger::errorPlatform('JWT', 'Error', 'VERIFY_FAIL', $ex->getMessage(), '');
+            echo 'Token verification failed.';
+            exit();
+        }
+
+        /* ----------------------- 4. Extract user info ---------------------- */
+        $sub    = $payload['sub'] ?? '';
+        $email  = strtolower($payload['email'] ?? '');
+        $name   = $payload['name'] ?? '';
+        $avatar = $payload['picture'] ?? '';
+
+        if ($email === '' || $sub === '') {
+            Logger::errorPlatform('Auth', 'Error', 'NO_EMAIL', 'No email/sub in Google ID token', '');
+            echo 'Unable to determine user identity from token.';
+            exit();
+        }
+
+        // 🏢 Enforce hosted domain restriction if configured
+        $requiredHd = $SETTINGS['auth']['google']['hostedDomain'] ?? '';
+        if ($requiredHd !== '') {
+            $tokenHd = $payload['hd'] ?? '';
+            if (strtolower($tokenHd) !== strtolower($requiredHd)) {
+                Logger::errorPlatform('Auth', 'Error', 'HD_MISMATCH', 'Google domain mismatch: expected ' . $requiredHd . ', got ' . $tokenHd, '');
+                echo 'Your Google account is not from the allowed organisation.';
+                exit();
+            }
+        }
+
+        /* ----------------------- 5. Find or create user -------------------- */
+        // 🔍 Check if there's already a linked account for this Google sub
+        $userId = self::findUserByLink('google', $sub, $mysqli);
+
+        if ($userId === null) {
+            // 🔍 Try to match by email address (auto-link)
+            $userId = self::findUserByEmail($email, $mysqli);
+
+            if ($userId !== null) {
+                // ♻️ Update name/avatar from Google profile
+                $upd = $mysqli->prepare('UPDATE tblUsers SET fullName = ?, avatarPath = ?, isActive = 1 WHERE userID = ?');
+                if ($upd !== false) {
+                    $upd->bind_param('ssi', $name, $avatar, $userId);
+                    $upd->execute();
+                    $upd->close();
+                }
+
+                // 🔗 Auto-link the Google account
+                self::linkAccount($userId, 'google', $sub, $email, $mysqli);
+            } else {
+                // ➕ Create new user + link
+                $userId = self::createUser($name, $email, $avatar, $mysqli);
+                self::linkAccount($userId, 'google', $sub, $email, $mysqli);
+            }
+        } else {
+            // ♻️ Update name/avatar on existing linked user
+            $upd = $mysqli->prepare('UPDATE tblUsers SET fullName = ?, avatarPath = ? WHERE userID = ?');
+            if ($upd !== false) {
+                $upd->bind_param('ssi', $name, $avatar, $userId);
+                $upd->execute();
+                $upd->close();
+            }
+        }
+
+        /* ----------------------- 6. Create session & redirect -------------- */
+        session_regenerate_id(true);
+
+        $_SESSION['user_id']    = $userId;
+        $_SESSION['user_name']  = $name;
+        $_SESSION['user_email'] = $email;
+
+        Logger::activity('LoginGoogle', 'User logged in via Google OAuth');
 
         $target = $_GET['redirect'] ?? '/';
         if (str_starts_with($target, '/') === false || str_starts_with($target, '//') === true) {
@@ -453,7 +701,7 @@ class Auth
     }
 
     /* ====================================================================== */
-    /* SSO configuration check                                                */
+    /* SSO configuration checks                                               */
     /* ====================================================================== */
 
     /**
@@ -465,6 +713,171 @@ class Auth
     public static function isMS365Configured(): bool
     {
         return (App::settings('auth.ms365.enduser.clientID') ?? '') !== '';
+    }
+
+    /**
+     * Check whether Google OAuth credentials are configured.
+     * Used to conditionally show the Google sign-in button on the login page.
+     *
+     * @return bool True if the Google client ID is non-empty
+     */
+    public static function isGoogleConfigured(): bool
+    {
+        return (App::settings('auth.google.clientID') ?? '') !== '';
+    }
+
+    /* ====================================================================== */
+    /* Account linking                                                        */
+    /* ====================================================================== */
+
+    /**
+     * Link an external identity provider account to a portal user.
+     *
+     * @param int      $userId       The portal user ID
+     * @param string   $provider     Provider name (ms365, google, local)
+     * @param string   $providerSub  Provider-specific unique identifier
+     * @param string   $providerEmail Email from the provider
+     * @param \mysqli  $db           Database connection
+     *
+     * @return bool True if the link was created successfully
+     */
+    public static function linkAccount(int $userId, string $provider, string $providerSub, string $providerEmail, \mysqli $db): bool
+    {
+        $stmt = $db->prepare(
+            'INSERT INTO tblLinkedAccounts (userID, provider, providerSub, providerEmail) '
+            . 'VALUES (?, ?, ?, ?) '
+            . 'ON DUPLICATE KEY UPDATE providerEmail = VALUES(providerEmail)'
+        );
+        if ($stmt === false) {
+            Logger::errorPlatform('Auth', 'Error', 'LINK_PREP', 'Failed to prepare link insert: ' . $db->error, '');
+            return false;
+        }
+
+        $stmt->bind_param('isss', $userId, $provider, $providerSub, $providerEmail);
+        $result = $stmt->execute();
+        $stmt->close();
+
+        if ($result === true) {
+            Logger::activity('AccountLink', 'Linked ' . $provider . ' account (' . $providerEmail . ')');
+        }
+
+        return $result;
+    }
+
+    /**
+     * Unlink an external provider from a user. Safety check: will refuse to
+     * unlink if it would leave the user with zero login methods.
+     *
+     * @param int      $userId   The portal user ID
+     * @param int      $linkID   The tblLinkedAccounts.linkID to remove
+     * @param \mysqli  $db       Database connection
+     *
+     * @return array{success: bool, error: string}
+     */
+    public static function unlinkAccount(int $userId, int $linkID, \mysqli $db): array
+    {
+        // 🛡️ Verify the link belongs to this user
+        $stmt = $db->prepare('SELECT provider, providerEmail FROM tblLinkedAccounts WHERE linkID = ? AND userID = ?');
+        if ($stmt === false) {
+            return ['success' => false, 'error' => 'Database error.'];
+        }
+        $stmt->bind_param('ii', $linkID, $userId);
+        $stmt->execute();
+        $link = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+
+        if ($link === null) {
+            return ['success' => false, 'error' => 'Link not found.'];
+        }
+
+        // 🛡️ Safety: ensure the user has at least 2 login methods before unlinking
+        $methodCount = self::countLoginMethods($userId, $db);
+        if ($methodCount <= 1) {
+            return ['success' => false, 'error' => 'Cannot unlink your only login method. Add another method first.'];
+        }
+
+        $del = $db->prepare('DELETE FROM tblLinkedAccounts WHERE linkID = ? AND userID = ?');
+        if ($del === false) {
+            return ['success' => false, 'error' => 'Database error.'];
+        }
+        $del->bind_param('ii', $linkID, $userId);
+        $del->execute();
+        $del->close();
+
+        Logger::activity('AccountUnlink', 'Unlinked ' . $link['provider'] . ' account (' . ($link['providerEmail'] ?? '') . ')');
+
+        return ['success' => true, 'error' => ''];
+    }
+
+    /**
+     * Get all linked external accounts for a user.
+     *
+     * @param int     $userId The portal user ID
+     * @param \mysqli $db     Database connection
+     *
+     * @return array List of linked account rows
+     */
+    public static function getLinkedAccounts(int $userId, \mysqli $db): array
+    {
+        $stmt = $db->prepare(
+            'SELECT linkID, provider, providerSub, providerEmail, linkedAt '
+            . 'FROM tblLinkedAccounts WHERE userID = ? ORDER BY linkedAt ASC'
+        );
+        if ($stmt === false) {
+            return [];
+        }
+        $stmt->bind_param('i', $userId);
+        $stmt->execute();
+        $rows = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+        $stmt->close();
+        return $rows;
+    }
+
+    /**
+     * Count the total number of login methods available to a user.
+     * Includes: local account (if exists) + linked accounts + WebAuthn credentials.
+     *
+     * @param int     $userId The portal user ID
+     * @param \mysqli $db     Database connection
+     *
+     * @return int Number of available login methods
+     */
+    public static function countLoginMethods(int $userId, \mysqli $db): int
+    {
+        $count = 0;
+
+        // 📝 Check for local account
+        $stmt = $db->prepare('SELECT 1 FROM tblLocalAccounts WHERE userID = ? LIMIT 1');
+        if ($stmt !== false) {
+            $stmt->bind_param('i', $userId);
+            $stmt->execute();
+            if ($stmt->get_result()->num_rows > 0) {
+                $count++;
+            }
+            $stmt->close();
+        }
+
+        // 🔗 Count linked external accounts
+        $stmt = $db->prepare('SELECT COUNT(*) AS cnt FROM tblLinkedAccounts WHERE userID = ?');
+        if ($stmt !== false) {
+            $stmt->bind_param('i', $userId);
+            $stmt->execute();
+            $row = $stmt->get_result()->fetch_assoc();
+            $count += (int) ($row['cnt'] ?? 0);
+            $stmt->close();
+        }
+
+        // 🔐 Count WebAuthn credentials
+        $stmt = $db->prepare('SELECT COUNT(*) AS cnt FROM tblWebAuthnCredentials WHERE userID = ?');
+        if ($stmt !== false) {
+            $stmt->bind_param('i', $userId);
+            $stmt->execute();
+            $row = $stmt->get_result()->fetch_assoc();
+            $count += (int) ($row['cnt'] ?? 0);
+            $stmt->close();
+        }
+
+        return $count;
     }
 
     /* ====================================================================== */
@@ -553,48 +966,69 @@ class Auth
     }
 
     /**
-     * Upsert a user record for Microsoft 365 login.
-     * Creates a new user if they don't exist, or updates their name/avatar if they do.
+     * Find a user ID by linked account (provider + providerSub).
      *
-     * @param \mysqli $db     Database connection
-     * @param string  $email  User's email address (already lowercased)
-     * @param string  $name   User's display name from MS365
-     * @param string  $avatar User's avatar URL from MS365
+     * @param string  $provider    Provider name (ms365, google)
+     * @param string  $providerSub Provider-specific unique identifier
+     * @param \mysqli $db          Database connection
      *
-     * @return int The user's ID (new or existing)
-     *
-     * @throws RuntimeException If the database query fails
+     * @return int|null User ID if found, null otherwise
      */
-    private static function upsertUserMS(\mysqli $db, string $email, string $name, string $avatar): int
+    private static function findUserByLink(string $provider, string $providerSub, \mysqli $db): ?int
     {
-        // 🔍 Check if the user already exists
-        $stmt = $db->prepare('SELECT userID FROM tblUsers WHERE emailAddress = ? LIMIT 1');
+        $stmt = $db->prepare(
+            'SELECT LA.userID FROM tblLinkedAccounts LA '
+            . 'JOIN tblUsers U ON U.userID = LA.userID '
+            . 'WHERE LA.provider = ? AND LA.providerSub = ? AND U.isActive = 1 '
+            . 'LIMIT 1'
+        );
         if ($stmt === false) {
-            throw new RuntimeException('DB prepare failed: ' . $db->error);
+            return null;
         }
-
-        $stmt->bind_param('s', $email);
+        $stmt->bind_param('ss', $provider, $providerSub);
         $stmt->execute();
-        $res = $stmt->get_result();
-
-        if ($row = $res->fetch_assoc()) {
-            // ♻️ Update existing user's name and avatar
-            $userId = (int) $row['userID'];
-            $stmt->close();
-
-            $stmt = $db->prepare('UPDATE tblUsers SET fullName = ?, avatarPath = ?, isActive = 1 WHERE userID = ?');
-            if ($stmt === false) {
-                throw new RuntimeException('DB prepare failed: ' . $db->error);
-            }
-            $stmt->bind_param('ssi', $name, $avatar, $userId);
-            $stmt->execute();
-            $stmt->close();
-
-            return $userId;
-        }
+        $row = $stmt->get_result()->fetch_assoc();
         $stmt->close();
 
-        // ➕ Insert new user
+        return $row !== null ? (int) $row['userID'] : null;
+    }
+
+    /**
+     * Find a user ID by email address.
+     *
+     * @param string  $email Email address (already lowercased)
+     * @param \mysqli $db    Database connection
+     *
+     * @return int|null User ID if found, null otherwise
+     */
+    private static function findUserByEmail(string $email, \mysqli $db): ?int
+    {
+        $stmt = $db->prepare('SELECT userID FROM tblUsers WHERE emailAddress = ? AND isActive = 1 LIMIT 1');
+        if ($stmt === false) {
+            return null;
+        }
+        $stmt->bind_param('s', $email);
+        $stmt->execute();
+        $row = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+
+        return $row !== null ? (int) $row['userID'] : null;
+    }
+
+    /**
+     * Create a new user record.
+     *
+     * @param string  $name   Full name
+     * @param string  $email  Email address
+     * @param string  $avatar Avatar URL
+     * @param \mysqli $db     Database connection
+     *
+     * @return int The new user's ID
+     *
+     * @throws RuntimeException If the insert fails
+     */
+    private static function createUser(string $name, string $email, string $avatar, \mysqli $db): int
+    {
         $stmt = $db->prepare('INSERT INTO tblUsers (fullName, emailAddress, avatarPath, isActive) VALUES (?, ?, ?, 1)');
         if ($stmt === false) {
             throw new RuntimeException('DB prepare failed: ' . $db->error);

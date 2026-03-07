@@ -196,20 +196,147 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         </button>
     </form>
 
-    <!-- 🔑 Microsoft 365 SSO (shown only when configured) -->
-    <?php if (Auth::isMS365Configured() === true): ?>
+    <!-- 🔑 SSO buttons (shown only when configured) -->
+    <?php if (Auth::isMS365Configured() === true || Auth::isGoogleConfigured() === true): ?>
         <div class="d-flex align-items-center my-3">
             <hr class="flex-grow-1"><span class="px-2 text-muted small">or</span><hr class="flex-grow-1">
         </div>
-        <a href="/login/ms365" class="btn btn-outline-primary w-100">
-            <i class="fa-brands fa-microsoft me-1"></i> Sign in with Microsoft 365
-        </a>
+
+        <?php if (Auth::isMS365Configured() === true): ?>
+            <a href="/login/ms365" class="btn btn-outline-primary w-100 mb-2">
+                <i class="fa-brands fa-microsoft me-1"></i> Sign in with Microsoft 365
+            </a>
+        <?php endif; ?>
+
+        <?php if (Auth::isGoogleConfigured() === true): ?>
+            <a href="/login/google" class="btn btn-outline-danger w-100 mb-2">
+                <i class="fa-brands fa-google me-1"></i> Sign in with Google
+            </a>
+        <?php endif; ?>
     <?php endif; ?>
+
+    <!-- 🔐 PassKey / WebAuthn sign-in button -->
+    <div id="webauthn-section" class="d-none">
+        <div class="d-flex align-items-center my-3">
+            <hr class="flex-grow-1"><span class="px-2 text-muted small">or use a passkey</span><hr class="flex-grow-1">
+        </div>
+        <button type="button" class="btn btn-outline-secondary w-100" id="btnPasskeyLogin">
+            <i class="fa-solid fa-fingerprint me-1"></i> Sign in with Passkey
+        </button>
+        <div id="passkeyLoginStatus" class="small mt-2 text-center"></div>
+    </div>
 
 </div>
 
 <!-- 📦 JavaScript (CDN with local fallback) -->
 <?php echo Asset::bootstrapJs(); ?>
+
+<!-- 🔐 WebAuthn login script -->
+<script>
+(function() {
+    'use strict';
+
+    // 📋 Only show passkey button if WebAuthn is supported
+    if (!window.PublicKeyCredential) return;
+
+    var section   = document.getElementById('webauthn-section');
+    var btn       = document.getElementById('btnPasskeyLogin');
+    var statusEl  = document.getElementById('passkeyLoginStatus');
+
+    section.classList.remove('d-none');
+
+    btn.addEventListener('click', async function() {
+        statusEl.innerHTML = '<i class="fa-solid fa-spinner fa-spin me-1"></i> Requesting...';
+        btn.disabled = true;
+
+        try {
+            // 📋 Step 1: Get authentication options from server
+            var optResp = await fetch('/login/webauthn', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({action: 'auth_options'})
+            });
+            var optData = await optResp.json();
+            if (!optData.success) throw new Error(optData.error || 'Failed to get options');
+
+            var options = optData.options;
+            options.challenge = base64urlToBuffer(options.challenge);
+            if (options.allowCredentials) {
+                options.allowCredentials = options.allowCredentials.map(function(c) {
+                    c.id = base64urlToBuffer(c.id);
+                    return c;
+                });
+            }
+
+            statusEl.innerHTML = '<i class="fa-solid fa-fingerprint fa-beat me-1"></i> Waiting for authenticator...';
+
+            // 📋 Step 2: Get credential from authenticator
+            var assertion = await navigator.credentials.get({publicKey: options});
+
+            statusEl.innerHTML = '<i class="fa-solid fa-spinner fa-spin me-1"></i> Verifying...';
+
+            // 📋 Step 3: Send assertion to server
+            var params = new URLSearchParams(window.location.search);
+            var verifyResp = await fetch('/login/webauthn', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    action: 'auth_verify',
+                    redirect: params.get('redirect') || '/',
+                    credential: {
+                        id:    assertion.id,
+                        rawId: bufferToBase64url(assertion.rawId),
+                        type:  assertion.type,
+                        response: {
+                            clientDataJSON:    bufferToBase64url(assertion.response.clientDataJSON),
+                            authenticatorData: bufferToBase64url(assertion.response.authenticatorData),
+                            signature:         bufferToBase64url(assertion.response.signature),
+                            userHandle:        assertion.response.userHandle ? bufferToBase64url(assertion.response.userHandle) : null
+                        }
+                    }
+                })
+            });
+            var verifyData = await verifyResp.json();
+
+            if (verifyData.success) {
+                window.location.href = verifyData.redirect || '/';
+            } else {
+                throw new Error(verifyData.error || 'Authentication failed');
+            }
+        } catch (err) {
+            if (err.name === 'NotAllowedError') {
+                statusEl.innerHTML = '<span class="text-warning"><i class="fa-solid fa-triangle-exclamation me-1"></i> Cancelled.</span>';
+            } else {
+                statusEl.innerHTML = '<span class="text-danger"><i class="fa-solid fa-circle-exclamation me-1"></i> ' + escapeHtml(err.message) + '</span>';
+            }
+        } finally {
+            btn.disabled = false;
+        }
+    });
+
+    function base64urlToBuffer(b64url) {
+        var b64 = b64url.replace(/-/g, '+').replace(/_/g, '/');
+        while (b64.length % 4 !== 0) b64 += '=';
+        var bin = atob(b64);
+        var buf = new Uint8Array(bin.length);
+        for (var i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
+        return buf.buffer;
+    }
+
+    function bufferToBase64url(buffer) {
+        var bytes = new Uint8Array(buffer);
+        var bin = '';
+        for (var i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+        return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+    }
+
+    function escapeHtml(str) {
+        var div = document.createElement('div');
+        div.appendChild(document.createTextNode(str));
+        return div.innerHTML;
+    }
+})();
+</script>
 
 </body>
 </html>

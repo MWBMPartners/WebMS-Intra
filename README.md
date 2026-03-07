@@ -1,6 +1,6 @@
 # WebMS Intra
 
-> **Version:** 0.5.0 | **PHP** 8.5 (backward-compatible with 8.4) | **MySQL** 8.0+ | **DreamHost** shared hosting
+> **Version:** 0.6.0 | **PHP** 8.5 (backward-compatible with 8.4) | **MySQL** 8.0+ | **DreamHost** shared hosting
 
 A modular internal portal platform for organisations, providing centralised access to internal tools, expense management, and future modules (Calendar, Attendance, Leadership, Preaching Plan).
 
@@ -12,7 +12,7 @@ A modular internal portal platform for organisations, providing centralised acce
 | ------------------ | -------------------------------------------------------------------------------- | ------------------------------------------------ |
 | **Backend**        | PHP 8.5 (strict types, backward-compatible with 8.4), MySQL 8.0                  | Ubiquitous LAMP stack; DreamHost-friendly        |
 | **Routing**        | Front-controller + DB-backed router (tblRoutes)                                  | Clean URLs, app isolation, easy overrides        |
-| **Auth**           | Local accounts (primary), MS365 OAuth (conditional), SIGNula SSO (future)        | Flexible auth, SSO integration planned           |
+| **Auth**           | Local accounts, MS365 OAuth, Google OAuth, WebAuthn/PassKeys, account linking    | Multi-provider SSO, passwordless support         |
 | **UI**             | Bootstrap 5.3.3, Font Awesome 6.5.1, custom CSS design system                   | Responsive, WCAG compliant, dark mode            |
 | **PDF**            | dompdf 2.0 (in `_libraries/`, manually uploaded)                                 | Server-side PDF without external service         |
 | **Email**          | Microsoft Graph "SendAs" via shared mailbox                                      | DKIM/DMARC compliance, modern auth               |
@@ -34,7 +34,7 @@ WebMS-Intra/                         # Git repository root (NOT deployed)
     │   ├── App.php                  # Application registry (db, settings, user)
     │   ├── ApiResponse.php          # JSON API response builder
     │   ├── Asset.php                # CDN-with-fallback asset loader (SRI)
-    │   ├── Auth.php                 # Authentication (MS365, local, CSRF, JWT)
+    │   ├── Auth.php                 # Authentication (MS365, Google, local, WebAuthn, CSRF, JWT)
     │   ├── Avatar.php               # Avatar cascade (MS365 > local > Gravatar > SVG)
     │   ├── bootstrap.php            # Environment, DB, settings, autoloader
     │   ├── Captcha.php              # Turnstile / reCAPTCHA helper
@@ -48,6 +48,7 @@ WebMS-Intra/                         # Git repository root (NOT deployed)
     │   ├── Pdf.php                  # dompdf wrapper (conditional load)
     │   ├── RateLimiter.php          # Login rate limiting
     │   ├── Router.php               # Front-controller URL dispatcher
+    │   ├── WebAuthn.php             # WebAuthn/PassKey server-side helper
     │   └── templates/               # Shared page templates
     ├── vendor/simplejwt/            # Lightweight RS256 JWT verifier
     ├── sql/                         # Numbered SQL migration files
@@ -78,7 +79,7 @@ WebMS-Intra/                         # Git repository root (NOT deployed)
 
 ```text
 Browser -> .htaccess -> index.php -> bootstrap.php -> Router::dispatch()
-  |-- Special route? (login/ms365, logout, api/*, health) -> handle directly
+  |-- Special route? (login/ms365, login/google, login/webauthn, logout, api/*, health) -> handle directly
   |-- Query tblRoutes for matching routeKey
   |-- If isProtected=1, enforce Auth::requireLogin()
   '-- Include target app file -> header.php -> content -> footer.php
@@ -160,7 +161,7 @@ Server-managed directories (`_auth_keys/`, `_uploads/`, `_backups/`, `_libraries
 | 4     | Calendar / Events / Preaching Plan                                              | Done             |
 | 5     | Attendance Tracker                                                              | Done             |
 | 6     | Expenses — Multi-Approver, Email, PDF, Treasury                                 | Done             |
-| 7     | SSO & Auth Enhancement (SIGNula, Google, WebAuthn)                              | Planned          |
+| 7     | SSO & Auth Enhancement (Google OAuth, WebAuthn/PassKeys, Account Linking)       | Done             |
 | 8     | Translations / i18n                                                             | Planned          |
 | 9     | Polish & Hardening                                                              | Planned          |
 

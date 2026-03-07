@@ -167,6 +167,24 @@ class Router
             return true; // callbackMS365() calls exit() after redirect
         }
 
+        // 🔑 Google OAuth initiation
+        if ($path === 'login/google') {
+            Auth::loginGoogle();
+            return true; // loginGoogle() calls exit() after redirect
+        }
+
+        // 🔑 Google OAuth callback
+        if ($path === 'login/google/callback') {
+            Auth::callbackGoogle();
+            return true; // callbackGoogle() calls exit() after redirect
+        }
+
+        // 🔐 WebAuthn authentication API (login flow)
+        if ($path === 'login/webauthn') {
+            require PORTAL_APPS . DIRECTORY_SEPARATOR . 'auth' . DIRECTORY_SEPARATOR . 'login' . DIRECTORY_SEPARATOR . 'webauthn.php';
+            return true;
+        }
+
         // 🚪 Logout
         if ($path === 'logout') {
             Auth::logout();
