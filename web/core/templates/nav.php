@@ -9,6 +9,7 @@
  *   - Navigation links with active state highlighting
  *   - User avatar (cascade), name, and logout dropdown
  *   - Dark mode toggle button
+ *   - Language switcher (when multiple locales enabled)
  *
  * Included by header.php. Uses $pageSection to determine which nav item
  * is active. User information comes from App::user() and the session.
@@ -17,7 +18,7 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   0.1.0
+ * @version   0.7.0
  * -----------------------------------------------------------------------------
  */
 
@@ -26,6 +27,7 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Avatar;
+use Portal\Core\I18n;
 use Portal\Core\Router;
 
 // 📌 Get current user and section for nav state
@@ -48,7 +50,7 @@ $navSiteName = App::settings('site.name') ?? 'Portal';
         <!-- 📱 Mobile toggle -->
         <button class="navbar-toggler" type="button"
                 data-bs-toggle="collapse" data-bs-target="#portalNav"
-                aria-controls="portalNav" aria-expanded="false" aria-label="Toggle navigation">
+                aria-controls="portalNav" aria-expanded="false" aria-label="<?php echo htmlspecialchars(t('nav.toggle_navigation'), ENT_QUOTES, 'UTF-8'); ?>">
             <span class="navbar-toggler-icon"></span>
         </button>
 
@@ -60,7 +62,7 @@ $navSiteName = App::settings('site.name') ?? 'Portal';
                     <a class="nav-link<?php echo ($navSection === 'dashboard' || $navSection === '') ? ' active' : ''; ?>"
                        href="/"
                        <?php echo ($navSection === 'dashboard' || $navSection === '') ? 'aria-current="page"' : ''; ?>>
-                        <i class="fa-solid fa-house-chimney me-1"></i> Dashboard
+                        <i class="fa-solid fa-house-chimney me-1"></i> <?php echo htmlspecialchars(t('nav.dashboard'), ENT_QUOTES, 'UTF-8'); ?>
                     </a>
                 </li>
 
@@ -76,7 +78,7 @@ $navSiteName = App::settings('site.name') ?? 'Portal';
                             continue;
                         }
                         // Skip meta-settings that aren't real apps
-                        if (in_array($appKey, ['site', 'auth', 'portal', 'features', 'api', 'email'], true) === true) {
+                        if (in_array($appKey, ['site', 'auth', 'portal', 'features', 'api', 'email', 'i18n'], true) === true) {
                             continue;
                         }
                         $appName = $appConf['displayName'] ?? ucfirst($appKey);
@@ -101,39 +103,39 @@ $navSiteName = App::settings('site.name') ?? 'Portal';
                     <a class="nav-link dropdown-toggle<?php echo ($navSection === 'admin' || $navSection === 'settings') ? ' active' : ''; ?>"
                        href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false"
                        <?php echo ($navSection === 'admin' || $navSection === 'settings') ? 'aria-current="page"' : ''; ?>>
-                        <i class="fa-solid fa-shield-halved me-1"></i> Admin
+                        <i class="fa-solid fa-shield-halved me-1"></i> <?php echo htmlspecialchars(t('nav.admin'), ENT_QUOTES, 'UTF-8'); ?>
                     </a>
                     <ul class="dropdown-menu">
                         <li>
                             <a class="dropdown-item" href="/admin">
-                                <i class="fa-solid fa-gauge me-1"></i> Admin Dashboard
+                                <i class="fa-solid fa-gauge me-1"></i> <?php echo htmlspecialchars(t('nav.admin_dashboard'), ENT_QUOTES, 'UTF-8'); ?>
                             </a>
                         </li>
                         <li><hr class="dropdown-divider"></li>
                         <li>
                             <a class="dropdown-item" href="/admin/errors">
-                                <i class="fa-solid fa-triangle-exclamation me-1"></i> Error Log
+                                <i class="fa-solid fa-triangle-exclamation me-1"></i> <?php echo htmlspecialchars(t('nav.error_log'), ENT_QUOTES, 'UTF-8'); ?>
                             </a>
                         </li>
                         <li>
                             <a class="dropdown-item" href="/admin/activity">
-                                <i class="fa-solid fa-clock-rotate-left me-1"></i> Activity Log
+                                <i class="fa-solid fa-clock-rotate-left me-1"></i> <?php echo htmlspecialchars(t('nav.activity_log'), ENT_QUOTES, 'UTF-8'); ?>
                             </a>
                         </li>
                         <li><hr class="dropdown-divider"></li>
                         <li>
                             <a class="dropdown-item" href="/admin/users">
-                                <i class="fa-solid fa-users me-1"></i> User Management
+                                <i class="fa-solid fa-users me-1"></i> <?php echo htmlspecialchars(t('nav.user_management'), ENT_QUOTES, 'UTF-8'); ?>
                             </a>
                         </li>
                         <li>
                             <a class="dropdown-item" href="/admin/migrations">
-                                <i class="fa-solid fa-database me-1"></i> Migrations
+                                <i class="fa-solid fa-database me-1"></i> <?php echo htmlspecialchars(t('nav.migrations'), ENT_QUOTES, 'UTF-8'); ?>
                             </a>
                         </li>
                         <li>
                             <a class="dropdown-item" href="/settings">
-                                <i class="fa-solid fa-gear me-1"></i> Settings
+                                <i class="fa-solid fa-gear me-1"></i> <?php echo htmlspecialchars(t('nav.settings'), ENT_QUOTES, 'UTF-8'); ?>
                             </a>
                         </li>
                     </ul>
@@ -143,8 +145,11 @@ $navSiteName = App::settings('site.name') ?? 'Portal';
 
             <!-- 👤 User area (right side) -->
             <div class="d-flex align-items-center gap-2">
+                <!-- 🌐 Language switcher -->
+                <?php echo I18n::languageSwitcher(); ?>
+
                 <!-- 🌙 Dark mode toggle -->
-                <button type="button" class="portal-theme-toggle" aria-label="Toggle dark mode">
+                <button type="button" class="portal-theme-toggle" aria-label="<?php echo htmlspecialchars(t('nav.toggle_dark_mode'), ENT_QUOTES, 'UTF-8'); ?>">
                     <i class="fa-solid fa-moon"></i>
                 </button>
 
@@ -170,13 +175,13 @@ $navSiteName = App::settings('site.name') ?? 'Portal';
                         <li><hr class="dropdown-divider"></li>
                         <li>
                             <a class="dropdown-item" href="/account">
-                                <i class="fa-solid fa-user-gear me-1"></i> My Account
+                                <i class="fa-solid fa-user-gear me-1"></i> <?php echo htmlspecialchars(t('nav.my_account'), ENT_QUOTES, 'UTF-8'); ?>
                             </a>
                         </li>
                         <li><hr class="dropdown-divider"></li>
                         <li>
                             <a class="dropdown-item" href="/logout">
-                                <i class="fa-solid fa-right-from-bracket me-1"></i> Sign Out
+                                <i class="fa-solid fa-right-from-bracket me-1"></i> <?php echo htmlspecialchars(t('nav.sign_out'), ENT_QUOTES, 'UTF-8'); ?>
                             </a>
                         </li>
                     </ul>
@@ -187,11 +192,15 @@ $navSiteName = App::settings('site.name') ?? 'Portal';
             <ul class="navbar-nav ms-auto">
                 <li class="nav-item">
                     <a class="nav-link" href="/login">
-                        <i class="fa-solid fa-right-to-bracket me-1"></i> Sign In
+                        <i class="fa-solid fa-right-to-bracket me-1"></i> <?php echo htmlspecialchars(t('nav.sign_in'), ENT_QUOTES, 'UTF-8'); ?>
                     </a>
                 </li>
+                <li class="nav-item d-flex align-items-center">
+                    <!-- 🌐 Language switcher (unauthenticated) -->
+                    <?php echo I18n::languageSwitcher(); ?>
+                </li>
                 <li class="nav-item">
-                    <button type="button" class="portal-theme-toggle" aria-label="Toggle dark mode">
+                    <button type="button" class="portal-theme-toggle" aria-label="<?php echo htmlspecialchars(t('nav.toggle_dark_mode'), ENT_QUOTES, 'UTF-8'); ?>">
                         <i class="fa-solid fa-moon"></i>
                     </button>
                 </li>

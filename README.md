@@ -1,6 +1,6 @@
 # WebMS Intra
 
-> **Version:** 0.6.0 | **PHP** 8.5 (backward-compatible with 8.4) | **MySQL** 8.0+ | **DreamHost** shared hosting
+> **Version:** 0.7.0 | **PHP** 8.5 (backward-compatible with 8.4) | **MySQL** 8.0+ | **DreamHost** shared hosting
 
 A modular internal portal platform for organisations, providing centralised access to internal tools, expense management, and future modules (Calendar, Attendance, Leadership, Preaching Plan).
 
@@ -49,7 +49,9 @@ WebMS-Intra/                         # Git repository root (NOT deployed)
     │   ├── RateLimiter.php          # Login rate limiting
     │   ├── Router.php               # Front-controller URL dispatcher
     │   ├── WebAuthn.php             # WebAuthn/PassKey server-side helper
+    │   ├── I18n.php                 # Internationalisation framework (translations, RTL, formatting)
     │   └── templates/               # Shared page templates
+    ├── lang/                        # Translation files (en.php, cy.php, etc.)
     ├── vendor/simplejwt/            # Lightweight RS256 JWT verifier
     ├── sql/                         # Numbered SQL migration files
     ├── _auth_keys/                  # DB credentials, encryption key (gitignored)
@@ -162,7 +164,7 @@ Server-managed directories (`_auth_keys/`, `_uploads/`, `_backups/`, `_libraries
 | 5     | Attendance Tracker                                                              | Done             |
 | 6     | Expenses — Multi-Approver, Email, PDF, Treasury                                 | Done             |
 | 7     | SSO & Auth Enhancement (Google OAuth, WebAuthn/PassKeys, Account Linking)       | Done             |
-| 8     | Translations / i18n                                                             | Planned          |
+| 8     | Translations / i18n (I18n framework, RTL support, language switcher)            | Done             |
 | 9     | Polish & Hardening                                                              | Planned          |
 
 ---

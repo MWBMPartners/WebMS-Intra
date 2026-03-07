@@ -25,6 +25,7 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\Asset;
 use Portal\Core\Auth;
+use Portal\Core\I18n;
 
 // 🛡️ Ensure session is started (needed for CSRF meta tag and nav user info)
 Auth::ensureSession();
@@ -45,15 +46,15 @@ header('Referrer-Policy: strict-origin-when-cross-origin');
 // 🎨 Determine initial theme from localStorage (handled by JS, default light)
 ?>
 <!doctype html>
-<html lang="en" data-bs-theme="light">
+<html lang="<?php echo htmlspecialchars(I18n::locale(), ENT_QUOTES, 'UTF-8'); ?>" dir="<?php echo I18n::dir(); ?>" data-bs-theme="light">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="csrf-token" content="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
     <title><?php echo htmlspecialchars($pageTitle . ' - ' . $siteName, ENT_QUOTES, 'UTF-8'); ?></title>
 
-    <!-- 🎨 Stylesheets (CDN with local fallback) -->
-    <?php echo Asset::bootstrapCss(); ?>
+    <!-- 🎨 Stylesheets (CDN with local fallback, RTL variant if needed) -->
+    <?php echo Asset::bootstrapCss(I18n::isRtl()); ?>
 
     <?php echo Asset::fontAwesomeCss(); ?>
 

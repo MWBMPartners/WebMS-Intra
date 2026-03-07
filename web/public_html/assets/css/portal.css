@@ -525,7 +525,46 @@ textarea:focus-visible,
 }
 
 /* ============================================================================
-   18. Print Styles
+   18. RTL (Right-to-Left) Overrides
+   ============================================================================
+   Uses CSS logical properties where possible. Bootstrap 5.3 RTL handles most
+   layout mirroring; these overrides cover portal-specific components.
+   See: https://developer.mozilla.org/en-US/docs/Web/CSS/CSS_logical_properties
+   ============================================================================ */
+
+[dir="rtl"] .portal-navbar .navbar-brand {
+    letter-spacing: 0;
+}
+
+[dir="rtl"] .me-1 { margin-right: 0 !important; margin-left: 0.25rem !important; }
+[dir="rtl"] .me-2 { margin-right: 0 !important; margin-left: 0.5rem !important; }
+[dir="rtl"] .ms-1 { margin-left: 0 !important; margin-right: 0.25rem !important; }
+[dir="rtl"] .ms-2 { margin-left: 0 !important; margin-right: 0.5rem !important; }
+
+[dir="rtl"] .text-end { text-align: left !important; }
+[dir="rtl"] .text-start { text-align: right !important; }
+
+[dir="rtl"] .portal-data-header,
+[dir="rtl"] .portal-data-row {
+    direction: rtl;
+}
+
+[dir="rtl"] .portal-breadcrumb .breadcrumb-item + .breadcrumb-item::before {
+    content: "\\";
+}
+
+[dir="rtl"] .dropdown-menu-end {
+    --bs-position: left;
+}
+
+[dir="rtl"] .portal-card-branded {
+    border-top: 4px solid var(--portal-primary);
+    border-right: none;
+    border-left: none;
+}
+
+/* ============================================================================
+   19. Print Styles
    ============================================================================ */
 
 @media print {

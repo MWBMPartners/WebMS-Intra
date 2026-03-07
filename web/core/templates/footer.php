@@ -42,7 +42,7 @@ if ($copyrightYear !== $currentYear) {
     <div class="container text-center">
         <span>&copy; <?php echo htmlspecialchars($yearDisplay, ENT_QUOTES, 'UTF-8'); ?>
               <?php echo htmlspecialchars($copyrightOrg, ENT_QUOTES, 'UTF-8'); ?>.
-              All rights reserved.</span>
+              <?php echo htmlspecialchars(t('common.all_rights_reserved'), ENT_QUOTES, 'UTF-8'); ?></span>
         <span class="d-none d-md-inline ms-2 text-muted">
             v<?php echo htmlspecialchars(App::version(), ENT_QUOTES, 'UTF-8'); ?>
         </span>

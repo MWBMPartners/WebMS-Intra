@@ -342,4 +342,69 @@ set_exception_handler(function (\Throwable $ex): void {
     }
 });
 
+// 🌐 ---------------------------------------------------------------------------
+// 10. Internationalisation (i18n)
+// -----------------------------------------------------------------------------
+// Initialise the translation framework. Determines the active locale from
+// user preference, session, or browser Accept-Language header.
+// Provides the global t() helper function for translating strings.
+// See: core/I18n.php
+
+// 📋 Define PORTAL_LANG constant for the language directory
+if (defined('PORTAL_LANG') === false) {
+    define('PORTAL_LANG', PORTAL_ROOT . DIRECTORY_SEPARATOR . 'lang');
+}
+
+\Portal\Core\I18n::init();
+
+// 📋 Handle ?lang= query parameter for language switching
+if (isset($_GET['lang']) === true && $_GET['lang'] !== '') {
+    \Portal\Core\I18n::switchLocale($_GET['lang']);
+    // 🔀 Redirect to same page without the lang parameter to avoid sticky URL
+    $currentUri = $_SERVER['REQUEST_URI'] ?? '/';
+    $parsed     = parse_url($currentUri);
+    $path       = $parsed['path'] ?? '/';
+    parse_str($parsed['query'] ?? '', $queryParams);
+    unset($queryParams['lang']);
+    $newQuery = http_build_query($queryParams);
+    $redirect = $path . ($newQuery !== '' ? '?' . $newQuery : '');
+    header('Location: ' . $redirect, true, 302);
+    exit();
+}
+
+// 📋 Load user locale from DB into session on login (if not already set)
+if (session_status() === PHP_SESSION_ACTIVE
+    && isset($_SESSION['user_id']) === true
+    && isset($_SESSION['user_locale']) === false
+) {
+    $localeStmt = $mysqli->prepare('SELECT locale FROM tblUsers WHERE userID = ? LIMIT 1');
+    if ($localeStmt !== false) {
+        $localeUserId = (int) $_SESSION['user_id'];
+        $localeStmt->bind_param('i', $localeUserId);
+        $localeStmt->execute();
+        $localeRow = $localeStmt->get_result()->fetch_assoc();
+        $localeStmt->close();
+        if ($localeRow !== null && $localeRow['locale'] !== null && $localeRow['locale'] !== '') {
+            $_SESSION['user_locale'] = $localeRow['locale'];
+            \Portal\Core\I18n::setLocale($localeRow['locale']);
+        }
+    }
+}
+
+/**
+ * Global translation helper function.
+ * Shortcut for I18n::t() — use in templates and app files.
+ *
+ * @param string $key    Translation key
+ * @param array  $params Replacement parameters
+ *
+ * @return string Translated string
+ */
+if (function_exists('t') === false) {
+    function t(string $key, array $params = []): string
+    {
+        return \Portal\Core\I18n::t($key, $params);
+    }
+}
+
 // 🏁 Bootstrap completed – Router will now take over in the front controller.

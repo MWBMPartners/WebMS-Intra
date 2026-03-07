@@ -57,7 +57,7 @@ $username   = '';
 
 // 📨 Flash messages from password-reset flow
 if (isset($_GET['reset']) === true && $_GET['reset'] === '1') {
-    $successMsg = 'Your password has been updated. Please sign in.';
+    $successMsg = t('auth.password_reset_success');
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -65,20 +65,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // 🚦 Rate-limit check (block brute-force attempts)
     if (RateLimiter::isBlocked() === true) {
         $remaining = RateLimiter::lockoutRemaining();
-        $errorMsg  = 'Too many failed attempts. Please try again in ' . $remaining . ' minute(s).';
+        $errorMsg  = t('auth.too_many_attempts', ['minutes' => $remaining]);
     }
 
     // 🔒 CSRF check
     if ($errorMsg === '') {
         if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
-            $errorMsg = 'Invalid session token. Please try again.';
+            $errorMsg = t('auth.invalid_session_token');
         }
     }
 
     // 🤖 Captcha check (if configured)
     if ($errorMsg === '') {
         if (Captcha::verify($_POST) === false) {
-            $errorMsg = 'Captcha verification failed.';
+            $errorMsg = t('auth.captcha_failed');
         }
     }
 
@@ -87,7 +87,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $username = trim($_POST['username'] ?? '');
         $password = $_POST['password'] ?? '';
         if ($username === '' || $password === '') {
-            $errorMsg = 'Please enter your username or email and password.';
+            $errorMsg = t('auth.enter_credentials');
         }
     }
 
@@ -103,7 +103,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             header('Location: ' . $target, true, 302);
             exit();
         }
-        $errorMsg = 'Invalid credentials.';
+        $errorMsg = t('auth.invalid_credentials');
     }
 
     if ($errorMsg !== '') {
@@ -116,14 +116,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 // -----------------------------------------------------------------------------
 ?>
 <!doctype html>
-<html lang="en" data-bs-theme="light">
+<html lang="<?php echo htmlspecialchars(\Portal\Core\I18n::locale(), ENT_QUOTES, 'UTF-8'); ?>" dir="<?php echo \Portal\Core\I18n::dir(); ?>" data-bs-theme="light">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Sign In &bull; <?php echo htmlspecialchars($SETTINGS['site']['name'] ?? 'Portal', ENT_QUOTES, 'UTF-8'); ?></title>
+    <title><?php echo htmlspecialchars(t('auth.sign_in_title'), ENT_QUOTES, 'UTF-8'); ?> &bull; <?php echo htmlspecialchars($SETTINGS['site']['name'] ?? 'Portal', ENT_QUOTES, 'UTF-8'); ?></title>
 
     <!-- 🎨 Stylesheets (CDN with local fallback) -->
-    <?php echo Asset::bootstrapCss(); ?>
+    <?php echo Asset::bootstrapCss(\Portal\Core\I18n::isRtl()); ?>
     <?php echo Asset::fontAwesomeCss(); ?>
     <?php echo Asset::portalCss(); ?>
 
@@ -147,7 +147,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <!-- 🏷️ Site branding -->
     <div class="text-center mb-3">
         <img src="/assets/images/logo.svg" alt="Logo" style="height:48px;" class="mb-2">
-        <h1 class="h4 mb-0">Sign In</h1>
+        <h1 class="h4 mb-0"><?php echo htmlspecialchars(t('auth.sign_in_title'), ENT_QUOTES, 'UTF-8'); ?></h1>
         <p class="text-muted small mb-0"><?php echo htmlspecialchars($SETTINGS['site']['name'] ?? 'Portal', ENT_QUOTES, 'UTF-8'); ?></p>
     </div>
 
@@ -172,45 +172,45 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
 
         <div class="mb-3">
-            <label for="username" class="form-label">Username or Email</label>
+            <label for="username" class="form-label"><?php echo htmlspecialchars(t('auth.username_or_email'), ENT_QUOTES, 'UTF-8'); ?></label>
             <input type="text" class="form-control" id="username" name="username"
                    value="<?php echo htmlspecialchars($username, ENT_QUOTES, 'UTF-8'); ?>"
                    autocomplete="username" required autofocus>
         </div>
 
         <div class="mb-2">
-            <label for="password" class="form-label">Password</label>
+            <label for="password" class="form-label"><?php echo htmlspecialchars(t('auth.password'), ENT_QUOTES, 'UTF-8'); ?></label>
             <input type="password" class="form-control" id="password" name="password"
                    autocomplete="current-password" required>
         </div>
 
         <!-- 🔗 Forgot password link -->
         <div class="text-end mb-3">
-            <a href="/forgot-password" class="small text-decoration-none">Forgot your password?</a>
+            <a href="/forgot-password" class="small text-decoration-none"><?php echo htmlspecialchars(t('auth.forgot_password'), ENT_QUOTES, 'UTF-8'); ?></a>
         </div>
 
         <?php echo Captcha::widget(); ?>
 
         <button type="submit" class="btn btn-success w-100">
-            <i class="fa-solid fa-right-to-bracket me-1"></i> Sign In
+            <i class="fa-solid fa-right-to-bracket me-1"></i> <?php echo htmlspecialchars(t('auth.sign_in'), ENT_QUOTES, 'UTF-8'); ?>
         </button>
     </form>
 
     <!-- 🔑 SSO buttons (shown only when configured) -->
     <?php if (Auth::isMS365Configured() === true || Auth::isGoogleConfigured() === true): ?>
         <div class="d-flex align-items-center my-3">
-            <hr class="flex-grow-1"><span class="px-2 text-muted small">or</span><hr class="flex-grow-1">
+            <hr class="flex-grow-1"><span class="px-2 text-muted small"><?php echo htmlspecialchars(t('auth.or'), ENT_QUOTES, 'UTF-8'); ?></span><hr class="flex-grow-1">
         </div>
 
         <?php if (Auth::isMS365Configured() === true): ?>
             <a href="/login/ms365" class="btn btn-outline-primary w-100 mb-2">
-                <i class="fa-brands fa-microsoft me-1"></i> Sign in with Microsoft 365
+                <i class="fa-brands fa-microsoft me-1"></i> <?php echo htmlspecialchars(t('auth.sign_in_with_ms365'), ENT_QUOTES, 'UTF-8'); ?>
             </a>
         <?php endif; ?>
 
         <?php if (Auth::isGoogleConfigured() === true): ?>
             <a href="/login/google" class="btn btn-outline-danger w-100 mb-2">
-                <i class="fa-brands fa-google me-1"></i> Sign in with Google
+                <i class="fa-brands fa-google me-1"></i> <?php echo htmlspecialchars(t('auth.sign_in_with_google'), ENT_QUOTES, 'UTF-8'); ?>
             </a>
         <?php endif; ?>
     <?php endif; ?>
@@ -218,10 +218,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <!-- 🔐 PassKey / WebAuthn sign-in button -->
     <div id="webauthn-section" class="d-none">
         <div class="d-flex align-items-center my-3">
-            <hr class="flex-grow-1"><span class="px-2 text-muted small">or use a passkey</span><hr class="flex-grow-1">
+            <hr class="flex-grow-1"><span class="px-2 text-muted small"><?php echo htmlspecialchars(t('auth.or_use_passkey'), ENT_QUOTES, 'UTF-8'); ?></span><hr class="flex-grow-1">
         </div>
         <button type="button" class="btn btn-outline-secondary w-100" id="btnPasskeyLogin">
-            <i class="fa-solid fa-fingerprint me-1"></i> Sign in with Passkey
+            <i class="fa-solid fa-fingerprint me-1"></i> <?php echo htmlspecialchars(t('auth.sign_in_with_passkey'), ENT_QUOTES, 'UTF-8'); ?>
         </button>
         <div id="passkeyLoginStatus" class="small mt-2 text-center"></div>
     </div>

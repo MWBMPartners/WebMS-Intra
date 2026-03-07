@@ -70,6 +70,9 @@ class Asset
     /** @var string Local path for Bootstrap CSS */
     private const LOCAL_BOOTSTRAP_CSS = '/assets/css/bootstrap.min.css';
 
+    /** @var string Local path for Bootstrap RTL CSS */
+    private const LOCAL_BOOTSTRAP_RTL_CSS = '/assets/css/bootstrap.rtl.min.css';
+
     /** @var string Local path for Bootstrap JS bundle */
     private const LOCAL_BOOTSTRAP_JS = '/assets/js/bootstrap.bundle.min.js';
 
@@ -90,6 +93,11 @@ class Asset
     private const CDN_BOOTSTRAP_CSS =
         'https://cdn.jsdelivr.net/npm/bootstrap@' . self::BOOTSTRAP_VERSION
         . '/dist/css/bootstrap.min.css';
+
+    /** @var string CDN URL for Bootstrap RTL CSS */
+    private const CDN_BOOTSTRAP_RTL_CSS =
+        'https://cdn.jsdelivr.net/npm/bootstrap@' . self::BOOTSTRAP_VERSION
+        . '/dist/css/bootstrap.rtl.min.css';
 
     /** @var string CDN URL for Bootstrap JS bundle */
     private const CDN_BOOTSTRAP_JS =
@@ -207,11 +215,22 @@ class Asset
 
     /**
      * Bootstrap 5.3.3 CSS via jsdelivr CDN with local fallback.
+     * When RTL mode is active, loads the bootstrap.rtl.min.css variant instead.
+     *
+     * @param bool $rtl Whether to load the RTL variant
      *
      * @return string HTML <link> tag
      */
-    public static function bootstrapCss(): string
+    public static function bootstrapCss(bool $rtl = false): string
     {
+        if ($rtl === true) {
+            return self::css(
+                self::CDN_BOOTSTRAP_RTL_CSS,
+                self::LOCAL_BOOTSTRAP_RTL_CSS,
+                '' // 📋 SRI hash omitted for RTL variant — local fallback handles integrity
+            );
+        }
+
         return self::css(
             self::CDN_BOOTSTRAP_CSS,
             self::LOCAL_BOOTSTRAP_CSS,

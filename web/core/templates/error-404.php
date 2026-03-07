@@ -14,7 +14,7 @@
 
 declare(strict_types=1);
 
-$pageTitle   = 'Page Not Found';
+$pageTitle   = t('error.page_not_found');
 $pageSection = '';
 $breadcrumbs = [];
 
@@ -23,12 +23,12 @@ require __DIR__ . DIRECTORY_SEPARATOR . 'header.php';
 
 <div class="portal-error-page">
     <div class="portal-error-code">404</div>
-    <h1 class="portal-error-title">Page Not Found</h1>
+    <h1 class="portal-error-title"><?php echo htmlspecialchars(t('error.page_not_found'), ENT_QUOTES, 'UTF-8'); ?></h1>
     <p class="portal-error-text">
-        The page you are looking for does not exist or may have been moved.
+        <?php echo htmlspecialchars(t('error.page_not_found_text'), ENT_QUOTES, 'UTF-8'); ?>
     </p>
     <a href="/" class="btn btn-primary">
-        <i class="fa-solid fa-house-chimney me-1"></i> Return to Dashboard
+        <i class="fa-solid fa-house-chimney me-1"></i> <?php echo htmlspecialchars(t('error.return_to_dashboard'), ENT_QUOTES, 'UTF-8'); ?>
     </a>
 </div>
 

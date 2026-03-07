@@ -12,13 +12,13 @@
 -- After running, all individual migrations (000–006) are marked as executed
 -- in tblMigrations so the web-based Migrator won't re-run them.
 --
--- Covers migrations: 000, 001, 002, 003, 004, 005, 006, 007, 008, 009, 010, 011
+-- Covers migrations: 000, 001, 002, 003, 004, 005, 006, 007, 008, 009, 010, 011, 012
 -- =============================================================================
 -- @package   Portal\Database
 -- @author    MWBM Partners Ltd (t/a MWservices)
 -- @copyright 2025-2026 MWBM Partners Ltd (t/a MWservices)
 -- @license   All Rights Reserved
--- @version   0.5.0
+-- @version   0.7.0
 -- =============================================================================
 
 
@@ -132,6 +132,7 @@ CREATE TABLE IF NOT EXISTS `tblUsers` (
     `emailAddress` VARCHAR(255) COLLATE utf8mb4_general_ci NOT NULL,
     `phoneNumber`  VARCHAR(50)  COLLATE utf8mb4_general_ci DEFAULT NULL,
     `avatarPath`   VARCHAR(255) COLLATE utf8mb4_general_ci DEFAULT NULL,
+    `locale`       VARCHAR(10)  COLLATE utf8mb4_general_ci DEFAULT 'en',
     `isActive`     TINYINT(1)   DEFAULT 1,
     `isAdmin`      TINYINT(1)   DEFAULT 0,
     `isRootAdmin`  TINYINT(1)   DEFAULT 0,
@@ -735,6 +736,15 @@ INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isSensitive`, `default
 VALUES ('auth.webauthn.rpID', '', 0, '')
 ON DUPLICATE KEY UPDATE `settingKey` = `settingKey`;
 
+-- ─── i18n settings (from migration 012) ─────────────────────────────────────
+INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isSensitive`, `defaultValue`)
+VALUES ('i18n.defaultLocale', 'en', 0, 'en')
+ON DUPLICATE KEY UPDATE `settingKey` = `settingKey`;
+
+INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isSensitive`, `defaultValue`)
+VALUES ('i18n.enabled', 'true', 0, 'true')
+ON DUPLICATE KEY UPDATE `settingKey` = `settingKey`;
+
 -- ─── Mail settings ───────────────────────────────────────────────────────────
 INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isSensitive`, `defaultValue`)
 VALUES ('mail.defaultFromName', 'Portal', 0, NULL)
@@ -1089,4 +1099,7 @@ INSERT INTO `tblMigrations` (`filename`) VALUES ('010_expenses_phase6.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
 INSERT INTO `tblMigrations` (`filename`) VALUES ('011_auth_phase7.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('012_i18n_phase8.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;

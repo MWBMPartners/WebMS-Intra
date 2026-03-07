@@ -14,7 +14,7 @@
 
 declare(strict_types=1);
 
-$pageTitle   = 'Server Error';
+$pageTitle   = t('error.server_error');
 $pageSection = '';
 $breadcrumbs = [];
 
@@ -23,13 +23,12 @@ require __DIR__ . DIRECTORY_SEPARATOR . 'header.php';
 
 <div class="portal-error-page">
     <div class="portal-error-code">500</div>
-    <h1 class="portal-error-title">Something Went Wrong</h1>
+    <h1 class="portal-error-title"><?php echo htmlspecialchars(t('error.something_wrong'), ENT_QUOTES, 'UTF-8'); ?></h1>
     <p class="portal-error-text">
-        An unexpected error occurred. The issue has been logged and our team will look into it.
-        Please try again later.
+        <?php echo htmlspecialchars(t('error.server_error_text'), ENT_QUOTES, 'UTF-8'); ?>
     </p>
     <a href="/" class="btn btn-primary">
-        <i class="fa-solid fa-house-chimney me-1"></i> Return to Dashboard
+        <i class="fa-solid fa-house-chimney me-1"></i> <?php echo htmlspecialchars(t('error.return_to_dashboard'), ENT_QUOTES, 'UTF-8'); ?>
     </a>
 </div>
 
