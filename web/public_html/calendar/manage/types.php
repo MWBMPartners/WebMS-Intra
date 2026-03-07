@@ -38,7 +38,10 @@ if (App::isAdmin() === false) {
 // 💾 Handle POST actions
 // -----------------------------------------------------------------------------
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    Auth::verifyCsrf($_POST['csrf_token'] ?? '');
+    if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
+        http_response_code(403);
+        exit('Invalid CSRF token.');
+    }
     $action = $_POST['action'] ?? '';
     $entity = $_POST['entity'] ?? ''; // 'type' or 'category'
 
@@ -79,7 +82,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($action === 'delete' && $entity === 'type') {
         $typeID = (int) ($_POST['typeID'] ?? 0);
         if ($typeID > 0) {
-            $mysqli->query('UPDATE tblEventTypes SET parentID = NULL WHERE parentID = ' . $typeID);
+            $stmtP = $mysqli->prepare('UPDATE tblEventTypes SET parentID = NULL WHERE parentID = ?');
+            if ($stmtP !== false) {
+                $stmtP->bind_param('i', $typeID);
+                $stmtP->execute();
+                $stmtP->close();
+            }
             $stmt = $mysqli->prepare('DELETE FROM tblEventTypes WHERE typeID = ?');
             if ($stmt !== false) {
                 $stmt->bind_param('i', $typeID);
@@ -94,7 +102,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($action === 'delete' && $entity === 'category') {
         $catID = (int) ($_POST['categoryID'] ?? 0);
         if ($catID > 0) {
-            $mysqli->query('UPDATE tblEventCategories SET parentID = NULL WHERE parentID = ' . $catID);
+            $stmtP = $mysqli->prepare('UPDATE tblEventCategories SET parentID = NULL WHERE parentID = ?');
+            if ($stmtP !== false) {
+                $stmtP->bind_param('i', $catID);
+                $stmtP->execute();
+                $stmtP->close();
+            }
             $stmt = $mysqli->prepare('DELETE FROM tblEventCategories WHERE categoryID = ?');
             if ($stmt !== false) {
                 $stmt->bind_param('i', $catID);

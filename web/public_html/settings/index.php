@@ -46,7 +46,10 @@ $isRoot = App::isRootAdmin();
 // 🗑️ Handle delete action (POST, root admin only)
 // -----------------------------------------------------------------------------
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'delete') {
-    Auth::verifyCsrf($_POST['csrf_token'] ?? '');
+    if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
+        http_response_code(403);
+        exit('Invalid CSRF token.');
+    }
     if ($isRoot === true) {
         $deleteId = (int) ($_POST['settingID'] ?? 0);
         if ($deleteId > 0) {

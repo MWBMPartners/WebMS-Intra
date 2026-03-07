@@ -37,7 +37,10 @@ if (App::isAdmin() === false) {
 // 🔧 Handle resolve/unresolve actions (POST)
 // -----------------------------------------------------------------------------
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) === true) {
-    Auth::verifyCsrf($_POST['csrf_token'] ?? '');
+    if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
+        http_response_code(403);
+        exit('Invalid CSRF token.');
+    }
 
     $errorId = (int) ($_POST['error_id'] ?? 0);
     $action  = $_POST['action'];

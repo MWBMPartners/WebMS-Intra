@@ -37,7 +37,10 @@ if (App::isAdmin() === false) {
 // 💾 Handle POST actions (create, update, delete)
 // -----------------------------------------------------------------------------
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    Auth::verifyCsrf($_POST['csrf_token'] ?? '');
+    if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
+        http_response_code(403);
+        exit('Invalid CSRF token.');
+    }
     $action = $_POST['action'] ?? '';
 
     if ($action === 'create') {

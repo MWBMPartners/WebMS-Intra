@@ -33,7 +33,10 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     exit();
 }
 
-Auth::verifyCsrf($_POST['csrf_token'] ?? '');
+if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
+    http_response_code(403);
+    exit('Invalid CSRF token.');
+}
 
 $sessionID = (int) ($_POST['sessionID'] ?? 0);
 $userId    = $_SESSION['user_id'] ?? null;

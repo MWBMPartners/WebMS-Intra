@@ -39,7 +39,10 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 }
 
 // 🛡️ CSRF verification
-Auth::verifyCsrf($_POST['csrf_token'] ?? '');
+if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
+    http_response_code(403);
+    exit('Invalid CSRF token.');
+}
 
 // -----------------------------------------------------------------------------
 // 📋 Collect and validate form fields
