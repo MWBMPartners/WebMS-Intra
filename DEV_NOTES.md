@@ -212,6 +212,9 @@ the web-based Migrator (admin-only) and tracked in `tblMigrations`.
 | `003_add_missing_settings.sql` | Required settings entries |
 | `004_seed_routes.sql` | Initial route definitions |
 | `006_local_auth_enhancement.sql` | Password resets, password policy settings, auth routes |
+| `007_admin_routes.sql` | Admin section routes |
+| `008_calendar_events_schema.sql` | Calendar / Events / Preaching Plan tables and seeds |
+| `009_attendance_schema.sql` | Attendance service types, sessions, counts tables and seeds |
 | `full_schema.sql` | Consolidated schema for fresh installs (all tables + seeds) |
 
 ---

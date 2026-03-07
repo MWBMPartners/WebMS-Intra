@@ -63,6 +63,8 @@ WebMS-Intra/                         # Git repository root (NOT deployed)
     │   ├── auth/                    # Login, forgot/reset password, account
     │   ├── dashboard/               # Portal home with app cards
     │   ├── expenses/                # Expense claim lifecycle
+    │   ├── attendance/              # Attendance tracker app
+    │   ├── calendar/                # Calendar / Events / Preaching Plan
     │   ├── help/                    # Help centre pages
     │   └── settings/                # Admin settings UI
     ├── public_html_dev/             # Dev web root (Gatekeeper-protected)
@@ -153,9 +155,9 @@ Server-managed directories (`_auth_keys/`, `_uploads/`, `_backups/`, `_libraries
 | 1     | Core Framework                                                                  | Done             |
 | 2     | Local Auth Enhancement (forgot/reset password, account page, policy engine)     | Done             |
 | 2.5   | Directory Restructure (web/ consolidation, deploy fix, bug fixes)               | Done             |
-| 3     | Admin UI (error logs, activity logs, user management, migration runner)         | Planned          |
-| 4     | Calendar / Events / Preaching Plan                                              | Planned (LAUNCH) |
-| 5     | Attendance Tracker                                                              | Planned          |
+| 3     | Admin UI (error logs, activity logs, user management, migration runner)         | Done             |
+| 4     | Calendar / Events / Preaching Plan                                              | Done             |
+| 5     | Attendance Tracker                                                              | Done             |
 | 6     | Expenses — Claim Submission & Tracking                                          | Planned          |
 | 7     | SSO & Auth Enhancement (SIGNula, Google, WebAuthn)                              | Planned          |
 | 8     | Translations / i18n                                                             | Planned          |

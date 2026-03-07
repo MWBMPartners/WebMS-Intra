@@ -348,6 +348,81 @@ COMMENT='Records payment/reimbursement references against approved expense claim
 
 
 -- #############################################################################
+-- SECTION 3B: ATTENDANCE TABLES
+-- #############################################################################
+
+-- -----------------------------------------------------------------------------
+-- 🏷️ tblAttendanceServiceTypes — types of services/events to track attendance for
+-- Supports nested sub-types (e.g. Sabbath School > Children > Kindergarten).
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `tblAttendanceServiceTypes` (
+    `serviceTypeID` INT          NOT NULL AUTO_INCREMENT,
+    `parentID`      INT          DEFAULT NULL COMMENT 'FK to self for sub-types (NULL = top-level)',
+    `typeName`      VARCHAR(150) NOT NULL,
+    `typeSlug`      VARCHAR(100) NOT NULL COMMENT 'URL-safe slug for routing/API',
+    `description`   VARCHAR(500) DEFAULT NULL COMMENT 'Optional description shown in UI',
+    `sortOrder`     INT          NOT NULL DEFAULT 0,
+    `isActive`      TINYINT(1)   NOT NULL DEFAULT 1,
+    `createdAt`     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updatedAt`     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`serviceTypeID`),
+    UNIQUE KEY `uq_att_type_slug` (`typeSlug`),
+    KEY `idx_att_type_parent` (`parentID`),
+    CONSTRAINT `fk_att_type_parent` FOREIGN KEY (`parentID`)
+        REFERENCES `tblAttendanceServiceTypes` (`serviceTypeID`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+COMMENT='Service/event types for attendance tracking, with nested sub-types.';
+
+
+-- -----------------------------------------------------------------------------
+-- 📋 tblAttendanceSessions — a single attendance-recording session
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `tblAttendanceSessions` (
+    `sessionID`     INT          NOT NULL AUTO_INCREMENT,
+    `serviceTypeID` INT          NOT NULL COMMENT 'FK → tblAttendanceServiceTypes',
+    `eventID`       INT          DEFAULT NULL COMMENT 'FK → tblEvents (NULL if standalone)',
+    `sessionDate`   DATE         NOT NULL COMMENT 'Date of the service/event',
+    `sessionTime`   TIME         DEFAULT NULL COMMENT 'Start time (optional)',
+    `notes`         TEXT         DEFAULT NULL COMMENT 'Optional notes about this session',
+    `isDeleted`     TINYINT(1)   NOT NULL DEFAULT 0 COMMENT 'Soft delete flag',
+    `createdByID`   INT          DEFAULT NULL COMMENT 'FK → tblUsers',
+    `updatedByID`   INT          DEFAULT NULL COMMENT 'FK → tblUsers',
+    `createdAt`     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updatedAt`     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`sessionID`),
+    KEY `idx_att_sess_type`   (`serviceTypeID`),
+    KEY `idx_att_sess_event`  (`eventID`),
+    KEY `idx_att_sess_date`   (`sessionDate`),
+    KEY `idx_att_sess_del`    (`isDeleted`),
+    CONSTRAINT `fk_att_sess_type` FOREIGN KEY (`serviceTypeID`)
+        REFERENCES `tblAttendanceServiceTypes` (`serviceTypeID`) ON DELETE RESTRICT,
+    CONSTRAINT `fk_att_sess_creator` FOREIGN KEY (`createdByID`)
+        REFERENCES `tblUsers` (`userID`) ON DELETE SET NULL,
+    CONSTRAINT `fk_att_sess_updater` FOREIGN KEY (`updatedByID`)
+        REFERENCES `tblUsers` (`userID`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+COMMENT='Individual attendance sessions — one row per service/event occasion.';
+
+
+-- -----------------------------------------------------------------------------
+-- 🔢 tblAttendanceCounts — headcount breakdowns within a session
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `tblAttendanceCounts` (
+    `countID`     INT          NOT NULL AUTO_INCREMENT,
+    `sessionID`   INT          NOT NULL COMMENT 'FK → tblAttendanceSessions',
+    `groupLabel`  VARCHAR(100) NOT NULL COMMENT 'Age group or category label (e.g. Adults, Children, Visitors)',
+    `headcount`   INT          NOT NULL DEFAULT 0 COMMENT 'Number of people counted',
+    `sortOrder`   INT          NOT NULL DEFAULT 0,
+    `createdAt`   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`countID`),
+    KEY `idx_att_count_session` (`sessionID`),
+    CONSTRAINT `fk_att_count_session` FOREIGN KEY (`sessionID`)
+        REFERENCES `tblAttendanceSessions` (`sessionID`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+COMMENT='Headcount breakdowns per session — multiple groups per session.';
+
+
+-- #############################################################################
 -- SECTION 4: LOGGING TABLES
 -- #############################################################################
 
@@ -716,7 +791,15 @@ VALUES ('attendance.enabled', 'false', 0, 'false')
 ON DUPLICATE KEY UPDATE `settingKey` = `settingKey`;
 
 INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isSensitive`, `defaultValue`)
-VALUES ('attendancecount.enabled', 'false', 0, 'false')
+VALUES ('attendance.displayName', 'Attendance', 0, 'Attendance')
+ON DUPLICATE KEY UPDATE `settingKey` = `settingKey`;
+
+INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isSensitive`, `defaultValue`)
+VALUES ('attendance.displayIcon', 'fa-solid fa-clipboard-list', 0, 'fa-solid fa-clipboard-list')
+ON DUPLICATE KEY UPDATE `settingKey` = `settingKey`;
+
+INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isSensitive`, `defaultValue`)
+VALUES ('attendance.brandColor', '#6f42c1', 0, '#6f42c1')
 ON DUPLICATE KEY UPDATE `settingKey` = `settingKey`;
 
 INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isSensitive`, `defaultValue`)
@@ -843,6 +926,35 @@ INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`)
 VALUES ('help/faq', 'help/faq.php', 0)
 ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 
+-- ─── Attendance ────────────────────────────────────────────────────────────
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`)
+VALUES ('attendance', 'attendance/index.php', 1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`)
+VALUES ('attendance/record', 'attendance/record.php', 1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`)
+VALUES ('attendance/record/save', 'attendance/record/save.php', 1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`)
+VALUES ('attendance/record/delete', 'attendance/record/delete.php', 1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`)
+VALUES ('attendance/manage', 'attendance/manage/index.php', 1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`)
+VALUES ('attendance/manage/save', 'attendance/manage/save.php', 1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`)
+VALUES ('attendance/report', 'attendance/report.php', 1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
 
 -- #############################################################################
 -- SECTION 7: MARK ALL MIGRATIONS AS EXECUTED
@@ -868,4 +980,13 @@ INSERT INTO `tblMigrations` (`filename`) VALUES ('005_add_help_routes_and_dev_se
 ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
 INSERT INTO `tblMigrations` (`filename`) VALUES ('006_local_auth_enhancement.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('007_admin_routes.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('008_calendar_events_schema.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('009_attendance_schema.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;
