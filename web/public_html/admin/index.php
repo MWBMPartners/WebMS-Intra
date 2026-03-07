@@ -310,6 +310,12 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 </a>
             </div>
             <div class="col-6 col-md-4 col-lg-2">
+                <a href="/admin/integrations" class="btn btn-outline-info w-100 d-flex flex-column align-items-center gap-1 py-3">
+                    <i class="fa-solid fa-plug-circle-check fa-lg"></i>
+                    <span class="small">Integrations</span>
+                </a>
+            </div>
+            <div class="col-6 col-md-4 col-lg-2">
                 <a href="/settings" class="btn btn-outline-info w-100 d-flex flex-column align-items-center gap-1 py-3">
                     <i class="fa-solid fa-sliders fa-lg"></i>
                     <span class="small">Old Settings</span>

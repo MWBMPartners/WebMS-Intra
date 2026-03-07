@@ -4,7 +4,7 @@
 
 Internal portal platform (PHP 8.5, backward-compatible with 8.4, MySQL 8.0, Bootstrap 5.3.3) hosted on DreamHost shared hosting. No CLI, no Composer.
 
-- **Version:** 0.8.0
+- **Version:** 0.8.1
 - **Licence:** All Rights Reserved — MWBM Partners Ltd (t/a MWservices)
 - **Repo:** github.com/MWBMPartners/WebMS-Intra
 - **Server:** portal.millrdsdacambridge.uk

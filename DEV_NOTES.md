@@ -219,7 +219,8 @@ the web-based Migrator (admin-only) and tracked in `tblMigrations`.
 | `011_auth_phase7.sql` | Linked accounts table, WebAuthn credentials table, Google/WebAuthn settings, account routes |
 | `012_i18n_phase8.sql` | Adds locale column to tblUsers, i18n settings (defaultLocale, enabled) |
 | `013_help_translations_route.sql` | Adds route for translations help page |
-| `full_schema.sql` | Consolidated schema for fresh installs (all tables + seeds) |
+| `014_admin_integrations_route.sql` | Adds route for admin integration diagnostics page |
+| `full_schema.sql`                  | Consolidated schema for fresh installs (all tables + seeds) |
 
 ---
 

@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.1] - 2026-03-07
+
+### Added
+
+- **Integration Diagnostics** (`admin/integrations/index.php`, Issue #46) — admin-only page to test MS365 OAuth login configuration, Graph API token acquisition (client-credentials flow), test email sending from shared mailbox via SendAs/delegate, and Google OAuth configuration status. Includes pass/fail badges, Azure AD permissions reference, and CSRF-protected forms.
+- SQL migration `014_admin_integrations_route.sql` — adds `admin/integrations` protected route
+- Integrations quick-link on Admin Dashboard
+
+---
+
 ## [0.8.0] - 2026-03-07
 
 ### Added - Polish & Hardening (Phase 9, Issues #35–#37)
