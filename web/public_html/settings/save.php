@@ -1,107 +1,116 @@
 <?php
-// Path: apps/settings/save.php
+// Path: public_html/settings/save.php
 /**
  * -----------------------------------------------------------------------------
  * Settings Save Handler 💾
  * -----------------------------------------------------------------------------
  * Processes POST from settings add/edit forms. Performs:
- *   • CSRF verification
- *   • Role check (requires Admin or Global Admin)
- *   • Encryption for isSensitive values
- *   • INSERT (new) or UPDATE (existing) row in tblSettings
- *   • Logs activity and redirects back to settings list with flash status
- * -----------------------------------------------------------------------------
- * @package    Portal\Settings
+ *   - CSRF verification
+ *   - Role check (requires Admin or Root Admin)
+ *   - Encryption for isSensitive values
+ *   - INSERT (new) or UPDATE (existing) row in tblSettings
+ *   - Logs activity and redirects back with flash message
+ *
+ * @package   Portal\Settings
+ * @author    MWBM Partners Ltd (t/a MWservices)
+ * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
+ * @version   0.3.0
  * -----------------------------------------------------------------------------
  */
 
 declare(strict_types=1);
 
-require_once dirname(__DIR__, 2) . DIRECTORY_SEPARATOR . 'core' . DIRECTORY_SEPARATOR . 'bootstrap.php';
-
 use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Logger;
+use Portal\Core\Router;
 
-// -----------------------------------------------------------------------------
-// 1. Permission & CSRF checks
-// -----------------------------------------------------------------------------
-
-Auth::ensureSession();
-Auth::requireLogin();
-
-if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
-    echo 'Invalid CSRF token.';
-    exit();
-}
-
-// Require Admin or Root Admin role
+// 🛡️ Admin access check
 if (App::isAdmin() === false) {
-    echo 'Access denied.';
+    Router::renderError(403);
+    return;
+}
+
+// 🛡️ Only accept POST
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    header('Location: /settings');
     exit();
 }
 
-// -----------------------------------------------------------------------------
-// 2. Collect and validate form fields
-// -----------------------------------------------------------------------------
+// 🛡️ CSRF verification
+Auth::verifyCsrf($_POST['csrf_token'] ?? '');
 
-$settingId   = intval($_POST['settingID'] ?? 0);
+// -----------------------------------------------------------------------------
+// 📋 Collect and validate form fields
+// -----------------------------------------------------------------------------
+$settingId   = (int) ($_POST['settingID'] ?? 0);
 $settingKey  = trim($_POST['settingKey'] ?? '');
 $settingVal  = trim($_POST['settingValue'] ?? '');
-$isSensitive = isset($_POST['isSensitive']) ? 1 : 0;
+$isSensitive = isset($_POST['isSensitive']) === true ? 1 : 0;
 
 if ($settingKey === '') {
-    echo 'Setting key is required.';
+    $_SESSION['admin_flash_msg']  = 'Setting key is required.';
+    $_SESSION['admin_flash_type'] = 'danger';
+    header('Location: /settings');
     exit();
 }
 
-// Encrypt sensitive value
-if ($isSensitive === 1) {
+// 🔒 Encrypt sensitive value
+if ($isSensitive === 1 && function_exists('encrypt_setting') === true) {
     $settingVal = encrypt_setting($settingVal);
 }
 
 // -----------------------------------------------------------------------------
-// 3. Insert or update DB row
+// 💾 Insert or update DB row
 // -----------------------------------------------------------------------------
-
 if ($settingId > 0) {
-    // Update existing
+    // ✏️ Update existing
     $stmt = $mysqli->prepare('UPDATE tblSettings SET settingValue = ?, isSensitive = ?, updatedAt = NOW() WHERE settingID = ?');
     if ($stmt === false) {
-        echo 'DB prepare failed.';
+        $_SESSION['admin_flash_msg']  = 'Database error updating setting.';
+        $_SESSION['admin_flash_type'] = 'danger';
+        header('Location: /settings');
         exit();
     }
     $stmt->bind_param('sii', $settingVal, $isSensitive, $settingId);
     $stmt->execute();
     $stmt->close();
-    Logger::activity('SettingsUpdate', 'Updated setting ' . $settingKey);
+    Logger::activity('SettingsUpdate', 'Updated setting: ' . $settingKey, $_SESSION['user_id'] ?? null);
+    $_SESSION['admin_flash_msg']  = 'Setting "' . $settingKey . '" updated.';
+    $_SESSION['admin_flash_type'] = 'success';
 } else {
-    // Insert new – ensure unique key
+    // ➕ Insert new — ensure unique key
     $stmt = $mysqli->prepare('SELECT settingID FROM tblSettings WHERE settingKey = ? LIMIT 1');
-    $stmt->bind_param('s', $settingKey);
-    $stmt->execute();
-    $stmt->store_result();
-    if ($stmt->num_rows > 0) {
+    if ($stmt !== false) {
+        $stmt->bind_param('s', $settingKey);
+        $stmt->execute();
+        $stmt->store_result();
+        if ($stmt->num_rows > 0) {
+            $stmt->close();
+            $_SESSION['admin_flash_msg']  = 'Setting key "' . $settingKey . '" already exists.';
+            $_SESSION['admin_flash_type'] = 'danger';
+            header('Location: /settings');
+            exit();
+        }
         $stmt->close();
-        echo 'Setting key already exists.';
-        exit();
     }
-    $stmt->close();
 
-    $stmt = $mysqli->prepare('INSERT INTO tblSettings (settingKey, settingValue, isSensitive, updatedAt) VALUES (?,?,?,NOW())');
+    $stmt = $mysqli->prepare('INSERT INTO tblSettings (settingKey, settingValue, isSensitive, updatedAt) VALUES (?, ?, ?, NOW())');
     if ($stmt === false) {
-        echo 'DB insert failed.';
+        $_SESSION['admin_flash_msg']  = 'Database error adding setting.';
+        $_SESSION['admin_flash_type'] = 'danger';
+        header('Location: /settings');
         exit();
     }
     $stmt->bind_param('ssi', $settingKey, $settingVal, $isSensitive);
     $stmt->execute();
     $stmt->close();
-    Logger::activity('SettingsInsert', 'Added setting ' . $settingKey);
+    Logger::activity('SettingsInsert', 'Added setting: ' . $settingKey, $_SESSION['user_id'] ?? null);
+    $_SESSION['admin_flash_msg']  = 'Setting "' . $settingKey . '" added.';
+    $_SESSION['admin_flash_type'] = 'success';
 }
 
-// -----------------------------------------------------------------------------
-// 4. Redirect back
-// -----------------------------------------------------------------------------
-header('Location: /settings?success=1');
+// 🔄 Redirect back (PRG pattern)
+header('Location: /settings');
 exit();

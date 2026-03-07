@@ -97,12 +97,46 @@ $navSiteName = App::settings('site.name') ?? 'Portal';
                 ?>
 
                 <?php if (App::isAdmin() === true): ?>
-                <li class="nav-item">
-                    <a class="nav-link<?php echo ($navSection === 'settings') ? ' active' : ''; ?>"
-                       href="/settings"
-                       <?php echo ($navSection === 'settings') ? 'aria-current="page"' : ''; ?>>
-                        <i class="fa-solid fa-gear me-1"></i> Settings
+                <li class="nav-item dropdown">
+                    <a class="nav-link dropdown-toggle<?php echo ($navSection === 'admin' || $navSection === 'settings') ? ' active' : ''; ?>"
+                       href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false"
+                       <?php echo ($navSection === 'admin' || $navSection === 'settings') ? 'aria-current="page"' : ''; ?>>
+                        <i class="fa-solid fa-shield-halved me-1"></i> Admin
                     </a>
+                    <ul class="dropdown-menu">
+                        <li>
+                            <a class="dropdown-item" href="/admin">
+                                <i class="fa-solid fa-gauge me-1"></i> Admin Dashboard
+                            </a>
+                        </li>
+                        <li><hr class="dropdown-divider"></li>
+                        <li>
+                            <a class="dropdown-item" href="/admin/errors">
+                                <i class="fa-solid fa-triangle-exclamation me-1"></i> Error Log
+                            </a>
+                        </li>
+                        <li>
+                            <a class="dropdown-item" href="/admin/activity">
+                                <i class="fa-solid fa-clock-rotate-left me-1"></i> Activity Log
+                            </a>
+                        </li>
+                        <li><hr class="dropdown-divider"></li>
+                        <li>
+                            <a class="dropdown-item" href="/admin/users">
+                                <i class="fa-solid fa-users me-1"></i> User Management
+                            </a>
+                        </li>
+                        <li>
+                            <a class="dropdown-item" href="/admin/migrations">
+                                <i class="fa-solid fa-database me-1"></i> Migrations
+                            </a>
+                        </li>
+                        <li>
+                            <a class="dropdown-item" href="/settings">
+                                <i class="fa-solid fa-gear me-1"></i> Settings
+                            </a>
+                        </li>
+                    </ul>
                 </li>
                 <?php endif; ?>
             </ul>
