@@ -1,23 +1,34 @@
 <?php
-// Path: apps/expenses/treasury/index.php
+// Path: public_html/expenses/treasury/index.php
 /**
  * -----------------------------------------------------------------------------
- * Treasury -- Reimbursement Dashboard 💷
+ * Treasury — Reimbursement Dashboard 💷
  * -----------------------------------------------------------------------------
- * Lists approved expense claims awaiting reimbursement.  Treasury users can
+ * Lists approved expense claims awaiting reimbursement. Treasury users can
  * mark claims as Reimbursed and record payment references via a modal form.
+ *
+ * @package   Portal\Expenses
+ * @author    MWBM Partners Ltd (t/a MWservices)
+ * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
+ * @license   All Rights Reserved
+ * @version   0.4.0
  * -----------------------------------------------------------------------------
  */
 
 declare(strict_types=1);
 
+use Portal\Core\App;
 use Portal\Core\Auth;
-use Portal\Core\Logger;
 
 // 📌 Page metadata for the template system
 $pageTitle   = 'Treasury';
 $pageSection = 'expenses';
 $breadcrumbs = ['Dashboard' => '/', 'Expenses' => '/expenses/treasury', 'Treasury' => ''];
+
+// 📋 Flash message
+$flashMsg  = $_SESSION['admin_flash_msg']  ?? '';
+$flashType = $_SESSION['admin_flash_type'] ?? 'info';
+unset($_SESSION['admin_flash_msg'], $_SESSION['admin_flash_type']);
 
 // 📋 Fetch approved claims awaiting reimbursement
 $claims = [];
@@ -42,8 +53,15 @@ if ($stmt !== false) {
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 
+<?php if ($flashMsg !== ''): ?>
+    <div class="alert alert-<?php echo htmlspecialchars($flashType, ENT_QUOTES, 'UTF-8'); ?> alert-dismissible fade show">
+        <?php echo htmlspecialchars($flashMsg, ENT_QUOTES, 'UTF-8'); ?>
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+    </div>
+<?php endif; ?>
+
 <!-- 💷 Treasury Dashboard -->
-<h1 class="mb-4">Treasury -- Approved Claims</h1>
+<h1 class="mb-4"><i class="fa-solid fa-sterling-sign me-2"></i>Treasury — Approved Claims</h1>
 
 <?php if (empty($claims) === true): ?>
     <div class="alert alert-info">No approved claims awaiting reimbursement.</div>

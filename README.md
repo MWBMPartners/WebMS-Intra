@@ -1,6 +1,6 @@
 # WebMS Intra
 
-> **Version:** 0.3.0 | **PHP** 8.5 (backward-compatible with 8.4) | **MySQL** 8.0+ | **DreamHost** shared hosting
+> **Version:** 0.5.0 | **PHP** 8.5 (backward-compatible with 8.4) | **MySQL** 8.0+ | **DreamHost** shared hosting
 
 A modular internal portal platform for organisations, providing centralised access to internal tools, expense management, and future modules (Calendar, Attendance, Leadership, Preaching Plan).
 
@@ -39,6 +39,7 @@ WebMS-Intra/                         # Git repository root (NOT deployed)
     │   ├── bootstrap.php            # Environment, DB, settings, autoloader
     │   ├── Captcha.php              # Turnstile / reCAPTCHA helper
     │   ├── Debug.php                # Debug panel (admin + ?debug=true)
+    │   ├── ExpenseMailer.php        # Expense email notification helper
     │   ├── ExpensePdf.php           # Expense claim PDF generator
     │   ├── Gatekeeper.php           # Dev/channel access control
     │   ├── Logger.php               # Activity and error logging
@@ -158,7 +159,7 @@ Server-managed directories (`_auth_keys/`, `_uploads/`, `_backups/`, `_libraries
 | 3     | Admin UI (error logs, activity logs, user management, migration runner)         | Done             |
 | 4     | Calendar / Events / Preaching Plan                                              | Done             |
 | 5     | Attendance Tracker                                                              | Done             |
-| 6     | Expenses — Claim Submission & Tracking                                          | Planned          |
+| 6     | Expenses — Multi-Approver, Email, PDF, Treasury                                 | Done             |
 | 7     | SSO & Auth Enhancement (SIGNula, Google, WebAuthn)                              | Planned          |
 | 8     | Translations / i18n                                                             | Planned          |
 | 9     | Polish & Hardening                                                              | Planned          |

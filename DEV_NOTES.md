@@ -215,6 +215,7 @@ the web-based Migrator (admin-only) and tracked in `tblMigrations`.
 | `007_admin_routes.sql` | Admin section routes |
 | `008_calendar_events_schema.sql` | Calendar / Events / Preaching Plan tables and seeds |
 | `009_attendance_schema.sql` | Attendance service types, sessions, counts tables and seeds |
+| `010_expenses_phase6.sql` | Expense multi-approver settings, file stage column, approver role column, view route |
 | `full_schema.sql` | Consolidated schema for fresh installs (all tables + seeds) |
 
 ---

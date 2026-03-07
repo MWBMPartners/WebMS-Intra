@@ -12,13 +12,13 @@
 -- After running, all individual migrations (000–006) are marked as executed
 -- in tblMigrations so the web-based Migrator won't re-run them.
 --
--- Covers migrations: 000, 001, 002, 003, 004, 005, 006
+-- Covers migrations: 000, 001, 002, 003, 004, 005, 006, 007, 008, 009, 010
 -- =============================================================================
 -- @package   Portal\Database
 -- @author    MWBM Partners Ltd (t/a MWservices)
 -- @copyright 2025-2026 MWBM Partners Ltd (t/a MWservices)
 -- @license   All Rights Reserved
--- @version   0.2.0
+-- @version   0.4.0
 -- =============================================================================
 
 
@@ -299,6 +299,7 @@ CREATE TABLE IF NOT EXISTS `tblExpenseClaimFiles` (
     `storedFilename`   VARCHAR(255) COLLATE utf8mb4_general_ci DEFAULT NULL,
     `fileSize`         INT          DEFAULT NULL,
     `fileType`         VARCHAR(100) COLLATE utf8mb4_general_ci DEFAULT NULL,
+    `stage`            VARCHAR(50)  COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT 'PDF generation stage (Pending, Approved, Not Approved, Complete)',
     `uploadedAt`       DATETIME     DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (`fileID`),
     KEY `claimID` (`claimID`),
@@ -314,9 +315,10 @@ CREATE TABLE IF NOT EXISTS `tblExpenseClaimApprovals` (
     `approvalID` INT          NOT NULL AUTO_INCREMENT COMMENT 'Unique approval record identifier',
     `claimID`    INT          NOT NULL                COMMENT 'FK to tblExpenseClaims.claimID',
     `userID`     INT          NOT NULL                COMMENT 'FK to tblUsers.userID — the approver',
-    `decision`   ENUM('Approved','Rejected') NOT NULL COMMENT 'Approver decision for this claim',
-    `comments`   TEXT         DEFAULT NULL             COMMENT 'Optional comments from the approver',
-    `decidedAt`  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'When the decision was made',
+    `decision`     ENUM('Approved','Rejected') NOT NULL COMMENT 'Approver decision for this claim',
+    `comments`     TEXT         DEFAULT NULL             COMMENT 'Optional comments from the approver',
+    `approverRole` VARCHAR(50)  DEFAULT 'approver'       COMMENT 'Role context (admin, dept_lead, mandatory_approver, dept_approver)',
+    `decidedAt`    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'When the decision was made',
     PRIMARY KEY (`approvalID`),
     KEY `idx_approvals_claim` (`claimID`),
     KEY `idx_approvals_user`  (`userID`),
@@ -764,6 +766,22 @@ INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isSensitive`, `default
 VALUES ('expenses.showInlineLogsInDashboard', 'true', 0, NULL)
 ON DUPLICATE KEY UPDATE `settingKey` = `settingKey`;
 
+INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isSensitive`, `defaultValue`)
+VALUES ('expenses.approvalThreshold', '500.00', 0, '500.00')
+ON DUPLICATE KEY UPDATE `settingKey` = `settingKey`;
+
+INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isSensitive`, `defaultValue`)
+VALUES ('expenses.requireTreasuryApproval', 'true', 0, 'true')
+ON DUPLICATE KEY UPDATE `settingKey` = `settingKey`;
+
+INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isSensitive`, `defaultValue`)
+VALUES ('expenses.followUpDays', '7', 0, '7')
+ON DUPLICATE KEY UPDATE `settingKey` = `settingKey`;
+
+INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isSensitive`, `defaultValue`)
+VALUES ('expenses.emailNotifications', 'true', 0, 'true')
+ON DUPLICATE KEY UPDATE `settingKey` = `settingKey`;
+
 -- ─── API endpoint toggles ────────────────────────────────────────────────────
 INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isSensitive`, `defaultValue`)
 VALUES ('api.expenses.list.enabled', 'true', 0, 'true')
@@ -883,6 +901,10 @@ INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`)
 VALUES ('expenses/treasury/save', 'expenses/treasury/save.php', 1)
 ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`)
+VALUES ('expenses/view', 'expenses/view/index.php', 1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
 -- ─── Settings ────────────────────────────────────────────────────────────────
 INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`)
 VALUES ('settings', 'settings/index.php', 1)
@@ -989,4 +1011,7 @@ INSERT INTO `tblMigrations` (`filename`) VALUES ('008_calendar_events_schema.sql
 ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
 INSERT INTO `tblMigrations` (`filename`) VALUES ('009_attendance_schema.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('010_expenses_phase6.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;

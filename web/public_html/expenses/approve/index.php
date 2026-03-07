@@ -1,37 +1,68 @@
 <?php
-// Path: apps/expenses/approve/index.php
+// Path: public_html/expenses/approve/index.php
 /**
  * -----------------------------------------------------------------------------
- * Expenses -- Approval Dashboard ✔️
+ * Expenses — Approval Dashboard ✔️
  * -----------------------------------------------------------------------------
- * Lists pending claims that the current user is authorised to approve.  Shows
+ * Lists pending claims that the current user is authorised to approve. Shows
  * summary info, status badges, and opens a modal to approve / decline each.
- * -----------------------------------------------------------------------------
- * Version: Phase-5 scaffold (UI only -- action handler in approve/save.php).
+ * Supports multi-approver workflow with dept-based filtering.
+ *
+ * @package   Portal\Expenses
+ * @author    MWBM Partners Ltd (t/a MWservices)
+ * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
+ * @license   All Rights Reserved
+ * @version   0.4.0
  * -----------------------------------------------------------------------------
  */
 
 declare(strict_types=1);
 
+use Portal\Core\App;
 use Portal\Core\Auth;
-use Portal\Core\Logger;
 
 // 📌 Page metadata for the template system
 $pageTitle   = 'Approve Expense Claims';
 $pageSection = 'expenses';
 $breadcrumbs = ['Dashboard' => '/', 'Expenses' => '/expenses/approve', 'Approve' => ''];
 
-// TODO: derive approver list via Dept + tblUserDepts. For now, fetch all pending.
+// 📋 Flash message
+$flashMsg  = $_SESSION['admin_flash_msg']  ?? '';
+$flashType = $_SESSION['admin_flash_type'] ?? 'info';
+unset($_SESSION['admin_flash_msg'], $_SESSION['admin_flash_type']);
+
+// 📋 Fetch pending claims — admins see all, approvers see their dept claims
 $claims = [];
-$stmt = $mysqli->prepare(
-    'SELECT EC.claimID, EC.claimTitle, U.fullName, D.deptName, EC.totalAmount, EC.createdAt '
-    . 'FROM tblExpenseClaims EC '
-    . 'JOIN tblUsers U ON U.userID = EC.userID '
-    . 'JOIN tblDepts D ON D.deptID = EC.deptID '
-    . 'WHERE EC.status = "Pending" '
-    . 'ORDER BY EC.createdAt DESC'
-);
+$currentUserId = (int) ($_SESSION['user_id'] ?? 0);
+
+if (App::isAdmin() === true) {
+    // 🛡️ Admins see all pending claims
+    $stmt = $mysqli->prepare(
+        'SELECT EC.claimID, EC.claimTitle, U.fullName, D.deptName, EC.totalAmount, EC.createdAt '
+        . 'FROM tblExpenseClaims EC '
+        . 'JOIN tblUsers U ON U.userID = EC.userID '
+        . 'JOIN tblDepts D ON D.deptID = EC.deptID '
+        . "WHERE EC.status = 'Pending' "
+        . 'ORDER BY EC.createdAt DESC'
+    );
+} else {
+    // 📋 Approvers see claims from their assigned departments
+    $stmt = $mysqli->prepare(
+        'SELECT DISTINCT EC.claimID, EC.claimTitle, U.fullName, D.deptName, EC.totalAmount, EC.createdAt '
+        . 'FROM tblExpenseClaims EC '
+        . 'JOIN tblUsers U ON U.userID = EC.userID '
+        . 'JOIN tblDepts D ON D.deptID = EC.deptID '
+        . 'JOIN tblUserDepts UD ON UD.deptID = EC.deptID AND UD.userID = ? '
+        . "WHERE EC.status = 'Pending' "
+        . 'AND (UD.isApprover = 1 OR UD.isDeptLead = 1 OR UD.isMandatoryApprover = 1) '
+        . 'ORDER BY EC.createdAt DESC'
+    );
+}
+
 if ($stmt !== false) {
+    if (App::isAdmin() === false) {
+        $stmt->bind_param('i', $currentUserId);
+    }
     $stmt->execute();
     $res = $stmt->get_result();
     while ($row = $res->fetch_assoc()) {
@@ -44,8 +75,15 @@ if ($stmt !== false) {
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 
+<?php if ($flashMsg !== ''): ?>
+    <div class="alert alert-<?php echo htmlspecialchars($flashType, ENT_QUOTES, 'UTF-8'); ?> alert-dismissible fade show">
+        <?php echo htmlspecialchars($flashMsg, ENT_QUOTES, 'UTF-8'); ?>
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+    </div>
+<?php endif; ?>
+
 <!-- ✔️ Pending Expense Approvals -->
-<h1 class="mb-4">Pending Expense Approvals</h1>
+<h1 class="mb-4"><i class="fa-solid fa-check-double me-2"></i>Pending Expense Approvals</h1>
 
 <?php if (empty($claims) === true): ?>
     <div class="alert alert-info">No claims awaiting your approval.</div>
