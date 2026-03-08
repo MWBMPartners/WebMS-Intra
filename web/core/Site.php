@@ -64,6 +64,9 @@ class Site
     /** @var string Matched path prefix (path mode only, e.g. 'cambridge') */
     private static string $pathPrefix = '';
 
+    /** @var array Per-request cache: userSiteRoles[userId:siteId] => array|false */
+    private static array $userSiteRoleCache = [];
+
     /* ====================================================================== */
     /* Initialisation                                                         */
     /* ====================================================================== */
@@ -333,6 +336,51 @@ class Site
     }
 
     /**
+     * 🔍 Fetch and cache a user's site role flags in a single query.
+     * Returns the tblUserSites row plus tblUsers.isRootAdmin, or false
+     * if the user has no assignment to the given site.
+     *
+     * @param int     $userID User ID
+     * @param int     $siteID Site ID
+     * @param \mysqli $db     Database connection
+     *
+     * @return array|false Role row or false if not assigned
+     */
+    private static function getUserSiteRole(int $userID, int $siteID, \mysqli $db): array|false
+    {
+        $cacheKey = $userID . ':' . $siteID;
+
+        // 📦 Return cached result if available
+        if (isset(self::$userSiteRoleCache[$cacheKey]) === true) {
+            return self::$userSiteRoleCache[$cacheKey];
+        }
+
+        // 🔍 Single query: LEFT JOIN tblUserSites so we always get isRootAdmin
+        $stmt = $db->prepare(
+            'SELECT U.isRootAdmin, US.isSiteAdmin, US.isSiteRootAdmin, US.isActive AS usActive '
+            . 'FROM tblUsers U '
+            . 'LEFT JOIN tblUserSites US ON US.userID = U.userID AND US.siteID = ? AND US.isActive = 1 '
+            . 'WHERE U.userID = ? LIMIT 1'
+        );
+        if ($stmt === false) {
+            self::$userSiteRoleCache[$cacheKey] = false;
+            return false;
+        }
+        $stmt->bind_param('ii', $siteID, $userID);
+        $stmt->execute();
+        $row = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+
+        if ($row === null) {
+            self::$userSiteRoleCache[$cacheKey] = false;
+            return false;
+        }
+
+        self::$userSiteRoleCache[$cacheKey] = $row;
+        return $row;
+    }
+
+    /**
      * Check if a user belongs to a specific site.
      *
      * @param int     $userID User ID
@@ -343,30 +391,18 @@ class Site
      */
     public static function userBelongsTo(int $userID, int $siteID, \mysqli $db): bool
     {
-        // 🛡️ Umbrella admins (tblUsers.isRootAdmin=1) belong to all sites
-        $uStmt = $db->prepare('SELECT isRootAdmin FROM tblUsers WHERE userID = ? LIMIT 1');
-        if ($uStmt !== false) {
-            $uStmt->bind_param('i', $userID);
-            $uStmt->execute();
-            $uRow = $uStmt->get_result()->fetch_assoc();
-            $uStmt->close();
-            if ($uRow !== null && $uRow['isRootAdmin'] === '1') {
-                return true;
-            }
-        }
-
-        $stmt = $db->prepare(
-            'SELECT 1 FROM tblUserSites '
-            . 'WHERE userID = ? AND siteID = ? AND isActive = 1 LIMIT 1'
-        );
-        if ($stmt === false) {
+        $role = self::getUserSiteRole($userID, $siteID, $db);
+        if ($role === false) {
             return false;
         }
-        $stmt->bind_param('ii', $userID, $siteID);
-        $stmt->execute();
-        $found = $stmt->get_result()->num_rows > 0;
-        $stmt->close();
-        return $found;
+
+        // 🛡️ Umbrella admins belong to all sites
+        if ($role['isRootAdmin'] === '1') {
+            return true;
+        }
+
+        // 📋 Has an active tblUserSites row
+        return ($role['isSiteAdmin'] !== null);
     }
 
     /**
@@ -379,23 +415,11 @@ class Site
      */
     public static function userIsSiteAdmin(int $userID, \mysqli $db): bool
     {
-        $siteID = self::$currentSiteID;
-        $stmt = $db->prepare(
-            'SELECT isSiteAdmin, isSiteRootAdmin FROM tblUserSites '
-            . 'WHERE userID = ? AND siteID = ? AND isActive = 1 LIMIT 1'
-        );
-        if ($stmt === false) {
+        $role = self::getUserSiteRole($userID, self::$currentSiteID, $db);
+        if ($role === false || $role['isSiteAdmin'] === null) {
             return false;
         }
-        $stmt->bind_param('ii', $userID, $siteID);
-        $stmt->execute();
-        $row = $stmt->get_result()->fetch_assoc();
-        $stmt->close();
-
-        if ($row === null) {
-            return false;
-        }
-        return ($row['isSiteAdmin'] === '1' || $row['isSiteRootAdmin'] === '1');
+        return ($role['isSiteAdmin'] === '1' || $role['isSiteRootAdmin'] === '1');
     }
 
     /**
@@ -408,23 +432,11 @@ class Site
      */
     public static function userIsSiteRootAdmin(int $userID, \mysqli $db): bool
     {
-        $siteID = self::$currentSiteID;
-        $stmt = $db->prepare(
-            'SELECT isSiteRootAdmin FROM tblUserSites '
-            . 'WHERE userID = ? AND siteID = ? AND isActive = 1 LIMIT 1'
-        );
-        if ($stmt === false) {
+        $role = self::getUserSiteRole($userID, self::$currentSiteID, $db);
+        if ($role === false || $role['isSiteRootAdmin'] === null) {
             return false;
         }
-        $stmt->bind_param('ii', $userID, $siteID);
-        $stmt->execute();
-        $row = $stmt->get_result()->fetch_assoc();
-        $stmt->close();
-
-        if ($row === null) {
-            return false;
-        }
-        return ($row['isSiteRootAdmin'] === '1');
+        return ($role['isSiteRootAdmin'] === '1');
     }
 
     /**
@@ -652,5 +664,6 @@ class Site
         self::$enabled = false;
         self::$mode = 'session';
         self::$pathPrefix = '';
+        self::$userSiteRoleCache = [];
     }
 }
