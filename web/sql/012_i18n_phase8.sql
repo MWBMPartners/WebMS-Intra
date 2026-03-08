@@ -19,5 +19,5 @@ INSERT INTO tblSettings (settingKey, settingValue, isSensitive) VALUES
 ON DUPLICATE KEY UPDATE settingValue = VALUES(settingValue);
 
 -- 📋 Track this migration
-INSERT INTO tblMigrations (migrationFile, description)
-VALUES ('012_i18n_phase8.sql', 'Phase 8: i18n framework — locale column, settings');
+INSERT INTO tblMigrations (filename)
+VALUES ('012_i18n_phase8.sql');
