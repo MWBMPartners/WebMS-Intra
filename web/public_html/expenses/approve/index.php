@@ -87,7 +87,13 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <?php endif; ?>
 
 <!-- ✔️ Pending Expense Approvals -->
-<h1 class="mb-4"><i class="fa-solid fa-check-double me-2"></i>Pending Expense Approvals</h1>
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h1 class="mb-0"><i class="fa-solid fa-check-double me-2"></i>Pending Expense Approvals</h1>
+    <a href="/expenses/api/export?csrf_token=<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>"
+       class="btn btn-outline-success" title="Export all claims CSV">
+        <i class="fa-solid fa-file-csv me-1"></i> Export
+    </a>
+</div>
 
 <?php if (empty($claims) === true): ?>
     <div class="alert alert-info">No claims awaiting your approval.</div>

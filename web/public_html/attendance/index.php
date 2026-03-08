@@ -163,6 +163,12 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h1 class="mb-0"><i class="fa-solid fa-clipboard-list me-2"></i>Attendance</h1>
     <div class="d-flex gap-2">
+        <?php if (App::isAdmin() === true): ?>
+            <a href="/attendance/export?csrf_token=<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>"
+               class="btn btn-outline-success" title="Export CSV">
+                <i class="fa-solid fa-file-csv"></i>
+            </a>
+        <?php endif; ?>
         <a href="/attendance/record" class="btn btn-success">
             <i class="fa-solid fa-plus me-1"></i> Record Attendance
         </a>

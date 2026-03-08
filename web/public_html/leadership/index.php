@@ -121,6 +121,10 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <h1 class="mb-0"><i class="fa-solid fa-crown me-2" style="color:#d4af37;"></i>Leadership Directory</h1>
     <?php if ($isAdmin === true): ?>
         <div class="d-flex gap-2">
+            <a href="/leadership/export?csrf_token=<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>"
+               class="btn btn-outline-success" title="Export CSV">
+                <i class="fa-solid fa-file-csv me-1"></i> Export
+            </a>
             <a href="/leadership/history" class="btn btn-outline-secondary">
                 <i class="fa-solid fa-clock-rotate-left me-1"></i> History
             </a>

@@ -179,7 +179,13 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <!-- 📋 Activity Log Viewer -->
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h1 class="mb-0"><i class="fa-solid fa-clock-rotate-left me-2"></i>Activity Log</h1>
-    <span class="badge bg-secondary"><?php echo number_format($totalRows); ?> record<?php echo $totalRows !== 1 ? 's' : ''; ?></span>
+    <div class="d-flex align-items-center gap-2">
+        <span class="badge bg-secondary"><?php echo number_format($totalRows); ?> record<?php echo $totalRows !== 1 ? 's' : ''; ?></span>
+        <a href="/admin/activity/export?csrf_token=<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>"
+           class="btn btn-sm btn-outline-success" title="Export CSV">
+            <i class="fa-solid fa-file-csv"></i>
+        </a>
+    </div>
 </div>
 
 <!-- 🔍 Filters -->

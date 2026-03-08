@@ -151,9 +151,15 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <!-- 👥 User Management -->
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h1 class="mb-0"><i class="fa-solid fa-users me-2"></i>User Management</h1>
-    <button class="btn btn-success" data-bs-toggle="modal" data-bs-target="#addUserModal">
-        <i class="fa-solid fa-user-plus me-1"></i> Add User
-    </button>
+    <div class="d-flex gap-2">
+        <a href="/admin/users/export?csrf_token=<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>"
+           class="btn btn-outline-success" title="Export CSV">
+            <i class="fa-solid fa-file-csv"></i>
+        </a>
+        <button class="btn btn-success" data-bs-toggle="modal" data-bs-target="#addUserModal">
+            <i class="fa-solid fa-user-plus me-1"></i> Add User
+        </button>
+    </div>
 </div>
 <noscript>
     <div class="alert alert-warning">
