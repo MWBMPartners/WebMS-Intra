@@ -170,6 +170,13 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <strong>Important:</strong> Approval decisions are final and recorded in the system log. Please review claims carefully before making your decision.
         </div>
     </div>
+
+    <div class="alert alert-info d-flex gap-2" role="alert">
+        <i class="fa-solid fa-shield-halved mt-1"></i>
+        <div>
+            <strong>Concurrent approval protection:</strong> The system prevents duplicate approvals. If another approver has already made a decision on a claim while you are reviewing it, you will be notified and the claim will be removed from your pending list. This ensures each claim is only actioned once.
+        </div>
+    </div>
 </div>
 
 <!-- Section 4: Adding Comments -->

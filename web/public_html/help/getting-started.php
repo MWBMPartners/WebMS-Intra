@@ -40,6 +40,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <a href="#logging-in" class="badge text-bg-secondary text-decoration-none">Logging In</a>
             <a href="#first-time" class="badge text-bg-secondary text-decoration-none">First-Time Setup</a>
             <a href="#navigating" class="badge text-bg-secondary text-decoration-none">Navigating the Portal</a>
+            <a href="#csv-export" class="badge text-bg-secondary text-decoration-none">Exporting Data</a>
             <a href="#dark-mode" class="badge text-bg-secondary text-decoration-none">Dark Mode</a>
         </div>
     </div>
@@ -210,7 +211,21 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     </div>
 </div>
 
-<!-- Section 4: Dark Mode -->
+<!-- Section 4: CSV Export -->
+<div class="portal-card p-4 mb-4" id="csv-export">
+    <h2 class="h4 mb-3"><i class="fa-solid fa-file-csv me-2 text-primary"></i>Exporting Data</h2>
+
+    <p>Many areas of the portal now support <strong>CSV export</strong>, allowing you to download lists and records as spreadsheet-compatible files. Look for the <span class="badge text-bg-success"><i class="fa-solid fa-file-csv me-1"></i>Export CSV</span> button at the top of data lists such as expenses, user management, and logs.</p>
+
+    <div class="alert alert-info d-flex gap-2" role="alert">
+        <i class="fa-solid fa-circle-info mt-1"></i>
+        <div>
+            <strong>Tip:</strong> CSV files can be opened in Microsoft Excel, Google Sheets, or any spreadsheet application for further analysis.
+        </div>
+    </div>
+</div>
+
+<!-- Section 5: Dark Mode -->
 <div class="portal-card p-4 mb-4" id="dark-mode">
     <h2 class="h4 mb-3"><i class="fa-solid fa-moon me-2 text-primary"></i>Dark Mode</h2>
 

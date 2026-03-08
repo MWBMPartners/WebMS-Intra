@@ -42,6 +42,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <a href="#statuses" class="badge text-bg-secondary text-decoration-none">Status Meanings</a>
             <a href="#receipts" class="badge text-bg-secondary text-decoration-none">Uploading Receipts</a>
             <a href="#viewing" class="badge text-bg-secondary text-decoration-none">Viewing Your Claims</a>
+            <a href="#withdrawing" class="badge text-bg-secondary text-decoration-none">Withdrawing a Claim</a>
         </div>
     </div>
 </div>
@@ -273,6 +274,51 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <i class="fa-solid fa-circle-info mt-1"></i>
         <div>
             <strong>Tip:</strong> On mobile devices the claims list adapts to a stacked card layout for easy reading. Scroll down to see all your claims.
+        </div>
+    </div>
+</div>
+
+<!-- Section 6: Withdrawing a Claim -->
+<div class="portal-card p-4 mb-4" id="withdrawing">
+    <h2 class="h4 mb-3"><i class="fa-solid fa-rotate-left me-2 text-warning"></i>Withdrawing a Claim</h2>
+
+    <p>If you have submitted a claim in error or need to make corrections, you can withdraw it while it is still pending approval.</p>
+
+    <div class="list-group list-group-flush mb-3">
+        <div class="list-group-item d-flex gap-3 align-items-start">
+            <span class="badge text-bg-warning rounded-pill mt-1">1</span>
+            <div>
+                <strong>Navigate to your claims list</strong>
+                <p class="mb-0 small text-secondary">Click <strong>Expenses</strong> in the navigation bar to view your submitted claims.</p>
+            </div>
+        </div>
+        <div class="list-group-item d-flex gap-3 align-items-start">
+            <span class="badge text-bg-warning rounded-pill mt-1">2</span>
+            <div>
+                <strong>Find the pending claim</strong>
+                <p class="mb-0 small text-secondary">Look for the claim you wish to withdraw. It must still have a <span class="portal-badge portal-badge-pending"><i class="fa-solid fa-clock"></i> Pending</span> status.</p>
+            </div>
+        </div>
+        <div class="list-group-item d-flex gap-3 align-items-start">
+            <span class="badge text-bg-warning rounded-pill mt-1">3</span>
+            <div>
+                <strong>Click "Withdraw"</strong>
+                <p class="mb-0 small text-secondary">Click the <strong>Withdraw</strong> button on the claim. You will be asked to confirm your decision.</p>
+            </div>
+        </div>
+        <div class="list-group-item d-flex gap-3 align-items-start">
+            <span class="badge text-bg-warning rounded-pill mt-1">4</span>
+            <div>
+                <strong>Confirm the withdrawal</strong>
+                <p class="mb-0 small text-secondary">Once confirmed, the claim status changes to <strong>Withdrawn</strong> and it is removed from the approver's queue.</p>
+            </div>
+        </div>
+    </div>
+
+    <div class="alert alert-warning d-flex gap-2" role="alert">
+        <i class="fa-solid fa-triangle-exclamation mt-1"></i>
+        <div>
+            <strong>Important:</strong> You can only withdraw claims that are still <strong>Pending</strong>. Once a claim has been approved, rejected, or reimbursed, it cannot be withdrawn. If you need to correct an approved claim, contact your administrator.
         </div>
     </div>
 </div>

@@ -49,6 +49,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <a href="#roles" class="badge text-bg-secondary text-decoration-none">User Roles</a>
             <a href="#gatekeeper" class="badge text-bg-secondary text-decoration-none">Dev Site Access (Gatekeeper)</a>
             <a href="#logs" class="badge text-bg-secondary text-decoration-none">Viewing Logs</a>
+            <a href="#csv-export" class="badge text-bg-secondary text-decoration-none">CSV Export</a>
+            <a href="#developer" class="badge text-bg-secondary text-decoration-none">Developer Tools</a>
         </div>
     </div>
 </div>
@@ -219,6 +221,10 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <strong>Note:</strong> Role assignment is currently managed at the database level. Contact your system administrator to change a user's role.
         </div>
     </div>
+
+    <h5 class="mt-4 mb-3">User management list</h5>
+
+    <p>The user management page now includes <strong>pagination</strong> and a <strong>search bar</strong> for easier navigation of large user lists. Use the search field to filter users by name or email, and use the page controls at the bottom to browse through results.</p>
 </div>
 
 <!-- Section 3: Gatekeeper (Dev Site Access) -->
@@ -327,6 +333,67 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <i class="fa-solid fa-circle-info mt-1"></i>
         <div>
             <strong>Tip:</strong> The debug panel is only visible to admin users for security. It will not appear for standard users even if the query parameter is present.
+        </div>
+    </div>
+</div>
+
+<!-- Section 5: CSV Export -->
+<div class="portal-card p-4 mb-4" id="csv-export">
+    <h2 class="h4 mb-3"><i class="fa-solid fa-file-csv me-2 text-primary"></i>CSV Export</h2>
+
+    <p>Several areas of the admin interface now include <strong>CSV export</strong> buttons, allowing you to download data for reporting or record-keeping purposes.</p>
+
+    <h5 class="mt-3 mb-3">Where CSV export is available</h5>
+
+    <ul class="list-group list-group-flush mb-3">
+        <li class="list-group-item d-flex gap-2">
+            <i class="fa-solid fa-users text-primary mt-1"></i>
+            <div>
+                <strong>User management:</strong> Export the full list of portal users including their roles and status.
+            </div>
+        </li>
+        <li class="list-group-item d-flex gap-2">
+            <i class="fa-solid fa-clipboard-list text-primary mt-1"></i>
+            <div>
+                <strong>Activity and error logs:</strong> Export log entries for auditing or analysis.
+            </div>
+        </li>
+        <li class="list-group-item d-flex gap-2">
+            <i class="fa-solid fa-receipt text-primary mt-1"></i>
+            <div>
+                <strong>Expenses and treasury:</strong> Export expense claims and payment records.
+            </div>
+        </li>
+    </ul>
+
+    <p>To export, click the <span class="badge text-bg-success"><i class="fa-solid fa-file-csv me-1"></i>Export CSV</span> button located near the top of the relevant list. The file will download to your browser's default downloads folder.</p>
+</div>
+
+<!-- Section 6: Developer Tools -->
+<div class="portal-card p-4 mb-4" id="developer">
+    <h2 class="h4 mb-3"><i class="fa-solid fa-code me-2 text-primary"></i>Developer Tools</h2>
+
+    <p>The portal framework includes utility classes that developers and advanced administrators should be aware of:</p>
+
+    <ul class="list-group list-group-flush mb-3">
+        <li class="list-group-item d-flex gap-2">
+            <i class="fa-solid fa-box text-info mt-1"></i>
+            <div>
+                <strong>Container class:</strong> A lightweight dependency injection container used by the framework to manage service instances and shared resources across the application.
+            </div>
+        </li>
+        <li class="list-group-item d-flex gap-2">
+            <i class="fa-solid fa-check-double text-info mt-1"></i>
+            <div>
+                <strong>Validator class:</strong> A reusable input validation helper that provides common validation rules (required fields, email format, numeric ranges, etc.) used by forms throughout the portal.
+            </div>
+        </li>
+    </ul>
+
+    <div class="alert alert-info d-flex gap-2" role="alert">
+        <i class="fa-solid fa-circle-info mt-1"></i>
+        <div>
+            <strong>Note:</strong> These classes are part of the <code>Portal\Core</code> namespace and are available for use when developing new portal apps or extending existing functionality.
         </div>
     </div>
 </div>
