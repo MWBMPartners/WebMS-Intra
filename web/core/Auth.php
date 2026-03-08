@@ -156,6 +156,53 @@ class Auth
         return $valid;
     }
 
+    /**
+     * 🛡️ Validate and sanitize a redirect URL to prevent open redirect attacks.
+     * Only allows relative paths on the same origin. Rejects protocol-relative
+     * URLs, encoded traversals, backslash tricks, and external hosts.
+     *
+     * @see https://cheatsheetseries.owasp.org/cheatsheets/Unvalidated_Redirects_and_Forwards_Cheat_Sheet.html
+     *
+     * @param string $url The raw redirect URL (typically from $_GET['redirect'])
+     * @param string $fallback Fallback URL if validation fails (default '/')
+     *
+     * @return string A safe redirect URL
+     */
+    public static function safeRedirectUrl(string $url, string $fallback = '/'): string
+    {
+        // 🔍 Decode the URL to catch encoded bypass attempts (%2F, %5C, etc.)
+        $decoded = rawurldecode($url);
+
+        // 🚫 Must start with a single forward slash (relative path)
+        if (str_starts_with($decoded, '/') === false) {
+            return $fallback;
+        }
+
+        // 🚫 Reject protocol-relative URLs (//evil.com)
+        if (str_starts_with($decoded, '//') === true) {
+            return $fallback;
+        }
+
+        // 🚫 Reject backslash sequences that could be interpreted as protocol-relative
+        if (str_contains($decoded, '\\') === true) {
+            return $fallback;
+        }
+
+        // 🚫 Reject URLs containing a scheme (javascript:, data:, etc.)
+        if (preg_match('#[a-zA-Z][a-zA-Z0-9+\-.]*:#', $decoded) === 1) {
+            return $fallback;
+        }
+
+        // 🔍 Parse the URL — if it has a host component, it's an external redirect
+        $parsed = parse_url($decoded);
+        if ($parsed === false || isset($parsed['host']) === true) {
+            return $fallback;
+        }
+
+        // ✅ URL is a safe relative path
+        return $url;
+    }
+
     /* ====================================================================== */
     /* Microsoft 365 OAuth flow                                               */
     /* ====================================================================== */
@@ -348,10 +395,7 @@ class Auth
         // 📝 Log the successful login
         Logger::activity('LoginMS365', 'User logged in via Microsoft 365');
 
-        $target = $_GET['redirect'] ?? '/';
-        if (str_starts_with($target, '/') === false || str_starts_with($target, '//') === true) {
-            $target = '/';
-        }
+        $target = self::safeRedirectUrl($_GET['redirect'] ?? '/');
         header('Location: ' . $target, true, 302);
         exit();
     }
@@ -559,10 +603,7 @@ class Auth
 
         Logger::activity('LoginGoogle', 'User logged in via Google OAuth');
 
-        $target = $_GET['redirect'] ?? '/';
-        if (str_starts_with($target, '/') === false || str_starts_with($target, '//') === true) {
-            $target = '/';
-        }
+        $target = self::safeRedirectUrl($_GET['redirect'] ?? '/');
         header('Location: ' . $target, true, 302);
         exit();
     }

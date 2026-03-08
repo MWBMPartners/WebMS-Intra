@@ -39,10 +39,7 @@ use Portal\Core\RateLimiter;
 // -----------------------------------------------------------------------------
 
 if (Auth::check() === true) {
-    $target = $_GET['redirect'] ?? '/';
-    if (str_starts_with($target, '/') === false || str_starts_with($target, '//') === true) {
-        $target = '/';
-    }
+    $target = Auth::safeRedirectUrl($_GET['redirect'] ?? '/');
     header('Location: ' . $target, true, 302);
     exit();
 }
@@ -96,10 +93,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($errorMsg === '') {
         if (Auth::loginLocal($username, $password) === true) {
             // 🔀 Redirect to dashboard or original target
-            $target = $_GET['redirect'] ?? '/';
-            if (str_starts_with($target, '/') === false || str_starts_with($target, '//') === true) {
-                $target = '/';
-            }
+            $target = Auth::safeRedirectUrl($_GET['redirect'] ?? '/');
             header('Location: ' . $target, true, 302);
             exit();
         }
