@@ -86,6 +86,85 @@ class Logger
     }
 
     /* ---------------------------------------------------------------------- */
+    /* Audit Trail — Before/After Change Tracking                             */
+    /* ---------------------------------------------------------------------- */
+
+    /**
+     * Log a detailed before/after change for a specific record.
+     *
+     * @param string      $tableName  Database table name (e.g. 'tblExpenseClaims')
+     * @param int         $recordId   Primary key of the affected record
+     * @param string      $action     One of: create, update, delete
+     * @param array|null  $oldData    Previous state (null for create)
+     * @param array|null  $newData    New state (null for delete)
+     * @param int|null    $userId     Acting user ID
+     */
+    public static function audit(
+        string $tableName,
+        int $recordId,
+        string $action,
+        ?array $oldData = null,
+        ?array $newData = null,
+        ?int $userId = null
+    ): void {
+        $db = self::db();
+        $siteId = Site::id();
+
+        // 📋 Build change set for updates (diff old vs new)
+        $changeSet = null;
+        if ($action === 'update' && $oldData !== null && $newData !== null) {
+            $diff = [];
+            foreach ($newData as $field => $newVal) {
+                $oldVal = $oldData[$field] ?? null;
+                if ((string) ($oldVal ?? '') !== (string) ($newVal ?? '')) {
+                    $diff[$field] = ['old' => $oldVal, 'new' => $newVal];
+                }
+            }
+            if (count($diff) === 0) {
+                return; // No actual changes
+            }
+            $changeSet = json_encode($diff, JSON_UNESCAPED_UNICODE);
+        }
+
+        // 📋 For single-field tracking, use first changed field
+        $fieldName = null;
+        $oldValue  = null;
+        $newValue  = null;
+
+        if ($action === 'create' && $newData !== null) {
+            $newValue = json_encode($newData, JSON_UNESCAPED_UNICODE);
+        } elseif ($action === 'delete' && $oldData !== null) {
+            $oldValue = json_encode($oldData, JSON_UNESCAPED_UNICODE);
+        } elseif ($action === 'update' && $changeSet !== null) {
+            $diffArr = json_decode($changeSet, true);
+            if (is_array($diffArr) === true && count($diffArr) === 1) {
+                $fieldName = array_key_first($diffArr);
+                $oldValue  = (string) ($diffArr[$fieldName]['old'] ?? '');
+                $newValue  = (string) ($diffArr[$fieldName]['new'] ?? '');
+            }
+        }
+
+        $ip = self::clientIp();
+
+        $stmt = $db->prepare(
+            'INSERT INTO tblAuditTrail '
+            . '(siteID, userID, tableName, recordID, action, fieldName, oldValue, newValue, changeSet, ipAddress) '
+            . 'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        );
+        if ($stmt === false) {
+            error_log('Audit trail prepare failed: ' . $db->error);
+            return;
+        }
+        $stmt->bind_param(
+            'iisissssss',
+            $siteId, $userId, $tableName, $recordId, $action,
+            $fieldName, $oldValue, $newValue, $changeSet, $ip
+        );
+        $stmt->execute();
+        $stmt->close();
+    }
+
+    /* ---------------------------------------------------------------------- */
     /* PHP Error & Exception Handlers                                         */
     /* ---------------------------------------------------------------------- */
 
