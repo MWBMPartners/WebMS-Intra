@@ -234,7 +234,15 @@ the web-based Migrator (admin-only) and tracked in `tblMigrations`.
 | `026_notification_preferences.sql` | notifyPrefs JSON column, digest settings |
 | `027_user_import_route.sql`        | User CSV import route |
 | `028_event_rsvp.sql`               | tblEventRSVPs, capacity column on tblEvents, RSVP route |
-| `full_schema.sql`                  | Consolidated schema for fresh installs (covers 000–028) |
+| `029_announcements.sql`            | tblAnnouncements, announcement routes and app settings |
+| `030_document_library.sql`         | tblDocCategories, tblDocuments, document routes and settings |
+| `031_audit_trail.sql`              | tblAuditTrail for before/after change tracking |
+| `032_totp_2fa.sql`                 | TOTP columns on tblUsers, tblTotpBackupCodes, 2FA routes |
+| `033_reports.sql`                  | Reports/analytics dashboard routes |
+| `034_workflow_engine.sql`          | tblWorkflows, Steps, Instances, Actions tables |
+| `035_api_expansion.sql`            | REST API routes for events, attendance, users, announcements |
+| `036_tasks_reminders.sql`          | tblTasks with recurrence, task routes and app settings |
+| `full_schema.sql`                  | Consolidated schema for fresh installs (covers 000–036) |
 
 ---
 

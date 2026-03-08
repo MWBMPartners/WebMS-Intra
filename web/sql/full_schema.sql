@@ -12,7 +12,7 @@
 -- After running, all individual migrations (000–020) are marked as executed
 -- in tblMigrations so the web-based Migrator won't re-run them.
 --
--- Covers migrations: 000–028
+-- Covers migrations: 000–036
 -- =============================================================================
 -- @package   Portal\Database
 -- @author    MWBM Partners Ltd (t/a MWservices)
@@ -1802,4 +1802,28 @@ INSERT INTO `tblMigrations` (`filename`) VALUES ('027_user_import_route.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
 INSERT INTO `tblMigrations` (`filename`) VALUES ('028_event_rsvp.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('029_announcements.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('030_document_library.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('031_audit_trail.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('032_totp_2fa.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('033_reports.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('034_workflow_engine.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('035_api_expansion.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('036_tasks_reminders.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;

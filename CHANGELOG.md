@@ -39,7 +39,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `capacity` column on `tblEvents` for optional attendee limits
 - SQL migration `028_event_rsvp.sql`
 
-- Updated `full_schema.sql` — added tblEventRSVPs, capacity column, routes, migration entries through 028
+### Added — Announcements / Noticeboard (Issue #89)
+
+- **Announcements module** — listing, detail view, admin CRUD with priority levels (normal/important/urgent), pinning, scheduled publish/expiry
+- Pinned announcements displayed on dashboard
+- SQL migration `029_announcements.sql`
+
+### Added — File / Document Library (Issue #90)
+
+- **Document library** — category browsing, file upload/download with counter, admin category management, file type icons
+- SQL migration `030_document_library.sql`
+
+### Added — Audit Trail Improvements (Issue #91)
+
+- **Logger::audit()** method for before/after change tracking with automatic diff generation
+- Admin audit trail viewer with table/action filters and pagination
+- SQL migration `031_audit_trail.sql`
+
+### Added — Two-Factor Authentication TOTP (Issue #92)
+
+- **TOTP 2FA** — QR code setup, backup codes, post-login verification challenge, disable option
+- Pure PHP RFC 6238 implementation (`Totp.php` core class)
+- SQL migration `032_totp_2fa.sql`
+
+### Added — Reporting / Analytics Dashboard (Issue #93)
+
+- **Reports dashboard** — summary cards, expense status breakdown, activity trend chart, JSON data endpoint
+- SQL migration `033_reports.sql`
+
+### Added — Configurable Workflow Engine (Issue #94)
+
+- **Workflow engine** — definitions, ordered steps, instance tracking, action logs, admin management UI
+- SQL migration `034_workflow_engine.sql`
+
+### Added — REST API Expansion (Issue #95)
+
+- **New API endpoints** — events list/detail, attendance list, users list (admin), announcements list
+- SQL migration `035_api_expansion.sql`
+
+### Added — Recurring Task / Reminder System (Issue #96)
+
+- **Tasks app** — task management with priorities, due dates, user assignment, recurring tasks
+- Auto-spawns next occurrence when a recurring task is completed
+- SQL migration `036_tasks_reminders.sql`
+
+- Updated `full_schema.sql` — covers migrations 000–036
 
 ## [0.9.0] - 2026-03-08
 
