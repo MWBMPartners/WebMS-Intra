@@ -34,6 +34,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - All expense, calendar, attendance, admin, and settings queries — `AND siteID = ?` filtering
 - `full_schema.sql` — consolidated with tblSites, tblUserSites, siteID columns, multisite settings/routes
 
+### Added — Google Workspace Email Sending (Issue #48)
+
+- **`MailerGoogle.php`** — Gmail API email backend using service account with domain-wide delegation (RS256 JWT, RFC 2822 MIME, attachments up to 25MB)
+- **`Mailer.php` refactored** — multi-provider dispatcher; `mail.provider` setting toggles between `ms365` (default) and `google`
+- **Integration Diagnostics** updated — Google email config panel with key file validation, delegate user display, active provider indicator, and test email sending via Gmail API
+- **New settings**: `mail.provider`, `mail.google.serviceAccountKeyFile`, `mail.google.delegateUser`
+- SQL migration `016_google_mail.sql` — new Google email settings
+
 ---
 
 ## [0.8.1] - 2026-03-07

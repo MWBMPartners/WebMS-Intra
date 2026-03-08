@@ -858,6 +858,18 @@ INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isSensitive`, `default
 VALUES ('mail.sendFromSharedMailbox', 'true', 0, NULL)
 ON DUPLICATE KEY UPDATE `settingKey` = `settingKey`;
 
+INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isSensitive`, `defaultValue`)
+VALUES ('mail.provider', 'ms365', 0, NULL)
+ON DUPLICATE KEY UPDATE `settingKey` = `settingKey`;
+
+INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isSensitive`, `defaultValue`)
+VALUES ('mail.google.serviceAccountKeyFile', '', 1, NULL)
+ON DUPLICATE KEY UPDATE `settingKey` = `settingKey`;
+
+INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isSensitive`, `defaultValue`)
+VALUES ('mail.google.delegateUser', '', 0, NULL)
+ON DUPLICATE KEY UPDATE `settingKey` = `settingKey`;
+
 -- ─── Notification settings ───────────────────────────────────────────────────
 INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isSensitive`, `defaultValue`)
 VALUES ('notifications.allowSMS', 'false', 0, NULL)
@@ -1228,4 +1240,7 @@ INSERT INTO `tblMigrations` (`filename`) VALUES ('014_admin_integrations_route.s
 ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
 INSERT INTO `tblMigrations` (`filename`) VALUES ('015_multisite.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('016_google_mail.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;

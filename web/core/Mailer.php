@@ -2,18 +2,22 @@
 // Path: core/Mailer.php
 /**
  * -----------------------------------------------------------------------------
- * Microsoft Graph Mailer ✉️
+ * Portal Mailer — Multi-Provider Dispatcher ✉️
  * -----------------------------------------------------------------------------
- * Sends HTML email (optionally with attachments) from a shared mailbox using
- * application-level OAuth2 (client credentials) and Microsoft Graph.
- * -----------------------------------------------------------------------------
- * Requirements in tblSettings (isSensitive=1):
- *   auth.ms365.appwide.clientID
- *   auth.ms365.appwide.clientSecret
- *   auth.ms365.tenantID
- *   mail.defaultFromAddress   – shared mailbox address to SendAs
- *   mail.defaultFromName      – display name
- * -----------------------------------------------------------------------------
+ * Sends HTML email (optionally with attachments) via the configured provider.
+ * Dispatches to either Microsoft Graph (MS365) or Gmail API (Google Workspace)
+ * based on the `mail.provider` setting.
+ *
+ * The MS365 backend uses application-level OAuth2 (client credentials) and
+ * Microsoft Graph to send from a shared mailbox via SendAs delegation.
+ *
+ * The Google backend uses a service account with domain-wide delegation
+ * and the Gmail API. See MailerGoogle.php for the implementation.
+ *
+ * Provider selection:
+ *   mail.provider = 'ms365'   → Microsoft Graph (default)
+ *   mail.provider = 'google'  → Gmail API via service account
+ *
  * Usage:
  *   Mailer::send(
  *     to:    ['alice@example.com'],
@@ -21,6 +25,13 @@
  *     html:  '<p>Congrats…</p>',
  *     files: ['/path/file.pdf']
  *   );
+ *
+ * @package   Portal\Core
+ * @author    MWBM Partners Ltd (t/a MWservices)
+ * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
+ * @license   All Rights Reserved
+ * @version   0.9.0
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/48
  * -----------------------------------------------------------------------------
  */
 
@@ -35,13 +46,49 @@ class Mailer
     private static string $token    = '';
     private static int    $tokenExp = 0;
 
-    /** Public send wrapper */
+    /**
+     * 📧 Send an email via the configured provider.
+     *
+     * Checks `mail.provider` setting and dispatches to the appropriate backend.
+     * Defaults to MS365 (Microsoft Graph) for backward compatibility.
+     *
+     * @param array  $to    Array of recipient email addresses
+     * @param string $subj  Email subject line
+     * @param string $html  HTML body content
+     * @param array  $files Array of absolute file paths to attach (optional)
+     *
+     * @return bool True if sent successfully
+     */
     public static function send(array $to, string $subj, string $html, array $files = []): bool
     {
         global $SETTINGS;
 
+        // 🔀 Dispatch to the configured provider
+        $provider = strtolower($SETTINGS['mail']['provider'] ?? 'ms365');
+
+        if ($provider === 'google') {
+            return MailerGoogle::send($to, $subj, $html, $files);
+        }
+
+        // 📧 Default: Microsoft Graph (MS365)
+        return self::sendViaGraph($to, $subj, $html, $files);
+    }
+
+    /**
+     * 📧 Send an email via Microsoft Graph (MS365 shared mailbox).
+     *
+     * @param array  $to    Recipient email addresses
+     * @param string $subj  Subject
+     * @param string $html  HTML body
+     * @param array  $files File paths to attach
+     *
+     * @return bool True if sent successfully
+     */
+    private static function sendViaGraph(array $to, string $subj, string $html, array $files = []): bool
+    {
+        global $SETTINGS;
+
         $fromAddr = $SETTINGS['mail']['defaultFromAddress'] ?? '';
-        $fromName = $SETTINGS['mail']['defaultFromName']    ?? 'Portal';
 
         if ($fromAddr === '') {
             throw new RuntimeException('From address missing');
@@ -110,7 +157,17 @@ class Mailer
         return $out;
     }
 
-    /** Obtain / cache app token */
+    /**
+     * 🔍 Get the currently configured mail provider.
+     *
+     * @return string 'ms365' or 'google'
+     */
+    public static function provider(): string
+    {
+        return strtolower(App::settings('mail.provider') ?? 'ms365');
+    }
+
+    /** Obtain / cache app token (MS365 client credentials) */
     private static function accessToken(): string
     {
         if (self::$token !== '' && time() < self::$tokenExp - 60) {

@@ -221,6 +221,7 @@ the web-based Migrator (admin-only) and tracked in `tblMigrations`.
 | `013_help_translations_route.sql` | Adds route for translations help page |
 | `014_admin_integrations_route.sql` | Adds route for admin integration diagnostics page |
 | `015_multisite.sql`                | Multi-site support: tblSites, tblUserSites, siteID columns, multisite settings/routes |
+| `016_google_mail.sql`              | Google Workspace email settings: mail.provider, service account key, delegate user |
 | `full_schema.sql`                  | Consolidated schema for fresh installs (all tables + seeds) |
 
 ---

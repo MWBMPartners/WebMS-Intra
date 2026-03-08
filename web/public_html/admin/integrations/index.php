@@ -13,13 +13,14 @@
  *   2. MS365 Graph Token — attempts client-credentials token acquisition
  *   3. MS365 Graph Email — sends a test email from the shared mailbox
  *   4. Google OAuth — checks configuration status
+ *   5. Google Email — checks Gmail API service account config and sends test
  *
  * @package   Portal\Admin
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   0.8.0
- * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/46
+ * @version   0.9.0
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/48
  * -----------------------------------------------------------------------------
  */
 
@@ -28,6 +29,8 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Logger;
+use Portal\Core\Mailer;
+use Portal\Core\MailerGoogle;
 use Portal\Core\Router;
 
 // 📌 Page metadata
@@ -75,6 +78,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) === true &&
     }
 
     $tokenResult = testGraphToken();
+}
+
+// ============================================================================
+// 📧 Handle Google test-email POST
+// ============================================================================
+$googleEmailResult = null;
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) === true && $_POST['action'] === 'send_google_test_email') {
+    // 🛡️ CSRF verification
+    if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
+        http_response_code(403);
+        exit('Invalid CSRF token.');
+    }
+
+    $testRecipient = trim($_POST['test_recipient'] ?? '');
+
+    if (filter_var($testRecipient, FILTER_VALIDATE_EMAIL) === false) {
+        $googleEmailResult = ['success' => false, 'message' => 'Invalid email address.', 'details' => ''];
+    } else {
+        $googleEmailResult = sendGoogleTestEmail($testRecipient);
+    }
 }
 
 // ============================================================================
@@ -151,6 +175,47 @@ foreach ($googleSettings as $key => $label) {
     if ($isSet === false && $isRequired === true) {
         $googleAllSet = false;
     }
+}
+
+// -- Mail provider & Google email settings --
+$mailProvider = App::settings('mail.provider') ?? 'ms365';
+
+$googleMailSettings = [
+    'mail.provider'                     => 'Mail Provider',
+    'mail.google.serviceAccountKeyFile' => 'Service Account Key File',
+    'mail.google.delegateUser'          => 'Delegate User (Sender)',
+    'mail.defaultFromName'              => 'From Display Name (shared)',
+];
+
+$googleMailStatus = [];
+$googleMailAllSet = true;
+foreach ($googleMailSettings as $key => $label) {
+    $val   = App::settings($key) ?? '';
+    $isSet = ($val !== '');
+    // 🔍 mail.provider and defaultFromName are always set, not critical for Google check
+    $isRequired = ($key !== 'mail.provider' && $key !== 'mail.defaultFromName');
+    $displayVal = '';
+    if ($isSet === true) {
+        if (strpos($key, 'KeyFile') !== false) {
+            $displayVal = $val; // Show filename (not secret — it's just the filename)
+        } elseif ($key === 'mail.provider') {
+            $displayVal = strtoupper($val);
+        } else {
+            $displayVal = $val;
+        }
+    }
+    $googleMailStatus[] = ['key' => $key, 'label' => $label, 'configured' => $isSet, 'required' => $isRequired, 'display' => $displayVal];
+    if ($isSet === false && $isRequired === true) {
+        $googleMailAllSet = false;
+    }
+}
+
+// 🔍 Check if the key file actually exists on disk
+$keyFileExists = false;
+$keyFileName   = App::settings('mail.google.serviceAccountKeyFile') ?? '';
+if ($keyFileName !== '') {
+    $keyFilePath = PORTAL_ROOT . DIRECTORY_SEPARATOR . '_auth_keys' . DIRECTORY_SEPARATOR . $keyFileName;
+    $keyFileExists = is_readable($keyFilePath);
 }
 
 // 📄 Include header
@@ -368,10 +433,116 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     </div>
 </div>
 
+<!-- ====================================================================== -->
+<!-- 5️⃣ Google Email — Gmail API Configuration & Test                        -->
+<!-- ====================================================================== -->
+<div class="card mb-4">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <h5 class="mb-0"><i class="fa-solid fa-envelope me-2" aria-hidden="true"></i>Google Email — Gmail API</h5>
+        <?php if ($googleMailAllSet === true && $keyFileExists === true): ?>
+            <span class="badge bg-success"><i class="fa-solid fa-circle-check me-1" aria-hidden="true"></i>Configured</span>
+        <?php else: ?>
+            <span class="badge bg-danger"><i class="fa-solid fa-circle-xmark me-1" aria-hidden="true"></i>Incomplete</span>
+        <?php endif; ?>
+    </div>
+    <div class="card-body">
+        <p class="text-secondary small mb-3">
+            Google Workspace email sending via the Gmail API using a service account with domain-wide delegation.
+            The service account impersonates the delegate user to send from a shared/generic mailbox.
+        </p>
+
+        <!-- 📋 Settings status -->
+        <div class="portal-data-list mb-4">
+            <?php foreach ($googleMailStatus as $item): ?>
+                <div class="portal-data-row">
+                    <div class="col-12 col-md-3 fw-semibold"><?php echo htmlspecialchars($item['label'], ENT_QUOTES, 'UTF-8'); ?></div>
+                    <div class="col-12 col-md-4 text-muted small font-monospace"><?php echo htmlspecialchars($item['key'], ENT_QUOTES, 'UTF-8'); ?></div>
+                    <div class="col-12 col-md-5">
+                        <?php if ($item['configured'] === true): ?>
+                            <span class="badge bg-success"><i class="fa-solid fa-check me-1" aria-hidden="true"></i>Set</span>
+                            <?php if ($item['display'] !== ''): ?>
+                                <code class="ms-2 small"><?php echo htmlspecialchars($item['display'], ENT_QUOTES, 'UTF-8'); ?></code>
+                            <?php endif; ?>
+                        <?php elseif ($item['required'] === false): ?>
+                            <span class="badge bg-secondary"><i class="fa-solid fa-minus me-1" aria-hidden="true"></i>Optional</span>
+                        <?php else: ?>
+                            <span class="badge bg-danger"><i class="fa-solid fa-xmark me-1" aria-hidden="true"></i>Missing</span>
+                        <?php endif; ?>
+                    </div>
+                </div>
+            <?php endforeach; ?>
+
+            <!-- 📂 Key file existence check -->
+            <?php if ($keyFileName !== ''): ?>
+                <div class="portal-data-row">
+                    <div class="col-12 col-md-3 fw-semibold">Key File on Disk</div>
+                    <div class="col-12 col-md-4 text-muted small font-monospace">_auth_keys/<?php echo htmlspecialchars($keyFileName, ENT_QUOTES, 'UTF-8'); ?></div>
+                    <div class="col-12 col-md-5">
+                        <?php if ($keyFileExists === true): ?>
+                            <span class="badge bg-success"><i class="fa-solid fa-check me-1" aria-hidden="true"></i>Found</span>
+                        <?php else: ?>
+                            <span class="badge bg-danger"><i class="fa-solid fa-xmark me-1" aria-hidden="true"></i>Not Found</span>
+                        <?php endif; ?>
+                    </div>
+                </div>
+            <?php endif; ?>
+        </div>
+
+        <!-- 📧 Active provider indicator -->
+        <div class="alert alert-<?php echo ($mailProvider === 'google') ? 'primary' : 'secondary'; ?> small mb-3">
+            <i class="fa-solid fa-toggle-<?php echo ($mailProvider === 'google') ? 'on' : 'off'; ?> me-2" aria-hidden="true"></i>
+            <strong>Active mail provider:</strong>
+            <code><?php echo htmlspecialchars(strtoupper($mailProvider), ENT_QUOTES, 'UTF-8'); ?></code>
+            <?php if ($mailProvider !== 'google'): ?>
+                — Set <code>mail.provider = google</code> in Settings to use Gmail API.
+            <?php else: ?>
+                — Gmail API is the active email backend.
+            <?php endif; ?>
+        </div>
+
+        <!-- 📧 Send Test Email -->
+        <h6 class="border-bottom pb-2 mb-3"><i class="fa-solid fa-vial me-2" aria-hidden="true"></i>Send Test Email via Gmail API</h6>
+
+        <?php if ($googleMailAllSet === false || $keyFileExists === false): ?>
+            <div class="alert alert-warning small mb-0">
+                <i class="fa-solid fa-triangle-exclamation me-2" aria-hidden="true"></i>
+                Cannot send test email — Google email settings are incomplete or key file is missing.
+            </div>
+        <?php else: ?>
+            <?php if ($googleEmailResult !== null): ?>
+                <div class="alert alert-<?php echo ($googleEmailResult['success'] === true) ? 'success' : 'danger'; ?> small" role="alert" aria-live="polite">
+                    <i class="fa-solid fa-<?php echo ($googleEmailResult['success'] === true) ? 'circle-check' : 'circle-xmark'; ?> me-2" aria-hidden="true"></i>
+                    <strong><?php echo ($googleEmailResult['success'] === true) ? 'Email Sent' : 'Email Failed'; ?></strong>
+                    — <?php echo htmlspecialchars($googleEmailResult['message'], ENT_QUOTES, 'UTF-8'); ?>
+                    <?php if ($googleEmailResult['details'] !== ''): ?>
+                        <pre class="mt-2 mb-0 p-2 bg-body-tertiary rounded small" style="white-space:pre-wrap;"><?php echo htmlspecialchars($googleEmailResult['details'], ENT_QUOTES, 'UTF-8'); ?></pre>
+                    <?php endif; ?>
+                </div>
+            <?php endif; ?>
+
+            <form method="POST" action="/admin/integrations" class="row g-2 align-items-end">
+                <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
+                <input type="hidden" name="action" value="send_google_test_email">
+                <div class="col-12 col-md-6 col-lg-4">
+                    <label for="google_test_recipient" class="form-label small fw-semibold">Recipient Email</label>
+                    <input type="email" class="form-control form-control-sm" id="google_test_recipient" name="test_recipient"
+                           placeholder="you@example.com" required
+                           value="<?php echo htmlspecialchars($_SESSION['user_email'] ?? '', ENT_QUOTES, 'UTF-8'); ?>">
+                </div>
+                <div class="col-12 col-md-auto">
+                    <button type="submit" class="btn btn-primary btn-sm">
+                        <i class="fa-brands fa-google me-1" aria-hidden="true"></i>Send Test Email via Gmail
+                    </button>
+                </div>
+            </form>
+        <?php endif; ?>
+    </div>
+</div>
+
 <!-- 📋 Permissions Reference -->
 <div class="card border-0 bg-body-tertiary">
     <div class="card-body">
-        <h6><i class="fa-solid fa-info-circle me-2" aria-hidden="true"></i>Azure AD Permissions Reference</h6>
+        <h6><i class="fa-solid fa-info-circle me-2" aria-hidden="true"></i>Azure AD &amp; Google Workspace Permissions Reference</h6>
         <div class="small text-secondary">
             <p class="mb-2">For <strong>end-user OAuth login</strong>, the Azure AD app registration needs:</p>
             <ul class="mb-3">
@@ -385,6 +556,15 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 <li>The shared mailbox must grant SendAs or Full Access to the app, or use an
                     <a href="https://learn.microsoft.com/en-us/graph/auth-limit-mailbox-access" target="_blank" rel="noopener">
                         Application Access Policy</a> scoped to the mailbox</li>
+            </ul>
+            <p class="mb-2">For <strong>Google Workspace email sending</strong> (Gmail API via service account):</p>
+            <ul class="mb-0">
+                <li>Create a service account in Google Cloud Console with a JSON key</li>
+                <li>Enable the Gmail API in the project</li>
+                <li>Enable domain-wide delegation on the service account</li>
+                <li>In Google Workspace Admin Console, authorise the service account client ID with scope: <code>https://www.googleapis.com/auth/gmail.send</code></li>
+                <li>Upload the JSON key file to <code>_auth_keys/</code> on the server</li>
+                <li>Set <code>mail.google.serviceAccountKeyFile</code> to the filename and <code>mail.google.delegateUser</code> to the sender address</li>
             </ul>
         </div>
     </div>
@@ -632,5 +812,79 @@ function sendTestEmail(string $recipient): array
         'message' => 'HTTP ' . $sendCode . ' — ' . $errCode,
         'details' => $errMsg,
     ];
+}
+
+/**
+ * 📧 Send a test email via the Gmail API using service account delegation.
+ *
+ * @param string $recipient The email address to send the test to
+ *
+ * @return array{success: bool, message: string, details: string}
+ */
+function sendGoogleTestEmail(string $recipient): array
+{
+    global $SETTINGS;
+
+    $delegateUser = $SETTINGS['mail']['google']['delegateUser'] ?? '';
+    $fromName     = $SETTINGS['mail']['defaultFromName'] ?? 'Portal';
+    $siteName     = htmlspecialchars($SETTINGS['site']['name'] ?? 'Portal', ENT_QUOTES, 'UTF-8');
+    $timestamp    = date('Y-m-d H:i:s T');
+
+    if ($delegateUser === '') {
+        return ['success' => false, 'message' => 'Delegate user not configured.', 'details' => ''];
+    }
+
+    $htmlBody = '<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"></head>'
+        . '<body style="font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif;font-size:14px;color:#212529;background:#f8f9fa;margin:0;padding:20px;">'
+        . '<div style="max-width:600px;margin:0 auto;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.1);">'
+        . '<div style="background:#ea4335;color:#fff;padding:16px 24px;">'
+        . '<h2 style="margin:0;font-size:18px;">Google Email Integration Test</h2>'
+        . '</div>'
+        . '<div style="padding:24px;">'
+        . '<p>This is a <strong>test email</strong> sent from the ' . $siteName . ' Integration Diagnostics page.</p>'
+        . '<table style="border-collapse:collapse;margin:1em 0;width:100%;max-width:500px;">'
+        . '<tr><td style="padding:6px 12px;border:1px solid #dee2e6;font-weight:bold;">From (Delegate User)</td>'
+        . '<td style="padding:6px 12px;border:1px solid #dee2e6;">' . htmlspecialchars($delegateUser, ENT_QUOTES, 'UTF-8') . '</td></tr>'
+        . '<tr><td style="padding:6px 12px;border:1px solid #dee2e6;font-weight:bold;">Display Name</td>'
+        . '<td style="padding:6px 12px;border:1px solid #dee2e6;">' . htmlspecialchars($fromName, ENT_QUOTES, 'UTF-8') . '</td></tr>'
+        . '<tr><td style="padding:6px 12px;border:1px solid #dee2e6;font-weight:bold;">Sent At</td>'
+        . '<td style="padding:6px 12px;border:1px solid #dee2e6;">' . $timestamp . '</td></tr>'
+        . '<tr><td style="padding:6px 12px;border:1px solid #dee2e6;font-weight:bold;">API Method</td>'
+        . '<td style="padding:6px 12px;border:1px solid #dee2e6;">Gmail API — service account delegation + users.messages.send</td></tr>'
+        . '</table>'
+        . '<p style="color:#6c757d;font-size:12px;">If you received this email, Gmail API service account delegation is working correctly.</p>'
+        . '</div>'
+        . '<div style="padding:16px 24px;background:#f8f9fa;border-top:1px solid #dee2e6;font-size:12px;color:#6c757d;text-align:center;">'
+        . 'Sent by ' . $siteName . ' Integration Diagnostics &mdash; ' . $timestamp
+        . '</div>'
+        . '</div></body></html>';
+
+    $subject = '[' . ($SETTINGS['site']['name'] ?? 'Portal') . '] Google Email Integration Test — ' . $timestamp;
+
+    try {
+        $result = MailerGoogle::send([$recipient], $subject, $htmlBody);
+
+        if ($result === true) {
+            Logger::activity('IntegrationTest', 'Google test email sent successfully to ' . $recipient . ' from ' . $delegateUser);
+            return [
+                'success' => true,
+                'message' => 'Email sent to ' . $recipient . ' from delegate user ' . $delegateUser . '.',
+                'details' => '',
+            ];
+        }
+
+        return [
+            'success' => false,
+            'message' => 'Gmail API returned failure.',
+            'details' => 'Check the error log for details.',
+        ];
+    } catch (\RuntimeException $ex) {
+        Logger::activity('IntegrationTest', 'Google test email failed: ' . $ex->getMessage());
+        return [
+            'success' => false,
+            'message' => 'Exception: ' . $ex->getMessage(),
+            'details' => '',
+        ];
+    }
 }
 ?>
