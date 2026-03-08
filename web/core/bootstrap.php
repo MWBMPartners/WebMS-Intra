@@ -304,6 +304,9 @@ if ($settingsStmt !== false) {
         assign_setting($SETTINGS, $row['settingKey'], $value);
     }
     $settingsStmt->close();
+} else {
+    // 🚨 Settings query failed — log error so it's visible in admin error log
+    error_log('[WebMS-Intra] CRITICAL: Failed to prepare settings query: ' . $mysqli->error);
 }
 
 // 🕐 Update timezone to the configured value (overrides the UTC default above)
