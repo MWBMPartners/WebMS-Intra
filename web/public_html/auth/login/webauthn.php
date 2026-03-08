@@ -120,6 +120,9 @@ if ($action === 'auth_verify') {
             $_SESSION['user_name']  = $row['fullName'];
             $_SESSION['user_email'] = $row['emailAddress'];
 
+            // 🌐 Set active site ID for multi-site context
+            Auth::initSessionSite((int) $row['userID'], $mysqli);
+
             Logger::activity('LoginWebAuthn', 'User logged in via passkey: ' . ($row['friendlyName'] ?? 'Passkey'));
 
             $redirect = $input['redirect'] ?? '/';

@@ -1072,6 +1072,20 @@ class Auth
      *
      * @return void
      */
+    /**
+     * 🌐 Public wrapper for setSessionSiteId — for use outside Auth class
+     * (e.g. WebAuthn login handler in separate file).
+     *
+     * @param int    $userId User ID
+     * @param \mysqli $db    Database connection
+     *
+     * @return void
+     */
+    public static function initSessionSite(int $userId, \mysqli $db): void
+    {
+        self::setSessionSiteId($userId, $db);
+    }
+
     private static function setSessionSiteId(int $userId, \mysqli $db): void
     {
         $currentSiteId = Site::id();
