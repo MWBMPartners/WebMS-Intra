@@ -21,6 +21,7 @@ use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Logger;
 use Portal\Core\Router;
+use Portal\Core\Site;
 
 // 📌 Page metadata
 $pageTitle   = 'Manage Event Series';
@@ -32,6 +33,9 @@ if (App::isAdmin() === false) {
     Router::renderError(403);
     return;
 }
+
+// 🌐 Multi-site scope
+$siteId = Site::id();
 
 // -----------------------------------------------------------------------------
 // 💾 Handle POST actions (create, update, delete)
@@ -51,10 +55,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         if ($name !== '') {
             $stmt = $mysqli->prepare(
-                'INSERT INTO tblEventSeries (seriesName, seriesSlug, description, parentID) VALUES (?, ?, ?, ?)'
+                'INSERT INTO tblEventSeries (seriesName, seriesSlug, description, parentID, siteID) VALUES (?, ?, ?, ?, ?)'
             );
             if ($stmt !== false) {
-                $stmt->bind_param('sssi', $name, $slug, $desc, $parentID);
+                $stmt->bind_param('sssii', $name, $slug, $desc, $parentID, $siteId);
                 $stmt->execute();
                 $stmt->close();
             }
@@ -72,10 +76,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         if ($seriesID > 0 && $name !== '') {
             $stmt = $mysqli->prepare(
-                'UPDATE tblEventSeries SET seriesName = ?, description = ?, parentID = ? WHERE seriesID = ?'
+                'UPDATE tblEventSeries SET seriesName = ?, description = ?, parentID = ? WHERE seriesID = ? AND siteID = ?'
             );
             if ($stmt !== false) {
-                $stmt->bind_param('ssii', $name, $desc, $parentID, $seriesID);
+                $stmt->bind_param('ssiii', $name, $desc, $parentID, $seriesID, $siteId);
                 $stmt->execute();
                 $stmt->close();
             }
@@ -89,15 +93,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $seriesID = (int) ($_POST['seriesID'] ?? 0);
         if ($seriesID > 0) {
             // 🔄 Unlink events from series before deleting
-            $stmt = $mysqli->prepare('UPDATE tblEvents SET seriesID = NULL WHERE seriesID = ?');
+            $stmt = $mysqli->prepare('UPDATE tblEvents SET seriesID = NULL WHERE seriesID = ? AND siteID = ?');
             if ($stmt !== false) {
-                $stmt->bind_param('i', $seriesID);
+                $stmt->bind_param('ii', $seriesID, $siteId);
                 $stmt->execute();
                 $stmt->close();
             }
-            $stmt = $mysqli->prepare('DELETE FROM tblEventSeries WHERE seriesID = ?');
+            $stmt = $mysqli->prepare('DELETE FROM tblEventSeries WHERE seriesID = ? AND siteID = ?');
             if ($stmt !== false) {
-                $stmt->bind_param('i', $seriesID);
+                $stmt->bind_param('ii', $seriesID, $siteId);
                 $stmt->execute();
                 $stmt->close();
             }
@@ -115,17 +119,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 // 📋 Fetch series list
 // -----------------------------------------------------------------------------
 $seriesList = [];
-$result = $mysqli->query(
+$stmtSeries = $mysqli->prepare(
     'SELECT s.*, p.seriesName AS parentName, '
     . '(SELECT COUNT(*) FROM tblEvents e WHERE e.seriesID = s.seriesID AND e.isDeleted = 0) AS eventCount '
     . 'FROM tblEventSeries s '
     . 'LEFT JOIN tblEventSeries p ON p.seriesID = s.parentID '
+    . 'WHERE s.siteID = ? '
     . 'ORDER BY s.seriesName'
 );
-if ($result !== false) {
-    while ($r = $result->fetch_assoc()) {
+if ($stmtSeries !== false) {
+    $stmtSeries->bind_param('i', $siteId);
+    $stmtSeries->execute();
+    $resultSeries = $stmtSeries->get_result();
+    while ($r = $resultSeries->fetch_assoc()) {
         $seriesList[] = $r;
     }
+    $stmtSeries->close();
 }
 
 // 📋 Flash message

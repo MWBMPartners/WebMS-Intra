@@ -19,6 +19,7 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\Site;
 
 // 📌 Page metadata for the template system
 $pageTitle   = 'Treasury';
@@ -32,15 +33,17 @@ unset($_SESSION['admin_flash_msg'], $_SESSION['admin_flash_type']);
 
 // 📋 Fetch approved claims awaiting reimbursement
 $claims = [];
+$siteId = Site::id();
 $stmt = $mysqli->prepare(
     'SELECT EC.claimID, EC.claimTitle, U.fullName, D.deptName, EC.totalAmount, EC.createdAt '
     . 'FROM tblExpenseClaims EC '
     . 'JOIN tblUsers U ON U.userID = EC.userID '
     . 'JOIN tblDepts D ON D.deptID = EC.deptID '
-    . 'WHERE EC.status = "Approved" '
+    . 'WHERE EC.status = "Approved" AND EC.siteID = ? '
     . 'ORDER BY EC.createdAt DESC'
 );
 if ($stmt !== false) {
+    $stmt->bind_param('i', $siteId);
     $stmt->execute();
     $res = $stmt->get_result();
     while ($row = $res->fetch_assoc()) {

@@ -20,6 +20,7 @@ declare(strict_types=1);
 use Portal\Core\Auth;
 use Portal\Core\Logger;
 use Portal\Core\Router;
+use Portal\Core\Site;
 
 // 🛡️ Auth check
 if (Auth::check() === false) {
@@ -41,6 +42,9 @@ if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
 $sessionID = (int) ($_POST['sessionID'] ?? 0);
 $userId    = $_SESSION['user_id'] ?? null;
 
+// 🌐 Multi-site scope
+$siteId = Site::id();
+
 if ($sessionID <= 0) {
     $_SESSION['admin_flash_msg']  = 'Invalid session ID.';
     $_SESSION['admin_flash_type'] = 'danger';
@@ -49,9 +53,9 @@ if ($sessionID <= 0) {
 }
 
 // 🗑️ Soft delete
-$stmt = $mysqli->prepare('UPDATE tblAttendanceSessions SET isDeleted = 1, updatedByID = ? WHERE sessionID = ?');
+$stmt = $mysqli->prepare('UPDATE tblAttendanceSessions SET isDeleted = 1, updatedByID = ? WHERE sessionID = ? AND siteID = ?');
 if ($stmt !== false) {
-    $stmt->bind_param('ii', $userId, $sessionID);
+    $stmt->bind_param('iii', $userId, $sessionID, $siteId);
     $stmt->execute();
     $stmt->close();
 }

@@ -12,13 +12,13 @@
 -- After running, all individual migrations (000–006) are marked as executed
 -- in tblMigrations so the web-based Migrator won't re-run them.
 --
--- Covers migrations: 000, 001, 002, 003, 004, 005, 006, 007, 008, 009, 010, 011, 012
+-- Covers migrations: 000–015
 -- =============================================================================
 -- @package   Portal\Database
 -- @author    MWBM Partners Ltd (t/a MWservices)
 -- @copyright 2025-2026 MWBM Partners Ltd (t/a MWservices)
 -- @license   All Rights Reserved
--- @version   0.8.0
+-- @version   0.9.0
 -- =============================================================================
 
 
@@ -42,11 +42,42 @@ COMMENT='Tracks executed SQL migrations to prevent re-running.';
 
 
 -- -----------------------------------------------------------------------------
+-- 🌐 tblSites — multi-site definitions (from migration 015)
+-- Each row represents a portal site/division.
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `tblSites` (
+    `siteID`        INT          NOT NULL AUTO_INCREMENT,
+    `siteName`      VARCHAR(255) COLLATE utf8mb4_general_ci NOT NULL
+                    COMMENT 'Human-readable site name',
+    `siteKey`       VARCHAR(50)  COLLATE utf8mb4_general_ci NOT NULL
+                    COMMENT 'Machine-readable slug (e.g. cambridge, leeds)',
+    `hostPattern`   VARCHAR(255) COLLATE utf8mb4_general_ci DEFAULT NULL
+                    COMMENT 'Hostname for subdomain detection',
+    `logoPath`      VARCHAR(500) COLLATE utf8mb4_general_ci DEFAULT '/assets/images/logo.svg'
+                    COMMENT 'Path to site-specific logo image',
+    `primaryColor`  VARCHAR(7)   COLLATE utf8mb4_general_ci DEFAULT '#0d6efd'
+                    COMMENT 'Hex colour for site branding',
+    `copyrightOrg`  VARCHAR(255) COLLATE utf8mb4_general_ci DEFAULT NULL
+                    COMMENT 'Copyright holder name for footer',
+    `timezone`      VARCHAR(50)  COLLATE utf8mb4_general_ci DEFAULT 'UTC'
+                    COMMENT 'Site-specific timezone identifier',
+    `isActive`      TINYINT(1)   NOT NULL DEFAULT 1,
+    `createdAt`     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updatedAt`     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`siteID`),
+    UNIQUE KEY `uq_site_key` (`siteKey`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+COMMENT='Multi-site definitions. Each row represents a portal site/division.';
+
+
+-- -----------------------------------------------------------------------------
 -- ⚙️ tblSettings — dot-notation key/value configuration store
 -- isSensitive=1 values are encrypted with libsodium at rest
 -- -----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS `tblSettings` (
     `settingID`    INT          NOT NULL AUTO_INCREMENT,
+    `siteID`       INT          DEFAULT NULL
+                   COMMENT 'FK → tblSites. NULL = global default, specific siteID = per-site override',
     `settingKey`   VARCHAR(150) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL
                    COMMENT 'Setting name with period-separated hierarchy (e.g. auth.ms365.clientID)',
     `settingValue` MEDIUMTEXT   CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
@@ -58,7 +89,10 @@ CREATE TABLE IF NOT EXISTS `tblSettings` (
     `defaultValue` MEDIUMTEXT   CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
                    COMMENT 'Optional default value for this setting',
     PRIMARY KEY (`settingID`),
-    UNIQUE KEY `settingKey` (`settingKey`)
+    UNIQUE KEY `uq_setting_key_site` (`settingKey`, `siteID`),
+    KEY `idx_settings_site` (`siteID`),
+    CONSTRAINT `fk_settings_site` FOREIGN KEY (`siteID`)
+        REFERENCES `tblSites` (`siteID`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 
@@ -112,10 +146,14 @@ CREATE TABLE IF NOT EXISTS `tblGroups` (
 -- -----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS `tblDepts` (
     `deptID`   INT          NOT NULL AUTO_INCREMENT,
+    `siteID`   INT          NOT NULL DEFAULT 1 COMMENT 'FK → tblSites.siteID',
     `deptName` VARCHAR(100) COLLATE utf8mb4_general_ci DEFAULT NULL,
     `deptCode` VARCHAR(50)  COLLATE utf8mb4_general_ci DEFAULT NULL,
     `isActive` TINYINT(1)   DEFAULT 1,
-    PRIMARY KEY (`deptID`)
+    PRIMARY KEY (`deptID`),
+    KEY `idx_depts_site` (`siteID`),
+    CONSTRAINT `fk_depts_site` FOREIGN KEY (`siteID`)
+        REFERENCES `tblSites` (`siteID`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 
@@ -140,6 +178,31 @@ CREATE TABLE IF NOT EXISTS `tblUsers` (
     PRIMARY KEY (`userID`),
     UNIQUE KEY `emailAddress` (`emailAddress`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+
+-- -----------------------------------------------------------------------------
+-- 🔗 tblUserSites — user-to-site assignments with site-level role flags
+-- (from migration 015)
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `tblUserSites` (
+    `userSiteID`      INT        NOT NULL AUTO_INCREMENT,
+    `userID`          INT        NOT NULL COMMENT 'FK → tblUsers.userID',
+    `siteID`          INT        NOT NULL COMMENT 'FK → tblSites.siteID',
+    `isSiteAdmin`     TINYINT(1) NOT NULL DEFAULT 0
+                      COMMENT 'Can manage users/settings/data for this site',
+    `isSiteRootAdmin` TINYINT(1) NOT NULL DEFAULT 0
+                      COMMENT 'Full control within this site, can assign site admins',
+    `isActive`        TINYINT(1) NOT NULL DEFAULT 1,
+    `joinedAt`        DATETIME   NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`userSiteID`),
+    UNIQUE KEY `uq_user_site` (`userID`, `siteID`),
+    KEY `idx_us_site` (`siteID`),
+    CONSTRAINT `fk_us_user` FOREIGN KEY (`userID`)
+        REFERENCES `tblUsers` (`userID`) ON DELETE CASCADE,
+    CONSTRAINT `fk_us_site` FOREIGN KEY (`siteID`)
+        REFERENCES `tblSites` (`siteID`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+COMMENT='Maps users to sites with per-site admin role flags (4-tier hierarchy).';
 
 
 -- -----------------------------------------------------------------------------
@@ -293,6 +356,7 @@ CREATE TABLE IF NOT EXISTS `tblUserDepts` (
 -- -----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS `tblExpenseClaims` (
     `claimID`     INT            NOT NULL AUTO_INCREMENT,
+    `siteID`      INT            NOT NULL DEFAULT 1 COMMENT 'FK → tblSites.siteID',
     `userID`      INT            NOT NULL,
     `deptID`      INT            NOT NULL,
     `claimTitle`  VARCHAR(255)   COLLATE utf8mb4_general_ci DEFAULT NULL,
@@ -306,10 +370,13 @@ CREATE TABLE IF NOT EXISTS `tblExpenseClaims` (
     PRIMARY KEY (`claimID`),
     KEY `userID` (`userID`),
     KEY `deptID` (`deptID`),
+    KEY `idx_claims_site` (`siteID`),
     CONSTRAINT `tblExpenseClaims_ibfk_1` FOREIGN KEY (`userID`)
         REFERENCES `tblUsers` (`userID`),
     CONSTRAINT `tblExpenseClaims_ibfk_2` FOREIGN KEY (`deptID`)
-        REFERENCES `tblDepts` (`deptID`)
+        REFERENCES `tblDepts` (`deptID`),
+    CONSTRAINT `fk_claims_site` FOREIGN KEY (`siteID`)
+        REFERENCES `tblSites` (`siteID`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 
@@ -403,6 +470,7 @@ COMMENT='Records payment/reimbursement references against approved expense claim
 -- -----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS `tblAttendanceServiceTypes` (
     `serviceTypeID` INT          NOT NULL AUTO_INCREMENT,
+    `siteID`        INT          NOT NULL DEFAULT 1 COMMENT 'FK → tblSites.siteID',
     `parentID`      INT          DEFAULT NULL COMMENT 'FK to self for sub-types (NULL = top-level)',
     `typeName`      VARCHAR(150) NOT NULL,
     `typeSlug`      VARCHAR(100) NOT NULL COMMENT 'URL-safe slug for routing/API',
@@ -415,7 +483,10 @@ CREATE TABLE IF NOT EXISTS `tblAttendanceServiceTypes` (
     UNIQUE KEY `uq_att_type_slug` (`typeSlug`),
     KEY `idx_att_type_parent` (`parentID`),
     CONSTRAINT `fk_att_type_parent` FOREIGN KEY (`parentID`)
-        REFERENCES `tblAttendanceServiceTypes` (`serviceTypeID`) ON DELETE SET NULL
+        REFERENCES `tblAttendanceServiceTypes` (`serviceTypeID`) ON DELETE SET NULL,
+    KEY `idx_ast_site` (`siteID`),
+    CONSTRAINT `fk_ast_site` FOREIGN KEY (`siteID`)
+        REFERENCES `tblSites` (`siteID`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
 COMMENT='Service/event types for attendance tracking, with nested sub-types.';
 
@@ -425,6 +496,7 @@ COMMENT='Service/event types for attendance tracking, with nested sub-types.';
 -- -----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS `tblAttendanceSessions` (
     `sessionID`     INT          NOT NULL AUTO_INCREMENT,
+    `siteID`        INT          NOT NULL DEFAULT 1 COMMENT 'FK → tblSites.siteID',
     `serviceTypeID` INT          NOT NULL COMMENT 'FK → tblAttendanceServiceTypes',
     `eventID`       INT          DEFAULT NULL COMMENT 'FK → tblEvents (NULL if standalone)',
     `sessionDate`   DATE         NOT NULL COMMENT 'Date of the service/event',
@@ -445,7 +517,10 @@ CREATE TABLE IF NOT EXISTS `tblAttendanceSessions` (
     CONSTRAINT `fk_att_sess_creator` FOREIGN KEY (`createdByID`)
         REFERENCES `tblUsers` (`userID`) ON DELETE SET NULL,
     CONSTRAINT `fk_att_sess_updater` FOREIGN KEY (`updatedByID`)
-        REFERENCES `tblUsers` (`userID`) ON DELETE SET NULL
+        REFERENCES `tblUsers` (`userID`) ON DELETE SET NULL,
+    KEY `idx_asess_site` (`siteID`),
+    CONSTRAINT `fk_asess_site` FOREIGN KEY (`siteID`)
+        REFERENCES `tblSites` (`siteID`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
 COMMENT='Individual attendance sessions — one row per service/event occasion.';
 
@@ -477,6 +552,7 @@ COMMENT='Headcount breakdowns per session — multiple groups per session.';
 -- -----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS `tblActivityLogs` (
     `logID`               INT          NOT NULL AUTO_INCREMENT,
+    `siteID`              INT          DEFAULT NULL COMMENT 'FK → tblSites.siteID (nullable for pre-bootstrap logs)',
     `userID`              INT          DEFAULT NULL,
     `activityType`        VARCHAR(100) COLLATE utf8mb4_general_ci DEFAULT NULL,
     `activityDescription` TEXT         COLLATE utf8mb4_general_ci,
@@ -494,7 +570,10 @@ CREATE TABLE IF NOT EXISTS `tblActivityLogs` (
     CONSTRAINT `tblActivityLogs_ibfk_1` FOREIGN KEY (`userID`)
         REFERENCES `tblUsers` (`userID`),
     CONSTRAINT `tblActivityLogs_ibfk_2` FOREIGN KEY (`claimID`)
-        REFERENCES `tblExpenseClaims` (`claimID`)
+        REFERENCES `tblExpenseClaims` (`claimID`),
+    KEY `idx_logs_site` (`siteID`),
+    CONSTRAINT `fk_logs_site` FOREIGN KEY (`siteID`)
+        REFERENCES `tblSites` (`siteID`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
 COMMENT='Audit trail for all portal activity — login, actions, errors.';
 
@@ -505,6 +584,7 @@ COMMENT='Audit trail for all portal activity — login, actions, errors.';
 -- -----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS `tblErrors` (
     `errorID`        INT           NOT NULL AUTO_INCREMENT COMMENT 'Unique error record identifier',
+    `siteID`         INT           DEFAULT NULL COMMENT 'FK → tblSites.siteID (nullable for pre-bootstrap errors)',
     `errorPlatform`  VARCHAR(50)   NOT NULL DEFAULT 'PHP'  COMMENT 'Platform where error occurred (PHP, MySQL, dompdf, MS365, cURL, JS etc)',
     `errorSeverity`  VARCHAR(50)   NOT NULL DEFAULT 'Error' COMMENT 'Severity: Notification, Warning, Error, Fatal',
     `errorCode`      VARCHAR(100)  DEFAULT NULL             COMMENT 'Platform-specific error code',
@@ -524,7 +604,10 @@ CREATE TABLE IF NOT EXISTS `tblErrors` (
     KEY `idx_errors_severity`  (`errorSeverity`),
     KEY `idx_errors_created`   (`createdAt`),
     KEY `idx_errors_resolved`  (`isResolved`),
-    KEY `idx_errors_user`      (`userID`)
+    KEY `idx_errors_user`      (`userID`),
+    KEY `idx_errors_site`     (`siteID`),
+    CONSTRAINT `fk_errors_site` FOREIGN KEY (`siteID`)
+        REFERENCES `tblSites` (`siteID`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
 COMMENT='Centralised error log for all platforms/libraries. See core/Logger.php.';
 
@@ -734,6 +817,15 @@ ON DUPLICATE KEY UPDATE `settingKey` = `settingKey`;
 
 INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isSensitive`, `defaultValue`)
 VALUES ('auth.webauthn.rpID', '', 0, '')
+ON DUPLICATE KEY UPDATE `settingKey` = `settingKey`;
+
+-- ─── Multisite settings (from migration 015) ────────────────────────────────
+INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isSensitive`, `defaultValue`)
+VALUES ('multisite.enabled', 'false', 0, 'false')
+ON DUPLICATE KEY UPDATE `settingKey` = `settingKey`;
+
+INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isSensitive`, `defaultValue`)
+VALUES ('multisite.detectionMode', 'session', 0, 'session')
 ON DUPLICATE KEY UPDATE `settingKey` = `settingKey`;
 
 -- ─── i18n settings (from migration 012) ─────────────────────────────────────
@@ -1005,6 +1097,23 @@ INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`)
 VALUES ('admin/integrations', 'admin/integrations/index.php', 1)
 ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 
+-- ─── Multi-site (from migration 015) ────────────────────────────────────────
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`)
+VALUES ('admin/sites', 'admin/sites/index.php', 1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`)
+VALUES ('admin/sites/save', 'admin/sites/save.php', 1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`)
+VALUES ('admin/sites/users', 'admin/sites/users.php', 1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`)
+VALUES ('site/switch', 'site/switch.php', 1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
 -- ─── Help Centre ─────────────────────────────────────────────────────────────
 INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`)
 VALUES ('help', 'help/index.php', 0)
@@ -1116,4 +1225,7 @@ INSERT INTO `tblMigrations` (`filename`) VALUES ('013_help_translations_route.sq
 ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
 INSERT INTO `tblMigrations` (`filename`) VALUES ('014_admin_integrations_route.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('015_multisite.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;

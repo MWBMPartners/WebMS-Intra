@@ -21,6 +21,7 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\Site;
 
 // 📌 Page metadata
 $pageTitle   = 'Attendance Reports';
@@ -37,6 +38,9 @@ if (Auth::check() === false) {
 // -----------------------------------------------------------------------------
 // 📅 Report parameters
 // -----------------------------------------------------------------------------
+// 🌐 Multi-site scope
+$siteId = Site::id();
+
 $reportYear  = (int) ($_GET['year'] ?? (int) date('Y'));
 $reportMonth = (int) ($_GET['month'] ?? 0); // 0 = full year
 
@@ -48,11 +52,11 @@ $stmt = $mysqli->prepare(
     . 'COALESCE(SUM(c.headcount), 0) AS headcount '
     . 'FROM tblAttendanceSessions s '
     . 'LEFT JOIN tblAttendanceCounts c ON c.sessionID = s.sessionID '
-    . 'WHERE s.isDeleted = 0 AND YEAR(s.sessionDate) = ? '
+    . 'WHERE s.isDeleted = 0 AND s.siteID = ? AND YEAR(s.sessionDate) = ? '
     . 'GROUP BY MONTH(s.sessionDate) ORDER BY m'
 );
 if ($stmt !== false) {
-    $stmt->bind_param('i', $reportYear);
+    $stmt->bind_param('ii', $siteId, $reportYear);
     $stmt->execute();
     $result = $stmt->get_result();
     while ($r = $result->fetch_assoc()) {
@@ -69,7 +73,7 @@ $typeSql = 'SELECT st.typeName, st.serviceTypeID, '
          . 'FROM tblAttendanceSessions s '
          . 'INNER JOIN tblAttendanceServiceTypes st ON st.serviceTypeID = s.serviceTypeID '
          . 'LEFT JOIN tblAttendanceCounts c ON c.sessionID = s.sessionID '
-         . 'WHERE s.isDeleted = 0 AND YEAR(s.sessionDate) = ?';
+         . 'WHERE s.isDeleted = 0 AND s.siteID = ? AND YEAR(s.sessionDate) = ?';
 
 if ($reportMonth > 0) {
     $typeSql .= ' AND MONTH(s.sessionDate) = ?';
@@ -79,9 +83,9 @@ $typeSql .= ' GROUP BY st.serviceTypeID ORDER BY headcount DESC';
 $stmt = $mysqli->prepare($typeSql);
 if ($stmt !== false) {
     if ($reportMonth > 0) {
-        $stmt->bind_param('ii', $reportYear, $reportMonth);
+        $stmt->bind_param('iii', $siteId, $reportYear, $reportMonth);
     } else {
-        $stmt->bind_param('i', $reportYear);
+        $stmt->bind_param('ii', $siteId, $reportYear);
     }
     $stmt->execute();
     $result = $stmt->get_result();
@@ -96,7 +100,7 @@ $groupBreakdown = [];
 $groupSql = 'SELECT c.groupLabel, SUM(c.headcount) AS totalCount '
           . 'FROM tblAttendanceCounts c '
           . 'INNER JOIN tblAttendanceSessions s ON s.sessionID = c.sessionID '
-          . 'WHERE s.isDeleted = 0 AND YEAR(s.sessionDate) = ?';
+          . 'WHERE s.isDeleted = 0 AND s.siteID = ? AND YEAR(s.sessionDate) = ?';
 
 if ($reportMonth > 0) {
     $groupSql .= ' AND MONTH(s.sessionDate) = ?';
@@ -106,9 +110,9 @@ $groupSql .= ' GROUP BY c.groupLabel ORDER BY totalCount DESC';
 $stmt = $mysqli->prepare($groupSql);
 if ($stmt !== false) {
     if ($reportMonth > 0) {
-        $stmt->bind_param('ii', $reportYear, $reportMonth);
+        $stmt->bind_param('iii', $siteId, $reportYear, $reportMonth);
     } else {
-        $stmt->bind_param('i', $reportYear);
+        $stmt->bind_param('ii', $siteId, $reportYear);
     }
     $stmt->execute();
     $result = $stmt->get_result();
@@ -127,13 +131,17 @@ foreach ($monthlyTotals as $mt) {
 
 // 📊 Available years for dropdown
 $availableYears = [];
-$result = $mysqli->query(
-    'SELECT DISTINCT YEAR(sessionDate) AS y FROM tblAttendanceSessions WHERE isDeleted = 0 ORDER BY y DESC'
+$stmtYears = $mysqli->prepare(
+    'SELECT DISTINCT YEAR(sessionDate) AS y FROM tblAttendanceSessions WHERE isDeleted = 0 AND siteID = ? ORDER BY y DESC'
 );
-if ($result !== false) {
-    while ($r = $result->fetch_assoc()) {
+if ($stmtYears !== false) {
+    $stmtYears->bind_param('i', $siteId);
+    $stmtYears->execute();
+    $resultYears = $stmtYears->get_result();
+    while ($r = $resultYears->fetch_assoc()) {
         $availableYears[] = (int) $r['y'];
     }
+    $stmtYears->close();
 }
 if (in_array($reportYear, $availableYears, true) === false) {
     $availableYears[] = $reportYear;

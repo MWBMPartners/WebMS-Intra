@@ -23,6 +23,7 @@ use Portal\Core\Auth;
 use Portal\Core\Logger;
 use Portal\Core\ExpensePdf;
 use Portal\Core\ExpenseMailer;
+use Portal\Core\Site;
 
 // 🛡️ Session and CSRF checks
 Auth::ensureSession();
@@ -67,15 +68,16 @@ if (empty($refs) === true) {
 // 📋 Verify claim exists and is in Approved status
 // -----------------------------------------------------------------------------
 $claim = null;
+$siteId = Site::id();
 $stmt = $mysqli->prepare(
     'SELECT EC.claimID, EC.status, EC.userID, U.fullName AS claimantName '
     . 'FROM tblExpenseClaims EC '
     . 'JOIN tblUsers U ON U.userID = EC.userID '
-    . 'WHERE EC.claimID = ? AND EC.status = ? LIMIT 1'
+    . 'WHERE EC.claimID = ? AND EC.status = ? AND EC.siteID = ? LIMIT 1'
 );
 if ($stmt !== false) {
     $approved = 'Approved';
-    $stmt->bind_param('is', $claimID, $approved);
+    $stmt->bind_param('isi', $claimID, $approved, $siteId);
     $stmt->execute();
     $claim = $stmt->get_result()->fetch_assoc();
     $stmt->close();
@@ -107,10 +109,10 @@ try {
     $stmt->close();
 
     // 2. 📝 Update claim status to Reimbursed
-    $upd = $mysqli->prepare('UPDATE tblExpenseClaims SET status = ?, updatedAt = NOW() WHERE claimID = ?');
+    $upd = $mysqli->prepare('UPDATE tblExpenseClaims SET status = ?, updatedAt = NOW() WHERE claimID = ? AND siteID = ?');
     if ($upd !== false) {
         $reimbursed = 'Reimbursed';
-        $upd->bind_param('si', $reimbursed, $claimID);
+        $upd->bind_param('sii', $reimbursed, $claimID, $siteId);
         $upd->execute();
         $upd->close();
     }

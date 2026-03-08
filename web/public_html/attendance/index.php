@@ -20,6 +20,7 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\Site;
 
 // 📌 Page metadata
 $pageTitle   = 'Attendance';
@@ -39,10 +40,13 @@ $page        = max(1, (int) ($_GET['page'] ?? 1));
 $perPage     = 25;
 $offset      = ($page - 1) * $perPage;
 
+// 🌐 Multi-site scope
+$siteId = Site::id();
+
 // 📊 Build WHERE clause
-$conditions = ['s.isDeleted = 0'];
-$params     = [];
-$types      = '';
+$conditions = ['s.isDeleted = 0', 's.siteID = ?'];
+$params     = [$siteId];
+$types      = 'i';
 
 if ($filterType !== '') {
     $conditions[] = 's.serviceTypeID = ?';
@@ -116,14 +120,18 @@ if ($stmt !== false) {
 
 // 📊 Fetch service types for filter dropdown (top-level only)
 $serviceTypes = [];
-$result = $mysqli->query(
+$stmtTypes = $mysqli->prepare(
     'SELECT serviceTypeID, typeName FROM tblAttendanceServiceTypes '
-    . 'WHERE isActive = 1 AND parentID IS NULL ORDER BY sortOrder, typeName'
+    . 'WHERE isActive = 1 AND parentID IS NULL AND siteID = ? ORDER BY sortOrder, typeName'
 );
-if ($result !== false) {
-    while ($r = $result->fetch_assoc()) {
+if ($stmtTypes !== false) {
+    $stmtTypes->bind_param('i', $siteId);
+    $stmtTypes->execute();
+    $resultTypes = $stmtTypes->get_result();
+    while ($r = $resultTypes->fetch_assoc()) {
         $serviceTypes[] = $r;
     }
+    $stmtTypes->close();
 }
 
 // 📊 Quick stats — total sessions this month and overall headcount this month
@@ -133,11 +141,11 @@ $stmt = $mysqli->prepare(
     'SELECT COUNT(DISTINCT s.sessionID) AS sessions, COALESCE(SUM(c.headcount), 0) AS headcount '
     . 'FROM tblAttendanceSessions s '
     . 'LEFT JOIN tblAttendanceCounts c ON c.sessionID = s.sessionID '
-    . 'WHERE s.isDeleted = 0 AND s.sessionDate >= ? AND s.sessionDate < DATE_ADD(?, INTERVAL 1 MONTH)'
+    . 'WHERE s.isDeleted = 0 AND s.siteID = ? AND s.sessionDate >= ? AND s.sessionDate < DATE_ADD(?, INTERVAL 1 MONTH)'
 );
 if ($stmt !== false) {
     $monthStart = $statsMonth . '-01';
-    $stmt->bind_param('ss', $monthStart, $monthStart);
+    $stmt->bind_param('iss', $siteId, $monthStart, $monthStart);
     $stmt->execute();
     $row = $stmt->get_result()->fetch_assoc();
     if ($row !== null) {

@@ -21,9 +21,10 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\Asset;
 use Portal\Core\Debug;
+use Portal\Core\Site;
 
-// 📌 Copyright information from settings
-$copyrightOrg  = App::settings('site.copyrightOrg') ?? 'MWBM Partners Ltd';
+// 📌 Copyright information — site branding overrides global setting
+$copyrightOrg  = Site::branding('copyright') ?? App::settings('site.copyrightOrg') ?? 'MWBM Partners Ltd';
 $copyrightYear = App::settings('site.copyrightStartYear') ?? '2025';
 $currentYear   = date('Y');
 

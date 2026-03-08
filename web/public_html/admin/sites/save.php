@@ -1,0 +1,138 @@
+<?php
+// Path: public_html/admin/sites/save.php
+/**
+ * -----------------------------------------------------------------------------
+ * Admin — Save Site 🌐
+ * -----------------------------------------------------------------------------
+ * POST handler for creating or updating a site record in tblSites.
+ * Umbrella admin only. Redirects back to admin/sites with flash message.
+ *
+ * @package   Portal\App\Admin
+ * @author    MWBM Partners Ltd (t/a MWservices)
+ * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
+ * @license   All Rights Reserved
+ * @version   0.9.0
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/45
+ * -----------------------------------------------------------------------------
+ */
+
+declare(strict_types=1);
+
+use Portal\Core\App;
+use Portal\Core\Auth;
+use Portal\Core\Logger;
+
+// 🛡️ POST only
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    header('Location: /admin/sites', true, 302);
+    exit();
+}
+
+// 🛡️ Umbrella admin only
+if (App::isUmbrellaAdmin() === false) {
+    http_response_code(403);
+    echo 'Access denied.';
+    exit();
+}
+
+// 🛡️ CSRF
+if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
+    http_response_code(403);
+    echo 'Invalid CSRF token.';
+    exit();
+}
+
+$db = App::db();
+
+// 📋 Sanitise inputs
+$siteID       = (int) ($_POST['siteID'] ?? 0);
+$siteName     = trim($_POST['siteName'] ?? '');
+$siteKey      = trim(strtolower($_POST['siteKey'] ?? ''));
+$hostPattern  = trim($_POST['hostPattern'] ?? '');
+$logoPath     = trim($_POST['logoPath'] ?? '/assets/images/logo.svg');
+$primaryColor = trim($_POST['primaryColor'] ?? '#0d6efd');
+$copyrightOrg = trim($_POST['copyrightOrg'] ?? '');
+$timezone     = trim($_POST['timezone'] ?? 'UTC');
+$isActive     = isset($_POST['isActive']) ? 1 : 0;
+
+// 🔍 Validate required fields
+if ($siteName === '' || $siteKey === '') {
+    $_SESSION['flash_error'] = 'Site name and key are required.';
+    header('Location: /admin/sites', true, 302);
+    exit();
+}
+
+// 🔍 Validate siteKey format (alphanumeric + hyphens only)
+if (preg_match('/^[a-z0-9\-]+$/', $siteKey) !== 1) {
+    $_SESSION['flash_error'] = 'Site key must contain only lowercase letters, numbers, and hyphens.';
+    header('Location: /admin/sites', true, 302);
+    exit();
+}
+
+// 🔍 Validate timezone
+if (in_array($timezone, timezone_identifiers_list(), true) === false) {
+    $timezone = 'UTC';
+}
+
+if ($siteID > 0) {
+    // ♻️ UPDATE existing site
+    $stmt = $db->prepare(
+        'UPDATE tblSites SET siteName = ?, siteKey = ?, hostPattern = ?, logoPath = ?, '
+        . 'primaryColor = ?, copyrightOrg = ?, timezone = ?, isActive = ? '
+        . 'WHERE siteID = ?'
+    );
+    if ($stmt === false) {
+        $_SESSION['flash_error'] = 'Database error: ' . $db->error;
+        header('Location: /admin/sites', true, 302);
+        exit();
+    }
+
+    $hostPatternVal = ($hostPattern !== '') ? $hostPattern : null;
+    $copyrightVal   = ($copyrightOrg !== '') ? $copyrightOrg : null;
+
+    $stmt->bind_param(
+        'sssssssii',
+        $siteName, $siteKey, $hostPatternVal, $logoPath,
+        $primaryColor, $copyrightVal, $timezone, $isActive, $siteID
+    );
+
+    if ($stmt->execute() === true) {
+        Logger::activity('SiteUpdate', 'Updated site #' . $siteID . ' (' . $siteName . ')');
+        $_SESSION['flash_success'] = 'Site "' . $siteName . '" updated successfully.';
+    } else {
+        $_SESSION['flash_error'] = 'Failed to update site: ' . $stmt->error;
+    }
+    $stmt->close();
+} else {
+    // ➕ INSERT new site
+    $stmt = $db->prepare(
+        'INSERT INTO tblSites (siteName, siteKey, hostPattern, logoPath, primaryColor, copyrightOrg, timezone, isActive) '
+        . 'VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+    );
+    if ($stmt === false) {
+        $_SESSION['flash_error'] = 'Database error: ' . $db->error;
+        header('Location: /admin/sites', true, 302);
+        exit();
+    }
+
+    $hostPatternVal = ($hostPattern !== '') ? $hostPattern : null;
+    $copyrightVal   = ($copyrightOrg !== '') ? $copyrightOrg : null;
+
+    $stmt->bind_param(
+        'sssssssi',
+        $siteName, $siteKey, $hostPatternVal, $logoPath,
+        $primaryColor, $copyrightVal, $timezone, $isActive
+    );
+
+    if ($stmt->execute() === true) {
+        $newSiteId = $stmt->insert_id;
+        Logger::activity('SiteCreate', 'Created site #' . $newSiteId . ' (' . $siteName . ')');
+        $_SESSION['flash_success'] = 'Site "' . $siteName . '" created successfully.';
+    } else {
+        $_SESSION['flash_error'] = 'Failed to create site: ' . $stmt->error;
+    }
+    $stmt->close();
+}
+
+header('Location: /admin/sites', true, 302);
+exit();

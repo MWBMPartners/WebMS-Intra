@@ -28,6 +28,7 @@ use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Logger;
 use Portal\Core\Router;
+use Portal\Core\Site;
 
 // 📌 Page metadata for the template system
 $pageTitle   = 'Settings';
@@ -52,10 +53,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'delet
     }
     if ($isRoot === true) {
         $deleteId = (int) ($_POST['settingID'] ?? 0);
+        $deleteSiteId = Site::id();
         if ($deleteId > 0) {
-            $stmt = $mysqli->prepare('DELETE FROM tblSettings WHERE settingID = ?');
+            // 🌐 Multi-site: only delete settings belonging to this site or global (NULL)
+            $stmt = $mysqli->prepare('DELETE FROM tblSettings WHERE settingID = ? AND (siteID = ? OR siteID IS NULL)');
             if ($stmt !== false) {
-                $stmt->bind_param('i', $deleteId);
+                $stmt->bind_param('ii', $deleteId, $deleteSiteId);
                 $stmt->execute();
                 $stmt->close();
             }
@@ -74,9 +77,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'delet
 // -----------------------------------------------------------------------------
 // 📋 Fetch settings list
 // -----------------------------------------------------------------------------
+// 🌐 Multi-site: show settings for this site (siteID = current) plus global defaults (siteID IS NULL)
+$siteId = Site::id();
 $rows = [];
-$stmt = $mysqli->prepare('SELECT settingID, settingKey, settingValue, isSensitive, updatedAt FROM tblSettings ORDER BY settingKey');
+$stmt = $mysqli->prepare(
+    'SELECT settingID, settingKey, settingValue, isSensitive, siteID, updatedAt '
+    . 'FROM tblSettings '
+    . 'WHERE siteID = ? OR siteID IS NULL '
+    . 'ORDER BY settingKey, siteID DESC'
+);
 if ($stmt !== false) {
+    $stmt->bind_param('i', $siteId);
     $stmt->execute();
     $result = $stmt->get_result();
     while ($r = $result->fetch_assoc()) {

@@ -22,6 +22,7 @@ use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Logger;
 use Portal\Core\Router;
+use Portal\Core\Site;
 
 // 📌 Page metadata
 $pageTitle   = 'Event Types & Categories';
@@ -33,6 +34,9 @@ if (App::isAdmin() === false) {
     Router::renderError(403);
     return;
 }
+
+// 🌐 Multi-site scope
+$siteId = Site::id();
 
 // -----------------------------------------------------------------------------
 // 💾 Handle POST actions
@@ -50,9 +54,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $parentID = ((int) ($_POST['parentID'] ?? 0)) ?: null;
         $slug     = strtolower(trim(preg_replace('/[^a-zA-Z0-9]+/', '-', $name), '-'));
         if ($name !== '') {
-            $stmt = $mysqli->prepare('INSERT INTO tblEventTypes (typeName, typeSlug, parentID) VALUES (?, ?, ?)');
+            $stmt = $mysqli->prepare('INSERT INTO tblEventTypes (typeName, typeSlug, parentID, siteID) VALUES (?, ?, ?, ?)');
             if ($stmt !== false) {
-                $stmt->bind_param('ssi', $name, $slug, $parentID);
+                $stmt->bind_param('ssii', $name, $slug, $parentID, $siteId);
                 $stmt->execute();
                 $stmt->close();
             }
@@ -67,9 +71,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $parentID = ((int) ($_POST['parentID'] ?? 0)) ?: null;
         $slug     = strtolower(trim(preg_replace('/[^a-zA-Z0-9]+/', '-', $name), '-'));
         if ($name !== '') {
-            $stmt = $mysqli->prepare('INSERT INTO tblEventCategories (categoryName, categorySlug, parentID) VALUES (?, ?, ?)');
+            $stmt = $mysqli->prepare('INSERT INTO tblEventCategories (categoryName, categorySlug, parentID, siteID) VALUES (?, ?, ?, ?)');
             if ($stmt !== false) {
-                $stmt->bind_param('ssi', $name, $slug, $parentID);
+                $stmt->bind_param('ssii', $name, $slug, $parentID, $siteId);
                 $stmt->execute();
                 $stmt->close();
             }
@@ -82,15 +86,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($action === 'delete' && $entity === 'type') {
         $typeID = (int) ($_POST['typeID'] ?? 0);
         if ($typeID > 0) {
-            $stmtP = $mysqli->prepare('UPDATE tblEventTypes SET parentID = NULL WHERE parentID = ?');
+            $stmtP = $mysqli->prepare('UPDATE tblEventTypes SET parentID = NULL WHERE parentID = ? AND siteID = ?');
             if ($stmtP !== false) {
-                $stmtP->bind_param('i', $typeID);
+                $stmtP->bind_param('ii', $typeID, $siteId);
                 $stmtP->execute();
                 $stmtP->close();
             }
-            $stmt = $mysqli->prepare('DELETE FROM tblEventTypes WHERE typeID = ?');
+            $stmt = $mysqli->prepare('DELETE FROM tblEventTypes WHERE typeID = ? AND siteID = ?');
             if ($stmt !== false) {
-                $stmt->bind_param('i', $typeID);
+                $stmt->bind_param('ii', $typeID, $siteId);
                 $stmt->execute();
                 $stmt->close();
             }
@@ -102,15 +106,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($action === 'delete' && $entity === 'category') {
         $catID = (int) ($_POST['categoryID'] ?? 0);
         if ($catID > 0) {
-            $stmtP = $mysqli->prepare('UPDATE tblEventCategories SET parentID = NULL WHERE parentID = ?');
+            $stmtP = $mysqli->prepare('UPDATE tblEventCategories SET parentID = NULL WHERE parentID = ? AND siteID = ?');
             if ($stmtP !== false) {
-                $stmtP->bind_param('i', $catID);
+                $stmtP->bind_param('ii', $catID, $siteId);
                 $stmtP->execute();
                 $stmtP->close();
             }
-            $stmt = $mysqli->prepare('DELETE FROM tblEventCategories WHERE categoryID = ?');
+            $stmt = $mysqli->prepare('DELETE FROM tblEventCategories WHERE categoryID = ? AND siteID = ?');
             if ($stmt !== false) {
-                $stmt->bind_param('i', $catID);
+                $stmt->bind_param('ii', $catID, $siteId);
                 $stmt->execute();
                 $stmt->close();
             }
@@ -127,27 +131,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 // 📋 Fetch types and categories
 // -----------------------------------------------------------------------------
 $typesList = [];
-$result = $mysqli->query(
+$stmtTypes = $mysqli->prepare(
     'SELECT t.*, p.typeName AS parentName FROM tblEventTypes t '
     . 'LEFT JOIN tblEventTypes p ON p.typeID = t.parentID '
+    . 'WHERE t.siteID = ? '
     . 'ORDER BY t.parentID IS NOT NULL, t.sortOrder, t.typeName'
 );
-if ($result !== false) {
-    while ($r = $result->fetch_assoc()) {
+if ($stmtTypes !== false) {
+    $stmtTypes->bind_param('i', $siteId);
+    $stmtTypes->execute();
+    $resultTypes = $stmtTypes->get_result();
+    while ($r = $resultTypes->fetch_assoc()) {
         $typesList[] = $r;
     }
+    $stmtTypes->close();
 }
 
 $categoriesList = [];
-$result = $mysqli->query(
+$stmtCats = $mysqli->prepare(
     'SELECT c.*, p.categoryName AS parentName FROM tblEventCategories c '
     . 'LEFT JOIN tblEventCategories p ON p.categoryID = c.parentID '
+    . 'WHERE c.siteID = ? '
     . 'ORDER BY c.parentID IS NOT NULL, c.sortOrder, c.categoryName'
 );
-if ($result !== false) {
-    while ($r = $result->fetch_assoc()) {
+if ($stmtCats !== false) {
+    $stmtCats->bind_param('i', $siteId);
+    $stmtCats->execute();
+    $resultCats = $stmtCats->get_result();
+    while ($r = $resultCats->fetch_assoc()) {
         $categoriesList[] = $r;
     }
+    $stmtCats->close();
 }
 
 $flashMsg  = $_SESSION['admin_flash_msg']  ?? '';

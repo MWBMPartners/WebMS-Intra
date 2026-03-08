@@ -25,6 +25,7 @@ use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Logger;
 use Portal\Core\Router;
+use Portal\Core\Site;
 
 // 🛡️ Admin access check
 if (App::isAdmin() === false) {
@@ -67,6 +68,9 @@ if ($isSensitive === 1 && function_exists('encrypt_setting') === true) {
 // -----------------------------------------------------------------------------
 // 💾 Insert or update DB row
 // -----------------------------------------------------------------------------
+// 🌐 Multi-site: settings are scoped to the current site
+$siteId = Site::id();
+
 if ($settingId > 0) {
     // ✏️ Update existing
     $stmt = $mysqli->prepare('UPDATE tblSettings SET settingValue = ?, isSensitive = ?, updatedAt = NOW() WHERE settingID = ?');
@@ -83,10 +87,10 @@ if ($settingId > 0) {
     $_SESSION['admin_flash_msg']  = 'Setting "' . $settingKey . '" updated.';
     $_SESSION['admin_flash_type'] = 'success';
 } else {
-    // ➕ Insert new — ensure unique key
-    $stmt = $mysqli->prepare('SELECT settingID FROM tblSettings WHERE settingKey = ? LIMIT 1');
+    // ➕ Insert new — ensure unique key per site
+    $stmt = $mysqli->prepare('SELECT settingID FROM tblSettings WHERE settingKey = ? AND (siteID = ? OR siteID IS NULL) LIMIT 1');
     if ($stmt !== false) {
-        $stmt->bind_param('s', $settingKey);
+        $stmt->bind_param('si', $settingKey, $siteId);
         $stmt->execute();
         $stmt->store_result();
         if ($stmt->num_rows > 0) {
@@ -99,14 +103,16 @@ if ($settingId > 0) {
         $stmt->close();
     }
 
-    $stmt = $mysqli->prepare('INSERT INTO tblSettings (settingKey, settingValue, isSensitive, updatedAt) VALUES (?, ?, ?, NOW())');
+    $stmt = $mysqli->prepare(
+        'INSERT INTO tblSettings (settingKey, settingValue, isSensitive, siteID, updatedAt) VALUES (?, ?, ?, ?, NOW())'
+    );
     if ($stmt === false) {
         $_SESSION['admin_flash_msg']  = 'Database error adding setting.';
         $_SESSION['admin_flash_type'] = 'danger';
         header('Location: /settings');
         exit();
     }
-    $stmt->bind_param('ssi', $settingKey, $settingVal, $isSensitive);
+    $stmt->bind_param('ssii', $settingKey, $settingVal, $isSensitive, $siteId);
     $stmt->execute();
     $stmt->close();
     Logger::activity('SettingsInsert', 'Added setting: ' . $settingKey, $_SESSION['user_id'] ?? null);

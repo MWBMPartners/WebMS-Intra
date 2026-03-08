@@ -127,6 +127,15 @@ class Router
         $path = strtolower(trim($path, '/'));
         $path = (string) preg_replace('#/{2,}#', '/', $path);
 
+        // 🌐 In path-prefix multisite mode, strip the site key from the URL
+        // E.g. /cambridge/expenses → expenses (Site::preDetect already stored the prefix)
+        $sitePrefix = Site::pathPrefix();
+        if ($sitePrefix !== '' && str_starts_with($path, $sitePrefix . '/') === true) {
+            $path = substr($path, strlen($sitePrefix) + 1);
+        } elseif ($sitePrefix !== '' && $path === $sitePrefix) {
+            $path = '';
+        }
+
         return $path;
     }
 
@@ -383,6 +392,11 @@ class Router
      */
     public static function url(string $routeKey): string
     {
+        // 🌐 In path-prefix multisite mode, prepend the site key to the URL
+        $prefix = Site::pathPrefix();
+        if ($prefix !== '') {
+            return '/' . $prefix . '/' . ltrim($routeKey, '/');
+        }
         return '/' . ltrim($routeKey, '/');
     }
 

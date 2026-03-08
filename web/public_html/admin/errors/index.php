@@ -21,6 +21,7 @@ use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Logger;
 use Portal\Core\Router;
+use Portal\Core\Site;
 
 // 📌 Page metadata
 $pageTitle   = 'Error Log';
@@ -93,10 +94,21 @@ $page           = max(1, (int) ($_GET['page'] ?? 1));
 $perPage        = 50;
 $offset         = ($page - 1) * $perPage;
 
+// 🌐 Multi-site: filter by siteID unless umbrella admin
+$siteId      = Site::id();
+$isUmbrella  = App::isUmbrellaAdmin();
+
 // 📊 Build dynamic WHERE clause
 $conditions = [];
 $params     = [];
 $types      = '';
+
+// 🌐 Non-umbrella admins only see errors for their site
+if ($isUmbrella === false) {
+    $conditions[] = 'e.siteID = ?';
+    $params[]     = $siteId;
+    $types       .= 'i';
+}
 
 if ($filterPlatform !== '') {
     $conditions[] = 'e.errorPlatform = ?';
@@ -169,16 +181,39 @@ if ($stmt !== false) {
 // 📊 Get distinct platforms and severities for filter dropdowns
 $platforms  = [];
 $severities = [];
-$result = $mysqli->query('SELECT DISTINCT errorPlatform FROM tblErrors ORDER BY errorPlatform');
-if ($result !== false) {
-    while ($r = $result->fetch_assoc()) {
-        $platforms[] = $r['errorPlatform'];
+if ($isUmbrella === true) {
+    $result = $mysqli->query('SELECT DISTINCT errorPlatform FROM tblErrors ORDER BY errorPlatform');
+    if ($result !== false) {
+        while ($r = $result->fetch_assoc()) {
+            $platforms[] = $r['errorPlatform'];
+        }
     }
-}
-$result = $mysqli->query('SELECT DISTINCT errorSeverity FROM tblErrors ORDER BY errorSeverity');
-if ($result !== false) {
-    while ($r = $result->fetch_assoc()) {
-        $severities[] = $r['errorSeverity'];
+    $result = $mysqli->query('SELECT DISTINCT errorSeverity FROM tblErrors ORDER BY errorSeverity');
+    if ($result !== false) {
+        while ($r = $result->fetch_assoc()) {
+            $severities[] = $r['errorSeverity'];
+        }
+    }
+} else {
+    $stmt = $mysqli->prepare('SELECT DISTINCT errorPlatform FROM tblErrors WHERE siteID = ? ORDER BY errorPlatform');
+    if ($stmt !== false) {
+        $stmt->bind_param('i', $siteId);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        while ($r = $result->fetch_assoc()) {
+            $platforms[] = $r['errorPlatform'];
+        }
+        $stmt->close();
+    }
+    $stmt = $mysqli->prepare('SELECT DISTINCT errorSeverity FROM tblErrors WHERE siteID = ? ORDER BY errorSeverity');
+    if ($stmt !== false) {
+        $stmt->bind_param('i', $siteId);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        while ($r = $result->fetch_assoc()) {
+            $severities[] = $r['errorSeverity'];
+        }
+        $stmt->close();
     }
 }
 

@@ -22,6 +22,7 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\Site;
 
 // 📌 Page metadata
 $pageTitle   = 'Calendar';
@@ -41,10 +42,13 @@ $page           = max(1, (int) ($_GET['page'] ?? 1));
 $perPage        = 20;
 $offset         = ($page - 1) * $perPage;
 
+// 🌐 Multi-site scope
+$siteId = Site::id();
+
 // 📊 Build WHERE clause
-$conditions = ["e.isDeleted = 0", "e.status = 'published'", "e.isPublic = 1"];
-$params     = [];
-$types      = '';
+$conditions = ["e.isDeleted = 0", "e.status = 'published'", "e.isPublic = 1", "e.siteID = ?"];
+$params     = [$siteId];
+$types      = 'i';
 
 if ($showPast === false) {
     $conditions[] = 'e.startDateTime >= NOW()';
@@ -116,19 +120,27 @@ if ($stmt !== false) {
 
 // 📊 Fetch categories and types for filter dropdowns
 $categories = [];
-$result = $mysqli->query('SELECT categoryID, categoryName FROM tblEventCategories WHERE isActive = 1 ORDER BY sortOrder, categoryName');
-if ($result !== false) {
-    while ($r = $result->fetch_assoc()) {
+$stmtCat = $mysqli->prepare('SELECT categoryID, categoryName FROM tblEventCategories WHERE isActive = 1 AND siteID = ? ORDER BY sortOrder, categoryName');
+if ($stmtCat !== false) {
+    $stmtCat->bind_param('i', $siteId);
+    $stmtCat->execute();
+    $resultCat = $stmtCat->get_result();
+    while ($r = $resultCat->fetch_assoc()) {
         $categories[] = $r;
     }
+    $stmtCat->close();
 }
 
 $eventTypes = [];
-$result = $mysqli->query('SELECT typeID, typeName FROM tblEventTypes WHERE isActive = 1 AND parentID IS NULL ORDER BY sortOrder, typeName');
-if ($result !== false) {
-    while ($r = $result->fetch_assoc()) {
+$stmtType = $mysqli->prepare('SELECT typeID, typeName FROM tblEventTypes WHERE isActive = 1 AND parentID IS NULL AND siteID = ? ORDER BY sortOrder, typeName');
+if ($stmtType !== false) {
+    $stmtType->bind_param('i', $siteId);
+    $stmtType->execute();
+    $resultType = $stmtType->get_result();
+    while ($r = $resultType->fetch_assoc()) {
         $eventTypes[] = $r;
     }
+    $stmtType->close();
 }
 
 // 📄 Include shared header template

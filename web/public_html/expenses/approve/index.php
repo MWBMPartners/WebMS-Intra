@@ -20,6 +20,7 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\Site;
 
 // 📌 Page metadata for the template system
 $pageTitle   = 'Approve Expense Claims';
@@ -34,15 +35,16 @@ unset($_SESSION['admin_flash_msg'], $_SESSION['admin_flash_type']);
 // 📋 Fetch pending claims — admins see all, approvers see their dept claims
 $claims = [];
 $currentUserId = (int) ($_SESSION['user_id'] ?? 0);
+$siteId = Site::id();
 
 if (App::isAdmin() === true) {
-    // 🛡️ Admins see all pending claims
+    // 🛡️ Admins see all pending claims for this site
     $stmt = $mysqli->prepare(
         'SELECT EC.claimID, EC.claimTitle, U.fullName, D.deptName, EC.totalAmount, EC.createdAt '
         . 'FROM tblExpenseClaims EC '
         . 'JOIN tblUsers U ON U.userID = EC.userID '
         . 'JOIN tblDepts D ON D.deptID = EC.deptID '
-        . "WHERE EC.status = 'Pending' "
+        . "WHERE EC.status = 'Pending' AND EC.siteID = ? "
         . 'ORDER BY EC.createdAt DESC'
     );
 } else {
@@ -53,15 +55,17 @@ if (App::isAdmin() === true) {
         . 'JOIN tblUsers U ON U.userID = EC.userID '
         . 'JOIN tblDepts D ON D.deptID = EC.deptID '
         . 'JOIN tblUserDepts UD ON UD.deptID = EC.deptID AND UD.userID = ? '
-        . "WHERE EC.status = 'Pending' "
+        . "WHERE EC.status = 'Pending' AND EC.siteID = ? "
         . 'AND (UD.isApprover = 1 OR UD.isDeptLead = 1 OR UD.isMandatoryApprover = 1) '
         . 'ORDER BY EC.createdAt DESC'
     );
 }
 
 if ($stmt !== false) {
-    if (App::isAdmin() === false) {
-        $stmt->bind_param('i', $currentUserId);
+    if (App::isAdmin() === true) {
+        $stmt->bind_param('i', $siteId);
+    } else {
+        $stmt->bind_param('ii', $currentUserId, $siteId);
     }
     $stmt->execute();
     $res = $stmt->get_result();

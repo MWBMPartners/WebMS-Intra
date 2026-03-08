@@ -17,6 +17,11 @@
  *   App::isDebug()                → true if debug mode active AND user is admin
  *   App::version()                → portal version string (e.g. "0.1.0")
  *   App::env()                    → environment string (dev|beta|prod)
+ *   App::siteId()                 → active site ID (delegates to Site::id())
+ *   App::isAdmin()                → 4-tier admin check (umbrella/site root/site/legacy)
+ *   App::isSiteAdmin()            → site-level admin check for current site
+ *   App::isSiteRootAdmin()        → site root admin check for current site
+ *   App::isUmbrellaAdmin()        → umbrella (global root) admin check
  *
  * @package   Portal\Core
  * @author    MWBM Partners Ltd (t/a MWservices)
@@ -152,17 +157,22 @@ class App
         $userId = (int) $_SESSION['user_id'];
         $db     = self::db();
 
-        // 📝 Fetch full user record from the database
+        // 📝 Fetch full user record from the database, including site-level role flags
+        $siteId = Site::id();
         $stmt = $db->prepare(
-            'SELECT userID, fullName, emailAddress, phoneNumber, avatarPath, '
-            . 'isActive, isAdmin, isRootAdmin, createdAt '
-            . 'FROM tblUsers WHERE userID = ? LIMIT 1'
+            'SELECT U.userID, U.fullName, U.emailAddress, U.phoneNumber, U.avatarPath, '
+            . 'U.isActive, U.isAdmin, U.isRootAdmin, U.createdAt, '
+            . 'COALESCE(US.isSiteAdmin, 0) AS isSiteAdmin, '
+            . 'COALESCE(US.isSiteRootAdmin, 0) AS isSiteRootAdmin '
+            . 'FROM tblUsers U '
+            . 'LEFT JOIN tblUserSites US ON US.userID = U.userID AND US.siteID = ? AND US.isActive = 1 '
+            . 'WHERE U.userID = ? LIMIT 1'
         );
         if ($stmt === false) {
             return null;
         }
 
-        $stmt->bind_param('i', $userId);
+        $stmt->bind_param('ii', $siteId, $userId);
         $stmt->execute();
         $result = $stmt->get_result();
         $user   = $result->fetch_assoc();
@@ -264,9 +274,24 @@ class App
     }
 
     /**
-     * Check if the current user is at least an Admin.
+     * 🌐 Get the active site ID. Delegates to Site::id().
      *
-     * @return bool True if the user is Admin or Root Admin
+     * @return int Active site ID (defaults to 1)
+     */
+    public static function siteId(): int
+    {
+        return Site::id();
+    }
+
+    /**
+     * Check if the current user is at least an Admin (4-tier hierarchy).
+     * Returns true if user is ANY of:
+     *   - Umbrella Admin (tblUsers.isRootAdmin=1)
+     *   - Site Root Admin (tblUserSites.isSiteRootAdmin=1 for current site)
+     *   - Site Admin (tblUserSites.isSiteAdmin=1 for current site)
+     *   - Legacy Admin (tblUsers.isAdmin=1)
+     *
+     * @return bool True if the user has admin-level access
      */
     public static function isAdmin(): bool
     {
@@ -274,11 +299,14 @@ class App
         if ($user === null) {
             return false;
         }
-        return ($user['isAdmin'] === '1' || $user['isRootAdmin'] === '1');
+        return ($user['isAdmin'] === '1'
+            || $user['isRootAdmin'] === '1'
+            || (string) ($user['isSiteAdmin'] ?? '0') === '1'
+            || (string) ($user['isSiteRootAdmin'] ?? '0') === '1');
     }
 
     /**
-     * Check if the current user is a Root/Global Admin.
+     * Check if the current user is a Root/Global (Umbrella) Admin.
      *
      * @return bool True if the user is Root Admin
      */
@@ -289,6 +317,58 @@ class App
             return false;
         }
         return ($user['isRootAdmin'] === '1');
+    }
+
+    /**
+     * 🌐 Check if the current user is an Umbrella Admin (alias for isRootAdmin).
+     *
+     * @return bool True if the user is a global root admin
+     */
+    public static function isUmbrellaAdmin(): bool
+    {
+        return self::isRootAdmin();
+    }
+
+    /**
+     * 🌐 Check if the current user is a Site Admin for the current site.
+     * Includes Site Root Admins (who are also site admins by implication).
+     *
+     * @return bool True if the user has site admin access
+     */
+    public static function isSiteAdmin(): bool
+    {
+        $user = self::user();
+        if ($user === null) {
+            return false;
+        }
+
+        // 🛡️ Umbrella admins are implicitly site admins everywhere
+        if ($user['isRootAdmin'] === '1') {
+            return true;
+        }
+
+        return ((string) ($user['isSiteAdmin'] ?? '0') === '1'
+            || (string) ($user['isSiteRootAdmin'] ?? '0') === '1');
+    }
+
+    /**
+     * 🌐 Check if the current user is a Site Root Admin for the current site.
+     *
+     * @return bool True if the user has site root admin access
+     */
+    public static function isSiteRootAdmin(): bool
+    {
+        $user = self::user();
+        if ($user === null) {
+            return false;
+        }
+
+        // 🛡️ Umbrella admins are implicitly site root admins everywhere
+        if ($user['isRootAdmin'] === '1') {
+            return true;
+        }
+
+        return ((string) ($user['isSiteRootAdmin'] ?? '0') === '1');
     }
 
     /**

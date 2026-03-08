@@ -260,17 +260,37 @@ try {
     exit('Database connection error.');
 }
 
+// 🌐 ---------------------------------------------------------------------------
+// 5b. Multi-site pre-detection (before settings load)
+// -----------------------------------------------------------------------------
+// Lightweight site detection runs before settings are loaded so we know which
+// siteID to use when fetching site-specific settings overrides.
+// Returns siteID=1 if multisite is disabled or detection fails.
+// See: core/Site.php — preDetect() method
+
+$preDetectedSiteID = \Portal\Core\Site::preDetect($mysqli);
+
 // 🗝️ ---------------------------------------------------------------------------
 // 6. Settings loader – dot-notation → multidimensional array
 // -----------------------------------------------------------------------------
 // Reads all settings from tblSettings, decrypts sensitive values, and builds
 // a nested PHP array using the dot-separated settingKey as the hierarchy.
 // Example: 'auth.ms365.clientID' → $SETTINGS['auth']['ms365']['clientID']
+//
+// Site-aware: fetches global defaults (siteID IS NULL) and site-specific
+// overrides (siteID = N). Global defaults are loaded first, then site-specific
+// values overwrite them so the final array reflects the merged config.
 
 $SETTINGS = [];
 
-$settingsStmt = $mysqli->prepare('SELECT settingKey, settingValue, isSensitive FROM tblSettings');
+$settingsStmt = $mysqli->prepare(
+    'SELECT settingKey, settingValue, isSensitive, siteID '
+    . 'FROM tblSettings '
+    . 'WHERE siteID IS NULL OR siteID = ? '
+    . 'ORDER BY siteID IS NULL DESC'
+);
 if ($settingsStmt !== false) {
+    $settingsStmt->bind_param('i', $preDetectedSiteID);
     $settingsStmt->execute();
     $result = $settingsStmt->get_result();
     while ($row = $result->fetch_assoc()) {
@@ -287,6 +307,7 @@ if ($settingsStmt !== false) {
 }
 
 // 🕐 Update timezone to the configured value (overrides the UTC default above)
+// Site-specific timezone from tblSites takes priority over the settings value
 if (isset($SETTINGS['site']['timezone']) === true && $SETTINGS['site']['timezone'] !== '') {
     $tz = $SETTINGS['site']['timezone'];
     if (in_array($tz, timezone_identifiers_list(), true) === true) {
@@ -302,6 +323,16 @@ if (isset($SETTINGS['site']['timezone']) === true && $SETTINGS['site']['timezone
 // See: core/App.php
 
 \Portal\Core\App::init($mysqli, $SETTINGS);
+
+// 🌐 ---------------------------------------------------------------------------
+// 7b. Initialise Site context
+// -----------------------------------------------------------------------------
+// Completes multi-site initialisation now that settings are fully loaded.
+// Uses the pre-detected siteID from step 5b plus the full settings array
+// to determine detection mode, branding, and site-level permissions.
+// See: core/Site.php
+
+\Portal\Core\Site::init($mysqli, $SETTINGS, $preDetectedSiteID);
 
 // ⏱️ ---------------------------------------------------------------------------
 // 8. Initialise Debug timer

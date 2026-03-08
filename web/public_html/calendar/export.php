@@ -23,21 +23,25 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Router;
+use Portal\Core\Site;
 
 // 🔍 Determine what to export
 $eventId  = (int) ($_GET['id'] ?? 0);
 $seriesId = (int) ($_GET['series'] ?? 0);
 $exportAll = ($_GET['all'] ?? '') === '1';
 
+// 🌐 Multi-site scope
+$siteId = Site::id();
+
 $events = [];
 
 if ($eventId > 0) {
     // 📅 Single event
     $stmt = $mysqli->prepare(
-        'SELECT * FROM tblEvents WHERE eventID = ? AND isDeleted = 0 LIMIT 1'
+        'SELECT * FROM tblEvents WHERE eventID = ? AND isDeleted = 0 AND siteID = ? LIMIT 1'
     );
     if ($stmt !== false) {
-        $stmt->bind_param('i', $eventId);
+        $stmt->bind_param('ii', $eventId, $siteId);
         $stmt->execute();
         $row = $stmt->get_result()->fetch_assoc();
         if ($row !== null) {
@@ -48,10 +52,10 @@ if ($eventId > 0) {
 } elseif ($seriesId > 0) {
     // 🔄 All events in a series
     $stmt = $mysqli->prepare(
-        'SELECT * FROM tblEvents WHERE seriesID = ? AND isDeleted = 0 AND status = \'published\' ORDER BY startDateTime'
+        'SELECT * FROM tblEvents WHERE seriesID = ? AND isDeleted = 0 AND status = \'published\' AND siteID = ? ORDER BY startDateTime'
     );
     if ($stmt !== false) {
-        $stmt->bind_param('i', $seriesId);
+        $stmt->bind_param('ii', $seriesId, $siteId);
         $stmt->execute();
         $result = $stmt->get_result();
         while ($r = $result->fetch_assoc()) {
@@ -61,14 +65,18 @@ if ($eventId > 0) {
     }
 } elseif ($exportAll === true) {
     // 📅 All upcoming public events
-    $result = $mysqli->query(
+    $stmt = $mysqli->prepare(
         'SELECT * FROM tblEvents WHERE isDeleted = 0 AND status = \'published\' '
-        . 'AND isPublic = 1 AND startDateTime >= NOW() ORDER BY startDateTime LIMIT 200'
+        . 'AND isPublic = 1 AND startDateTime >= NOW() AND siteID = ? ORDER BY startDateTime LIMIT 200'
     );
-    if ($result !== false) {
+    if ($stmt !== false) {
+        $stmt->bind_param('i', $siteId);
+        $stmt->execute();
+        $result = $stmt->get_result();
         while ($r = $result->fetch_assoc()) {
             $events[] = $r;
         }
+        $stmt->close();
     }
 }
 

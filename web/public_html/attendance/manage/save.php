@@ -21,6 +21,7 @@ use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Logger;
 use Portal\Core\Router;
+use Portal\Core\Site;
 
 // 🛡️ Admin access check
 if (App::isAdmin() === false) {
@@ -41,6 +42,9 @@ if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
 
 $action = $_POST['action'] ?? '';
 $userId = $_SESSION['user_id'] ?? null;
+
+// 🌐 Multi-site scope
+$siteId = Site::id();
 
 // -----------------------------------------------------------------------------
 // ➕ Create service type
@@ -66,9 +70,9 @@ if ($action === 'create') {
     $originalSlug = $slug;
     $counter = 1;
     while (true) {
-        $stmt = $mysqli->prepare('SELECT serviceTypeID FROM tblAttendanceServiceTypes WHERE typeSlug = ? LIMIT 1');
+        $stmt = $mysqli->prepare('SELECT serviceTypeID FROM tblAttendanceServiceTypes WHERE typeSlug = ? AND siteID = ? LIMIT 1');
         if ($stmt !== false) {
-            $stmt->bind_param('s', $slug);
+            $stmt->bind_param('si', $slug, $siteId);
             $stmt->execute();
             $exists = $stmt->get_result()->fetch_assoc();
             $stmt->close();
@@ -81,8 +85,8 @@ if ($action === 'create') {
     }
 
     $stmt = $mysqli->prepare(
-        'INSERT INTO tblAttendanceServiceTypes (parentID, typeName, typeSlug, description, sortOrder) '
-        . 'VALUES (?, ?, ?, ?, ?)'
+        'INSERT INTO tblAttendanceServiceTypes (siteID, parentID, typeName, typeSlug, description, sortOrder) '
+        . 'VALUES (?, ?, ?, ?, ?, ?)'
     );
     if ($stmt === false) {
         $_SESSION['admin_flash_msg']  = 'Database error creating service type.';
@@ -91,7 +95,7 @@ if ($action === 'create') {
         exit();
     }
 
-    $stmt->bind_param('isssi', $parentID, $typeName, $slug, $description, $sortOrder);
+    $stmt->bind_param('iisssi', $siteId, $parentID, $typeName, $slug, $description, $sortOrder);
     $stmt->execute();
     $newId = $stmt->insert_id;
     $stmt->close();
@@ -119,9 +123,9 @@ if ($action === 'toggle') {
     // 📋 Get current state
     $currentActive = null;
     $typeName = '';
-    $stmt = $mysqli->prepare('SELECT isActive, typeName FROM tblAttendanceServiceTypes WHERE serviceTypeID = ? LIMIT 1');
+    $stmt = $mysqli->prepare('SELECT isActive, typeName FROM tblAttendanceServiceTypes WHERE serviceTypeID = ? AND siteID = ? LIMIT 1');
     if ($stmt !== false) {
-        $stmt->bind_param('i', $serviceTypeID);
+        $stmt->bind_param('ii', $serviceTypeID, $siteId);
         $stmt->execute();
         $row = $stmt->get_result()->fetch_assoc();
         if ($row !== null) {
@@ -139,9 +143,9 @@ if ($action === 'toggle') {
     }
 
     $newActive = $currentActive === 1 ? 0 : 1;
-    $stmt = $mysqli->prepare('UPDATE tblAttendanceServiceTypes SET isActive = ? WHERE serviceTypeID = ?');
+    $stmt = $mysqli->prepare('UPDATE tblAttendanceServiceTypes SET isActive = ? WHERE serviceTypeID = ? AND siteID = ?');
     if ($stmt !== false) {
-        $stmt->bind_param('ii', $newActive, $serviceTypeID);
+        $stmt->bind_param('iii', $newActive, $serviceTypeID, $siteId);
         $stmt->execute();
         $stmt->close();
     }

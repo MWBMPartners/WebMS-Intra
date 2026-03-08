@@ -32,6 +32,7 @@ use Portal\Core\Auth;
 use Portal\Core\Logger;
 use Portal\Core\ExpensePdf;
 use Portal\Core\ExpenseMailer;
+use Portal\Core\Site;
 
 // 🛡️ Session and CSRF checks
 Auth::ensureSession();
@@ -69,15 +70,16 @@ if ($claimID === 0) {
 // 📋 Fetch claim details to determine dept and amount
 // -----------------------------------------------------------------------------
 $claim = null;
+$siteId = Site::id();
 $stmt = $mysqli->prepare(
     'SELECT EC.claimID, EC.deptID, EC.totalAmount, EC.status, EC.userID, U.fullName AS claimantName '
     . 'FROM tblExpenseClaims EC '
     . 'JOIN tblUsers U ON U.userID = EC.userID '
-    . 'WHERE EC.claimID = ? AND EC.status = ? LIMIT 1'
+    . 'WHERE EC.claimID = ? AND EC.status = ? AND EC.siteID = ? LIMIT 1'
 );
 if ($stmt !== false) {
     $pending = 'Pending';
-    $stmt->bind_param('is', $claimID, $pending);
+    $stmt->bind_param('isi', $claimID, $pending, $siteId);
     $stmt->execute();
     $claim = $stmt->get_result()->fetch_assoc();
     $stmt->close();
@@ -197,9 +199,9 @@ try {
 
     // 3. 📊 Update claim status if a final decision has been reached
     if ($finalDecision !== null) {
-        $stmt = $mysqli->prepare('UPDATE tblExpenseClaims SET status = ?, updatedAt = NOW() WHERE claimID = ?');
+        $stmt = $mysqli->prepare('UPDATE tblExpenseClaims SET status = ?, updatedAt = NOW() WHERE claimID = ? AND siteID = ?');
         if ($stmt !== false) {
-            $stmt->bind_param('si', $finalDecision, $claimID);
+            $stmt->bind_param('sii', $finalDecision, $claimID, $siteId);
             $stmt->execute();
             $stmt->close();
         }

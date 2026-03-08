@@ -23,6 +23,7 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Router;
+use Portal\Core\Site;
 
 // 📌 Page metadata
 $pageTitle   = 'Manage Service Types';
@@ -40,20 +41,28 @@ $flashMsg  = $_SESSION['admin_flash_msg']  ?? '';
 $flashType = $_SESSION['admin_flash_type'] ?? 'info';
 unset($_SESSION['admin_flash_msg'], $_SESSION['admin_flash_type']);
 
+// 🌐 Multi-site scope
+$siteId = Site::id();
+
 // -----------------------------------------------------------------------------
 // 📋 Fetch all service types (including inactive, for admin view)
 // -----------------------------------------------------------------------------
 $allTypes = [];
-$result = $mysqli->query(
+$stmtTypes = $mysqli->prepare(
     'SELECT st.*, '
-    . '(SELECT COUNT(*) FROM tblAttendanceSessions s WHERE s.serviceTypeID = st.serviceTypeID AND s.isDeleted = 0) AS sessionCount '
+    . '(SELECT COUNT(*) FROM tblAttendanceSessions s WHERE s.serviceTypeID = st.serviceTypeID AND s.isDeleted = 0 AND s.siteID = ?) AS sessionCount '
     . 'FROM tblAttendanceServiceTypes st '
+    . 'WHERE st.siteID = ? '
     . 'ORDER BY st.sortOrder, st.typeName'
 );
-if ($result !== false) {
-    while ($r = $result->fetch_assoc()) {
+if ($stmtTypes !== false) {
+    $stmtTypes->bind_param('ii', $siteId, $siteId);
+    $stmtTypes->execute();
+    $resultTypes = $stmtTypes->get_result();
+    while ($r = $resultTypes->fetch_assoc()) {
         $allTypes[] = $r;
     }
+    $stmtTypes->close();
 }
 
 // 📊 Separate into top-level and children for hierarchical display

@@ -26,6 +26,7 @@ use Portal\Core\App;
 use Portal\Core\Asset;
 use Portal\Core\Auth;
 use Portal\Core\I18n;
+use Portal\Core\Site;
 
 // 🛡️ Ensure session is started (needed for CSRF meta tag and nav user info)
 Auth::ensureSession();
@@ -35,8 +36,9 @@ $pageTitle   = $pageTitle   ?? 'Portal';
 $pageSection = $pageSection ?? '';
 $breadcrumbs = $breadcrumbs ?? [];
 
-// 🌐 Site name from settings for the title suffix
-$siteName = App::settings('site.name') ?? 'Portal';
+// 🌐 Site branding — use Site::branding() for multi-site, fallback to settings
+$siteName    = Site::branding('name') ?? App::settings('site.name') ?? 'Portal';
+$siteColor   = Site::branding('color') ?? '#0d6efd';
 
 // 🔒 Security headers
 header_remove('X-Powered-By');
@@ -55,7 +57,7 @@ header("Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-i
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="csrf-token" content="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
-    <meta name="theme-color" content="#0d6efd">
+    <meta name="theme-color" content="<?php echo htmlspecialchars($siteColor, ENT_QUOTES, 'UTF-8'); ?>">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <link rel="manifest" href="/manifest.json">

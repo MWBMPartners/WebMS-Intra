@@ -5,6 +5,37 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] - 2026-03-08
+
+### Added — Multi-Site Support (Phase 5, Issue #45)
+
+- **Multi-site architecture** — single installation serving multiple sites/divisions with full data isolation via `siteID` foreign keys on all data tables
+- **Three detection modes** (configurable via `multisite.detectionMode`): subdomain (`cambridge.portal.example.com`), path-prefix (`/cambridge/expenses`), session (navbar switcher dropdown)
+- **4-tier permission hierarchy**: Umbrella Admin → Site Root Admin → Site Admin → User, with per-site role flags in `tblUserSites`
+- **New tables**: `tblSites` (site definitions with branding), `tblUserSites` (user-to-site assignments with admin flags)
+- **New core class**: `Site.php` — central site-context manager with detection, branding, user assignment, and URL generation
+- **Site-aware bootstrap**: pre-settings site detection, settings query loads global defaults then site-specific overrides
+- **Per-site branding**: logo, primary colour, copyright org, timezone per site — reflected in navbar, header meta, footer copyright
+- **Site switcher** in navbar (shown when multisite enabled and user has 2+ sites)
+- **Admin site management** (`admin/sites`) — create/edit sites, manage user-to-site assignments, toggle admin roles (umbrella admin only)
+- **Site switch handler** (`site/switch`) — CSRF-protected POST handler for switching active site
+- SQL migration `015_multisite.sql` — tblSites, tblUserSites, siteID columns on 12 tables, seed data, routes
+
+### Changed
+
+- `bootstrap.php` — pre-settings site detection via `Site::preDetect()`, site-aware settings query (`WHERE siteID IS NULL OR siteID = ?`), `Site::init()` after App
+- `App.php` — added `siteId()`, `isSiteAdmin()`, `isSiteRootAdmin()`, `isUmbrellaAdmin()`; `user()` JOINs `tblUserSites`; `isAdmin()` uses 4-tier hierarchy
+- `Router.php` — `extractPath()` strips site-key prefix in path mode; `url()` prepends site prefix
+- `Auth.php` — sets `$_SESSION['active_site_id']` after all login flows; `createUser()` inserts into `tblUserSites`
+- `Logger.php` — `activity()` and `errorPlatform()` include `siteID` column
+- `nav.php` — site switcher dropdown, per-site logo/name, "Sites" admin link
+- `header.php` — per-site theme-color meta tag
+- `footer.php` — per-site copyright org
+- All expense, calendar, attendance, admin, and settings queries — `AND siteID = ?` filtering
+- `full_schema.sql` — consolidated with tblSites, tblUserSites, siteID columns, multisite settings/routes
+
+---
+
 ## [0.8.1] - 2026-03-07
 
 ### Added

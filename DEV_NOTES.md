@@ -220,6 +220,7 @@ the web-based Migrator (admin-only) and tracked in `tblMigrations`.
 | `012_i18n_phase8.sql` | Adds locale column to tblUsers, i18n settings (defaultLocale, enabled) |
 | `013_help_translations_route.sql` | Adds route for translations help page |
 | `014_admin_integrations_route.sql` | Adds route for admin integration diagnostics page |
+| `015_multisite.sql`                | Multi-site support: tblSites, tblUserSites, siteID columns, multisite settings/routes |
 | `full_schema.sql`                  | Consolidated schema for fresh installs (all tables + seeds) |
 
 ---

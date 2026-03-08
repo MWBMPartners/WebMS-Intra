@@ -20,6 +20,7 @@ use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Logger;
 use Portal\Core\Router;
+use Portal\Core\Site;
 
 // 🛡️ Admin access check
 if (App::isAdmin() === false) {
@@ -39,10 +40,13 @@ if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
 
 $eventID = (int) ($_POST['eventID'] ?? 0);
 
+// 🌐 Multi-site scope
+$siteId = Site::id();
+
 if ($eventID > 0) {
-    $stmt = $mysqli->prepare('UPDATE tblEvents SET isDeleted = 1 WHERE eventID = ?');
+    $stmt = $mysqli->prepare('UPDATE tblEvents SET isDeleted = 1 WHERE eventID = ? AND siteID = ?');
     if ($stmt !== false) {
-        $stmt->bind_param('i', $eventID);
+        $stmt->bind_param('ii', $eventID, $siteId);
         $stmt->execute();
         $stmt->close();
     }

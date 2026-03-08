@@ -21,6 +21,7 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Router;
+use Portal\Core\Site;
 
 // 📌 Page metadata
 $pageTitle   = 'Manage Events';
@@ -33,6 +34,9 @@ if (App::isAdmin() === false) {
     return;
 }
 
+// 🌐 Multi-site scope
+$siteId = Site::id();
+
 // -----------------------------------------------------------------------------
 // 🔍 Check if we're editing a specific event
 // -----------------------------------------------------------------------------
@@ -41,9 +45,9 @@ $editEvent = null;
 $editPeople = [];
 
 if ($editId > 0) {
-    $stmt = $mysqli->prepare('SELECT * FROM tblEvents WHERE eventID = ? LIMIT 1');
+    $stmt = $mysqli->prepare('SELECT * FROM tblEvents WHERE eventID = ? AND siteID = ? LIMIT 1');
     if ($stmt !== false) {
-        $stmt->bind_param('i', $editId);
+        $stmt->bind_param('ii', $editId, $siteId);
         $stmt->execute();
         $editEvent = $stmt->get_result()->fetch_assoc();
         $stmt->close();
@@ -75,27 +79,39 @@ if ($editId > 0) {
 // 📋 Fetch reference data for forms
 // -----------------------------------------------------------------------------
 $categories = [];
-$result = $mysqli->query('SELECT categoryID, categoryName FROM tblEventCategories WHERE isActive = 1 ORDER BY sortOrder');
-if ($result !== false) {
-    while ($r = $result->fetch_assoc()) {
+$stmtCat = $mysqli->prepare('SELECT categoryID, categoryName FROM tblEventCategories WHERE isActive = 1 AND siteID = ? ORDER BY sortOrder');
+if ($stmtCat !== false) {
+    $stmtCat->bind_param('i', $siteId);
+    $stmtCat->execute();
+    $resultCat = $stmtCat->get_result();
+    while ($r = $resultCat->fetch_assoc()) {
         $categories[] = $r;
     }
+    $stmtCat->close();
 }
 
 $eventTypes = [];
-$result = $mysqli->query('SELECT typeID, parentID, typeName FROM tblEventTypes WHERE isActive = 1 ORDER BY sortOrder');
-if ($result !== false) {
-    while ($r = $result->fetch_assoc()) {
+$stmtType = $mysqli->prepare('SELECT typeID, parentID, typeName FROM tblEventTypes WHERE isActive = 1 AND siteID = ? ORDER BY sortOrder');
+if ($stmtType !== false) {
+    $stmtType->bind_param('i', $siteId);
+    $stmtType->execute();
+    $resultType = $stmtType->get_result();
+    while ($r = $resultType->fetch_assoc()) {
         $eventTypes[] = $r;
     }
+    $stmtType->close();
 }
 
 $seriesList = [];
-$result = $mysqli->query('SELECT seriesID, seriesName FROM tblEventSeries WHERE isActive = 1 ORDER BY seriesName');
-if ($result !== false) {
-    while ($r = $result->fetch_assoc()) {
+$stmtSeries = $mysqli->prepare('SELECT seriesID, seriesName FROM tblEventSeries WHERE isActive = 1 AND siteID = ? ORDER BY seriesName');
+if ($stmtSeries !== false) {
+    $stmtSeries->bind_param('i', $siteId);
+    $stmtSeries->execute();
+    $resultSeries = $stmtSeries->get_result();
+    while ($r = $resultSeries->fetch_assoc()) {
         $seriesList[] = $r;
     }
+    $stmtSeries->close();
 }
 
 // 📋 Flash message
@@ -113,9 +129,9 @@ if ($editEvent === null) {
     $perPage = 25;
     $offset  = ($page - 1) * $perPage;
 
-    $conditions = ['e.isDeleted = 0'];
-    $params = [];
-    $types  = '';
+    $conditions = ['e.isDeleted = 0', 'e.siteID = ?'];
+    $params = [$siteId];
+    $types  = 'i';
 
     if ($filterStatus !== '') {
         $conditions[] = 'e.status = ?';

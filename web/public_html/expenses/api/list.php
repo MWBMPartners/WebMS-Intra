@@ -32,6 +32,7 @@ declare(strict_types=1);
 
 use Portal\Core\ApiResponse;
 use Portal\Core\App;
+use Portal\Core\Site;
 
 // 🔐 Require authentication for this API endpoint
 ApiResponse::requireAuth();
@@ -51,17 +52,18 @@ if ($status !== '' && in_array($status, $validStatuses, true) === false) {
 // 📊 Build the query dynamically based on filters
 $db     = App::db();
 $userId = (int) ($_SESSION['user_id'] ?? 0);
+$siteId = Site::id();
 $offset = ($page - 1) * $limit;
 
 // 🔍 Determine scope: own claims or all claims (admin only)
-$whereClause = 'WHERE EC.userID = ?';
-$params      = [$userId];
-$types       = 'i';
+$whereClause = 'WHERE EC.userID = ? AND EC.siteID = ?';
+$params      = [$userId, $siteId];
+$types       = 'ii';
 
 if ($showAll === true && App::isAdmin() === true) {
-    $whereClause = 'WHERE 1=1';
-    $params      = [];
-    $types       = '';
+    $whereClause = 'WHERE EC.siteID = ?';
+    $params      = [$siteId];
+    $types       = 'i';
 }
 
 // 📌 Add status filter if specified

@@ -1,8 +1,8 @@
 # WebMS Intra
 
-> **Version:** 0.8.1 | **PHP** 8.5 (backward-compatible with 8.4) | **MySQL** 8.0+ | **DreamHost** shared hosting
+> **Version:** 0.9.0 | **PHP** 8.5 (backward-compatible with 8.4) | **MySQL** 8.0+ | **DreamHost** shared hosting
 
-A modular internal portal platform for organisations, providing centralised access to internal tools, expense management, and future modules (Calendar, Attendance, Leadership, Preaching Plan).
+A modular internal portal platform for organisations, providing centralised access to internal tools, expense management, multi-site support, and future modules (Leadership).
 
 ---
 
@@ -13,6 +13,7 @@ A modular internal portal platform for organisations, providing centralised acce
 | **Backend**        | PHP 8.5 (strict types, backward-compatible with 8.4), MySQL 8.0                  | Ubiquitous LAMP stack; DreamHost-friendly        |
 | **Routing**        | Front-controller + DB-backed router (tblRoutes)                                  | Clean URLs, app isolation, easy overrides        |
 | **Auth**           | Local accounts, MS365 OAuth, Google OAuth, WebAuthn/PassKeys, account linking    | Multi-provider SSO, passwordless support         |
+| **Multi-Site**     | Umbrella multi-site with subdomain, path-prefix, and session detection modes     | One install serves multiple locations/divisions  |
 | **UI**             | Bootstrap 5.3.3, Font Awesome 6.5.1, custom CSS design system                   | Responsive, WCAG compliant, dark mode            |
 | **PDF**            | dompdf 2.0 (in `_libraries/`, manually uploaded)                                 | Server-side PDF without external service         |
 | **Email**          | Microsoft Graph "SendAs" via shared mailbox                                      | DKIM/DMARC compliance, modern auth               |
@@ -33,6 +34,7 @@ WebMS-Intra/                         # Git repository root (NOT deployed)
     ├── core/                        # Framework classes (Portal\Core namespace)
     │   ├── App.php                  # Application registry (db, settings, user)
     │   ├── ApiResponse.php          # JSON API response builder
+    │   ├── Site.php                 # Multi-site context manager (detection, branding)
     │   ├── Asset.php                # CDN-with-fallback asset loader (SRI)
     │   ├── Auth.php                 # Authentication (MS365, Google, local, WebAuthn, CSRF, JWT)
     │   ├── Avatar.php               # Avatar cascade (MS365 > local > Gravatar > SVG)
@@ -69,7 +71,9 @@ WebMS-Intra/                         # Git repository root (NOT deployed)
     │   ├── expenses/                # Expense claim lifecycle
     │   ├── attendance/              # Attendance tracker app
     │   ├── calendar/                # Calendar / Events / Preaching Plan
+    │   ├── admin/                   # Admin panel (sites, users, logs, migrations)
     │   ├── help/                    # Help centre pages
+    │   ├── site/                    # Site switcher handler
     │   └── settings/                # Admin settings UI
     ├── public_html_dev/             # Dev web root (Gatekeeper-protected)
     ├── private_html/                # Private / non-live files
@@ -166,6 +170,7 @@ Server-managed directories (`_auth_keys/`, `_uploads/`, `_backups/`, `_libraries
 | 7     | SSO & Auth Enhancement (Google OAuth, WebAuthn/PassKeys, Account Linking)       | Done             |
 | 8     | Translations / i18n (I18n framework, RTL support, language switcher)            | Done             |
 | 9     | Polish & Hardening (PWA, WCAG 2.1, Security Hardening)                          | Done             |
+| 10    | Multi-Site Support (umbrella orgs, site detection, 4-tier permissions)          | Done             |
 
 ---
 

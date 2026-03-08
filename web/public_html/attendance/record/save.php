@@ -22,6 +22,7 @@ use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Logger;
 use Portal\Core\Router;
+use Portal\Core\Site;
 
 // 🛡️ Auth check
 if (Auth::check() === false) {
@@ -42,6 +43,9 @@ if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
 
 $action = $_POST['action'] ?? '';
 $userId = $_SESSION['user_id'] ?? null;
+
+// 🌐 Multi-site scope
+$siteId = Site::id();
 
 // -----------------------------------------------------------------------------
 // 📋 Collect form data
@@ -66,9 +70,9 @@ if ($serviceTypeID <= 0 || $sessionDate === '') {
 
 // 🔍 Validate service type exists
 $typeValid = false;
-$stmt = $mysqli->prepare('SELECT serviceTypeID FROM tblAttendanceServiceTypes WHERE serviceTypeID = ? AND isActive = 1 LIMIT 1');
+$stmt = $mysqli->prepare('SELECT serviceTypeID FROM tblAttendanceServiceTypes WHERE serviceTypeID = ? AND isActive = 1 AND siteID = ? LIMIT 1');
 if ($stmt !== false) {
-    $stmt->bind_param('i', $serviceTypeID);
+    $stmt->bind_param('ii', $serviceTypeID, $siteId);
     $stmt->execute();
     $typeValid = ($stmt->get_result()->fetch_assoc() !== null);
     $stmt->close();
@@ -117,8 +121,8 @@ if ($action === 'create') {
 
     $stmt = $mysqli->prepare(
         'INSERT INTO tblAttendanceSessions '
-        . '(serviceTypeID, eventID, sessionDate, sessionTime, notes, createdByID, updatedByID) '
-        . 'VALUES (?, ?, ?, ?, ?, ?, ?)'
+        . '(siteID, serviceTypeID, eventID, sessionDate, sessionTime, notes, createdByID, updatedByID) '
+        . 'VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
     );
     if ($stmt === false) {
         $mysqli->rollback();
@@ -128,7 +132,7 @@ if ($action === 'create') {
         exit();
     }
 
-    $stmt->bind_param('iisssii', $serviceTypeID, $eventID, $sessionDate, $sessionTime, $notes, $userId, $userId);
+    $stmt->bind_param('iiisssii', $siteId, $serviceTypeID, $eventID, $sessionDate, $sessionTime, $notes, $userId, $userId);
     $stmt->execute();
     $newSessionId = $stmt->insert_id;
     $stmt->close();
@@ -178,7 +182,7 @@ if ($action === 'update') {
     $stmt = $mysqli->prepare(
         'UPDATE tblAttendanceSessions SET '
         . 'serviceTypeID = ?, eventID = ?, sessionDate = ?, sessionTime = ?, notes = ?, updatedByID = ? '
-        . 'WHERE sessionID = ? AND isDeleted = 0'
+        . 'WHERE sessionID = ? AND isDeleted = 0 AND siteID = ?'
     );
     if ($stmt === false) {
         $mysqli->rollback();
@@ -188,7 +192,7 @@ if ($action === 'update') {
         exit();
     }
 
-    $stmt->bind_param('iisssii', $serviceTypeID, $eventID, $sessionDate, $sessionTime, $notes, $userId, $sessionID);
+    $stmt->bind_param('iisssiii', $serviceTypeID, $eventID, $sessionDate, $sessionTime, $notes, $userId, $sessionID, $siteId);
     $stmt->execute();
     $stmt->close();
 

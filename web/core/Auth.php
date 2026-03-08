@@ -342,6 +342,9 @@ class Auth
         $_SESSION['user_name']  = $name;
         $_SESSION['user_email'] = $email;
 
+        // 🌐 Set active site ID for multi-site context
+        self::setSessionSiteId($userId, $mysqli);
+
         // 📝 Log the successful login
         Logger::activity('LoginMS365', 'User logged in via Microsoft 365');
 
@@ -551,6 +554,9 @@ class Auth
         $_SESSION['user_name']  = $name;
         $_SESSION['user_email'] = $email;
 
+        // 🌐 Set active site ID for multi-site context
+        self::setSessionSiteId($userId, $mysqli);
+
         Logger::activity('LoginGoogle', 'User logged in via Google OAuth');
 
         $target = $_GET['redirect'] ?? '/';
@@ -635,6 +641,9 @@ class Auth
         $_SESSION['user_id']    = (int) $row['userID'];
         $_SESSION['user_name']  = $row['fullName'];
         $_SESSION['user_email'] = $row['emailAddress'];
+
+        // 🌐 Set active site ID for multi-site context
+        self::setSessionSiteId((int) $row['userID'], $mysqli);
 
         // 🕐 Update lastLogin timestamp on tblLocalAccounts
         $updateStmt = $mysqli->prepare('UPDATE tblLocalAccounts SET lastLogin = NOW() WHERE localID = ?');
@@ -1038,6 +1047,43 @@ class Auth
         $newId = $stmt->insert_id;
         $stmt->close();
 
+        // 🌐 Assign new user to the current site
+        $siteId = Site::id();
+        $siteStmt = $db->prepare(
+            'INSERT IGNORE INTO tblUserSites (userID, siteID, isSiteAdmin, isSiteRootAdmin) '
+            . 'VALUES (?, ?, 0, 0)'
+        );
+        if ($siteStmt !== false) {
+            $siteStmt->bind_param('ii', $newId, $siteId);
+            $siteStmt->execute();
+            $siteStmt->close();
+        }
+
         return $newId;
+    }
+
+    /**
+     * 🌐 Set the active site ID in the session after login.
+     * Uses the pre-detected site if the user belongs to it, otherwise
+     * falls back to the user's first assigned site.
+     *
+     * @param int     $userId User ID
+     * @param \mysqli $db     Database connection
+     *
+     * @return void
+     */
+    private static function setSessionSiteId(int $userId, \mysqli $db): void
+    {
+        $currentSiteId = Site::id();
+
+        // 🔍 Check if the user belongs to the current (pre-detected) site
+        if (Site::userBelongsTo($userId, $currentSiteId, $db) === true) {
+            $_SESSION['active_site_id'] = $currentSiteId;
+            return;
+        }
+
+        // 🔄 Fall back to the user's first assigned site
+        $defaultSite = Site::resolveDefaultSiteForUser($userId, $db);
+        $_SESSION['active_site_id'] = $defaultSite;
     }
 }

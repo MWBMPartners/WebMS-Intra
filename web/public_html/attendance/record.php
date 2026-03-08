@@ -22,6 +22,7 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Router;
+use Portal\Core\Site;
 
 // 📌 Page metadata
 $pageTitle   = 'Record Attendance';
@@ -38,6 +39,9 @@ if (Auth::check() === false) {
 // -----------------------------------------------------------------------------
 // ✏️ Check if editing an existing session
 // -----------------------------------------------------------------------------
+// 🌐 Multi-site scope
+$siteId = Site::id();
+
 $editId      = (int) ($_GET['edit'] ?? 0);
 $editSession = null;
 $editCounts  = [];
@@ -46,10 +50,10 @@ if ($editId > 0) {
     $stmt = $mysqli->prepare(
         'SELECT s.*, st.typeName FROM tblAttendanceSessions s '
         . 'INNER JOIN tblAttendanceServiceTypes st ON st.serviceTypeID = s.serviceTypeID '
-        . 'WHERE s.sessionID = ? AND s.isDeleted = 0 LIMIT 1'
+        . 'WHERE s.sessionID = ? AND s.isDeleted = 0 AND s.siteID = ? LIMIT 1'
     );
     if ($stmt !== false) {
-        $stmt->bind_param('i', $editId);
+        $stmt->bind_param('ii', $editId, $siteId);
         $stmt->execute();
         $editSession = $stmt->get_result()->fetch_assoc();
         $stmt->close();
@@ -87,28 +91,36 @@ unset($_SESSION['admin_flash_msg'], $_SESSION['admin_flash_type']);
 
 // 🏷️ Service types — build hierarchical list
 $allServiceTypes = [];
-$result = $mysqli->query(
+$stmtTypes = $mysqli->prepare(
     'SELECT serviceTypeID, parentID, typeName, typeSlug FROM tblAttendanceServiceTypes '
-    . 'WHERE isActive = 1 ORDER BY sortOrder, typeName'
+    . 'WHERE isActive = 1 AND siteID = ? ORDER BY sortOrder, typeName'
 );
-if ($result !== false) {
-    while ($r = $result->fetch_assoc()) {
+if ($stmtTypes !== false) {
+    $stmtTypes->bind_param('i', $siteId);
+    $stmtTypes->execute();
+    $resultTypes = $stmtTypes->get_result();
+    while ($r = $resultTypes->fetch_assoc()) {
         $allServiceTypes[] = $r;
     }
+    $stmtTypes->close();
 }
 
 // 📅 Recent events for linking (optional — last 30 days + next 30 days)
 $recentEvents = [];
-$result = $mysqli->query(
+$stmtEvents = $mysqli->prepare(
     'SELECT eventID, eventName, startDateTime FROM tblEvents '
-    . "WHERE isDeleted = 0 AND status = 'published' "
+    . "WHERE isDeleted = 0 AND status = 'published' AND siteID = ? "
     . 'AND startDateTime BETWEEN DATE_SUB(NOW(), INTERVAL 30 DAY) AND DATE_ADD(NOW(), INTERVAL 30 DAY) '
     . 'ORDER BY startDateTime DESC LIMIT 50'
 );
-if ($result !== false) {
-    while ($r = $result->fetch_assoc()) {
+if ($stmtEvents !== false) {
+    $stmtEvents->bind_param('i', $siteId);
+    $stmtEvents->execute();
+    $resultEvents = $stmtEvents->get_result();
+    while ($r = $resultEvents->fetch_assoc()) {
         $recentEvents[] = $r;
     }
+    $stmtEvents->close();
 }
 
 // 🏷️ Default count groups — common categories to pre-populate

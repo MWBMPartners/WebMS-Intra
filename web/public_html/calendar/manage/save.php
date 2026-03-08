@@ -21,6 +21,7 @@ use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Logger;
 use Portal\Core\Router;
+use Portal\Core\Site;
 
 // 🛡️ Admin access check
 if (App::isAdmin() === false) {
@@ -125,6 +126,9 @@ $profileImage = $processUpload('profileImage');
 
 $userId = $_SESSION['user_id'] ?? null;
 
+// 🌐 Multi-site scope
+$siteId = Site::id();
+
 // -----------------------------------------------------------------------------
 // ➕ Create event
 // -----------------------------------------------------------------------------
@@ -154,8 +158,8 @@ if ($action === 'create') {
         . 'locationName, locationAddress, locationWebURL, locationGeoLat, locationGeoLng, '
         . 'locationW3W, locationPhone, locationEmail, '
         . 'hostOrgName, partnerOrgs, heroImage, posterImage, profileImage, '
-        . 'createdByID, updatedByID'
-        . ') VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        . 'createdByID, updatedByID, siteID'
+        . ') VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
     );
 
     if ($stmt === false) {
@@ -168,13 +172,13 @@ if ($action === 'create') {
     $endDt = $endDateTime !== '' ? $endDateTime : null;
 
     $stmt->bind_param(
-        'ssssssiiiisissssddssssssssii',
+        'ssssssiiiisissssddssssssssiii',
         $eventName, $slug, $description, $startDateTime, $endDt, $timezone, $isAllDay,
         $categoryID, $typeID, $seriesID, $status, $isPublic, $isFeatured,
         $locationName, $locationAddress, $locationWebURL, $locationGeoLat, $locationGeoLng,
         $locationW3W, $locationPhone, $locationEmail,
         $hostOrgName, $partnerOrgs, $heroImage, $posterImage, $profileImage,
-        $userId, $userId
+        $userId, $userId, $siteId
     );
     $stmt->execute();
     $newEventId = $stmt->insert_id;
@@ -238,10 +242,11 @@ if ($action === 'update') {
         $paramValues[] = $profileImage;
     }
 
-    $paramTypes   .= 'i';
+    $paramTypes   .= 'ii';
     $paramValues[] = $eventID;
+    $paramValues[] = $siteId;
 
-    $sql = 'UPDATE tblEvents SET ' . implode(', ', $setClauses) . ' WHERE eventID = ?';
+    $sql = 'UPDATE tblEvents SET ' . implode(', ', $setClauses) . ' WHERE eventID = ? AND siteID = ?';
 
     $stmt = $mysqli->prepare($sql);
     if ($stmt !== false) {

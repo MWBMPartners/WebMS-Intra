@@ -20,6 +20,7 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Router;
+use Portal\Core\Site;
 
 // 🛡️ Ensure session for nav state
 Auth::ensureSession();
@@ -31,6 +32,9 @@ if ($slug === '') {
     return;
 }
 
+// 🌐 Multi-site scope
+$siteId = Site::id();
+
 // 📋 Fetch event
 $event = null;
 $stmt = $mysqli->prepare(
@@ -39,10 +43,10 @@ $stmt = $mysqli->prepare(
     . 'LEFT JOIN tblEventCategories c ON c.categoryID = e.categoryID '
     . 'LEFT JOIN tblEventTypes t ON t.typeID = e.typeID '
     . 'LEFT JOIN tblEventSeries s ON s.seriesID = e.seriesID '
-    . 'WHERE e.eventSlug = ? AND e.isDeleted = 0 LIMIT 1'
+    . 'WHERE e.eventSlug = ? AND e.isDeleted = 0 AND e.siteID = ? LIMIT 1'
 );
 if ($stmt !== false) {
-    $stmt->bind_param('s', $slug);
+    $stmt->bind_param('si', $slug, $siteId);
     $stmt->execute();
     $event = $stmt->get_result()->fetch_assoc();
     $stmt->close();
@@ -110,11 +114,11 @@ if ($stmt !== false) {
 $themes = [];
 $stmt = $mysqli->prepare(
     'SELECT th.themeName, th.color FROM tblEventThemeMap tm '
-    . 'JOIN tblEventThemes th ON th.themeID = tm.themeID '
+    . 'JOIN tblEventThemes th ON th.themeID = tm.themeID AND th.siteID = ? '
     . 'WHERE tm.eventID = ?'
 );
 if ($stmt !== false) {
-    $stmt->bind_param('i', $event['eventID']);
+    $stmt->bind_param('ii', $siteId, $event['eventID']);
     $stmt->execute();
     $result = $stmt->get_result();
     while ($r = $result->fetch_assoc()) {

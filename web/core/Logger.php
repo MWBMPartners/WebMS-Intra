@@ -56,18 +56,22 @@ class Logger
         unset($sessionData['csrf_token'], $sessionData['oauth_state'], $sessionData['oauth_nonce']);
         $sessionSnap = json_encode($sessionData);
 
+        // 🌐 Include siteID for multi-site context
+        $siteId = Site::id();
+
         /** @var mysqli_stmt $stmt */
         $stmt = $db->prepare(
             'INSERT INTO tblActivityLogs ' .
-            '(userID, activityType, activityDescription, requestHeaders, sessionID, visitorIP, userAgent, sessionDataSnapshot) ' .
-            'VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+            '(siteID, userID, activityType, activityDescription, requestHeaders, sessionID, visitorIP, userAgent, sessionDataSnapshot) ' .
+            'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
         );
         if ($stmt === false) {
             error_log('Activity log prepare failed: ' . $db->error);
             return;
         }
         $stmt->bind_param(
-            'isssssss',
+            'iisssssss',
+            $siteId,
             $userId,
             $type,
             $description,
@@ -116,18 +120,22 @@ class Logger
         $ua          = $_SERVER['HTTP_USER_AGENT'] ?? '';
         $url         = $_SERVER['REQUEST_URI'] ?? '';
 
+        // 🌐 Include siteID for multi-site context
+        $siteId = Site::id();
+
         /** @var mysqli_stmt $stmt */
         $stmt = $db->prepare(
             'INSERT INTO tblErrors ' .
-            '(errorPlatform, errorSeverity, errorCode, errorTitle, errorDetail, userID, visitorIP, userAgent, requestURL, requestHeaders) ' .
-            'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+            '(siteID, errorPlatform, errorSeverity, errorCode, errorTitle, errorDetail, userID, visitorIP, userAgent, requestURL, requestHeaders) ' .
+            'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         );
         if ($stmt === false) {
             error_log('Error log prepare failed: ' . $db->error);
             return;
         }
         $stmt->bind_param(
-            'sssssissss',
+            'isssssissss',
+            $siteId,
             $platform,
             $severity,
             $code,

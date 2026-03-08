@@ -21,6 +21,7 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Router;
+use Portal\Core\Site;
 
 // 📌 Page metadata
 $pageTitle   = 'View Claim';
@@ -43,15 +44,16 @@ if ($claimID <= 0) {
 // 📋 Fetch claim header with claimant and department info
 // -----------------------------------------------------------------------------
 $claim = null;
+$siteId = Site::id();
 $stmt = $mysqli->prepare(
     'SELECT EC.*, U.fullName AS claimantName, U.emailAddress AS claimantEmail, D.deptName '
     . 'FROM tblExpenseClaims EC '
     . 'JOIN tblUsers U ON U.userID = EC.userID '
     . 'JOIN tblDepts D ON D.deptID = EC.deptID '
-    . 'WHERE EC.claimID = ? LIMIT 1'
+    . 'WHERE EC.claimID = ? AND EC.siteID = ? LIMIT 1'
 );
 if ($stmt !== false) {
-    $stmt->bind_param('i', $claimID);
+    $stmt->bind_param('ii', $claimID, $siteId);
     $stmt->execute();
     $claim = $stmt->get_result()->fetch_assoc();
     $stmt->close();

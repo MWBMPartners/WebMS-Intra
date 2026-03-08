@@ -29,21 +29,31 @@ use Portal\Core\Auth;
 use Portal\Core\Avatar;
 use Portal\Core\I18n;
 use Portal\Core\Router;
+use Portal\Core\Site;
 
 // 📌 Get current user and section for nav state
 $navUser    = App::user();
 $navSection = $pageSection ?? (defined('PORTAL_CURRENT_APP') ? PORTAL_CURRENT_APP : '');
 $isLoggedIn = Auth::check();
 
-// 🏷️ Site name for navbar brand
-$navSiteName = App::settings('site.name') ?? 'Portal';
+// 🏷️ Site branding — use Site::branding() for multi-site, fallback to settings
+$navSiteName = Site::branding('name') ?? App::settings('site.name') ?? 'Portal';
+$navSiteLogo = Site::branding('logo') ?? '/assets/images/logo.svg';
+
+// 🌐 Multi-site switcher data (only when multisite enabled and user has 2+ sites)
+$navShowSiteSwitcher = false;
+$navUserSites        = [];
+if ($isLoggedIn === true && Site::isMultisiteEnabled() === true && $navUser !== null) {
+    $navUserSites = Site::userSites((int) $navUser['userID'], App::db());
+    $navShowSiteSwitcher = (count($navUserSites) > 1);
+}
 ?>
 
 <nav class="navbar navbar-expand-lg portal-navbar bg-body-tertiary">
     <div class="container">
         <!-- 🏠 Brand / Logo -->
         <a class="navbar-brand d-flex align-items-center gap-2" href="/">
-            <img src="/assets/images/logo.svg" alt="" width="28" height="28">
+            <img src="<?php echo htmlspecialchars($navSiteLogo, ENT_QUOTES, 'UTF-8'); ?>" alt="" width="28" height="28">
             <span><?php echo htmlspecialchars($navSiteName, ENT_QUOTES, 'UTF-8'); ?></span>
         </a>
 
@@ -138,6 +148,14 @@ $navSiteName = App::settings('site.name') ?? 'Portal';
                                 <i class="fa-solid fa-gear me-1"></i> <?php echo htmlspecialchars(t('nav.settings'), ENT_QUOTES, 'UTF-8'); ?>
                             </a>
                         </li>
+                        <?php if (App::isUmbrellaAdmin() === true): ?>
+                        <li><hr class="dropdown-divider"></li>
+                        <li>
+                            <a class="dropdown-item" href="/admin/sites">
+                                <i class="fa-solid fa-sitemap me-1"></i> Sites
+                            </a>
+                        </li>
+                        <?php endif; ?>
                     </ul>
                 </li>
                 <?php endif; ?>
@@ -147,6 +165,34 @@ $navSiteName = App::settings('site.name') ?? 'Portal';
             <div class="d-flex align-items-center gap-2">
                 <!-- 🌐 Language switcher -->
                 <?php echo I18n::languageSwitcher(); ?>
+
+                <?php if ($navShowSiteSwitcher === true): ?>
+                <!-- 🌐 Site switcher -->
+                <div class="dropdown">
+                    <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button"
+                            data-bs-toggle="dropdown" aria-expanded="false" aria-label="Switch site">
+                        <i class="fa-solid fa-building me-1"></i>
+                        <span class="d-none d-lg-inline"><?php echo htmlspecialchars($navSiteName, ENT_QUOTES, 'UTF-8'); ?></span>
+                    </button>
+                    <ul class="dropdown-menu dropdown-menu-end">
+                        <?php foreach ($navUserSites as $navSiteItem): ?>
+                        <li>
+                            <form method="post" action="/site/switch" class="d-inline w-100">
+                                <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
+                                <input type="hidden" name="site_id" value="<?php echo (int) $navSiteItem['siteID']; ?>">
+                                <button type="submit" class="dropdown-item<?php echo ((int) $navSiteItem['siteID'] === Site::id()) ? ' active' : ''; ?>">
+                                    <i class="fa-solid fa-building me-1" style="color:<?php echo htmlspecialchars($navSiteItem['primaryColor'] ?? '#0d6efd', ENT_QUOTES, 'UTF-8'); ?>"></i>
+                                    <?php echo htmlspecialchars($navSiteItem['siteName'], ENT_QUOTES, 'UTF-8'); ?>
+                                    <?php if ((int) $navSiteItem['siteID'] === Site::id()): ?>
+                                    <i class="fa-solid fa-check ms-2 text-success"></i>
+                                    <?php endif; ?>
+                                </button>
+                            </form>
+                        </li>
+                        <?php endforeach; ?>
+                    </ul>
+                </div>
+                <?php endif; ?>
 
                 <!-- 🌙 Dark mode toggle -->
                 <button type="button" class="portal-theme-toggle" aria-label="<?php echo htmlspecialchars(t('nav.toggle_dark_mode'), ENT_QUOTES, 'UTF-8'); ?>">

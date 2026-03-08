@@ -19,6 +19,7 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Router;
+use Portal\Core\Site;
 
 // 📌 Page metadata
 $pageTitle   = 'Activity Log';
@@ -40,10 +41,21 @@ $page       = max(1, (int) ($_GET['page'] ?? 1));
 $perPage    = 50;
 $offset     = ($page - 1) * $perPage;
 
+// 🌐 Multi-site: filter by siteID unless umbrella admin
+$siteId      = Site::id();
+$isUmbrella  = App::isUmbrellaAdmin();
+
 // 📊 Build dynamic WHERE clause
 $conditions = [];
 $params     = [];
 $types      = '';
+
+// 🌐 Non-umbrella admins only see activity for their site
+if ($isUmbrella === false) {
+    $conditions[] = 'a.siteID = ?';
+    $params[]     = $siteId;
+    $types       .= 'i';
+}
 
 if ($filterType !== '') {
     $conditions[] = 'a.activityType = ?';
@@ -110,23 +122,53 @@ if ($stmt !== false) {
 
 // 📊 Get distinct activity types for filter dropdown
 $activityTypes = [];
-$result = $mysqli->query('SELECT DISTINCT activityType FROM tblActivityLogs ORDER BY activityType');
-if ($result !== false) {
-    while ($r = $result->fetch_assoc()) {
-        $activityTypes[] = $r['activityType'];
+if ($isUmbrella === true) {
+    $result = $mysqli->query('SELECT DISTINCT activityType FROM tblActivityLogs ORDER BY activityType');
+    if ($result !== false) {
+        while ($r = $result->fetch_assoc()) {
+            $activityTypes[] = $r['activityType'];
+        }
+    }
+} else {
+    $stmt = $mysqli->prepare('SELECT DISTINCT activityType FROM tblActivityLogs WHERE siteID = ? ORDER BY activityType');
+    if ($stmt !== false) {
+        $stmt->bind_param('i', $siteId);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        while ($r = $result->fetch_assoc()) {
+            $activityTypes[] = $r['activityType'];
+        }
+        $stmt->close();
     }
 }
 
 // 👥 Get user list for filter dropdown
 $userList = [];
-$result = $mysqli->query(
-    'SELECT DISTINCT a.userID, u.fullName FROM tblActivityLogs a '
-    . 'LEFT JOIN tblUsers u ON u.userID = a.userID '
-    . 'WHERE a.userID IS NOT NULL ORDER BY u.fullName'
-);
-if ($result !== false) {
-    while ($r = $result->fetch_assoc()) {
-        $userList[] = $r;
+if ($isUmbrella === true) {
+    $result = $mysqli->query(
+        'SELECT DISTINCT a.userID, u.fullName FROM tblActivityLogs a '
+        . 'LEFT JOIN tblUsers u ON u.userID = a.userID '
+        . 'WHERE a.userID IS NOT NULL ORDER BY u.fullName'
+    );
+    if ($result !== false) {
+        while ($r = $result->fetch_assoc()) {
+            $userList[] = $r;
+        }
+    }
+} else {
+    $stmt = $mysqli->prepare(
+        'SELECT DISTINCT a.userID, u.fullName FROM tblActivityLogs a '
+        . 'LEFT JOIN tblUsers u ON u.userID = a.userID '
+        . 'WHERE a.userID IS NOT NULL AND a.siteID = ? ORDER BY u.fullName'
+    );
+    if ($stmt !== false) {
+        $stmt->bind_param('i', $siteId);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        while ($r = $result->fetch_assoc()) {
+            $userList[] = $r;
+        }
+        $stmt->close();
     }
 }
 

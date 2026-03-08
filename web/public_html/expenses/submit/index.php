@@ -14,6 +14,7 @@ declare(strict_types=1);
 
 use Portal\Core\Auth;
 use Portal\Core\Captcha;
+use Portal\Core\Site;
 
 // 📌 Page metadata for the template system
 $pageTitle   = 'Submit Expense Claim';
@@ -24,8 +25,10 @@ $breadcrumbs = ['Dashboard' => '/', 'Expenses' => '/expenses/submit', 'Submit Cl
 /* 🏢 Active departments                                                      */
 /* -------------------------------------------------------------------------- */
 $depts = [];
-$stmt = $mysqli->prepare('SELECT deptID, deptName FROM tblDepts WHERE isActive = 1 ORDER BY deptName');
+$siteId = Site::id();
+$stmt = $mysqli->prepare('SELECT deptID, deptName FROM tblDepts WHERE isActive = 1 AND siteID = ? ORDER BY deptName');
 if ($stmt !== false) {
+    $stmt->bind_param('i', $siteId);
     $stmt->execute();
     $res = $stmt->get_result();
     while ($d = $res->fetch_assoc()) {

@@ -24,6 +24,7 @@ use Portal\Core\Captcha;
 use Portal\Core\Logger;
 use Portal\Core\ExpensePdf;
 use Portal\Core\ExpenseMailer;
+use Portal\Core\Site;
 
 // 🛡️ Session and security checks
 Auth::ensureSession();
@@ -72,14 +73,16 @@ if ($totalAmt <= 0) {
     exit();
 }
 
+$siteId = Site::id();
+
 $mysqli->begin_transaction();
 try {
     // 1. 📋 Insert claim header
-    $stmt = $mysqli->prepare('INSERT INTO tblExpenseClaims (userID, deptID, claimTitle, claimDate, totalAmount) VALUES (?, ?, ?, CURDATE(), ?)');
+    $stmt = $mysqli->prepare('INSERT INTO tblExpenseClaims (userID, deptID, claimTitle, claimDate, totalAmount, siteID) VALUES (?, ?, ?, CURDATE(), ?, ?)');
     if ($stmt === false) {
         throw new \RuntimeException('Failed to prepare claim insert: ' . $mysqli->error);
     }
-    $stmt->bind_param('iisd', $userId, $deptID, $claimTitle, $totalAmt);
+    $stmt->bind_param('iisdi', $userId, $deptID, $claimTitle, $totalAmt, $siteId);
     $stmt->execute();
     $claimID = $stmt->insert_id;
     $stmt->close();
