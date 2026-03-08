@@ -4,7 +4,7 @@ info:
   description: |
     Internal API endpoints for the WebMS-Intra portal platform.
     All API routes require authentication unless noted otherwise.
-    API endpoints must be enabled via tblSettings (`api.{app}.{action}.enabled = 'true'`).
+    JSON API endpoints must be enabled via tblSettings (`api.{app}.{action}.enabled = 'true'`).
   version: 0.8.1
   contact:
     name: MWBM Partners Ltd (t/a MWservices)
@@ -46,39 +46,90 @@ paths:
     get:
       summary: List expense claims
       description: |
-        Returns JSON list of expense claims for the authenticated user's site.
+        Returns a paginated JSON list of expense claims for the authenticated user.
+        Admins can pass `all=true` to view all users' claims across the organisation.
         Requires `api.expenses.list.enabled = 'true'` in settings.
       tags: [Expenses]
       security:
         - session: []
       parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+            minimum: 1
+          description: Page number for pagination
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+            minimum: 1
+            maximum: 100
+          description: Number of items per page (max 100)
         - name: status
           in: query
           schema:
             type: string
-            enum: [Pending, Approved, Rejected, Withdrawn, Paid]
+            enum: [Pending, Approved, Rejected, Reimbursed]
           description: Filter by claim status
+        - name: all
+          in: query
+          schema:
+            type: string
+            enum: ['true']
+          description: If `true` and user is admin, return all users' claims
       responses:
         '200':
-          description: List of claims
+          description: Paginated list of claims
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  success:
-                    type: boolean
-                  data:
-                    type: array
-                    items:
-                      $ref: '#/components/schemas/ExpenseClaim'
+                $ref: '#/components/schemas/ApiResponse'
+              example:
+                status: ok
+                data:
+                  claims:
+                    - claimID: 42
+                      title: "Conference travel"
+                      claimDate: "2026-03-01"
+                      totalAmount: 125.50
+                      status: Pending
+                      claimantName: "Jane Smith"
+                      claimantEmail: "jane@example.org"
+                      department: "Outreach"
+                      createdAt: "2026-03-01T10:30:00"
+                      updatedAt: null
+                  pagination:
+                    page: 1
+                    limit: 20
+                    totalItems: 1
+                    totalPages: 1
+                    hasNext: false
+                    hasPrev: false
+                meta:
+                  timestamp: "2026-03-08T12:00:00Z"
+                  version: "0.8.1"
+        '400':
+          description: Invalid status filter value
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '403':
-          description: API endpoint disabled
+          description: API endpoint disabled in settings
 
   /expenses/api/export:
     get:
       summary: Export expense claims as CSV
-      description: Downloads all expense claims for the current site as a CSV file.
+      description: Downloads all expense claims for the current site as a UTF-8 CSV file with BOM for Excel compatibility.
       tags: [Expenses]
       security:
         - session: []
@@ -92,6 +143,11 @@ paths:
       responses:
         '200':
           description: CSV file download
+          headers:
+            Content-Disposition:
+              schema:
+                type: string
+                example: 'attachment; filename="expenses-export-2026-03-08.csv"'
           content:
             text/csv:
               schema:
@@ -115,6 +171,11 @@ paths:
       responses:
         '200':
           description: CSV file download
+          headers:
+            Content-Disposition:
+              schema:
+                type: string
+                example: 'attachment; filename="attendance-export-2026-03-08.csv"'
           content:
             text/csv:
               schema:
@@ -138,6 +199,11 @@ paths:
       responses:
         '200':
           description: CSV file download
+          headers:
+            Content-Disposition:
+              schema:
+                type: string
+                example: 'attachment; filename="leadership-export-2026-03-08.csv"'
           content:
             text/csv:
               schema:
@@ -159,6 +225,11 @@ paths:
       responses:
         '200':
           description: CSV file download
+          headers:
+            Content-Disposition:
+              schema:
+                type: string
+                example: 'attachment; filename="users-export-2026-03-08.csv"'
           content:
             text/csv:
               schema:
@@ -182,12 +253,58 @@ paths:
       responses:
         '200':
           description: CSV file download
+          headers:
+            Content-Disposition:
+              schema:
+                type: string
+                example: 'attachment; filename="activity-log-export-2026-03-08.csv"'
           content:
             text/csv:
               schema:
                 type: string
         '403':
           description: Unauthorized — requires Admin role
+
+  /calendar/export:
+    get:
+      summary: Export calendar events as iCalendar
+      description: |
+        Generates an RFC 5545 iCalendar (.ics) file for download or subscription.
+        Supports single event, series, or all upcoming public events.
+        No authentication required — respects event visibility (published, public only).
+      tags: [Calendar]
+      parameters:
+        - name: id
+          in: query
+          schema:
+            type: integer
+          description: Export a single event by its ID
+        - name: series
+          in: query
+          schema:
+            type: integer
+          description: Export all published events in a series
+        - name: all
+          in: query
+          schema:
+            type: integer
+            enum: [1]
+          description: Export all upcoming public events (limit 200)
+      responses:
+        '200':
+          description: iCalendar file download
+          headers:
+            Content-Disposition:
+              schema:
+                type: string
+                example: 'attachment; filename="Portal_Calendar.ics"'
+          content:
+            text/calendar:
+              schema:
+                type: string
+                description: RFC 5545 iCalendar format
+        '404':
+          description: No matching events found
 
 components:
   securitySchemes:
@@ -198,12 +315,52 @@ components:
       description: PHP session cookie (set after login via MS365, Google, or local auth)
 
   schemas:
+    ApiResponse:
+      type: object
+      description: Standard API response envelope used by all JSON endpoints
+      properties:
+        status:
+          type: string
+          enum: [ok, error]
+          description: Response status
+        data:
+          type: object
+          description: Response payload (structure varies by endpoint)
+        meta:
+          type: object
+          properties:
+            timestamp:
+              type: string
+              format: date-time
+            version:
+              type: string
+              example: "0.8.1"
+
+    ApiError:
+      type: object
+      description: Error response from API endpoints
+      properties:
+        status:
+          type: string
+          enum: [error]
+        error:
+          type: string
+          description: Human-readable error message
+        meta:
+          type: object
+          properties:
+            timestamp:
+              type: string
+              format: date-time
+            version:
+              type: string
+
     ExpenseClaim:
       type: object
       properties:
         claimID:
           type: integer
-        claimTitle:
+        title:
           type: string
         claimDate:
           type: string
@@ -213,11 +370,21 @@ components:
           format: float
         status:
           type: string
-          enum: [Pending, Approved, Rejected, Withdrawn, Paid]
-        deptName:
-          type: string
+          enum: [Pending, Approved, Rejected, Reimbursed]
         claimantName:
           type: string
+        claimantEmail:
+          type: string
+          format: email
+        department:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+          nullable: true
 
 tags:
   - name: System
@@ -228,5 +395,7 @@ tags:
     description: Attendance tracking
   - name: Leadership
     description: Leadership directory
+  - name: Calendar
+    description: Calendar and events
   - name: Admin
     description: Administrative operations
