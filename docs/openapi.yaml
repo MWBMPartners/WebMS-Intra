@@ -1,0 +1,232 @@
+openapi: 3.0.3
+info:
+  title: WebMS-Intra Portal API
+  description: |
+    Internal API endpoints for the WebMS-Intra portal platform.
+    All API routes require authentication unless noted otherwise.
+    API endpoints must be enabled via tblSettings (`api.{app}.{action}.enabled = 'true'`).
+  version: 0.8.1
+  contact:
+    name: MWBM Partners Ltd (t/a MWservices)
+  license:
+    name: All Rights Reserved
+
+servers:
+  - url: https://portal.millrdsdacambridge.uk
+    description: Production
+
+paths:
+  /health:
+    get:
+      summary: Health check
+      description: Returns portal status for CI/CD monitoring. No authentication required.
+      tags: [System]
+      responses:
+        '200':
+          description: Portal is operational
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  env:
+                    type: string
+                    example: prod
+                  version:
+                    type: string
+                    example: 0.8.1
+                  time:
+                    type: string
+                    format: date-time
+
+  /api/expenses/list:
+    get:
+      summary: List expense claims
+      description: |
+        Returns JSON list of expense claims for the authenticated user's site.
+        Requires `api.expenses.list.enabled = 'true'` in settings.
+      tags: [Expenses]
+      security:
+        - session: []
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [Pending, Approved, Rejected, Withdrawn, Paid]
+          description: Filter by claim status
+      responses:
+        '200':
+          description: List of claims
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ExpenseClaim'
+        '403':
+          description: API endpoint disabled
+
+  /expenses/api/export:
+    get:
+      summary: Export expense claims as CSV
+      description: Downloads all expense claims for the current site as a CSV file.
+      tags: [Expenses]
+      security:
+        - session: []
+      parameters:
+        - name: csrf_token
+          in: query
+          required: true
+          schema:
+            type: string
+          description: CSRF token for request validation
+      responses:
+        '200':
+          description: CSV file download
+          content:
+            text/csv:
+              schema:
+                type: string
+        '403':
+          description: Unauthorized — requires Admin or Approver role
+
+  /attendance/export:
+    get:
+      summary: Export attendance sessions as CSV
+      description: Downloads attendance sessions with headcount totals. Admin only.
+      tags: [Attendance]
+      security:
+        - session: []
+      parameters:
+        - name: csrf_token
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: CSV file download
+          content:
+            text/csv:
+              schema:
+                type: string
+        '403':
+          description: Unauthorized — requires Admin role
+
+  /leadership/export:
+    get:
+      summary: Export leadership directory as CSV
+      description: Downloads current leadership assignments. Any authenticated user.
+      tags: [Leadership]
+      security:
+        - session: []
+      parameters:
+        - name: csrf_token
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: CSV file download
+          content:
+            text/csv:
+              schema:
+                type: string
+
+  /admin/users/export:
+    get:
+      summary: Export user list as CSV
+      description: Downloads user list for the current site. Admin only.
+      tags: [Admin]
+      security:
+        - session: []
+      parameters:
+        - name: csrf_token
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: CSV file download
+          content:
+            text/csv:
+              schema:
+                type: string
+        '403':
+          description: Unauthorized — requires Admin role
+
+  /admin/activity/export:
+    get:
+      summary: Export activity log as CSV
+      description: Downloads up to 5000 recent activity log entries. Admin only.
+      tags: [Admin]
+      security:
+        - session: []
+      parameters:
+        - name: csrf_token
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: CSV file download
+          content:
+            text/csv:
+              schema:
+                type: string
+        '403':
+          description: Unauthorized — requires Admin role
+
+components:
+  securitySchemes:
+    session:
+      type: apiKey
+      in: cookie
+      name: PHPSESSID
+      description: PHP session cookie (set after login via MS365, Google, or local auth)
+
+  schemas:
+    ExpenseClaim:
+      type: object
+      properties:
+        claimID:
+          type: integer
+        claimTitle:
+          type: string
+        claimDate:
+          type: string
+          format: date
+        totalAmount:
+          type: number
+          format: float
+        status:
+          type: string
+          enum: [Pending, Approved, Rejected, Withdrawn, Paid]
+        deptName:
+          type: string
+        claimantName:
+          type: string
+
+tags:
+  - name: System
+    description: Health check and system status
+  - name: Expenses
+    description: Expense claim management
+  - name: Attendance
+    description: Attendance tracking
+  - name: Leadership
+    description: Leadership directory
+  - name: Admin
+    description: Administrative operations
