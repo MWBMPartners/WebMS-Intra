@@ -248,7 +248,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 <div class="card-body">
                     <p class="mb-1">
                         <i class="fa-regular fa-calendar me-1 text-primary"></i>
-                        <strong><?php echo htmlspecialchars($startDt->format('l, j F Y'), ENT_QUOTES, 'UTF-8'); ?></strong>
+                        <strong><?php echo htmlspecialchars(\Portal\Core\I18n::formatDate($startDt->format('Y-m-d H:i:s'), 'long'), ENT_QUOTES, 'UTF-8'); ?></strong>
                     </p>
                     <?php if ($event['isAllDay'] !== '1' && (int) $event['isAllDay'] !== 1): ?>
                         <p class="mb-1">

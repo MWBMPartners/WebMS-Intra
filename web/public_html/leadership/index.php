@@ -206,9 +206,9 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                             <?php endif; ?>
                                             <?php if ($holder['startDate'] !== null): ?>
                                                 <br><small class="text-muted">
-                                                    Since <?php echo htmlspecialchars(date('M Y', strtotime($holder['startDate'])), ENT_QUOTES, 'UTF-8'); ?>
+                                                    Since <?php echo htmlspecialchars(\Portal\Core\I18n::formatDate($holder['startDate'], 'M Y'), ENT_QUOTES, 'UTF-8'); ?>
                                                     <?php if ($holder['endDate'] !== null): ?>
-                                                        &ndash; <?php echo htmlspecialchars(date('M Y', strtotime($holder['endDate'])), ENT_QUOTES, 'UTF-8'); ?>
+                                                        &ndash; <?php echo htmlspecialchars(\Portal\Core\I18n::formatDate($holder['endDate'], 'M Y'), ENT_QUOTES, 'UTF-8'); ?>
                                                     <?php endif; ?>
                                                 </small>
                                             <?php endif; ?>

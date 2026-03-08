@@ -453,6 +453,15 @@ class I18n
             return $date;
         }
 
+        // 🔧 Check configurable settings first (display.dateFormat overrides 'medium')
+        if ($format === 'medium') {
+            global $SETTINGS;
+            $configuredFormat = $SETTINGS['display']['dateFormat'] ?? '';
+            if ($configuredFormat !== '') {
+                return date($configuredFormat, $timestamp);
+            }
+        }
+
         // 📋 Use translation keys for date formats
         $formatKey = 'format.date.' . $format;
         $phpFormat = self::t($formatKey);
@@ -483,6 +492,15 @@ class I18n
         $timestamp = strtotime($datetime);
         if ($timestamp === false) {
             return $datetime;
+        }
+
+        // 🔧 Check configurable settings first (display.dateTimeFormat overrides 'medium')
+        if ($format === 'medium') {
+            global $SETTINGS;
+            $configuredFormat = $SETTINGS['display']['dateTimeFormat'] ?? '';
+            if ($configuredFormat !== '') {
+                return date($configuredFormat, $timestamp);
+            }
         }
 
         $formatKey = 'format.datetime.' . $format;

@@ -420,7 +420,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                     <?php if (($la['providerEmail'] ?? '') !== ''): ?>
                                         <div class="small text-muted"><?php echo htmlspecialchars($la['providerEmail'], ENT_QUOTES, 'UTF-8'); ?></div>
                                     <?php endif; ?>
-                                    <div class="small text-muted">Linked <?php echo date('d M Y', strtotime($la['linkedAt'])); ?></div>
+                                    <div class="small text-muted">Linked <?php echo \Portal\Core\I18n::formatDate($la['linkedAt']); ?></div>
                                 </div>
                                 <div class="col-auto">
                                     <?php if ($loginMethodCount > 1): ?>
@@ -483,9 +483,9 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                     <i class="fa-solid fa-key me-2 text-primary"></i>
                                     <strong><?php echo htmlspecialchars($cred['friendlyName'] ?? 'Passkey', ENT_QUOTES, 'UTF-8'); ?></strong>
                                     <div class="small text-muted">
-                                        Registered <?php echo date('d M Y', strtotime($cred['createdAt'])); ?>
+                                        Registered <?php echo \Portal\Core\I18n::formatDate($cred['createdAt']); ?>
                                         <?php if (($cred['lastUsedAt'] ?? '') !== ''): ?>
-                                            &bull; Last used <?php echo date('d M Y H:i', strtotime($cred['lastUsedAt'])); ?>
+                                            &bull; Last used <?php echo \Portal\Core\I18n::formatDateTime($cred['lastUsedAt']); ?>
                                         <?php endif; ?>
                                     </div>
                                 </div>

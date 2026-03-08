@@ -186,11 +186,11 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 </div>
                 <div class="col-12 col-md-2">
                     <span class="d-md-none fw-semibold">Start: </span>
-                    <?php echo $assign['startDate'] !== null ? htmlspecialchars(date('d M Y', strtotime($assign['startDate'])), ENT_QUOTES, 'UTF-8') : '—'; ?>
+                    <?php echo $assign['startDate'] !== null ? htmlspecialchars(\Portal\Core\I18n::formatDate($assign['startDate']), ENT_QUOTES, 'UTF-8') : '—'; ?>
                 </div>
                 <div class="col-12 col-md-2">
                     <span class="d-md-none fw-semibold">End: </span>
-                    <?php echo $assign['endDate'] !== null ? htmlspecialchars(date('d M Y', strtotime($assign['endDate'])), ENT_QUOTES, 'UTF-8') : '<span class="text-muted">Ongoing</span>'; ?>
+                    <?php echo $assign['endDate'] !== null ? htmlspecialchars(\Portal\Core\I18n::formatDate($assign['endDate']), ENT_QUOTES, 'UTF-8') : '<span class="text-muted">Ongoing</span>'; ?>
                 </div>
                 <div class="col-12 col-md-1 text-md-center">
                     <span class="d-md-none fw-semibold">Status: </span>

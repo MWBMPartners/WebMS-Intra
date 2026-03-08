@@ -231,7 +231,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         <!-- 📅 Date/Time -->
                         <p class="card-text mb-1">
                             <i class="fa-regular fa-calendar me-1 text-primary"></i>
-                            <strong><?php echo htmlspecialchars($startDt->format('D, j M Y'), ENT_QUOTES, 'UTF-8'); ?></strong>
+                            <strong><?php echo htmlspecialchars(\Portal\Core\I18n::formatDate($startDt->format('Y-m-d H:i:s'), 'long'), ENT_QUOTES, 'UTF-8'); ?></strong>
                             <?php if ($event['isAllDay'] !== '1' && (int) $event['isAllDay'] !== 1): ?>
                                 <span class="text-muted ms-1"><?php echo htmlspecialchars($startDt->format('g:i A'), ENT_QUOTES, 'UTF-8'); ?></span>
                             <?php else: ?>

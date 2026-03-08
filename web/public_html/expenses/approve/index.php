@@ -124,7 +124,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     <span class="d-md-none fw-semibold">Total: </span>&pound;<?php echo number_format((float) $c['totalAmount'], 2); ?>
                 </div>
                 <div class="col-12 col-md-2 text-md-end small text-secondary">
-                    <span class="d-md-none fw-semibold">Submitted: </span><?php echo date('d M Y', strtotime($c['createdAt'])); ?>
+                    <span class="d-md-none fw-semibold">Submitted: </span><?php echo \Portal\Core\I18n::formatDate($c['createdAt']); ?>
                 </div>
                 <div class="col-12 col-md-1 text-md-end mt-2 mt-md-0">
                     <button class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#approveModal"

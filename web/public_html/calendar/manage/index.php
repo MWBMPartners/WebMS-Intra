@@ -300,7 +300,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             </div>
             <div class="col-12 col-md-2">
                 <span class="d-md-none fw-semibold">Date: </span>
-                <small><?php echo htmlspecialchars((new DateTime($ev['startDateTime']))->format('j M Y, g:i A'), ENT_QUOTES, 'UTF-8'); ?></small>
+                <small><?php echo htmlspecialchars(\Portal\Core\I18n::formatDateTime($ev['startDateTime']), ENT_QUOTES, 'UTF-8'); ?></small>
             </div>
             <div class="col-12 col-md-2">
                 <span class="d-md-none fw-semibold">Status: </span>
