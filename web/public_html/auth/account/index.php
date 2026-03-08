@@ -126,6 +126,26 @@ if ($laCheck !== false) {
     $laCheck->close();
 }
 
+// 🔔 Load notification preferences
+$notifyPrefs = [
+    'emailDigest'    => true,
+    'expenseUpdates' => true,
+    'eventReminders' => true,
+];
+$npStmt = $mysqli->prepare('SELECT notifyPrefs FROM tblUsers WHERE userID = ? LIMIT 1');
+if ($npStmt !== false) {
+    $npStmt->bind_param('i', $userId);
+    $npStmt->execute();
+    $npRow = $npStmt->get_result()->fetch_assoc();
+    $npStmt->close();
+    if ($npRow !== null && $npRow['notifyPrefs'] !== null) {
+        $decoded = json_decode($npRow['notifyPrefs'], true);
+        if (is_array($decoded) === true) {
+            $notifyPrefs = array_merge($notifyPrefs, $decoded);
+        }
+    }
+}
+
 // -----------------------------------------------------------------------------
 // 3. 📋 Build password policy description
 // -----------------------------------------------------------------------------
@@ -675,6 +695,50 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     }
 })();
 </script>
+
+<!-- 🔔 Notification Preferences Card -->
+<div class="card shadow-sm mt-4">
+    <div class="card-header">
+        <h5 class="mb-0"><i class="fa-solid fa-bell me-2" aria-hidden="true"></i>Notification Preferences</h5>
+    </div>
+    <div class="card-body">
+        <form method="post" action="/auth/account/save">
+            <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
+            <input type="hidden" name="action" value="update_notifications">
+
+            <div class="form-check form-switch mb-3">
+                <input class="form-check-input" type="checkbox" id="notifyDigest" name="emailDigest" value="1"
+                       <?php echo ($notifyPrefs['emailDigest'] === true) ? 'checked' : ''; ?>>
+                <label class="form-check-label" for="notifyDigest">
+                    <strong>Weekly email digest</strong>
+                    <div class="text-muted small">Summary of upcoming events, pending items, and recent activity</div>
+                </label>
+            </div>
+
+            <div class="form-check form-switch mb-3">
+                <input class="form-check-input" type="checkbox" id="notifyExpenses" name="expenseUpdates" value="1"
+                       <?php echo ($notifyPrefs['expenseUpdates'] === true) ? 'checked' : ''; ?>>
+                <label class="form-check-label" for="notifyExpenses">
+                    <strong>Expense claim updates</strong>
+                    <div class="text-muted small">Notifications when your claims are approved, rejected, or reimbursed</div>
+                </label>
+            </div>
+
+            <div class="form-check form-switch mb-3">
+                <input class="form-check-input" type="checkbox" id="notifyEvents" name="eventReminders" value="1"
+                       <?php echo ($notifyPrefs['eventReminders'] === true) ? 'checked' : ''; ?>>
+                <label class="form-check-label" for="notifyEvents">
+                    <strong>Event reminders</strong>
+                    <div class="text-muted small">Reminders for upcoming events you've registered for</div>
+                </label>
+            </div>
+
+            <button type="submit" class="btn btn-primary btn-sm">
+                <i class="fa-solid fa-save me-1" aria-hidden="true"></i>Save Preferences
+            </button>
+        </form>
+    </div>
+</div>
 
 <?php
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'footer.php';

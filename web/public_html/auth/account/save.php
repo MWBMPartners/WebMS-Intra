@@ -41,6 +41,34 @@ if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
 }
 
 // -----------------------------------------------------------------------------
+// 1b. 🔔 Handle notification preference updates
+// -----------------------------------------------------------------------------
+
+$action = $_POST['action'] ?? 'update_profile';
+
+if ($action === 'update_notifications') {
+    $userId = (int) $_SESSION['user_id'];
+    $prefs = json_encode([
+        'emailDigest'    => isset($_POST['emailDigest']) === true,
+        'expenseUpdates' => isset($_POST['expenseUpdates']) === true,
+        'eventReminders' => isset($_POST['eventReminders']) === true,
+    ], JSON_THROW_ON_ERROR);
+
+    $npStmt = $mysqli->prepare('UPDATE tblUsers SET notifyPrefs = ? WHERE userID = ?');
+    if ($npStmt !== false) {
+        $npStmt->bind_param('si', $prefs, $userId);
+        $npStmt->execute();
+        $npStmt->close();
+    }
+
+    Logger::activity('NotificationPrefsUpdate', 'Updated notification preferences');
+    $_SESSION['flash_msg']  = 'Notification preferences saved.';
+    $_SESSION['flash_type'] = 'success';
+    header('Location: /account', true, 302);
+    exit();
+}
+
+// -----------------------------------------------------------------------------
 // 2. 📝 Validate fields
 // -----------------------------------------------------------------------------
 
