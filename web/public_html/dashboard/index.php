@@ -157,6 +157,28 @@ foreach ($SETTINGS as $key => $arr) {
     }
 }
 
+/* -------------------------------------------------------------------------- */
+/* 📢 Pinned announcements for dashboard                                      */
+/* -------------------------------------------------------------------------- */
+$pinnedAnnouncements = [];
+$now = date('Y-m-d H:i:s');
+$pnStmt = $mysqli->prepare(
+    'SELECT announcementID, title, slug, body, priority, createdAt FROM tblAnnouncements '
+    . 'WHERE siteID = ? AND isPinned = 1 AND isPublished = 1 AND isDeleted = 0 '
+    . 'AND (publishAt IS NULL OR publishAt <= ?) '
+    . 'AND (expiresAt IS NULL OR expiresAt > ?) '
+    . 'ORDER BY priority = \'urgent\' DESC, priority = \'important\' DESC, createdAt DESC LIMIT 5'
+);
+if ($pnStmt !== false) {
+    $pnStmt->bind_param('iss', $siteId, $now, $now);
+    $pnStmt->execute();
+    $pnResult = $pnStmt->get_result();
+    while ($pnRow = $pnResult->fetch_assoc()) {
+        $pinnedAnnouncements[] = $pnRow;
+    }
+    $pnStmt->close();
+}
+
 // 📄 Include shared header template (DOCTYPE, <head>, navbar, breadcrumbs)
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
@@ -179,6 +201,31 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     </div>
                 </div>
             </a>
+        </div>
+    <?php endforeach; ?>
+</div>
+<?php endif; ?>
+
+<!-- 📢 Pinned Announcements -->
+<?php if (count($pinnedAnnouncements) > 0): ?>
+<div class="mb-4">
+    <?php foreach ($pinnedAnnouncements as $pAnn): ?>
+        <?php
+        $pColors = ['urgent' => 'danger', 'important' => 'warning', 'normal' => 'info'];
+        $pColor  = $pColors[$pAnn['priority']] ?? 'info';
+        ?>
+        <div class="alert alert-<?php echo $pColor; ?> d-flex align-items-start mb-2" role="alert">
+            <i class="fa-solid fa-thumbtack me-2 mt-1"></i>
+            <div>
+                <strong>
+                    <a href="/announcements/view?slug=<?php echo htmlspecialchars(urlencode($pAnn['slug']), ENT_QUOTES, 'UTF-8'); ?>" class="alert-link text-decoration-none">
+                        <?php echo htmlspecialchars($pAnn['title'], ENT_QUOTES, 'UTF-8'); ?>
+                    </a>
+                </strong>
+                <span class="d-block small">
+                    <?php echo htmlspecialchars(mb_strimwidth(strip_tags($pAnn['body']), 0, 120, '...'), ENT_QUOTES, 'UTF-8'); ?>
+                </span>
+            </div>
         </div>
     <?php endforeach; ?>
 </div>
