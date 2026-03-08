@@ -441,4 +441,18 @@ if (function_exists('t') === false) {
     }
 }
 
+// 📦 ---------------------------------------------------------------------------
+// 11. Service Container
+// -----------------------------------------------------------------------------
+// Register core services in the lightweight DI container. This coexists with
+// the existing static singletons, enabling gradual migration to injectable deps.
+// See: core/Container.php
+
+$container = \Portal\Core\Container::getInstance();
+$container->instance('db', $mysqli);
+$container->instance('settings', $SETTINGS);
+$container->set('site', function () {
+    return \Portal\Core\Site::current();
+});
+
 // 🏁 Bootstrap completed – Router will now take over in the front controller.
