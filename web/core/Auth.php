@@ -260,6 +260,13 @@ class Auth
         self::ensureSession();
         global $SETTINGS, $mysqli;
 
+        /* ----------------------- 0. Rate limit OAuth callbacks ------------- */
+        if (RateLimiter::isBlocked() === true) {
+            http_response_code(429);
+            echo 'Too many authentication attempts. Please try again later.';
+            exit();
+        }
+
         /* ----------------------- 1. Validate OAuth state ------------------- */
         if (isset($_GET['state']) === false || hash_equals($_SESSION['oauth_state'] ?? '', $_GET['state'] ?? '') === false) {
             Logger::errorPlatform('Auth', 'Error', 'OAUTH_STATE', 'Invalid OAuth state parameter', '');
@@ -465,6 +472,13 @@ class Auth
     {
         self::ensureSession();
         global $SETTINGS, $mysqli;
+
+        /* ----------------------- 0. Rate limit OAuth callbacks ------------- */
+        if (RateLimiter::isBlocked() === true) {
+            http_response_code(429);
+            echo 'Too many authentication attempts. Please try again later.';
+            exit();
+        }
 
         /* ----------------------- 1. Validate OAuth state ------------------- */
         if (isset($_GET['state']) === false || hash_equals($_SESSION['oauth_state'] ?? '', $_GET['state'] ?? '') === false) {
