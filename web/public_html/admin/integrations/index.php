@@ -309,7 +309,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                             <?php if ($item['display'] !== '' && $item['display'] !== '••••••••'): ?>
                                 <code class="ms-2 small"><?php echo htmlspecialchars($item['display'], ENT_QUOTES, 'UTF-8'); ?></code>
                             <?php elseif ($item['display'] === '••••••••'): ?>
-                                <span class="ms-2 text-muted small"><?php echo $item['display']; ?></span>
+                                <span class="ms-2 text-muted small"><?php echo htmlspecialchars($item['display'], ENT_QUOTES, 'UTF-8'); ?></span>
                             <?php endif; ?>
                         <?php else: ?>
                             <span class="badge bg-danger"><i class="fa-solid fa-xmark me-1" aria-hidden="true"></i>Missing</span>
