@@ -95,41 +95,58 @@ if ($action === 'create') {
         exit();
     }
 
-    // 📝 Insert user
-    $stmt = $mysqli->prepare(
-        'INSERT INTO tblUsers (fullName, emailAddress, phoneNumber, isActive, isAdmin, isRootAdmin) '
-        . 'VALUES (?, ?, ?, ?, ?, ?)'
-    );
-    if ($stmt === false) {
-        $_SESSION['flash_msg']  = 'Database error creating user.';
-        $_SESSION['flash_type'] = 'danger';
-        header('Location: /admin/users');
-        exit();
-    }
-    $stmt->bind_param('sssiii', $fullName, $emailAddress, $phoneNumber, $isActive, $isAdmin, $isRootAdmin);
-    $stmt->execute();
-    $newUserId = $stmt->insert_id;
-    $stmt->close();
+    // 🔄 Wrap multi-table insert in a transaction for atomicity
+    App::beginTransaction();
 
-    // 🔑 Create local account if username provided
-    if ($username !== '' && $newUserId > 0) {
-        $hash = password_hash($password, PASSWORD_DEFAULT);
+    try {
+        // 📝 Insert user
         $stmt = $mysqli->prepare(
-            'INSERT INTO tblLocalAccounts (userID, username, passwordHash) VALUES (?, ?, ?)'
+            'INSERT INTO tblUsers (fullName, emailAddress, phoneNumber, isActive, isAdmin, isRootAdmin) '
+            . 'VALUES (?, ?, ?, ?, ?, ?)'
         );
-        if ($stmt !== false) {
+        if ($stmt === false) {
+            throw new \RuntimeException('Failed to prepare user insert: ' . $mysqli->error);
+        }
+        $stmt->bind_param('sssiii', $fullName, $emailAddress, $phoneNumber, $isActive, $isAdmin, $isRootAdmin);
+        $stmt->execute();
+        $newUserId = $stmt->insert_id;
+        $stmt->close();
+
+        if ($newUserId <= 0) {
+            throw new \RuntimeException('User insert returned invalid ID.');
+        }
+
+        // 🔑 Create local account if username provided
+        if ($username !== '') {
+            $hash = password_hash($password, PASSWORD_DEFAULT);
+            $stmt = $mysqli->prepare(
+                'INSERT INTO tblLocalAccounts (userID, username, passwordHash) VALUES (?, ?, ?)'
+            );
+            if ($stmt === false) {
+                throw new \RuntimeException('Failed to prepare local account insert: ' . $mysqli->error);
+            }
             $stmt->bind_param('iss', $newUserId, $username, $hash);
             $stmt->execute();
             $stmt->close();
         }
+
+        App::commit();
+
+        Logger::activity('UserCreated', 'Created user: ' . $fullName . ' (' . $emailAddress . ')', $_SESSION['user_id'] ?? null);
+
+        $_SESSION['flash_msg']  = 'User "' . $fullName . '" created successfully.';
+        $_SESSION['flash_type'] = 'success';
+        header('Location: /admin/users');
+        exit();
+
+    } catch (\Throwable $ex) {
+        App::rollback();
+        Logger::exception($ex);
+        $_SESSION['flash_msg']  = 'Database error creating user. Please try again.';
+        $_SESSION['flash_type'] = 'danger';
+        header('Location: /admin/users');
+        exit();
     }
-
-    Logger::activity('UserCreated', 'Created user: ' . $fullName . ' (' . $emailAddress . ')', $_SESSION['user_id'] ?? null);
-
-    $_SESSION['flash_msg']  = 'User "' . $fullName . '" created successfully.';
-    $_SESSION['flash_type'] = 'success';
-    header('Location: /admin/users');
-    exit();
 }
 
 // -----------------------------------------------------------------------------

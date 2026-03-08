@@ -1093,28 +1093,43 @@ class Auth
      */
     private static function createUser(string $name, string $email, string $avatar, \mysqli $db): int
     {
-        $stmt = $db->prepare('INSERT INTO tblUsers (fullName, emailAddress, avatarPath, isActive) VALUES (?, ?, ?, 1)');
-        if ($stmt === false) {
-            throw new RuntimeException('DB prepare failed: ' . $db->error);
-        }
-        $stmt->bind_param('sss', $name, $email, $avatar);
-        $stmt->execute();
-        $newId = $stmt->insert_id;
-        $stmt->close();
+        // 🔄 Wrap multi-table insert in a transaction for atomicity
+        App::beginTransaction();
 
-        // 🌐 Assign new user to the current site
-        $siteId = Site::id();
-        $siteStmt = $db->prepare(
-            'INSERT IGNORE INTO tblUserSites (userID, siteID, isSiteAdmin, isSiteRootAdmin) '
-            . 'VALUES (?, ?, 0, 0)'
-        );
-        if ($siteStmt !== false) {
+        try {
+            $stmt = $db->prepare('INSERT INTO tblUsers (fullName, emailAddress, avatarPath, isActive) VALUES (?, ?, ?, 1)');
+            if ($stmt === false) {
+                throw new RuntimeException('DB prepare failed: ' . $db->error);
+            }
+            $stmt->bind_param('sss', $name, $email, $avatar);
+            $stmt->execute();
+            $newId = $stmt->insert_id;
+            $stmt->close();
+
+            if ($newId <= 0) {
+                throw new RuntimeException('User insert returned invalid ID.');
+            }
+
+            // 🌐 Assign new user to the current site
+            $siteId = Site::id();
+            $siteStmt = $db->prepare(
+                'INSERT IGNORE INTO tblUserSites (userID, siteID, isSiteAdmin, isSiteRootAdmin) '
+                . 'VALUES (?, ?, 0, 0)'
+            );
+            if ($siteStmt === false) {
+                throw new RuntimeException('DB prepare failed for tblUserSites: ' . $db->error);
+            }
             $siteStmt->bind_param('ii', $newId, $siteId);
             $siteStmt->execute();
             $siteStmt->close();
-        }
 
-        return $newId;
+            App::commit();
+
+            return $newId;
+        } catch (\Throwable $ex) {
+            App::rollback();
+            throw $ex;
+        }
     }
 
     /**

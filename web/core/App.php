@@ -371,6 +371,55 @@ class App
         return ((string) ($user['isSiteRootAdmin'] ?? '0') === '1');
     }
 
+    // =========================================================================
+    // 🔄 Transaction Helpers
+    // =========================================================================
+
+    /**
+     * Begin a database transaction.
+     * Wraps mysqli::begin_transaction() with error logging on failure.
+     *
+     * @return bool True on success, false on failure
+     */
+    public static function beginTransaction(): bool
+    {
+        $result = self::db()->begin_transaction();
+        if ($result === false) {
+            error_log('[App::beginTransaction] Failed to begin transaction: ' . self::db()->error);
+        }
+        return $result;
+    }
+
+    /**
+     * Commit the current database transaction.
+     * Wraps mysqli::commit() with error logging on failure.
+     *
+     * @return bool True on success, false on failure
+     */
+    public static function commit(): bool
+    {
+        $result = self::db()->commit();
+        if ($result === false) {
+            error_log('[App::commit] Failed to commit transaction: ' . self::db()->error);
+        }
+        return $result;
+    }
+
+    /**
+     * Roll back the current database transaction.
+     * Wraps mysqli::rollback() with error logging on failure.
+     *
+     * @return bool True on success, false on failure
+     */
+    public static function rollback(): bool
+    {
+        $result = self::db()->rollback();
+        if ($result === false) {
+            error_log('[App::rollback] Failed to rollback transaction: ' . self::db()->error);
+        }
+        return $result;
+    }
+
     /**
      * Reset the cached user data (useful after role changes or for testing).
      *

@@ -19,6 +19,7 @@
 declare(strict_types=1);
 require_once dirname(__DIR__, 3) . DIRECTORY_SEPARATOR . 'core' . DIRECTORY_SEPARATOR . 'bootstrap.php';
 
+use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Captcha;
 use Portal\Core\Logger;
@@ -75,7 +76,8 @@ if ($totalAmt <= 0) {
 
 $siteId = Site::id();
 
-$mysqli->begin_transaction();
+// 🔄 Wrap multi-table insert in a transaction for atomicity
+App::beginTransaction();
 try {
     // 1. 📋 Insert claim header
     $stmt = $mysqli->prepare('INSERT INTO tblExpenseClaims (userID, deptID, claimTitle, claimDate, totalAmount, siteID) VALUES (?, ?, ?, CURDATE(), ?, ?)');
@@ -148,7 +150,7 @@ try {
     // 4. 📄 Pending PDF
     ExpensePdf::generate($claimID, 'Pending');
 
-    $mysqli->commit();
+    App::commit();
 
     // 5. 📓 Log activity
     Logger::activity('ExpenseSubmit', 'Claim #' . $claimID . ' created (£' . number_format($totalAmt, 2) . ')', $userId);
@@ -163,7 +165,7 @@ try {
     exit();
 
 } catch (\Throwable $ex) {
-    $mysqli->rollback();
+    App::rollback();
     Logger::exception($ex);
     $_SESSION['flash_msg']  = 'Error saving claim. Please try again.';
     $_SESSION['flash_type'] = 'danger';
