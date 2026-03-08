@@ -18,7 +18,7 @@
 -- @author    MWBM Partners Ltd (t/a MWservices)
 -- @copyright 2025-2026 MWBM Partners Ltd (t/a MWservices)
 -- @license   All Rights Reserved
--- @version   0.9.0
+-- @version   0.8.1
 -- =============================================================================
 
 
@@ -987,7 +987,7 @@ ON DUPLICATE KEY UPDATE `settingKey` = `settingKey`;
 
 -- ─── Portal settings ─────────────────────────────────────────────────────────
 INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isSensitive`, `defaultValue`)
-VALUES ('portal.version', '0.2.0', 0, '0.2.0')
+VALUES ('portal.version', '0.8.1', 0, '0.8.1')
 ON DUPLICATE KEY UPDATE `settingKey` = `settingKey`;
 
 INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isSensitive`, `defaultValue`)

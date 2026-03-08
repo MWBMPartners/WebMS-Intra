@@ -53,7 +53,7 @@ class App
     private static bool $userLoaded = false;
 
     /** @var string Portal version number */
-    private static string $version = '0.1.0';
+    private static string $version = '0.8.1';
 
     /**
      * Initialise the App registry. Called from bootstrap.php after DB and settings are ready.
