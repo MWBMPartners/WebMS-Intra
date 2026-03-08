@@ -124,6 +124,28 @@ $approverName = $_SESSION['user_name'] ?? 'Unknown';
 
 $mysqli->begin_transaction();
 try {
+    // 0. 🔒 Re-fetch claim with row lock to prevent concurrent approval race condition
+    $lockedClaim = null;
+    $lockStmt = $mysqli->prepare(
+        'SELECT claimID, status FROM tblExpenseClaims '
+        . 'WHERE claimID = ? AND siteID = ? FOR UPDATE'
+    );
+    if ($lockStmt !== false) {
+        $lockStmt->bind_param('ii', $claimID, $siteId);
+        $lockStmt->execute();
+        $lockedClaim = $lockStmt->get_result()->fetch_assoc();
+        $lockStmt->close();
+    }
+
+    // 🛡️ Verify claim is still Pending (another approver may have changed it)
+    if ($lockedClaim === null || $lockedClaim['status'] !== 'Pending') {
+        $mysqli->rollback();
+        $_SESSION['admin_flash_msg']  = 'This claim has already been decided by another approver.';
+        $_SESSION['admin_flash_type'] = 'warning';
+        header('Location: /expenses/approve');
+        exit();
+    }
+
     // 1. 📋 Insert approval record with role context
     $stmt = $mysqli->prepare(
         'INSERT INTO tblExpenseClaimApprovals (claimID, userID, decision, comments, approverRole) '
