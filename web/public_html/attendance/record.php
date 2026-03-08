@@ -8,12 +8,13 @@
  *   - Selecting a service type (or linking to an existing calendar event)
  *   - Adding multiple count rows for different age groups/categories
  *   - Editing existing sessions via ?edit=<sessionID>
+ *   - Copying group labels from last session via ?copyFrom=last&serviceTypeID=X
  *
  * @package   Portal\Attendance
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   0.3.0
+ * @version   0.4.0
  * -----------------------------------------------------------------------------
  */
 
@@ -77,6 +78,52 @@ if ($editId > 0) {
 
         $pageTitle   = 'Edit Attendance — ' . $editSession['typeName'];
         $breadcrumbs = ['Dashboard' => '/', 'Attendance' => '/attendance', 'Edit' => ''];
+    }
+}
+
+// -----------------------------------------------------------------------------
+// 📑 "Copy from last session" — pre-fill group labels from previous session
+// -----------------------------------------------------------------------------
+$copyFrom        = trim($_GET['copyFrom'] ?? '');
+$copyServiceType = (int) ($_GET['serviceTypeID'] ?? 0);
+$copiedGroups    = [];
+
+if ($editSession === null && $copyFrom === 'last' && $copyServiceType > 0) {
+    // 🔍 Find the most recent session of the same service type for this site
+    $stmtLast = $mysqli->prepare(
+        'SELECT s.sessionID FROM tblAttendanceSessions s '
+        . 'WHERE s.serviceTypeID = ? AND s.isDeleted = 0 AND s.siteID = ? '
+        . 'ORDER BY s.sessionDate DESC, s.sessionID DESC LIMIT 1'
+    );
+    if ($stmtLast !== false) {
+        $stmtLast->bind_param('ii', $copyServiceType, $siteId);
+        $stmtLast->execute();
+        $lastRow = $stmtLast->get_result()->fetch_assoc();
+        $stmtLast->close();
+
+        if ($lastRow !== null) {
+            // 📋 Fetch the group labels from the last session (headcounts set to 0)
+            $lastSessionId = (int) $lastRow['sessionID'];
+            $stmtCopy = $mysqli->prepare(
+                'SELECT groupLabel, sortOrder '
+                . 'FROM tblAttendanceCounts WHERE sessionID = ? ORDER BY sortOrder, countID'
+            );
+            if ($stmtCopy !== false) {
+                $stmtCopy->bind_param('i', $lastSessionId);
+                $stmtCopy->execute();
+                $resultCopy = $stmtCopy->get_result();
+                while ($rc = $resultCopy->fetch_assoc()) {
+                    $copiedGroups[] = $rc['groupLabel'];
+                }
+                $stmtCopy->close();
+            }
+        }
+
+        // ⚠️ No previous session found — set flash message
+        if (count($copiedGroups) === 0) {
+            $_SESSION['flash_msg']  = 'No previous session found to copy from.';
+            $_SESSION['flash_type'] = 'warning';
+        }
     }
 }
 
@@ -148,6 +195,25 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     </a>
 </div>
 
+<?php if ($editSession === null): ?>
+    <!-- 📑 Copy from last session — visible only when creating a new session -->
+    <div class="mb-3">
+        <p class="text-muted small mb-2">
+            <i class="fa-solid fa-copy me-1"></i>
+            Pre-fill group labels from a previous session of the same service type:
+        </p>
+        <div class="d-flex flex-wrap gap-2">
+            <?php foreach ($allServiceTypes as $st): ?>
+                <a href="/attendance/record?copyFrom=last&amp;serviceTypeID=<?php echo (int) $st['serviceTypeID']; ?>"
+                   class="btn btn-sm btn-outline-primary<?php echo ($copyServiceType === (int) $st['serviceTypeID']) ? ' active' : ''; ?>">
+                    <i class="fa-solid fa-copy me-1"></i>
+                    Copy from last <?php echo htmlspecialchars($st['typeName'], ENT_QUOTES, 'UTF-8'); ?>
+                </a>
+            <?php endforeach; ?>
+        </div>
+    </div>
+<?php endif; ?>
+
 <form method="post" action="/attendance/record/save" id="attendanceForm">
     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
     <input type="hidden" name="action" value="<?php echo $editSession !== null ? 'update' : 'create'; ?>">
@@ -170,7 +236,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                             return $t['parentID'] === null;
                         });
                         foreach ($topLevel as $parent) {
-                            $selected = ($editSession !== null && (int) $editSession['serviceTypeID'] === (int) $parent['serviceTypeID']) ? 'selected' : '';
+                            $selected = (($editSession !== null && (int) $editSession['serviceTypeID'] === (int) $parent['serviceTypeID'])
+                                || ($editSession === null && $copyServiceType === (int) $parent['serviceTypeID'])) ? 'selected' : '';
                             echo '<option value="' . (int) $parent['serviceTypeID'] . '" ' . $selected . '>'
                                . htmlspecialchars($parent['typeName'], ENT_QUOTES, 'UTF-8') . '</option>';
 
@@ -179,7 +246,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                 return $c['parentID'] !== null && (int) $c['parentID'] === (int) $parent['serviceTypeID'];
                             });
                             foreach ($children as $child) {
-                                $childSelected = ($editSession !== null && (int) $editSession['serviceTypeID'] === (int) $child['serviceTypeID']) ? 'selected' : '';
+                                $childSelected = (($editSession !== null && (int) $editSession['serviceTypeID'] === (int) $child['serviceTypeID'])
+                                    || ($editSession === null && $copyServiceType === (int) $child['serviceTypeID'])) ? 'selected' : '';
                                 echo '<option value="' . (int) $child['serviceTypeID'] . '" ' . $childSelected . '>'
                                    . '&nbsp;&nbsp;&nbsp;&mdash; ' . htmlspecialchars($child['typeName'], ENT_QUOTES, 'UTF-8') . '</option>';
                             }
@@ -258,6 +326,28 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                 <input type="number" name="counts[]" class="form-control form-control-sm count-input"
                                        min="0" placeholder="0"
                                        value="<?php echo (int) $cnt['headcount']; ?>" required>
+                            </div>
+                            <div class="col-2 col-md-2">
+                                <?php if ($idx > 0): ?>
+                                    <button type="button" class="btn btn-sm btn-outline-danger remove-row" title="Remove">
+                                        <i class="fa-solid fa-xmark"></i>
+                                    </button>
+                                <?php endif; ?>
+                            </div>
+                        </div>
+                    <?php endforeach; ?>
+                <?php elseif (count($copiedGroups) > 0): ?>
+                    <!-- 📑 Copied groups from last session (headcounts zeroed) -->
+                    <?php foreach ($copiedGroups as $idx => $groupLabel): ?>
+                        <div class="row g-2 mb-2 count-row">
+                            <div class="col-6 col-md-5">
+                                <input type="text" name="groups[]" class="form-control form-control-sm"
+                                       placeholder="Group label (e.g. Adults)"
+                                       value="<?php echo htmlspecialchars($groupLabel, ENT_QUOTES, 'UTF-8'); ?>" required>
+                            </div>
+                            <div class="col-4 col-md-3">
+                                <input type="number" name="counts[]" class="form-control form-control-sm count-input"
+                                       min="0" placeholder="0" value="" required>
                             </div>
                             <div class="col-2 col-md-2">
                                 <?php if ($idx > 0): ?>
