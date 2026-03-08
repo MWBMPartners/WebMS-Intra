@@ -5,7 +5,7 @@ info:
     Internal API endpoints for the WebMS-Intra portal platform.
     All API routes require authentication unless noted otherwise.
     JSON API endpoints must be enabled via tblSettings (`api.{app}.{action}.enabled = 'true'`).
-  version: 0.8.1
+  version: 0.8.2
   contact:
     name: MWBM Partners Ltd (t/a MWservices)
   license:
