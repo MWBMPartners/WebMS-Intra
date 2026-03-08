@@ -2,7 +2,7 @@
 
 > **Version:** 0.9.0 | **PHP** 8.5 (backward-compatible with 8.4) | **MySQL** 8.0+ | **DreamHost** shared hosting
 
-A modular internal portal platform for organisations, providing centralised access to internal tools, expense management, multi-site support, and future modules (Leadership).
+A modular internal portal platform for organisations, providing centralised access to internal tools, expense management, leadership directory, multi-site support, and more.
 
 ---
 
@@ -70,6 +70,7 @@ WebMS-Intra/                         # Git repository root (NOT deployed)
     │   ├── dashboard/               # Portal home with app cards
     │   ├── expenses/                # Expense claim lifecycle
     │   ├── attendance/              # Attendance tracker app
+    │   ├── leadership/              # Leadership roles & assignments
     │   ├── calendar/                # Calendar / Events / Preaching Plan
     │   ├── admin/                   # Admin panel (sites, users, logs, migrations)
     │   ├── help/                    # Help centre pages

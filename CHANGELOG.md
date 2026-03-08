@@ -34,6 +34,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - All expense, calendar, attendance, admin, and settings queries — `AND siteID = ?` filtering
 - `full_schema.sql` — consolidated with tblSites, tblUserSites, siteID columns, multisite settings/routes
 
+### Added — Leadership App (Phase 9, Issue #38)
+
+- **Leadership directory** — card-based view of all roles and current holders, with term dates, vacancy indicators, and summary stats
+- **Role management** (`leadership/manage`) — admin CRUD for leadership role definitions with activate/deactivate toggle
+- **Role assignment** (`leadership/assign`) — assign portal users or external people to roles, with start/end term dates and notes
+- **Historical records** (`leadership/history`) — full audit trail of all assignments (current, past, removed) with role filter
+- **17 default SDA church roles** seeded: Pastor, Elder, Deacon/Deaconess, Clerk, Treasurer, SS Superintendent, Youth Leader, etc.
+- **Multi-site scoped** — all tables include `siteID` FK; queries filter by `Site::id()`
+- **New tables**: `tblLeadershipRoles`, `tblLeadershipAssignments`
+- SQL migration `017_leadership.sql` — tables, seed roles, routes, settings
+
 ### Added — Google Workspace Email Sending (Issue #48)
 
 - **`MailerGoogle.php`** — Gmail API email backend using service account with domain-wide delegation (RS256 JWT, RFC 2822 MIME, attachments up to 25MB)
