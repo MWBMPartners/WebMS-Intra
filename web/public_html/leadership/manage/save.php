@@ -57,8 +57,8 @@ if ($action === 'create') {
 
     // 🔍 Validation
     if ($roleName === '') {
-        $_SESSION['admin_flash_msg']  = 'Role name is required.';
-        $_SESSION['admin_flash_type'] = 'danger';
+        $_SESSION['flash_msg']  = 'Role name is required.';
+        $_SESSION['flash_type'] = 'danger';
         header('Location: /leadership/manage');
         exit();
     }
@@ -91,8 +91,8 @@ if ($action === 'create') {
         . 'VALUES (?, ?, ?, ?, ?)'
     );
     if ($stmt === false) {
-        $_SESSION['admin_flash_msg']  = 'Database error creating role.';
-        $_SESSION['admin_flash_type'] = 'danger';
+        $_SESSION['flash_msg']  = 'Database error creating role.';
+        $_SESSION['flash_type'] = 'danger';
         header('Location: /leadership/manage');
         exit();
     }
@@ -104,8 +104,8 @@ if ($action === 'create') {
 
     Logger::activity('LeadershipRoleCreated', 'Created leadership role: ' . $roleName . ' (ID:' . $newId . ')', $userId);
 
-    $_SESSION['admin_flash_msg']  = 'Role "' . $roleName . '" created successfully.';
-    $_SESSION['admin_flash_type'] = 'success';
+    $_SESSION['flash_msg']  = 'Role "' . $roleName . '" created successfully.';
+    $_SESSION['flash_type'] = 'success';
     header('Location: /leadership/manage');
     exit();
 }
@@ -116,8 +116,8 @@ if ($action === 'create') {
 if ($action === 'toggle') {
     $roleID = (int) ($_POST['roleID'] ?? 0);
     if ($roleID <= 0) {
-        $_SESSION['admin_flash_msg']  = 'Invalid role ID.';
-        $_SESSION['admin_flash_type'] = 'danger';
+        $_SESSION['flash_msg']  = 'Invalid role ID.';
+        $_SESSION['flash_type'] = 'danger';
         header('Location: /leadership/manage');
         exit();
     }
@@ -140,8 +140,8 @@ if ($action === 'toggle') {
     }
 
     if ($currentActive === null) {
-        $_SESSION['admin_flash_msg']  = 'Role not found.';
-        $_SESSION['admin_flash_type'] = 'danger';
+        $_SESSION['flash_msg']  = 'Role not found.';
+        $_SESSION['flash_type'] = 'danger';
         header('Location: /leadership/manage');
         exit();
     }
@@ -157,14 +157,14 @@ if ($action === 'toggle') {
     $stateLabel = $newActive === 1 ? 'activated' : 'deactivated';
     Logger::activity('LeadershipRoleToggled', ucfirst($stateLabel) . ' leadership role: ' . $roleName . ' (ID:' . $roleID . ')', $userId);
 
-    $_SESSION['admin_flash_msg']  = 'Role "' . $roleName . '" ' . $stateLabel . '.';
-    $_SESSION['admin_flash_type'] = 'success';
+    $_SESSION['flash_msg']  = 'Role "' . $roleName . '" ' . $stateLabel . '.';
+    $_SESSION['flash_type'] = 'success';
     header('Location: /leadership/manage');
     exit();
 }
 
 // 🚫 Unknown action
-$_SESSION['admin_flash_msg']  = 'Unknown action.';
-$_SESSION['admin_flash_type'] = 'warning';
+$_SESSION['flash_msg']  = 'Unknown action.';
+$_SESSION['flash_type'] = 'warning';
 header('Location: /leadership/manage');
 exit();

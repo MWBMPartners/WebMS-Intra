@@ -53,11 +53,11 @@ if ($eventID > 0) {
 
     Logger::activity('EventDeleted', 'Soft-deleted event #' . $eventID, $_SESSION['user_id'] ?? null);
 
-    $_SESSION['admin_flash_msg']  = 'Event deleted.';
-    $_SESSION['admin_flash_type'] = 'success';
+    $_SESSION['flash_msg']  = 'Event deleted.';
+    $_SESSION['flash_type'] = 'success';
 } else {
-    $_SESSION['admin_flash_msg']  = 'Invalid event ID.';
-    $_SESSION['admin_flash_type'] = 'danger';
+    $_SESSION['flash_msg']  = 'Invalid event ID.';
+    $_SESSION['flash_type'] = 'danger';
 }
 
 header('Location: /calendar/manage');

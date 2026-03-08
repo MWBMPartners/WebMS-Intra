@@ -57,8 +57,8 @@ if ($action === 'create') {
 
     // 🔍 Validation
     if ($typeName === '') {
-        $_SESSION['admin_flash_msg']  = 'Type name is required.';
-        $_SESSION['admin_flash_type'] = 'danger';
+        $_SESSION['flash_msg']  = 'Type name is required.';
+        $_SESSION['flash_type'] = 'danger';
         header('Location: /attendance/manage');
         exit();
     }
@@ -89,8 +89,8 @@ if ($action === 'create') {
         . 'VALUES (?, ?, ?, ?, ?, ?)'
     );
     if ($stmt === false) {
-        $_SESSION['admin_flash_msg']  = 'Database error creating service type.';
-        $_SESSION['admin_flash_type'] = 'danger';
+        $_SESSION['flash_msg']  = 'Database error creating service type.';
+        $_SESSION['flash_type'] = 'danger';
         header('Location: /attendance/manage');
         exit();
     }
@@ -102,8 +102,8 @@ if ($action === 'create') {
 
     Logger::activity('AttendanceTypeCreated', 'Created service type: ' . $typeName . ' (ID:' . $newId . ')', $userId);
 
-    $_SESSION['admin_flash_msg']  = 'Service type "' . $typeName . '" created successfully.';
-    $_SESSION['admin_flash_type'] = 'success';
+    $_SESSION['flash_msg']  = 'Service type "' . $typeName . '" created successfully.';
+    $_SESSION['flash_type'] = 'success';
     header('Location: /attendance/manage');
     exit();
 }
@@ -114,8 +114,8 @@ if ($action === 'create') {
 if ($action === 'toggle') {
     $serviceTypeID = (int) ($_POST['serviceTypeID'] ?? 0);
     if ($serviceTypeID <= 0) {
-        $_SESSION['admin_flash_msg']  = 'Invalid service type ID.';
-        $_SESSION['admin_flash_type'] = 'danger';
+        $_SESSION['flash_msg']  = 'Invalid service type ID.';
+        $_SESSION['flash_type'] = 'danger';
         header('Location: /attendance/manage');
         exit();
     }
@@ -136,8 +136,8 @@ if ($action === 'toggle') {
     }
 
     if ($currentActive === null) {
-        $_SESSION['admin_flash_msg']  = 'Service type not found.';
-        $_SESSION['admin_flash_type'] = 'danger';
+        $_SESSION['flash_msg']  = 'Service type not found.';
+        $_SESSION['flash_type'] = 'danger';
         header('Location: /attendance/manage');
         exit();
     }
@@ -153,14 +153,14 @@ if ($action === 'toggle') {
     $stateLabel = $newActive === 1 ? 'activated' : 'deactivated';
     Logger::activity('AttendanceTypeToggled', ucfirst($stateLabel) . ' service type: ' . $typeName . ' (ID:' . $serviceTypeID . ')', $userId);
 
-    $_SESSION['admin_flash_msg']  = 'Service type "' . $typeName . '" ' . $stateLabel . '.';
-    $_SESSION['admin_flash_type'] = 'success';
+    $_SESSION['flash_msg']  = 'Service type "' . $typeName . '" ' . $stateLabel . '.';
+    $_SESSION['flash_type'] = 'success';
     header('Location: /attendance/manage');
     exit();
 }
 
 // 🚫 Unknown action
-$_SESSION['admin_flash_msg']  = 'Unknown action.';
-$_SESSION['admin_flash_type'] = 'warning';
+$_SESSION['flash_msg']  = 'Unknown action.';
+$_SESSION['flash_type'] = 'warning';
 header('Location: /attendance/manage');
 exit();

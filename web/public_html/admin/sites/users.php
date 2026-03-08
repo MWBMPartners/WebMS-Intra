@@ -51,7 +51,8 @@ $siteInfo = $siteStmt->get_result()->fetch_assoc();
 $siteStmt->close();
 
 if ($siteInfo === null) {
-    $_SESSION['flash_error'] = 'Site not found.';
+    $_SESSION['flash_msg'] = 'Site not found.';
+    $_SESSION['flash_type'] = 'danger';
     header('Location: /admin/sites', true, 302);
     exit();
 }
@@ -78,7 +79,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $addStmt->execute();
                 $addStmt->close();
                 Logger::activity('SiteUserAdd', 'Added user #' . $addUserId . ' to site #' . $siteId);
-                $_SESSION['flash_success'] = 'User added to site.';
+                $_SESSION['flash_msg'] = 'User added to site.';
+                $_SESSION['flash_type'] = 'success';
             }
         }
     } elseif ($action === 'remove') {
@@ -91,7 +93,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $rmStmt->execute();
                 $rmStmt->close();
                 Logger::activity('SiteUserRemove', 'Removed user #' . $removeUserId . ' from site #' . $siteId);
-                $_SESSION['flash_success'] = 'User removed from site.';
+                $_SESSION['flash_msg'] = 'User removed from site.';
+                $_SESSION['flash_type'] = 'success';
             }
         }
     } elseif ($action === 'toggle_admin') {
@@ -106,7 +109,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $tStmt->execute();
                 $tStmt->close();
                 Logger::activity('SiteUserRole', 'Toggled site admin for user #' . $toggleUserId . ' on site #' . $siteId);
-                $_SESSION['flash_success'] = 'Site admin role updated.';
+                $_SESSION['flash_msg'] = 'Site admin role updated.';
+                $_SESSION['flash_type'] = 'success';
             }
         }
     } elseif ($action === 'toggle_root_admin') {
@@ -121,7 +125,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $tStmt->execute();
                 $tStmt->close();
                 Logger::activity('SiteUserRole', 'Toggled site root admin for user #' . $toggleUserId . ' on site #' . $siteId);
-                $_SESSION['flash_success'] = 'Site root admin role updated.';
+                $_SESSION['flash_msg'] = 'Site root admin role updated.';
+                $_SESSION['flash_type'] = 'success';
             }
         }
     }
@@ -164,9 +169,9 @@ if ($unassignedStmt !== false) {
 }
 
 // 📋 Flash messages
-$flashSuccess = $_SESSION['flash_success'] ?? '';
-$flashError   = $_SESSION['flash_error'] ?? '';
-unset($_SESSION['flash_success'], $_SESSION['flash_error']);
+$flashMsg  = $_SESSION['flash_msg'] ?? '';
+$flashType = $_SESSION['flash_type'] ?? 'info';
+unset($_SESSION['flash_msg'], $_SESSION['flash_type']);
 
 $siteName    = htmlspecialchars($siteInfo['siteName'], ENT_QUOTES, 'UTF-8');
 $pageTitle   = 'Users — ' . $siteInfo['siteName'];
@@ -185,18 +190,9 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     </a>
 </div>
 
-<?php if ($flashSuccess !== ''): ?>
-<div class="alert alert-success alert-dismissible fade show" role="alert">
-    <i class="fa-solid fa-check-circle me-1"></i>
-    <?php echo htmlspecialchars($flashSuccess, ENT_QUOTES, 'UTF-8'); ?>
-    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-</div>
-<?php endif; ?>
-
-<?php if ($flashError !== ''): ?>
-<div class="alert alert-danger alert-dismissible fade show" role="alert">
-    <i class="fa-solid fa-triangle-exclamation me-1"></i>
-    <?php echo htmlspecialchars($flashError, ENT_QUOTES, 'UTF-8'); ?>
+<?php if ($flashMsg !== ''): ?>
+<div class="alert alert-<?php echo htmlspecialchars($flashType, ENT_QUOTES, 'UTF-8'); ?> alert-dismissible fade show" role="alert">
+    <?php echo htmlspecialchars($flashMsg, ENT_QUOTES, 'UTF-8'); ?>
     <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
 </div>
 <?php endif; ?>

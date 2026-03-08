@@ -140,9 +140,9 @@ if ($result !== false) {
 }
 
 // 📋 Flash message from save handler
-$flashMsg  = $_SESSION['admin_flash_msg']  ?? '';
-$flashType = $_SESSION['admin_flash_type'] ?? 'info';
-unset($_SESSION['admin_flash_msg'], $_SESSION['admin_flash_type']);
+$flashMsg  = $_SESSION['flash_msg']  ?? '';
+$flashType = $_SESSION['flash_type'] ?? 'info';
+unset($_SESSION['flash_msg'], $_SESSION['flash_type']);
 
 // 📄 Include shared header template
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';

@@ -59,8 +59,8 @@ if ($action === 'create') {
 
     // 🔍 Validation
     if ($fullName === '' || $emailAddress === '') {
-        $_SESSION['admin_flash_msg']  = 'Full name and email address are required.';
-        $_SESSION['admin_flash_type'] = 'danger';
+        $_SESSION['flash_msg']  = 'Full name and email address are required.';
+        $_SESSION['flash_type'] = 'danger';
         header('Location: /admin/users');
         exit();
     }
@@ -73,8 +73,8 @@ if ($action === 'create') {
         $existing = $stmt->get_result()->fetch_assoc();
         $stmt->close();
         if ($existing !== null) {
-            $_SESSION['admin_flash_msg']  = 'A user with that email address already exists.';
-            $_SESSION['admin_flash_type'] = 'danger';
+            $_SESSION['flash_msg']  = 'A user with that email address already exists.';
+            $_SESSION['flash_type'] = 'danger';
             header('Location: /admin/users');
             exit();
         }
@@ -82,15 +82,15 @@ if ($action === 'create') {
 
     // 🔍 If username provided, password is required
     if ($username !== '' && $password === '') {
-        $_SESSION['admin_flash_msg']  = 'Password is required when creating a local account.';
-        $_SESSION['admin_flash_type'] = 'danger';
+        $_SESSION['flash_msg']  = 'Password is required when creating a local account.';
+        $_SESSION['flash_type'] = 'danger';
         header('Location: /admin/users');
         exit();
     }
 
     if ($password !== '' && $password !== $passConfirm) {
-        $_SESSION['admin_flash_msg']  = 'Passwords do not match.';
-        $_SESSION['admin_flash_type'] = 'danger';
+        $_SESSION['flash_msg']  = 'Passwords do not match.';
+        $_SESSION['flash_type'] = 'danger';
         header('Location: /admin/users');
         exit();
     }
@@ -101,8 +101,8 @@ if ($action === 'create') {
         . 'VALUES (?, ?, ?, ?, ?, ?)'
     );
     if ($stmt === false) {
-        $_SESSION['admin_flash_msg']  = 'Database error creating user.';
-        $_SESSION['admin_flash_type'] = 'danger';
+        $_SESSION['flash_msg']  = 'Database error creating user.';
+        $_SESSION['flash_type'] = 'danger';
         header('Location: /admin/users');
         exit();
     }
@@ -126,8 +126,8 @@ if ($action === 'create') {
 
     Logger::activity('UserCreated', 'Created user: ' . $fullName . ' (' . $emailAddress . ')', $_SESSION['user_id'] ?? null);
 
-    $_SESSION['admin_flash_msg']  = 'User "' . $fullName . '" created successfully.';
-    $_SESSION['admin_flash_type'] = 'success';
+    $_SESSION['flash_msg']  = 'User "' . $fullName . '" created successfully.';
+    $_SESSION['flash_type'] = 'success';
     header('Location: /admin/users');
     exit();
 }
@@ -146,8 +146,8 @@ if ($action === 'update') {
     $isRootAdmin  = (App::isRootAdmin() === true && isset($_POST['isRootAdmin']) === true) ? 1 : 0;
 
     if ($userID <= 0 || $fullName === '' || $emailAddress === '') {
-        $_SESSION['admin_flash_msg']  = 'Invalid user data.';
-        $_SESSION['admin_flash_type'] = 'danger';
+        $_SESSION['flash_msg']  = 'Invalid user data.';
+        $_SESSION['flash_type'] = 'danger';
         header('Location: /admin/users');
         exit();
     }
@@ -160,8 +160,8 @@ if ($action === 'update') {
         $existing = $stmt->get_result()->fetch_assoc();
         $stmt->close();
         if ($existing !== null) {
-            $_SESSION['admin_flash_msg']  = 'Another user with that email address already exists.';
-            $_SESSION['admin_flash_type'] = 'danger';
+            $_SESSION['flash_msg']  = 'Another user with that email address already exists.';
+            $_SESSION['flash_type'] = 'danger';
             header('Location: /admin/users');
             exit();
         }
@@ -216,14 +216,14 @@ if ($action === 'update') {
 
     Logger::activity('UserUpdated', 'Updated user #' . $userID . ': ' . $fullName, $_SESSION['user_id'] ?? null);
 
-    $_SESSION['admin_flash_msg']  = 'User "' . $fullName . '" updated successfully.';
-    $_SESSION['admin_flash_type'] = 'success';
+    $_SESSION['flash_msg']  = 'User "' . $fullName . '" updated successfully.';
+    $_SESSION['flash_type'] = 'success';
     header('Location: /admin/users');
     exit();
 }
 
 // 🚫 Unknown action
-$_SESSION['admin_flash_msg']  = 'Unknown action.';
-$_SESSION['admin_flash_type'] = 'warning';
+$_SESSION['flash_msg']  = 'Unknown action.';
+$_SESSION['flash_type'] = 'warning';
 header('Location: /admin/users');
 exit();

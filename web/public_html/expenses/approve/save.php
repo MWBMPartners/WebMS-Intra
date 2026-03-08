@@ -39,16 +39,16 @@ Auth::ensureSession();
 Auth::requireLogin();
 
 if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
-    $_SESSION['admin_flash_msg']  = 'Invalid CSRF token.';
-    $_SESSION['admin_flash_type'] = 'danger';
+    $_SESSION['flash_msg']  = 'Invalid CSRF token.';
+    $_SESSION['flash_type'] = 'danger';
     header('Location: /expenses/approve');
     exit();
 }
 
 // 🛡️ Require Approver or Admin role
 if (App::hasRole('Approver') === false && App::isAdmin() === false) {
-    $_SESSION['admin_flash_msg']  = 'Access denied — Approver or Admin role required.';
-    $_SESSION['admin_flash_type'] = 'danger';
+    $_SESSION['flash_msg']  = 'Access denied — Approver or Admin role required.';
+    $_SESSION['flash_type'] = 'danger';
     header('Location: /expenses/approve');
     exit();
 }
@@ -60,8 +60,8 @@ $decision = ($_POST['decision'] ?? '') === 'Rejected' ? 'Rejected' : 'Approved';
 $comment  = trim($_POST['comments'] ?? '');
 
 if ($claimID === 0) {
-    $_SESSION['admin_flash_msg']  = 'Invalid claim ID.';
-    $_SESSION['admin_flash_type'] = 'danger';
+    $_SESSION['flash_msg']  = 'Invalid claim ID.';
+    $_SESSION['flash_type'] = 'danger';
     header('Location: /expenses/approve');
     exit();
 }
@@ -86,8 +86,8 @@ if ($stmt !== false) {
 }
 
 if ($claim === null) {
-    $_SESSION['admin_flash_msg']  = 'Claim not found or not in Pending status.';
-    $_SESSION['admin_flash_type'] = 'warning';
+    $_SESSION['flash_msg']  = 'Claim not found or not in Pending status.';
+    $_SESSION['flash_type'] = 'warning';
     header('Location: /expenses/approve');
     exit();
 }
@@ -140,8 +140,8 @@ try {
     // 🛡️ Verify claim is still Pending (another approver may have changed it)
     if ($lockedClaim === null || $lockedClaim['status'] !== 'Pending') {
         $mysqli->rollback();
-        $_SESSION['admin_flash_msg']  = 'This claim has already been decided by another approver.';
-        $_SESSION['admin_flash_type'] = 'warning';
+        $_SESSION['flash_msg']  = 'This claim has already been decided by another approver.';
+        $_SESSION['flash_type'] = 'warning';
         header('Location: /expenses/approve');
         exit();
     }
@@ -257,14 +257,14 @@ try {
 
     // 7. ✅ Redirect with flash message
     if ($finalDecision === 'Rejected') {
-        $_SESSION['admin_flash_msg']  = 'Claim #' . $claimID . ' has been rejected.';
-        $_SESSION['admin_flash_type'] = 'warning';
+        $_SESSION['flash_msg']  = 'Claim #' . $claimID . ' has been rejected.';
+        $_SESSION['flash_type'] = 'warning';
     } elseif ($finalDecision === 'Approved') {
-        $_SESSION['admin_flash_msg']  = 'Claim #' . $claimID . ' has been fully approved.';
-        $_SESSION['admin_flash_type'] = 'success';
+        $_SESSION['flash_msg']  = 'Claim #' . $claimID . ' has been fully approved.';
+        $_SESSION['flash_type'] = 'success';
     } else {
-        $_SESSION['admin_flash_msg']  = 'Your approval for claim #' . $claimID . ' has been recorded. Awaiting remaining approvers.';
-        $_SESSION['admin_flash_type'] = 'info';
+        $_SESSION['flash_msg']  = 'Your approval for claim #' . $claimID . ' has been recorded. Awaiting remaining approvers.';
+        $_SESSION['flash_type'] = 'info';
     }
 
     header('Location: /expenses/approve');
@@ -273,8 +273,8 @@ try {
 } catch (\Throwable $ex) {
     $mysqli->rollback();
     Logger::exception($ex);
-    $_SESSION['admin_flash_msg']  = 'Error processing decision. Please try again.';
-    $_SESSION['admin_flash_type'] = 'danger';
+    $_SESSION['flash_msg']  = 'Error processing decision. Please try again.';
+    $_SESSION['flash_type'] = 'danger';
     header('Location: /expenses/approve');
     exit();
 }

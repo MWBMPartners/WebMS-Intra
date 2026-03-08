@@ -46,9 +46,9 @@ if ($countResult !== false) {
 }
 
 // 📋 Check for flash messages
-$flashSuccess = $_SESSION['flash_success'] ?? '';
-$flashError   = $_SESSION['flash_error'] ?? '';
-unset($_SESSION['flash_success'], $_SESSION['flash_error']);
+$flashMsg  = $_SESSION['flash_msg'] ?? '';
+$flashType = $_SESSION['flash_type'] ?? 'info';
+unset($_SESSION['flash_msg'], $_SESSION['flash_type']);
 
 // 🎨 Page setup
 $pageTitle   = 'Site Management';
@@ -74,18 +74,9 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     </div>
 </noscript>
 
-<?php if ($flashSuccess !== ''): ?>
-<div class="alert alert-success alert-dismissible fade show" role="alert">
-    <i class="fa-solid fa-check-circle me-1"></i>
-    <?php echo htmlspecialchars($flashSuccess, ENT_QUOTES, 'UTF-8'); ?>
-    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-</div>
-<?php endif; ?>
-
-<?php if ($flashError !== ''): ?>
-<div class="alert alert-danger alert-dismissible fade show" role="alert">
-    <i class="fa-solid fa-triangle-exclamation me-1"></i>
-    <?php echo htmlspecialchars($flashError, ENT_QUOTES, 'UTF-8'); ?>
+<?php if ($flashMsg !== ''): ?>
+<div class="alert alert-<?php echo htmlspecialchars($flashType, ENT_QUOTES, 'UTF-8'); ?> alert-dismissible fade show" role="alert">
+    <?php echo htmlspecialchars($flashMsg, ENT_QUOTES, 'UTF-8'); ?>
     <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
 </div>
 <?php endif; ?>

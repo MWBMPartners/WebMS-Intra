@@ -31,15 +31,15 @@ Auth::ensureSession();
 Auth::requireLogin();
 
 if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
-    $_SESSION['admin_flash_msg']  = 'Invalid CSRF token.';
-    $_SESSION['admin_flash_type'] = 'danger';
+    $_SESSION['flash_msg']  = 'Invalid CSRF token.';
+    $_SESSION['flash_type'] = 'danger';
     header('Location: /expenses/submit');
     exit();
 }
 
 if (Captcha::verify($_POST) === false) {
-    $_SESSION['admin_flash_msg']  = 'Captcha verification failed. Please try again.';
-    $_SESSION['admin_flash_type'] = 'danger';
+    $_SESSION['flash_msg']  = 'Captcha verification failed. Please try again.';
+    $_SESSION['flash_type'] = 'danger';
     header('Location: /expenses/submit');
     exit();
 }
@@ -50,8 +50,8 @@ $deptID     = (int) ($_POST['deptID'] ?? 0);
 $claimTitle = trim($_POST['claimTitle'] ?? '');
 
 if ($deptID === 0 || $claimTitle === '') {
-    $_SESSION['admin_flash_msg']  = 'Missing required fields (department and title).';
-    $_SESSION['admin_flash_type'] = 'danger';
+    $_SESSION['flash_msg']  = 'Missing required fields (department and title).';
+    $_SESSION['flash_type'] = 'danger';
     header('Location: /expenses/submit');
     exit();
 }
@@ -67,8 +67,8 @@ foreach ($_POST['itemDesc'] ?? [] as $i => $desc) {
     $totalAmt += $qty * $unit;
 }
 if ($totalAmt <= 0) {
-    $_SESSION['admin_flash_msg']  = 'Total must be greater than zero.';
-    $_SESSION['admin_flash_type'] = 'danger';
+    $_SESSION['flash_msg']  = 'Total must be greater than zero.';
+    $_SESSION['flash_type'] = 'danger';
     header('Location: /expenses/submit');
     exit();
 }
@@ -165,8 +165,8 @@ try {
 } catch (\Throwable $ex) {
     $mysqli->rollback();
     Logger::exception($ex);
-    $_SESSION['admin_flash_msg']  = 'Error saving claim. Please try again.';
-    $_SESSION['admin_flash_type'] = 'danger';
+    $_SESSION['flash_msg']  = 'Error saving claim. Please try again.';
+    $_SESSION['flash_type'] = 'danger';
     header('Location: /expenses/submit');
     exit();
 }

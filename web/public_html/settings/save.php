@@ -54,8 +54,8 @@ $settingVal  = trim($_POST['settingValue'] ?? '');
 $isSensitive = isset($_POST['isSensitive']) === true ? 1 : 0;
 
 if ($settingKey === '') {
-    $_SESSION['admin_flash_msg']  = 'Setting key is required.';
-    $_SESSION['admin_flash_type'] = 'danger';
+    $_SESSION['flash_msg']  = 'Setting key is required.';
+    $_SESSION['flash_type'] = 'danger';
     header('Location: /settings');
     exit();
 }
@@ -75,8 +75,8 @@ if ($settingId > 0) {
     // ✏️ Update existing
     $stmt = $mysqli->prepare('UPDATE tblSettings SET settingValue = ?, isSensitive = ?, updatedAt = NOW() WHERE settingID = ?');
     if ($stmt === false) {
-        $_SESSION['admin_flash_msg']  = 'Database error updating setting.';
-        $_SESSION['admin_flash_type'] = 'danger';
+        $_SESSION['flash_msg']  = 'Database error updating setting.';
+        $_SESSION['flash_type'] = 'danger';
         header('Location: /settings');
         exit();
     }
@@ -84,8 +84,8 @@ if ($settingId > 0) {
     $stmt->execute();
     $stmt->close();
     Logger::activity('SettingsUpdate', 'Updated setting: ' . $settingKey, $_SESSION['user_id'] ?? null);
-    $_SESSION['admin_flash_msg']  = 'Setting "' . $settingKey . '" updated.';
-    $_SESSION['admin_flash_type'] = 'success';
+    $_SESSION['flash_msg']  = 'Setting "' . $settingKey . '" updated.';
+    $_SESSION['flash_type'] = 'success';
 } else {
     // ➕ Insert new — ensure unique key per site
     $stmt = $mysqli->prepare('SELECT settingID FROM tblSettings WHERE settingKey = ? AND (siteID = ? OR siteID IS NULL) LIMIT 1');
@@ -95,8 +95,8 @@ if ($settingId > 0) {
         $stmt->store_result();
         if ($stmt->num_rows > 0) {
             $stmt->close();
-            $_SESSION['admin_flash_msg']  = 'Setting key "' . $settingKey . '" already exists.';
-            $_SESSION['admin_flash_type'] = 'danger';
+            $_SESSION['flash_msg']  = 'Setting key "' . $settingKey . '" already exists.';
+            $_SESSION['flash_type'] = 'danger';
             header('Location: /settings');
             exit();
         }
@@ -107,8 +107,8 @@ if ($settingId > 0) {
         'INSERT INTO tblSettings (settingKey, settingValue, isSensitive, siteID, updatedAt) VALUES (?, ?, ?, ?, NOW())'
     );
     if ($stmt === false) {
-        $_SESSION['admin_flash_msg']  = 'Database error adding setting.';
-        $_SESSION['admin_flash_type'] = 'danger';
+        $_SESSION['flash_msg']  = 'Database error adding setting.';
+        $_SESSION['flash_type'] = 'danger';
         header('Location: /settings');
         exit();
     }
@@ -116,8 +116,8 @@ if ($settingId > 0) {
     $stmt->execute();
     $stmt->close();
     Logger::activity('SettingsInsert', 'Added setting: ' . $settingKey, $_SESSION['user_id'] ?? null);
-    $_SESSION['admin_flash_msg']  = 'Setting "' . $settingKey . '" added.';
-    $_SESSION['admin_flash_type'] = 'success';
+    $_SESSION['flash_msg']  = 'Setting "' . $settingKey . '" added.';
+    $_SESSION['flash_type'] = 'success';
 }
 
 // 🔄 Redirect back (PRG pattern)

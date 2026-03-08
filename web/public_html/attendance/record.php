@@ -81,9 +81,9 @@ if ($editId > 0) {
 }
 
 // 📋 Flash message
-$flashMsg  = $_SESSION['admin_flash_msg']  ?? '';
-$flashType = $_SESSION['admin_flash_type'] ?? 'info';
-unset($_SESSION['admin_flash_msg'], $_SESSION['admin_flash_type']);
+$flashMsg  = $_SESSION['flash_msg']  ?? '';
+$flashType = $_SESSION['flash_type'] ?? 'info';
+unset($_SESSION['flash_msg'], $_SESSION['flash_type']);
 
 // -----------------------------------------------------------------------------
 // 📊 Fetch reference data for form

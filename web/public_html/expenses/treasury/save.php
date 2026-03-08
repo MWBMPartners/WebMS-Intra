@@ -30,16 +30,16 @@ Auth::ensureSession();
 Auth::requireLogin();
 
 if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
-    $_SESSION['admin_flash_msg']  = 'Invalid CSRF token.';
-    $_SESSION['admin_flash_type'] = 'danger';
+    $_SESSION['flash_msg']  = 'Invalid CSRF token.';
+    $_SESSION['flash_type'] = 'danger';
     header('Location: /expenses/treasury');
     exit();
 }
 
 // 🛡️ Require Treasurer or Admin role
 if (App::hasRole('Treasurer') === false && App::isAdmin() === false) {
-    $_SESSION['admin_flash_msg']  = 'Access denied — Treasurer or Admin role required.';
-    $_SESSION['admin_flash_type'] = 'danger';
+    $_SESSION['flash_msg']  = 'Access denied — Treasurer or Admin role required.';
+    $_SESSION['flash_type'] = 'danger';
     header('Location: /expenses/treasury');
     exit();
 }
@@ -51,15 +51,15 @@ $comments = trim($_POST['comments'] ?? '');
 $refs     = array_filter(array_map('trim', explode(',', implode(',', $_POST['payRef'] ?? []))));
 
 if ($claimID === 0) {
-    $_SESSION['admin_flash_msg']  = 'Invalid claim ID.';
-    $_SESSION['admin_flash_type'] = 'danger';
+    $_SESSION['flash_msg']  = 'Invalid claim ID.';
+    $_SESSION['flash_type'] = 'danger';
     header('Location: /expenses/treasury');
     exit();
 }
 
 if (empty($refs) === true) {
-    $_SESSION['admin_flash_msg']  = 'At least one payment reference is required.';
-    $_SESSION['admin_flash_type'] = 'danger';
+    $_SESSION['flash_msg']  = 'At least one payment reference is required.';
+    $_SESSION['flash_type'] = 'danger';
     header('Location: /expenses/treasury');
     exit();
 }
@@ -84,8 +84,8 @@ if ($stmt !== false) {
 }
 
 if ($claim === null) {
-    $_SESSION['admin_flash_msg']  = 'Claim not found or not in Approved status.';
-    $_SESSION['admin_flash_type'] = 'warning';
+    $_SESSION['flash_msg']  = 'Claim not found or not in Approved status.';
+    $_SESSION['flash_type'] = 'warning';
     header('Location: /expenses/treasury');
     exit();
 }
@@ -136,16 +136,16 @@ try {
     ]);
 
     // 6. ✅ Redirect with flash message
-    $_SESSION['admin_flash_msg']  = 'Claim #' . $claimID . ' has been marked as reimbursed.';
-    $_SESSION['admin_flash_type'] = 'success';
+    $_SESSION['flash_msg']  = 'Claim #' . $claimID . ' has been marked as reimbursed.';
+    $_SESSION['flash_type'] = 'success';
     header('Location: /expenses/treasury');
     exit();
 
 } catch (\Throwable $ex) {
     $mysqli->rollback();
     Logger::exception($ex);
-    $_SESSION['admin_flash_msg']  = 'Error processing reimbursement. Please try again.';
-    $_SESSION['admin_flash_type'] = 'danger';
+    $_SESSION['flash_msg']  = 'Error processing reimbursement. Please try again.';
+    $_SESSION['flash_type'] = 'danger';
     header('Location: /expenses/treasury');
     exit();
 }

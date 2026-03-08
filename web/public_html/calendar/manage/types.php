@@ -61,8 +61,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $stmt->close();
             }
             Logger::activity('TypeCreated', 'Created event type: ' . $name, $_SESSION['user_id'] ?? null);
-            $_SESSION['admin_flash_msg'] = 'Type "' . $name . '" created.';
-            $_SESSION['admin_flash_type'] = 'success';
+            $_SESSION['flash_msg'] = 'Type "' . $name . '" created.';
+            $_SESSION['flash_type'] = 'success';
         }
     }
 
@@ -78,8 +78,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $stmt->close();
             }
             Logger::activity('CategoryCreated', 'Created event category: ' . $name, $_SESSION['user_id'] ?? null);
-            $_SESSION['admin_flash_msg'] = 'Category "' . $name . '" created.';
-            $_SESSION['admin_flash_type'] = 'success';
+            $_SESSION['flash_msg'] = 'Category "' . $name . '" created.';
+            $_SESSION['flash_type'] = 'success';
         }
     }
 
@@ -98,8 +98,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $stmt->execute();
                 $stmt->close();
             }
-            $_SESSION['admin_flash_msg'] = 'Type deleted.';
-            $_SESSION['admin_flash_type'] = 'success';
+            $_SESSION['flash_msg'] = 'Type deleted.';
+            $_SESSION['flash_type'] = 'success';
         }
     }
 
@@ -118,8 +118,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $stmt->execute();
                 $stmt->close();
             }
-            $_SESSION['admin_flash_msg'] = 'Category deleted.';
-            $_SESSION['admin_flash_type'] = 'success';
+            $_SESSION['flash_msg'] = 'Category deleted.';
+            $_SESSION['flash_type'] = 'success';
         }
     }
 
@@ -164,9 +164,9 @@ if ($stmtCats !== false) {
     $stmtCats->close();
 }
 
-$flashMsg  = $_SESSION['admin_flash_msg']  ?? '';
-$flashType = $_SESSION['admin_flash_type'] ?? 'info';
-unset($_SESSION['admin_flash_msg'], $_SESSION['admin_flash_type']);
+$flashMsg  = $_SESSION['flash_msg']  ?? '';
+$flashType = $_SESSION['flash_type'] ?? 'info';
+unset($_SESSION['flash_msg'], $_SESSION['flash_type']);
 
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>

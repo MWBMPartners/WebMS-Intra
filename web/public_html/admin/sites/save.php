@@ -57,14 +57,16 @@ $isActive     = isset($_POST['isActive']) ? 1 : 0;
 
 // 🔍 Validate required fields
 if ($siteName === '' || $siteKey === '') {
-    $_SESSION['flash_error'] = 'Site name and key are required.';
+    $_SESSION['flash_msg'] = 'Site name and key are required.';
+    $_SESSION['flash_type'] = 'danger';
     header('Location: /admin/sites', true, 302);
     exit();
 }
 
 // 🔍 Validate siteKey format (alphanumeric + hyphens only)
 if (preg_match('/^[a-z0-9\-]+$/', $siteKey) !== 1) {
-    $_SESSION['flash_error'] = 'Site key must contain only lowercase letters, numbers, and hyphens.';
+    $_SESSION['flash_msg'] = 'Site key must contain only lowercase letters, numbers, and hyphens.';
+    $_SESSION['flash_type'] = 'danger';
     header('Location: /admin/sites', true, 302);
     exit();
 }
@@ -82,7 +84,8 @@ if ($siteID > 0) {
         . 'WHERE siteID = ?'
     );
     if ($stmt === false) {
-        $_SESSION['flash_error'] = 'Database error: ' . $db->error;
+        $_SESSION['flash_msg'] = 'Database error: ' . $db->error;
+        $_SESSION['flash_type'] = 'danger';
         header('Location: /admin/sites', true, 302);
         exit();
     }
@@ -98,9 +101,11 @@ if ($siteID > 0) {
 
     if ($stmt->execute() === true) {
         Logger::activity('SiteUpdate', 'Updated site #' . $siteID . ' (' . $siteName . ')');
-        $_SESSION['flash_success'] = 'Site "' . $siteName . '" updated successfully.';
+        $_SESSION['flash_msg'] = 'Site "' . $siteName . '" updated successfully.';
+        $_SESSION['flash_type'] = 'success';
     } else {
-        $_SESSION['flash_error'] = 'Failed to update site: ' . $stmt->error;
+        $_SESSION['flash_msg'] = 'Failed to update site: ' . $stmt->error;
+        $_SESSION['flash_type'] = 'danger';
     }
     $stmt->close();
 } else {
@@ -110,7 +115,8 @@ if ($siteID > 0) {
         . 'VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
     );
     if ($stmt === false) {
-        $_SESSION['flash_error'] = 'Database error: ' . $db->error;
+        $_SESSION['flash_msg'] = 'Database error: ' . $db->error;
+        $_SESSION['flash_type'] = 'danger';
         header('Location: /admin/sites', true, 302);
         exit();
     }
@@ -127,9 +133,11 @@ if ($siteID > 0) {
     if ($stmt->execute() === true) {
         $newSiteId = $stmt->insert_id;
         Logger::activity('SiteCreate', 'Created site #' . $newSiteId . ' (' . $siteName . ')');
-        $_SESSION['flash_success'] = 'Site "' . $siteName . '" created successfully.';
+        $_SESSION['flash_msg'] = 'Site "' . $siteName . '" created successfully.';
+        $_SESSION['flash_type'] = 'success';
     } else {
-        $_SESSION['flash_error'] = 'Failed to create site: ' . $stmt->error;
+        $_SESSION['flash_msg'] = 'Failed to create site: ' . $stmt->error;
+        $_SESSION['flash_type'] = 'danger';
     }
     $stmt->close();
 }

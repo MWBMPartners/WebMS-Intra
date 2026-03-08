@@ -46,8 +46,8 @@ $userId    = $_SESSION['user_id'] ?? null;
 $siteId = Site::id();
 
 if ($sessionID <= 0) {
-    $_SESSION['admin_flash_msg']  = 'Invalid session ID.';
-    $_SESSION['admin_flash_type'] = 'danger';
+    $_SESSION['flash_msg']  = 'Invalid session ID.';
+    $_SESSION['flash_type'] = 'danger';
     header('Location: /attendance');
     exit();
 }
@@ -62,7 +62,7 @@ if ($stmt !== false) {
 
 Logger::activity('AttendanceDeleted', 'Soft-deleted attendance session #' . $sessionID, $userId);
 
-$_SESSION['admin_flash_msg']  = 'Attendance record deleted.';
-$_SESSION['admin_flash_type'] = 'success';
+$_SESSION['flash_msg']  = 'Attendance record deleted.';
+$_SESSION['flash_type'] = 'success';
 header('Location: /attendance');
 exit();

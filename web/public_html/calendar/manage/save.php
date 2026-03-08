@@ -78,8 +78,8 @@ if ($partnerOrgsStr !== '') {
 
 // 🔍 Validation
 if ($eventName === '' || $startDateTime === '') {
-    $_SESSION['admin_flash_msg']  = 'Event name and start date/time are required.';
-    $_SESSION['admin_flash_type'] = 'danger';
+    $_SESSION['flash_msg']  = 'Event name and start date/time are required.';
+    $_SESSION['flash_type'] = 'danger';
     header('Location: /calendar/manage');
     exit();
 }
@@ -163,8 +163,8 @@ if ($action === 'create') {
     );
 
     if ($stmt === false) {
-        $_SESSION['admin_flash_msg']  = 'Database error: ' . $mysqli->error;
-        $_SESSION['admin_flash_type'] = 'danger';
+        $_SESSION['flash_msg']  = 'Database error: ' . $mysqli->error;
+        $_SESSION['flash_type'] = 'danger';
         header('Location: /calendar/manage');
         exit();
     }
@@ -186,8 +186,8 @@ if ($action === 'create') {
 
     Logger::activity('EventCreated', 'Created event: ' . $eventName . ' (ID:' . $newEventId . ')', $userId);
 
-    $_SESSION['admin_flash_msg']  = 'Event "' . $eventName . '" created successfully.';
-    $_SESSION['admin_flash_type'] = 'success';
+    $_SESSION['flash_msg']  = 'Event "' . $eventName . '" created successfully.';
+    $_SESSION['flash_type'] = 'success';
     header('Location: /calendar/manage');
     exit();
 }
@@ -198,8 +198,8 @@ if ($action === 'create') {
 if ($action === 'update') {
     $eventID = (int) ($_POST['eventID'] ?? 0);
     if ($eventID <= 0) {
-        $_SESSION['admin_flash_msg']  = 'Invalid event ID.';
-        $_SESSION['admin_flash_type'] = 'danger';
+        $_SESSION['flash_msg']  = 'Invalid event ID.';
+        $_SESSION['flash_type'] = 'danger';
         header('Location: /calendar/manage');
         exit();
     }
@@ -257,14 +257,14 @@ if ($action === 'update') {
 
     Logger::activity('EventUpdated', 'Updated event #' . $eventID . ': ' . $eventName, $userId);
 
-    $_SESSION['admin_flash_msg']  = 'Event "' . $eventName . '" updated successfully.';
-    $_SESSION['admin_flash_type'] = 'success';
+    $_SESSION['flash_msg']  = 'Event "' . $eventName . '" updated successfully.';
+    $_SESSION['flash_type'] = 'success';
     header('Location: /calendar/manage');
     exit();
 }
 
 // 🚫 Unknown action
-$_SESSION['admin_flash_msg']  = 'Unknown action.';
-$_SESSION['admin_flash_type'] = 'warning';
+$_SESSION['flash_msg']  = 'Unknown action.';
+$_SESSION['flash_type'] = 'warning';
 header('Location: /calendar/manage');
 exit();

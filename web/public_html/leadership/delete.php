@@ -46,8 +46,8 @@ $userId       = $_SESSION['user_id'] ?? null;
 $siteId       = Site::id();
 
 if ($assignmentID <= 0) {
-    $_SESSION['admin_flash_msg']  = 'Invalid assignment ID.';
-    $_SESSION['admin_flash_type'] = 'danger';
+    $_SESSION['flash_msg']  = 'Invalid assignment ID.';
+    $_SESSION['flash_type'] = 'danger';
     header('Location: /leadership');
     exit();
 }
@@ -64,8 +64,8 @@ if ($stmt !== false) {
 
 Logger::activity('LeadershipDeleted', 'Soft-deleted assignment #' . $assignmentID, $userId);
 
-$_SESSION['admin_flash_msg']  = 'Assignment removed.';
-$_SESSION['admin_flash_type'] = 'success';
+$_SESSION['flash_msg']  = 'Assignment removed.';
+$_SESSION['flash_type'] = 'success';
 
 // 📌 Return to history page if referrer is history, otherwise main page
 $referer = $_SERVER['HTTP_REFERER'] ?? '';

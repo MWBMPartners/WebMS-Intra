@@ -63,12 +63,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'delet
                 $stmt->close();
             }
             Logger::activity('SettingsDelete', 'Deleted setting ID ' . $deleteId, $_SESSION['user_id'] ?? null);
-            $_SESSION['admin_flash_msg']  = 'Setting deleted.';
-            $_SESSION['admin_flash_type'] = 'success';
+            $_SESSION['flash_msg']  = 'Setting deleted.';
+            $_SESSION['flash_type'] = 'success';
         }
     } else {
-        $_SESSION['admin_flash_msg']  = 'Only root admins can delete settings.';
-        $_SESSION['admin_flash_type'] = 'danger';
+        $_SESSION['flash_msg']  = 'Only root admins can delete settings.';
+        $_SESSION['flash_type'] = 'danger';
     }
     header('Location: /settings');
     exit();
@@ -109,9 +109,9 @@ foreach ($rows as $row) {
 ksort($groups);
 
 // 📋 Flash message
-$flashMsg  = $_SESSION['admin_flash_msg']  ?? '';
-$flashType = $_SESSION['admin_flash_type'] ?? 'info';
-unset($_SESSION['admin_flash_msg'], $_SESSION['admin_flash_type']);
+$flashMsg  = $_SESSION['flash_msg']  ?? '';
+$flashType = $_SESSION['flash_type'] ?? 'info';
+unset($_SESSION['flash_msg'], $_SESSION['flash_type']);
 
 // 🔍 Check for success query param from old save handler
 if (isset($_GET['success']) === true && $flashMsg === '') {

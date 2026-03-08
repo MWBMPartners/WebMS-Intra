@@ -62,8 +62,8 @@ $counts = $_POST['counts'] ?? [];
 
 // 🔍 Validation
 if ($serviceTypeID <= 0 || $sessionDate === '') {
-    $_SESSION['admin_flash_msg']  = 'Service type and date are required.';
-    $_SESSION['admin_flash_type'] = 'danger';
+    $_SESSION['flash_msg']  = 'Service type and date are required.';
+    $_SESSION['flash_type'] = 'danger';
     header('Location: /attendance/record');
     exit();
 }
@@ -78,8 +78,8 @@ if ($stmt !== false) {
     $stmt->close();
 }
 if ($typeValid === false) {
-    $_SESSION['admin_flash_msg']  = 'Invalid service type selected.';
-    $_SESSION['admin_flash_type'] = 'danger';
+    $_SESSION['flash_msg']  = 'Invalid service type selected.';
+    $_SESSION['flash_type'] = 'danger';
     header('Location: /attendance/record');
     exit();
 }
@@ -87,8 +87,8 @@ if ($typeValid === false) {
 // 🔍 Validate date format
 $dateObj = DateTime::createFromFormat('Y-m-d', $sessionDate);
 if ($dateObj === false || $dateObj->format('Y-m-d') !== $sessionDate) {
-    $_SESSION['admin_flash_msg']  = 'Invalid date format.';
-    $_SESSION['admin_flash_type'] = 'danger';
+    $_SESSION['flash_msg']  = 'Invalid date format.';
+    $_SESSION['flash_type'] = 'danger';
     header('Location: /attendance/record');
     exit();
 }
@@ -107,8 +107,8 @@ if (is_array($groups) === true && is_array($counts) === true) {
 }
 
 if (count($validGroups) === 0) {
-    $_SESSION['admin_flash_msg']  = 'At least one headcount group is required.';
-    $_SESSION['admin_flash_type'] = 'danger';
+    $_SESSION['flash_msg']  = 'At least one headcount group is required.';
+    $_SESSION['flash_type'] = 'danger';
     header('Location: /attendance/record');
     exit();
 }
@@ -126,8 +126,8 @@ if ($action === 'create') {
     );
     if ($stmt === false) {
         $mysqli->rollback();
-        $_SESSION['admin_flash_msg']  = 'Database error creating session.';
-        $_SESSION['admin_flash_type'] = 'danger';
+        $_SESSION['flash_msg']  = 'Database error creating session.';
+        $_SESSION['flash_type'] = 'danger';
         header('Location: /attendance/record');
         exit();
     }
@@ -158,8 +158,8 @@ if ($action === 'create') {
         $userId
     );
 
-    $_SESSION['admin_flash_msg']  = 'Attendance recorded successfully (total: ' . number_format($totalCount) . ').';
-    $_SESSION['admin_flash_type'] = 'success';
+    $_SESSION['flash_msg']  = 'Attendance recorded successfully (total: ' . number_format($totalCount) . ').';
+    $_SESSION['flash_type'] = 'success';
     header('Location: /attendance');
     exit();
 }
@@ -170,8 +170,8 @@ if ($action === 'create') {
 if ($action === 'update') {
     $sessionID = (int) ($_POST['sessionID'] ?? 0);
     if ($sessionID <= 0) {
-        $_SESSION['admin_flash_msg']  = 'Invalid session ID.';
-        $_SESSION['admin_flash_type'] = 'danger';
+        $_SESSION['flash_msg']  = 'Invalid session ID.';
+        $_SESSION['flash_type'] = 'danger';
         header('Location: /attendance');
         exit();
     }
@@ -186,8 +186,8 @@ if ($action === 'update') {
     );
     if ($stmt === false) {
         $mysqli->rollback();
-        $_SESSION['admin_flash_msg']  = 'Database error updating session.';
-        $_SESSION['admin_flash_type'] = 'danger';
+        $_SESSION['flash_msg']  = 'Database error updating session.';
+        $_SESSION['flash_type'] = 'danger';
         header('Location: /attendance');
         exit();
     }
@@ -225,14 +225,14 @@ if ($action === 'update') {
         $userId
     );
 
-    $_SESSION['admin_flash_msg']  = 'Attendance updated successfully (total: ' . number_format($totalCount) . ').';
-    $_SESSION['admin_flash_type'] = 'success';
+    $_SESSION['flash_msg']  = 'Attendance updated successfully (total: ' . number_format($totalCount) . ').';
+    $_SESSION['flash_type'] = 'success';
     header('Location: /attendance');
     exit();
 }
 
 // 🚫 Unknown action
-$_SESSION['admin_flash_msg']  = 'Unknown action.';
-$_SESSION['admin_flash_type'] = 'warning';
+$_SESSION['flash_msg']  = 'Unknown action.';
+$_SESSION['flash_type'] = 'warning';
 header('Location: /attendance/record');
 exit();

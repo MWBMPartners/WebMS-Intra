@@ -63,8 +63,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $stmt->close();
             }
             Logger::activity('SeriesCreated', 'Created series: ' . $name, $_SESSION['user_id'] ?? null);
-            $_SESSION['admin_flash_msg']  = 'Series "' . $name . '" created.';
-            $_SESSION['admin_flash_type'] = 'success';
+            $_SESSION['flash_msg']  = 'Series "' . $name . '" created.';
+            $_SESSION['flash_type'] = 'success';
         }
     }
 
@@ -84,8 +84,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $stmt->close();
             }
             Logger::activity('SeriesUpdated', 'Updated series #' . $seriesID, $_SESSION['user_id'] ?? null);
-            $_SESSION['admin_flash_msg']  = 'Series updated.';
-            $_SESSION['admin_flash_type'] = 'success';
+            $_SESSION['flash_msg']  = 'Series updated.';
+            $_SESSION['flash_type'] = 'success';
         }
     }
 
@@ -106,8 +106,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $stmt->close();
             }
             Logger::activity('SeriesDeleted', 'Deleted series #' . $seriesID, $_SESSION['user_id'] ?? null);
-            $_SESSION['admin_flash_msg']  = 'Series deleted.';
-            $_SESSION['admin_flash_type'] = 'success';
+            $_SESSION['flash_msg']  = 'Series deleted.';
+            $_SESSION['flash_type'] = 'success';
         }
     }
 
@@ -138,9 +138,9 @@ if ($stmtSeries !== false) {
 }
 
 // 📋 Flash message
-$flashMsg  = $_SESSION['admin_flash_msg']  ?? '';
-$flashType = $_SESSION['admin_flash_type'] ?? 'info';
-unset($_SESSION['admin_flash_msg'], $_SESSION['admin_flash_type']);
+$flashMsg  = $_SESSION['flash_msg']  ?? '';
+$flashType = $_SESSION['flash_type'] ?? 'info';
+unset($_SESSION['flash_msg'], $_SESSION['flash_type']);
 
 // 📄 Include shared header template
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
