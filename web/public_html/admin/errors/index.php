@@ -39,8 +39,10 @@ if (App::isAdmin() === false) {
 // -----------------------------------------------------------------------------
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) === true) {
     if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
-        http_response_code(403);
-        exit('Invalid CSRF token.');
+        $_SESSION['flash_msg']  = 'Invalid or expired form token. Please try again.';
+        $_SESSION['flash_type'] = 'danger';
+        header('Location: /admin');
+        exit();
     }
 
     $errorId = (int) ($_POST['error_id'] ?? 0);

@@ -48,8 +48,10 @@ $isRoot = App::isRootAdmin();
 // -----------------------------------------------------------------------------
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'delete') {
     if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
-        http_response_code(403);
-        exit('Invalid CSRF token.');
+        $_SESSION['flash_msg']  = 'Invalid or expired form token. Please try again.';
+        $_SESSION['flash_type'] = 'danger';
+        header('Location: /settings');
+        exit();
     }
     if ($isRoot === true) {
         $deleteId = (int) ($_POST['settingID'] ?? 0);

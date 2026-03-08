@@ -37,8 +37,10 @@ if ($isAdmin === false && $isApprover === false) {
 
 // 🛡️ CSRF verification via GET token
 if (Auth::verifyCsrf($_GET['csrf_token'] ?? '') === false) {
-    http_response_code(403);
-    exit('Invalid CSRF token');
+    $_SESSION['flash_msg']  = 'Invalid or expired form token. Please try again.';
+    $_SESSION['flash_type'] = 'danger';
+    header('Location: /expenses');
+    exit();
 }
 
 // 🌐 Site context

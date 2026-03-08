@@ -37,8 +37,9 @@ if (App::isUmbrellaAdmin() === false) {
 
 // 🛡️ CSRF
 if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
-    http_response_code(403);
-    echo 'Invalid CSRF token.';
+    $_SESSION['flash_msg']  = 'Invalid or expired form token. Please try again.';
+    $_SESSION['flash_type'] = 'danger';
+    header('Location: /admin/sites');
     exit();
 }
 

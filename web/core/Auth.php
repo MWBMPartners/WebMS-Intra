@@ -262,22 +262,18 @@ class Auth
 
         /* ----------------------- 0. Rate limit OAuth callbacks ------------- */
         if (RateLimiter::isBlocked() === true) {
-            http_response_code(429);
-            echo 'Too many authentication attempts. Please try again later.';
-            exit();
+            self::oauthError('Too many authentication attempts. Please try again later.', 429);
         }
 
         /* ----------------------- 1. Validate OAuth state ------------------- */
         if (isset($_GET['state']) === false || hash_equals($_SESSION['oauth_state'] ?? '', $_GET['state'] ?? '') === false) {
             Logger::errorPlatform('Auth', 'Error', 'OAUTH_STATE', 'Invalid OAuth state parameter', '');
-            echo 'Invalid OAuth state.';
-            exit();
+            self::oauthError('Invalid OAuth state. Please try signing in again.');
         }
 
         if (isset($_GET['code']) === false) {
             Logger::errorPlatform('Auth', 'Error', 'OAUTH_CODE', 'Authorization code missing from callback', '');
-            echo 'Authorization code missing.';
-            exit();
+            self::oauthError('Authorization code missing. Please try signing in again.');
         }
 
         // 🧹 Clear the OAuth state to prevent replay
@@ -301,15 +297,13 @@ class Auth
         ]);
 
         if ($tokenResp === null) {
-            echo 'Token request failed.';
-            exit();
+            self::oauthError('Token request failed. Please try signing in again.');
         }
 
         $tokenData = json_decode($tokenResp, true);
         if (json_last_error() !== JSON_ERROR_NONE || isset($tokenData['id_token']) === false) {
             Logger::errorPlatform('Auth', 'Error', 'TOKEN_RESPONSE', 'Invalid token response from MS365', '');
-            echo 'Invalid token response.';
-            exit();
+            self::oauthError('Invalid token response. Please try signing in again.');
         }
 
         $idToken = $tokenData['id_token'];
@@ -321,8 +315,7 @@ class Auth
         $jwksJson = file_get_contents($jwksUri);
         if ($jwksJson === false) {
             Logger::errorPlatform('Auth', 'Error', 'JWKS_FETCH', 'Unable to retrieve JWKS from ' . $jwksUri, '');
-            echo 'Unable to retrieve signing keys.';
-            exit();
+            self::oauthError('Unable to retrieve signing keys. Please try again later.');
         }
 
         $jwks = json_decode($jwksJson, true);
@@ -337,8 +330,7 @@ class Auth
             ]);
         } catch (RuntimeException $ex) {
             Logger::errorPlatform('JWT', 'Error', 'VERIFY_FAIL', $ex->getMessage(), '');
-            echo 'Token verification failed.';
-            exit();
+            self::oauthError('Token verification failed. Please try signing in again.');
         }
 
         /* ----------------------- 4. Extract user info ---------------------- */
@@ -349,8 +341,7 @@ class Auth
 
         if ($email === '') {
             Logger::errorPlatform('Auth', 'Error', 'NO_EMAIL', 'No email in ID token payload', '');
-            echo 'Unable to determine user email from token.';
-            exit();
+            self::oauthError('Unable to determine user email from token.');
         }
 
         /* ----------------------- 5. Find or create user -------------------- */
@@ -475,22 +466,18 @@ class Auth
 
         /* ----------------------- 0. Rate limit OAuth callbacks ------------- */
         if (RateLimiter::isBlocked() === true) {
-            http_response_code(429);
-            echo 'Too many authentication attempts. Please try again later.';
-            exit();
+            self::oauthError('Too many authentication attempts. Please try again later.', 429);
         }
 
         /* ----------------------- 1. Validate OAuth state ------------------- */
         if (isset($_GET['state']) === false || hash_equals($_SESSION['oauth_state'] ?? '', $_GET['state'] ?? '') === false) {
             Logger::errorPlatform('Auth', 'Error', 'OAUTH_STATE', 'Invalid Google OAuth state parameter', '');
-            echo 'Invalid OAuth state.';
-            exit();
+            self::oauthError('Invalid OAuth state. Please try signing in again.');
         }
 
         if (isset($_GET['code']) === false) {
             Logger::errorPlatform('Auth', 'Error', 'OAUTH_CODE', 'Google authorization code missing from callback', '');
-            echo 'Authorization code missing.';
-            exit();
+            self::oauthError('Authorization code missing. Please try signing in again.');
         }
 
         // 🧹 Clear the OAuth state to prevent replay
@@ -511,15 +498,13 @@ class Auth
         ]);
 
         if ($tokenResp === null) {
-            echo 'Token request failed.';
-            exit();
+            self::oauthError('Token request failed. Please try signing in again.');
         }
 
         $tokenData = json_decode($tokenResp, true);
         if (json_last_error() !== JSON_ERROR_NONE || isset($tokenData['id_token']) === false) {
             Logger::errorPlatform('Auth', 'Error', 'TOKEN_RESPONSE', 'Invalid token response from Google', '');
-            echo 'Invalid token response.';
-            exit();
+            self::oauthError('Invalid token response. Please try signing in again.');
         }
 
         $idToken = $tokenData['id_token'];
@@ -531,8 +516,7 @@ class Auth
         $jwksJson = file_get_contents($jwksUri);
         if ($jwksJson === false) {
             Logger::errorPlatform('Auth', 'Error', 'JWKS_FETCH', 'Unable to retrieve JWKS from Google', '');
-            echo 'Unable to retrieve signing keys.';
-            exit();
+            self::oauthError('Unable to retrieve signing keys. Please try again later.');
         }
 
         $jwks = json_decode($jwksJson, true);
@@ -544,8 +528,7 @@ class Auth
             ]);
         } catch (RuntimeException $ex) {
             Logger::errorPlatform('JWT', 'Error', 'VERIFY_FAIL', $ex->getMessage(), '');
-            echo 'Token verification failed.';
-            exit();
+            self::oauthError('Token verification failed. Please try signing in again.');
         }
 
         /* ----------------------- 4. Extract user info ---------------------- */
@@ -556,8 +539,7 @@ class Auth
 
         if ($email === '' || $sub === '') {
             Logger::errorPlatform('Auth', 'Error', 'NO_EMAIL', 'No email/sub in Google ID token', '');
-            echo 'Unable to determine user identity from token.';
-            exit();
+            self::oauthError('Unable to determine user identity from token.');
         }
 
         // 🏢 Enforce hosted domain restriction if configured
@@ -566,8 +548,7 @@ class Auth
             $tokenHd = $payload['hd'] ?? '';
             if (strtolower($tokenHd) !== strtolower($requiredHd)) {
                 Logger::errorPlatform('Auth', 'Error', 'HD_MISMATCH', 'Google domain mismatch: expected ' . $requiredHd . ', got ' . $tokenHd, '');
-                echo 'Your Google account is not from the allowed organisation.';
-                exit();
+                self::oauthError('Your Google account is not from the allowed organisation.');
             }
         }
 
@@ -1077,6 +1058,25 @@ class Auth
         $stmt->close();
 
         return $row !== null ? (int) $row['userID'] : null;
+    }
+
+    /**
+     * 🚫 Redirect to login with an error flash message.
+     * Used by OAuth callbacks to provide user-friendly error handling instead
+     * of bare echo+exit patterns.
+     *
+     * @param string $message User-facing error message
+     * @param int    $httpCode Optional HTTP status code (default 400)
+     * @return never
+     */
+    private static function oauthError(string $message, int $httpCode = 400): never
+    {
+        self::ensureSession();
+        http_response_code($httpCode);
+        $_SESSION['flash_msg']  = $message;
+        $_SESSION['flash_type'] = 'danger';
+        header('Location: /login');
+        exit();
     }
 
     /**
