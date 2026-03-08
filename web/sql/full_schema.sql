@@ -1580,6 +1580,10 @@ VALUES ('calendar/manage/series', 'calendar/manage/series.php', 1)
 ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 
 INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`)
+VALUES ('calendar/manage/series-edit', 'calendar/manage/series-edit.php', 1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`)
 VALUES ('calendar/manage/types', 'calendar/manage/types.php', 1)
 ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 

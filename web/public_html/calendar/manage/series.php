@@ -193,6 +193,10 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 <span class="badge bg-secondary"><?php echo (int) $s['eventCount']; ?></span>
             </div>
             <div class="col-12 col-md-3 text-md-end mt-2 mt-md-0">
+                <a href="/calendar/manage/series-edit?seriesID=<?php echo (int) $s['seriesID']; ?>"
+                   class="btn btn-sm btn-outline-success" title="Bulk edit events in this series">
+                    <i class="fa-solid fa-pen-ruler"></i>
+                </a>
                 <button class="btn btn-sm btn-outline-primary portal-edit-series-btn" data-bs-toggle="modal" data-bs-target="#editSeriesModal"
                         data-id="<?php echo (int) $s['seriesID']; ?>"
                         data-name="<?php echo htmlspecialchars($s['seriesName'], ENT_QUOTES, 'UTF-8'); ?>"
