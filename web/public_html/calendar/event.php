@@ -130,6 +130,44 @@ if ($stmt !== false) {
 $startDt = new DateTime($event['startDateTime']);
 $endDt   = $event['endDateTime'] !== null ? new DateTime($event['endDateTime']) : null;
 
+// 📋 Fetch RSVP data (logged-in users only)
+$userRsvp   = null;
+$rsvpCounts = ['going' => 0, 'maybe' => 0, 'not_going' => 0];
+$rsvpEnabled = ($event['status'] !== 'cancelled');
+
+if (Auth::check() === true) {
+    // 🔍 Current user's RSVP
+    $rStmt = $mysqli->prepare(
+        'SELECT response FROM tblEventRSVPs WHERE eventID = ? AND userID = ? LIMIT 1'
+    );
+    if ($rStmt !== false) {
+        $userId = (int) ($_SESSION['user_id'] ?? 0);
+        $rStmt->bind_param('ii', $event['eventID'], $userId);
+        $rStmt->execute();
+        $rRow = $rStmt->get_result()->fetch_assoc();
+        if ($rRow !== null) {
+            $userRsvp = $rRow['response'];
+        }
+        $rStmt->close();
+    }
+
+    // 📊 RSVP counts by response type
+    $cStmt = $mysqli->prepare(
+        'SELECT response, COUNT(*) AS cnt FROM tblEventRSVPs WHERE eventID = ? GROUP BY response'
+    );
+    if ($cStmt !== false) {
+        $cStmt->bind_param('i', $event['eventID']);
+        $cStmt->execute();
+        $cResult = $cStmt->get_result();
+        while ($cRow = $cResult->fetch_assoc()) {
+            if (isset($rsvpCounts[$cRow['response']]) === true) {
+                $rsvpCounts[$cRow['response']] = (int) $cRow['cnt'];
+            }
+        }
+        $cStmt->close();
+    }
+}
+
 // 📄 Include shared header template
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
@@ -337,6 +375,90 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     <div class="card-header"><h5 class="mb-0"><i class="fa-solid fa-layer-group me-2"></i>Series</h5></div>
                     <div class="card-body">
                         <p class="mb-0">Part of: <strong><?php echo htmlspecialchars($event['seriesName'], ENT_QUOTES, 'UTF-8'); ?></strong></p>
+                    </div>
+                </div>
+            <?php endif; ?>
+
+            <!-- 🎟️ RSVP -->
+            <?php if (Auth::check() === true && $rsvpEnabled === true): ?>
+                <div class="card mb-4">
+                    <div class="card-header"><h5 class="mb-0"><i class="fa-solid fa-user-check me-2"></i>RSVP</h5></div>
+                    <div class="card-body">
+                        <?php
+                        $totalGoing = $rsvpCounts['going'] + $rsvpCounts['maybe'];
+                        $capacity   = $event['capacity'] !== null ? (int) $event['capacity'] : null;
+                        $atCapacity = ($capacity !== null && $rsvpCounts['going'] >= $capacity);
+                        ?>
+                        <!-- 📊 Counts -->
+                        <div class="d-flex gap-3 mb-3 text-center">
+                            <div>
+                                <div class="fw-bold text-success"><?php echo $rsvpCounts['going']; ?></div>
+                                <small class="text-muted">Going</small>
+                            </div>
+                            <div>
+                                <div class="fw-bold text-warning"><?php echo $rsvpCounts['maybe']; ?></div>
+                                <small class="text-muted">Maybe</small>
+                            </div>
+                            <div>
+                                <div class="fw-bold text-secondary"><?php echo $rsvpCounts['not_going']; ?></div>
+                                <small class="text-muted">Not Going</small>
+                            </div>
+                        </div>
+
+                        <?php if ($capacity !== null): ?>
+                            <p class="small text-muted mb-3">
+                                <i class="fa-solid fa-users me-1"></i>Capacity: <?php echo $rsvpCounts['going']; ?>/<?php echo $capacity; ?>
+                                <?php if ($atCapacity === true && $userRsvp !== 'going'): ?>
+                                    <span class="badge bg-danger ms-1">Full</span>
+                                <?php endif; ?>
+                            </p>
+                        <?php endif; ?>
+
+                        <!-- 🎯 Current status -->
+                        <?php if ($userRsvp !== null): ?>
+                            <?php
+                            $statusLabels = ['going' => 'Going', 'maybe' => 'Maybe', 'not_going' => 'Not Going'];
+                            $statusColors = ['going' => 'success', 'maybe' => 'warning', 'not_going' => 'secondary'];
+                            ?>
+                            <p class="mb-3">
+                                Your RSVP: <span class="badge bg-<?php echo $statusColors[$userRsvp] ?? 'secondary'; ?>">
+                                    <?php echo htmlspecialchars($statusLabels[$userRsvp] ?? $userRsvp, ENT_QUOTES, 'UTF-8'); ?>
+                                </span>
+                            </p>
+                        <?php endif; ?>
+
+                        <!-- 🔘 RSVP buttons -->
+                        <form method="post" action="/calendar/rsvp" class="d-flex flex-wrap gap-2">
+                            <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
+                            <input type="hidden" name="eventID" value="<?php echo (int) $event['eventID']; ?>">
+                            <input type="hidden" name="slug" value="<?php echo htmlspecialchars($slug, ENT_QUOTES, 'UTF-8'); ?>">
+
+                            <?php if ($userRsvp !== 'going'): ?>
+                                <button type="submit" name="response" value="going"
+                                        class="btn btn-sm btn-outline-success"
+                                        <?php echo ($atCapacity === true ? 'disabled title="Event is at full capacity"' : ''); ?>>
+                                    <i class="fa-solid fa-check me-1"></i>Going
+                                </button>
+                            <?php endif; ?>
+
+                            <?php if ($userRsvp !== 'maybe'): ?>
+                                <button type="submit" name="response" value="maybe" class="btn btn-sm btn-outline-warning">
+                                    <i class="fa-solid fa-question me-1"></i>Maybe
+                                </button>
+                            <?php endif; ?>
+
+                            <?php if ($userRsvp !== 'not_going'): ?>
+                                <button type="submit" name="response" value="not_going" class="btn btn-sm btn-outline-secondary">
+                                    <i class="fa-solid fa-xmark me-1"></i>Not Going
+                                </button>
+                            <?php endif; ?>
+
+                            <?php if ($userRsvp !== null): ?>
+                                <button type="submit" name="response" value="cancel" class="btn btn-sm btn-outline-danger">
+                                    <i class="fa-solid fa-trash me-1"></i>Cancel
+                                </button>
+                            <?php endif; ?>
+                        </form>
                     </div>
                 </div>
             <?php endif; ?>

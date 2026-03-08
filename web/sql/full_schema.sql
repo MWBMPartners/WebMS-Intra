@@ -12,7 +12,7 @@
 -- After running, all individual migrations (000–020) are marked as executed
 -- in tblMigrations so the web-based Migrator won't re-run them.
 --
--- Covers migrations: 000–025
+-- Covers migrations: 000–028
 -- =============================================================================
 -- @package   Portal\Database
 -- @author    MWBM Partners Ltd (t/a MWservices)
@@ -174,6 +174,7 @@ CREATE TABLE IF NOT EXISTS `tblUsers` (
     `isActive`     TINYINT(1)   DEFAULT 1,
     `isAdmin`      TINYINT(1)   DEFAULT 0,
     `isRootAdmin`  TINYINT(1)   DEFAULT 0,
+    `notifyPrefs`  JSON         DEFAULT NULL COMMENT 'User notification preferences (JSON: {emailDigest, expenseUpdates, eventReminders})',
     `createdAt`    DATETIME     DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (`userID`),
     UNIQUE KEY `emailAddress` (`emailAddress`)
@@ -711,6 +712,7 @@ CREATE TABLE IF NOT EXISTS `tblEvents` (
     `isPublic`     TINYINT(1)   NOT NULL DEFAULT 1 COMMENT 'Visible on public calendar',
     `isFeatured`   TINYINT(1)   NOT NULL DEFAULT 0,
     `isDeleted`    TINYINT(1)   NOT NULL DEFAULT 0 COMMENT 'Soft delete flag',
+    `capacity`     INT          DEFAULT NULL COMMENT 'Max attendees (NULL = unlimited)',
 
     -- 🔢 Metadata
     `createdByID`  INT           DEFAULT NULL COMMENT 'FK → tblUsers',
@@ -811,6 +813,25 @@ CREATE TABLE IF NOT EXISTS `tblEventMaterials` (
     CONSTRAINT `fk_ematerials_event` FOREIGN KEY (`eventID`) REFERENCES `tblEvents` (`eventID`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
 COMMENT='Downloadable materials/documents attached to events.';
+
+
+-- -----------------------------------------------------------------------------
+-- 🎟️ tblEventRSVPs — event RSVP/registration responses
+-- (from migration 028)
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `tblEventRSVPs` (
+    `rsvpID`    INT         NOT NULL AUTO_INCREMENT,
+    `eventID`   INT         NOT NULL,
+    `userID`    INT         NOT NULL,
+    `siteID`    INT         NOT NULL DEFAULT 1,
+    `response`  ENUM('going','maybe','not_going') NOT NULL DEFAULT 'going',
+    `createdAt` DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updatedAt` DATETIME    DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`rsvpID`),
+    UNIQUE KEY `uq_event_user` (`eventID`, `userID`),
+    KEY `idx_event_response` (`eventID`, `response`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+COMMENT='Event RSVP/registration responses';
 
 
 -- -----------------------------------------------------------------------------
@@ -1218,6 +1239,14 @@ INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isSensitive`, `default
 VALUES ('notifications.senderName', 'Portal Notifications', 0, NULL)
 ON DUPLICATE KEY UPDATE `settingKey` = `settingKey`;
 
+INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isSensitive`, `siteID`)
+VALUES ('notifications.digestEnabled', 'true', 0, NULL)
+ON DUPLICATE KEY UPDATE `settingKey` = `settingKey`;
+
+INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isSensitive`, `siteID`)
+VALUES ('notifications.digestDay', 'monday', 0, NULL)
+ON DUPLICATE KEY UPDATE `settingKey` = `settingKey`;
+
 -- ─── Expenses app settings ───────────────────────────────────────────────────
 INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isSensitive`, `defaultValue`)
 VALUES ('expenses.enabled', 'true', 0, 'true')
@@ -1595,6 +1624,10 @@ INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`)
 VALUES ('calendar/export', 'calendar/export.php', 0)
 ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`)
+VALUES ('calendar/rsvp', 'calendar/rsvp.php', 1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
 -- ─── Attendance ────────────────────────────────────────────────────────────
 INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`)
 VALUES ('attendance', 'attendance/index.php', 1)
@@ -1672,6 +1705,10 @@ ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 
 INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`)
 VALUES ('admin/users/export', 'admin/users/export.php', 1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`)
+VALUES ('admin/users/import', 'admin/users/import.php', 1)
 ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 
 
@@ -1756,4 +1793,13 @@ INSERT INTO `tblMigrations` (`filename`) VALUES ('024_csv_export_routes.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
 INSERT INTO `tblMigrations` (`filename`) VALUES ('025_install_upgrade_route.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('026_notification_preferences.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('027_user_import_route.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('028_event_rsvp.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;

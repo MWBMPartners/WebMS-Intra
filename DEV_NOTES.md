@@ -231,7 +231,10 @@ the web-based Migrator (admin-only) and tracked in `tblMigrations`.
 | `023_series_bulk_edit_route.sql`   | Event series bulk edit route |
 | `024_csv_export_routes.sql`        | CSV export routes for expenses, attendance, leadership, admin |
 | `025_install_upgrade_route.sql`    | Upgrade handler route for admin upgrade page |
-| `full_schema.sql`                  | Consolidated schema for fresh installs (covers 000–025) |
+| `026_notification_preferences.sql` | notifyPrefs JSON column, digest settings |
+| `027_user_import_route.sql`        | User CSV import route |
+| `028_event_rsvp.sql`               | tblEventRSVPs, capacity column on tblEvents, RSVP route |
+| `full_schema.sql`                  | Consolidated schema for fresh installs (covers 000–028) |
 
 ---
 

@@ -15,7 +15,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Shared hosting support** — graceful error handling when database creation permissions are restricted (prompts user to create DB via hosting panel)
 - **Security protections** — lock file prevents re-installation; credentials stored outside web root; restrictive file permissions
 - SQL migration `025_install_upgrade_route.sql` — route for admin upgrade page
-- Updated `full_schema.sql` — added upgrade route, migration entries through 025
+
+### Added — Dashboard Widgets (Issue #85)
+
+- **Stat widgets** on dashboard — pending expenses, events this week, active users (admin), 24h activity (admin) with quick-link cards
+
+### Added — Email Digest / Notification Preferences (Issue #86)
+
+- **Notification preferences** on account page — toggles for weekly email digest, expense updates, event reminders
+- `notifyPrefs` JSON column on `tblUsers` for per-user preferences
+- SQL migration `026_notification_preferences.sql`
+
+### Added — Bulk User Import (Issue #87)
+
+- **CSV import** for users (`admin/users/import`) — preview/validate/confirm workflow with duplicate detection
+- SQL migration `027_user_import_route.sql`
+
+### Added — Event RSVP / Registration (Issue #88)
+
+- **RSVP system** for calendar events — Going / Maybe / Not Going with capacity limits
+- RSVP card on event detail page with response counts and status display
+- `tblEventRSVPs` table with UPSERT pattern for response changes
+- `capacity` column on `tblEvents` for optional attendee limits
+- SQL migration `028_event_rsvp.sql`
+
+- Updated `full_schema.sql` — added tblEventRSVPs, capacity column, routes, migration entries through 028
 
 ## [0.9.0] - 2026-03-08
 
