@@ -83,6 +83,23 @@ header("Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-i
 </head>
 <body>
 
+<!-- ⚠️ Global noscript banner — visible only when JS is disabled -->
+<noscript>
+    <div class="portal-noscript-banner" role="alert"
+         style="background:#fff3cd;color:#664d03;border-bottom:2px solid #ffc107;padding:.75rem 1rem;text-align:center;font-size:.9rem;">
+        <strong>JavaScript is disabled.</strong>
+        Core features (navigation, forms, login) will still work, but some interactive
+        features (passkeys, dynamic form rows, dark mode) require JavaScript.
+    </div>
+    <style>
+        /* 📌 No-JS global overrides */
+        .accordion-collapse { display: block !important; }
+        .navbar .dropdown:hover > .dropdown-menu,
+        .navbar .dropdown:focus-within > .dropdown-menu { display: block; margin-top: 0; }
+        .collapse:not(.navbar-collapse) { display: block !important; }
+    </style>
+</noscript>
+
 <!-- ♿ Skip to main content link (WCAG 2.4.1) -->
 <a href="#main-content" class="portal-skip-link">Skip to main content</a>
 

@@ -622,3 +622,33 @@ textarea:focus-visible,
         color: black;
     }
 }
+
+
+/* ============================================================================
+   12. No-JS Fallbacks
+   When JavaScript is disabled, ensure critical UI remains functional.
+   ============================================================================ */
+
+/* Nav dropdowns: open on hover when JS is unavailable */
+@media (hover: hover) {
+    .navbar .dropdown:hover > .dropdown-menu,
+    .navbar .dropdown:focus-within > .dropdown-menu {
+        display: block;
+        margin-top: 0;
+    }
+}
+
+/* Accordion/collapse: show all sections when JS is unavailable
+   (Bootstrap's .collapse hides content via JS; override with noscript) */
+noscript + .accordion .collapse,
+noscript ~ .accordion .collapse {
+    display: block;
+}
+
+/* Noscript banner styling (inline styles on the element handle the base,
+   this adds dark-mode support) */
+[data-bs-theme="dark"] .portal-noscript-banner {
+    background: #332701 !important;
+    color: #ffc107 !important;
+    border-color: #664d03 !important;
+}

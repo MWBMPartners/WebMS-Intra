@@ -34,6 +34,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - All expense, calendar, attendance, admin, and settings queries — `AND siteID = ?` filtering
 - `full_schema.sql` — consolidated with tblSites, tblUserSites, siteID columns, multisite settings/routes
 
+### Added — JS Graceful Degradation (Issue #49)
+
+- **Global `<noscript>` banner** in `header.php` — informs users when JS is disabled, listing affected features
+- **No-JS CSS overrides** — accordion panels expanded, nav dropdowns open on hover/focus-within, Bootstrap collapse sections visible
+- **Expense submit fallback** — 5 static line-item rows rendered inside `<noscript>` when JS can't generate dynamic rows; visible file input fallback for dropzone
+- **Attendance record note** — contextual `<noscript>` message explaining limited row management
+- **Account page passkey note** — `<noscript>` message explaining passkey registration requires JS
+- **Settings page** — `<noscript>` style expands all accordion groups; note about search requiring JS
+- **Admin modals** — `<noscript>` warnings on user management and site management pages where modal dialogs require JS
+- **CSS-only nav dropdowns** — hover/focus-within fallback for navbar dropdown menus
+- **Dark mode noscript support** — dark theme variant for noscript banner
+
 ### Added — Leadership App (Phase 9, Issue #38)
 
 - **Leadership directory** — card-based view of all roles and current holders, with term dates, vacancy indicators, and summary stats

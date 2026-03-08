@@ -293,6 +293,10 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 <?php endif; ?>
             </div>
 
+            <noscript>
+                <p class="text-muted small mt-2"><i class="fa-solid fa-circle-info me-1"></i>JavaScript is disabled — use the pre-filled group rows above. Adding/removing rows requires JavaScript. Total will be calculated on the server.</p>
+            </noscript>
+
             <!-- 📊 Running total -->
             <div class="mt-3 p-2 bg-light rounded d-flex justify-content-between align-items-center">
                 <strong>Total Headcount:</strong>

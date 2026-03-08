@@ -512,6 +512,9 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 <button type="button" class="btn btn-sm btn-outline-primary" id="btnRegisterPasskey">
                     <i class="fa-solid fa-plus me-1"></i> Register New Passkey
                 </button>
+                <noscript>
+                    <p class="text-muted small mt-2"><i class="fa-solid fa-circle-info me-1"></i>Passkey registration requires JavaScript and a compatible browser. Enable JavaScript to register passkeys.</p>
+                </noscript>
 
                 <!-- 🔐 Passkey registration modal -->
                 <div class="modal fade" id="passkeyModal" tabindex="-1" aria-hidden="true">

@@ -95,6 +95,12 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <i class="fa-solid fa-user-plus me-1"></i> Add User
     </button>
 </div>
+<noscript>
+    <div class="alert alert-warning">
+        <i class="fa-solid fa-triangle-exclamation me-1"></i>
+        <strong>JavaScript is disabled.</strong> The Add User and Edit User buttons require JavaScript to open modal dialogs. Enable JavaScript for full user management functionality.
+    </div>
+</noscript>
 
 <?php if ($flashMsg !== ''): ?>
     <div class="alert alert-<?php echo htmlspecialchars($flashType, ENT_QUOTES, 'UTF-8'); ?> alert-dismissible fade show">

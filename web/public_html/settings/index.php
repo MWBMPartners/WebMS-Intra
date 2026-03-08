@@ -146,6 +146,12 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <input type="text" class="form-control" id="settingsSearch" placeholder="Search settings by key or value..." aria-label="Search settings">
 </div>
 
+<!-- ⚠️ No-JS: expand all accordion panels and show search note -->
+<noscript>
+    <style>.accordion-collapse { display: block !important; }</style>
+    <p class="text-muted small mb-2"><i class="fa-solid fa-circle-info me-1"></i>JavaScript is disabled — all settings groups are expanded. Search filtering requires JavaScript.</p>
+</noscript>
+
 <!-- 📋 Grouped settings accordion -->
 <div class="accordion" id="settingsAccordion">
     <?php $groupIndex = 0; ?>

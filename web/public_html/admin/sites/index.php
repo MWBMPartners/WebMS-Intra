@@ -67,6 +67,12 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <i class="fa-solid fa-plus me-1"></i> New Site
     </button>
 </div>
+<noscript>
+    <div class="alert alert-warning">
+        <i class="fa-solid fa-triangle-exclamation me-1"></i>
+        <strong>JavaScript is disabled.</strong> The New Site and Edit buttons require JavaScript to open modal dialogs. Enable JavaScript for full site management functionality.
+    </div>
+</noscript>
 
 <?php if ($flashSuccess !== ''): ?>
 <div class="alert alert-success alert-dismissible fade show" role="alert">

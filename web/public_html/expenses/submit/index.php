@@ -73,7 +73,29 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <div class="col-md-1"></div>
     </div>
 
-    <div id="items-list"></div>
+    <div id="items-list">
+        <!-- ⚠️ Static fallback rows for no-JS environments -->
+        <noscript>
+            <?php for ($rowIdx = 1; $rowIdx <= 5; $rowIdx++): ?>
+            <div class="row g-2 align-items-end mb-2">
+                <div class="col-12 col-md-5">
+                    <label class="form-label d-md-none">Description</label>
+                    <input type="text" name="itemDesc[]" class="form-control" placeholder="Item <?php echo $rowIdx; ?>">
+                </div>
+                <div class="col-4 col-md-2">
+                    <label class="form-label d-md-none">Qty</label>
+                    <input type="number" name="itemQty[]" class="form-control text-end" min="1" value="1">
+                </div>
+                <div class="col-4 col-md-2">
+                    <label class="form-label d-md-none">Unit &pound;</label>
+                    <input type="number" step="0.01" name="itemUnit[]" class="form-control text-end" value="0.00">
+                </div>
+                <div class="col-4 col-md-3"></div>
+            </div>
+            <?php endfor; ?>
+            <p class="text-muted small"><i class="fa-solid fa-circle-info me-1"></i>JavaScript is disabled — 5 line items are shown. Blank rows will be ignored. Line totals will be calculated on the server.</p>
+        </noscript>
+    </div>
 
     <button type="button" id="addRow" class="btn btn-outline-secondary btn-sm mb-3">+ Add item</button>
 
@@ -86,6 +108,9 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <div class="mb-3">
         <div class="dropzone" onclick="document.getElementById('files').click()">Drop files here or click to upload</div>
         <input type="file" name="files[]" id="files" class="form-control d-none" multiple accept="image/*,application/pdf">
+        <noscript>
+            <input type="file" name="files[]" class="form-control mt-2" multiple accept="image/*,application/pdf">
+        </noscript>
     </div>
 
     <!-- 🤖 Captcha widget (if configured) -->
