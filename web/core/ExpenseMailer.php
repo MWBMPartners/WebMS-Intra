@@ -8,6 +8,7 @@
  *   - On submission: notify dept approvers + treasury
  *   - On approval: notify claimant + treasury
  *   - On rejection: notify claimant + approvers
+ *   - On withdrawal: notify dept approvers
  *   - On reimbursement: notify claimant + approvers
  *
  * Uses Mailer::send() (Microsoft Graph) with graceful fallback if
@@ -31,7 +32,7 @@ class ExpenseMailer
      * 📧 Send notification for a workflow event.
      *
      * @param int    $claimID  The expense claim ID
-     * @param string $event    One of: submitted, approved, rejected, reimbursed
+     * @param string $event    One of: submitted, approved, rejected, withdrawn, reimbursed
      * @param array  $extra    Optional extra data (e.g. approver name, comments)
      */
     public static function notify(int $claimID, string $event, array $extra = []): void
@@ -132,6 +133,19 @@ class ExpenseMailer
                     . self::claimSummaryHtml($claimID, $claimTitle, $claimant, $dept, $total, $claimDate)
                     . (($extra['comments'] ?? '') !== '' ? '<p><strong>Reason:</strong> ' . htmlspecialchars($extra['comments'], ENT_QUOTES, 'UTF-8') . '</p>' : '')
                     . '<p><a href="/expenses/view?id=' . $claimID . '" style="' . self::btnStyle() . '">View Claim</a></p>'
+                );
+                break;
+
+            case 'withdrawn':
+                // 📧 Notify dept approvers that claim was withdrawn
+                $recipients   = self::getApproverEmails((int) $claim['deptID']);
+                $claimantNote = htmlspecialchars($extra['claimantName'] ?? $claim['claimantName'], ENT_QUOTES, 'UTF-8');
+                $subject      = '[' . $siteName . '] Expense Claim #' . $claimID . ' Withdrawn';
+                $body         = self::buildHtml(
+                    'Expense Claim Withdrawn',
+                    '<p>Expense claim #' . $claimID . ' has been <strong style="color:#6c757d">withdrawn</strong> by ' . $claimantNote . '.</p>'
+                    . self::claimSummaryHtml($claimID, $claimTitle, $claimant, $dept, $total, $claimDate)
+                    . '<p>No further action is required for this claim.</p>'
                 );
                 break;
 

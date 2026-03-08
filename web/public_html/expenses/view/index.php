@@ -161,6 +161,7 @@ $statusClass = match ($claim['status']) {
     'Approved'   => 'info',
     'Rejected'   => 'danger',
     'Reimbursed' => 'success',
+    'Withdrawn'  => 'secondary',
     default      => 'secondary',
 };
 
@@ -427,6 +428,17 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <a href="/expenses/treasury" class="btn btn-outline-success">
             <i class="fa-solid fa-sterling-sign me-1"></i> Go to Treasury
         </a>
+    <?php endif; ?>
+    <?php if ($claim['status'] === 'Pending' && $isClaimant === true): ?>
+        <!-- 🔄 Withdraw claim form — only visible to claimant for Pending claims -->
+        <form method="POST" action="/expenses/withdraw/save" class="d-inline">
+            <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
+            <input type="hidden" name="claimID" value="<?php echo (int) $claim['claimID']; ?>">
+            <button type="submit" class="btn btn-outline-danger"
+                    onclick="return confirm('Are you sure you want to withdraw this claim? This action cannot be undone.');">
+                <i class="fa-solid fa-rotate-left me-1"></i> Withdraw Claim
+            </button>
+        </form>
     <?php endif; ?>
 </div>
 
