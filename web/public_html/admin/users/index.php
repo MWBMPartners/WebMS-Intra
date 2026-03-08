@@ -152,6 +152,9 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h1 class="mb-0"><i class="fa-solid fa-users me-2"></i>User Management</h1>
     <div class="d-flex gap-2">
+        <a href="/admin/users/import" class="btn btn-outline-primary" title="Import CSV">
+            <i class="fa-solid fa-file-import"></i>
+        </a>
         <a href="/admin/users/export?csrf_token=<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>"
            class="btn btn-outline-success" title="Export CSV">
             <i class="fa-solid fa-file-csv"></i>
