@@ -67,13 +67,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [0.8.1] - 2026-03-07
+## [0.8.1] - 2026-03-08
 
-### Added — Integration Diagnostics (Issue #46)
+### Added
 
+- Event series bulk edit page for calendar management (#75)
+- Leadership role transition workflow — auto-end outgoing holders (#76)
+- CSV export across 5 apps: expenses, attendance, leadership, admin users, activity logs (#77)
+- Input validation framework — Validator class with pipe-separated rules (#78)
+- Transaction helpers — App::beginTransaction/commit/rollback (#79)
+- Lightweight DI container — Container class alongside existing statics (#81)
 - **Integration Diagnostics** (`admin/integrations/index.php`, Issue #46) — admin-only page to test MS365 OAuth login configuration, Graph API token acquisition (client-credentials flow), test email sending from shared mailbox via SendAs/delegate, and Google OAuth configuration status. Includes pass/fail badges, Azure AD permissions reference, and CSRF-protected forms.
 - SQL migration `014_admin_integrations_route.sql` — adds `admin/integrations` protected route
 - Integrations quick-link on Admin Dashboard
+
+### Changed
+
+- Separated API routing into dedicated ApiRouter class (#80)
+- Standardized error handling — flash+redirect for all CSRF/OAuth errors (#82)
+
+### Fixed
+
+- Version seed in full_schema.sql and App.php now shows 0.8.1 (#83)
+
+### Security
+
+- All codebase passes lint with zero syntax errors
+- No SQL injection, die(), or bare exit patterns remaining
 
 ---
 

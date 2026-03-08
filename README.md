@@ -50,6 +50,10 @@ WebMS-Intra/                         # Git repository root (NOT deployed)
     │   ├── Pdf.php                  # dompdf wrapper (conditional load)
     │   ├── RateLimiter.php          # Login rate limiting
     │   ├── Router.php               # Front-controller URL dispatcher
+    │   ├── ApiRouter.php            # Dedicated API route dispatcher
+    │   ├── Container.php            # Lightweight dependency injection container
+    │   ├── CsvExporter.php          # CSV export helper (expenses, attendance, etc.)
+    │   ├── Validator.php            # Input validation framework (pipe-separated rules)
     │   ├── WebAuthn.php             # WebAuthn/PassKey server-side helper
     │   ├── I18n.php                 # Internationalisation framework (translations, RTL, formatting)
     │   └── templates/               # Shared page templates

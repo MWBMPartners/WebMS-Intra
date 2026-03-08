@@ -223,6 +223,13 @@ the web-based Migrator (admin-only) and tracked in `tblMigrations`.
 | `015_multisite.sql`                | Multi-site support: tblSites, tblUserSites, siteID columns, multisite settings/routes |
 | `016_google_mail.sql`              | Google Workspace email settings: mail.provider, service account key, delegate user |
 | `017_leadership.sql`               | Leadership app: roles, assignments tables, seed roles, routes, settings |
+| `018_event_series_bulk_edit.sql`   | Event series bulk edit routes and settings |
+| `019_leadership_transitions.sql`   | Leadership role transition workflow fields and settings |
+| `020_csv_export.sql`               | CSV export routes for expenses, attendance, leadership, admin |
+| `021_validator.sql`                | Validation settings and configuration |
+| `022_transaction_helpers.sql`      | Transaction helper support settings |
+| `023_api_router.sql`               | API router refactor — dedicated API route entries |
+| `024_error_handling.sql`           | Error handling standardisation settings |
 | `full_schema.sql`                  | Consolidated schema for fresh installs (all tables + seeds) |
 
 ---
@@ -482,6 +489,90 @@ There is no built-in approval UI — translations are managed as code:
 5. **Tag a release** — translations deploy to production
 
 This keeps translations version-controlled, reviewable, and auditable.
+
+---
+
+## New Core Classes (v0.8.1)
+
+### Container (`core/Container.php`)
+
+Lightweight dependency injection container that works alongside the existing static
+`App` registry. Supports singleton and factory bindings with lazy resolution:
+
+```php
+$container = new Container();
+$container->singleton('mailer', fn() => new Mailer($config));
+$mailer = $container->get('mailer'); // same instance each time
+```
+
+Use `Container` for new service wiring; existing `App::db()`, `App::settings()` etc.
+remain unchanged for backward compatibility.
+
+### ApiRouter (`core/ApiRouter.php`)
+
+Dedicated API route dispatcher, extracted from the main `Router` class. Handles
+all `api/{app}/{action}` patterns with JSON content-type enforcement, CORS headers,
+and standardised error envelopes via `ApiResponse`. The main `Router::dispatch()`
+delegates to `ApiRouter` for any path starting with `api/`.
+
+### CsvExporter (`core/CsvExporter.php`)
+
+Generic CSV export helper used across five apps: expenses, attendance, leadership,
+admin users, and activity logs. Accepts a column definition array and a MySQLi result
+set, streams output with proper headers (`Content-Type: text/csv`,
+`Content-Disposition: attachment`), and escapes fields to prevent formula injection.
+
+### Validator (`core/Validator.php`)
+
+Input validation framework using pipe-separated rule syntax:
+
+```php
+$v = new Validator($_POST, [
+    'email'  => 'required|email|max:255',
+    'amount' => 'required|numeric|min:0.01',
+    'date'   => 'required|date',
+]);
+if ($v->fails()) {
+    $errors = $v->errors(); // ['email' => ['The email field is required.']]
+}
+```
+
+Built-in rules: `required`, `email`, `numeric`, `integer`, `min`, `max`,
+`date`, `in`, `regex`, `string`, `boolean`. Custom rules can be added via closures.
+
+### Transaction Helpers
+
+`App::beginTransaction()`, `App::commit()`, and `App::rollback()` wrap MySQLi
+transaction methods for cleaner multi-statement operations:
+
+```php
+App::beginTransaction();
+try {
+    // multiple inserts/updates
+    App::commit();
+} catch (\Throwable $e) {
+    App::rollback();
+    throw $e;
+}
+```
+
+---
+
+## Error Handling Standardisation (v0.8.1)
+
+All CSRF validation failures and OAuth errors now follow a consistent
+**flash + redirect** pattern instead of mixed approaches (some pages used
+`die()`, others rendered inline errors, others returned JSON):
+
+- **CSRF failures** — set a flash error message in `$_SESSION['flash']` and
+  redirect back to the originating form. The header template renders flash
+  messages automatically.
+- **OAuth errors** — capture error details, flash a user-friendly message,
+  and redirect to the login page. Technical details are logged via `Logger`.
+- **No remaining `die()` or bare `exit()` calls** — all early-termination
+  paths use flash+redirect or `ApiResponse::error()` (for API endpoints).
+
+This was tracked in Issue #82.
 
 ---
 
