@@ -44,7 +44,7 @@ define('INSTALL_VERSION', '0.8.1');
 // ---------------------------------------------------------------------------
 // Block re-installation if lock file exists
 // ---------------------------------------------------------------------------
-if (is_file(INSTALL_LOCK_FILE) === true) {
+if (is_file(INSTALL_LOCK_FILE) === true || is_file(INSTALL_CREDS_FILE) === true) {
     http_response_code(403);
     echo '<!doctype html><html><head><title>Already Installed</title>'
        . '<meta name="viewport" content="width=device-width,initial-scale=1">'
@@ -53,7 +53,7 @@ if (is_file(INSTALL_LOCK_FILE) === true) {
        . 'text-decoration:none;border-radius:.4rem;margin-top:1rem;}</style></head>'
        . '<body><h1>Already Installed</h1>'
        . '<p>WebMS Intra has already been installed. To re-run the installer, '
-       . 'delete the lock file at <code>_auth_keys/.installed</code>.</p>'
+       . 'remove both the lock file and credentials file from the <code>_auth_keys/</code> directory.</p>'
        . '<a class="btn" href="/">Go to Portal</a></body></html>';
     exit();
 }
@@ -71,6 +71,14 @@ if (session_status() !== PHP_SESSION_ACTIVE) {
 $step = (int) ($_GET['step'] ?? ($_POST['step'] ?? 1));
 if ($step < 1 || $step > 6) {
     $step = 1;
+}
+
+// Enforce step progression — cannot skip ahead without completing prior steps
+if ($step >= 3 && isset($_SESSION['install_db']) === false) {
+    $step = 2; // DB credentials not yet configured
+}
+if ($step === 6 && is_file(INSTALL_LOCK_FILE) === false) {
+    $step = 5; // Finalization not yet completed
 }
 
 // ---------------------------------------------------------------------------
@@ -110,7 +118,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         . 'CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci'
                     );
                     if ($createResult === false) {
-                        $error = 'Database "' . htmlspecialchars($dbName, ENT_QUOTES, 'UTF-8')
+                        $error = 'Database "' . $dbName
                                . '" does not exist and could not be created. '
                                . 'On shared hosting, you may need to create the database '
                                . 'manually via your hosting control panel (e.g. cPanel, DreamHost Panel) '
@@ -137,7 +145,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 $testConn->close();
             } catch (\mysqli_sql_exception $e) {
-                $error = 'Database connection failed: ' . htmlspecialchars($e->getMessage(), ENT_QUOTES, 'UTF-8');
+                $error = 'Database connection failed: ' . $e->getMessage();
                 $step = 2;
             }
         }
@@ -171,7 +179,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 } while ($db->more_results() === true && $db->next_result());
 
                 if ($queryError !== '') {
-                    $error = 'Schema installation error: ' . htmlspecialchars($queryError, ENT_QUOTES, 'UTF-8');
+                    $error = 'Schema installation error: ' . $queryError;
                     $step = 3;
                 } else {
                     header('Location: ?step=4');
@@ -214,7 +222,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     . 'VALUES (?, ?, 1, 1, 1, NOW(), 1)'
                 );
                 if ($stmt === false) {
-                    $error = 'Failed to prepare user insert: ' . htmlspecialchars($db->error, ENT_QUOTES, 'UTF-8');
+                    $error = 'Failed to prepare user insert: ' . $db->error;
                     $step = 4;
                 } else {
                     $stmt->bind_param('ss', $adminName, $adminEmail);
@@ -470,7 +478,7 @@ $pageTitle = 'Install — ' . ($stepTitles[$step] ?? 'WebMS Intra');
 
     <!-- Error / success messages -->
     <?php if ($error !== ''): ?>
-        <div class="alert alert-danger install-card"><?php echo $error; ?></div>
+        <div class="alert alert-danger install-card"><?php echo htmlspecialchars($error, ENT_QUOTES, 'UTF-8'); ?></div>
     <?php endif; ?>
     <?php if ($success !== ''): ?>
         <div class="alert alert-success install-card"><?php echo htmlspecialchars($success, ENT_QUOTES, 'UTF-8'); ?></div>
