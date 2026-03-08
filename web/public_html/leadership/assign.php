@@ -101,6 +101,35 @@ if ($stmtUsers !== false) {
     $stmtUsers->close();
 }
 
+// 📋 Fetch current active holders per role (for transition UI)
+$roleHolders = [];
+$stmtHolders = $mysqli->prepare(
+    'SELECT a.assignmentID, a.roleID, a.userID, a.personName, '
+    . 'u.fullName AS userName, a.startDate '
+    . 'FROM tblLeadershipAssignments a '
+    . 'LEFT JOIN tblUsers u ON u.userID = a.userID '
+    . 'WHERE a.siteID = ? AND a.isActive = 1 '
+    . 'AND (a.endDate IS NULL OR a.endDate >= CURDATE()) '
+    . 'ORDER BY a.roleID, a.startDate'
+);
+if ($stmtHolders !== false) {
+    $stmtHolders->bind_param('i', $siteId);
+    $stmtHolders->execute();
+    $resultHolders = $stmtHolders->get_result();
+    while ($h = $resultHolders->fetch_assoc()) {
+        $rid = (int) $h['roleID'];
+        if (isset($roleHolders[$rid]) === false) {
+            $roleHolders[$rid] = [];
+        }
+        $roleHolders[$rid][] = [
+            'id'    => (int) $h['assignmentID'],
+            'name'  => $h['userName'] ?? $h['personName'] ?? 'Unknown',
+            'since' => $h['startDate'],
+        ];
+    }
+    $stmtHolders->close();
+}
+
 // 📋 Determine person type for edit mode
 $personType = 'user';
 if ($editAssignment !== null && $editAssignment['userID'] === null) {
@@ -149,6 +178,31 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             </div>
         </div>
     </div>
+
+    <!-- 🔄 Card 1b: Transition — current holders (shown only for create mode) -->
+    <?php if ($editAssignment === null): ?>
+    <div class="card mb-4" id="transitionCard" style="display:none;">
+        <div class="card-header bg-warning-subtle">
+            <h5 class="mb-0"><i class="fa-solid fa-right-left me-1"></i> Current Holders</h5>
+        </div>
+        <div class="card-body">
+            <div id="currentHoldersList" class="mb-3"></div>
+            <div class="form-check">
+                <input type="checkbox" name="endCurrentHolders" value="1" id="endCurrentHolders" class="form-check-input">
+                <label for="endCurrentHolders" class="form-check-label">
+                    End current holder(s) term when this assignment starts
+                </label>
+            </div>
+            <div class="mt-2" id="transitionDateGroup" style="display:none;">
+                <label for="transitionDate" class="form-label">Transition Date</label>
+                <input type="date" name="transitionDate" id="transitionDate" class="form-control"
+                       value="<?php echo htmlspecialchars(date('Y-m-d'), ENT_QUOTES, 'UTF-8'); ?>"
+                       style="max-width:250px;">
+                <small class="text-muted">Current holder(s) end date will be set to the day before this date.</small>
+            </div>
+        </div>
+    </div>
+    <?php endif; ?>
 
     <!-- 👤 Card 2: Person selection -->
     <div class="card mb-4">
@@ -259,6 +313,70 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     toggle();
 })();
 </script>
+
+<!-- 🔄 Role transition — show current holders when role changes (create mode only) -->
+<?php if ($editAssignment === null): ?>
+<script>
+(function () {
+    'use strict';
+
+    // 📋 Role holders data (pre-rendered from PHP)
+    var roleHolders = <?php echo json_encode($roleHolders, JSON_HEX_TAG | JSON_HEX_AMP); ?>;
+
+    var roleSelect       = document.getElementById('roleID');
+    var transitionCard   = document.getElementById('transitionCard');
+    var holdersList      = document.getElementById('currentHoldersList');
+    var endCheckbox      = document.getElementById('endCurrentHolders');
+    var transitionDate   = document.getElementById('transitionDateGroup');
+
+    if (!roleSelect || !transitionCard) { return; }
+
+    // 🔄 Show/hide transition card based on selected role
+    function onRoleChange() {
+        var rid = roleSelect.value;
+        var holders = roleHolders[rid] || [];
+
+        if (holders.length === 0) {
+            transitionCard.style.display = 'none';
+            endCheckbox.checked = false;
+            transitionDate.style.display = 'none';
+            return;
+        }
+
+        // 📋 Build holder list HTML
+        var html = '<ul class="list-unstyled mb-0">';
+        for (var i = 0; i < holders.length; i++) {
+            var h = holders[i];
+            html += '<li class="mb-1"><i class="fa-solid fa-user me-1 text-muted"></i> ';
+            html += '<strong>' + escapeHtml(h.name) + '</strong>';
+            if (h.since) {
+                html += ' <small class="text-muted">(since ' + escapeHtml(h.since) + ')</small>';
+            }
+            html += '</li>';
+        }
+        html += '</ul>';
+        holdersList.innerHTML = html;
+        transitionCard.style.display = '';
+    }
+
+    // 🔄 Show/hide transition date based on checkbox
+    endCheckbox.addEventListener('change', function () {
+        transitionDate.style.display = endCheckbox.checked ? '' : 'none';
+    });
+
+    roleSelect.addEventListener('change', onRoleChange);
+    onRoleChange();
+
+    // 🛡️ Simple HTML escape
+    function escapeHtml(str) {
+        if (!str) { return ''; }
+        var div = document.createElement('div');
+        div.appendChild(document.createTextNode(str));
+        return div.innerHTML;
+    }
+})();
+</script>
+<?php endif; ?>
 
 <noscript>
     <style>

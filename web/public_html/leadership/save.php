@@ -146,6 +146,42 @@ if ($startDateVal !== null && $endDateVal !== null && $endDateVal < $startDateVa
 
 // ➕ CREATE
 if ($action === 'create') {
+    // 🔄 Transition: end current holders if requested
+    $endCurrent     = ($_POST['endCurrentHolders'] ?? '') === '1';
+    $transitionDate = trim($_POST['transitionDate'] ?? '');
+    $transitionedCount = 0;
+
+    if ($endCurrent === true) {
+        // 📋 Calculate the end date for outgoing holders (day before transition date)
+        $transEndDate = null;
+        if ($transitionDate !== '') {
+            $transObj = \DateTime::createFromFormat('Y-m-d', $transitionDate);
+            if ($transObj !== false && $transObj->format('Y-m-d') === $transitionDate) {
+                $transObj->modify('-1 day');
+                $transEndDate = $transObj->format('Y-m-d');
+            }
+        }
+        // 📋 Fallback: if no valid transition date, use yesterday
+        if ($transEndDate === null) {
+            $transEndDate = date('Y-m-d', strtotime('-1 day'));
+        }
+
+        // 🔄 End all current active holders for this role
+        $stmtEnd = $mysqli->prepare(
+            'UPDATE tblLeadershipAssignments '
+            . 'SET endDate = ?, updatedByID = ? '
+            . 'WHERE roleID = ? AND siteID = ? AND isActive = 1 '
+            . 'AND (endDate IS NULL OR endDate >= CURDATE())'
+        );
+        if ($stmtEnd !== false) {
+            $stmtEnd->bind_param('siii', $transEndDate, $userId, $roleID, $siteId);
+            $stmtEnd->execute();
+            $transitionedCount = $stmtEnd->affected_rows;
+            $stmtEnd->close();
+        }
+    }
+
+    // 📋 Insert the new assignment
     $stmt = $mysqli->prepare(
         'INSERT INTO tblLeadershipAssignments '
         . '(siteID, roleID, userID, personName, personEmail, startDate, endDate, notes, createdByID, updatedByID) '
@@ -168,9 +204,17 @@ if ($action === 'create') {
     $stmt->close();
 
     $displayName = $assignName ?? 'User #' . $assignUserID;
-    Logger::activity('LeadershipAssigned', 'Assigned ' . $displayName . ' to ' . $roleName . ' (ID:' . $newId . ')', $userId);
+    $logDetail = 'Assigned ' . $displayName . ' to ' . $roleName . ' (ID:' . $newId . ')';
+    if ($transitionedCount > 0) {
+        $logDetail .= ' — transitioned ' . $transitionedCount . ' outgoing holder(s)';
+    }
+    Logger::activity('LeadershipAssigned', $logDetail, $userId);
 
-    $_SESSION['flash_msg']  = 'Role assignment created successfully.';
+    $flashMsg = 'Role assignment created successfully.';
+    if ($transitionedCount > 0) {
+        $flashMsg .= ' ' . $transitionedCount . ' previous holder(s) transitioned out.';
+    }
+    $_SESSION['flash_msg']  = $flashMsg;
     $_SESSION['flash_type'] = 'success';
     header('Location: /leadership');
     exit();
