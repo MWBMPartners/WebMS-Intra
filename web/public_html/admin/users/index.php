@@ -34,18 +34,78 @@ if (App::isAdmin() === false) {
 }
 
 // -----------------------------------------------------------------------------
-// 📋 Fetch users with their roles and local account status
+// 📋 Pagination & search parameters
+// -----------------------------------------------------------------------------
+$perPage     = 25;
+$currentPage = max(1, (int) ($_GET['page'] ?? 1));
+$search      = trim($_GET['q'] ?? '');
+$filterStatus = $_GET['status'] ?? ''; // 'active', 'inactive', or '' (all)
+$offset      = ($currentPage - 1) * $perPage;
+
+// 🔍 Build WHERE clause dynamically
+$whereClauses = [];
+$bindTypes    = '';
+$bindValues   = [];
+
+if ($search !== '') {
+    $whereClauses[] = '(u.fullName LIKE ? OR u.emailAddress LIKE ? OR la.username LIKE ?)';
+    $searchLike     = '%' . $search . '%';
+    $bindTypes     .= 'sss';
+    $bindValues[]   = &$searchLike;
+    $bindValues[]   = &$searchLike;
+    $bindValues[]   = &$searchLike;
+}
+
+if ($filterStatus === 'active') {
+    $whereClauses[] = 'u.isActive = 1';
+} elseif ($filterStatus === 'inactive') {
+    $whereClauses[] = 'u.isActive = 0';
+}
+
+$whereSQL = count($whereClauses) > 0 ? 'WHERE ' . implode(' AND ', $whereClauses) : '';
+
+// 📊 Count total matching users for pagination
+$countSQL = 'SELECT COUNT(*) AS total FROM tblUsers u '
+    . 'LEFT JOIN tblLocalAccounts la ON la.userID = u.userID '
+    . $whereSQL;
+
+$totalUsers = 0;
+$countStmt  = $mysqli->prepare($countSQL);
+if ($countStmt !== false) {
+    if ($bindTypes !== '') {
+        $countStmt->bind_param($bindTypes, ...$bindValues);
+    }
+    $countStmt->execute();
+    $totalUsers = (int) $countStmt->get_result()->fetch_assoc()['total'];
+    $countStmt->close();
+}
+
+$totalPages = max(1, (int) ceil($totalUsers / $perPage));
+if ($currentPage > $totalPages) {
+    $currentPage = $totalPages;
+    $offset      = ($currentPage - 1) * $perPage;
+}
+
+// -----------------------------------------------------------------------------
+// 📋 Fetch users with their roles and local account status (paginated)
 // -----------------------------------------------------------------------------
 $users = [];
-$stmt = $mysqli->prepare(
-    'SELECT u.userID, u.fullName, u.emailAddress, u.phoneNumber, '
+$dataSQL = 'SELECT u.userID, u.fullName, u.emailAddress, u.phoneNumber, '
     . 'u.isActive, u.isAdmin, u.isRootAdmin, u.createdAt, '
     . 'la.username AS localUsername, la.lastLogin '
     . 'FROM tblUsers u '
     . 'LEFT JOIN tblLocalAccounts la ON la.userID = u.userID '
-    . 'ORDER BY u.fullName ASC'
-);
+    . $whereSQL
+    . ' ORDER BY u.fullName ASC LIMIT ? OFFSET ?';
+
+$dataTypes  = $bindTypes . 'ii';
+$dataValues = $bindValues;
+$dataValues[] = &$perPage;
+$dataValues[] = &$offset;
+
+$stmt = $mysqli->prepare($dataSQL);
 if ($stmt !== false) {
+    $stmt->bind_param($dataTypes, ...$dataValues);
     $stmt->execute();
     $result = $stmt->get_result();
     while ($r = $result->fetch_assoc()) {
@@ -108,6 +168,39 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
     </div>
 <?php endif; ?>
+
+<!-- 🔍 Search and filter bar -->
+<form method="get" class="row g-2 mb-3 align-items-end">
+    <div class="col-12 col-md-5">
+        <label for="searchUsers" class="form-label visually-hidden">Search</label>
+        <div class="input-group">
+            <span class="input-group-text"><i class="fa-solid fa-magnifying-glass"></i></span>
+            <input type="text" class="form-control" id="searchUsers" name="q"
+                   value="<?php echo htmlspecialchars($search, ENT_QUOTES, 'UTF-8'); ?>"
+                   placeholder="Search by name, email, or username&hellip;">
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <label for="filterStatus" class="form-label visually-hidden">Status</label>
+        <select class="form-select" id="filterStatus" name="status">
+            <option value="">All Statuses</option>
+            <option value="active"<?php echo $filterStatus === 'active' ? ' selected' : ''; ?>>Active</option>
+            <option value="inactive"<?php echo $filterStatus === 'inactive' ? ' selected' : ''; ?>>Inactive</option>
+        </select>
+    </div>
+    <div class="col-6 col-md-2">
+        <button type="submit" class="btn btn-outline-primary w-100">
+            <i class="fa-solid fa-filter me-1"></i> Filter
+        </button>
+    </div>
+    <?php if ($search !== '' || $filterStatus !== ''): ?>
+        <div class="col-12 col-md-2">
+            <a href="/admin/users" class="btn btn-outline-secondary w-100">
+                <i class="fa-solid fa-times me-1"></i> Clear
+            </a>
+        </div>
+    <?php endif; ?>
+</form>
 
 <!-- 📋 User list -->
 <div class="portal-data-list">
@@ -184,9 +277,52 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <?php endforeach; ?>
 </div>
 
-<p class="text-muted small mt-3">
-    <?php echo count($users); ?> user<?php echo count($users) !== 1 ? 's' : ''; ?> total
-</p>
+<div class="d-flex justify-content-between align-items-center mt-3">
+    <p class="text-muted small mb-0">
+        Showing <?php echo count($users); ?> of <?php echo $totalUsers; ?> user<?php echo $totalUsers !== 1 ? 's' : ''; ?>
+        <?php if ($search !== ''): ?>
+            matching &ldquo;<?php echo htmlspecialchars($search, ENT_QUOTES, 'UTF-8'); ?>&rdquo;
+        <?php endif; ?>
+    </p>
+    <?php if ($totalPages > 1): ?>
+        <?php
+        // 🔗 Build query string for pagination links
+        $paginationParams = [];
+        if ($search !== '') {
+            $paginationParams['q'] = $search;
+        }
+        if ($filterStatus !== '') {
+            $paginationParams['status'] = $filterStatus;
+        }
+        $baseQuery = count($paginationParams) > 0 ? '&' . http_build_query($paginationParams) : '';
+        ?>
+        <nav aria-label="User list pagination">
+            <ul class="pagination pagination-sm mb-0">
+                <li class="page-item <?php echo $currentPage <= 1 ? 'disabled' : ''; ?>">
+                    <a class="page-link" href="?page=<?php echo $currentPage - 1; ?><?php echo $baseQuery; ?>">
+                        <i class="fa-solid fa-chevron-left"></i>
+                    </a>
+                </li>
+                <?php for ($p = 1; $p <= $totalPages; $p++): ?>
+                    <?php if ($totalPages > 7 && $p > 2 && $p < $totalPages - 1 && abs($p - $currentPage) > 1): ?>
+                        <?php if ($p === 3 || $p === $totalPages - 2): ?>
+                            <li class="page-item disabled"><span class="page-link">&hellip;</span></li>
+                        <?php endif; ?>
+                    <?php else: ?>
+                        <li class="page-item <?php echo $p === $currentPage ? 'active' : ''; ?>">
+                            <a class="page-link" href="?page=<?php echo $p; ?><?php echo $baseQuery; ?>"><?php echo $p; ?></a>
+                        </li>
+                    <?php endif; ?>
+                <?php endfor; ?>
+                <li class="page-item <?php echo $currentPage >= $totalPages ? 'disabled' : ''; ?>">
+                    <a class="page-link" href="?page=<?php echo $currentPage + 1; ?><?php echo $baseQuery; ?>">
+                        <i class="fa-solid fa-chevron-right"></i>
+                    </a>
+                </li>
+            </ul>
+        </nav>
+    <?php endif; ?>
+</div>
 
 <!-- ➕ Add User Modal -->
 <div class="modal fade" id="addUserModal" tabindex="-1" aria-labelledby="addUserLabel" aria-hidden="true">
