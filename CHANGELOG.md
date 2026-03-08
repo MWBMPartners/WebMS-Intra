@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.2] - 2026-03-08
+
+### Added — Installation & Upgrade System (Issue #84)
+
+- **Web-based installation wizard** (`install/index.php`) — 6-step guided setup for first-time installations: prerequisites check, database configuration, schema installation, admin user creation, encryption key generation, finalization
+- **Upgrade handler** (`install/upgrade.php`) — admin-only page to detect and run pending SQL migrations with progress display and migration history
+- **Auto-detection** — front controller redirects to installer when credentials file is missing
+- **Shared hosting support** — graceful error handling when database creation permissions are restricted (prompts user to create DB via hosting panel)
+- **Security protections** — lock file prevents re-installation; credentials stored outside web root; restrictive file permissions
+- SQL migration `025_install_upgrade_route.sql` — route for admin upgrade page
+- Updated `full_schema.sql` — added upgrade route, migration entries through 025
+
 ## [0.9.0] - 2026-03-08
 
 ### Added — Multi-Site Support (Phase 5, Issue #45)

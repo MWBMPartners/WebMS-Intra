@@ -223,14 +223,15 @@ the web-based Migrator (admin-only) and tracked in `tblMigrations`.
 | `015_multisite.sql`                | Multi-site support: tblSites, tblUserSites, siteID columns, multisite settings/routes |
 | `016_google_mail.sql`              | Google Workspace email settings: mail.provider, service account key, delegate user |
 | `017_leadership.sql`               | Leadership app: roles, assignments tables, seed roles, routes, settings |
-| `018_event_series_bulk_edit.sql`   | Event series bulk edit routes and settings |
-| `019_leadership_transitions.sql`   | Leadership role transition workflow fields and settings |
-| `020_csv_export.sql`               | CSV export routes for expenses, attendance, leadership, admin |
-| `021_validator.sql`                | Validation settings and configuration |
-| `022_transaction_helpers.sql`      | Transaction helper support settings |
-| `023_api_router.sql`               | API router refactor — dedicated API route entries |
-| `024_error_handling.sql`           | Error handling standardisation settings |
-| `full_schema.sql`                  | Consolidated schema for fresh installs (all tables + seeds) |
+| `018_multisite_fixes.sql`          | Multi-site bug fixes: missing siteID on recurrence rules, open redirect prevention |
+| `019_slug_uniqueness_multisite.sql` | Composite unique index on event slugs (slug + siteID) |
+| `020_composite_indexes.sql`        | Composite indexes for multi-site query performance |
+| `021_display_format_settings.sql`  | Configurable date/time display format settings |
+| `022_expense_withdrawal.sql`       | Expense claim withdrawal feature, concurrent approval lock |
+| `023_series_bulk_edit_route.sql`   | Event series bulk edit route |
+| `024_csv_export_routes.sql`        | CSV export routes for expenses, attendance, leadership, admin |
+| `025_install_upgrade_route.sql`    | Upgrade handler route for admin upgrade page |
+| `full_schema.sql`                  | Consolidated schema for fresh installs (covers 000–025) |
 
 ---
 
@@ -247,7 +248,8 @@ All paths below are relative to `web/` (the deployable root):
 | `public_html/` | Production web root (front controller, assets, app controllers) |
 | `public_html/{app}/` | App controllers (e.g. `expenses/`, `auth/`, `dashboard/`) |
 | `public_html_dev/` | Dev web root (Gatekeeper-protected) |
-| `_auth_keys/` | Credentials and encryption keys (gitignored) |
+| `install/` | Installation wizard and upgrade handler |
+| `_auth_keys/` | Credentials and encryption keys (gitignored, created by installer) |
 | `_uploads/` | User file uploads (gitignored) |
 | `_backups/` | Server backups (gitignored) |
 | `_libraries/` | Self-hosted libs e.g. dompdf (gitignored) |

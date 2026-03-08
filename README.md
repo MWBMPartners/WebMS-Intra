@@ -106,14 +106,27 @@ Browser -> .htaccess -> index.php -> bootstrap.php -> Router::dispatch()
 - MySQL 8.0+
 - Apache with `mod_rewrite`
 
-### Server Configuration
+### Fresh Installation
 
 1. Upload `web/` contents to the server domain directory
-2. Create `_auth_keys/auth_creds.php` returning: `['db_host'=>..., 'db_user'=>..., 'db_pass'=>..., 'db_name'=>..., 'db_port'=>3306]`
-3. Generate encryption key: `openssl rand -hex 32 > _auth_keys/enc.key`
+2. Navigate to the portal URL in your browser — the installation wizard will start automatically
+3. Follow the 6-step wizard: prerequisites check, database config, schema install, admin account, encryption key generation
 4. Upload dompdf to `_libraries/dompdf/` (download from github.com/dompdf/dompdf)
-5. Access the portal and run pending migrations via admin UI
-6. Configure MS365 OAuth settings in the Settings admin page
+5. Log in and configure site settings and OAuth providers as needed
+
+### Upgrading
+
+1. Upload the updated `web/` files to the server (FTP sync)
+2. Navigate to Admin > Upgrade (or `/install/upgrade.php`)
+3. Review and run any pending SQL migrations
+4. Verify the portal is working correctly
+
+### Manual Configuration (alternative to wizard)
+
+1. Create `_auth_keys/auth_creds.php` returning: `['db_host'=>..., 'db_user'=>..., 'db_pass'=>..., 'db_name'=>..., 'db_port'=>3306]`
+2. Generate encryption key: `openssl rand -hex 32 > _auth_keys/enc.key`
+3. Import `sql/full_schema.sql` into your database
+4. Create a lock file: `touch _auth_keys/.installed`
 
 ### Local Development
 
