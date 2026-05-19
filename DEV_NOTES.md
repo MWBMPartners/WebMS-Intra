@@ -143,15 +143,34 @@ ssh -i ~/.ssh/webms_intra_deploy -p 22 <SFTP_USER>@<SFTP_HOST> 'pwd; ls'
 
 ### 3. Set the GitHub repo secrets
 
+| Secret           | Required | Example value                                                              |
+| ---------------- | -------- | -------------------------------------------------------------------------- |
+| `SFTP_HOST`      | yes      | `iad1-shared-XX-XX.dreamhost.com`                                          |
+| `SFTP_USER`      | yes      | `dh_abcd1234`                                                              |
+| `SFTP_LIVE_PATH` | yes      | `/home/dh_abcd1234/portal.millrdsdacambridge.uk/public_html`               |
+| `SFTP_BETA_PATH` | yes      | `/home/dh_abcd1234/portal.millrdsdacambridge.uk/public_html_beta`          |
+| `SFTP_DEV_PATH`  | yes      | `/home/dh_abcd1234/portal.millrdsdacambridge.uk/public_html_dev`           |
+| `SFTP_PORT`      | no       | `22` (default if omitted)                                                  |
+| `SFTP_KEY`       | one of   | full contents of `~/.ssh/webms_intra_deploy` (private key, preferred)      |
+| `SFTP_PASSWORD`  | one of   | DreamHost SFTP password (fallback when `SFTP_KEY` is unset)                |
+
 ```bash
 gh secret set SFTP_HOST      --body 'iad1-shared-XX-XX.dreamhost.com'
 gh secret set SFTP_USER      --body 'dh_abcd1234'
-gh secret set SFTP_BASE_PATH --body '/home/dh_abcd1234/portal.millrdsdacambridge.uk'
+gh secret set SFTP_LIVE_PATH --body '/home/dh_abcd1234/portal.millrdsdacambridge.uk/public_html'
+gh secret set SFTP_BETA_PATH --body '/home/dh_abcd1234/portal.millrdsdacambridge.uk/public_html_beta'
+gh secret set SFTP_DEV_PATH  --body '/home/dh_abcd1234/portal.millrdsdacambridge.uk/public_html_dev'
 gh secret set SFTP_KEY       < ~/.ssh/webms_intra_deploy
 # optional:
 gh secret set SFTP_PORT      --body '22'
-gh secret set SFTP_PASSWORD  --body '<fallback password>'
+gh secret set SFTP_PASSWORD                       # prompts (avoids password in shell history)
 ```
+
+**Shared-base note.** The shared `core/`, `vendor/`, `sql/` etc. upload to
+`dirname()` of whichever per-branch path applies. When all three paths share
+one parent (the default — recommended for the WebMS-Intra single-site setup),
+all branches' shared code lands in the same place. Point them at different
+parents if you want full isolation.
 
 ### 4. Enable the kill switch
 

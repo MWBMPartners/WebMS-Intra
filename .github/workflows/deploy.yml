@@ -29,12 +29,22 @@
 # ----------------
 #   SFTP_HOST          DreamHost SFTP server (e.g. iad1-shared-XXX.dreamhost.com)
 #   SFTP_USER          DreamHost SFTP user
-#   SFTP_BASE_PATH     Shared remote base (e.g. /home/USER/portal.millrdsdacambridge.uk)
+#   SFTP_LIVE_PATH     Absolute remote path for the main branch's public_html
+#                      (e.g. /home/USER/portal.millrdsdacambridge.uk/public_html)
+#   SFTP_BETA_PATH     Absolute remote path for the beta branch's public_html_beta
+#                      (e.g. /home/USER/portal.millrdsdacambridge.uk/public_html_beta)
+#   SFTP_DEV_PATH      Absolute remote path for the alpha branch's public_html_dev
+#                      (e.g. /home/USER/portal.millrdsdacambridge.uk/public_html_dev)
 #
 # Optional secrets:
 #   SFTP_PORT          Defaults to 22 if missing or non-numeric
 #   SFTP_KEY           SSH private key (preferred over password)
 #   SFTP_PASSWORD      Fallback password used only when SFTP_KEY is empty
+#
+# Shared assets (core/, vendor/, sql/, _includes/, _functions/, _libraries/dompdf/)
+# upload to the PARENT directory of whichever per-branch path applies — so all
+# three branches typically share one parent (the iHymns model). If you want full
+# isolation, point the three paths at different parents.
 #
 # VARIABLES
 # ---------
@@ -124,9 +134,16 @@ jobs:
           fetch-depth: 0
           ref: ${{ github.ref_name }}
 
-      # -- Resolve target channel + remote sub-path --
+      # -- Resolve target channel + remote paths --
+      # Each branch maps to its own full remote path secret (iHymns model).
+      # The shared upload target is dirname(per-branch path), so when all three
+      # share one parent the shared core/vendor/sql land in the same place.
       - name: Determine target channel
         id: target
+        env:
+          LIVE_PATH: ${{ secrets.SFTP_LIVE_PATH }}
+          BETA_PATH: ${{ secrets.SFTP_BETA_PATH }}
+          DEV_PATH:  ${{ secrets.SFTP_DEV_PATH }}
         run: |
           MANUAL_TARGET="${{ github.event.inputs.target }}"
           if [[ -n "$MANUAL_TARGET" ]]; then
@@ -138,22 +155,37 @@ jobs:
 
           case "$CHANNEL" in
             main)
-              echo "channel=live"               >> "$GITHUB_OUTPUT"
-              echo "public_dir=public_html"     >> "$GITHUB_OUTPUT"
+              REMOTE_PUBLIC="$LIVE_PATH"
+              echo "channel=live" >> "$GITHUB_OUTPUT"
               ;;
             beta)
-              echo "channel=beta"               >> "$GITHUB_OUTPUT"
-              echo "public_dir=public_html_beta">> "$GITHUB_OUTPUT"
+              REMOTE_PUBLIC="$BETA_PATH"
+              echo "channel=beta" >> "$GITHUB_OUTPUT"
               ;;
             alpha)
-              echo "channel=alpha"              >> "$GITHUB_OUTPUT"
-              echo "public_dir=public_html_dev" >> "$GITHUB_OUTPUT"
+              REMOTE_PUBLIC="$DEV_PATH"
+              echo "channel=alpha" >> "$GITHUB_OUTPUT"
               ;;
             *)
               echo "::error::Unknown channel: $CHANNEL"
               exit 1
               ;;
           esac
+
+          if [[ -z "$REMOTE_PUBLIC" ]]; then
+            echo "::error::SFTP path secret for channel '$CHANNEL' is empty (set SFTP_LIVE_PATH / SFTP_BETA_PATH / SFTP_DEV_PATH)"
+            exit 1
+          fi
+
+          # Strip trailing slash for tidy paths
+          REMOTE_PUBLIC="${REMOTE_PUBLIC%/}"
+          REMOTE_SHARED="$(dirname "$REMOTE_PUBLIC")"
+
+          echo "remote_public=$REMOTE_PUBLIC" >> "$GITHUB_OUTPUT"
+          echo "remote_shared=$REMOTE_SHARED" >> "$GITHUB_OUTPUT"
+
+          echo "  public path: $REMOTE_PUBLIC"
+          echo "  shared path: $REMOTE_SHARED"
 
       # -- Lint PHP (every file) — blocks deploy on syntax errors --
       - name: Lint PHP
@@ -260,15 +292,14 @@ jobs:
           SFTP_HOST: ${{ secrets.SFTP_HOST }}
           SFTP_USER: ${{ secrets.SFTP_USER }}
           SFTP_PORT: ${{ steps.port.outputs.port }}
-          BASE_PATH: ${{ secrets.SFTP_BASE_PATH }}
-          PUBLIC_DIR: ${{ steps.target.outputs.public_dir }}
+          REMOTE:    ${{ steps.target.outputs.remote_public }}
         run: |
-          REMOTE="${BASE_PATH%/}/${PUBLIC_DIR}/"
-          echo "Deploying web/public_html/ -> $REMOTE"
+          REMOTE_DIR="${REMOTE%/}/"
+          echo "Deploying web/public_html/ -> $REMOTE_DIR"
           cat > /tmp/lftp_public.txt <<LFTP_EOF
           set sftp:connect-program "ssh -o StrictHostKeyChecking=no -i $HOME/.ssh/deploy_key -p ${SFTP_PORT}"
           open sftp://${SFTP_USER}@${SFTP_HOST}:${SFTP_PORT}
-          mirror --reverse --delete --verbose --only-newer --no-empty-dirs $LFTP_EXCLUDES web/public_html/ ${REMOTE}
+          mirror --reverse --delete --verbose --only-newer --no-empty-dirs $LFTP_EXCLUDES web/public_html/ ${REMOTE_DIR}
           bye
           LFTP_EOF
           lftp -f /tmp/lftp_public.txt
@@ -280,16 +311,15 @@ jobs:
           SFTP_USER: ${{ secrets.SFTP_USER }}
           SFTP_PASS: ${{ secrets.SFTP_PASSWORD }}
           SFTP_PORT: ${{ steps.port.outputs.port }}
-          BASE_PATH: ${{ secrets.SFTP_BASE_PATH }}
-          PUBLIC_DIR: ${{ steps.target.outputs.public_dir }}
+          REMOTE:    ${{ steps.target.outputs.remote_public }}
         run: |
-          REMOTE="${BASE_PATH%/}/${PUBLIC_DIR}/"
-          echo "Deploying web/public_html/ -> $REMOTE"
+          REMOTE_DIR="${REMOTE%/}/"
+          echo "Deploying web/public_html/ -> $REMOTE_DIR"
           lftp -u "${SFTP_USER},${SFTP_PASS}" \
             -e "set sftp:auto-confirm yes; set ssl:verify-certificate no; \
                 mirror --reverse --delete --verbose --only-newer --no-empty-dirs \
                 $LFTP_EXCLUDES \
-                web/public_html/ ${REMOTE}; bye" \
+                web/public_html/ ${REMOTE_DIR}; bye" \
             "sftp://${SFTP_HOST}:${SFTP_PORT}"
 
       # ========================================================================
@@ -306,14 +336,14 @@ jobs:
           SFTP_HOST: ${{ secrets.SFTP_HOST }}
           SFTP_USER: ${{ secrets.SFTP_USER }}
           SFTP_PORT: ${{ steps.port.outputs.port }}
-          BASE_PATH: ${{ secrets.SFTP_BASE_PATH }}
+          REMOTE:    ${{ steps.target.outputs.remote_shared }}
         run: |
-          REMOTE="${BASE_PATH%/}/"
-          echo "Deploying shared web/ (core, vendor, sql, _includes, _functions) -> $REMOTE"
+          REMOTE_DIR="${REMOTE%/}/"
+          echo "Deploying shared web/ (core, vendor, sql, _includes, _functions) -> $REMOTE_DIR"
           cat > /tmp/lftp_shared.txt <<LFTP_EOF
           set sftp:connect-program "ssh -o StrictHostKeyChecking=no -i $HOME/.ssh/deploy_key -p ${SFTP_PORT}"
           open sftp://${SFTP_USER}@${SFTP_HOST}:${SFTP_PORT}
-          mirror --reverse --verbose --only-newer --no-empty-dirs $LFTP_EXCLUDES $WEB_ROOT_EXCLUDES web/ ${REMOTE}
+          mirror --reverse --verbose --only-newer --no-empty-dirs $LFTP_EXCLUDES $WEB_ROOT_EXCLUDES web/ ${REMOTE_DIR}
           bye
           LFTP_EOF
           lftp -f /tmp/lftp_shared.txt
@@ -325,15 +355,15 @@ jobs:
           SFTP_USER: ${{ secrets.SFTP_USER }}
           SFTP_PASS: ${{ secrets.SFTP_PASSWORD }}
           SFTP_PORT: ${{ steps.port.outputs.port }}
-          BASE_PATH: ${{ secrets.SFTP_BASE_PATH }}
+          REMOTE:    ${{ steps.target.outputs.remote_shared }}
         run: |
-          REMOTE="${BASE_PATH%/}/"
-          echo "Deploying shared web/ (core, vendor, sql, _includes, _functions) -> $REMOTE"
+          REMOTE_DIR="${REMOTE%/}/"
+          echo "Deploying shared web/ (core, vendor, sql, _includes, _functions) -> $REMOTE_DIR"
           lftp -u "${SFTP_USER},${SFTP_PASS}" \
             -e "set sftp:auto-confirm yes; set ssl:verify-certificate no; \
                 mirror --reverse --verbose --only-newer --no-empty-dirs \
                 $LFTP_EXCLUDES $WEB_ROOT_EXCLUDES \
-                web/ ${REMOTE}; bye" \
+                web/ ${REMOTE_DIR}; bye" \
             "sftp://${SFTP_HOST}:${SFTP_PORT}"
 
       # -- Wipe SSH key from disk --
