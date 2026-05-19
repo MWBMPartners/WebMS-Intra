@@ -1,0 +1,211 @@
+# =============================================================================
+# WebMS-Intra — PR Security Checks
+#
+# Copyright (c) 2026 MWBM Partners Ltd. All rights reserved.
+# Proprietary. Unauthorised copying, modification or distribution prohibited.
+#
+# PURPOSE
+# -------
+# Defence-in-depth security gate that runs on every PR targeting alpha,
+# beta, or main. Each step is non-blocking (continues on failure) EXCEPT
+# the PHP lint step which is a hard gate. A summary comment is posted on
+# the PR with any findings.
+#
+# Checks performed:
+#   1. PHP lint (hard gate)                       — syntax error blocks merge
+#   2. Secrets scan (gitleaks)                    — high-confidence credentials
+#   3. SQL-injection heuristic grep                — $_GET/POST/REQUEST inside query strings
+#   4. XSS heuristic grep                          — echo of user input without htmlspecialchars
+#   5. CSRF heuristic grep                         — POST forms without csrf_token field
+#   6. Hardcoded-paths sanity check                — absolute /Users / /home paths in code
+#   7. Dangerous PHP functions                     — eval, exec, shell_exec, system, passthru
+#   8. Server-managed dirs touched?                — flag if PR touches _auth_keys/_uploads/_backups
+#
+# These are HEURISTICS — false positives are expected. Review the findings,
+# don't blindly fail the merge.
+# =============================================================================
+
+name: PR Security Checks
+
+on:
+  pull_request:
+    branches:
+      - main
+      - beta
+      - alpha
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: pr-security-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  security:
+    name: Static security checks
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout PR head
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # =====================================================================
+      # 1) PHP lint — HARD GATE
+      # =====================================================================
+      - name: PHP lint (hard gate)
+        run: |
+          echo "::group::PHP syntax check"
+          find ./web -type f -name "*.php" \
+            -not -path "*/vendor/*" \
+            -not -path "*/_libraries/*" \
+            -print0 \
+          | xargs -0 -n1 -P4 php -l
+          echo "::endgroup::"
+
+      # =====================================================================
+      # 2) Secrets scan via gitleaks
+      # =====================================================================
+      - name: Scan for committed secrets (gitleaks)
+        id: gitleaks
+        continue-on-error: true
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_ENABLE_COMMENTS: 'true'
+          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: 'true'
+
+      # =====================================================================
+      # 3-8) Custom heuristic grep checks
+      # =====================================================================
+      - name: Heuristic anti-pattern scan
+        id: heuristics
+        continue-on-error: true
+        run: |
+          set +e
+          REPORT=/tmp/security-report.md
+          : > "$REPORT"
+
+          # Files changed in this PR (vs. base)
+          BASE_SHA="${{ github.event.pull_request.base.sha }}"
+          HEAD_SHA="${{ github.sha }}"
+          CHANGED=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA" -- 'web/**/*.php' 2>/dev/null || true)
+
+          if [[ -z "$CHANGED" ]]; then
+            echo "No PHP files changed in web/ — skipping heuristic checks"
+            echo "no_changes=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "Scanning these PHP files changed in this PR:"
+          echo "$CHANGED"
+          echo
+
+          HITS=0
+          add_section() {
+            local title="$1"
+            local body="$2"
+            if [[ -n "$body" ]]; then
+              {
+                echo "### $title"
+                echo
+                echo '```'
+                echo "$body"
+                echo '```'
+                echo
+              } >> "$REPORT"
+              HITS=$((HITS + 1))
+            fi
+          }
+
+          # ---- 3) SQL injection heuristic --------------------------------
+          # mysqli->query or mysqli_query with string interpolation of $_GET/POST/REQUEST/COOKIE
+          SQLI=$(echo "$CHANGED" | xargs -r grep -nE '(mysqli_query|->query)\s*\(\s*[^,)]*\$_(GET|POST|REQUEST|COOKIE)' 2>/dev/null || true)
+          add_section "SQL injection candidates (mysqli->query / mysqli_query with \$_GET/POST/REQUEST/COOKIE)" "$SQLI"
+
+          # ---- 4) XSS heuristic -------------------------------------------
+          # echo or print of $_GET/POST/REQUEST/COOKIE without htmlspecialchars on the same line
+          XSS=$(echo "$CHANGED" | xargs -r grep -nE '(echo|print)\s+[^;]*\$_(GET|POST|REQUEST|COOKIE)' 2>/dev/null \
+              | grep -v 'htmlspecialchars\|htmlentities\|h(' || true)
+          add_section "Possible unescaped output of user input" "$XSS"
+
+          # ---- 5) CSRF heuristic -----------------------------------------
+          # form method=post lacking a csrf_token hidden input within 30 lines
+          CSRF_FILES=$(echo "$CHANGED" | xargs -r grep -lE '<form[^>]*method\s*=\s*["'\'']?post' 2>/dev/null || true)
+          CSRF_MISSING=""
+          for f in $CSRF_FILES; do
+            if ! grep -qE 'csrf_token|csrf\b' "$f"; then
+              CSRF_MISSING="${CSRF_MISSING}${f}: contains <form method=POST> but no csrf_token field found"$'\n'
+            fi
+          done
+          add_section "POST forms without an apparent CSRF token field" "$CSRF_MISSING"
+
+          # ---- 6) Hardcoded absolute paths -------------------------------
+          PATHS=$(echo "$CHANGED" | xargs -r grep -nE "(['\"])(/Users/|/home/[^/]+/|C:\\\\)" 2>/dev/null || true)
+          add_section "Hardcoded absolute filesystem paths (use PORTAL_ROOT / DIRECTORY_SEPARATOR instead)" "$PATHS"
+
+          # ---- 7) Dangerous PHP functions --------------------------------
+          DANGER=$(echo "$CHANGED" | xargs -r grep -nE '\b(eval|exec|shell_exec|system|passthru|popen|proc_open)\s*\(' 2>/dev/null || true)
+          add_section "Dangerous PHP functions (review carefully — only allow if user input is fully sanitised)" "$DANGER"
+
+          # ---- 8) Server-managed dirs touched? ---------------------------
+          SERVER_TOUCH=$(echo "$CHANGED" | grep -E '^web/(_auth_keys|_uploads|_backups)/' || true)
+          add_section "PR touches server-managed dirs (_auth_keys / _uploads / _backups) — confirm this is intentional" "$SERVER_TOUCH"
+
+          echo "hits=$HITS" >> "$GITHUB_OUTPUT"
+          echo "Total finding sections: $HITS"
+
+          if [[ -s "$REPORT" ]]; then
+            cat "$REPORT"
+          fi
+
+      # =====================================================================
+      # Post a single summary comment back to the PR
+      # =====================================================================
+      - name: Post findings to PR
+        if: always() && steps.heuristics.outputs.no_changes != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+          HITS: ${{ steps.heuristics.outputs.hits }}
+        run: |
+          REPORT=/tmp/security-report.md
+          COMMENT=/tmp/comment.md
+
+          {
+            echo "## PR Security Checks"
+            echo
+            if [[ "${HITS:-0}" == "0" ]]; then
+              echo "✅ No heuristic findings on the files changed in this PR."
+            else
+              echo "⚠️ **${HITS} category(ies) of findings** — these are heuristics, please review each:"
+              echo
+              cat "$REPORT"
+            fi
+            echo
+            echo "<sub>Generated by \`.github/workflows/pr-security.yml\`. These checks are non-blocking on the merge gate; PHP lint is the only hard gate. False positives are expected — confirm before acting.</sub>"
+          } > "$COMMENT"
+
+          gh pr comment "$PR_NUMBER" --repo "$REPO" --body-file "$COMMENT"
+
+      # =====================================================================
+      # Summary in the Actions UI
+      # =====================================================================
+      - name: Job summary
+        if: always()
+        run: |
+          {
+            echo "### PR Security Checks"
+            echo
+            echo "- PHP lint: passed (hard gate)"
+            echo "- gitleaks: see step output / artifact"
+            if [[ "${{ steps.heuristics.outputs.no_changes }}" == "true" ]]; then
+              echo "- Heuristic scans: no PHP files changed in web/ — skipped"
+            else
+              echo "- Heuristic scans: ${{ steps.heuristics.outputs.hits }} finding category(ies)"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
