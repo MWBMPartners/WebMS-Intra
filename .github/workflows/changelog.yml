@@ -1,0 +1,184 @@
+# =============================================================================
+# WebMS-Intra — Automatic Changelog Generation
+#
+# Copyright (c) 2026 MWBM Partners Ltd. All rights reserved.
+# Proprietary. Unauthorised copying, modification or distribution prohibited.
+#
+# PURPOSE
+# -------
+# Generates / updates CHANGELOG.md from commit messages since the last v* tag
+# on push to alpha, beta, or main. Commits the result with [skip ci] so the
+# update itself does not retrigger the workflow.
+#
+# Excludes meta commits (CI bot bumps, [skip ci], changelog updates) from
+# the generated section. Per-branch sections use the heading format:
+#   ## [VERSION] - YYYY-MM-DD (branch)
+# so alpha/beta/main entries for the same version can coexist.
+# =============================================================================
+
+name: Changelog
+
+on:
+  push:
+    branches:
+      - alpha
+      - beta
+      - main
+    paths:
+      - 'web/**'
+
+concurrency:
+  group: changelog-${{ github.ref_name }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  changelog:
+    name: Generate changelog
+    runs-on: ubuntu-latest
+
+    # Skip if the triggering commit was a CI automation commit
+    if: "!contains(github.event.head_commit.message, '[skip ci]')"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      # -----------------------------------------------------------------------
+      # Read current portal version from web/core/App.php
+      # -----------------------------------------------------------------------
+      - name: Read current version
+        id: version
+        run: |
+          VERSION_FILE="web/core/App.php"
+          VERSION=$(grep -oP "static string \\\$version\s*=\s*'\K[^']+" "$VERSION_FILE" 2>/dev/null || echo "Unreleased")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Version: $VERSION"
+
+      # -----------------------------------------------------------------------
+      # Determine commit range (since last v* tag, or all history)
+      # -----------------------------------------------------------------------
+      - name: Determine commit range
+        id: range
+        run: |
+          LAST_TAG=$(git describe --tags --abbrev=0 --match 'v*' 2>/dev/null || echo "")
+          if [[ -n "$LAST_TAG" ]]; then
+            echo "range=${LAST_TAG}..HEAD" >> "$GITHUB_OUTPUT"
+            echo "Range: ${LAST_TAG}..HEAD"
+          else
+            echo "range=HEAD" >> "$GITHUB_OUTPUT"
+            echo "No previous v* tags — using full history"
+          fi
+
+      # -----------------------------------------------------------------------
+      # Build the entry text and splice into CHANGELOG.md
+      # -----------------------------------------------------------------------
+      - name: Generate CHANGELOG.md
+        id: generate
+        env:
+          CL_VERSION: ${{ steps.version.outputs.version }}
+          CL_RANGE: ${{ steps.range.outputs.range }}
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          DATE=$(date +%Y-%m-%d)
+          HEADER="## [${CL_VERSION}] - ${DATE} (${BRANCH})"
+          FILTER_OUT='(\[skip ci\]|^chore: bump version|^chore: update changelog)'
+
+          MSGS=$(git log "${CL_RANGE}" --pretty=format:"%s" -- 'web/' 2>/dev/null \
+            | grep -vE "$FILTER_OUT" \
+            | sort -u \
+            | sed '/^$/d' \
+            | sed 's/^/- /' || true)
+
+          if [[ -z "$MSGS" ]]; then
+            echo "No changelog-worthy commits in range"
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Write the entry to a temp file (avoids shell-quoting headaches)
+          {
+            echo "$HEADER"
+            echo "$MSGS"
+          } > /tmp/cl_entry.txt
+
+          # Splice into CHANGELOG.md. The Python helper:
+          #   - creates the file if missing
+          #   - removes any existing section that matches "[VERSION] ... (branch)"
+          #   - inserts the new entry right after the top "# Changelog" header
+          python3 - "$CL_VERSION" "$BRANCH" <<'PYEOF'
+          import os, re, sys
+          version, branch = sys.argv[1], sys.argv[2]
+          path = 'CHANGELOG.md'
+          with open('/tmp/cl_entry.txt', 'r') as f:
+              entry = f.read().rstrip() + '\n'
+
+          if not os.path.exists(path):
+              with open(path, 'w') as f:
+                  f.write('# Changelog\n\n' + entry + '\n')
+              sys.exit(0)
+
+          with open(path, 'r') as f:
+              content = f.read()
+
+          # Strip any prior section for this version+branch
+          pattern = (
+              r'## \[' + re.escape(version) + r'\][^\n]*\('
+              + re.escape(branch) + r'\)[^\n]*\n(?:(?!^## \[).*\n?)*'
+          )
+          content = re.sub(pattern, '', content, flags=re.MULTILINE)
+
+          # Insert after the first "# " heading (and following blank line)
+          if content.startswith('# '):
+              first_nl = content.find('\n')
+              insert_at = first_nl + 1
+              if content[insert_at:insert_at + 1] == '\n':
+                  insert_at += 1
+              new = content[:insert_at] + '\n' + entry + '\n' + content[insert_at:]
+          else:
+              new = entry + '\n' + content
+
+          with open(path, 'w') as f:
+              f.write(new)
+          PYEOF
+
+          echo "has_changes=true" >> "$GITHUB_OUTPUT"
+          echo "Updated CHANGELOG.md"
+
+      # -----------------------------------------------------------------------
+      # Commit + push with [skip ci]; retry on race with version-bump.yml
+      # -----------------------------------------------------------------------
+      - name: Commit changelog
+        if: steps.generate.outputs.has_changes == 'true'
+        env:
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add CHANGELOG.md
+          if git diff --cached --quiet; then
+            echo "No changelog changes to commit"
+            exit 0
+          fi
+
+          git commit -m "chore: update changelog for ${{ steps.version.outputs.version }} [skip ci]"
+
+          for attempt in 1 2 3 4 5; do
+            if git push origin "HEAD:${BRANCH}"; then
+              echo "Pushed on attempt $attempt"
+              exit 0
+            fi
+            echo "Push rejected on attempt $attempt — rebasing and retrying"
+            git fetch origin "${BRANCH}"
+            git rebase "origin/${BRANCH}"
+            sleep $((attempt * 2))
+          done
+
+          echo "::error::Failed to push changelog after 5 attempts"
+          exit 1

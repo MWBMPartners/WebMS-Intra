@@ -42,45 +42,184 @@ with `web/`.
 
 ## Deployment Model
 
-WebMS Intra uses a **single-branch deployment model**. Only the `web/` directory
-is synced to the server via FTP.
+WebMS Intra uses a **three-branch SFTP deployment model** modelled on the
+iHymns pipeline. Only `web/` is synced; the active branch decides which
+public web root the upload lands in.
 
-| Environment | Branch / Trigger | What Deploys | URL |
-| ----------- | --------------- | ------------ | --- |
-| **Dev** | Every push to `main` | `web/` → server root | dev subdomain |
-| **Production** | Tagged release (`v*`) | `web/` → server root | main domain |
+| Branch  | Channel    | Public dir on server  | Auto-bump rule           |
+| ------- | ---------- | --------------------- | ------------------------ |
+| `alpha` | alpha/dev  | `public_html_dev/`    | PATCH (always)           |
+| `beta`  | beta       | `public_html_beta/`   | Conventional Commits     |
+| `main`  | production | `public_html/`        | none — tag `v*` manually |
 
-### How It Works
+### Remote layout (shared base)
 
+All three branches share **one** remote base directory on DreamHost. Per
+branch, `web/public_html/` mirrors to a different sibling; everything else
+inside `web/` (`core/`, `vendor/`, `sql/`, `_includes/`, `_functions/`) goes
+to the shared base from every branch — **last push wins for shared code**.
+
+```text
+SFTP_BASE_PATH/
+├── core/                  ← from web/core/         (all branches)
+├── vendor/                ← from web/vendor/       (all branches)
+├── sql/                   ← from web/sql/          (all branches)
+├── _auth_keys/            ← server-managed (excluded from sync)
+├── _libraries/dompdf/     ← fetched at deploy time by tools/download-dompdf.sh
+├── _uploads/              ← server-managed (excluded from sync)
+├── _backups/              ← server-managed (excluded from sync)
+├── public_html/           ← from web/public_html/  (main branch)
+├── public_html_beta/      ← from web/public_html/  (beta branch)
+└── public_html_dev/       ← from web/public_html/  (alpha branch)
 ```
-commit ──► push to main ──► GitHub Actions ──► FTP sync web/ to server
-                                                  (automatic, every push)
 
-git tag v0.3.0 ──► push tag ──► GitHub Actions ──► FTP sync web/ to server
-                                                      (production release)
-```
+### Workflows
 
-Server-managed directories are **excluded** from sync:
-`_auth_keys/`, `_uploads/`, `_backups/`, `_libraries/`
+- `deploy.yml` — push to alpha/beta/main, or manual dispatch. PHP-lint, fetch
+  pinned dompdf, SFTP via lftp (SSH key first, password fallback).
+- `version-bump.yml` — push to alpha or beta. Alpha always bumps PATCH; beta
+  uses Conventional Commits (BREAKING/`!:` → major, `feat(` → minor, else patch).
+- `changelog.yml` — push to alpha/beta/main. Appends per-branch sections to
+  `CHANGELOG.md` from commit messages since the last `v*` tag.
+- `release.yml` — push of any `v*` tag. Creates a GitHub Release from
+  `CHANGELOG.md`; tags containing `-beta` or `-rc` are marked pre-release.
+- `auto-merge-alpha.yml` — PR opened or synchronised against `alpha`. Enables
+  GitHub native auto-merge and dispatches `deploy.yml` after merge.
 
 ### Day-to-Day Workflow
 
-1. Work directly on `main` (or short-lived feature branches merged into `main`)
-2. Push to `main` -- dev site updates automatically
-3. Test on the dev site (restricted to authorised users via Gatekeeper)
-4. When ready for production, tag a release:
+1. Branch off `alpha` for new work.
+2. Open a PR against `alpha` → auto-merge fires once checks pass.
+3. When `alpha` is stable, open a PR from `alpha` → `beta` for wider testing.
+4. When `beta` is stable, open a PR from `beta` → `main` for production.
+5. Tag a release on `main`:
 
 ```bash
-git tag v0.3.0
-git push origin v0.3.0
+git tag -a v0.9.0 -m "Release notes summary"
+git push origin v0.9.0   # fires release.yml
 ```
-
-5. GitHub Actions deploys the tagged code to the server
 
 ### Manual Deploy Override
 
-The workflow also supports manual dispatch via the GitHub Actions UI:
-**Actions > Deploy to DreamHost > Run workflow** -- choose `dev` or `live`.
+`Actions → Deploy via SFTP → Run workflow` accepts an override target
+(`alpha` / `beta` / `main`) that bypasses the branch-based mapping for a
+one-off deploy.
+
+### Commit flags
+
+- `[skip ci]` — skip every workflow on this commit
+- `[deploy all]` — force a full re-sync regardless of change detection
+
+---
+
+## CI/CD Secrets Setup — Step-by-Step
+
+Configure these once when bringing a fresh repo (or a new server) online.
+
+### 1. Generate the SSH deploy keypair (preferred over password)
+
+On your local machine:
+
+```bash
+ssh-keygen -t ed25519 -C "webms-intra-deploy@github" \
+  -f ~/.ssh/webms_intra_deploy -N ''
+```
+
+Produces:
+
+- `~/.ssh/webms_intra_deploy`     — private key (goes into GitHub secret `SFTP_KEY`)
+- `~/.ssh/webms_intra_deploy.pub` — public key (goes onto the DreamHost server)
+
+### 2. Authorise the public key on DreamHost
+
+DreamHost panel → **Users → SFTP Users → [deploy user] → Manage Users**,
+paste the contents of `~/.ssh/webms_intra_deploy.pub` into **Authorized Keys**.
+
+Verify from your laptop:
+
+```bash
+ssh -i ~/.ssh/webms_intra_deploy -p 22 <SFTP_USER>@<SFTP_HOST> 'pwd; ls'
+```
+
+### 3. Set the GitHub repo secrets
+
+| Secret           | Required | Example value                                                              |
+| ---------------- | -------- | -------------------------------------------------------------------------- |
+| `SFTP_HOST`      | yes      | `iad1-shared-XX-XX.dreamhost.com`                                          |
+| `SFTP_USER`      | yes      | `dh_abcd1234`                                                              |
+| `SFTP_LIVE_PATH` | yes      | `/home/dh_abcd1234/portal.millrdsdacambridge.uk/public_html`               |
+| `SFTP_BETA_PATH` | yes      | `/home/dh_abcd1234/portal.millrdsdacambridge.uk/public_html_beta`          |
+| `SFTP_DEV_PATH`  | yes      | `/home/dh_abcd1234/portal.millrdsdacambridge.uk/public_html_dev`           |
+| `SFTP_PORT`      | no       | `22` (default if omitted)                                                  |
+| `SFTP_KEY`       | one of   | full contents of `~/.ssh/webms_intra_deploy` (private key, preferred)      |
+| `SFTP_PASSWORD`  | one of   | DreamHost SFTP password (fallback when `SFTP_KEY` is unset)                |
+
+```bash
+gh secret set SFTP_HOST      --body 'iad1-shared-XX-XX.dreamhost.com'
+gh secret set SFTP_USER      --body 'dh_abcd1234'
+gh secret set SFTP_LIVE_PATH --body '/home/dh_abcd1234/portal.millrdsdacambridge.uk/public_html'
+gh secret set SFTP_BETA_PATH --body '/home/dh_abcd1234/portal.millrdsdacambridge.uk/public_html_beta'
+gh secret set SFTP_DEV_PATH  --body '/home/dh_abcd1234/portal.millrdsdacambridge.uk/public_html_dev'
+gh secret set SFTP_KEY       < ~/.ssh/webms_intra_deploy
+# optional:
+gh secret set SFTP_PORT      --body '22'
+gh secret set SFTP_PASSWORD                       # prompts (avoids password in shell history)
+```
+
+**Shared-base note.** The shared `core/`, `vendor/`, `sql/` etc. upload to
+`dirname()` of whichever per-branch path applies. When all three paths share
+one parent (the default — recommended for the WebMS-Intra single-site setup),
+all branches' shared code lands in the same place. Point them at different
+parents if you want full isolation.
+
+### 4. Enable the kill switch
+
+```bash
+gh variable set SFTP_ENABLED --body 'true'
+```
+
+While `SFTP_ENABLED != 'true'`, all deploy runs no-op.
+
+### 5. Repo settings (one-time UI clicks)
+
+1. **Settings → General → Pull Requests → Allow auto-merge** = ON.
+2. **Settings → Branches → Add rule** on `alpha`, `beta`, and `main`:
+   - Disable allow-deletions
+   - Disable allow-force-pushes
+   - (Recommended) Require status check on `main`
+
+### 6. Verify
+
+```bash
+gh workflow run deploy.yml --ref main
+gh run watch
+```
+
+### Rotating the SSH key
+
+1. Generate a new keypair
+2. Add the new public key on DreamHost (don't remove the old yet)
+3. Update `SFTP_KEY` in GitHub
+4. Trigger a manual deploy to confirm
+5. Remove the old public key from DreamHost
+
+---
+
+## dompdf at deploy time
+
+Expense PDF generation depends on dompdf in `_libraries/dompdf/`. The library
+is **not** committed to this repo — `tools/download-dompdf.sh` fetches the
+pinned version at deploy time and the lftp mirror uploads it as part of the
+shared `web/` sync. Update the pinned version by editing `DOMPDF_VERSION` in
+that script.
+
+For local development:
+
+```bash
+bash tools/download-dompdf.sh
+```
+
+The script is idempotent — re-runs skip if the right version is already present.
 
 ---
 

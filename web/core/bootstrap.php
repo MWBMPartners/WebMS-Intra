@@ -56,10 +56,13 @@ define('PORTAL_APPS',   PORTAL_ROOT . DIRECTORY_SEPARATOR . 'public_html');
 define('PORTAL_VENDOR', PORTAL_ROOT . DIRECTORY_SEPARATOR . 'vendor');
 define('PORTAL_SQL',    PORTAL_ROOT . DIRECTORY_SEPARATOR . 'sql');
 
-// 🌍 Determine runtime environment flag (dev | prod)
+// 🌍 Determine runtime environment flag (dev | beta | prod)
 // Priority: 1) PORTAL_ENV env var  2) directory name detection  3) default 'dev'
-// Primary directories: public_html (prod), public_html_dev (dev)
-// Legacy alpha_html / beta_html checks kept for backwards compatibility
+// Primary directories: public_html (prod), public_html_beta (beta), public_html_dev (dev)
+// Legacy alpha_html / beta_html checks kept for backwards compatibility.
+// IMPORTANT: order matters — public_html_dev / public_html_beta must be tested
+// BEFORE public_html, since str_contains() would otherwise match "public_html"
+// inside the beta/dev directory names and misclassify them as prod.
 // See: https://www.php.net/manual/en/function.getenv.php
 $env = getenv('PORTAL_ENV');
 if ($env === false || $env === '') {
@@ -67,7 +70,7 @@ if ($env === false || $env === '') {
     $docRoot = $_SERVER['DOCUMENT_ROOT'] ?? '';
     if (str_contains($docRoot, 'public_html_dev') === true || str_contains($docRoot, 'alpha_html') === true) {
         $env = 'dev';
-    } elseif (str_contains($docRoot, 'beta_html') === true) {
+    } elseif (str_contains($docRoot, 'public_html_beta') === true || str_contains($docRoot, 'beta_html') === true) {
         $env = 'beta';
     } elseif (str_contains($docRoot, 'public_html') === true) {
         $env = 'prod';

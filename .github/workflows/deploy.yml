@@ -1,84 +1,424 @@
-# ===============================
-# GitHub Action - FTP Deploy
-# ===============================
-# Single-branch deployment model:
-#   - Push to main  -> deploys web/ to server root (dev, automatic)
-#   - Tagged v*     -> deploys web/ to server root (production, automatic)
-#   - Manual        -> choice of target (override)
+# =============================================================================
+# WebMS-Intra — Deploy via SFTP
 #
-# Only the web/ directory is deployed to the server. Repo-level files
-# (.github, .claude, README, etc.) are NOT uploaded.
+# Copyright (c) 2026 MWBM Partners Ltd. All rights reserved.
+# Proprietary. Unauthorised copying, modification or distribution prohibited.
 #
-# The remote server structure is:
-#   portal.millrdsdacambridge.uk/
-#     ├── core/              ← PHP framework (above web root)
-#     ├── vendor/            ← Self-hosted libraries
-#     ├── sql/               ← Migrations
-#     ├── _auth_keys/        ← Credentials (not deployed — managed on server)
-#     ├── _libraries/        ← Self-hosted libs like dompdf (not deployed)
-#     ├── public_html/       ← Production web root (app controllers + assets)
-#     ├── public_html_dev/   ← Dev web root (Gatekeeper-protected)
-#     └── ...
+# PURPOSE
+# -------
+# Multi-branch SFTP deployment to DreamHost. Mirrors the iHymns deployment
+# model, adapted for the WebMS-Intra web/ + public_html layout.
 #
-# Required secrets: DH_HOST, DH_USER, DH_PASS
-# -----------------------------------------------
-name: Deploy to DreamHost
+# CHANNEL MODEL
+# -------------
+# Three branches map to three web roots on a SINGLE shared remote base:
+#
+#   main   -> web/public_html/  ->  <base>/public_html/        (production)
+#   beta   -> web/public_html/  ->  <base>/public_html_beta/   (beta)
+#   alpha  -> web/public_html/  ->  <base>/public_html_dev/    (alpha / dev)
+#
+# Everything else inside web/ (core/, vendor/, sql/, _includes/, _functions/)
+# uploads to the SHARED <base>/ directory on every branch. Whichever branch
+# pushed last wins for shared code — protect main with branch rules if this
+# matters for your workflow.
+#
+# Excluded from every upload (server-managed):
+#   _auth_keys/  _uploads/  _backups/  _libraries/  .DS_Store
+#
+# SECRETS REQUIRED
+# ----------------
+#   SFTP_HOST          DreamHost SFTP server (e.g. iad1-shared-XXX.dreamhost.com)
+#   SFTP_USER          DreamHost SFTP user
+#   SFTP_LIVE_PATH     Absolute remote path for the main branch's public_html
+#                      (e.g. /home/USER/portal.millrdsdacambridge.uk/public_html)
+#   SFTP_BETA_PATH     Absolute remote path for the beta branch's public_html_beta
+#                      (e.g. /home/USER/portal.millrdsdacambridge.uk/public_html_beta)
+#   SFTP_DEV_PATH      Absolute remote path for the alpha branch's public_html_dev
+#                      (e.g. /home/USER/portal.millrdsdacambridge.uk/public_html_dev)
+#
+# Optional secrets:
+#   SFTP_PORT          Defaults to 22 if missing or non-numeric
+#   SFTP_KEY           SSH private key (preferred over password)
+#   SFTP_PASSWORD      Fallback password used only when SFTP_KEY is empty
+#
+# Shared assets (core/, vendor/, sql/, _includes/, _functions/, _libraries/dompdf/)
+# upload to the PARENT directory of whichever per-branch path applies — so all
+# three branches typically share one parent (the iHymns model). If you want full
+# isolation, point the three paths at different parents.
+#
+# VARIABLES
+# ---------
+#   vars.SFTP_ENABLED  Must be 'true' to enable deployment (kill switch)
+#
+# COMMIT FLAGS
+# ------------
+#   [skip ci]      Skip this workflow entirely
+#   [deploy all]   Force full sync regardless of change detection
+# =============================================================================
+
+name: Deploy via SFTP
 
 on:
   push:
-    branches: [ main ]
-    tags: [ 'v*' ]
+    branches:
+      - main
+      - beta
+      - alpha
+    paths:
+      - 'web/**'
+      - '.github/workflows/deploy.yml'
   workflow_dispatch:
     inputs:
       target:
-        description: "Deploy target"
+        description: "Override deploy target (alpha / beta / main). Leave blank to use the current branch."
         required: false
-        default: "dev"
         type: choice
+        default: ""
         options:
-          - dev
-          - live
+          - ""
+          - alpha
+          - beta
+          - main
+
+permissions:
+  contents: read
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    if: vars.SFTP_ENABLED == 'true'
 
-    # Remote base path — web/ contents are synced to this directory
+    # Shared lftp exclude flags. Patterns with wildcards are single-quoted in
+    # YAML so they pass through the shell as literal regexes for lftp.
     env:
-      FTP_HOST: ${{ secrets.DH_HOST }}
-      FTP_USER: ${{ secrets.DH_USER }}
-      FTP_PASS: ${{ secrets.DH_PASS }}
-      REMOTE_BASE: portal.millrdsdacambridge.uk
+      LFTP_EXCLUDES: >-
+        --exclude ^\.DS_Store$
+        --exclude ^Thumbs\.db$
+        --exclude ^\.git/
+        --exclude ^\.github/
+        --exclude ^\.gitkeep$
+        --exclude ^\.gitignore$
+        --exclude ^\.gitattributes$
+        --exclude ^README\.md$
+        --exclude ^DEV_NOTES\.md$
+        --exclude ^CHANGELOG\.md$
+        --exclude ^CLAUDE\.md$
+        --exclude ^\.htpasswd
+        --exclude ^\.vscode/
+        --exclude ^\.idea/
+        --exclude ^\.editorconfig$
+        --exclude \.swp$
+        --exclude \.swo$
+        --exclude ~$
+      # NOTE: _libraries/ is INTENTIONALLY not excluded — dompdf is fetched
+      # at build time by tools/download-dompdf.sh into web/_libraries/dompdf/
+      # and needs to ride along with the shared upload. The shared mirror runs
+      # without --delete, so any other server-managed contents of _libraries/
+      # are preserved.
+      WEB_ROOT_EXCLUDES: >-
+        --exclude ^_auth_keys/
+        --exclude ^_uploads/
+        --exclude ^_backups/
+        --exclude ^public_html/
+        --exclude ^public_html_dev/
+        --exclude ^public_html_beta/
+        --exclude ^public_html_landing/
+        --exclude ^public_html_redir/
+        --exclude ^private_html/
 
     steps:
-      - name: Checkout repo
+      # -- Checkout code --
+      - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.ref_name }}
 
-      - name: Select target path
-        id: set-path
+      # -- Resolve target channel + remote paths --
+      # Each branch maps to its own full remote path secret (iHymns model).
+      # The shared upload target is dirname(per-branch path), so when all three
+      # share one parent the shared core/vendor/sql land in the same place.
+      - name: Determine target channel
+        id: target
+        env:
+          LIVE_PATH: ${{ secrets.SFTP_LIVE_PATH }}
+          BETA_PATH: ${{ secrets.SFTP_BETA_PATH }}
+          DEV_PATH:  ${{ secrets.SFTP_DEV_PATH }}
         run: |
-          echo "::group::Select remote path"
-          # All targets deploy to the same base — the server structure
-          # inside web/ determines which web root is used
-          echo "path=${REMOTE_BASE}" >> $GITHUB_OUTPUT
-          echo "::endgroup::"
+          MANUAL_TARGET="${{ github.event.inputs.target }}"
+          if [[ -n "$MANUAL_TARGET" ]]; then
+            CHANNEL="$MANUAL_TARGET"
+            echo "Manual dispatch override: $CHANNEL"
+          else
+            CHANNEL="${{ github.ref_name }}"
+          fi
 
+          case "$CHANNEL" in
+            main)
+              REMOTE_PUBLIC="$LIVE_PATH"
+              echo "channel=live" >> "$GITHUB_OUTPUT"
+              ;;
+            beta)
+              REMOTE_PUBLIC="$BETA_PATH"
+              echo "channel=beta" >> "$GITHUB_OUTPUT"
+              ;;
+            alpha)
+              REMOTE_PUBLIC="$DEV_PATH"
+              echo "channel=alpha" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "::error::Unknown channel: $CHANNEL"
+              exit 1
+              ;;
+          esac
+
+          if [[ -z "$REMOTE_PUBLIC" ]]; then
+            echo "::error::SFTP path secret for channel '$CHANNEL' is empty (set SFTP_LIVE_PATH / SFTP_BETA_PATH / SFTP_DEV_PATH)"
+            exit 1
+          fi
+
+          # Strip trailing slash for tidy paths
+          REMOTE_PUBLIC="${REMOTE_PUBLIC%/}"
+          REMOTE_SHARED="$(dirname "$REMOTE_PUBLIC")"
+
+          echo "remote_public=$REMOTE_PUBLIC" >> "$GITHUB_OUTPUT"
+          echo "remote_shared=$REMOTE_SHARED" >> "$GITHUB_OUTPUT"
+
+          echo "  public path: $REMOTE_PUBLIC"
+          echo "  shared path: $REMOTE_SHARED"
+
+      # -- Lint PHP (every file) — blocks deploy on syntax errors --
       - name: Lint PHP
         run: |
-          echo "::group::PHP Lint"
-          find ./web -type f -name "*.php" -not -path "*/vendor/*" -print0 | xargs -0 -n1 -P4 php -l
+          echo "::group::PHP lint"
+          find ./web -type f -name "*.php" \
+            -not -path "*/vendor/*" \
+            -not -path "*/_libraries/*" \
+            -print0 \
+          | xargs -0 -n1 -P4 php -l
           echo "::endgroup::"
 
-      - name: Sync web/ to server via lftp
-        uses: sebastianpopp/ftp-action@v1
-        with:
-          host:   ${{ env.FTP_HOST }}
-          user:   ${{ env.FTP_USER }}
-          pass:   ${{ env.FTP_PASS }}
-          local:  ./web/
-          remote: ${{ steps.set-path.outputs.path }}
-          args:   "--verbose --parallel=4 --delete --exclude _auth_keys/ --exclude _uploads/ --exclude _backups/ --exclude _libraries/ --exclude .DS_Store"
+      # -- Change detection (skip deploy when nothing relevant changed) --
+      - name: Detect deployable changes
+        id: changes
+        run: |
+          COMMIT_MSG=$(git log -1 --pretty=format:"%s")
+          if echo "$COMMIT_MSG" | grep -q "\[deploy all\]"; then
+            echo "Force full deploy via [deploy all] flag"
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # workflow_dispatch always deploys
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "Manual dispatch — deploying"
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          CHANGED=$(git diff --name-only HEAD~5 HEAD -- 'web/' 2>/dev/null \
+            | grep -vE 'README\.md|DEV_NOTES\.md|CHANGELOG\.md|\.DS_Store|\.gitkeep|\.gitignore' \
+            | sort -u || true)
+
+          if [[ -z "$CHANGED" ]]; then
+            echo "No deployable changes in web/ — skipping"
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Changed files:"
+            echo "$CHANGED"
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # -- Fetch pinned dompdf into web/_libraries/dompdf/ so it gets uploaded
+      #    as part of the shared web/ sync. Skips if already present at the
+      #    pinned version. See tools/download-dompdf.sh for the pin.
+      - name: Fetch dompdf (pinned)
+        if: steps.changes.outputs.has_changes == 'true'
+        run: bash tools/download-dompdf.sh
+
+      # -- Install lftp --
+      - name: Install lftp
+        if: steps.changes.outputs.has_changes == 'true'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq lftp
+
+      # -- Resolve SFTP port (default 22 on missing / non-numeric) --
+      - name: Resolve SFTP port
+        if: steps.changes.outputs.has_changes == 'true'
+        id: port
+        env:
+          RAW_PORT: ${{ secrets.SFTP_PORT }}
+        run: |
+          TRIMMED=$(echo "$RAW_PORT" | tr -d '[:space:]')
+          if [[ "$TRIMMED" =~ ^[0-9]+$ ]] && [[ "$TRIMMED" -ge 1 ]] && [[ "$TRIMMED" -le 65535 ]]; then
+            echo "port=$TRIMMED" >> "$GITHUB_OUTPUT"
+          else
+            echo "port=22" >> "$GITHUB_OUTPUT"
+          fi
+
+      # -- Choose auth method: SSH key preferred, password fallback --
+      - name: Choose auth method
+        if: steps.changes.outputs.has_changes == 'true'
+        id: auth
+        env:
+          SFTP_KEY: ${{ secrets.SFTP_KEY }}
+          SFTP_PASSWORD: ${{ secrets.SFTP_PASSWORD }}
+        run: |
+          if [[ -n "$SFTP_KEY" ]]; then
+            echo "method=key" >> "$GITHUB_OUTPUT"
+          elif [[ -n "$SFTP_PASSWORD" ]]; then
+            echo "method=password" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::Neither SFTP_KEY nor SFTP_PASSWORD is configured"
+            exit 1
+          fi
+
+      # -- Stage SSH key on disk if we'll use key auth --
+      - name: Stage SSH key
+        if: steps.changes.outputs.has_changes == 'true' && steps.auth.outputs.method == 'key'
+        env:
+          SFTP_KEY: ${{ secrets.SFTP_KEY }}
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          echo "$SFTP_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+
+      # ========================================================================
+      # 1) Upload web/public_html/  ->  <base>/<public_dir>/   (per branch)
+      # ========================================================================
+
+      - name: Deploy public_html via SFTP (SSH key)
+        if: steps.changes.outputs.has_changes == 'true' && steps.auth.outputs.method == 'key'
+        env:
+          SFTP_HOST: ${{ secrets.SFTP_HOST }}
+          SFTP_USER: ${{ secrets.SFTP_USER }}
+          SFTP_PORT: ${{ steps.port.outputs.port }}
+          REMOTE:    ${{ steps.target.outputs.remote_public }}
+        run: |
+          REMOTE_DIR="${REMOTE%/}/"
+          echo "Deploying web/public_html/ -> $REMOTE_DIR"
+          cat > /tmp/lftp_public.txt <<LFTP_EOF
+          set sftp:connect-program "ssh -o StrictHostKeyChecking=no -i $HOME/.ssh/deploy_key -p ${SFTP_PORT}"
+          open sftp://${SFTP_USER}@${SFTP_HOST}:${SFTP_PORT}
+          mirror --reverse --delete --verbose --only-newer --no-empty-dirs $LFTP_EXCLUDES web/public_html/ ${REMOTE_DIR}
+          bye
+          LFTP_EOF
+          lftp -f /tmp/lftp_public.txt
+
+      - name: Deploy public_html via SFTP (password)
+        if: steps.changes.outputs.has_changes == 'true' && steps.auth.outputs.method == 'password'
+        env:
+          SFTP_HOST: ${{ secrets.SFTP_HOST }}
+          SFTP_USER: ${{ secrets.SFTP_USER }}
+          SFTP_PASS: ${{ secrets.SFTP_PASSWORD }}
+          SFTP_PORT: ${{ steps.port.outputs.port }}
+          REMOTE:    ${{ steps.target.outputs.remote_public }}
+        run: |
+          REMOTE_DIR="${REMOTE%/}/"
+          echo "Deploying web/public_html/ -> $REMOTE_DIR"
+          lftp -u "${SFTP_USER},${SFTP_PASS}" \
+            -e "set sftp:auto-confirm yes; set ssl:verify-certificate no; \
+                mirror --reverse --delete --verbose --only-newer --no-empty-dirs \
+                $LFTP_EXCLUDES \
+                web/public_html/ ${REMOTE_DIR}; bye" \
+            "sftp://${SFTP_HOST}:${SFTP_PORT}"
+
+      # ========================================================================
+      # 2) Upload everything else in web/  ->  <REMOTE_SHARED>/   (shared)
+      #
+      #    Excluded entirely (server-managed or per-branch — see envs above):
+      #      _auth_keys/  _uploads/  _backups/      ← server-managed contents
+      #      public_html/  public_html_dev/  public_html_beta/
+      #      public_html_landing/  public_html_redir/  private_html/
+      #
+      #    Uses --delete: the repo is the source of truth for the shared
+      #    dirs (core/, vendor/, sql/, _includes/, _functions/,
+      #    _libraries/dompdf/). Removing a file from the repo removes it
+      #    from the server on next deploy. The excludes ensure server-only
+      #    state (credentials, uploads, backups, other web roots) is
+      #    NEVER touched.
+      #
+      #    Before mirroring, mkd -p creates _auth_keys/, _uploads/,
+      #    _backups/ on the server if they don't exist yet — so the app
+      #    has writable target dirs without ever uploading their contents.
+      # ========================================================================
+
+      - name: Deploy shared web/ via SFTP (SSH key)
+        if: steps.changes.outputs.has_changes == 'true' && steps.auth.outputs.method == 'key'
+        env:
+          SFTP_HOST: ${{ secrets.SFTP_HOST }}
+          SFTP_USER: ${{ secrets.SFTP_USER }}
+          SFTP_PORT: ${{ steps.port.outputs.port }}
+          REMOTE:    ${{ steps.target.outputs.remote_shared }}
+        run: |
+          REMOTE_DIR="${REMOTE%/}/"
+          echo "Deploying shared web/ (core, vendor, sql, _includes, _functions, _libraries/dompdf) -> $REMOTE_DIR"
+          cat > /tmp/lftp_shared.txt <<LFTP_EOF
+          set sftp:connect-program "ssh -o StrictHostKeyChecking=no -i $HOME/.ssh/deploy_key -p ${SFTP_PORT}"
+          open sftp://${SFTP_USER}@${SFTP_HOST}:${SFTP_PORT}
+          mkdir -p -f ${REMOTE_DIR}_auth_keys
+          mkdir -p -f ${REMOTE_DIR}_uploads
+          mkdir -p -f ${REMOTE_DIR}_backups
+          mirror --reverse --delete --verbose --only-newer --no-empty-dirs $LFTP_EXCLUDES $WEB_ROOT_EXCLUDES web/ ${REMOTE_DIR}
+          bye
+          LFTP_EOF
+          lftp -f /tmp/lftp_shared.txt
+
+      - name: Deploy shared web/ via SFTP (password)
+        if: steps.changes.outputs.has_changes == 'true' && steps.auth.outputs.method == 'password'
+        env:
+          SFTP_HOST: ${{ secrets.SFTP_HOST }}
+          SFTP_USER: ${{ secrets.SFTP_USER }}
+          SFTP_PASS: ${{ secrets.SFTP_PASSWORD }}
+          SFTP_PORT: ${{ steps.port.outputs.port }}
+          REMOTE:    ${{ steps.target.outputs.remote_shared }}
+        run: |
+          REMOTE_DIR="${REMOTE%/}/"
+          echo "Deploying shared web/ (core, vendor, sql, _includes, _functions, _libraries/dompdf) -> $REMOTE_DIR"
+          lftp -u "${SFTP_USER},${SFTP_PASS}" \
+            -e "set sftp:auto-confirm yes; set ssl:verify-certificate no; \
+                mkdir -p -f ${REMOTE_DIR}_auth_keys; \
+                mkdir -p -f ${REMOTE_DIR}_uploads; \
+                mkdir -p -f ${REMOTE_DIR}_backups; \
+                mirror --reverse --delete --verbose --only-newer --no-empty-dirs \
+                $LFTP_EXCLUDES $WEB_ROOT_EXCLUDES \
+                web/ ${REMOTE_DIR}; bye" \
+            "sftp://${SFTP_HOST}:${SFTP_PORT}"
+
+      # -- Wipe SSH key from disk --
+      - name: Clean up SSH key
+        if: always() && steps.auth.outputs.method == 'key'
+        run: rm -f ~/.ssh/deploy_key
+
+      # ========================================================================
+      # Health check (post-deploy probe). Non-blocking: a 404 / non-2xx is
+      # logged but doesn't fail the run, since dev/beta channels may not have
+      # the health route mapped during early bring-up.
+      # ========================================================================
 
       - name: Health check
+        if: steps.changes.outputs.has_changes == 'true' && steps.target.outputs.channel == 'live'
         run: |
-          curl -fsSL "https://portal.millrdsdacambridge.uk/health" || echo "Health endpoint not responding; continuing"
+          curl -fsSL --max-time 15 "https://portal.millrdsdacambridge.uk/health" \
+            || echo "::warning::Health endpoint did not return 2xx — investigate after deploy"
+
+      # ========================================================================
+      # Summary
+      # ========================================================================
+
+      - name: Deployment summary
+        if: steps.changes.outputs.has_changes == 'true'
+        run: |
+          {
+            echo "### Deployment complete"
+            echo "- Branch: \`${{ github.ref_name }}\`"
+            echo "- Channel: \`${{ steps.target.outputs.channel }}\`"
+            echo "- Public dir: \`${{ steps.target.outputs.public_dir }}/\`"
+            echo "- Auth: ${{ steps.auth.outputs.method }}"
+            echo "- Commit: ${{ github.sha }}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Skip summary
+        if: steps.changes.outputs.has_changes == 'false'
+        run: |
+          echo "### No deployment needed" >> "$GITHUB_STEP_SUMMARY"
+          echo "No deployable files changed in \`web/\`." >> "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,177 @@
+# =============================================================================
+# WebMS-Intra — Automatic Semantic Version Bump
+#
+# Copyright (c) 2026 MWBM Partners Ltd. All rights reserved.
+# Proprietary. Unauthorised copying, modification or distribution prohibited.
+#
+# PURPOSE
+# -------
+# Auto-bumps the portal version on push to `alpha` or `beta`. Writes the
+# new value back to web/core/App.php and commits with [skip ci] so the
+# bump itself does not retrigger the workflow.
+#
+# BUMP RULES
+# ----------
+#   alpha push  ->  PATCH bump  (always)
+#   beta push   ->  Conventional Commits:
+#                     - "BREAKING CHANGE" or "!:" -> MAJOR (X.0.0)
+#                     - starts with "feat("       -> MINOR (x.Y.0)
+#                     - everything else           -> PATCH (x.y.Z)
+#
+# Production releases are NOT auto-bumped — tag manually via `git tag vX.Y.Z`
+# on main, which fires release.yml.
+#
+# SOURCE OF TRUTH
+# ---------------
+#   web/core/App.php  ->  private static string $version = 'X.Y.Z';
+# =============================================================================
+
+name: Version Bump
+
+on:
+  push:
+    branches:
+      - alpha
+      - beta
+    paths:
+      - 'web/**'
+      - 'CHANGELOG.md'
+
+concurrency:
+  group: version-bump-${{ github.ref_name }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  bump:
+    name: Bump version on ${{ github.ref_name }}
+    runs-on: ubuntu-latest
+
+    # Skip self-triggered bumps and changelog auto-commits
+    if: "!contains(github.event.head_commit.message, '[skip ci]')"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      # -----------------------------------------------------------------------
+      # Read current $version from web/core/App.php
+      # -----------------------------------------------------------------------
+      - name: Read current version
+        id: current
+        run: |
+          VERSION_FILE="web/core/App.php"
+          # Matches: private static string $version = 'X.Y.Z';
+          CURRENT=$(grep -oP "static string \\\$version\s*=\s*'\K[^']+" "$VERSION_FILE")
+          if [[ -z "$CURRENT" ]]; then
+            echo "::error::Could not read version from $VERSION_FILE"
+            exit 1
+          fi
+          echo "current=$CURRENT" >> "$GITHUB_OUTPUT"
+          echo "Current version: $CURRENT"
+
+      # -----------------------------------------------------------------------
+      # Determine bump type from branch + commit message
+      # -----------------------------------------------------------------------
+      - name: Determine bump type
+        id: bump
+        run: |
+          BRANCH="${{ github.ref_name }}"
+          COMMIT_MSG="${{ github.event.head_commit.message }}"
+          echo "Branch:  $BRANCH"
+          echo "Commit:  $COMMIT_MSG"
+
+          if [[ "$BRANCH" == "alpha" ]]; then
+            # alpha always bumps patch
+            echo "type=patch" >> "$GITHUB_OUTPUT"
+            echo "Bump type: PATCH (alpha rule)"
+          else
+            # beta uses Conventional Commits
+            if echo "$COMMIT_MSG" | grep -qiE 'BREAKING CHANGE|!:'; then
+              echo "type=major" >> "$GITHUB_OUTPUT"
+              echo "Bump type: MAJOR (conventional commits)"
+            elif echo "$COMMIT_MSG" | grep -qE '^feat(\(|:)'; then
+              echo "type=minor" >> "$GITHUB_OUTPUT"
+              echo "Bump type: MINOR (conventional commits)"
+            else
+              echo "type=patch" >> "$GITHUB_OUTPUT"
+              echo "Bump type: PATCH (conventional commits)"
+            fi
+          fi
+
+      # -----------------------------------------------------------------------
+      # Compute the new SemVer string
+      # -----------------------------------------------------------------------
+      - name: Calculate new version
+        id: new_version
+        run: |
+          CURRENT="${{ steps.current.outputs.current }}"
+          BUMP_TYPE="${{ steps.bump.outputs.type }}"
+
+          # Strip any pre-release suffix (everything after the first hyphen)
+          BASE_VERSION=$(echo "$CURRENT" | sed 's/-.*//')
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$BASE_VERSION"
+
+          case "$BUMP_TYPE" in
+            major) MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0 ;;
+            minor) MINOR=$((MINOR + 1)); PATCH=0 ;;
+            patch) PATCH=$((PATCH + 1)) ;;
+          esac
+
+          NEW="${MAJOR}.${MINOR}.${PATCH}"
+          echo "version=$NEW" >> "$GITHUB_OUTPUT"
+          echo "New version: $NEW (was $CURRENT)"
+
+      # -----------------------------------------------------------------------
+      # Write the bumped version into App.php
+      # -----------------------------------------------------------------------
+      - name: Update version in App.php
+        run: |
+          VERSION_FILE="web/core/App.php"
+          OLD="${{ steps.current.outputs.current }}"
+          NEW="${{ steps.new_version.outputs.version }}"
+
+          # Replace inside: private static string $version = 'X.Y.Z';
+          sed -i "s|\(static string \\\$version\s*=\s*'\)${OLD}'|\1${NEW}'|" "$VERSION_FILE"
+
+          # Verify
+          grep "static string \$version" "$VERSION_FILE"
+
+      # -----------------------------------------------------------------------
+      # Commit + push with [skip ci]; retry if changelog.yml lands first
+      # -----------------------------------------------------------------------
+      - name: Commit version bump
+        env:
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          NEW="${{ steps.new_version.outputs.version }}"
+
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add web/core/App.php
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
+
+          git commit -m "chore: bump version to ${NEW} [skip ci]"
+
+          for attempt in 1 2 3 4 5; do
+            if git push origin "HEAD:${BRANCH}"; then
+              echo "Pushed on attempt $attempt"
+              exit 0
+            fi
+            echo "Push rejected on attempt $attempt — rebasing and retrying"
+            git fetch origin "${BRANCH}"
+            git rebase "origin/${BRANCH}"
+            sleep $((attempt * 2))
+          done
+
+          echo "::error::Failed to push version bump after 5 attempts"
+          exit 1
