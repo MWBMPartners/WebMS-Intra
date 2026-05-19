@@ -85,6 +85,14 @@ SFTP_BASE_PATH/
   `CHANGELOG.md`; tags containing `-beta` or `-rc` are marked pre-release.
 - `auto-merge-alpha.yml` — PR opened or synchronised against `alpha`. Enables
   GitHub native auto-merge and dispatches `deploy.yml` after merge.
+- `post-merge-deploy-bridge.yml` — PR opened/synchronised against `beta` or
+  `main`. Polls the PR; once merged, dispatches `deploy.yml` on the matching
+  branch. Bridges GitHub's GITHUB_TOKEN anti-recursion rule which otherwise
+  blocks `push:`-triggered deploys after a UI merge.
+- `pr-security.yml` — runs on every PR against alpha/beta/main. PHP lint
+  (hard gate), gitleaks secrets scan, heuristic anti-pattern scan.
+- `repo-config-audit.yml` — weekly + on PRs touching `.github/workflows/`.
+  Detects orphaned required-status-check rules (see gotchas section).
 
 ### Day-to-Day Workflow
 
