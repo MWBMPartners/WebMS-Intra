@@ -1,0 +1,131 @@
+# =============================================================================
+# WebMS-Intra — GitHub Releases
+#
+# Copyright (c) 2026 MWBM Partners Ltd. All rights reserved.
+# Proprietary. Unauthorised copying, modification or distribution prohibited.
+#
+# PURPOSE
+# -------
+# When a `v*` tag is pushed, automatically create a GitHub Release. Release
+# notes are extracted from CHANGELOG.md (the section matching the tagged
+# version, regardless of (alpha)/(beta)/(main) branch suffix). Tags
+# containing -beta or -rc are marked as pre-releases.
+#
+# USAGE
+# -----
+#   git tag -a v0.5.0 -m "Phase 4 launch"
+#   git push origin v0.5.0
+# =============================================================================
+
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # -----------------------------------------------------------------------
+      # Extract version from tag (strip leading 'v')
+      # -----------------------------------------------------------------------
+      - name: Extract version from tag
+        id: tag
+        run: |
+          TAG="${{ github.ref_name }}"
+          VERSION="${TAG#v}"
+          echo "tag=$TAG"         >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Tag: $TAG (version $VERSION)"
+
+      # -----------------------------------------------------------------------
+      # Pre-release detection (-beta or -rc in tag)
+      # -----------------------------------------------------------------------
+      - name: Detect pre-release
+        id: prerelease
+        run: |
+          TAG="${{ steps.tag.outputs.tag }}"
+          if echo "$TAG" | grep -qiE '\-beta|\-rc'; then
+            echo "is_prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "is_prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # -----------------------------------------------------------------------
+      # Pull the section for this version out of CHANGELOG.md.
+      # Concatenates all per-branch sections (alpha/beta/main) for this
+      # version into one release-notes blob.
+      # -----------------------------------------------------------------------
+      - name: Extract release notes from CHANGELOG.md
+        id: notes
+        run: |
+          VERSION="${{ steps.tag.outputs.version }}"
+          NOTES_FILE="/tmp/release_notes.md"
+
+          if [[ ! -f CHANGELOG.md ]]; then
+            echo "No CHANGELOG.md — using default notes"
+            echo "Release ${VERSION}" > "$NOTES_FILE"
+          else
+            python3 - "$VERSION" <<'PYEOF' > "$NOTES_FILE"
+            import re, sys
+            version = sys.argv[1]
+            with open('CHANGELOG.md', 'r') as f:
+                content = f.read()
+            # Capture every "## [VERSION] ..." section until the next "## ["
+            pattern = (
+                r'## \[' + re.escape(version) + r'\][^\n]*\n'
+                r'(?:(?!^## \[).*\n?)*'
+            )
+            matches = re.findall(pattern, content, flags=re.MULTILINE)
+            if matches:
+                print('\n'.join(m.rstrip() for m in matches))
+            else:
+                print(f'Release {version}')
+            PYEOF
+          fi
+
+          echo "----- release notes -----"
+          cat "$NOTES_FILE"
+          echo "-------------------------"
+          echo "notes_file=$NOTES_FILE" >> "$GITHUB_OUTPUT"
+
+      # -----------------------------------------------------------------------
+      # Create the GitHub Release
+      # -----------------------------------------------------------------------
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ steps.tag.outputs.tag }}"
+          PRERELEASE="${{ steps.prerelease.outputs.is_prerelease }}"
+          NOTES_FILE="${{ steps.notes.outputs.notes_file }}"
+
+          GH_ARGS=(
+            "release" "create" "$TAG"
+            "--title" "WebMS-Intra $TAG"
+            "--notes-file" "$NOTES_FILE"
+          )
+
+          if [[ "$PRERELEASE" == "true" ]]; then
+            GH_ARGS+=("--prerelease")
+          fi
+
+          echo "Creating release: gh ${GH_ARGS[*]}"
+          gh "${GH_ARGS[@]}"
+          echo "Release $TAG created"

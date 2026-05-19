@@ -5,6 +5,47 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+Automated sections are appended by `.github/workflows/changelog.yml` per push
+to `alpha`, `beta`, and `main` using the heading format
+`## [VERSION] - YYYY-MM-DD (branch)`.
+
+## [Unreleased] — CI/CD overhaul
+
+### Added — Multi-branch SFTP deploy + auto-versioning
+
+- **`alpha` / `beta` / `main` branch model** replacing the single-branch
+  FTP deploy. `main` → `public_html/`, `beta` → `public_html_beta/`,
+  `alpha` → `public_html_dev/`. Shared `core/`, `vendor/`, `sql/` deploy to
+  the same remote base from every branch.
+- **`.github/workflows/deploy.yml`** rewritten to SFTP (lftp),
+  SSH-key-preferred with password fallback, per-branch target resolution,
+  change detection, `[deploy all]` / `[skip ci]` flags, and a
+  `vars.SFTP_ENABLED` kill switch. New secrets: `SFTP_HOST`, `SFTP_USER`,
+  `SFTP_BASE_PATH`, plus `SFTP_KEY` and/or `SFTP_PASSWORD`.
+- **`.github/workflows/version-bump.yml`** auto-bumps `web/core/App.php`
+  `$version` on push: alpha = PATCH always; beta = Conventional Commits.
+- **`.github/workflows/changelog.yml`** auto-appends CHANGELOG entries from
+  commit messages since the last `v*` tag.
+- **`.github/workflows/release.yml`** creates a GitHub Release on `v*` tag,
+  extracting notes from CHANGELOG.md. Tags with `-beta` / `-rc` are pre-release.
+- **`.github/workflows/auto-merge-alpha.yml`** enables GitHub auto-merge on
+  PRs whose base is `alpha` and dispatches `deploy.yml` once merged.
+
+### Added — dompdf at build time
+
+- **`tools/download-dompdf.sh`** — idempotent fetch of pinned dompdf v3.1.5.
+- `deploy.yml` runs the fetch script before SFTP so dompdf rides along in
+  the shared upload; manual server-side install is no longer needed.
+
+### Fixed
+
+- **`web/core/bootstrap.php`** — environment detection now matches the new
+  `public_html_beta/` directory name (previously only `beta_html`); ordering
+  documented to avoid the `public_html` substring trap that would
+  misclassify dev/beta as prod.
+
+---
+
 ## [0.8.2] - 2026-03-08
 
 ### Added — Installation & Upgrade System (Issue #84)

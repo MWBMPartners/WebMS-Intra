@@ -140,13 +140,34 @@ php -S localhost:8080 -t public_html
 
 ## Deployment
 
-CI/CD via GitHub Actions syncs the `web/` directory to DreamHost via FTP.
+CI/CD via GitHub Actions syncs `web/` to DreamHost over **SFTP** (SSH key
+preferred, password fallback) on a three-branch model:
 
-- **Push to `main`** deploys automatically to the server
-- **Tagged `v*`** also deploys (production releases)
-- **Manual dispatch** available via GitHub Actions UI
+| Branch  | Channel    | Public dir on server  | Auto-bump rule           |
+| ------- | ---------- | --------------------- | ------------------------ |
+| `alpha` | alpha/dev  | `public_html_dev/`    | PATCH (always)           |
+| `beta`  | beta       | `public_html_beta/`   | Conventional Commits     |
+| `main`  | production | `public_html/`        | none — tag `v*` manually |
 
-Server-managed directories (`_auth_keys/`, `_uploads/`, `_backups/`, `_libraries/`) are excluded from FTP sync.
+Everything else inside `web/` (`core/`, `vendor/`, `sql/`) deploys to the
+shared remote base from every branch.
+
+Workflows in `.github/workflows/`:
+
+- `deploy.yml` — SFTP sync; key-first / password-fallback auth
+- `version-bump.yml` — updates `web/core/App.php` on alpha/beta pushes
+- `changelog.yml` — appends commit-message entries to CHANGELOG.md
+- `release.yml` — creates a GitHub Release on `v*` tag push
+- `auto-merge-alpha.yml` — enables auto-merge on PRs whose base is `alpha`
+
+dompdf is fetched at deploy time by `tools/download-dompdf.sh` (pinned
+version) and uploaded as part of the shared sync. Other server-managed
+directories (`_auth_keys/`, `_uploads/`, `_backups/`) stay on the server and
+are excluded from upload.
+
+Required repo configuration (one-time): see **DEV_NOTES.md → CI/CD Secrets
+Setup** for the step-by-step guide (SSH keypair, GitHub secrets, kill switch,
+branch protection).
 
 ---
 

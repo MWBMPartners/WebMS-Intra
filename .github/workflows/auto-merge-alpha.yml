@@ -1,0 +1,96 @@
+# =============================================================================
+# WebMS-Intra — Auto-Merge Alpha PRs
+#
+# Copyright (c) 2026 MWBM Partners Ltd. All rights reserved.
+# Proprietary. Unauthorised copying, modification or distribution prohibited.
+#
+# PURPOSE
+# -------
+# Enables GitHub's native "auto-merge" feature on any PR whose base branch
+# is `alpha`. GitHub will merge as soon as required status checks pass and
+# any required reviews are satisfied. Failed checks leave the PR open.
+#
+# REQUIREMENTS (one-time repo configuration)
+# ------------------------------------------
+#   1. Settings -> General -> "Allow auto-merge" must be enabled.
+#   2. (Recommended) Branch protection on `alpha` requiring at least one
+#      status check, otherwise auto-merge fires immediately with no gate.
+#
+# MERGE STRATEGY
+# --------------
+# Squash merge (`--squash`). Change to `--merge` or `--rebase` if preferred.
+#
+# DEPLOY DISPATCH BRIDGE
+# ----------------------
+# GitHub suppresses workflow triggers for pushes attributed to GITHUB_TOKEN
+# (anti-recursion). After auto-merge lands on alpha, this workflow explicitly
+# dispatches deploy.yml so the alpha environment updates.
+# =============================================================================
+
+name: Auto-Merge Alpha PRs
+
+on:
+  pull_request:
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - ready_for_review
+    branches:
+      - alpha
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: write
+
+# Coalesce repeated synchronise events on the same PR
+concurrency:
+  group: auto-merge-alpha-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  enable-auto-merge:
+    name: Enable auto-merge on alpha PRs
+    runs-on: ubuntu-latest
+
+    # Drafts cannot auto-merge — skip them
+    if: github.event.pull_request.draft == false
+
+    steps:
+      - name: Enable auto-merge (squash)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: gh pr merge --auto --squash "$PR_URL"
+
+      # ---------------------------------------------------------------------
+      # Bridge GitHub's anti-recursion rule: after merge, dispatch deploy.yml
+      # explicitly. Polls up to ~60 min and exits cleanly if the PR closes
+      # without merging.
+      # ---------------------------------------------------------------------
+      - name: Wait for merge and dispatch deploy
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 120); do
+            STATE=$(gh pr view "$PR_NUMBER" --repo "$REPO" --json state -q .state)
+            case "$STATE" in
+              MERGED)
+                echo "PR #$PR_NUMBER merged — dispatching deploy.yml on alpha"
+                gh workflow run deploy.yml --repo "$REPO" --ref alpha
+                exit 0
+                ;;
+              CLOSED)
+                echo "PR #$PR_NUMBER closed without merging — skipping deploy"
+                exit 0
+                ;;
+            esac
+            echo "PR #$PR_NUMBER state=$STATE (poll $i/120) — sleeping 30s"
+            sleep 30
+          done
+          echo "::error::Timed out waiting for PR #$PR_NUMBER to reach a terminal state"
+          exit 1
