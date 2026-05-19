@@ -1,0 +1,111 @@
+# =============================================================================
+# WebMS-Intra — Repo Config Audit
+#
+# Copyright (c) 2026 MWBM Partners Ltd. All rights reserved.
+# Proprietary. Unauthorised copying, modification or distribution prohibited.
+#
+# PURPOSE
+# -------
+# Detects orphaned required-status-check rules — i.e. a ruleset or branch
+# protection requires a check by name X, but no workflow in this repo emits
+# a check called X. This class of misconfiguration silently soft-locks PRs:
+# they wait forever for a check that will never arrive.
+#
+# Runs:
+#   - Weekly (Mondays 06:00 UTC) so drift is caught before it bites
+#   - On PRs that touch .github/workflows/  (catches workflow renames in flight)
+#   - On manual workflow_dispatch
+#
+# Requires `administration: read` permission to inspect rulesets and branch
+# protection settings.
+# =============================================================================
+
+name: Repo Config Audit
+
+on:
+  schedule:
+    - cron: '0 6 * * 1'   # Mondays 06:00 UTC
+  pull_request:
+    paths:
+      - '.github/workflows/**'
+      - 'tools/audit-required-checks.py'
+      - '.github/workflows/repo-config-audit.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  administration: read    # read rulesets + branch protection
+  pull-requests: write    # post a comment on PRs when run from one
+
+concurrency:
+  group: repo-config-audit-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  audit:
+    name: Audit required checks
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Run audit
+        id: audit
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          set +e
+          python3 tools/audit-required-checks.py 2>&1 | tee /tmp/audit.txt
+          EXIT=${PIPESTATUS[0]}
+          echo "exit_code=$EXIT" >> "$GITHUB_OUTPUT"
+          if [ "$EXIT" -eq 2 ]; then
+            echo "::error::Audit could not query GitHub API — check workflow has admin:read permission."
+            exit 2
+          fi
+          exit $EXIT
+
+      - name: Comment on PR if orphan found
+        if: failure() && github.event_name == 'pull_request' && steps.audit.outputs.exit_code == '1'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          {
+            echo "## ⚠️ Repo Config Audit — orphaned required check detected"
+            echo
+            echo "This PR (or the rules currently in place on \`main\`/\`beta\`/\`alpha\`) declare a required status check that no workflow in this repo emits. Future PRs will soft-lock waiting for this check forever."
+            echo
+            echo '<details><summary>Full audit output</summary>'
+            echo
+            echo '```'
+            cat /tmp/audit.txt
+            echo '```'
+            echo
+            echo '</details>'
+            echo
+            echo "**Fix:** either rename the requirement to match an existing workflow's job \`name:\` field (NO \`workflow / job\` prefix), drop the requirement, or add a workflow that emits the expected name. See \`DEV_NOTES.md → Branch protection & rulesets gotchas\`."
+          } > /tmp/comment.md
+          gh pr comment "$PR_NUMBER" --repo "$REPO" --body-file /tmp/comment.md
+
+      - name: Job summary
+        if: always()
+        run: |
+          {
+            echo "### Repo Config Audit"
+            echo
+            if [ "${{ steps.audit.outputs.exit_code }}" = "0" ]; then
+              echo "✅ All required status checks have matching workflow jobs."
+            elif [ "${{ steps.audit.outputs.exit_code }}" = "1" ]; then
+              echo "❌ Orphaned required check(s) detected — see the step log."
+            else
+              echo "🛑 Audit could not run."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

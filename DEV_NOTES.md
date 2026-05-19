@@ -223,6 +223,99 @@ The script is idempotent — re-runs skip if the right version is already presen
 
 ---
 
+## Branch protection & rulesets — gotchas
+
+Two GitHub mechanisms can guard a branch in parallel: classic **branch
+protection rules** (Settings → Branches) and the newer **rulesets**
+(Settings → Rules → Rulesets). This repo currently uses **both**, which
+is allowed but creates traps. Read this before adding or modifying any
+required check.
+
+### Required-check name format
+
+When you add a required status check to a ruleset or branch protection,
+the **context name** you enter must match the exact string GitHub records
+on the check_run — which for GitHub Actions is the **job's `name:` field**
+(or the job ID if no `name:` is set). It is **not** the prefixed
+`Workflow Name / Job Name` form you see in the PR UI's checks list.
+
+Example. Given this workflow:
+
+```yaml
+name: PR Security Checks    # workflow name
+jobs:
+  security:                  # job ID
+    name: Static security checks   # job name — THIS is what to enter
+```
+
+The PR UI shows `PR Security Checks / Static security checks (pull_request)`.
+But the required-check context to enter is just:
+
+```text
+Static security checks
+```
+
+If you enter the prefixed form, the rule waits forever for a check that
+never arrives — the same orphan condition that bit PR #104.
+
+### Orphans: required check names with no producing workflow
+
+A required check that no workflow emits silently soft-locks every future
+PR. Common causes:
+
+- A workflow gets renamed and the rule isn't updated
+- A required check is added in anticipation of a workflow that never ships
+- A `name:` field is changed without thinking about the rule
+
+**`.github/workflows/repo-config-audit.yml`** runs weekly and on PRs that
+touch any workflow. It calls `tools/audit-required-checks.py`, which
+cross-references every required check name against every workflow job
+name in the repo. Orphans fail the audit and post a comment on the PR.
+
+Run the audit locally:
+
+```bash
+python3 tools/audit-required-checks.py
+```
+
+Exits 0 on clean, 1 on orphans, 2 on API failure.
+
+### Branch protection + rulesets are additive
+
+If a check is required by **either** source, the PR is blocked until it
+passes. Removing a rule from branch protection does not remove a
+duplicate copy in a ruleset. When debugging "why is this PR blocked?",
+inspect both:
+
+```bash
+# Branch protection on a branch
+gh api repos/MWBMPartners/WebMS-Intra/branches/main/protection
+
+# All active rulesets
+gh api repos/MWBMPartners/WebMS-Intra/rulesets
+gh api repos/MWBMPartners/WebMS-Intra/rulesets/<id>
+```
+
+### Modifying a ruleset's required checks
+
+`PUT /repos/.../rulesets/<id>` with the full ruleset body (after stripping
+server-only fields like `id`, `created_at`, `updated_at`, `_links`).
+Easier-but-slower: use the GitHub UI at Settings → Rules → Rulesets →
+[ruleset] → Edit.
+
+### Solo-dev branch protection profile
+
+Set on `main`, `beta`, and `alpha` to disallow deletions and force-pushes
+without requiring PR reviews you can't satisfy:
+
+- Disallow allow_deletions, allow_force_pushes
+- Do not enforce_admins (so you can bypass when needed)
+- No required_pull_request_reviews (would block solo dev)
+- Required linear history on `main` only (forces squash/rebase)
+- Required status checks: `Static security checks` on `main`
+
+---
+
 ## Dev Site Access Control
 
 The dev site (`public_html_dev/`) is **not** protected by `.htaccess` basic
