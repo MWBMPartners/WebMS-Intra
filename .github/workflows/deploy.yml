@@ -323,11 +323,23 @@ jobs:
             "sftp://${SFTP_HOST}:${SFTP_PORT}"
 
       # ========================================================================
-      # 2) Upload everything else in web/  ->  <base>/   (shared)
-      #    Excludes _auth_keys/, _uploads/, _backups/, _libraries/, and the
-      #    public_html_* trees (they go through step 1 above per branch).
-      #    Uses --no-delete so server-managed siblings (private_html,
-      #    public_html_landing, etc.) are preserved.
+      # 2) Upload everything else in web/  ->  <REMOTE_SHARED>/   (shared)
+      #
+      #    Excluded entirely (server-managed or per-branch — see envs above):
+      #      _auth_keys/  _uploads/  _backups/      ← server-managed contents
+      #      public_html/  public_html_dev/  public_html_beta/
+      #      public_html_landing/  public_html_redir/  private_html/
+      #
+      #    Uses --delete: the repo is the source of truth for the shared
+      #    dirs (core/, vendor/, sql/, _includes/, _functions/,
+      #    _libraries/dompdf/). Removing a file from the repo removes it
+      #    from the server on next deploy. The excludes ensure server-only
+      #    state (credentials, uploads, backups, other web roots) is
+      #    NEVER touched.
+      #
+      #    Before mirroring, mkd -p creates _auth_keys/, _uploads/,
+      #    _backups/ on the server if they don't exist yet — so the app
+      #    has writable target dirs without ever uploading their contents.
       # ========================================================================
 
       - name: Deploy shared web/ via SFTP (SSH key)
@@ -339,11 +351,14 @@ jobs:
           REMOTE:    ${{ steps.target.outputs.remote_shared }}
         run: |
           REMOTE_DIR="${REMOTE%/}/"
-          echo "Deploying shared web/ (core, vendor, sql, _includes, _functions) -> $REMOTE_DIR"
+          echo "Deploying shared web/ (core, vendor, sql, _includes, _functions, _libraries/dompdf) -> $REMOTE_DIR"
           cat > /tmp/lftp_shared.txt <<LFTP_EOF
           set sftp:connect-program "ssh -o StrictHostKeyChecking=no -i $HOME/.ssh/deploy_key -p ${SFTP_PORT}"
           open sftp://${SFTP_USER}@${SFTP_HOST}:${SFTP_PORT}
-          mirror --reverse --verbose --only-newer --no-empty-dirs $LFTP_EXCLUDES $WEB_ROOT_EXCLUDES web/ ${REMOTE_DIR}
+          mkdir -p -f ${REMOTE_DIR}_auth_keys
+          mkdir -p -f ${REMOTE_DIR}_uploads
+          mkdir -p -f ${REMOTE_DIR}_backups
+          mirror --reverse --delete --verbose --only-newer --no-empty-dirs $LFTP_EXCLUDES $WEB_ROOT_EXCLUDES web/ ${REMOTE_DIR}
           bye
           LFTP_EOF
           lftp -f /tmp/lftp_shared.txt
@@ -358,10 +373,13 @@ jobs:
           REMOTE:    ${{ steps.target.outputs.remote_shared }}
         run: |
           REMOTE_DIR="${REMOTE%/}/"
-          echo "Deploying shared web/ (core, vendor, sql, _includes, _functions) -> $REMOTE_DIR"
+          echo "Deploying shared web/ (core, vendor, sql, _includes, _functions, _libraries/dompdf) -> $REMOTE_DIR"
           lftp -u "${SFTP_USER},${SFTP_PASS}" \
             -e "set sftp:auto-confirm yes; set ssl:verify-certificate no; \
-                mirror --reverse --verbose --only-newer --no-empty-dirs \
+                mkdir -p -f ${REMOTE_DIR}_auth_keys; \
+                mkdir -p -f ${REMOTE_DIR}_uploads; \
+                mkdir -p -f ${REMOTE_DIR}_backups; \
+                mirror --reverse --delete --verbose --only-newer --no-empty-dirs \
                 $LFTP_EXCLUDES $WEB_ROOT_EXCLUDES \
                 web/ ${REMOTE_DIR}; bye" \
             "sftp://${SFTP_HOST}:${SFTP_PORT}"
