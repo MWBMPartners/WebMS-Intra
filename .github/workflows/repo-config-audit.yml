@@ -34,8 +34,15 @@ on:
 
 permissions:
   contents: read
-  administration: read    # read rulesets + branch protection
   pull-requests: write    # post a comment on PRs when run from one
+  # NOTE: `administration: read` would let GITHUB_TOKEN read rulesets and
+  # branch-protection, but it's NOT a valid `permissions:` key in
+  # workflow files (it's exposed only to GitHub Apps and fine-grained
+  # PATs). To run the FULL audit in CI, set a repo secret
+  # RULESET_AUDIT_TOKEN to a fine-grained PAT with `Administration: Read`
+  # on this repo. Without it, the audit gracefully degrades to a
+  # no-op summary (the local `python3 tools/audit-required-checks.py`
+  # still works for devs, since their `gh` CLI is authenticated as them).
 
 concurrency:
   group: repo-config-audit-${{ github.ref }}
@@ -58,7 +65,10 @@ jobs:
       - name: Run audit
         id: audit
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Prefer a PAT with Administration:Read when configured; otherwise
+          # fall back to GITHUB_TOKEN, which causes the script to run in
+          # degraded mode (no rulesets / branch-protection visibility).
+          GH_TOKEN: ${{ secrets.RULESET_AUDIT_TOKEN != '' && secrets.RULESET_AUDIT_TOKEN || secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
         run: |
           set +e
@@ -66,7 +76,7 @@ jobs:
           EXIT=${PIPESTATUS[0]}
           echo "exit_code=$EXIT" >> "$GITHUB_OUTPUT"
           if [ "$EXIT" -eq 2 ]; then
-            echo "::error::Audit could not query GitHub API — check workflow has admin:read permission."
+            echo "::error::Audit hit an unexpected error talking to GitHub. Check tools/audit-required-checks.py."
             exit 2
           fi
           exit $EXIT
