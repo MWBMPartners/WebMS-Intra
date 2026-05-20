@@ -55,8 +55,10 @@ CREATE TABLE IF NOT EXISTS `tblSites` (
                     COMMENT 'Hostname for subdomain detection',
     `logoPath`      VARCHAR(500) COLLATE utf8mb4_general_ci DEFAULT '/assets/images/logo.svg'
                     COMMENT 'Path to site-specific logo image',
-    `primaryColor`  VARCHAR(7)   COLLATE utf8mb4_general_ci DEFAULT '#0d6efd'
-                    COMMENT 'Hex colour for site branding',
+    `faviconPath`   VARCHAR(500) COLLATE utf8mb4_general_ci DEFAULT NULL
+                    COMMENT 'Path or URL to per-site favicon; NULL falls back to default',
+    `primaryColor`  VARCHAR(7)   COLLATE utf8mb4_general_ci DEFAULT '#5e6ad2'
+                    COMMENT 'Hex colour for site branding (default: Linear-style indigo)',
     `copyrightOrg`  VARCHAR(255) COLLATE utf8mb4_general_ci DEFAULT NULL
                     COMMENT 'Copyright holder name for footer',
     `timezone`      VARCHAR(50)  COLLATE utf8mb4_general_ci DEFAULT 'UTC'
@@ -1826,4 +1828,7 @@ INSERT INTO `tblMigrations` (`filename`) VALUES ('035_api_expansion.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
 INSERT INTO `tblMigrations` (`filename`) VALUES ('036_tasks_reminders.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('037_site_favicon.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;

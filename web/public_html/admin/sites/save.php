@@ -51,10 +51,16 @@ $siteName     = trim($_POST['siteName'] ?? '');
 $siteKey      = trim(strtolower($_POST['siteKey'] ?? ''));
 $hostPattern  = trim($_POST['hostPattern'] ?? '');
 $logoPath     = trim($_POST['logoPath'] ?? '/assets/images/logo.svg');
-$primaryColor = trim($_POST['primaryColor'] ?? '#0d6efd');
+$faviconPath  = trim($_POST['faviconPath'] ?? '');
+$primaryColor = trim($_POST['primaryColor'] ?? '#5e6ad2');
 $copyrightOrg = trim($_POST['copyrightOrg'] ?? '');
 $timezone     = trim($_POST['timezone'] ?? 'UTC');
 $isActive     = isset($_POST['isActive']) ? 1 : 0;
+
+// 🔍 Validate primaryColor as #RGB or #RRGGBB hex; fall back to indigo default
+if (preg_match('/^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/', $primaryColor) !== 1) {
+    $primaryColor = '#5e6ad2';
+}
 
 // 🔍 Validate required fields
 if ($siteName === '' || $siteKey === '') {
@@ -81,7 +87,7 @@ if ($siteID > 0) {
     // ♻️ UPDATE existing site
     $stmt = $db->prepare(
         'UPDATE tblSites SET siteName = ?, siteKey = ?, hostPattern = ?, logoPath = ?, '
-        . 'primaryColor = ?, copyrightOrg = ?, timezone = ?, isActive = ? '
+        . 'faviconPath = ?, primaryColor = ?, copyrightOrg = ?, timezone = ?, isActive = ? '
         . 'WHERE siteID = ?'
     );
     if ($stmt === false) {
@@ -93,10 +99,11 @@ if ($siteID > 0) {
 
     $hostPatternVal = ($hostPattern !== '') ? $hostPattern : null;
     $copyrightVal   = ($copyrightOrg !== '') ? $copyrightOrg : null;
+    $faviconVal     = ($faviconPath !== '') ? $faviconPath : null;
 
     $stmt->bind_param(
-        'sssssssii',
-        $siteName, $siteKey, $hostPatternVal, $logoPath,
+        'ssssssssii',
+        $siteName, $siteKey, $hostPatternVal, $logoPath, $faviconVal,
         $primaryColor, $copyrightVal, $timezone, $isActive, $siteID
     );
 
@@ -112,8 +119,8 @@ if ($siteID > 0) {
 } else {
     // ➕ INSERT new site
     $stmt = $db->prepare(
-        'INSERT INTO tblSites (siteName, siteKey, hostPattern, logoPath, primaryColor, copyrightOrg, timezone, isActive) '
-        . 'VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+        'INSERT INTO tblSites (siteName, siteKey, hostPattern, logoPath, faviconPath, primaryColor, copyrightOrg, timezone, isActive) '
+        . 'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
     );
     if ($stmt === false) {
         $_SESSION['flash_msg'] = 'Database error: ' . $db->error;
@@ -124,10 +131,11 @@ if ($siteID > 0) {
 
     $hostPatternVal = ($hostPattern !== '') ? $hostPattern : null;
     $copyrightVal   = ($copyrightOrg !== '') ? $copyrightOrg : null;
+    $faviconVal     = ($faviconPath !== '') ? $faviconPath : null;
 
     $stmt->bind_param(
-        'sssssssi',
-        $siteName, $siteKey, $hostPatternVal, $logoPath,
+        'ssssssssi',
+        $siteName, $siteKey, $hostPatternVal, $logoPath, $faviconVal,
         $primaryColor, $copyrightVal, $timezone, $isActive
     );
 
