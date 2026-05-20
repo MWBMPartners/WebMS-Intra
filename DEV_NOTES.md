@@ -79,8 +79,10 @@ SFTP_BASE_PATH/
   pinned dompdf, SFTP via lftp (SSH key first, password fallback).
 - `version-bump.yml` — push to alpha or beta. Alpha always bumps PATCH; beta
   uses Conventional Commits (BREAKING/`!:` → major, `feat(` → minor, else patch).
-- `changelog.yml` — push to alpha/beta/main. Appends per-branch sections to
-  `CHANGELOG.md` from commit messages since the last `v*` tag.
+- `changelog.yml` — push to alpha or beta only (NOT main — the ruleset
+  on main blocks the bot's direct push). Appends per-branch sections to
+  `CHANGELOG.md` from commit messages since the last `v*` tag. Entries
+  propagate to main via the normal beta → main merge.
 - `release.yml` — push of any `v*` tag. Creates a GitHub Release from
   `CHANGELOG.md`; tags containing `-beta` or `-rc` are marked pre-release.
 - `auto-merge-alpha.yml` — PR opened or synchronised against `alpha`. Enables
