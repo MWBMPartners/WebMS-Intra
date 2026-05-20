@@ -7,13 +7,18 @@
 # PURPOSE
 # -------
 # Generates / updates CHANGELOG.md from commit messages since the last v* tag
-# on push to alpha, beta, or main. Commits the result with [skip ci] so the
-# update itself does not retrigger the workflow.
+# on push to alpha or beta. Commits the result with [skip ci] so the update
+# itself does not retrigger the workflow.
 #
 # Excludes meta commits (CI bot bumps, [skip ci], changelog updates) from
 # the generated section. Per-branch sections use the heading format:
 #   ## [VERSION] - YYYY-MM-DD (branch)
-# so alpha/beta/main entries for the same version can coexist.
+# so alpha/beta entries for the same version can coexist.
+#
+# IMPORTANT: this workflow does NOT run on `main`. The ruleset on main
+# requires a PR — the bot's direct push would be rejected with GH013.
+# Changelog entries created on alpha/beta propagate to main via the
+# normal beta → main merge, so a main-side bot push isn't necessary.
 # =============================================================================
 
 name: Changelog
@@ -23,7 +28,13 @@ on:
     branches:
       - alpha
       - beta
-      - main
+      # NOTE: `main` is deliberately NOT in this list. The ruleset on
+      # main requires changes to come via PR — so the `chore: update
+      # changelog [skip ci]` push from this workflow gets rejected with
+      # GH013. Changelog entries are generated during alpha/beta
+      # development; they propagate naturally to main when you merge
+      # beta → main (the merged PR carries the CHANGELOG.md updates
+      # with it). No bot push to main is needed.
     paths:
       - 'web/**'
 
