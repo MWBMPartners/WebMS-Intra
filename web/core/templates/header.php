@@ -71,12 +71,22 @@ header("Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-i
 
     <?php echo Asset::portalCss(); ?>
 
-    <!-- 🌙 Prevent FOUC: apply saved theme before first paint -->
+    <!-- 🌙 Prevent FOUC: apply saved theme + accessibility prefs before paint -->
     <script>
     (function(){
+        var html = document.documentElement;
+        // Theme: 'light' / 'dark' / 'auto' (or null/missing = 'auto' default).
         var t = localStorage.getItem('portal-theme');
-        if (t === 'dark' || t === 'light') {
-            document.documentElement.setAttribute('data-bs-theme', t);
+        if (t === 'auto' || t === null) {
+            var prefersDark = window.matchMedia
+                && window.matchMedia('(prefers-color-scheme: dark)').matches;
+            html.setAttribute('data-bs-theme', prefersDark ? 'dark' : 'light');
+        } else if (t === 'dark' || t === 'light') {
+            html.setAttribute('data-bs-theme', t);
+        }
+        // Colour-blind safe palette (toggleable, opt-in)
+        if (localStorage.getItem('portal-cb') === 'on') {
+            html.setAttribute('data-portal-cb', 'on');
         }
     })();
     </script>
