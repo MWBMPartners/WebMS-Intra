@@ -18,53 +18,106 @@
    ============================================================================ */
 
 :root {
-    /* Brand colours */
-    --portal-primary: #0d6efd;
-    --portal-primary-rgb: 13, 110, 253;
-    --portal-secondary: #6c757d;
-    --portal-accent: #0dcaf0;
-    --portal-success: #198754;
-    --portal-warning: #ffc107;
-    --portal-danger: #dc3545;
+    /* =========================================================================
+     * UI direction (#111 PR 1):
+     *   • Linear-style indigo accent (#5e6ad2)
+     *   • Stripe-inspired layered shadows
+     *   • System font stack for body+headings (no web-font cost yet)
+     *   • Site admins will override --portal-primary etc. per #111 PR 2
+     *     (branding settings) — keep the token names stable.
+     * =====================================================================*/
 
-    /* Surfaces */
-    --portal-bg: #f8f9fa;
-    --portal-surface: #ffffff;
-    --portal-surface-hover: #f0f1f3;
-    --portal-border: #dee2e6;
+    /* ----- Brand colours ----- */
+    --portal-primary:        #5e6ad2;
+    --portal-primary-rgb:    94, 106, 210;
+    --portal-primary-hover:  #4f5bbf;
+    --portal-primary-active: #424da5;
+    --portal-primary-subtle: #eef0fb;       /* tinted bg for callouts / hover */
 
-    /* Text */
-    --portal-text: #212529;
-    --portal-text-muted: #6c757d;
-    --portal-text-on-primary: #ffffff;
+    /* ----- Semantic colours ----- */
+    --portal-secondary: #6b7280;
+    --portal-accent:    #06b6d4;            /* cyan accent for links / info */
+    --portal-success:   #16a34a;
+    --portal-warning:   #d97706;
+    --portal-danger:    #dc2626;
 
-    /* Typography */
-    --portal-font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-    --portal-font-mono: SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-    --portal-font-size-sm: 0.875rem;
-    --portal-font-size-xs: 0.75rem;
+    /* ----- Surfaces ----- */
+    --portal-bg:               #f7f8fa;     /* slightly warmer page bg */
+    --portal-surface:          #ffffff;     /* card / panel base */
+    --portal-surface-elevated: #ffffff;     /* same colour, different shadow depth */
+    --portal-surface-hover:    #f0f2f6;
+    --portal-border:           #e5e7eb;     /* warmer than #dee2e6 */
+    --portal-border-strong:    #d1d5db;
 
-    /* Spacing */
-    --portal-spacing-xs: 0.25rem;
-    --portal-spacing-sm: 0.5rem;
-    --portal-spacing-md: 1rem;
-    --portal-spacing-lg: 1.5rem;
-    --portal-spacing-xl: 2rem;
+    /* ----- Text ----- */
+    --portal-text:             #1b2330;     /* near-black, slight cool tint to pair with indigo */
+    --portal-text-muted:       #6b7280;
+    --portal-text-subtle:      #9ca3af;
+    --portal-text-on-primary:  #ffffff;
+    --portal-link:             var(--portal-primary);
 
-    /* Shadows */
-    --portal-shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.08);
-    --portal-shadow-md: 0 4px 12px rgba(0, 0, 0, 0.1);
-    --portal-shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.12);
+    /* ----- Typography ----- */
+    --portal-font-family:      system-ui, -apple-system, "Segoe UI", Roboto,
+                               "Helvetica Neue", Arial, sans-serif;
+    --portal-font-mono:        ui-monospace, SFMono-Regular, "SF Mono", Menlo,
+                               Monaco, Consolas, "Liberation Mono", monospace;
 
-    /* Borders */
-    --portal-radius-sm: 0.375rem;
-    --portal-radius-md: 0.5rem;
-    --portal-radius-lg: 0.75rem;
+    --portal-font-size-xs:     0.75rem;     /* 12px */
+    --portal-font-size-sm:     0.875rem;    /* 14px */
+    --portal-font-size-base:   1rem;        /* 16px — default */
+    --portal-font-size-lg:     1.125rem;    /* 18px */
+    --portal-font-size-xl:     1.25rem;     /* 20px */
+    --portal-font-size-2xl:    1.5rem;      /* 24px */
+    --portal-font-size-3xl:    1.875rem;    /* 30px */
+    --portal-font-size-4xl:    2.25rem;     /* 36px */
+
+    --portal-font-weight-regular: 400;
+    --portal-font-weight-medium:  500;
+    --portal-font-weight-bold:    600;      /* modern semi-bold for headings */
+
+    --portal-line-height-tight:   1.25;
+    --portal-line-height-base:    1.5;
+    --portal-line-height-relaxed: 1.7;
+
+    --portal-letter-spacing-tight: -0.01em; /* subtle on large display text */
+
+    /* ----- Spacing scale ----- */
+    --portal-spacing-2xs: 0.125rem;         /* 2px */
+    --portal-spacing-xs:  0.25rem;          /* 4px */
+    --portal-spacing-sm:  0.5rem;           /* 8px */
+    --portal-spacing-md:  1rem;             /* 16px */
+    --portal-spacing-lg:  1.5rem;           /* 24px */
+    --portal-spacing-xl:  2rem;             /* 32px */
+    --portal-spacing-2xl: 3rem;             /* 48px */
+    --portal-spacing-3xl: 4rem;             /* 64px */
+
+    /* ----- Shadows (multi-layer, Stripe-style) ----- */
+    --portal-shadow-xs: 0 1px 2px rgba(16, 24, 40, 0.06);
+    --portal-shadow-sm: 0 1px 3px rgba(16, 24, 40, 0.08),
+                        0 1px 2px rgba(16, 24, 40, 0.05);
+    --portal-shadow-md: 0 4px 6px -1px rgba(16, 24, 40, 0.08),
+                        0 2px 4px -2px rgba(16, 24, 40, 0.06);
+    --portal-shadow-lg: 0 12px 20px -8px rgba(16, 24, 40, 0.12),
+                        0 4px 8px -4px rgba(16, 24, 40, 0.08);
+    --portal-shadow-xl: 0 24px 40px -12px rgba(16, 24, 40, 0.15),
+                        0 8px 16px -6px rgba(16, 24, 40, 0.08);
+    --portal-shadow-focus: 0 0 0 3px rgba(var(--portal-primary-rgb), 0.25);
+
+    /* ----- Borders / radius ----- */
+    --portal-radius-xs:    0.25rem;         /* 4px — tiny chips */
+    --portal-radius-sm:    0.375rem;        /* 6px — buttons */
+    --portal-radius-md:    0.5rem;          /* 8px — inputs, badges */
+    --portal-radius-lg:    0.75rem;         /* 12px — cards */
+    --portal-radius-xl:    1rem;            /* 16px — hero / large panels */
     --portal-radius-round: 50%;
 
-    /* Transitions */
-    --portal-transition-fast: 150ms ease;
-    --portal-transition-normal: 250ms ease;
+    /* ----- Motion ----- */
+    --portal-easing-standard:   cubic-bezier(0.4, 0, 0.2, 1);
+    --portal-easing-emphasised: cubic-bezier(0.16, 1, 0.3, 1);  /* spring-y */
+
+    --portal-transition-fast:   120ms var(--portal-easing-standard);
+    --portal-transition-normal: 200ms var(--portal-easing-standard);
+    --portal-transition-slow:   320ms var(--portal-easing-emphasised);
 }
 
 /* ============================================================================
@@ -72,15 +125,43 @@
    ============================================================================ */
 
 [data-bs-theme="dark"] {
-    --portal-bg: #1a1d21;
-    --portal-surface: #212529;
-    --portal-surface-hover: #2b3035;
-    --portal-border: #495057;
-    --portal-text: #e9ecef;
-    --portal-text-muted: #adb5bd;
-    --portal-shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.3);
-    --portal-shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
-    --portal-shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.5);
+    /* Primary brightens for dark mode to keep adequate contrast on dark surfaces.
+     * Subtle-bg flips to a deep indigo tint so callouts read as "branded"
+     * rather than just "lighter grey". */
+    --portal-primary:        #7b86e8;
+    --portal-primary-rgb:    123, 134, 232;
+    --portal-primary-hover:  #8f99eb;
+    --portal-primary-active: #a0a9ee;
+    --portal-primary-subtle: #1f2347;
+
+    --portal-accent:  #22d3ee;
+    --portal-success: #4ade80;
+    --portal-warning: #fbbf24;
+    --portal-danger:  #f87171;
+
+    --portal-bg:               #0f1115;     /* near-black with slight indigo cast */
+    --portal-surface:          #161a22;
+    --portal-surface-elevated: #1c212c;
+    --portal-surface-hover:    #232936;
+    --portal-border:           #2c3441;
+    --portal-border-strong:    #3a4252;
+
+    --portal-text:             #e8eaf0;
+    --portal-text-muted:       #9aa3b2;
+    --portal-text-subtle:      #6b7280;
+    --portal-text-on-primary:  #0f1115;     /* dark text on the lighter dark-mode primary */
+    --portal-link:             #9aa5f0;
+
+    --portal-shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --portal-shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.5),
+                        0 1px 2px rgba(0, 0, 0, 0.3);
+    --portal-shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.4),
+                        0 2px 4px -2px rgba(0, 0, 0, 0.3);
+    --portal-shadow-lg: 0 12px 20px -8px rgba(0, 0, 0, 0.5),
+                        0 4px 8px -4px rgba(0, 0, 0, 0.4);
+    --portal-shadow-xl: 0 24px 40px -12px rgba(0, 0, 0, 0.6),
+                        0 8px 16px -6px rgba(0, 0, 0, 0.4);
+    --portal-shadow-focus: 0 0 0 3px rgba(var(--portal-primary-rgb), 0.4);
 }
 
 /* ============================================================================

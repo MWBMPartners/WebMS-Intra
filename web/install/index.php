@@ -441,24 +441,188 @@ $pageTitle = 'Install — ' . ($stepTitles[$step] ?? 'WebMS Intra');
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet"
           integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YcnS/1PTgCq0l0vD8pVNSNZS1p0H084UB" crossorigin="anonymous">
     <style>
-        body { background: #f0f2f5; }
-        .install-card { max-width: 640px; margin: 2rem auto; }
-        .step-badge { width: 2rem; height: 2rem; border-radius: 50%; display: inline-flex;
-                      align-items: center; justify-content: center; font-weight: 600; font-size: .85rem; }
-        .step-active { background: #0d6efd; color: #fff; }
-        .step-done { background: #198754; color: #fff; }
-        .step-pending { background: #dee2e6; color: #6c757d; }
-        .prereq-pass { color: #198754; }
-        .prereq-fail { color: #dc3545; }
+        /* ===== Design tokens (mirrors web/public_html/assets/css/portal.css) =====
+           Installer is standalone — runs before bootstrap.php, so portal.css
+           can't be loaded. Token values are kept in sync manually. */
+        :root {
+            --portal-primary:        #5e6ad2;
+            --portal-primary-rgb:    94, 106, 210;
+            --portal-primary-hover:  #4f5bbf;
+            --portal-primary-subtle: #eef0fb;
+            --portal-success:        #16a34a;
+            --portal-warning:        #d97706;
+            --portal-danger:         #dc2626;
+            --portal-bg:             #f7f8fa;
+            --portal-surface:        #ffffff;
+            --portal-border:         #e5e7eb;
+            --portal-border-strong:  #d1d5db;
+            --portal-text:           #1b2330;
+            --portal-text-muted:     #6b7280;
+            --portal-radius-md:      0.5rem;
+            --portal-radius-lg:      0.75rem;
+            --portal-shadow-md:      0 4px 6px -1px rgba(16,24,40,0.08),
+                                     0 2px 4px -2px rgba(16,24,40,0.06);
+            --portal-shadow-lg:      0 12px 20px -8px rgba(16,24,40,0.12),
+                                     0 4px 8px -4px rgba(16,24,40,0.08);
+        }
+
+        /* ===== Page ===== */
+        body {
+            background: var(--portal-bg);
+            color: var(--portal-text);
+            font-family: system-ui, -apple-system, "Segoe UI", Roboto,
+                         "Helvetica Neue", Arial, sans-serif;
+            min-height: 100vh;
+        }
+
+        /* ===== Header ===== */
+        .install-header h1 {
+            color: var(--portal-text);
+            letter-spacing: -0.01em;
+            font-weight: 600;
+        }
+        .install-header .install-tagline {
+            color: var(--portal-text-muted);
+            margin-top: 0.25rem;
+            font-size: 0.9375rem;
+        }
+
+        /* ===== Card (the main wizard panel) ===== */
+        .install-card {
+            max-width: 640px;
+            margin: 0 auto;
+            background: var(--portal-surface);
+            border: 1px solid var(--portal-border);
+            border-radius: var(--portal-radius-lg);
+            box-shadow: var(--portal-shadow-md);
+        }
+        .install-card .card-body { padding: 2rem; }
+        .install-card h2 {
+            color: var(--portal-text);
+            font-weight: 600;
+            letter-spacing: -0.01em;
+            margin-bottom: 0.75rem;
+        }
+        .install-card h3 {
+            color: var(--portal-text);
+            font-weight: 600;
+            font-size: 0.9375rem;
+            margin-top: 1.5rem;
+            margin-bottom: 0.75rem;
+        }
+
+        /* ===== Step indicator badges =====
+           Markup keeps the existing flex+gap row; only the badges restyle. */
+        .step-badge {
+            width: 2.25rem;
+            height: 2.25rem;
+            border-radius: 50%;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 600;
+            font-size: 0.875rem;
+            transition: background 200ms cubic-bezier(0.4,0,0.2,1),
+                        color 200ms cubic-bezier(0.4,0,0.2,1),
+                        box-shadow 200ms cubic-bezier(0.4,0,0.2,1);
+        }
+        .step-active {
+            background: var(--portal-primary);
+            color: #fff;
+            box-shadow: 0 0 0 4px rgba(var(--portal-primary-rgb), 0.18);
+        }
+        .step-done {
+            background: var(--portal-success);
+            color: #fff;
+        }
+        .step-pending {
+            background: var(--portal-surface);
+            color: var(--portal-text-muted);
+            border: 1px solid var(--portal-border-strong);
+        }
+
+        /* ===== Prerequisites table polish ===== */
+        .install-card .table {
+            margin-bottom: 0;
+            font-size: 0.9375rem;
+        }
+        .install-card .table thead th {
+            color: var(--portal-text-muted);
+            font-weight: 600;
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            border-bottom: 1px solid var(--portal-border);
+            padding-bottom: 0.5rem;
+        }
+        .install-card .table td {
+            padding: 0.6rem 0.5rem;
+            vertical-align: middle;
+            border-color: var(--portal-border);
+        }
+        .prereq-pass { color: var(--portal-success); font-weight: 500; }
+        .prereq-fail { color: var(--portal-danger);  font-weight: 500; }
+
+        /* ===== Buttons (override Bootstrap primary to match indigo) ===== */
+        .btn-primary {
+            --bs-btn-bg:           var(--portal-primary);
+            --bs-btn-border-color: var(--portal-primary);
+            --bs-btn-hover-bg:           var(--portal-primary-hover);
+            --bs-btn-hover-border-color: var(--portal-primary-hover);
+            --bs-btn-active-bg:           var(--portal-primary-hover);
+            --bs-btn-active-border-color: var(--portal-primary-hover);
+            font-weight: 500;
+            padding-inline: 1.25rem;
+        }
+
+        /* ===== Form inputs ===== */
+        .install-card .form-control,
+        .install-card .form-select {
+            border-color: var(--portal-border-strong);
+            border-radius: var(--portal-radius-md);
+        }
+        .install-card .form-control:focus,
+        .install-card .form-select:focus {
+            border-color: var(--portal-primary);
+            box-shadow: 0 0 0 3px rgba(var(--portal-primary-rgb), 0.18);
+        }
+        .install-card .form-label { font-weight: 500; color: var(--portal-text); }
+
+        /* ===== Alerts ===== */
+        .alert.install-card { box-shadow: none; }
+        .alert-danger {
+            background: #fef2f2;
+            border-color: #fecaca;
+            color: #991b1b;
+        }
+        .alert-success {
+            background: #f0fdf4;
+            border-color: #bbf7d0;
+            color: #166534;
+        }
+
+        /* ===== Footer ===== */
+        .install-footer {
+            text-align: center;
+            color: var(--portal-text-muted);
+            font-size: 0.8125rem;
+            margin-top: 1.5rem;
+        }
+
+        /* ===== Focus indicators (WCAG) ===== */
+        :focus-visible {
+            outline: 3px solid var(--portal-primary);
+            outline-offset: 2px;
+        }
     </style>
 </head>
 <body>
 <div class="container py-4">
 
     <!-- Header -->
-    <div class="text-center mb-4">
+    <div class="install-header text-center mb-4">
         <h1 class="h3 fw-bold">WebMS Intra</h1>
-        <p class="text-muted">Installation Wizard &mdash; v<?php echo INSTALL_VERSION; ?></p>
+        <p class="install-tagline">Installation Wizard &mdash; v<?php echo INSTALL_VERSION; ?></p>
     </div>
 
     <!-- Step indicator -->
