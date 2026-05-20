@@ -67,16 +67,58 @@ jobs:
           echo "::endgroup::"
 
       # =====================================================================
-      # 2) Secrets scan via gitleaks
+      # 2) Secrets scan via gitleaks (CLI binary, not the action)
+      #
+      # We deliberately avoid gitleaks/gitleaks-action@v2 because it
+      # requires a paid GITLEAKS_LICENSE secret for organisation accounts.
+      # The gitleaks CLI itself is MIT-licensed and free to use directly.
+      # Bonus: this also avoids the deprecated Node.js 20 warning that
+      # the action emits.
       # =====================================================================
+      - name: Install gitleaks CLI
+        id: install_gitleaks
+        continue-on-error: true
+        run: |
+          set -e
+          VERSION="8.21.2"
+          URL="https://github.com/gitleaks/gitleaks/releases/download/v${VERSION}/gitleaks_${VERSION}_linux_x64.tar.gz"
+          curl -fsSL "$URL" -o /tmp/gitleaks.tgz
+          tar -xzf /tmp/gitleaks.tgz -C /tmp gitleaks
+          sudo mv /tmp/gitleaks /usr/local/bin/gitleaks
+          gitleaks version
+
       - name: Scan for committed secrets (gitleaks)
         id: gitleaks
         continue-on-error: true
-        uses: gitleaks/gitleaks-action@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITLEAKS_ENABLE_COMMENTS: 'true'
-          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: 'true'
+        if: steps.install_gitleaks.outcome == 'success'
+        run: |
+          set +e
+          # `detect` scans the working tree + commits since the PR base.
+          # --no-banner keeps the log readable; --redact stops actual
+          # secret values appearing in the run log; --report-format sarif
+          # gives a structured artifact we can upload.
+          gitleaks detect \
+            --source . \
+            --log-opts "${{ github.event.pull_request.base.sha }}..${{ github.sha }}" \
+            --no-banner \
+            --redact \
+            --report-path /tmp/gitleaks-report.sarif \
+            --report-format sarif \
+            --exit-code 1
+          EXIT=$?
+          echo "exit_code=$EXIT" >> "$GITHUB_OUTPUT"
+          if [ "$EXIT" -ne 0 ]; then
+            echo "::warning::gitleaks reported findings — review the SARIF artifact and the log above"
+          fi
+
+      - name: Upload gitleaks SARIF
+        if: always() && steps.gitleaks.outcome != 'skipped'
+        uses: actions/upload-artifact@v4
+        with:
+          name: gitleaks-report
+          path: /tmp/gitleaks-report.sarif
+          if-no-files-found: ignore
+          retention-days: 30
 
       # =====================================================================
       # 3-8) Custom heuristic grep checks
