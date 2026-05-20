@@ -286,7 +286,32 @@ Run the audit locally:
 python3 tools/audit-required-checks.py
 ```
 
-Exits 0 on clean, 1 on orphans, 2 on API failure.
+Exits 0 on clean (or degraded mode), 1 on orphans, 2 on unexpected error.
+
+### Optional: enabling the full audit in CI
+
+The default `GITHUB_TOKEN` in workflow runs **cannot read rulesets or
+branch protection** — the GitHub Actions permissions model has no
+`administration: read` key. Without that, the CI audit runs in
+**degraded mode** (it can still emit a useful summary based on
+workflow-file inspection, but can't catch orphans).
+
+To unlock the full CI audit, create a **fine-grained personal access
+token** scoped to this repo with **Administration: Read** permission,
+then store it as a repo secret named `RULESET_AUDIT_TOKEN`:
+
+1. GitHub → your account → Settings → Developer settings → Personal
+   access tokens → Fine-grained tokens → Generate new token
+2. Repository access: select **only** `WebMS-Intra` (least privilege)
+3. Repository permissions: **Administration: Read** (rest stay None)
+4. Generate and copy the token
+5. In the repo: Settings → Secrets and variables → Actions →
+   New repository secret → name `RULESET_AUDIT_TOKEN`, value =
+   the PAT
+
+The workflow auto-detects the secret and uses it when present; absent
+secret = degraded mode, no failure. Local `gh` runs are unaffected
+since you're already authenticated as an admin.
 
 ### Branch protection + rulesets are additive
 
