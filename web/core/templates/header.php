@@ -36,9 +36,28 @@ $pageTitle   = $pageTitle   ?? 'Portal';
 $pageSection = $pageSection ?? '';
 $breadcrumbs = $breadcrumbs ?? [];
 
-// 🌐 Site branding — use Site::branding() for multi-site, fallback to settings
+// 🌐 Site branding — use Site::branding() for multi-site, fallback to settings.
+// $siteColor is injected as --portal-primary on the <html> element below so
+// portal.css's design tokens shift to the site's brand colour automatically.
 $siteName    = Site::branding('name') ?? App::settings('site.name') ?? 'Portal';
-$siteColor   = Site::branding('color') ?? '#0d6efd';
+$siteColor   = Site::branding('color') ?? '#5e6ad2';
+$siteFavicon = Site::branding('favicon') ?? '/assets/images/favicon.ico';
+
+// 🎨 Derive --portal-primary-rgb (comma-separated R,G,B) from the hex colour
+// so portal.css's rgba()-based focus rings and shadows tint correctly.
+// Accepts #RGB / #RRGGBB; falls back to the indigo default on bad input.
+$hex = ltrim((string) $siteColor, '#');
+if (strlen($hex) === 3) {
+    $hex = $hex[0] . $hex[0] . $hex[1] . $hex[1] . $hex[2] . $hex[2];
+}
+if (preg_match('/^[0-9a-fA-F]{6}$/', $hex) === 1) {
+    $siteColorRgb = (int) hexdec(substr($hex, 0, 2)) . ', '
+                  . (int) hexdec(substr($hex, 2, 2)) . ', '
+                  . (int) hexdec(substr($hex, 4, 2));
+} else {
+    $siteColor    = '#5e6ad2';
+    $siteColorRgb = '94, 106, 210';
+}
 
 // 🔒 Security headers
 header_remove('X-Powered-By');
@@ -52,7 +71,10 @@ header("Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-i
 // 🎨 Determine initial theme from localStorage (handled by JS, default light)
 ?>
 <!doctype html>
-<html lang="<?php echo htmlspecialchars(I18n::locale(), ENT_QUOTES, 'UTF-8'); ?>" dir="<?php echo I18n::dir(); ?>" data-bs-theme="light">
+<html lang="<?php echo htmlspecialchars(I18n::locale(), ENT_QUOTES, 'UTF-8'); ?>"
+      dir="<?php echo I18n::dir(); ?>"
+      data-bs-theme="light"
+      style="--portal-primary: <?php echo htmlspecialchars($siteColor, ENT_QUOTES, 'UTF-8'); ?>; --portal-primary-rgb: <?php echo htmlspecialchars($siteColorRgb, ENT_QUOTES, 'UTF-8'); ?>;">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -61,6 +83,7 @@ header("Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-i
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <link rel="manifest" href="/manifest.json">
+    <link rel="icon" href="<?php echo htmlspecialchars($siteFavicon, ENT_QUOTES, 'UTF-8'); ?>">
     <link rel="apple-touch-icon" href="/assets/images/icon-192.svg">
     <title><?php echo htmlspecialchars($pageTitle . ' - ' . $siteName, ENT_QUOTES, 'UTF-8'); ?></title>
 

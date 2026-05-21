@@ -233,6 +233,70 @@ The script is idempotent — re-runs skip if the right version is already presen
 
 ---
 
+## Per-site branding flow
+
+The portal supports per-site visual branding via `tblSites` columns. Site
+admins can override the brand colour, logo and favicon per-site without
+touching code.
+
+### Data model
+
+`tblSites` columns relevant to branding (see migration `037_site_favicon.sql`):
+
+| Column         | Type         | Purpose                                          |
+| -------------- | ------------ | ------------------------------------------------ |
+| `siteName`     | VARCHAR(255) | Display name used in nav, page titles, footer    |
+| `logoPath`     | VARCHAR(500) | Header logo URL/path (any image format)          |
+| `faviconPath`  | VARCHAR(500) | Browser-tab favicon URL/path; NULL = default     |
+| `primaryColor` | VARCHAR(7)   | `#RRGGBB` hex; default `#5e6ad2` (Linear indigo) |
+| `copyrightOrg` | VARCHAR(255) | Footer copyright holder                          |
+
+### How a value flows from DB to UI
+
+1. `Site::loadCurrentSite()` selects the row into a class-level cache.
+2. `Site::branding('color' | 'logo' | 'favicon' | 'name' | …)` returns the
+   relevant column.
+3. `web/core/templates/header.php` reads `Site::branding('color')`,
+   derives `--portal-primary-rgb` (R,G,B) from the hex, and **inline-
+   styles** the `<html>` element:
+
+   ```html
+   <html data-bs-theme="light"
+         style="--portal-primary: #5e6ad2; --portal-primary-rgb: 94, 106, 210;">
+   ```
+
+4. `web/public_html/assets/css/portal.css` defines the design tokens
+   inside `:root`. Because the `<html>` inline style has higher
+   specificity than `:root`, the per-site primary wins. The derived
+   variants (`--portal-primary-hover`, `--portal-primary-active`,
+   `--portal-primary-subtle`) are auto-derived from the primary via
+   `color-mix()` and shift along with it on any browser that supports
+   color-mix (Chrome 111+, Safari 16.2+, Firefox 113+). On older
+   browsers, the literal indigo hex fallbacks defined in `:root` apply.
+5. `header.php` also renders `<link rel="icon">` from
+   `Site::branding('favicon')`, with `/assets/images/favicon.ico` as the
+   fallback.
+
+### Admin UI
+
+Umbrella admins manage all sites at **`/admin/sites/`**. The "New / Edit
+site" modal has form fields for `siteName`, `siteKey`, `hostPattern`,
+`logoPath`, `faviconPath`, `primaryColor` (color picker), `copyrightOrg`,
+`timezone`, and active status.
+
+The save handler at `web/public_html/admin/sites/save.php` validates the
+primary colour as `#RGB` or `#RRGGBB` and falls back to the indigo default
+on invalid input.
+
+### Defaults for white-label deploys
+
+`tblSites` ships with the global "WebMS Intra" defaults. New sites
+inherit `#5e6ad2` until the admin sets their own brand colour. Logo and
+favicon default to `/assets/images/logo.svg` and
+`/assets/images/favicon.ico` respectively.
+
+---
+
 ## Branch protection & rulesets — gotchas
 
 Two GitHub mechanisms can guard a branch in parallel: classic **branch

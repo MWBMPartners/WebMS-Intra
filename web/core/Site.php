@@ -113,8 +113,8 @@ class Site
     private static function loadSiteRow(\mysqli $db): void
     {
         $stmt = $db->prepare(
-            'SELECT siteID, siteName, siteKey, hostPattern, logoPath, primaryColor, '
-            . 'copyrightOrg, timezone, isActive '
+            'SELECT siteID, siteName, siteKey, hostPattern, logoPath, faviconPath, '
+            . 'primaryColor, copyrightOrg, timezone, isActive '
             . 'FROM tblSites WHERE siteID = ? LIMIT 1'
         );
         if ($stmt === false) {
@@ -157,7 +157,7 @@ class Site
     /**
      * Get a site-specific branding value.
      *
-     * @param string $key One of: name, logo, color, copyright, timezone, key
+     * @param string $key One of: name, logo, favicon, color, copyright, timezone, key
      *
      * @return string|null Value or null if site not loaded
      */
@@ -173,6 +173,11 @@ class Site
         }
         if ($key === 'logo') {
             return $site['logoPath'];
+        }
+        if ($key === 'favicon') {
+            // faviconPath column may not yet exist on databases that haven't
+            // run migration 037; return null to let the caller fall back.
+            return $site['faviconPath'] ?? null;
         }
         if ($key === 'color') {
             return $site['primaryColor'];
@@ -277,8 +282,8 @@ class Site
     public static function allActive(\mysqli $db): array
     {
         $result = $db->query(
-            'SELECT siteID, siteName, siteKey, hostPattern, logoPath, primaryColor, '
-            . 'copyrightOrg, timezone, isActive, createdAt '
+            'SELECT siteID, siteName, siteKey, hostPattern, logoPath, faviconPath, '
+            . 'primaryColor, copyrightOrg, timezone, isActive, createdAt '
             . 'FROM tblSites WHERE isActive = 1 ORDER BY siteName ASC'
         );
         if ($result === false) {
@@ -297,8 +302,8 @@ class Site
     public static function all(\mysqli $db): array
     {
         $result = $db->query(
-            'SELECT siteID, siteName, siteKey, hostPattern, logoPath, primaryColor, '
-            . 'copyrightOrg, timezone, isActive, createdAt, updatedAt '
+            'SELECT siteID, siteName, siteKey, hostPattern, logoPath, faviconPath, '
+            . 'primaryColor, copyrightOrg, timezone, isActive, createdAt, updatedAt '
             . 'FROM tblSites ORDER BY siteID ASC'
         );
         if ($result === false) {
