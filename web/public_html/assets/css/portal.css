@@ -265,29 +265,134 @@ textarea:focus-visible,
    5. Navbar Enhancements
    ============================================================================ */
 
+/* ----- Navbar shell ----- */
 .portal-navbar {
-    box-shadow: var(--portal-shadow-sm);
+    background-color: var(--portal-surface) !important; /* override Bootstrap's bg-body-tertiary */
     border-bottom: 1px solid var(--portal-border);
+    box-shadow: var(--portal-shadow-xs);
+    padding-top: 0.625rem;
+    padding-bottom: 0.625rem;
+    /* Sticky-friendly backdrop for when pages opt into position: sticky later */
+    -webkit-backdrop-filter: saturate(180%) blur(8px);
+    backdrop-filter: saturate(180%) blur(8px);
 }
 
+/* ----- Brand (logo + wordmark) ----- */
 .portal-navbar .navbar-brand {
     font-weight: 600;
-    letter-spacing: -0.025em;
+    letter-spacing: -0.015em;
+    color: var(--portal-text);
+    transition: opacity var(--portal-transition-fast);
 }
-
-.portal-navbar .nav-link {
-    transition: color var(--portal-transition-fast),
-                background-color var(--portal-transition-fast);
+.portal-navbar .navbar-brand:hover { opacity: 0.85; }
+.portal-navbar .navbar-brand img {
     border-radius: var(--portal-radius-sm);
-    padding: 0.4rem 0.75rem;
 }
 
+/* ----- Primary nav links ----- */
+.portal-navbar .nav-link {
+    color: var(--portal-text-muted);
+    font-weight: 500;
+    border-radius: var(--portal-radius-sm);
+    padding: 0.4375rem 0.75rem;
+    transition: color           var(--portal-transition-fast),
+                background-color var(--portal-transition-fast);
+}
 .portal-navbar .nav-link:hover {
+    color: var(--portal-text);
     background-color: var(--portal-surface-hover);
 }
-
 .portal-navbar .nav-link.active {
+    color: var(--portal-primary);
+    background-color: var(--portal-primary-subtle);
     font-weight: 600;
+}
+
+/* ----- Avatar dropdown trigger ----- */
+.portal-navbar .dropdown-toggle {
+    color: var(--portal-text);
+    padding: 0.25rem 0.5rem;
+    border-radius: var(--portal-radius-sm);
+    transition: background-color var(--portal-transition-fast);
+}
+.portal-navbar .dropdown-toggle:hover {
+    background-color: var(--portal-surface-hover);
+}
+.portal-navbar .dropdown-toggle::after {
+    color: var(--portal-text-muted);
+    margin-left: 0.375rem;
+}
+
+/* Tighten the avatar treatment when it lives inside the navbar */
+.portal-navbar .portal-avatar {
+    transition: box-shadow var(--portal-transition-fast),
+                border-color var(--portal-transition-fast);
+}
+.portal-navbar .dropdown-toggle:hover .portal-avatar,
+.portal-navbar .dropdown-toggle[aria-expanded="true"] .portal-avatar {
+    border-color: var(--portal-primary);
+    box-shadow: 0 0 0 2px rgba(var(--portal-primary-rgb), 0.18);
+}
+
+/* ----- Dropdown menus (user + multi-site switcher) ----- */
+.portal-navbar .dropdown-menu {
+    background-color: var(--portal-surface);
+    border: 1px solid var(--portal-border);
+    border-radius: var(--portal-radius-md);
+    box-shadow: var(--portal-shadow-lg);
+    padding: 0.375rem;
+    min-width: 12rem;
+    font-size: var(--portal-font-size-sm);
+}
+.portal-navbar .dropdown-item {
+    color: var(--portal-text);
+    padding: 0.5rem 0.6875rem;
+    border-radius: var(--portal-radius-sm);
+    transition: background-color var(--portal-transition-fast),
+                color            var(--portal-transition-fast);
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+.portal-navbar .dropdown-item i,
+.portal-navbar .dropdown-item .fa-solid,
+.portal-navbar .dropdown-item .fa-regular {
+    width: 1rem;                /* fixed-width so labels line up */
+    text-align: center;
+    color: var(--portal-text-muted);
+    transition: color var(--portal-transition-fast);
+}
+.portal-navbar .dropdown-item:hover,
+.portal-navbar .dropdown-item:focus {
+    background-color: var(--portal-primary-subtle);
+    color: var(--portal-primary);
+}
+.portal-navbar .dropdown-item:hover i,
+.portal-navbar .dropdown-item:focus i {
+    color: var(--portal-primary);
+}
+.portal-navbar .dropdown-item.active {
+    background-color: var(--portal-primary);
+    color: var(--portal-text-on-primary);
+}
+.portal-navbar .dropdown-item.active i { color: var(--portal-text-on-primary); }
+.portal-navbar .dropdown-item-text {
+    padding: 0.5rem 0.6875rem;
+    color: var(--portal-text-muted);
+}
+.portal-navbar .dropdown-divider {
+    border-color: var(--portal-border);
+    margin: 0.375rem 0;
+}
+
+/* ----- Mobile menu collapse ----- */
+@media (max-width: 991.98px) {
+    .portal-navbar .navbar-collapse {
+        margin-top: 0.625rem;
+        padding-top: 0.5rem;
+        border-top: 1px solid var(--portal-border);
+    }
+    .portal-navbar .navbar-nav .nav-link { padding-block: 0.625rem; }
 }
 
 /* ============================================================================
