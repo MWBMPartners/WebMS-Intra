@@ -27,7 +27,16 @@
      *     (branding settings) — keep the token names stable.
      * =====================================================================*/
 
-    /* ----- Brand colours ----- */
+    /* ----- Brand colours -----
+     * --portal-primary and --portal-primary-rgb are overridable per-site
+     * via inline style on the <html> element (set in header.php from
+     * tblSites.primaryColor). The hover/active/subtle variants below are
+     * DERIVED from --portal-primary using color-mix() so they shift
+     * automatically with the per-site primary.
+     *
+     * Fallback hex values are kept for browsers that don't support
+     * color-mix() (Chrome <111, Safari <16.2, Firefox <113). On those
+     * browsers all three derived tokens use the indigo default. */
     --portal-primary:        #5e6ad2;
     --portal-primary-rgb:    94, 106, 210;
     --portal-primary-hover:  #4f5bbf;
@@ -118,6 +127,26 @@
     --portal-transition-fast:   120ms var(--portal-easing-standard);
     --portal-transition-normal: 200ms var(--portal-easing-standard);
     --portal-transition-slow:   320ms var(--portal-easing-emphasised);
+}
+
+/* ----------------------------------------------------------------------------
+ * Derive primary-hover / primary-active / primary-subtle from --portal-primary
+ * so per-site overrides (header.php injects --portal-primary on <html>) shift
+ * the whole indigo family automatically. Wrapped in @supports because
+ * color-mix() lands in Chrome 111 / Safari 16.2 / Firefox 113. Browsers that
+ * don't support it fall back to the literal hex values defined inside :root.
+ * --------------------------------------------------------------------------*/
+@supports (color: color-mix(in srgb, red, blue)) {
+    :root {
+        --portal-primary-hover:  color-mix(in srgb, var(--portal-primary), black 12%);
+        --portal-primary-active: color-mix(in srgb, var(--portal-primary), black 24%);
+        --portal-primary-subtle: color-mix(in srgb, var(--portal-primary), white 92%);
+    }
+    [data-bs-theme="dark"] {
+        --portal-primary-hover:  color-mix(in srgb, var(--portal-primary), white 12%);
+        --portal-primary-active: color-mix(in srgb, var(--portal-primary), white 24%);
+        --portal-primary-subtle: color-mix(in srgb, var(--portal-primary), black 80%);
+    }
 }
 
 /* ============================================================================

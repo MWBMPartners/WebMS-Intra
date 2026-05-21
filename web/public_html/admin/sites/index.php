@@ -184,8 +184,14 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     <div class="col-md-6 mb-3">
                         <label for="formPrimaryColor" class="form-label">Primary Colour</label>
                         <input type="color" class="form-control form-control-color" id="formPrimaryColor"
-                               name="primaryColor" value="#0d6efd">
+                               name="primaryColor" value="#5e6ad2">
                     </div>
+                </div>
+                <div class="mb-3">
+                    <label for="formFaviconPath" class="form-label">Favicon Path</label>
+                    <input type="text" class="form-control" id="formFaviconPath" name="faviconPath" maxlength="500"
+                           placeholder="/assets/images/favicon.ico">
+                    <div class="form-text">URL or path to the favicon. Leave blank to use the default.</div>
                 </div>
                 <div class="mb-3">
                     <label for="formCopyrightOrg" class="form-label">Copyright Organisation</label>
@@ -226,7 +232,8 @@ function resetSiteForm() {
     document.getElementById('formSiteKey').value = '';
     document.getElementById('formHostPattern').value = '';
     document.getElementById('formLogoPath').value = '/assets/images/logo.svg';
-    document.getElementById('formPrimaryColor').value = '#0d6efd';
+    document.getElementById('formFaviconPath').value = '';
+    document.getElementById('formPrimaryColor').value = '#5e6ad2';
     document.getElementById('formCopyrightOrg').value = '';
     document.getElementById('formTimezone').value = 'UTC';
     document.getElementById('formIsActive').checked = true;
@@ -239,7 +246,8 @@ function editSite(site) {
     document.getElementById('formSiteKey').value = site.siteKey || '';
     document.getElementById('formHostPattern').value = site.hostPattern || '';
     document.getElementById('formLogoPath').value = site.logoPath || '/assets/images/logo.svg';
-    document.getElementById('formPrimaryColor').value = site.primaryColor || '#0d6efd';
+    document.getElementById('formFaviconPath').value = site.faviconPath || '';
+    document.getElementById('formPrimaryColor').value = site.primaryColor || '#5e6ad2';
     document.getElementById('formCopyrightOrg').value = site.copyrightOrg || '';
     document.getElementById('formTimezone').value = site.timezone || 'UTC';
     document.getElementById('formIsActive').checked = (String(site.isActive) === '1');
