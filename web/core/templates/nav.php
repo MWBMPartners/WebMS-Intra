@@ -194,9 +194,14 @@ if ($isLoggedIn === true && Site::isMultisiteEnabled() === true && $navUser !== 
                 </div>
                 <?php endif; ?>
 
-                <!-- 🌙 Dark mode toggle -->
+                <!-- 🌙 Theme toggle (cycles light → dark → auto) -->
                 <button type="button" class="portal-theme-toggle" aria-label="<?php echo htmlspecialchars(t('nav.toggle_dark_mode'), ENT_QUOTES, 'UTF-8'); ?>">
-                    <i class="fa-solid fa-moon"></i>
+                    <i class="fa-solid fa-circle-half-stroke"></i>
+                </button>
+
+                <!-- 🎨 Colour-blind safe palette toggle -->
+                <button type="button" class="portal-cb-toggle" aria-label="Toggle colour-blind safe palette" aria-pressed="false">
+                    <i class="fa-solid fa-eye-low-vision"></i>
                 </button>
 
                 <!-- 👤 User dropdown -->
@@ -247,7 +252,12 @@ if ($isLoggedIn === true && Site::isMultisiteEnabled() === true && $navUser !== 
                 </li>
                 <li class="nav-item">
                     <button type="button" class="portal-theme-toggle" aria-label="<?php echo htmlspecialchars(t('nav.toggle_dark_mode'), ENT_QUOTES, 'UTF-8'); ?>">
-                        <i class="fa-solid fa-moon"></i>
+                        <i class="fa-solid fa-circle-half-stroke"></i>
+                    </button>
+                </li>
+                <li class="nav-item">
+                    <button type="button" class="portal-cb-toggle" aria-label="Toggle colour-blind safe palette" aria-pressed="false">
+                        <i class="fa-solid fa-eye-low-vision"></i>
                     </button>
                 </li>
             </ul>

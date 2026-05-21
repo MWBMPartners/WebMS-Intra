@@ -194,6 +194,34 @@
 }
 
 /* ============================================================================
+   2.5 Colour-blind safe palette (data-portal-cb="on")
+
+   Overrides only the SEMANTIC colours (success / danger / warning / accent /
+   info) when the user opts in. Primary stays under per-site / user control
+   because the primary is meant to be the site's identity colour.
+
+   Palette is based on Wong (Nature Methods, 2011) — distinguishable for
+   the most common forms of colour blindness (deutan + protan, ~95% of
+   cases). The general rule the palette honours: avoid red/green as the
+   only differentiator. Components should also pair colour with icons or
+   text labels (handled at the component level, not the token level).
+   ============================================================================ */
+
+[data-portal-cb="on"] {
+    --portal-success: #009e73;     /* bluish-green — CB-safe */
+    --portal-danger:  #d55e00;     /* vermillion — CB-safe */
+    --portal-warning: #e69f00;     /* orange — CB-safe */
+    --portal-accent:  #56b4e9;     /* sky blue — CB-safe */
+}
+
+[data-portal-cb="on"][data-bs-theme="dark"] {
+    --portal-success: #5dd1a8;     /* lighter bluish-green for dark surfaces */
+    --portal-danger:  #ff8a4d;     /* lighter vermillion */
+    --portal-warning: #ffc04d;     /* lighter orange */
+    --portal-accent:  #7fc6f0;     /* lighter sky blue */
+}
+
+/* ============================================================================
    3. Base / Reset
    ============================================================================ */
 
@@ -573,7 +601,8 @@ textarea:focus-visible,
    14. Dark Mode Toggle Button
    ============================================================================ */
 
-.portal-theme-toggle {
+.portal-theme-toggle,
+.portal-cb-toggle {
     background: none;
     border: none;
     padding: var(--portal-spacing-sm);
@@ -585,8 +614,15 @@ textarea:focus-visible,
     transition: background-color var(--portal-transition-fast);
 }
 
-.portal-theme-toggle:hover {
+.portal-theme-toggle:hover,
+.portal-cb-toggle:hover {
     background-color: var(--portal-surface-hover);
+}
+
+/* Visual cue when CB-safe palette is active */
+.portal-cb-toggle[aria-pressed="true"] {
+    color: var(--portal-primary);
+    background-color: var(--portal-primary-subtle);
 }
 
 /* ============================================================================

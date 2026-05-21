@@ -26,58 +26,137 @@
     'use strict';
 
     /**
-     * Initialise the dark mode toggle button(s).
-     * Reads the saved preference from localStorage and applies it to the
-     * document's data-bs-theme attribute. Clicking the toggle button swaps
-     * the theme and persists the choice.
+     * Initialise the theme toggle button(s).
+     *
+     * Three-state cycle: light → dark → auto → light. The actual data-bs-theme
+     * value applied to <html> is always 'light' or 'dark' — when the saved
+     * preference is 'auto' the script resolves via prefers-color-scheme and
+     * listens for system theme changes.
+     *
+     * The FOUC script in header.php applies the initial value before this
+     * runs; this function attaches click handlers and updates the icon state.
      */
     function initThemeToggle() {
         var html = document.documentElement;
-        var savedTheme = localStorage.getItem('portal-theme');
+        var mediaQuery = window.matchMedia
+            ? window.matchMedia('(prefers-color-scheme: dark)')
+            : null;
 
-        // Apply saved theme preference on load
-        if (savedTheme === 'dark' || savedTheme === 'light') {
-            html.setAttribute('data-bs-theme', savedTheme);
+        function savedPreference() {
+            var v = localStorage.getItem('portal-theme');
+            return (v === 'light' || v === 'dark' || v === 'auto') ? v : 'auto';
+        }
+        function applyAuto() {
+            var prefersDark = mediaQuery && mediaQuery.matches;
+            html.setAttribute('data-bs-theme', prefersDark ? 'dark' : 'light');
         }
 
-        // Bind click handlers to all toggle buttons
+        // When in 'auto' mode, keep the resolved theme in sync with system pref.
+        if (mediaQuery && typeof mediaQuery.addEventListener === 'function') {
+            mediaQuery.addEventListener('change', function () {
+                if (savedPreference() === 'auto') {
+                    applyAuto();
+                    updateToggleIcons(savedPreference());
+                }
+            });
+        }
+
         var toggleButtons = document.querySelectorAll('.portal-theme-toggle');
         for (var i = 0; i < toggleButtons.length; i++) {
             toggleButtons[i].addEventListener('click', function () {
-                var current = html.getAttribute('data-bs-theme') || 'light';
-                var next = (current === 'dark') ? 'light' : 'dark';
+                var current = savedPreference();
+                var next = (current === 'light')
+                    ? 'dark'
+                    : (current === 'dark' ? 'auto' : 'light');
 
-                html.setAttribute('data-bs-theme', next);
                 localStorage.setItem('portal-theme', next);
-
-                // Update toggle button icons
+                if (next === 'auto') {
+                    applyAuto();
+                } else {
+                    html.setAttribute('data-bs-theme', next);
+                }
                 updateToggleIcons(next);
             });
         }
 
-        // Set initial icon state
-        var currentTheme = html.getAttribute('data-bs-theme') || 'light';
-        updateToggleIcons(currentTheme);
+        // Set initial icon state to reflect the saved preference (not resolved)
+        updateToggleIcons(savedPreference());
     }
 
     /**
-     * Update all theme toggle button icons to reflect the current theme.
-     *
-     * @param {string} theme - Current theme ("light" or "dark")
+     * Initialise the colour-blind-safe palette toggle button(s).
+     * Two states (on / off). Persists in localStorage as 'portal-cb'.
+     * The FOUC script in header.php applies the attribute before paint.
      */
-    function updateToggleIcons(theme) {
+    function initCbToggle() {
+        var html = document.documentElement;
+        function savedCb() {
+            return localStorage.getItem('portal-cb') === 'on';
+        }
+        function apply(on) {
+            if (on) {
+                html.setAttribute('data-portal-cb', 'on');
+            } else {
+                html.removeAttribute('data-portal-cb');
+            }
+        }
+
+        var buttons = document.querySelectorAll('.portal-cb-toggle');
+        for (var i = 0; i < buttons.length; i++) {
+            buttons[i].addEventListener('click', function () {
+                var next = !savedCb();
+                if (next) {
+                    localStorage.setItem('portal-cb', 'on');
+                } else {
+                    localStorage.removeItem('portal-cb');
+                }
+                apply(next);
+                updateCbIcons(next);
+            });
+        }
+        updateCbIcons(savedCb());
+    }
+
+    /**
+     * Update theme toggle icons + aria labels to reflect the saved preference.
+     * Saved preference is one of: 'light', 'dark', 'auto'.
+     *
+     * @param {string} preference - Saved theme preference (not the resolved value)
+     */
+    function updateToggleIcons(preference) {
         var toggleButtons = document.querySelectorAll('.portal-theme-toggle');
         for (var i = 0; i < toggleButtons.length; i++) {
             var icon = toggleButtons[i].querySelector('i');
             if (icon) {
-                if (theme === 'dark') {
-                    icon.className = 'fa-solid fa-sun';
-                    toggleButtons[i].setAttribute('title', 'Switch to light mode');
-                } else {
+                if (preference === 'dark') {
                     icon.className = 'fa-solid fa-moon';
-                    toggleButtons[i].setAttribute('title', 'Switch to dark mode');
+                    toggleButtons[i].setAttribute('title', 'Theme: dark — click for auto');
+                } else if (preference === 'auto') {
+                    icon.className = 'fa-solid fa-circle-half-stroke';
+                    toggleButtons[i].setAttribute('title', 'Theme: auto (system) — click for light');
+                } else {
+                    icon.className = 'fa-solid fa-sun';
+                    toggleButtons[i].setAttribute('title', 'Theme: light — click for dark');
                 }
             }
+        }
+    }
+
+    /**
+     * Update CB toggle icons + aria labels to reflect the current state.
+     *
+     * @param {boolean} on - Whether CB-safe mode is enabled
+     */
+    function updateCbIcons(on) {
+        var buttons = document.querySelectorAll('.portal-cb-toggle');
+        for (var i = 0; i < buttons.length; i++) {
+            buttons[i].setAttribute('aria-pressed', on ? 'true' : 'false');
+            buttons[i].setAttribute(
+                'title',
+                on
+                    ? 'Colour-blind safe palette: on — click to turn off'
+                    : 'Colour-blind safe palette: off — click to turn on'
+            );
         }
     }
 
@@ -276,10 +355,12 @@
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', function () {
             initThemeToggle();
+            initCbToggle();
             initDropzones();
         });
     } else {
         initThemeToggle();
+        initCbToggle();
         initDropzones();
     }
 

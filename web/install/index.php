@@ -475,6 +475,84 @@ $pageTitle = 'Install — ' . ($stepTitles[$step] ?? 'WebMS Intra');
         }
 
         /* =====================================================================
+         * Dark mode — mirrors portal.css's [data-bs-theme="dark"] block
+         * (applied to <html> by the FOUC script below).
+         * =================================================================*/
+        [data-bs-theme="dark"] {
+            --portal-primary:        #7b86e8;
+            --portal-primary-rgb:    123, 134, 232;
+            --portal-primary-hover:  #8f99eb;
+            --portal-primary-subtle: #1f2347;
+            --portal-success:        #4ade80;
+            --portal-warning:        #fbbf24;
+            --portal-danger:         #f87171;
+            --portal-bg:             #0f1115;
+            --portal-surface:        #161a22;
+            --portal-border:         #2c3441;
+            --portal-border-strong:  #3a4252;
+            --portal-text:           #e8eaf0;
+            --portal-text-muted:     #9aa3b2;
+            --portal-text-subtle:    #6b7280;
+            --portal-shadow-md:      0 4px 6px -1px rgba(0,0,0,0.4),
+                                     0 2px 4px -2px rgba(0,0,0,0.3);
+            --portal-shadow-lg:      0 12px 20px -8px rgba(0,0,0,0.5),
+                                     0 4px 8px -4px rgba(0,0,0,0.4);
+        }
+
+        /* =====================================================================
+         * Colour-blind safe palette — opt-in via [data-portal-cb="on"].
+         * Mirrors portal.css; Wong-based palette distinguishable for
+         * deutan + protan colour blindness (~95% of CB cases).
+         * =================================================================*/
+        [data-portal-cb="on"] {
+            --portal-success: #009e73;
+            --portal-danger:  #d55e00;
+            --portal-warning: #e69f00;
+        }
+        [data-portal-cb="on"][data-bs-theme="dark"] {
+            --portal-success: #5dd1a8;
+            --portal-danger:  #ff8a4d;
+            --portal-warning: #ffc04d;
+        }
+
+        /* =====================================================================
+         * Theme / accessibility toggle buttons in the installer header
+         * =================================================================*/
+        .install-toggles {
+            position: absolute;
+            top: 1rem;
+            right: 1rem;
+            display: flex;
+            gap: 0.375rem;
+        }
+        .install-toggle {
+            background: var(--portal-surface);
+            border: 1px solid var(--portal-border);
+            color: var(--portal-text-muted);
+            border-radius: var(--portal-radius-md);
+            width: 2.25rem;
+            height: 2.25rem;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            font-size: 1rem;
+            transition: background 120ms var(--portal-easing),
+                        color      120ms var(--portal-easing),
+                        border-color 120ms var(--portal-easing);
+        }
+        .install-toggle:hover {
+            background: var(--portal-bg);
+            color: var(--portal-text);
+            border-color: var(--portal-border-strong);
+        }
+        .install-toggle[aria-pressed="true"] {
+            color: var(--portal-primary);
+            background: var(--portal-primary-subtle);
+            border-color: var(--portal-primary);
+        }
+
+        /* =====================================================================
          * Page shell
          * =================================================================*/
         html, body { height: 100%; }
@@ -820,9 +898,52 @@ $pageTitle = 'Install — ' . ($stepTitles[$step] ?? 'WebMS Intra');
             outline-offset: 2px;
         }
     </style>
+
+    <!-- 🌙 Prevent FOUC: apply saved theme + CB prefs before first paint -->
+    <script>
+    (function(){
+        var html = document.documentElement;
+        var t = localStorage.getItem('portal-theme');
+        if (t === 'auto' || t === null) {
+            var prefersDark = window.matchMedia
+                && window.matchMedia('(prefers-color-scheme: dark)').matches;
+            html.setAttribute('data-bs-theme', prefersDark ? 'dark' : 'light');
+        } else if (t === 'dark' || t === 'light') {
+            html.setAttribute('data-bs-theme', t);
+        }
+        if (localStorage.getItem('portal-cb') === 'on') {
+            html.setAttribute('data-portal-cb', 'on');
+        }
+    })();
+    </script>
 </head>
 <body>
-<div class="install-shell">
+<div class="install-shell" style="position: relative;">
+
+    <!-- 🌙 / 🎨 Theme + accessibility toggles
+         Inline SVG icons so the installer doesn't need Font Awesome loaded. -->
+    <div class="install-toggles">
+        <button type="button" class="install-toggle" id="installThemeToggle"
+                title="Theme: auto (system) — click for light"
+                aria-label="Toggle theme">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                 stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <circle cx="12" cy="12" r="9"/>
+                <path d="M12 3v18" />
+                <path d="M12 3a9 9 0 0 1 0 18 9 9 0 0 1 0-18z" fill="currentColor" opacity="0.3"/>
+            </svg>
+        </button>
+        <button type="button" class="install-toggle" id="installCbToggle"
+                title="Colour-blind safe palette: off — click to turn on"
+                aria-label="Toggle colour-blind safe palette"
+                aria-pressed="false">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                 stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/>
+                <circle cx="12" cy="12" r="3"/>
+            </svg>
+        </button>
+    </div>
 
     <!-- Header -->
     <div class="install-header">
@@ -1069,5 +1190,78 @@ $pageTitle = 'Install — ' . ($stepTitles[$step] ?? 'WebMS Intra');
     </div>
 
 </div>
+
+<script>
+// Theme + CB toggle wiring for the installer (standalone — doesn't load portal.js)
+(function(){
+    var html = document.documentElement;
+    var themeBtn = document.getElementById('installThemeToggle');
+    var cbBtn    = document.getElementById('installCbToggle');
+    var mql      = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
+
+    function savedTheme() {
+        var v = localStorage.getItem('portal-theme');
+        return (v === 'light' || v === 'dark' || v === 'auto') ? v : 'auto';
+    }
+    function applyTheme(pref) {
+        if (pref === 'auto') {
+            html.setAttribute('data-bs-theme', (mql && mql.matches) ? 'dark' : 'light');
+        } else {
+            html.setAttribute('data-bs-theme', pref);
+        }
+        updateThemeBtn(pref);
+    }
+    function updateThemeBtn(pref) {
+        if (!themeBtn) return;
+        var titles = {
+            light: 'Theme: light — click for dark',
+            dark:  'Theme: dark — click for auto',
+            auto:  'Theme: auto (system) — click for light'
+        };
+        themeBtn.setAttribute('title', titles[pref] || titles.auto);
+    }
+    function savedCb() { return localStorage.getItem('portal-cb') === 'on'; }
+    function applyCb(on) {
+        if (on) {
+            html.setAttribute('data-portal-cb', 'on');
+        } else {
+            html.removeAttribute('data-portal-cb');
+        }
+        if (cbBtn) {
+            cbBtn.setAttribute('aria-pressed', on ? 'true' : 'false');
+            cbBtn.setAttribute('title', on
+                ? 'Colour-blind safe palette: on — click to turn off'
+                : 'Colour-blind safe palette: off — click to turn on');
+        }
+    }
+
+    if (themeBtn) {
+        themeBtn.addEventListener('click', function(){
+            var cur = savedTheme();
+            var next = (cur === 'light') ? 'dark' : (cur === 'dark' ? 'auto' : 'light');
+            localStorage.setItem('portal-theme', next);
+            applyTheme(next);
+        });
+    }
+    if (cbBtn) {
+        cbBtn.addEventListener('click', function(){
+            var next = !savedCb();
+            if (next) { localStorage.setItem('portal-cb', 'on'); }
+            else      { localStorage.removeItem('portal-cb'); }
+            applyCb(next);
+        });
+    }
+    if (mql && typeof mql.addEventListener === 'function') {
+        mql.addEventListener('change', function(){
+            if (savedTheme() === 'auto') applyTheme('auto');
+        });
+    }
+
+    // Initial state — FOUC script already applied the data-* attrs; just sync the icons/titles.
+    updateThemeBtn(savedTheme());
+    applyCb(savedCb());
+})();
+</script>
+
 </body>
 </html>

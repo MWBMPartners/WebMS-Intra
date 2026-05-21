@@ -297,6 +297,81 @@ favicon default to `/assets/images/logo.svg` and
 
 ---
 
+## Theme modes + colour-blind palette
+
+The portal and the standalone installer support three theme modes and an
+opt-in colour-blind safe palette. Both are user-level preferences stored in
+`localStorage` (per-device, per-browser).
+
+### Theme modes
+
+- **Light** — light surfaces, dark text (the design's default visual)
+- **Dark** — dark surfaces, light text (`[data-bs-theme="dark"]` overrides)
+- **Auto** — follows the OS `prefers-color-scheme` and live-updates if the
+  system flips
+
+Click the half-stroke circle icon in the navbar to cycle through the modes.
+The icon updates to indicate the active preference (sun = light, moon =
+dark, half-stroke = auto). Persisted as `localStorage.portal-theme` =
+`light` / `dark` / `auto`. Missing key defaults to `auto`.
+
+The same control exists in the standalone installer at `/install/` (top-
+right of the page). Its tokens mirror `portal.css` and are kept in sync
+manually.
+
+### Colour-blind safe palette
+
+Opt-in toggle (`localStorage.portal-cb` = `on` / unset). When enabled,
+the eye icon in the navbar shows as active and the semantic colours
+(success, danger, warning, accent) shift to a palette from Wong (Nature
+Methods, 2011) that's distinguishable for deutan + protan colour
+blindness (~95 % of CB cases):
+
+- `--portal-success`: default `#16a34a` (green) → CB `#009e73` (bluish-green); dark CB `#5dd1a8`
+- `--portal-danger`: default `#dc2626` (red) → CB `#d55e00` (vermillion); dark CB `#ff8a4d`
+- `--portal-warning`: default `#d97706` (amber) → CB `#e69f00` (orange); dark CB `#ffc04d`
+- `--portal-accent`: default `#06b6d4` (cyan) → CB `#56b4e9` (sky blue); dark CB `#7fc6f0`
+
+Primary stays untouched — it's the site's identity colour and is
+user/site-set (see "Per-site branding flow" above).
+
+**Accessibility note:** CB-safe tokens reduce the risk of mis-reading
+status colours, but **colour alone should never be the only signal**.
+Components that convey state (badges, alerts, validation messages)
+should also use icons or text labels. The PR template's security
+checklist already mentions this for new UI work.
+
+### Flow
+
+```text
+localStorage  ──FOUC script──▶  <html data-bs-theme="..." data-portal-cb="...">
+                                       │
+                                       ▼
+                              portal.css token overrides
+                                       │
+                                       ▼
+                              all components inherit
+```
+
+The FOUC script runs synchronously in `<head>` before first paint, so
+the chosen theme + CB mode are applied with no flash. portal.js (and
+the installer's inline JS) then wire up the toggle buttons and listen
+for `prefers-color-scheme` changes when in `auto` mode.
+
+### Where to find the code
+
+- `web/public_html/assets/css/portal.css` — token blocks for light,
+  dark, CB-safe (and dark + CB-safe combined)
+- `web/core/templates/header.php` — inline FOUC script reading
+  localStorage and applying the attrs
+- `web/core/templates/nav.php` — theme + CB toggle buttons
+- `web/public_html/assets/js/portal.js` — `initThemeToggle()` (cycles
+  light → dark → auto), `initCbToggle()` (on/off)
+- `web/install/index.php` — installer mirrors all of the above inline
+  (it's standalone, can't load portal.css/portal.js)
+
+---
+
 ## Branch protection & rulesets — gotchas
 
 Two GitHub mechanisms can guard a branch in parallel: classic **branch
