@@ -11,6 +11,8 @@ to `alpha`, `beta`, and `main` using the heading format
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-05-22
+
 ### Added — Calendar: per-month strap-lines + category display-style toggle (follow-ups to #136)
 
 Two enhancements deferred from the original calendar-views PR (#137):
