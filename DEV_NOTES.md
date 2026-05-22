@@ -323,6 +323,11 @@ Markup lives in `web/core/templates/footer.php`; styling is in the
 `.portal-powered-by-mark` rules in `portal.css`. The mark class is a
 hook for future hyperlinking when the WebMS Intra landing page exists.
 
+The same detection ALSO drives a `<meta name="generator" content="WebMS Intra">`
+tag in `web/core/templates/header.php`. This is the standard SaaS / CMS
+attribution mechanism — invisible to humans, picked up by site analysers
+like Wappalyzer + "View page source" + browser dev tools.
+
 ---
 
 ## Theme modes + colour-blind palette
