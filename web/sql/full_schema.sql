@@ -1938,6 +1938,36 @@ ON DUPLICATE KEY UPDATE `filename` = `filename`;
 INSERT INTO `tblMigrations` (`filename`) VALUES ('050_notification_prefs_ui.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
+INSERT INTO `tblMigrations` (`filename`) VALUES ('051_email_templates.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- 📨 Email template store (matches migration 051)
+CREATE TABLE IF NOT EXISTS `tblEmailTemplates` (
+    `templateID`      INT          NOT NULL AUTO_INCREMENT,
+    `siteID`          INT          DEFAULT NULL,
+    `templateKey`     VARCHAR(100) NOT NULL,
+    `subject`         VARCHAR(255) NOT NULL,
+    `bodyHtml`        MEDIUMTEXT   NOT NULL,
+    `description`     VARCHAR(500) DEFAULT NULL,
+    `availableTokens` TEXT         DEFAULT NULL,
+    `isActive`        TINYINT(1)   NOT NULL DEFAULT 1,
+    `createdAt`       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updatedAt`       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`templateID`),
+    UNIQUE KEY `uq_template_site_key` (`siteID`, `templateKey`),
+    KEY `idx_template_key` (`templateKey`),
+    CONSTRAINT `fk_template_site` FOREIGN KEY (`siteID`)
+        REFERENCES `tblSites` (`siteID`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+COMMENT='Editable email templates with Mustache-style {{token}} substitution.';
+
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('admin/email-templates',         'admin/email-templates/index.php',  1),
+    ('admin/email-templates/edit',    'admin/email-templates/edit.php',   1),
+    ('admin/email-templates/save',    'admin/email-templates/save.php',   1),
+    ('admin/email-templates/preview', 'admin/email-templates/preview.php',1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
 -- 📬 Notification prefs UI gating (matches migration 050)
 INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
     (NULL, 'notifications.deliveryReady', 'false', 'false', 0)
