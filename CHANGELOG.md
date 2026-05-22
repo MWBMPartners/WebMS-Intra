@@ -11,6 +11,21 @@ to `alpha`, `beta`, and `main` using the heading format
 
 ## [Unreleased]
 
+### Changed — Deploy workflow: dry-run dispatch + DEV_NOTES troubleshooting (#107)
+
+- `deploy.yml` now accepts a `dry_run` `workflow_dispatch` input. When
+  set to `true`, lftp `--dry-run` is threaded into every `mirror`
+  invocation (both per-branch `public_html/` and the `--delete` shared
+  upload). The run prints exactly what would be uploaded **and what would
+  be deleted** on the server, without making any changes — useful before
+  structurally-significant deploys (renamed/moved files in `core/`,
+  `vendor/`, `sql/`).
+- `DEV_NOTES.md → Troubleshooting` gains a "file disappeared from the
+  server after deploy" entry documenting the `--delete` mirror semantics
+  and the survival rules for `_auth_keys/` / `_uploads/` / `_backups/`.
+- Debug-panel troubleshooting note updated to mention the new prod
+  refusal (cross-references #54).
+
 ### Security — Debug mode hardening in production (#54)
 
 - `Debug::isEnabled()` and `App::isDebug()` now **unconditionally refuse**

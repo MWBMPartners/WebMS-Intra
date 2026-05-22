@@ -1051,9 +1051,43 @@ Your user account lacks dev access. Either:
 
 ### Debug panel not showing
 
-Append `?debug=true` to the URL. Only visible to admin users.
-Check that `isAdmin=1` or `isRootAdmin=1` on your user record.
+Append `?debug=true` to the URL. Only visible to admin users in **non-prod**
+environments. Debug mode is unconditionally refused when `PORTAL_ENV=prod`
+(any attempt is logged as a `DebugBlocked` activity entry). See issue #54.
+
+### A file disappeared from the server after deploy
+
+Almost certainly because **it isn't in the `web/` tree in the repo**. The
+deploy workflow mirrors with `--delete` on the shared dirs, so any file
+present on the server but absent from `web/` will be removed on the next
+push.
+
+Affected (mirrored) trees on the server:
+
+```text
+<base>/core/
+<base>/vendor/
+<base>/sql/
+<base>/_includes/
+<base>/_functions/
+<base>/_libraries/
+```
+
+What survives:
+
+- `<base>/_auth_keys/` — server-only (credentials, encryption key)
+- `<base>/_uploads/` — user uploads
+- `<base>/_backups/` — server-managed snapshots
+
+If you need a quick patch on the server during an incident, **commit + push**
+instead of SCP'ing the file — manual edits to mirrored dirs vanish on the
+next deploy. If a library or vendored asset must live on the server but
+not in the repo, add it to `WEB_ROOT_EXCLUDES` in `.github/workflows/deploy.yml`.
+
+Use the workflow_dispatch **dry-run** input on `deploy.yml` to preview what
+a deploy would change (and crucially, what it would delete) before pushing.
+See issue #107 for the full rationale and mitigation list.
 
 ---
 
-Last updated: March 2026
+Last updated: May 2026
