@@ -11,6 +11,8 @@ to `alpha`, `beta`, and `main` using the heading format
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-05-22
+
 ### Added — UI refresh: design system, theme modes, per-site branding
 
 A six-PR sweep across the portal and the standalone installer (#111).
