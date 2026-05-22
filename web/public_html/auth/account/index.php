@@ -737,6 +737,38 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     </div>
 </div>
 
+<!-- ============================================================== -->
+<!-- 🇪🇺 Privacy & Data Rights (GDPR #47)                            -->
+<!-- ============================================================== -->
+<?php
+$accAllowDelete = (\Portal\Core\App::settings('privacy.allowAccountDelete') ?? 'true') === 'true';
+?>
+<div class="row g-3 mt-4">
+    <div class="col-12 col-lg-6">
+        <div class="card shadow-sm">
+            <div class="card-body">
+                <h2 class="h5"><i class="fa-solid fa-shield-halved me-1"></i>Your data &amp; privacy</h2>
+                <p class="text-muted small">
+                    Download a copy of everything we hold about you, read the privacy policy, or close your account.
+                </p>
+                <div class="d-flex flex-wrap gap-2">
+                    <a href="/account/data-export" class="btn btn-sm btn-outline-primary">
+                        <i class="fa-solid fa-download me-1"></i> Download my data (JSON)
+                    </a>
+                    <a href="/privacy" class="btn btn-sm btn-outline-secondary">
+                        <i class="fa-solid fa-file-shield me-1"></i> Privacy policy
+                    </a>
+                    <?php if ($accAllowDelete === true): ?>
+                        <a href="/account/delete" class="btn btn-sm btn-outline-danger">
+                            <i class="fa-solid fa-trash me-1"></i> Delete my account
+                        </a>
+                    <?php endif; ?>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
 <?php
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'footer.php';
 ?>

@@ -1929,6 +1929,49 @@ ON DUPLICATE KEY UPDATE `filename` = `filename`;
 INSERT INTO `tblMigrations` (`filename`) VALUES ('047_2fa_trusted_devices.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
+INSERT INTO `tblMigrations` (`filename`) VALUES ('048_privacy_gdpr.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- 🇪🇺 Privacy / GDPR (matches migration 048 — closes #47)
+CREATE TABLE IF NOT EXISTS `tblConsentLog` (
+    `consentID`   INT          NOT NULL AUTO_INCREMENT,
+    `siteID`      INT          NOT NULL,
+    `userID`      INT          DEFAULT NULL,
+    `sessionID`   VARCHAR(255) DEFAULT NULL,
+    `consentType` ENUM('cookies','privacy_policy','marketing','analytics') NOT NULL,
+    `decision`    ENUM('accept','reject','withdraw') NOT NULL,
+    `policyHash`  CHAR(64)     DEFAULT NULL,
+    `ipAddress`   VARCHAR(45)  DEFAULT NULL,
+    `userAgent`   VARCHAR(255) DEFAULT NULL,
+    `createdAt`   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`consentID`),
+    KEY `idx_consent_user`    (`userID`),
+    KEY `idx_consent_session` (`sessionID`),
+    KEY `idx_consent_type`    (`siteID`, `consentType`),
+    CONSTRAINT `fk_consent_site` FOREIGN KEY (`siteID`)
+        REFERENCES `tblSites` (`siteID`) ON DELETE CASCADE,
+    CONSTRAINT `fk_consent_user` FOREIGN KEY (`userID`)
+        REFERENCES `tblUsers` (`userID`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+COMMENT='Audit trail of cookie / privacy policy consent decisions.';
+
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'privacy.controllerName',     '',  '',  0),
+    (NULL, 'privacy.contactEmail',       '',  '',  0),
+    (NULL, 'privacy.policyURL',          '',  '',  0),
+    (NULL, 'privacy.dataRetentionDays',  '730', '730', 0),
+    (NULL, 'privacy.cookieBannerEnabled','true','true',0),
+    (NULL, 'privacy.allowAccountDelete', 'true','true',0)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('privacy',                   'privacy/index.php',              0),
+    ('privacy/consent',           'privacy/consent.php',            0),
+    ('account/data-export',       'auth/account/data-export.php',   1),
+    ('account/delete',            'auth/account/delete.php',        1),
+    ('account/delete/confirm',    'auth/account/delete-confirm.php',1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
 -- 🔐 2FA trusted-device cookie (matches migration 047)
 CREATE TABLE IF NOT EXISTS `tblTrustedDevices` (
     `deviceID`    INT          NOT NULL AUTO_INCREMENT,
