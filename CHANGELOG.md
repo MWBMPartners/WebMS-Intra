@@ -9,7 +9,71 @@ Automated sections are appended by `.github/workflows/changelog.yml` per push
 to `alpha`, `beta`, and `main` using the heading format
 `## [VERSION] - YYYY-MM-DD (branch)`.
 
-## [Unreleased] — CI/CD overhaul
+## [Unreleased]
+
+### Added — UI refresh: design system, theme modes, per-site branding
+
+A six-PR sweep across the portal and the standalone installer (#111).
+The portal now has a coherent design language with full per-site /
+per-user customisation.
+
+- **Design tokens** (#114) — `web/public_html/assets/css/portal.css`
+  `:root` block refreshed with a Linear-style indigo palette
+  (`#5e6ad2` default), expanded type scale, modern semi-bold (600)
+  headings, Stripe-style multi-layer shadows, refined motion tokens
+  (cubic-bezier easings), and an extended spacing scale.
+- **Per-site branding flow** (#116) — `tblSites.primaryColor` and
+  `tblSites.faviconPath` (new column via migration `037_site_favicon.sql`)
+  flow into the portal's CSS tokens at render time. `header.php`
+  injects `--portal-primary` and `--portal-primary-rgb` as an inline
+  style on `<html>`; the hover / active / subtle variants are derived
+  with `color-mix()` so the whole indigo family shifts when an admin
+  picks a different brand colour. `Site::branding('favicon')` added.
+- **Theme modes + colour-blind safe palette** (#117) — three theme
+  modes (light / dark / `auto` following `prefers-color-scheme`)
+  with a 3-state toggle in the navbar. New CB-safe palette via
+  `[data-portal-cb="on"]` swapping the semantic tokens (success /
+  danger / warning / accent) for a Wong-derived palette
+  distinguishable for deutan + protan colour blindness. The
+  standalone installer mirrors all of it inline.
+- **Navbar + top chrome polish** (#118) — active nav-link state
+  becomes primary-coloured on a primary-subtle background (was just
+  font-weight); avatar gains primary-tinted ring on dropdown
+  hover/open; dropdown menus use layered shadow + branded item
+  hover/active states; mobile collapse gets a top-border separator.
+- **Forms / cards / alerts / buttons / data-list** (#119) — every
+  Bootstrap class consuming pages already use (`.form-control`,
+  `.form-label`, `.form-text`, `.card`, `.alert`, `.btn-success`,
+  `.btn-outline-*`, `.form-check-input`, validation classes) now
+  reads from the design tokens. `portal-data-list` wrapped in a
+  single rounded container with branded row hover. Empty-state and
+  badge components use tokens (CB-safe automatically). New auth-shell
+  card pattern picks up login + forgot/reset password screens
+  without markup changes.
+- **Dashboard hero + stat widgets + app card grid** (#120) — new
+  greeting hero at the top (time-of-day aware, first-name, site-aware
+  subtitle); stat widgets get 4 px brand-coloured left accent + lift
+  on hover with token-driven colours (CB-safe-aware); app cards get a
+  proper hover treatment (lift + layered shadow + primary border
+  accent), inline `<style>` block removed.
+- **Final polish + dark-mode audit** (#121) — Bootstrap tables, modals,
+  pagination, list-group, progress, spinners, tooltips all now read
+  from the design tokens. Breadcrumb uses a typographic `›` separator
+  (was `/`). Footer gets an inset top-shadow. Dropzone hover uses
+  `--portal-primary-subtle`. Explicit dark-mode overrides for tables,
+  modals, progress, and portal-badge variants.
+
+### Added — Installation wizard styling polish (#114 + #115)
+
+- `web/install/index.php` standalone styling rewritten across all six
+  step layouts (welcome, DB config, schema, admin, finalize, complete)
+  to match the portal's design language. Step indicator badges, card
+  shadows, form fields, button-row separators, and alert palettes all
+  refreshed inline (the installer runs before `bootstrap.php` so it
+  cannot load `portal.css`).
+- Same theme + CB toggles in the installer header (inline SVG icons
+  so the installer doesn't load Font Awesome). Identical FOUC script
+  and `localStorage` keys as the portal.
 
 ### Added — Multi-branch SFTP deploy + auto-versioning
 
