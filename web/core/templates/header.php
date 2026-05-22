@@ -50,6 +50,19 @@ $siteFavicon = Site::branding('favicon') ?? '/assets/images/favicon.ico';
 $showPoweredByMeta = (App::settings('branding.hidePoweredBy') !== 'true')
     && (Site::usesCustomBranding() === true);
 
+// 🤖 Robots / AI-crawler policy.
+// Internal-facing portal by default — meta-robots emits noindex,nofollow
+// for both general search engines AND AI training crawlers unless the
+// site has explicitly opted in. The settings are:
+//   site.allowIndexing    = 'true' to allow general search engines
+//   site.allowAiIndexing  = 'true' to allow AI/LLM training crawlers
+// Both default to 'false'. robots.txt at /robots.txt is the belt-and-braces
+// version for bots that don't read HTML meta tags.
+$allowIndexing   = (App::settings('site.allowIndexing')   ?? 'false') === 'true';
+$allowAiIndexing = (App::settings('site.allowAiIndexing') ?? 'false') === 'true';
+$robotsContent   = $allowIndexing === true ? 'index, follow' : 'noindex, nofollow';
+$aiRobotsContent = $allowAiIndexing === true ? 'index, follow' : 'noai, noimageai';
+
 // 🎨 Derive --portal-primary-rgb (comma-separated R,G,B) from the hex colour
 // so portal.css's rgba()-based focus rings and shadows tint correctly.
 // Accepts #RGB / #RRGGBB; falls back to the indigo default on bad input.
@@ -87,6 +100,22 @@ header("Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-i
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="csrf-token" content="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
     <meta name="theme-color" content="<?php echo htmlspecialchars($siteColor, ENT_QUOTES, 'UTF-8'); ?>">
+
+    <!-- 🤖 Robots / AI-crawler policy (defaults to deny; admin opt-in) -->
+    <meta name="robots"    content="<?php echo htmlspecialchars($robotsContent,   ENT_QUOTES, 'UTF-8'); ?>">
+    <meta name="googlebot" content="<?php echo htmlspecialchars($robotsContent,   ENT_QUOTES, 'UTF-8'); ?>">
+    <meta name="bingbot"   content="<?php echo htmlspecialchars($robotsContent,   ENT_QUOTES, 'UTF-8'); ?>">
+    <!-- AI crawlers: separate opt-in so a site can be indexable by search engines
+         while still blocking LLM training crawlers. -->
+    <meta name="ai-robots"     content="<?php echo htmlspecialchars($aiRobotsContent, ENT_QUOTES, 'UTF-8'); ?>">
+    <meta name="GPTBot"        content="<?php echo htmlspecialchars($aiRobotsContent, ENT_QUOTES, 'UTF-8'); ?>">
+    <meta name="ChatGPT-User"  content="<?php echo htmlspecialchars($aiRobotsContent, ENT_QUOTES, 'UTF-8'); ?>">
+    <meta name="anthropic-ai"  content="<?php echo htmlspecialchars($aiRobotsContent, ENT_QUOTES, 'UTF-8'); ?>">
+    <meta name="ClaudeBot"     content="<?php echo htmlspecialchars($aiRobotsContent, ENT_QUOTES, 'UTF-8'); ?>">
+    <meta name="Google-Extended" content="<?php echo htmlspecialchars($aiRobotsContent, ENT_QUOTES, 'UTF-8'); ?>">
+    <meta name="PerplexityBot" content="<?php echo htmlspecialchars($aiRobotsContent, ENT_QUOTES, 'UTF-8'); ?>">
+    <meta name="CCBot"         content="<?php echo htmlspecialchars($aiRobotsContent, ENT_QUOTES, 'UTF-8'); ?>">
+
     <?php if ($showPoweredByMeta === true): ?>
     <meta name="generator" content="WebMS Intra">
     <?php endif; ?>

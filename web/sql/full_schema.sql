@@ -1917,6 +1917,15 @@ ON DUPLICATE KEY UPDATE `filename` = `filename`;
 INSERT INTO `tblMigrations` (`filename`) VALUES ('043_calendar_categories_and_month_themes.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
+INSERT INTO `tblMigrations` (`filename`) VALUES ('044_robots_and_ai_indexing_settings.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- Robots / AI-indexing opt-in (matches migration 044)
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'site.allowIndexing',   'false', 'false', 0),
+    (NULL, 'site.allowAiIndexing', 'false', 'false', 0)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
 -- Seed the branding.hidePoweredBy setting (matches migration 038)
 INSERT INTO `tblSettings`
     (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`)
