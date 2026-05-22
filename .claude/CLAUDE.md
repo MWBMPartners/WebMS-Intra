@@ -22,10 +22,11 @@ web/                <- ALL deployable files (synced to server via SFTP)
   vendor/simplejwt/ <- Vendored RS256 JWT verifier
   sql/              <- Numbered SQL migrations (000-043 + full_schema.sql)
   lang/             <- I18n translation files (en.php, cy.php, …)
-  public_html/      <- Web root: front controller + assets + app controllers
+  public_html/      <- Web root: ONE front controller + assets + app controllers.
+                       Branch-based deploy mirrors this dir to the server's
+                       public_html/ (main), public_html_beta/ (beta) or
+                       public_html_dev/ (alpha) — no per-channel copy in repo.
     index.php, .htaccess, assets/
-  public_html_dev/  <- Dev web root (Gatekeeper-protected)
-  public_html_beta/ <- Beta web root
   private_html/, public_html_landing/, public_html_redir/  <- non-app server dirs
   _auth_keys/       <- Credentials + encryption key (gitignored, server-managed)
   _uploads/         <- User file uploads (gitignored, server-managed)
@@ -72,10 +73,10 @@ Calendar/Events/Preaching Plan is ONE app ("Events") — `/calendar` covers view
 ## Key Constants (defined in core/bootstrap.php)
 
 - `PORTAL_ROOT` -- web/ on server
-- `PORTAL_CORE` -- web/core/
+- `PORTAL_CORE` -- web/_core/
 - `PORTAL_APPS` -- web/public_html/
-- `PORTAL_VENDOR` -- web/vendor/
-- `PORTAL_SQL` -- web/sql/
+- `PORTAL_VENDOR` -- web/_vendor/
+- `PORTAL_SQL` -- web/_sql/
 - `PORTAL_ENV` -- 'dev', 'beta', or 'prod' (auto-detected from DOCUMENT_ROOT)
 
 ## Recent ships (chronological)

@@ -18,21 +18,31 @@ Git repo root (NOT deployed)          Server: portal.millrdsdacambridge.uk/
 ├── DEV_NOTES.md                       ├── _auth_keys/    (server-managed)
 ├── README.md                          ├── _libraries/    (server-managed)
 └── web/ ─── contents deployed ──────► ├── _uploads/      (server-managed)
-    ├── core/                          ├── _backups/      (server-managed)
-    ├── vendor/                        ├── _includes/
-    ├── sql/                           ├── _functions/
-    ├── _includes/                     ├── public_html/   (web root + apps)
-    ├── _functions/                    ├── public_html_dev/
-    ├── _libraries/ (gitignored)       ├── private_html/
-    ├── public_html/                   ├── public_html_landing/
-    │   ├── auth/                      └── public_html_redir/
+    ├── _core/                         ├── _backups/      (server-managed)
+    ├── _vendor/                       ├── _includes/
+    ├── _sql/                          ├── _functions/
+    ├── _lang/                         ├── public_html/   (web root + apps)
+    ├── _install/                      ├── public_html_dev/   (alpha branch deploy)
+    ├── _includes/                     ├── public_html_beta/  (beta branch deploy)
+    ├── _functions/                    ├── private_html/
+    ├── _libraries/ (gitignored)       ├── public_html_landing/
+    ├── public_html/                   └── public_html_redir/
+    │   ├── auth/
     │   ├── dashboard/
     │   ├── expenses/
     │   ├── help/
     │   └── settings/
-    ├── public_html_dev/
-    └── ...
+    ├── private_html/
+    ├── public_html_landing/
+    └── public_html_redir/
 ```
+
+The `_` prefix on every server-side dir is a naming convention: any dir
+that starts with `_` is **above Apache's DocumentRoot** and cannot be
+directly accessed via HTTP. Only `public_html/` (and its per-branch
+siblings on the server) are web-accessible.
+
+The repo holds **one** `public_html/` source tree. Branch-based deploy mirrors it to the appropriate server-side destination — `alpha` → `public_html_dev/`, `beta` → `public_html_beta/`, `main` → `public_html/`. There is no per-channel front controller in the repo.
 
 **Key rule:** when referencing paths in PHP code, use `PORTAL_ROOT` and related
 constants (defined in `bootstrap.php`). When referencing paths in Git/CI, prefix
@@ -61,9 +71,9 @@ to the shared base from every branch — **last push wins for shared code**.
 
 ```text
 SFTP_BASE_PATH/
-├── core/                  ← from web/core/         (all branches)
-├── vendor/                ← from web/vendor/       (all branches)
-├── sql/                   ← from web/sql/          (all branches)
+├── core/                  ← from web/_core/         (all branches)
+├── vendor/                ← from web/_vendor/       (all branches)
+├── sql/                   ← from web/_sql/          (all branches)
 ├── _auth_keys/            ← server-managed (excluded from sync)
 ├── _libraries/dompdf/     ← fetched at deploy time by tools/download-dompdf.sh
 ├── _uploads/              ← server-managed (excluded from sync)
@@ -256,7 +266,7 @@ touching code.
 1. `Site::loadCurrentSite()` selects the row into a class-level cache.
 2. `Site::branding('color' | 'logo' | 'favicon' | 'name' | …)` returns the
    relevant column.
-3. `web/core/templates/header.php` reads `Site::branding('color')`,
+3. `web/_core/templates/header.php` reads `Site::branding('color')`,
    derives `--portal-primary-rgb` (R,G,B) from the hex, and **inline-
    styles** the `<html>` element:
 
@@ -303,7 +313,7 @@ small "Powered by WebMS Intra" attribution after the copyright line.
 Sites running the default WebMS Intra branding don't show it — the
 copyright line already names the product.
 
-Detection (`Site::usesCustomBranding()` in `web/core/Site.php`):
+Detection (`Site::usesCustomBranding()` in `web/_core/Site.php`):
 
 - `siteName` differs from `Site::DEFAULT_SITE_NAME` (`'WebMS Intra'`), OR
 - `logoPath` differs from `Site::DEFAULT_LOGO_PATH`
@@ -318,13 +328,13 @@ setting in `/settings/` (set to the string `'true'`). Default is
 `'false'`, so attribution is on out-of-the-box for custom-branded
 deploys.
 
-Markup lives in `web/core/templates/footer.php`; styling is in the
+Markup lives in `web/_core/templates/footer.php`; styling is in the
 `.portal-powered-by`, `.portal-powered-by-prefix`, and
 `.portal-powered-by-mark` rules in `portal.css`. The mark class is a
 hook for future hyperlinking when the WebMS Intra landing page exists.
 
 The same detection ALSO drives a `<meta name="generator" content="WebMS Intra">`
-tag in `web/core/templates/header.php`. This is the standard SaaS / CMS
+tag in `web/_core/templates/header.php`. This is the standard SaaS / CMS
 attribution mechanism — invisible to humans, picked up by site analysers
 like Wappalyzer + "View page source" + browser dev tools.
 
@@ -395,12 +405,12 @@ for `prefers-color-scheme` changes when in `auto` mode.
 
 - `web/public_html/assets/css/portal.css` — token blocks for light,
   dark, CB-safe (and dark + CB-safe combined)
-- `web/core/templates/header.php` — inline FOUC script reading
+- `web/_core/templates/header.php` — inline FOUC script reading
   localStorage and applying the attrs
-- `web/core/templates/nav.php` — theme + CB toggle buttons
+- `web/_core/templates/nav.php` — theme + CB toggle buttons
 - `web/public_html/assets/js/portal.js` — `initThemeToggle()` (cycles
   light → dark → auto), `initCbToggle()` (on/off)
-- `web/install/index.php` — installer mirrors all of the above inline
+- `web/_install/index.php` — installer mirrors all of the above inline
   (it's standalone, can't load portal.css/portal.js)
 
 ---
@@ -629,12 +639,12 @@ These are enforced across the codebase. Follow them in all new code.
 
 ## SQL Migrations
 
-Migrations live in `web/sql/` as numbered `.sql` files. They are executed via
+Migrations live in `web/_sql/` as numbered `.sql` files. They are executed via
 the web-based Migrator (admin-only) and tracked in `tblMigrations`.
 
 ### Adding a New Migration
 
-1. Create `web/sql/NNN_description.sql` (next sequential number)
+1. Create `web/_sql/NNN_description.sql` (next sequential number)
 2. Write idempotent SQL (use `IF NOT EXISTS`, `IF EXISTS` where appropriate)
 3. Push to `main` -- it deploys to dev
 4. Run the migration on dev via the admin migration runner
@@ -695,9 +705,8 @@ All paths below are relative to `web/` (the deployable root):
 | `core/templates/` | Shared page templates (header, footer, nav, errors) |
 | `vendor/simplejwt/` | Vendored RS256 JWT verifier (no Composer) |
 | `sql/` | Numbered SQL migration files |
-| `public_html/` | Production web root (front controller, assets, app controllers) |
+| `public_html/` | The single web-root source; branch-based deploy maps this to `public_html/` (main), `public_html_dev/` (alpha) or `public_html_beta/` (beta) on the server |
 | `public_html/{app}/` | App controllers (e.g. `expenses/`, `auth/`, `dashboard/`) |
-| `public_html_dev/` | Dev web root (Gatekeeper-protected) |
 | `install/` | Installation wizard and upgrade handler |
 | `_auth_keys/` | Credentials and encryption keys (gitignored, created by installer) |
 | `_uploads/` | User file uploads (gitignored) |
@@ -743,7 +752,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 ## Translations (i18n)
 
 The portal supports multiple languages via the `I18n` framework (`core/I18n.php`).
-All user-facing text is stored in **language files** under `web/lang/`, one file
+All user-facing text is stored in **language files** under `web/_lang/`, one file
 per locale. English (`en.php`) is the baseline — every other language file only
 needs to include the keys it translates; missing keys fall back to English automatically.
 
@@ -752,7 +761,7 @@ needs to include the keys it translates; missing keys fall back to English autom
 ```
 User visits page
   → I18n checks: user DB preference → session → browser Accept-Language → default
-  → Loads web/lang/{locale}.php (e.g. lang/fr.php)
+  → Loads web/_lang/{locale}.php (e.g. lang/fr.php)
   → t('auth.sign_in') returns "Se connecter" instead of "Sign In"
   → Missing keys fall back to English automatically
 ```
@@ -764,7 +773,7 @@ Keys use **dot-notation** for logical grouping (e.g. `nav.dashboard`, `auth.sign
 
 ```php
 <?php
-// File: web/lang/fr.php
+// File: web/_lang/fr.php
 declare(strict_types=1);
 
 return [
@@ -801,7 +810,7 @@ Keys follow the pattern `{section}.{description}` using lowercase and underscore
 
 1. **Copy the English baseline** as a starting point:
    ```bash
-   cp web/lang/en.php web/lang/fr.php
+   cp web/_lang/en.php web/_lang/fr.php
    ```
 
 2. **Edit the file header** — update the language name and flag emoji:
@@ -835,9 +844,9 @@ Keys follow the pattern `{section}.{description}` using lowercase and underscore
 
 When you see a string you want to translate:
 
-1. **Find the key** — search `web/lang/en.php` for the English text:
+1. **Find the key** — search `web/_lang/en.php` for the English text:
    ```bash
-   grep -n "Sign In" web/lang/en.php
+   grep -n "Sign In" web/_lang/en.php
    ```
    Result: `'auth.sign_in' => 'Sign In',`
 
@@ -934,7 +943,7 @@ Two settings control i18n behaviour (in the portal Settings page):
 
 There is no built-in approval UI — translations are managed as code:
 
-1. **Translator** creates or edits `web/lang/{locale}.php`
+1. **Translator** creates or edits `web/_lang/{locale}.php`
 2. **Developer** reviews the changes via Git pull request or code review
 3. **Merge to `main`** — translations deploy to dev automatically
 4. **Test on dev** — verify strings appear correctly in context

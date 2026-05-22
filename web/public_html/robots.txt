@@ -1,0 +1,97 @@
+# =============================================================================
+# WebMS Intra — robots.txt
+# =============================================================================
+# This is an INTERNAL portal. By default we deny every crawler and explicitly
+# call out known AI training / answer-engine bots to leave no ambiguity.
+#
+# To open a site to search engines, an admin must set:
+#   site.allowIndexing = true    (per-site)
+# Even then, AI crawlers stay blocked unless:
+#   site.allowAiIndexing = true  (separate opt-in)
+#
+# Both settings drive the <meta name="robots"> / <meta name="googlebot"> /
+# <meta name="ai-robots"> tags emitted by core/templates/header.php — this
+# file is the belt-and-braces version for crawlers that don't read HTML
+# meta tags (or that read robots.txt only).
+#
+# See: https://www.robotstxt.org/robotstxt.html
+# See: https://platform.openai.com/docs/gptbot
+# See: https://darkvisitors.com/agents
+# =============================================================================
+
+# 🚫 Default: deny all crawlers
+User-agent: *
+Disallow: /
+
+# 🤖 AI training / answer-engine bots — explicit denies (some ignore the *)
+User-agent: GPTBot
+Disallow: /
+
+User-agent: ChatGPT-User
+Disallow: /
+
+User-agent: OAI-SearchBot
+Disallow: /
+
+User-agent: anthropic-ai
+Disallow: /
+
+User-agent: ClaudeBot
+Disallow: /
+
+User-agent: Claude-Web
+Disallow: /
+
+User-agent: Google-Extended
+Disallow: /
+
+User-agent: PerplexityBot
+Disallow: /
+
+User-agent: Perplexity-User
+Disallow: /
+
+User-agent: Bytespider
+Disallow: /
+
+User-agent: CCBot
+Disallow: /
+
+User-agent: FacebookBot
+Disallow: /
+
+User-agent: meta-externalagent
+Disallow: /
+
+User-agent: Diffbot
+Disallow: /
+
+User-agent: ImagesiftBot
+Disallow: /
+
+User-agent: Omgilibot
+Disallow: /
+
+User-agent: Omgili
+Disallow: /
+
+User-agent: Applebot-Extended
+Disallow: /
+
+User-agent: cohere-ai
+Disallow: /
+
+User-agent: cohere-training-data-crawler
+Disallow: /
+
+User-agent: TimpiBot
+Disallow: /
+
+User-agent: PetalBot
+Disallow: /
+
+User-agent: SemrushBot
+Disallow: /
+
+User-agent: AhrefsBot
+Disallow: /

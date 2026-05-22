@@ -321,6 +321,30 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     <span class="small">Captcha</span>
                 </a>
             </div>
+            <div class="col-6 col-md-4 col-lg-2">
+                <a href="/admin/release-notes" class="btn btn-outline-info w-100 d-flex flex-column align-items-center gap-1 py-3">
+                    <i class="fa-solid fa-clipboard-list fa-lg"></i>
+                    <span class="small">Release Notes</span>
+                </a>
+            </div>
+            <div class="col-6 col-md-4 col-lg-2">
+                <a href="/admin/email-templates" class="btn btn-outline-primary w-100 d-flex flex-column align-items-center gap-1 py-3">
+                    <i class="fa-solid fa-envelope fa-lg"></i>
+                    <span class="small">Email Templates</span>
+                </a>
+            </div>
+            <div class="col-6 col-md-4 col-lg-2">
+                <a href="/admin/maintenance/retention" class="btn btn-outline-warning w-100 d-flex flex-column align-items-center gap-1 py-3">
+                    <i class="fa-solid fa-broom fa-lg"></i>
+                    <span class="small">Retention</span>
+                </a>
+            </div>
+            <div class="col-6 col-md-4 col-lg-2">
+                <a href="/api-docs" class="btn btn-outline-info w-100 d-flex flex-column align-items-center gap-1 py-3" target="_blank" rel="noopener">
+                    <i class="fa-solid fa-book fa-lg"></i>
+                    <span class="small">API Docs</span>
+                </a>
+            </div>
             <?php if (App::isUmbrellaAdmin() === true): ?>
             <div class="col-6 col-md-4 col-lg-2">
                 <a href="/admin/sites" class="btn btn-outline-dark w-100 d-flex flex-column align-items-center gap-1 py-3">

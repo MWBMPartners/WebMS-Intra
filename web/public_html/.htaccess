@@ -1,11 +1,22 @@
 # =============================================================================
-# Portal Front Controller - URL Rewriting
+# Portal Front Controller - URL Rewriting + Hardening
 # =============================================================================
 # Rewrites all requests to index.php (the front controller) unless the request
-# matches an existing file or directory. This enables clean URLs like
-# /expenses/submit instead of /expenses/submit/index.php
+# matches a static asset. This enables clean URLs like /expenses/submit
+# instead of /expenses/submit/index.php.
+#
+# SECURITY: Direct access to .php files anywhere under public_html/ is BLOCKED
+# (returns 404). The only entry points that may execute PHP via direct URL are
+# /index.php (the front controller itself) and /api-docs/ (Swagger UI viewer,
+# served via Apache's DirectoryIndex). Every other PHP file is reached via
+# the front-controller -> Router -> tblRoutes pipeline.
+#
+# This means a probe like "/expenses/submit/save.php" returns 404 — no leak of
+# the backend language, no way to bypass the router's auth + CSRF gates by
+# hitting handler files directly.
 #
 # @see https://httpd.apache.org/docs/2.4/mod/mod_rewrite.html
+# @see https://owasp.org/www-community/Security_by_Design_Principles
 # =============================================================================
 
 RewriteEngine On
@@ -15,11 +26,39 @@ RewriteBase /
 RewriteCond %{REQUEST_URI} (^|/)\.(?!well-known) [NC]
 RewriteRule ^ - [F]
 
-# 📁 Skip rewriting for existing files (CSS, JS, images, fonts etc)
+# 🪞 Redirect direct /index.php requests to /.
+#     %{THE_REQUEST} reads the ORIGINAL HTTP request line, so this only
+#     fires on real external visits to /index.php — it does NOT fire on
+#     Apache's internal rewrites from clean URLs (e.g. /expenses/submit
+#     -> index.php) because those don't change THE_REQUEST.
+RewriteCond %{THE_REQUEST} ^(GET|POST|HEAD)\s/index\.php[\s?]
+RewriteRule ^index\.php$ / [R=301,L]
+
+# 🛡️ Deny direct access to ANY .php file except the two known entry points.
+#     Order matters: this MUST run before the existing-file pass-through
+#     below, otherwise Apache would serve the .php file directly.
+#     /index.php must stay exempt here so the internal rewrite from a
+#     clean URL still resolves to the front controller.
+RewriteCond %{REQUEST_URI} \.php$
+RewriteCond %{REQUEST_URI} !^/index\.php$
+RewriteCond %{REQUEST_URI} !^/api-docs/index\.php$
+RewriteRule .* - [R=404,L]
+
+# 📁 Skip rewriting for existing static files (CSS, JS, images, fonts,
+#     /robots.txt, /openapi.json, /manifest.json, /sw.js, etc.)
 RewriteCond %{REQUEST_FILENAME} !-f
 
-# 📂 Skip rewriting for existing directories
+# 📂 Skip rewriting for existing directories (so /api-docs/ resolves to its
+#     DirectoryIndex /api-docs/index.php correctly)
 RewriteCond %{REQUEST_FILENAME} !-d
 
 # 🎯 Route everything else through the front controller
 RewriteRule ^(.*)$ index.php [QSA,L]
+
+# 🤫 Strip headers that leak the backend stack. PHP also calls
+#     header_remove('X-Powered-By') in bootstrap.php as the primary defence;
+#     this is the belt-and-braces Apache-layer removal.
+<IfModule mod_headers.c>
+    Header always unset X-Powered-By
+    Header always unset Server
+</IfModule>

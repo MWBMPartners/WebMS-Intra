@@ -92,7 +92,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // password verification, session creation, and lastLogin update
     if ($errorMsg === '') {
         if (Auth::loginLocal($username, $password) === true) {
-            // 🔀 Redirect to dashboard or original target
+            $loggedInUserId = (int) ($_SESSION['user_id'] ?? 0);
+
+            // 🔐 2FA gate. If the user has TOTP enabled AND this browser
+            // isn't already a trusted device (post-#92 / #v1.0), demote the
+            // session to "pending 2FA" and route to /auth/2fa/verify. The
+            // verify handler will promote 2fa_user_id back to user_id on
+            // a successful challenge.
+            if ($loggedInUserId > 0
+                && Auth::userRequires2fa($loggedInUserId) === true
+                && Auth::deviceIsTrusted($loggedInUserId) === false
+            ) {
+                $_SESSION['2fa_user_id']   = $loggedInUserId;
+                $_SESSION['login_redirect'] = Auth::safeRedirectUrl($_GET['redirect'] ?? '/');
+                unset($_SESSION['user_id'], $_SESSION['2fa_passed']);
+                header('Location: /auth/2fa/verify', true, 302);
+                exit();
+            }
+
+            // ✅ No 2FA required (or device already trusted) — go straight in.
             $target = Auth::safeRedirectUrl($_GET['redirect'] ?? '/');
             header('Location: ' . $target, true, 302);
             exit();

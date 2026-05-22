@@ -212,7 +212,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <div>
                 <strong>Copy the English file as your starting point</strong>
                 <p class="mb-0 small text-secondary">
-                    The English file lives at <code>web/lang/en.php</code>. Make a copy and rename it to your language code. For example, for French: copy <code>en.php</code> to <code>fr.php</code> in the same folder.
+                    The English file lives at <code>web/_lang/en.php</code>. Make a copy and rename it to your language code. For example, for French: copy <code>en.php</code> to <code>fr.php</code> in the same folder.
                 </p>
             </div>
         </div>
@@ -274,7 +274,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <span class="badge text-bg-primary rounded-pill mt-1">1</span>
             <div>
                 <strong>Find the English text you want to translate</strong>
-                <p class="mb-0 small text-secondary">Open <code>web/lang/en.php</code> and search for the English text. For example, searching for "Sign In" would find:<br><code>'auth.sign_in' =&gt; 'Sign In',</code></p>
+                <p class="mb-0 small text-secondary">Open <code>web/_lang/en.php</code> and search for the English text. For example, searching for "Sign In" would find:<br><code>'auth.sign_in' =&gt; 'Sign In',</code></p>
             </div>
         </div>
         <div class="list-group-item d-flex gap-3 align-items-start">
@@ -288,7 +288,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <span class="badge text-bg-primary rounded-pill mt-1">3</span>
             <div>
                 <strong>Add it to your language file with the translation</strong>
-                <p class="mb-0 small text-secondary">Open your language file (e.g. <code>web/lang/fr.php</code>) and add:<br><code>'auth.sign_in' =&gt; 'Se connecter',</code></p>
+                <p class="mb-0 small text-secondary">Open your language file (e.g. <code>web/_lang/fr.php</code>) and add:<br><code>'auth.sign_in' =&gt; 'Se connecter',</code></p>
             </div>
         </div>
         <div class="list-group-item d-flex gap-3 align-items-start">
@@ -396,7 +396,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <span class="badge text-bg-primary rounded-pill mt-1">1</span>
             <div>
                 <strong>Translator creates or edits the language file</strong>
-                <p class="mb-0 small text-secondary">The translator opens the relevant file (e.g. <code>web/lang/fr.php</code>) and adds or updates translations.</p>
+                <p class="mb-0 small text-secondary">The translator opens the relevant file (e.g. <code>web/_lang/fr.php</code>) and adds or updates translations.</p>
             </div>
         </div>
         <div class="list-group-item d-flex gap-3 align-items-start">

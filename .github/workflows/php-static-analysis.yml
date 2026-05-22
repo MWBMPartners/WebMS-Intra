@@ -1,0 +1,129 @@
+# =============================================================================
+# PHP Static Analysis
+# =============================================================================
+# CodeQL doesn't natively support PHP, so we run Psalm (Vimeo) as a
+# parallel job. Psalm catches:
+#   - Type errors caught only at runtime by stricter analysis
+#   - Null-pointer / undefined-array-key issues
+#   - Security taint patterns (Psalm's @psalm-taint-* annotations)
+#   - Unused code paths
+#
+# Findings are uploaded as a SARIF artifact and shown in the PR's
+# "Files changed" tab via the Code Scanning UI.
+# =============================================================================
+
+name: "PHP Static Analysis"
+
+on:
+  push:
+    branches: [main, beta, alpha]
+  pull_request:
+    branches: [main, beta, alpha]
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  psalm:
+    name: Psalm
+    runs-on: ubuntu-latest
+    continue-on-error: true  # Don't block PR merges on Psalm hints during initial rollout
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup PHP 8.4
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: mysqli, openssl, sodium, curl, mbstring
+          tools: composer:v2
+
+      # Install Psalm via Composer in a temp dir so we don't need a
+      # repo-level composer.json (that's tracked in #145).
+      #
+      # --ignore-platform-req=php+ bypasses Psalm 5's upper-bound PHP
+      # requirement (~8.3). Psalm itself runs fine on PHP 8.4; the
+      # upper bound is just untested-by-upstream, not actually broken.
+      # When Psalm 6 stabilises with native 8.4+ support, drop the flag
+      # and bump the constraint to ^6.
+      - name: Install Psalm
+        run: |
+          mkdir -p /tmp/psalm-install && cd /tmp/psalm-install
+          composer require --dev vimeo/psalm:^5 \
+            --ignore-platform-req=php+ \
+            --no-interaction --no-progress
+
+      - name: Generate psalm.xml if missing
+        run: |
+          if [ ! -f psalm.xml ]; then
+            cat > psalm.xml <<'EOF'
+          <?xml version="1.0"?>
+          <psalm
+              errorLevel="6"
+              findUnusedBaselineEntry="false"
+              findUnusedCode="false"
+              resolveFromConfigFile="true"
+              xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+              xmlns="https://getpsalm.org/schema/config"
+              xsi:schemaLocation="https://getpsalm.org/schema/config vendor/vimeo/psalm/config.xsd"
+          >
+              <projectFiles>
+                  <directory name="web/_core" />
+                  <directory name="web/public_html" />
+                  <directory name="web/_install" />
+                  <ignoreFiles>
+                      <directory name="web/_libraries" />
+                      <directory name="web/_vendor" />
+                      <directory name="web/_uploads" />
+                  </ignoreFiles>
+              </projectFiles>
+          </psalm>
+          EOF
+          fi
+
+      - name: Run Psalm
+        run: |
+          /tmp/psalm-install/vendor/bin/psalm \
+            --output-format=github \
+            --report=psalm.sarif \
+            --no-cache || true
+          # Always produce a SARIF file so the upload step doesn't fail
+          # — even an empty-runs SARIF is valid input for code-scanning.
+          if [ ! -f psalm.sarif ]; then
+            cat > psalm.sarif <<'EOF'
+          {
+            "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
+            "version": "2.1.0",
+            "runs": [{
+              "tool": { "driver": { "name": "Psalm", "informationUri": "https://psalm.dev" } },
+              "results": []
+            }]
+          }
+          EOF
+          fi
+
+      - name: Upload SARIF to GitHub Security
+        if: always() && hashFiles('psalm.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: psalm.sarif
+          category: psalm
+
+  lint:
+    name: PHP -l lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+      - name: Lint every PHP file
+        run: |
+          find web -type f -name "*.php" \
+            -not -path "*/vendor/*" \
+            -not -path "*/_libraries/*" \
+            -print0 \
+          | xargs -0 -n1 -P4 php -l

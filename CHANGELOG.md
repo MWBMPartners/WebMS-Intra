@@ -11,6 +11,154 @@ to `alpha`, `beta`, and `main` using the heading format
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-05-22 — 🚀 v1.0 launch
+
+A "bumper" release pulling everything needed for the v1.0 launch into one
+cohesive ship. Includes every privacy / security / operational item that
+was either launch-blocking or worth landing pre-launch, plus the API
+surface + admin tooling to support it.
+
+### Added — Operational basics
+
+- **Healthcheck endpoint** at `/health` — JSON status with `db` ping
+  (returns 503 + `db: "error"` if the database is unreachable). Designed
+  for CloudFlare / Pingdom / GitHub Actions uptime probes.
+- **`robots.txt`** + meta-robots fallback. Internal portal by default —
+  general search engines + AI training crawlers (GPTBot, ClaudeBot,
+  anthropic-ai, Google-Extended, PerplexityBot, CCBot, Bytespider, …) all
+  blocked. Two per-site settings (`site.allowIndexing`,
+  `site.allowAiIndexing`) for opt-in.
+- **Release Notes viewer** at `/admin/release-notes` — renders this
+  CHANGELOG with a paranoid mini-Markdown renderer (no script
+  execution risk).
+- **Audit-log retention sweeper** at `/admin/maintenance/retention` —
+  hard-deletes rows from `tblActivityLogs` + `tblErrors` past the
+  configured window (default 365 days). Two-mode: web UI for one-off
+  cleanup, token-gated cron endpoint for nightly scheduling.
+
+### Added — Security hardening
+
+- **Composite IP + username rate-limit** (#52) — defends single-account
+  targeted attacks rotating IPs (which pure IP limiting missed). New
+  `RateLimiter::isUserOrIpBlocked()` checks both per-IP (default 5/15min)
+  and per-username (default 10/15min) counters.
+- **2FA "Remember this device"** cookie — after a successful TOTP
+  challenge, users can opt in to a 30-day device-trust cookie (only the
+  SHA-256 hash is stored). Revoked on password change for security.
+- **Wired up the dormant TOTP gate** — the 2FA verify page existed but
+  `$_SESSION['2fa_user_id']` was never set; `Auth::loginLocal()` skipped
+  the challenge. Now correctly demotes the session post-password and
+  routes through `/auth/2fa/verify` when `totpEnabled = 1`.
+- **SVG upload XSS fix** — `calendar/manage/save.php` allowed SVG event
+  images which could carry inline scripts. SVG removed from allow-list;
+  added 5 MB size cap + `finfo_file()` MIME sniff so the detected type
+  must match the claimed extension.
+
+### Added — Privacy & GDPR (#47)
+
+- **`/privacy`** — auto-generated public privacy policy reading
+  admin-editable settings (`privacy.controllerName`, `contactEmail`,
+  `dataRetentionDays`). Honours `privacy.policyURL` if set (external
+  redirect).
+- **Cookie consent banner** in footer — Accept / Necessary only / More
+  info. Each decision recorded in the new `tblConsentLog` with a
+  SHA-256 hash of the policy snapshot at decision time + IP + UA.
+- **Data export** at `/account/data-export` — bundles every record about
+  the user (profile, local-account, SSO links, passkeys, password-reset
+  history, activity logs, expense claims, prayer requests, consent log,
+  trusted devices) into a downloadable JSON. Sensitive fields
+  (passwordHash, totpSecret, tokenHash) explicitly stripped.
+- **Account self-deletion** at `/account/delete` + confirm — two-step
+  flow with typed confirmation phrase. Hard-deletes secrets tables and
+  anonymises everything else via `ON DELETE SET NULL` FKs. Root admins
+  can't self-delete (would lock the umbrella).
+
+### Added — REST API + Documentation
+
+- **Relocated** 5 existing API endpoints from `public_html/api/{app}/{action}.php`
+  to `public_html/{app}/api/{action}.php` (the path `ApiRouter::dispatch()`
+  actually looks at — they were unreachable before).
+- **Events full CRUD** at `/api/events/{list,detail,create,update,delete}`
+  as the canonical write-side example (admin-only, CSRF via header or
+  body, JSON request/response).
+- **List endpoints for previously API-less modules**: leadership,
+  tasks, prayer-requests, documents — all visibility-rule-aware
+  (tasks own-only for non-admins; prayer-requests masks anonymous
+  submitter for non-admin readers).
+- **Per-endpoint enable flags** (`api.{module}.{action}.enabled`) so
+  admins can selectively disable any endpoint per-site.
+- **OpenAPI 3.0 spec** at `/openapi.json` describing every endpoint
+  (paths, parameters, request/response schemas, security model).
+- **Swagger UI** at `/api-docs` — loads the spec, includes a
+  `requestInterceptor` that injects `X-CSRF-TOKEN` on writes so the
+  interactive docs drive real authenticated requests against the
+  portal.
+
+### Added — Admin tooling
+
+- **Notification preferences UI** at `/account/notifications` — 8
+  per-channel switches stored as JSON in `tblUsers.notifyPrefs`.
+  Delivery gated by `notifications.deliveryReady` (default false in v1.0);
+  the UI explains preferences are saved but emails aren't sent yet.
+- **Email template editor** at `/admin/email-templates` — DB-backed
+  templates with Mustache-style `{{token}}` substitution. Global
+  defaults + per-site overrides. Sandboxed `<iframe srcdoc>` preview
+  with sample-token substitution. Seeded with three real templates
+  (`auth.passwordReset`, `expenses.statusUpdate`, `expenses.approverNudge`).
+- **Bulk import (CSV)** for events (`/calendar/manage/import`) and
+  leadership assignments (`/leadership/manage/import`). Two-step
+  preview/confirm UX matching `/admin/users/import`. Excel users
+  directed to "Save As → CSV".
+
+### Added — CI / DevEx
+
+- **Dependabot** — weekly GitHub Actions version-bump PRs (grouped).
+- **CodeQL** scanning JavaScript on every push + weekly schedule.
+- **Psalm** PHP static analysis with SARIF upload to GitHub Security
+  tab + a `php -l` lint sweep as a hard gate.
+- **Existing**: `gitleaks` secret scanning (already in `pr-security.yml`),
+  branch-protection ruleset audit (`repo-config-audit.yml`).
+
+### Changed
+
+- **Removed `web/public_html_dev/`** from the repo — never deployed
+  anywhere (deploy source is `web/public_html/` for every branch,
+  destinations differ). Documented branch-based deploy model in
+  `bootstrap.php`, Gatekeeper, Router, README, DEV_NOTES, .claude/CLAUDE.md.
+- **CHANGELOG.md now ships in `web/CHANGELOG.md`** at deploy time (copied
+  from repo root) so the new Release Notes viewer can find it on the server.
+- **Deprecated `curl_close()` calls** removed from `Auth.php` and
+  `MailerGoogle.php` (PHP 8+ auto-closes cURL handles).
+
+### Schema
+
+Migrations **044 → 052**:
+
+| # | What |
+| --- | --- |
+| 044 | `site.allowIndexing` + `site.allowAiIndexing` settings |
+| 045 | `auth.rateLimit.maxAttemptsByUsername` (#52) |
+| 046 | Audit-log retention settings + admin route |
+| 047 | `tblTrustedDevices` + `auth.twoFactor.trustedDeviceDays` |
+| 048 | `tblConsentLog` + `privacy.*` settings + 5 new routes |
+| 049 | REST API enable-flag seeds + relocated endpoints + Swagger routes |
+| 050 | `notifications.deliveryReady` gate + 2 new routes |
+| 051 | `tblEmailTemplates` + 3 seed templates + 4 admin routes |
+| 052 | Bulk-importer routes (events + leadership) |
+
+### Known follow-ups (issues filed)
+
+- #141 — PWA install prompt + push notifications
+- #142–#147 — Operational tweaks (backup verification, Sentry monitoring,
+  CSP nonces, composer.json/Dependabot, visual regression tests,
+  auto-merge-alpha rollforward)
+- #148–#154 — Brand-new app proposals (Pastoral Care, Stewardship /
+  Giving, Sabbath School / Small Groups, Communications Hub, Resource
+  Booking, Forms Builder, Library / Resources)
+- #155 — Plugin / Extension framework
+- #156 — Reports builder UI (drag-and-drop)
+- #157 — Complete REST API write-side CRUD on remaining modules
+
 ## [0.12.0] - 2026-05-22
 
 ### Added — Calendar: per-month strap-lines + category display-style toggle (follow-ups to #136)

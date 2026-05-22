@@ -99,24 +99,60 @@ if (is_dir($uploadsDir) === false) {
 
 /**
  * 📸 Process a single image upload
+ *
+ * Security:
+ *   - Extension allow-list (raster + PDF only — NO SVG; SVG can carry
+ *     JavaScript and would XSS anyone viewing the event page).
+ *   - 5 MB size cap (event images don't need to be bigger).
+ *   - Server-side MIME check via finfo_file — confirms the file IS
+ *     what its extension claims, blocking renamed-PHP-as-JPG attacks.
+ *   - Stored filename is fully reconstructed from $slug + $fieldName +
+ *     timestamp + extension — never trusts the client filename.
  */
 $processUpload = function (string $fieldName) use ($uploadsDir, $slug): ?string {
     if (isset($_FILES[$fieldName]) === false || $_FILES[$fieldName]['error'] !== UPLOAD_ERR_OK) {
         return null;
     }
 
-    $file     = $_FILES[$fieldName];
-    $ext      = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
-    $allowed  = ['jpg', 'jpeg', 'png', 'svg', 'gif', 'webp', 'pdf'];
+    $file = $_FILES[$fieldName];
 
+    // 🛡️ Size cap — 5 MB
+    if (($file['size'] ?? 0) > 5 * 1024 * 1024) {
+        return null;
+    }
+
+    // 🛡️ Extension allow-list. SVG explicitly excluded — see security note above.
+    $ext     = strtolower(pathinfo((string) ($file['name'] ?? ''), PATHINFO_EXTENSION));
+    $allowed = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'pdf'];
     if (in_array($ext, $allowed, true) === false) {
         return null;
     }
 
+    // 🛡️ Server-side MIME sniff. Must match the extension's expected type.
+    $finfo = function_exists('finfo_open') === true ? finfo_open(FILEINFO_MIME_TYPE) : false;
+    if ($finfo === false) {
+        return null;
+    }
+    $detectedMime = (string) finfo_file($finfo, (string) $file['tmp_name']);
+    finfo_close($finfo);
+
+    $expectedMime = [
+        'jpg'  => ['image/jpeg'],
+        'jpeg' => ['image/jpeg'],
+        'png'  => ['image/png'],
+        'gif'  => ['image/gif'],
+        'webp' => ['image/webp'],
+        'pdf'  => ['application/pdf'],
+    ];
+    if (in_array($detectedMime, $expectedMime[$ext] ?? [], true) === false) {
+        return null;
+    }
+
+    // 🏷️ Always reconstruct the stored filename — never trust the client's.
     $newName = $slug . '-' . $fieldName . '-' . time() . '.' . $ext;
     $dest    = $uploadsDir . DIRECTORY_SEPARATOR . $newName;
 
-    if (move_uploaded_file($file['tmp_name'], $dest) === true) {
+    if (move_uploaded_file((string) $file['tmp_name'], $dest) === true) {
         return $newName;
     }
     return null;

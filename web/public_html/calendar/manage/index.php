@@ -226,6 +226,9 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <a href="/calendar/manage/month-themes" class="btn btn-outline-secondary">
             <i class="fa-solid fa-quote-left me-1"></i> Month Themes
         </a>
+        <a href="/calendar/manage/import" class="btn btn-outline-secondary">
+            <i class="fa-solid fa-file-csv me-1"></i> Bulk Import (CSV)
+        </a>
         <button class="btn btn-success" data-bs-toggle="collapse" data-bs-target="#createEventForm">
             <i class="fa-solid fa-plus me-1"></i> Create Event
         </button>

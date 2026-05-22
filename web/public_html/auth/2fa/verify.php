@@ -122,6 +122,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $_SESSION['2fa_passed'] = true;
     unset($_SESSION['2fa_user_id']);
 
+    // 🔐 "Trust this device" — if the user opted in, issue a cookie that
+    // bypasses 2FA on this browser for the configured window. Done AFTER
+    // session promotion so it's only set on a successful verification.
+    if (isset($_POST['trust_device']) === true && $_POST['trust_device'] === '1') {
+        Auth::issueTrustedDevice($pendingUserId);
+        Logger::activity('TotpDeviceTrusted', 'Device marked trusted (2FA bypass for the trust window)', $pendingUserId);
+    }
+
     Logger::activity('TotpVerified', '2FA verification successful' . ($useBackup === true ? ' (backup code)' : ''), $pendingUserId);
 
     $redirect = $_SESSION['login_redirect'] ?? '/dashboard';
@@ -170,6 +178,20 @@ $pageTitle = 'Two-Factor Verification';
                             <input type="text" class="form-control form-control-lg text-center" name="code"
                                    maxlength="8" pattern="[A-Za-z0-9]{6,8}" inputmode="numeric"
                                    autocomplete="one-time-code" placeholder="000000" required autofocus>
+                        </div>
+                        <?php
+                        // 🔐 Trust-this-device opt-in (#v1.0). Default OFF — user opts in per session.
+                        $trustDays = (int) (\Portal\Core\App::settings('auth.twoFactor.trustedDeviceDays') ?? '30');
+                        if ($trustDays < 1) { $trustDays = 30; }
+                        ?>
+                        <div class="form-check mb-3">
+                            <input class="form-check-input" type="checkbox" name="trust_device" value="1" id="trust_device">
+                            <label class="form-check-label small" for="trust_device">
+                                Trust this device for the next <?php echo (int) $trustDays; ?> days
+                                <span class="text-muted d-block small">
+                                    Don't tick this on shared or public computers.
+                                </span>
+                            </label>
                         </div>
                         <button type="submit" class="btn btn-primary w-100 mb-3">
                             <i class="fa-solid fa-check me-1"></i>Verify
