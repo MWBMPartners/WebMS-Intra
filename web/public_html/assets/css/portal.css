@@ -1230,3 +1230,132 @@ body.d-flex.vh-100 > .card h1 {
     background-color: rgba(6, 182, 212, 0.12);  /* derived from --portal-accent */
     color: #155e75;
 }
+
+/* ============================================================================
+   PR 5 — Dashboard hero + stat widgets + app card grid
+
+   The dashboard becomes the actual landing experience: a greeting hero at
+   the top, polished stat widgets below, then the app card grid as the main
+   call-to-action region.
+
+   Scoped via .portal-dashboard-hero + .app-card. The stat widgets pick up
+   polish via the global .card.border-* override used by the existing
+   markup (dashboard/index.php uses Bootstrap's border-color utility, e.g.
+   <div class="card border-primary">).
+   ============================================================================ */
+
+/* ----- Hero ----- */
+.portal-dashboard-hero {
+    padding: 0;
+}
+.portal-dashboard-hero-eyebrow {
+    margin: 0;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-size: var(--portal-font-size-xs);
+    font-weight: var(--portal-font-weight-medium);
+    color: var(--portal-text-muted);
+}
+.portal-dashboard-hero-title {
+    margin: 0.375rem 0 0.25rem;
+    font-size: var(--portal-font-size-3xl);
+    font-weight: var(--portal-font-weight-bold);
+    line-height: 1.2;
+    letter-spacing: var(--portal-letter-spacing-tight);
+    color: var(--portal-text);
+}
+.portal-dashboard-hero-subtitle {
+    margin: 0;
+    font-size: var(--portal-font-size-lg);
+    color: var(--portal-text-muted);
+    line-height: 1.5;
+}
+@media (max-width: 575.98px) {
+    .portal-dashboard-hero-title { font-size: var(--portal-font-size-2xl); }
+    .portal-dashboard-hero-subtitle { font-size: var(--portal-font-size-base); }
+}
+
+/* ----- Stat widgets (Bootstrap .card.border-* markup in dashboard) -----
+   The dashboard uses `border-primary | border-success | border-warning |
+   border-info` Bootstrap utilities for the stat-widget cards. Override the
+   semantic Bootstrap utility colours with the design tokens so the widgets
+   match the rest of the portal AND shift correctly under CB-safe mode. */
+.card.border-primary { border-color: var(--portal-primary) !important; }
+.card.border-success { border-color: var(--portal-success) !important; }
+.card.border-warning { border-color: var(--portal-warning) !important; }
+.card.border-info    { border-color: var(--portal-accent)  !important; }
+.card.border-danger  { border-color: var(--portal-danger)  !important; }
+
+.text-primary, .text-bg-primary { color: var(--portal-primary) !important; }
+.text-success { color: var(--portal-success) !important; }
+.text-warning { color: var(--portal-warning) !important; }
+.text-info    { color: var(--portal-accent)  !important; }
+.text-danger  { color: var(--portal-danger)  !important; }
+
+/* Stat widget row (the .row.g-3 immediately following the hero — anchor on
+   the markup pattern without requiring a new class). */
+.portal-dashboard-hero + .row .card {
+    border-width: 1px;
+    border-left-width: 4px;
+    border-radius: var(--portal-radius-md);
+    transition: transform var(--portal-transition-fast),
+                box-shadow var(--portal-transition-fast);
+}
+.portal-dashboard-hero + .row a:hover .card,
+.portal-dashboard-hero + .row a:focus .card {
+    transform: translateY(-2px);
+    box-shadow: var(--portal-shadow-md);
+}
+.portal-dashboard-hero + .row .card .h4 {
+    font-size: var(--portal-font-size-2xl);
+    font-weight: var(--portal-font-weight-bold);
+    color: var(--portal-text);
+    line-height: 1;
+    margin: 0 0 0.125rem;
+}
+.portal-dashboard-hero + .row .card small {
+    color: var(--portal-text-muted);
+    font-size: var(--portal-font-size-xs);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    font-weight: var(--portal-font-weight-medium);
+}
+
+/* ----- App card grid (the existing .app-card class used in dashboard) -----
+   Replaces the trailing inline <style> block previously in dashboard/index.php
+   with proper tokens + a richer hover treatment. */
+.app-card {
+    border: 1px solid var(--portal-border) !important;
+    border-radius: var(--portal-radius-lg);
+    background-color: var(--portal-surface);
+    box-shadow: var(--portal-shadow-xs);
+    transition: transform var(--portal-transition-fast),
+                box-shadow var(--portal-transition-fast),
+                border-color var(--portal-transition-fast);
+    overflow: hidden;
+}
+.app-card .card-body {
+    padding: 1.5rem 1rem;
+}
+.app-card .card-title {
+    color: var(--portal-text);
+    font-weight: var(--portal-font-weight-bold);
+    font-size: var(--portal-font-size-base);
+    letter-spacing: var(--portal-letter-spacing-tight);
+}
+/* The link wrapping an app card */
+a:hover > .app-card,
+a:focus > .app-card {
+    transform: translateY(-3px);
+    box-shadow: var(--portal-shadow-md);
+    border-color: var(--portal-primary) !important;
+}
+/* The brand-coloured border-top sits at top of each .app-card via inline
+   style on the markup (border-top:4px solid <color>). We've now widened
+   border to 1px elsewhere, so refine the inline-styled top to read as a
+   deliberate accent rather than a slab. */
+.app-card[style*="border-top"] {
+    /* inline border-top wins; just ensure radius doesn't crop it */
+    border-top-left-radius: var(--portal-radius-lg);
+    border-top-right-radius: var(--portal-radius-lg);
+}

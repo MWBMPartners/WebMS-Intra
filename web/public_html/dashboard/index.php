@@ -179,9 +179,39 @@ if ($pnStmt !== false) {
     $pnStmt->close();
 }
 
+// 🌅 Build greeting for the hero. UK-style "Good morning/afternoon/evening".
+$hour = (int) date('G');
+if ($hour < 12) {
+    $greeting = 'Good morning';
+} elseif ($hour < 17) {
+    $greeting = 'Good afternoon';
+} elseif ($hour < 22) {
+    $greeting = 'Good evening';
+} else {
+    $greeting = 'Hello';
+}
+$userFirstName = $_SESSION['user_name'] ?? 'there';
+// First word of the full name — friendlier than "Lance Manasse" in a greeting
+$userFirstName = preg_split('/\s+/', trim($userFirstName), 2)[0] ?? 'there';
+$heroSiteName  = Site::branding('name') ?? ($SETTINGS['site']['name'] ?? 'Portal');
+$todayDate     = date('l, j F Y');
+
 // 📄 Include shared header template (DOCTYPE, <head>, navbar, breadcrumbs)
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
+
+<!-- 🌅 Dashboard Hero -->
+<section class="portal-dashboard-hero mb-4">
+    <p class="portal-dashboard-hero-eyebrow">
+        <?php echo htmlspecialchars($todayDate, ENT_QUOTES, 'UTF-8'); ?>
+    </p>
+    <h1 class="portal-dashboard-hero-title">
+        <?php echo htmlspecialchars($greeting . ', ' . $userFirstName, ENT_QUOTES, 'UTF-8'); ?>
+    </h1>
+    <p class="portal-dashboard-hero-subtitle">
+        Welcome to <?php echo htmlspecialchars($heroSiteName, ENT_QUOTES, 'UTF-8'); ?>.
+    </p>
+</section>
 
 <!-- 📊 Stat Widgets -->
 <?php if (count($widgets) > 0): ?>
@@ -246,11 +276,6 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         </div>
     <?php endforeach; ?>
 </div>
-
-<style>
-    .app-card { transition: transform .1s; }
-    .app-card:hover { transform: translateY(-4px); }
-</style>
 
 <?php
 // 📄 Include shared footer template (close container, footer bar, JS, debug panel)
