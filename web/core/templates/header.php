@@ -43,6 +43,13 @@ $siteName    = Site::branding('name') ?? App::settings('site.name') ?? 'Portal';
 $siteColor   = Site::branding('color') ?? '#5e6ad2';
 $siteFavicon = Site::branding('favicon') ?? '/assets/images/favicon.ico';
 
+// 🏷️ "Powered by WebMS Intra" attribution — same rule as the footer span.
+// Custom-branded sites get a <meta name="generator"> tag so site analysers
+// (Wappalyzer, browser dev tools, etc.) can attribute the platform.
+// Admins opt out via the `branding.hidePoweredBy` setting.
+$showPoweredByMeta = (App::settings('branding.hidePoweredBy') !== 'true')
+    && (Site::usesCustomBranding() === true);
+
 // 🎨 Derive --portal-primary-rgb (comma-separated R,G,B) from the hex colour
 // so portal.css's rgba()-based focus rings and shadows tint correctly.
 // Accepts #RGB / #RRGGBB; falls back to the indigo default on bad input.
@@ -80,6 +87,9 @@ header("Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-i
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="csrf-token" content="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
     <meta name="theme-color" content="<?php echo htmlspecialchars($siteColor, ENT_QUOTES, 'UTF-8'); ?>">
+    <?php if ($showPoweredByMeta === true): ?>
+    <meta name="generator" content="WebMS Intra">
+    <?php endif; ?>
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <link rel="manifest" href="/manifest.json">
