@@ -11,6 +11,19 @@ to `alpha`, `beta`, and `main` using the heading format
 
 ## [Unreleased]
 
+### Fixed — Anchor colour falling back to browser default in dark mode
+
+- `portal.css` now binds `--portal-link` (and its hover / RGB variants) to
+  Bootstrap's `--bs-link-color`, `--bs-link-color-rgb`,
+  `--bs-link-hover-color`, and `--bs-link-hover-color-rgb` in both the
+  light `:root` and the `[data-bs-theme="dark"]` blocks. Every `<a>`,
+  `.btn-link`, `.alert-link`, and `.link-*` Bootstrap utility now stays
+  on the indigo brand colour instead of the browser-default blue that
+  clashed in dark mode (visible on installer Step 1 "Continue →" link).
+- `install/index.php` mirrors the same binding in its self-contained
+  inline `<style>` block so the installer renders consistently with
+  the rest of the portal.
+
 ### Changed — Deploy workflow: dry-run dispatch + DEV_NOTES troubleshooting (#107)
 
 - `deploy.yml` now accepts a `dry_run` `workflow_dispatch` input. When

@@ -494,6 +494,14 @@ $pageTitle = 'Install — ' . ($stepTitles[$step] ?? 'WebMS Intra');
             --portal-shadow-lg:      0 12px 20px -8px rgba(16,24,40,0.12),
                                      0 4px 8px -4px rgba(16,24,40,0.08);
             --portal-easing:         cubic-bezier(0.4,0,0.2,1);
+
+            /* 🔗 Bind Bootstrap link variables to the indigo brand colour so
+             * anchors don't fall back to the browser-default blue (which
+             * clashes hard in dark mode — see issue / screenshot). */
+            --bs-link-color:           var(--portal-primary);
+            --bs-link-color-rgb:       var(--portal-primary-rgb);
+            --bs-link-hover-color:     var(--portal-primary-hover);
+            --bs-link-hover-color-rgb: var(--portal-primary-rgb);
         }
 
         /* =====================================================================
@@ -519,6 +527,12 @@ $pageTitle = 'Install — ' . ($stepTitles[$step] ?? 'WebMS Intra');
                                      0 2px 4px -2px rgba(0,0,0,0.3);
             --portal-shadow-lg:      0 12px 20px -8px rgba(0,0,0,0.5),
                                      0 4px 8px -4px rgba(0,0,0,0.4);
+
+            /* 🔗 Brighter link colour for dark surfaces, matched to portal.css. */
+            --bs-link-color:           #9aa5f0;
+            --bs-link-color-rgb:       154, 165, 240;
+            --bs-link-hover-color:     #b3bcf6;
+            --bs-link-hover-color-rgb: 179, 188, 246;
         }
 
         /* =====================================================================
