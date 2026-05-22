@@ -24,7 +24,7 @@
 
 ---
 
-## Core framework (`web/core/`)
+## Core framework (`web/_core/`)
 
 Foundational classes loaded by every request via `bootstrap.php`. All ✅.
 
@@ -344,7 +344,7 @@ Self-contained 6-step setup wizard (bootstrap-free).
 
 ### 🌐 Internationalisation (Phase 8) ✅
 
-- `I18n` framework, translations under `web/lang/{xx}.php`.
+- `I18n` framework, translations under `web/_lang/{xx}.php`.
 - RTL support.
 - Per-user language preference.
 - Date/time format settings (#69).
@@ -371,7 +371,7 @@ Self-contained 6-step setup wizard (bootstrap-free).
 
 ## Migrations on disk
 
-`web/sql/` contains numbered migrations 000-043. `full_schema.sql` is kept in sync so fresh installs are wired up out of the box.
+`web/_sql/` contains numbered migrations 000-043. `full_schema.sql` is kept in sync so fresh installs are wired up out of the box.
 
 Latest additions:
 

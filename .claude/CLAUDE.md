@@ -73,10 +73,10 @@ Calendar/Events/Preaching Plan is ONE app ("Events") — `/calendar` covers view
 ## Key Constants (defined in core/bootstrap.php)
 
 - `PORTAL_ROOT` -- web/ on server
-- `PORTAL_CORE` -- web/core/
+- `PORTAL_CORE` -- web/_core/
 - `PORTAL_APPS` -- web/public_html/
-- `PORTAL_VENDOR` -- web/vendor/
-- `PORTAL_SQL` -- web/sql/
+- `PORTAL_VENDOR` -- web/_vendor/
+- `PORTAL_SQL` -- web/_sql/
 - `PORTAL_ENV` -- 'dev', 'beta', or 'prod' (auto-detected from DOCUMENT_ROOT)
 
 ## Recent ships (chronological)

@@ -17,7 +17,7 @@
 #   beta   -> web/public_html/  ->  <base>/public_html_beta/   (beta)
 #   alpha  -> web/public_html/  ->  <base>/public_html_dev/    (alpha / dev)
 #
-# Everything else inside web/ (core/, vendor/, sql/, _includes/, _functions/)
+# Everything else inside web/ (_core/, _vendor/, _sql/, _includes/, _functions/)
 # uploads to the SHARED <base>/ directory on every branch. Whichever branch
 # pushed last wins for shared code — protect main with branch rules if this
 # matters for your workflow.
@@ -41,7 +41,7 @@
 #   SFTP_KEY           SSH private key (preferred over password)
 #   SFTP_PASSWORD      Fallback password used only when SFTP_KEY is empty
 #
-# Shared assets (core/, vendor/, sql/, _includes/, _functions/, _libraries/dompdf/)
+# Shared assets (_core/, _vendor/, _sql/, _includes/, _functions/, _libraries/dompdf/)
 # upload to the PARENT directory of whichever per-branch path applies — so all
 # three branches typically share one parent (the iHymns model). If you want full
 # isolation, point the three paths at different parents.
@@ -147,7 +147,7 @@ jobs:
       # -- Resolve target channel + remote paths --
       # Each branch maps to its own full remote path secret (iHymns model).
       # The shared upload target is dirname(per-branch path), so when all three
-      # share one parent the shared core/vendor/sql land in the same place.
+      # share one parent the shared _core/_vendor/_sql land in the same place.
       - name: Determine target channel
         id: target
         env:
@@ -202,7 +202,7 @@ jobs:
         run: |
           echo "::group::PHP lint"
           find ./web -type f -name "*.php" \
-            -not -path "*/vendor/*" \
+            -not -path "*/_vendor/*" \
             -not -path "*/_libraries/*" \
             -print0 \
           | xargs -0 -n1 -P4 php -l
@@ -349,7 +349,7 @@ jobs:
       #      public_html_landing/  public_html_redir/  private_html/
       #
       #    Uses --delete: the repo is the source of truth for the shared
-      #    dirs (core/, vendor/, sql/, _includes/, _functions/,
+      #    dirs (_core/, _vendor/, _sql/, _includes/, _functions/,
       #    _libraries/dompdf/). Removing a file from the repo removes it
       #    from the server on next deploy. The excludes ensure server-only
       #    state (credentials, uploads, backups, other web roots) is

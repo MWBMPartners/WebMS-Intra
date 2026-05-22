@@ -33,7 +33,9 @@ WebMS-Intra/                         # Git repository root (NOT deployed)
 ├── DEV_NOTES.md                     # Developer guide
 ├── README.md                        # This file
 └── web/                             # ALL deployable server files
-    ├── core/                        # Framework classes (Portal\Core namespace)
+    │
+    │  ── Server-side (NOT web-accessible — above DocumentRoot) ──
+    ├── _core/                       # Framework classes (Portal\Core namespace)
     │   ├── App.php                  # Application registry (db, settings, user)
     │   ├── ApiResponse.php          # JSON API response builder
     │   ├── Site.php                 # Multi-site context manager (detection, branding)
@@ -59,15 +61,18 @@ WebMS-Intra/                         # Git repository root (NOT deployed)
     │   ├── WebAuthn.php             # WebAuthn/PassKey server-side helper
     │   ├── I18n.php                 # Internationalisation framework (translations, RTL, formatting)
     │   └── templates/               # Shared page templates
-    ├── lang/                        # Translation files (en.php, cy.php, etc.)
-    ├── vendor/simplejwt/            # Lightweight RS256 JWT verifier
-    ├── sql/                         # Numbered SQL migration files
+    ├── _lang/                       # Translation files (en.php, cy.php, etc.)
+    ├── _vendor/simplejwt/           # Lightweight RS256 JWT verifier
+    ├── _sql/                        # Numbered SQL migration files
+    ├── _install/                    # 6-step install wizard (run before first boot)
     ├── _auth_keys/                  # DB credentials, encryption key (gitignored)
     ├── _includes/                   # Shared includes (future)
     ├── _functions/                  # Shared functions (future)
     ├── _libraries/                  # Self-hosted libs e.g. dompdf (gitignored)
     ├── _uploads/                    # User file uploads (gitignored)
     ├── _backups/                    # Server backups (gitignored)
+    │
+    │  ── Apache DocumentRoot — the ONLY web-accessible tree ──
     ├── public_html/                 # Production web root
     │   ├── index.php                # Front controller
     │   ├── .htaccess                # URL rewriting
@@ -158,7 +163,7 @@ shared remote base from every branch.
 Workflows in `.github/workflows/`:
 
 - `deploy.yml` — SFTP sync; key-first / password-fallback auth
-- `version-bump.yml` — updates `web/core/App.php` on alpha/beta pushes
+- `version-bump.yml` — updates `web/_core/App.php` on alpha/beta pushes
 - `changelog.yml` — appends commit-message entries to CHANGELOG.md
 - `release.yml` — creates a GitHub Release on `v*` tag push
 - `auto-merge-alpha.yml` — enables auto-merge on PRs whose base is `alpha`

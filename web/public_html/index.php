@@ -16,7 +16,7 @@ declare(strict_types=1);
 $authCredsPath = dirname(__DIR__) . DIRECTORY_SEPARATOR . '_auth_keys' . DIRECTORY_SEPARATOR . 'auth_creds.php';
 if (is_readable($authCredsPath) === false) {
     // 📌 Redirect to the installation wizard
-    $installPath = dirname(__DIR__) . DIRECTORY_SEPARATOR . 'install' . DIRECTORY_SEPARATOR . 'index.php';
+    $installPath = dirname(__DIR__) . DIRECTORY_SEPARATOR . '_install' . DIRECTORY_SEPARATOR . 'index.php';
     if (is_readable($installPath) === true) {
         require $installPath;
         exit();
@@ -25,7 +25,7 @@ if (is_readable($authCredsPath) === false) {
     exit('Portal not configured. Please run the installer.');
 }
 
-require_once dirname(__DIR__) . DIRECTORY_SEPARATOR . 'core' . DIRECTORY_SEPARATOR . 'bootstrap.php';
+require_once dirname(__DIR__) . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEPARATOR . 'bootstrap.php';
 
 use Portal\Core\Router;
 

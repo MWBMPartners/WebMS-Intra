@@ -15,7 +15,7 @@
  * retained in VALID_CHANNELS for backwards compatibility.
  * -----------------------------------------------------------------------------
  * Usage from a front controller running under PORTAL_ENV=dev or =beta:
- *     require_once '../core/bootstrap.php';
+ *     require_once '../_core/bootstrap.php';
  *     \Portal\Core\Gatekeeper::enforce('dev');
  *     \Portal\Core\Router::dispatch($mysqli);
  *

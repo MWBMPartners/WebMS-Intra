@@ -54,10 +54,10 @@ define('PORTAL_START_TIME', microtime(true));
 
 define('PORTAL_ROOT', realpath(__DIR__ . DIRECTORY_SEPARATOR . '..'));
 
-define('PORTAL_CORE',   PORTAL_ROOT . DIRECTORY_SEPARATOR . 'core');
+define('PORTAL_CORE',   PORTAL_ROOT . DIRECTORY_SEPARATOR . '_core');
 define('PORTAL_APPS',   PORTAL_ROOT . DIRECTORY_SEPARATOR . 'public_html');
-define('PORTAL_VENDOR', PORTAL_ROOT . DIRECTORY_SEPARATOR . 'vendor');
-define('PORTAL_SQL',    PORTAL_ROOT . DIRECTORY_SEPARATOR . 'sql');
+define('PORTAL_VENDOR', PORTAL_ROOT . DIRECTORY_SEPARATOR . '_vendor');
+define('PORTAL_SQL',    PORTAL_ROOT . DIRECTORY_SEPARATOR . '_sql');
 
 // 🌍 Determine runtime environment flag (dev | beta | prod)
 // Priority: 1) PORTAL_ENV env var  2) directory name detection  3) default 'dev'
@@ -82,6 +82,15 @@ if ($env === false || $env === '') {
     }
 }
 define('PORTAL_ENV', $env);
+
+// 🤫 Strip the default `X-Powered-By: PHP/8.x.y` response header so probes
+// can't fingerprint the backend stack. Apache's mod_headers also unsets it
+// from .htaccess as a belt-and-braces second layer; we set ours here too
+// because that runs for ALL responses regardless of Apache config drift.
+// See: https://www.php.net/manual/en/function.header-remove.php
+if (function_exists('header_remove') === true) {
+    header_remove('X-Powered-By');
+}
 
 // 🛡️ PHP error display hardening
 // -----------------------------------------------------------------------------
@@ -413,7 +422,7 @@ set_exception_handler(function (\Throwable $ex): void {
 
 // 📋 Define PORTAL_LANG constant for the language directory
 if (defined('PORTAL_LANG') === false) {
-    define('PORTAL_LANG', PORTAL_ROOT . DIRECTORY_SEPARATOR . 'lang');
+    define('PORTAL_LANG', PORTAL_ROOT . DIRECTORY_SEPARATOR . '_lang');
 }
 
 \Portal\Core\I18n::init();

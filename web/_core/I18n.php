@@ -6,7 +6,7 @@
  * -----------------------------------------------------------------------------
  * Provides translation, parameterisation, pluralisation, and locale management
  * for the portal. All user-facing strings are loaded from language files stored
- * in web/lang/{locale}.php. Each file returns a flat associative array mapping
+ * in web/_lang/{locale}.php. Each file returns a flat associative array mapping
  * string keys to translated text.
  *
  * Features:
