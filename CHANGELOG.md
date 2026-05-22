@@ -11,6 +11,8 @@ to `alpha`, `beta`, and `main` using the heading format
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-05-22
+
 ### Added — Multi-provider Captcha
 
 The captcha layer now supports three providers and admin-configurable priority:
