@@ -83,13 +83,28 @@ if ($env === false || $env === '') {
 }
 define('PORTAL_ENV', $env);
 
-// 🤫 Strip the default `X-Powered-By: PHP/8.x.y` response header so probes
-// can't fingerprint the backend stack. Apache's mod_headers also unsets it
-// from .htaccess as a belt-and-braces second layer; we set ours here too
-// because that runs for ALL responses regardless of Apache config drift.
-// See: https://www.php.net/manual/en/function.header-remove.php
+// 🏷️ Replace the default `X-Powered-By: PHP/8.x.y` response header with our
+// own branded value (matching the in-page "Powered by" attribution + the
+// <meta name="generator"> tag). The PHP default leaks the backend stack
+// AND the exact PHP version, useful only to attackers looking up CVEs.
+//
+// The actual header value depends on `branding.hidePoweredBy`:
+//   - 'true'   → strip the header entirely (no brand reveal at all)
+//   - else     → "WebMS-Intra/<version>"  (default)
+//
+// The setting is read from $SETTINGS directly (already populated above);
+// we can't use App::settings() yet because App::init() runs later.
+// See: https://www.php.net/manual/en/function.header.php
 if (function_exists('header_remove') === true) {
     header_remove('X-Powered-By');
+}
+$hidePoweredBy = ($SETTINGS['branding']['hidePoweredBy'] ?? 'false') === 'true';
+if ($hidePoweredBy === false) {
+    // 📋 Pull version from settings if available, else fall back to the
+    // App class's compiled default (read here without App::init() because
+    // we need it before App::init runs — keep this in sync with App.php).
+    $brandedVersion = (string) ($SETTINGS['portal']['version'] ?? '1.0.0');
+    header('X-Powered-By: WebMS-Intra/' . $brandedVersion);
 }
 
 // 🛡️ PHP error display hardening
