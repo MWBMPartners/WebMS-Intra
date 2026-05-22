@@ -290,20 +290,63 @@ class Router
     }
 
     /**
-     * Health check endpoint for CI/CD monitoring.
-     * Returns a simple JSON response indicating the portal is operational.
+     * Health check endpoint for CI/CD monitoring + uptime probes.
+     *
+     * Returns a JSON document with the portal status, env, version, PHP
+     * version, current site ID, and the result of a lightweight DB ping
+     * (`SELECT 1`). Returns 200 only when the DB ping succeeds — uptime
+     * monitors should treat any non-200 as a failure.
+     *
+     * Output shape:
+     *   {
+     *     "status":    "ok" | "degraded",
+     *     "env":       "dev" | "beta" | "prod",
+     *     "version":   "1.0.0",
+     *     "phpVersion":"8.5.5",
+     *     "siteID":    1,
+     *     "db":        "ok" | "error",
+     *     "time":      "2026-05-22T13:00:00+00:00"
+     *   }
+     *
+     * The endpoint never requires auth — it's whitelisted at the top of
+     * Router::dispatch(). Designed for CloudFlare / Pingdom / GitHub
+     * Actions uptime probes.
      *
      * @return void
      */
     private static function healthCheck(): void
     {
-        http_response_code(200);
         header('Content-Type: application/json; charset=utf-8');
+        header('Cache-Control: no-store, no-cache, must-revalidate');
+
+        // 🩺 Lightweight DB ping — selects literal 1 so any working
+        // connection succeeds, no schema dependency.
+        $dbStatus = 'error';
+        try {
+            $db = App::db();
+            $result = $db->query('SELECT 1');
+            if ($result !== false) {
+                $row = $result->fetch_row();
+                if ($row !== null && (int) ($row[0] ?? 0) === 1) {
+                    $dbStatus = 'ok';
+                }
+            }
+        } catch (\Throwable) {
+            // 📝 Don't leak details in the response — Logger captured it.
+            $dbStatus = 'error';
+        }
+
+        $overall = $dbStatus === 'ok' ? 'ok' : 'degraded';
+        http_response_code($dbStatus === 'ok' ? 200 : 503);
+
         echo json_encode([
-            'status'  => 'ok',
-            'env'     => PORTAL_ENV,
-            'version' => App::version(),
-            'time'    => gmdate('c'),
+            'status'     => $overall,
+            'env'        => PORTAL_ENV,
+            'version'    => App::version(),
+            'phpVersion' => PHP_VERSION,
+            'siteID'     => Site::id(),
+            'db'         => $dbStatus,
+            'time'       => gmdate('c'),
         ], JSON_UNESCAPED_UNICODE);
         exit();
     }
