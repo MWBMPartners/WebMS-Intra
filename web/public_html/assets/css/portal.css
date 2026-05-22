@@ -64,6 +64,17 @@
     --portal-text-subtle:      #9ca3af;
     --portal-text-on-primary:  #ffffff;
     --portal-link:             var(--portal-primary);
+    --portal-link-rgb:         var(--portal-primary-rgb);
+    --portal-link-hover:       var(--portal-primary-hover);
+
+    /* 🔗 Bind to Bootstrap's link variables so every <a>, .btn-link,
+     * .alert-link, etc. picks up the theme automatically — instead of
+     * falling back to the browser default blue, which clashes in dark mode.
+     * See: https://getbootstrap.com/docs/5.3/customize/css-variables/#link-variables */
+    --bs-link-color:           var(--portal-link);
+    --bs-link-color-rgb:       var(--portal-link-rgb);
+    --bs-link-hover-color:     var(--portal-link-hover);
+    --bs-link-hover-color-rgb: var(--portal-link-rgb);
 
     /* ----- Typography ----- */
     --portal-font-family:      system-ui, -apple-system, "Segoe UI", Roboto,
@@ -180,6 +191,15 @@
     --portal-text-subtle:      #6b7280;
     --portal-text-on-primary:  #0f1115;     /* dark text on the lighter dark-mode primary */
     --portal-link:             #9aa5f0;
+    --portal-link-rgb:         154, 165, 240;
+    --portal-link-hover:       #b3bcf6;
+
+    /* 🔗 Re-bind Bootstrap link variables for dark mode so anchors stay on-brand
+     * instead of using Bootstrap's default dark-mode link blue. */
+    --bs-link-color:           var(--portal-link);
+    --bs-link-color-rgb:       var(--portal-link-rgb);
+    --bs-link-hover-color:     var(--portal-link-hover);
+    --bs-link-hover-color-rgb: 179, 188, 246;
 
     --portal-shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.4);
     --portal-shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.5),
