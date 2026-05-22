@@ -2,19 +2,44 @@
 // Path: public_html/calendar/index.php
 /**
  * -----------------------------------------------------------------------------
- * Calendar — Public Event Listing 📅
+ * Calendar — View Router 📅
  * -----------------------------------------------------------------------------
- * Public-facing calendar page showing upcoming and past events. Supports:
- *   - List view (default) with filters by category, type, and date range
- *   - Toggle to show past events
- *   - Pagination
- *   - Links to individual event pages and admin management (if admin)
+ * Routes between the seven calendar view modes (issue #136):
+ *
+ *   ?view=day        – single day, hour timeline
+ *   ?view=week       – 7-day grid (Mon-Sun)
+ *   ?view=weekdays   – 5-day grid (Mon-Fri)
+ *   ?view=weekend    – 2-day grid (Sat-Sun)
+ *   ?view=month      – calendar grid (5-6 rows)
+ *   ?view=year       – 12-month wall planner
+ *   ?view=list       – chronological card list (legacy default)
+ *
+ * Defaults:
+ *   - URL  ?view=…           ← takes top priority
+ *   - localStorage           ← remembered last view per device
+ *   - setting calendar.defaultView (admin-set, falls back to "month")
+ *
+ * Date cursor:
+ *   ?date=YYYY-MM-DD         (interpreted by view: day uses date,
+ *                            week uses containing week, month uses
+ *                            year-month, year uses year part)
+ *
+ * Filters (applied to every view):
+ *   ?category=N              category ID
+ *   ?type=N                  type ID
+ *   ?past=1                  list-view-only: also show past events
+ *
+ * Each view partial under views/ receives the resolved $events array
+ * plus the shared filter / range variables and emits the inner panel
+ * markup only (the shared header and template chrome are emitted by
+ * this router).
  *
  * @package   Portal\Calendar
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   0.3.0
+ * @version   0.11.0
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/136
  * -----------------------------------------------------------------------------
  */
 
@@ -33,26 +58,128 @@ $breadcrumbs = ['Dashboard' => '/', 'Calendar' => ''];
 Auth::ensureSession();
 
 // -----------------------------------------------------------------------------
-// 🔍 Filter parameters
+// 🔀 Resolve active view
 // -----------------------------------------------------------------------------
-$filterCategory = trim($_GET['category'] ?? '');
-$filterType     = trim($_GET['type'] ?? '');
-$showPast       = ($_GET['past'] ?? '') === '1';
-$page           = max(1, (int) ($_GET['page'] ?? 1));
-$perPage        = 20;
-$offset         = ($page - 1) * $perPage;
+$validViews = ['day', 'week', 'weekdays', 'weekend', 'month', 'year', 'list'];
 
-// 🌐 Multi-site scope
+$defaultView = (string) (App::settings('calendar.defaultView') ?? 'month');
+if (in_array($defaultView, $validViews, true) === false) {
+    $defaultView = 'month';
+}
+
+$view = (string) ($_GET['view'] ?? $defaultView);
+if (in_array($view, $validViews, true) === false) {
+    $view = $defaultView;
+}
+
+// -----------------------------------------------------------------------------
+// 📅 Resolve the date cursor — interpreted per view below
+// -----------------------------------------------------------------------------
+$rawDate = trim((string) ($_GET['date'] ?? ''));
+$cursor  = null;
+if ($rawDate !== '') {
+    // Accept YYYY-MM-DD, YYYY-MM, or YYYY — fall back to today if malformed
+    try {
+        if (preg_match('/^\d{4}$/', $rawDate) === 1) {
+            $cursor = new DateTimeImmutable($rawDate . '-01-01');
+        } elseif (preg_match('/^\d{4}-\d{2}$/', $rawDate) === 1) {
+            $cursor = new DateTimeImmutable($rawDate . '-01');
+        } else {
+            $cursor = new DateTimeImmutable($rawDate);
+        }
+    } catch (\Throwable) {
+        $cursor = null;
+    }
+}
+if ($cursor === null) {
+    $cursor = new DateTimeImmutable('today');
+}
+
+// -----------------------------------------------------------------------------
+// 🔍 Common filter parameters
+// -----------------------------------------------------------------------------
+$filterCategory = trim((string) ($_GET['category'] ?? ''));
+$filterType     = trim((string) ($_GET['type'] ?? ''));
+$showPast       = ($_GET['past'] ?? '') === '1';   // list-view only
+
 $siteId = Site::id();
 
-// 📊 Build WHERE clause
+// -----------------------------------------------------------------------------
+// 📊 Compute the date range visible in the chosen view.
+//
+// Returned as [DateTimeImmutable $rangeStart (00:00:00),
+//              DateTimeImmutable $rangeEnd  (last second of the range)].
+//
+// Used both for the SQL filter (grid views) and the title shown in the
+// shared header. List view ignores the range and uses pagination instead.
+// -----------------------------------------------------------------------------
+$rangeStart = $cursor;
+$rangeEnd   = $cursor;
+
+switch ($view) {
+    case 'day':
+        $rangeStart = $cursor->setTime(0, 0, 0);
+        $rangeEnd   = $cursor->setTime(23, 59, 59);
+        break;
+
+    case 'week':
+        // Week runs Monday → Sunday for civil/ISO convenience.
+        $dow        = (int) $cursor->format('N');           // 1..7, Mon..Sun
+        $rangeStart = $cursor->modify('-' . ($dow - 1) . ' days')->setTime(0, 0, 0);
+        $rangeEnd   = $rangeStart->modify('+6 days')->setTime(23, 59, 59);
+        break;
+
+    case 'weekdays':
+        $dow        = (int) $cursor->format('N');
+        $rangeStart = $cursor->modify('-' . ($dow - 1) . ' days')->setTime(0, 0, 0);
+        $rangeEnd   = $rangeStart->modify('+4 days')->setTime(23, 59, 59); // Mon..Fri
+        break;
+
+    case 'weekend':
+        // Anchor on the Saturday of the containing week. If the cursor is
+        // Mon-Fri we look forward to the upcoming Sat; if it's Sat/Sun we
+        // use the same weekend.
+        $dow = (int) $cursor->format('N');
+        if ($dow <= 5) {
+            $rangeStart = $cursor->modify('+' . (6 - $dow) . ' days')->setTime(0, 0, 0);
+        } else {
+            // Sat (6) → today; Sun (7) → yesterday (start of weekend)
+            $rangeStart = $cursor->modify('-' . ($dow - 6) . ' days')->setTime(0, 0, 0);
+        }
+        $rangeEnd = $rangeStart->modify('+1 day')->setTime(23, 59, 59);
+        break;
+
+    case 'month':
+        $rangeStart = $cursor->modify('first day of this month')->setTime(0, 0, 0);
+        $rangeEnd   = $cursor->modify('last day of this month')->setTime(23, 59, 59);
+        break;
+
+    case 'year':
+        $rangeStart = $cursor->setDate((int) $cursor->format('Y'), 1, 1)->setTime(0, 0, 0);
+        $rangeEnd   = $cursor->setDate((int) $cursor->format('Y'), 12, 31)->setTime(23, 59, 59);
+        break;
+
+    case 'list':
+    default:
+        $rangeStart = null;
+        $rangeEnd   = null;
+        break;
+}
+
+// -----------------------------------------------------------------------------
+// 🗄️ Fetch events. List view keeps its pagination; grid views pull the
+// full visible-range set in one query (no pagination — grids show the
+// whole window).
+// -----------------------------------------------------------------------------
+$events      = [];
+$totalRows   = 0;
+$totalPages  = 1;
+$page        = max(1, (int) ($_GET['page'] ?? 1));
+$perPage     = 20;
+
 $conditions = ["e.isDeleted = 0", "e.status = 'published'", "e.isPublic = 1", "e.siteID = ?"];
 $params     = [$siteId];
 $types      = 'i';
-
-if ($showPast === false) {
-    $conditions[] = 'e.startDateTime >= NOW()';
-}
 
 if ($filterCategory !== '') {
     $conditions[] = 'e.categoryID = ?';
@@ -65,13 +192,14 @@ if ($filterType !== '') {
     $types       .= 'i';
 }
 
-$where = 'WHERE ' . implode(' AND ', $conditions);
+if ($view === 'list') {
+    if ($showPast === false) {
+        $conditions[] = 'e.startDateTime >= NOW()';
+    }
+    $where = 'WHERE ' . implode(' AND ', $conditions);
 
-// 📋 Count total rows
-$countSql  = 'SELECT COUNT(*) AS cnt FROM tblEvents e ' . $where;
-$totalRows = 0;
-if (count($params) > 0) {
-    $stmt = $mysqli->prepare($countSql);
+    // 📋 Count
+    $stmt = $mysqli->prepare('SELECT COUNT(*) AS cnt FROM tblEvents e ' . $where);
     if ($stmt !== false) {
         $stmt->bind_param($types, ...$params);
         $stmt->execute();
@@ -79,48 +207,87 @@ if (count($params) > 0) {
         $totalRows = (int) ($row['cnt'] ?? 0);
         $stmt->close();
     }
+    $totalPages = max(1, (int) ceil($totalRows / $perPage));
+    $offset     = ($page - 1) * $perPage;
+
+    $orderDir = $showPast === true ? 'DESC' : 'ASC';
+    $sql = 'SELECT e.eventID, e.eventName, e.eventSlug, e.description, '
+         . 'e.startDateTime, e.endDateTime, e.timezone, e.isAllDay, '
+         . 'e.locationName, e.locationAddress, e.status, e.isFeatured, '
+         . 'e.heroImage, '
+         . 'c.categoryName, c.color AS categoryColor, t.typeName, s.seriesName '
+         . 'FROM tblEvents e '
+         . 'LEFT JOIN tblEventCategories c ON c.categoryID = e.categoryID '
+         . 'LEFT JOIN tblEventTypes t ON t.typeID = e.typeID '
+         . 'LEFT JOIN tblEventSeries s ON s.seriesID = e.seriesID '
+         . $where . ' '
+         . 'ORDER BY e.startDateTime ' . $orderDir . ' '
+         . 'LIMIT ? OFFSET ?';
+
+    $fetchTypes  = $types . 'ii';
+    $fetchParams = array_merge($params, [$perPage, $offset]);
+
+    $stmt = $mysqli->prepare($sql);
+    if ($stmt !== false) {
+        $stmt->bind_param($fetchTypes, ...$fetchParams);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        while ($r = $result->fetch_assoc()) {
+            $events[] = $r;
+        }
+        $stmt->close();
+    }
 } else {
-    $result = $mysqli->query($countSql);
-    if ($result !== false) {
-        $row = $result->fetch_assoc();
-        $totalRows = (int) ($row['cnt'] ?? 0);
+    // Grid views: fetch every event overlapping the visible range.
+    // An event overlaps if it starts BEFORE the range ends AND
+    // (it has no end date OR it ends AFTER the range starts).
+    $startStr = $rangeStart->format('Y-m-d H:i:s');
+    $endStr   = $rangeEnd->format('Y-m-d H:i:s');
+
+    $conditions[] = 'e.startDateTime <= ?';
+    $params[]     = $endStr;
+    $types       .= 's';
+
+    $conditions[] = '(e.endDateTime IS NULL OR e.endDateTime >= ?)';
+    $params[]     = $startStr;
+    $types       .= 's';
+
+    $where = 'WHERE ' . implode(' AND ', $conditions);
+
+    $sql = 'SELECT e.eventID, e.eventName, e.eventSlug, e.description, '
+         . 'e.startDateTime, e.endDateTime, e.timezone, e.isAllDay, '
+         . 'e.locationName, e.locationAddress, e.status, e.isFeatured, '
+         . 'e.heroImage, '
+         . 'c.categoryName, c.color AS categoryColor, t.typeName, s.seriesName '
+         . 'FROM tblEvents e '
+         . 'LEFT JOIN tblEventCategories c ON c.categoryID = e.categoryID '
+         . 'LEFT JOIN tblEventTypes t ON t.typeID = e.typeID '
+         . 'LEFT JOIN tblEventSeries s ON s.seriesID = e.seriesID '
+         . $where . ' '
+         . 'ORDER BY e.startDateTime ASC';
+
+    $stmt = $mysqli->prepare($sql);
+    if ($stmt !== false) {
+        $stmt->bind_param($types, ...$params);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        while ($r = $result->fetch_assoc()) {
+            $events[] = $r;
+        }
+        $stmt->close();
     }
-}
-$totalPages = max(1, (int) ceil($totalRows / $perPage));
-
-// 📋 Fetch events
-$orderDir = $showPast === true ? 'DESC' : 'ASC';
-$sql = 'SELECT e.eventID, e.eventName, e.eventSlug, e.description, '
-     . 'e.startDateTime, e.endDateTime, e.timezone, e.isAllDay, '
-     . 'e.locationName, e.locationAddress, e.status, e.isFeatured, '
-     . 'e.heroImage, '
-     . 'c.categoryName, t.typeName, s.seriesName '
-     . 'FROM tblEvents e '
-     . 'LEFT JOIN tblEventCategories c ON c.categoryID = e.categoryID '
-     . 'LEFT JOIN tblEventTypes t ON t.typeID = e.typeID '
-     . 'LEFT JOIN tblEventSeries s ON s.seriesID = e.seriesID '
-     . $where . ' '
-     . 'ORDER BY e.startDateTime ' . $orderDir . ' '
-     . 'LIMIT ? OFFSET ?';
-
-$fetchTypes  = $types . 'ii';
-$fetchParams = array_merge($params, [$perPage, $offset]);
-
-$events = [];
-$stmt = $mysqli->prepare($sql);
-if ($stmt !== false) {
-    $stmt->bind_param($fetchTypes, ...$fetchParams);
-    $stmt->execute();
-    $result = $stmt->get_result();
-    while ($r = $result->fetch_assoc()) {
-        $events[] = $r;
-    }
-    $stmt->close();
+    $totalRows  = count($events);
+    $totalPages = 1;
 }
 
-// 📊 Fetch categories and types for filter dropdowns
+// -----------------------------------------------------------------------------
+// 🏷️ Categories + types — for filter dropdowns AND for colour-coding events
+// -----------------------------------------------------------------------------
 $categories = [];
-$stmtCat = $mysqli->prepare('SELECT categoryID, categoryName FROM tblEventCategories WHERE isActive = 1 AND siteID = ? ORDER BY sortOrder, categoryName');
+$stmtCat = $mysqli->prepare(
+    'SELECT categoryID, categoryName, color FROM tblEventCategories '
+    . 'WHERE isActive = 1 AND siteID = ? ORDER BY sortOrder, categoryName'
+);
 if ($stmtCat !== false) {
     $stmtCat->bind_param('i', $siteId);
     $stmtCat->execute();
@@ -132,7 +299,11 @@ if ($stmtCat !== false) {
 }
 
 $eventTypes = [];
-$stmtType = $mysqli->prepare('SELECT typeID, typeName FROM tblEventTypes WHERE isActive = 1 AND parentID IS NULL AND siteID = ? ORDER BY sortOrder, typeName');
+$stmtType = $mysqli->prepare(
+    'SELECT typeID, typeName FROM tblEventTypes '
+    . 'WHERE isActive = 1 AND parentID IS NULL AND siteID = ? '
+    . 'ORDER BY sortOrder, typeName'
+);
 if ($stmtType !== false) {
     $stmtType->bind_param('i', $siteId);
     $stmtType->execute();
@@ -147,8 +318,8 @@ if ($stmtType !== false) {
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 
-<!-- 📅 Calendar Listing -->
-<div class="d-flex justify-content-between align-items-center mb-4">
+<!-- 📅 Calendar shell -->
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
     <h1 class="mb-0"><i class="fa-solid fa-calendar-days me-2"></i>Calendar</h1>
     <div class="d-flex gap-2">
         <?php if (App::isAdmin() === true): ?>
@@ -159,146 +330,18 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     </div>
 </div>
 
-<!-- 🔍 Filters -->
-<form method="get" action="/calendar" class="row g-2 mb-4">
-    <div class="col-12 col-md-3">
-        <select name="category" class="form-select form-select-sm">
-            <option value="">All Categories</option>
-            <?php foreach ($categories as $cat): ?>
-                <option value="<?php echo (int) $cat['categoryID']; ?>"
-                    <?php echo ($filterCategory === (string) $cat['categoryID']) ? 'selected' : ''; ?>>
-                    <?php echo htmlspecialchars($cat['categoryName'], ENT_QUOTES, 'UTF-8'); ?>
-                </option>
-            <?php endforeach; ?>
-        </select>
-    </div>
-    <div class="col-12 col-md-3">
-        <select name="type" class="form-select form-select-sm">
-            <option value="">All Types</option>
-            <?php foreach ($eventTypes as $et): ?>
-                <option value="<?php echo (int) $et['typeID']; ?>"
-                    <?php echo ($filterType === (string) $et['typeID']) ? 'selected' : ''; ?>>
-                    <?php echo htmlspecialchars($et['typeName'], ENT_QUOTES, 'UTF-8'); ?>
-                </option>
-            <?php endforeach; ?>
-        </select>
-    </div>
-    <div class="col-12 col-md-3">
-        <div class="form-check form-switch mt-2">
-            <input class="form-check-input" type="checkbox" name="past" value="1" id="showPast"
-                   <?php echo $showPast === true ? 'checked' : ''; ?>>
-            <label class="form-check-label" for="showPast">Show past events</label>
-        </div>
-    </div>
-    <div class="col-12 col-md-3">
-        <button type="submit" class="btn btn-sm btn-outline-primary w-100">
-            <i class="fa-solid fa-filter me-1"></i> Filter
-        </button>
-    </div>
-</form>
+<?php require __DIR__ . DIRECTORY_SEPARATOR . 'views' . DIRECTORY_SEPARATOR . '_shared_header.php'; ?>
 
-<!-- 📋 Events list -->
-<?php if (count($events) === 0): ?>
-    <div class="alert alert-info">
-        <i class="fa-solid fa-circle-info me-1"></i>
-        <?php echo $showPast === true ? 'No events found matching your filters.' : 'No upcoming events. Check back soon!'; ?>
-    </div>
-<?php else: ?>
-    <div class="row g-4">
-        <?php foreach ($events as $event): ?>
-            <?php
-            $startDt = new DateTime($event['startDateTime']);
-            $isToday = $startDt->format('Y-m-d') === date('Y-m-d');
-            $isPast  = $startDt < new DateTime();
-            ?>
-            <div class="col-12 col-md-6 col-lg-4">
-                <div class="card h-100 <?php echo $event['isFeatured'] === '1' ? 'border-warning' : ''; ?> <?php echo $isPast === true ? 'opacity-75' : ''; ?>">
-                    <?php if ($event['heroImage'] !== null && $event['heroImage'] !== ''): ?>
-                        <img src="/assets/uploads/calendar/<?php echo htmlspecialchars($event['heroImage'], ENT_QUOTES, 'UTF-8'); ?>"
-                             class="card-img-top" alt="" style="height:180px;object-fit:cover;">
-                    <?php endif; ?>
-                    <div class="card-body">
-                        <?php if ($event['isFeatured'] === '1'): ?>
-                            <span class="badge bg-warning text-dark mb-2"><i class="fa-solid fa-star me-1"></i>Featured</span>
-                        <?php endif; ?>
-
-                        <h5 class="card-title">
-                            <a href="/calendar/event?slug=<?php echo htmlspecialchars($event['eventSlug'], ENT_QUOTES, 'UTF-8'); ?>" class="text-decoration-none">
-                                <?php echo htmlspecialchars($event['eventName'], ENT_QUOTES, 'UTF-8'); ?>
-                            </a>
-                        </h5>
-
-                        <!-- 📅 Date/Time -->
-                        <p class="card-text mb-1">
-                            <i class="fa-regular fa-calendar me-1 text-primary"></i>
-                            <strong><?php echo htmlspecialchars(\Portal\Core\I18n::formatDate($startDt->format('Y-m-d H:i:s'), 'long'), ENT_QUOTES, 'UTF-8'); ?></strong>
-                            <?php if ($event['isAllDay'] !== '1' && (int) $event['isAllDay'] !== 1): ?>
-                                <span class="text-muted ms-1"><?php echo htmlspecialchars($startDt->format('g:i A'), ENT_QUOTES, 'UTF-8'); ?></span>
-                            <?php else: ?>
-                                <span class="badge bg-light text-dark ms-1">All Day</span>
-                            <?php endif; ?>
-                            <?php if ($isToday === true): ?>
-                                <span class="badge bg-success ms-1">Today</span>
-                            <?php endif; ?>
-                        </p>
-
-                        <!-- 📍 Location -->
-                        <?php if ($event['locationName'] !== null && $event['locationName'] !== ''): ?>
-                            <p class="card-text mb-1 small text-muted">
-                                <i class="fa-solid fa-location-dot me-1"></i>
-                                <?php echo htmlspecialchars($event['locationName'], ENT_QUOTES, 'UTF-8'); ?>
-                            </p>
-                        <?php endif; ?>
-
-                        <!-- 🏷️ Category / Type badges -->
-                        <div class="mt-2">
-                            <?php if ($event['categoryName'] !== null): ?>
-                                <span class="badge bg-primary me-1"><?php echo htmlspecialchars($event['categoryName'], ENT_QUOTES, 'UTF-8'); ?></span>
-                            <?php endif; ?>
-                            <?php if ($event['typeName'] !== null): ?>
-                                <span class="badge bg-secondary me-1"><?php echo htmlspecialchars($event['typeName'], ENT_QUOTES, 'UTF-8'); ?></span>
-                            <?php endif; ?>
-                            <?php if ($event['seriesName'] !== null): ?>
-                                <span class="badge bg-info me-1"><?php echo htmlspecialchars($event['seriesName'], ENT_QUOTES, 'UTF-8'); ?></span>
-                            <?php endif; ?>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        <?php endforeach; ?>
-    </div>
-
-    <!-- 📖 Pagination -->
-    <?php if ($totalPages > 1): ?>
-        <nav aria-label="Calendar pagination" class="mt-4">
-            <ul class="pagination justify-content-center">
-                <?php
-                $baseUrl = '/calendar?' . http_build_query(array_filter([
-                    'category' => $filterCategory,
-                    'type'     => $filterType,
-                    'past'     => $showPast ? '1' : '',
-                ]));
-                $sep = '&';
-                ?>
-                <li class="page-item <?php echo ($page <= 1) ? 'disabled' : ''; ?>">
-                    <a class="page-link" href="<?php echo htmlspecialchars($baseUrl . $sep . 'page=' . ($page - 1), ENT_QUOTES, 'UTF-8'); ?>">&laquo;</a>
-                </li>
-                <?php for ($i = 1; $i <= $totalPages; $i++): ?>
-                    <?php if ($i <= 3 || $i >= $totalPages - 2 || abs($i - $page) <= 1): ?>
-                        <li class="page-item <?php echo ($i === $page) ? 'active' : ''; ?>">
-                            <a class="page-link" href="<?php echo htmlspecialchars($baseUrl . $sep . 'page=' . $i, ENT_QUOTES, 'UTF-8'); ?>"><?php echo $i; ?></a>
-                        </li>
-                    <?php elseif ($i === 4 || $i === $totalPages - 3): ?>
-                        <li class="page-item disabled"><span class="page-link">&hellip;</span></li>
-                    <?php endif; ?>
-                <?php endfor; ?>
-                <li class="page-item <?php echo ($page >= $totalPages) ? 'disabled' : ''; ?>">
-                    <a class="page-link" href="<?php echo htmlspecialchars($baseUrl . $sep . 'page=' . ($page + 1), ENT_QUOTES, 'UTF-8'); ?>">&raquo;</a>
-                </li>
-            </ul>
-        </nav>
-    <?php endif; ?>
-<?php endif; ?>
+<?php
+// 🚦 Dispatch to the active view's partial
+$partial = __DIR__ . DIRECTORY_SEPARATOR . 'views' . DIRECTORY_SEPARATOR . $view . '.php';
+if (is_file($partial) === true) {
+    require $partial;
+} else {
+    // 🛟 Should never happen — $view is whitelisted above.
+    require __DIR__ . DIRECTORY_SEPARATOR . 'views' . DIRECTORY_SEPARATOR . 'list.php';
+}
+?>
 
 <?php
 // 📄 Include shared footer template

@@ -1396,6 +1396,12 @@ INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isSensitive`, `default
 VALUES ('calendar.brandColor', '#0d6efd', 0, '#0d6efd')
 ON DUPLICATE KEY UPDATE `settingKey` = `settingKey`;
 
+-- Default calendar view (matches migration 042 — issue #136).
+-- Valid values: day | week | weekdays | weekend | month | year | list
+INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isSensitive`, `defaultValue`)
+VALUES ('calendar.defaultView', 'month', 0, 'month')
+ON DUPLICATE KEY UPDATE `settingKey` = `settingKey`;
+
 INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isSensitive`, `defaultValue`)
 VALUES ('leadership.enabled', 'false', 0, 'false')
 ON DUPLICATE KEY UPDATE `settingKey` = `settingKey`;
@@ -1875,6 +1881,9 @@ INSERT INTO `tblMigrations` (`filename`) VALUES ('040_captcha_providers.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
 INSERT INTO `tblMigrations` (`filename`) VALUES ('041_password_policy_hardening.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('042_calendar_default_view.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
 -- Seed the branding.hidePoweredBy setting (matches migration 038)
