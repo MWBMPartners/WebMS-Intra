@@ -1620,3 +1620,372 @@ a:focus > .app-card {
     border-top-left-radius: var(--portal-radius-lg);
     border-top-right-radius: var(--portal-radius-lg);
 }
+
+/* ============================================================================
+   Calendar — multi-view grids (issue #136)
+
+   Shared between:
+     • day, week, weekdays, weekend  → .portal-cal-grid (hour timeline)
+     • month                         → .portal-cal-month (date grid)
+     • year                          → .portal-cal-year (wall planner)
+
+   Each event gets a --ev-color inline custom property pulled from
+   tblEventCategories.color; falls back to --portal-primary if absent.
+   ============================================================================ */
+
+.portal-calendar-controls {
+    background: var(--portal-surface);
+    border: 1px solid var(--portal-border);
+    border-radius: var(--portal-radius-md);
+    padding: var(--portal-spacing-md);
+}
+
+/* ---------- Hour-timeline grid (day / week / weekdays / weekend) ---------- */
+
+.portal-cal-grid {
+    background: var(--portal-surface);
+    border: 1px solid var(--portal-border);
+    border-radius: var(--portal-radius-md);
+    overflow: hidden;
+}
+
+.portal-cal-headrow {
+    display: grid;
+    grid-template-columns: 56px repeat(var(--cal-cols, 7), minmax(0, 1fr));
+    border-bottom: 1px solid var(--portal-border);
+    background: var(--portal-surface-elevated);
+}
+
+.portal-cal-gutter {
+    border-right: 1px solid var(--portal-border);
+}
+
+.portal-cal-dayhead {
+    padding: 0.5rem 0.75rem;
+    text-align: center;
+    border-right: 1px solid var(--portal-border);
+}
+.portal-cal-dayhead:last-child { border-right: none; }
+.portal-cal-dayhead.is-today {
+    background: var(--portal-primary-subtle);
+    color: var(--portal-primary);
+    font-weight: 600;
+}
+
+.portal-cal-allday {
+    display: grid;
+    grid-template-columns: 56px repeat(var(--cal-cols, 7), minmax(0, 1fr));
+    border-bottom: 1px solid var(--portal-border);
+    background: var(--portal-surface);
+}
+.portal-cal-allday .portal-cal-gutter {
+    padding: 0.5rem;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+}
+.portal-cal-allday-cell {
+    padding: 0.25rem;
+    border-right: 1px solid var(--portal-border);
+    min-height: 2.25rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+.portal-cal-allday-cell:last-child { border-right: none; }
+
+.portal-cal-timeline {
+    display: grid;
+    grid-template-columns: 56px repeat(var(--cal-cols, 7), minmax(0, 1fr));
+    position: relative;
+    /* Cap at ~70vh so a 24-hour grid stays usable on small screens */
+    max-height: 70vh;
+    overflow-y: auto;
+}
+
+.portal-cal-hours {
+    display: flex;
+    flex-direction: column;
+}
+.portal-cal-hour {
+    height: var(--portal-cal-px-per-hour, 48px);
+    padding: 0 0.25rem;
+    border-bottom: 1px solid var(--portal-border);
+    display: flex;
+    align-items: flex-start;
+    justify-content: flex-end;
+}
+.portal-cal-col {
+    position: relative;
+    border-right: 1px solid var(--portal-border);
+}
+.portal-cal-col:last-child { border-right: none; }
+.portal-cal-hourline {
+    height: var(--portal-cal-px-per-hour, 48px);
+    border-bottom: 1px solid var(--portal-border);
+}
+
+/* Events (pill blocks) — coloured by --ev-color from category */
+.portal-cal-event {
+    --ev-color: var(--portal-primary);
+    display: block;
+    text-decoration: none;
+    border-radius: var(--portal-radius-sm);
+    padding: 0.25rem 0.4rem;
+    color: var(--portal-text);
+    background: color-mix(in srgb, var(--ev-color) 18%, var(--portal-surface));
+    border-left: 3px solid var(--ev-color);
+    overflow: hidden;
+    transition: filter var(--portal-transition-fast),
+                box-shadow var(--portal-transition-fast);
+}
+.portal-cal-event:hover {
+    filter: brightness(1.05);
+    box-shadow: var(--portal-shadow-xs);
+}
+.portal-cal-event.is-featured {
+    box-shadow: 0 0 0 2px var(--portal-warning);
+}
+.portal-cal-event-timed {
+    position: absolute;
+    left: 4px;
+    right: 4px;
+    z-index: 1;
+    font-size: var(--portal-font-size-sm);
+    line-height: 1.2;
+}
+.portal-cal-event-time {
+    font-weight: 600;
+    color: var(--ev-color);
+    margin-bottom: 0.125rem;
+}
+.portal-cal-event-title {
+    font-weight: 500;
+}
+.portal-cal-event-loc {
+    color: var(--portal-text-muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.portal-cal-event-allday {
+    font-size: var(--portal-font-size-sm);
+    line-height: 1.2;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* Fallback: when color-mix is unsupported, use a tinted background via opacity */
+@supports not (background: color-mix(in srgb, red, blue)) {
+    .portal-cal-event {
+        background: var(--ev-color);
+        opacity: 0.85;
+        color: #fff;
+    }
+}
+
+/* ---------- Month grid ---------- */
+
+.portal-cal-month {
+    background: var(--portal-surface);
+    border: 1px solid var(--portal-border);
+    border-radius: var(--portal-radius-md);
+    overflow: hidden;
+}
+.portal-cal-month-head {
+    display: grid;
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+    background: var(--portal-surface-elevated);
+    border-bottom: 1px solid var(--portal-border);
+}
+.portal-cal-month-headcell {
+    padding: 0.5rem 0.75rem;
+    text-align: center;
+    font-weight: 600;
+    color: var(--portal-text-muted);
+    text-transform: uppercase;
+    font-size: var(--portal-font-size-xs);
+    border-right: 1px solid var(--portal-border);
+}
+.portal-cal-month-headcell:last-child { border-right: none; }
+
+.portal-cal-month-grid {
+    display: grid;
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+.portal-cal-month-cell {
+    min-height: 96px;
+    padding: 0.375rem;
+    border-right: 1px solid var(--portal-border);
+    border-bottom: 1px solid var(--portal-border);
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+    background: var(--portal-surface);
+}
+.portal-cal-month-cell:nth-child(7n) { border-right: none; }
+.portal-cal-month-cell.is-outside {
+    background: var(--portal-surface-hover);
+    color: var(--portal-text-subtle);
+}
+.portal-cal-month-cell.is-today {
+    background: var(--portal-primary-subtle);
+}
+.portal-cal-month-cell-head {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    margin-bottom: 0.1rem;
+}
+.portal-cal-month-cell-date {
+    font-weight: 600;
+    text-decoration: none;
+    color: var(--portal-text);
+}
+.portal-cal-month-pill {
+    --ev-color: var(--portal-primary);
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0.125rem 0.35rem;
+    border-radius: var(--portal-radius-sm);
+    text-decoration: none;
+    color: var(--portal-text);
+    background: color-mix(in srgb, var(--ev-color) 16%, var(--portal-surface));
+    border-left: 2px solid var(--ev-color);
+    font-size: var(--portal-font-size-xs);
+    line-height: 1.2;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+.portal-cal-month-pill:hover {
+    filter: brightness(1.05);
+}
+.portal-cal-month-pill-time {
+    font-weight: 600;
+    color: var(--ev-color);
+}
+.portal-cal-month-pill-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.portal-cal-month-more {
+    color: var(--portal-primary);
+    text-decoration: none;
+    margin-top: 0.1rem;
+}
+.portal-cal-month-more:hover {
+    text-decoration: underline;
+}
+
+/* ---------- Year planner ---------- */
+
+.portal-cal-year {
+    background: var(--portal-surface);
+    border: 1px solid var(--portal-border);
+    border-radius: var(--portal-radius-md);
+    overflow-x: auto;
+    padding: var(--portal-spacing-md);
+}
+.portal-cal-year-grid {
+    display: grid;
+    grid-template-columns: 32px repeat(12, minmax(56px, 1fr));
+    gap: 1px;
+    background: var(--portal-border);
+    min-width: 880px;
+}
+.portal-cal-year-cornercell,
+.portal-cal-year-daynum,
+.portal-cal-year-monthhead,
+.portal-cal-year-cell {
+    background: var(--portal-surface);
+    padding: 0.2rem;
+    font-size: var(--portal-font-size-xs);
+    line-height: 1.1;
+}
+.portal-cal-year-monthhead {
+    text-align: center;
+    font-weight: 600;
+    text-transform: uppercase;
+    padding: 0.35rem 0.2rem;
+    background: var(--portal-surface-elevated);
+}
+.portal-cal-year-monthhead a {
+    color: var(--portal-text);
+    text-decoration: none;
+}
+.portal-cal-year-monthhead a:hover {
+    color: var(--portal-primary);
+}
+.portal-cal-year-daynum {
+    text-align: right;
+    font-weight: 600;
+    color: var(--portal-text-muted);
+    background: var(--portal-surface-elevated);
+}
+.portal-cal-year-cell {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    text-decoration: none;
+    color: var(--portal-text);
+    min-height: 22px;
+    transition: background var(--portal-transition-fast);
+}
+.portal-cal-year-cell:hover {
+    background: var(--portal-surface-hover);
+}
+.portal-cal-year-cell.is-weekend {
+    background: var(--portal-surface-hover);
+}
+.portal-cal-year-cell.is-today {
+    outline: 2px solid var(--portal-primary);
+    outline-offset: -2px;
+    background: var(--portal-primary-subtle);
+}
+.portal-cal-year-cell.is-blank {
+    background: transparent;
+    pointer-events: none;
+}
+.portal-cal-year-cell-dow {
+    color: var(--portal-text-subtle);
+    font-size: 0.65rem;
+}
+.portal-cal-year-dots {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+}
+.portal-cal-year-dot {
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+}
+.portal-cal-year-dot-more {
+    font-size: 0.6rem;
+    color: var(--portal-text-muted);
+    margin-left: 2px;
+}
+
+/* ---------- Mobile: collapse grid views to a friendlier layout ---------- */
+
+@media (max-width: 640px) {
+    /* Hour-timeline grids stay scrollable horizontally so the week view
+       doesn't get squashed past readability. */
+    .portal-cal-timeline,
+    .portal-cal-headrow,
+    .portal-cal-allday {
+        overflow-x: auto;
+    }
+    /* Month cells shrink to fit but stay readable */
+    .portal-cal-month-cell {
+        min-height: 64px;
+        font-size: var(--portal-font-size-xs);
+    }
+    .portal-cal-month-pill-name {
+        display: none;
+    }
+}

@@ -11,6 +11,41 @@ to `alpha`, `beta`, and `main` using the heading format
 
 ## [Unreleased]
 
+### Added — Calendar multi-view modes (#136)
+
+The calendar app was previously list-view only. It now supports **seven**
+view modes that the spec originally called for:
+
+- **Day** — single day, vertical hour timeline.
+- **Week** — full 7-day grid (Mon → Sun), hour timeline.
+- **Weekdays** — 5-column grid (Mon → Fri).
+- **Weekend** — 2-column grid (Sat → Sun).
+- **Month** — 7×5/6 calendar grid; up to 3 event pills per day, "+ N more"
+  link to the day view for busier days.
+- **Year** — 12-column wall-planner grid (months across, days down).
+  Cells show day-of-week initial + up to 3 colour-coded category dots.
+- **List** — the original card-grid layout, refactored into the new shell.
+
+Implementation:
+
+- `web/public_html/calendar/index.php` is now a thin view router that
+  validates `?view=`, resolves the visible date range, fetches events in
+  one query, and delegates rendering to a per-view partial under
+  `web/public_html/calendar/views/`.
+- Day / Week / Weekdays / Weekend share a single hour-timeline renderer
+  (`views/_day_columns.php`) parametrised by column count.
+- Shared header (`views/_shared_header.php`) provides date navigation,
+  view-switcher buttons, filters (category / type / show-past).
+- Last-used view persists in `localStorage` (`portal-calendar-view`); a
+  new admin setting `calendar.defaultView` controls the first-visit
+  landing view (default: `month`).
+- Events colour-code by `tblEventCategories.color` via an `--ev-color`
+  CSS custom property; falls back to `--portal-primary`.
+- Mobile-responsive: hour timelines scroll horizontally; month cells
+  shrink; pill names hide below 640px.
+- Migration `web/sql/042_calendar_default_view.sql` seeds
+  `calendar.defaultView`.
+
 ### Fixed — Anchor colour falling back to browser default in dark mode
 
 - `portal.css` now binds `--portal-link` (and its hover / RGB variants) to
