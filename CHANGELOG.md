@@ -11,6 +11,30 @@ to `alpha`, `beta`, and `main` using the heading format
 
 ## [Unreleased]
 
+### Added — Prayer Requests app
+
+A new portal app at `/prayer-requests` for collecting and tracking prayer
+requests, with built-in moderation and an anonymous public-submission route.
+
+- **Logged-in submissions** with per-request visibility — *leadership only*
+  (default) or *congregation feed* (visible to all members of the site).
+- **Anonymous "display as Anonymous" toggle** for logged-in submitters —
+  members see "Anonymous"; leaders still see who submitted for pastoral
+  follow-up.
+- **Public anonymous route** at `/prayer-requests/anonymous` (no login).
+  Protected by CSRF + Captcha + RateLimiter. Hard-coded to leadership-only
+  visibility and `pending` status for moderator review.
+- **Lifecycle**: pending → active → answered (with optional praise /
+  testimony note) → archived. Moderators see a status-grouped queue and
+  per-request quick actions.
+- **Per-site settings** seeded with sane defaults — feature toggle,
+  anonymous allowed, congregation feed allowed, require moderation,
+  allow testimony.
+- **Help guide** at `/help/prayer-requests` and a tile on the Help Centre
+  landing page.
+- Migration `web/sql/039_prayer_requests.sql` + `tblPrayerRequests`
+  definition added to `full_schema.sql`.
+
 ## [0.10.0] - 2026-05-22
 
 ### Added — UI refresh: design system, theme modes, per-site branding
