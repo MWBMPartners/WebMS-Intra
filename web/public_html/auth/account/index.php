@@ -752,6 +752,9 @@ $accAllowDelete = (\Portal\Core\App::settings('privacy.allowAccountDelete') ?? '
                     Download a copy of everything we hold about you, read the privacy policy, or close your account.
                 </p>
                 <div class="d-flex flex-wrap gap-2">
+                    <a href="/account/notifications" class="btn btn-sm btn-outline-primary">
+                        <i class="fa-solid fa-bell me-1"></i> Notification preferences
+                    </a>
                     <a href="/account/data-export" class="btn btn-sm btn-outline-primary">
                         <i class="fa-solid fa-download me-1"></i> Download my data (JSON)
                     </a>

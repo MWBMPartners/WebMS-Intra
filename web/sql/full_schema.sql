@@ -1935,6 +1935,19 @@ ON DUPLICATE KEY UPDATE `filename` = `filename`;
 INSERT INTO `tblMigrations` (`filename`) VALUES ('049_rest_api_expansion.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
+INSERT INTO `tblMigrations` (`filename`) VALUES ('050_notification_prefs_ui.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- 📬 Notification prefs UI gating (matches migration 050)
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'notifications.deliveryReady', 'false', 'false', 0)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('account/notifications',      'auth/account/notifications.php',      1),
+    ('account/notifications/save', 'auth/account/notifications-save.php', 1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
 -- 🛰️ REST API enable flags (matches migration 049)
 INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
     (NULL, 'api.announcements.list.enabled',   'true', 'true', 0),
