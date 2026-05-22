@@ -59,6 +59,11 @@ define('PORTAL_APPS',   PORTAL_ROOT . DIRECTORY_SEPARATOR . 'public_html');
 define('PORTAL_VENDOR', PORTAL_ROOT . DIRECTORY_SEPARATOR . '_vendor');
 define('PORTAL_SQL',    PORTAL_ROOT . DIRECTORY_SEPARATOR . '_sql');
 
+// 📌 Authoritative portal version — single source of truth shared with the
+// bootstrap-free installer (web/_install/) so they cannot drift apart.
+// See _core/version.php for the release-bump procedure.
+define('PORTAL_VERSION', (string) (require PORTAL_CORE . DIRECTORY_SEPARATOR . 'version.php'));
+
 // 🌍 Determine runtime environment flag (dev | beta | prod)
 // Priority: 1) PORTAL_ENV env var  2) directory name detection  3) default 'dev'
 // Primary directories: public_html (prod), public_html_beta (beta), public_html_dev (dev)
@@ -100,10 +105,9 @@ if (function_exists('header_remove') === true) {
 }
 $hidePoweredBy = ($SETTINGS['branding']['hidePoweredBy'] ?? 'false') === 'true';
 if ($hidePoweredBy === false) {
-    // 📋 Pull version from settings if available, else fall back to the
-    // App class's compiled default (read here without App::init() because
-    // we need it before App::init runs — keep this in sync with App.php).
-    $brandedVersion = (string) ($SETTINGS['portal']['version'] ?? '1.0.0');
+    // 📋 Use the DB-settings override if present, else the authoritative
+    // PORTAL_VERSION constant (loaded from _core/version.php above).
+    $brandedVersion = (string) ($SETTINGS['portal']['version'] ?? PORTAL_VERSION);
     header('X-Powered-By: WebMS-Intra/' . $brandedVersion);
 }
 
