@@ -82,11 +82,12 @@ WebMS-Intra/                         # Git repository root (NOT deployed)
     │   ├── help/                    # Help centre pages
     │   ├── site/                    # Site switcher handler
     │   └── settings/                # Admin settings UI
-    ├── public_html_dev/             # Dev web root (Gatekeeper-protected)
     ├── private_html/                # Private / non-live files
     ├── public_html_landing/         # Pre-launch landing page
     └── public_html_redir/           # Redirect page
 ```
+
+The single `public_html/` directory is the source for **every** branch's deploy — `alpha` lands at the server's `public_html_dev/`, `beta` at `public_html_beta/`, and `main` at `public_html/`. There's no per-channel front controller in the repo.
 
 ## Request Flow
 

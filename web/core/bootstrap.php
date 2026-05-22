@@ -8,9 +8,12 @@
  * into a multidimensional array, initialises the App registry and Debug timer,
  * registers the PSR-4-lite autoloader, and wires global error/exception handlers.
  *
- * This file is loaded by every front controller (public_html/index.php,
- * public_html_dev/index.php) and can also be conditionally loaded by
- * individual app files for standalone/debug use.
+ * This file is loaded by the single front controller (public_html/index.php),
+ * and can also be conditionally loaded by individual app files for
+ * standalone/debug use. Branch-based deploy targets the same source dir to
+ * different server destinations (alpha → public_html_dev/ on server,
+ * beta → public_html_beta/ on server, main → public_html/ on server) — so
+ * there's no longer a per-channel front controller in the repo.
  *
  * All conditional logic uses full IF notation for human readability, per code
  * style guidelines.

@@ -22,17 +22,20 @@ Git repo root (NOT deployed)          Server: portal.millrdsdacambridge.uk/
     ├── vendor/                        ├── _includes/
     ├── sql/                           ├── _functions/
     ├── _includes/                     ├── public_html/   (web root + apps)
-    ├── _functions/                    ├── public_html_dev/
-    ├── _libraries/ (gitignored)       ├── private_html/
-    ├── public_html/                   ├── public_html_landing/
-    │   ├── auth/                      └── public_html_redir/
-    │   ├── dashboard/
+    ├── _functions/                    ├── public_html_dev/   (alpha branch deploy)
+    ├── _libraries/ (gitignored)       ├── public_html_beta/  (beta branch deploy)
+    ├── public_html/                   ├── private_html/
+    │   ├── auth/                      ├── public_html_landing/
+    │   ├── dashboard/                 └── public_html_redir/
     │   ├── expenses/
     │   ├── help/
     │   └── settings/
-    ├── public_html_dev/
-    └── ...
+    ├── private_html/
+    ├── public_html_landing/
+    └── public_html_redir/
 ```
+
+The repo holds **one** `public_html/` source tree. Branch-based deploy mirrors it to the appropriate server-side destination — `alpha` → `public_html_dev/`, `beta` → `public_html_beta/`, `main` → `public_html/`. There is no per-channel front controller in the repo.
 
 **Key rule:** when referencing paths in PHP code, use `PORTAL_ROOT` and related
 constants (defined in `bootstrap.php`). When referencing paths in Git/CI, prefix
@@ -695,9 +698,8 @@ All paths below are relative to `web/` (the deployable root):
 | `core/templates/` | Shared page templates (header, footer, nav, errors) |
 | `vendor/simplejwt/` | Vendored RS256 JWT verifier (no Composer) |
 | `sql/` | Numbered SQL migration files |
-| `public_html/` | Production web root (front controller, assets, app controllers) |
+| `public_html/` | The single web-root source; branch-based deploy maps this to `public_html/` (main), `public_html_dev/` (alpha) or `public_html_beta/` (beta) on the server |
 | `public_html/{app}/` | App controllers (e.g. `expenses/`, `auth/`, `dashboard/`) |
-| `public_html_dev/` | Dev web root (Gatekeeper-protected) |
 | `install/` | Installation wizard and upgrade handler |
 | `_auth_keys/` | Credentials and encryption keys (gitignored, created by installer) |
 | `_uploads/` | User file uploads (gitignored) |

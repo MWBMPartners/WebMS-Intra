@@ -22,10 +22,11 @@ web/                <- ALL deployable files (synced to server via SFTP)
   vendor/simplejwt/ <- Vendored RS256 JWT verifier
   sql/              <- Numbered SQL migrations (000-043 + full_schema.sql)
   lang/             <- I18n translation files (en.php, cy.php, …)
-  public_html/      <- Web root: front controller + assets + app controllers
+  public_html/      <- Web root: ONE front controller + assets + app controllers.
+                       Branch-based deploy mirrors this dir to the server's
+                       public_html/ (main), public_html_beta/ (beta) or
+                       public_html_dev/ (alpha) — no per-channel copy in repo.
     index.php, .htaccess, assets/
-  public_html_dev/  <- Dev web root (Gatekeeper-protected)
-  public_html_beta/ <- Beta web root
   private_html/, public_html_landing/, public_html_redir/  <- non-app server dirs
   _auth_keys/       <- Credentials + encryption key (gitignored, server-managed)
   _uploads/         <- User file uploads (gitignored, server-managed)

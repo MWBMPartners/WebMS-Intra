@@ -4,8 +4,10 @@
  * -----------------------------------------------------------------------------
  * Portal Front-Controller Router 🎯
  * -----------------------------------------------------------------------------
- * Central request dispatcher for the Portal. Called by the front-controller
- * entry points (public_html/index.php, public_html_dev/index.php).
+ * Central request dispatcher for the Portal. Called by the single front
+ * controller at public_html/index.php (branch-based deploy lands this file
+ * in the server's public_html/ or public_html_dev/ or public_html_beta/
+ * as appropriate — there's no per-channel front controller in the repo).
  *
  * Routing flow:
  *   1. Extract clean path from REQUEST_URI (strip query string and slashes)

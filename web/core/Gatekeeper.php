@@ -4,20 +4,23 @@
  * -----------------------------------------------------------------------------
  * Channel Gatekeeper 🚧
  * -----------------------------------------------------------------------------
- * Restricts access to non-production directories (primarily public_html_dev/)
- * based on user roles. By default only Admins (`isAdmin=1`) or Root Admins
- * (`isRootAdmin=1`) are allowed. Additional roles can be configured via
- * tblSettings key:
+ * Restricts access to non-production channels (alpha / beta deploys served from
+ * the server's public_html_dev/ or public_html_beta/ directories) based on user
+ * roles. By default only Admins (`isAdmin=1`) or Root Admins (`isRootAdmin=1`)
+ * are allowed. Additional roles can be configured via tblSettings:
  *     portal.devAccessRoles     = "Admin,Developer"
  * (comma-separated roleKey values from tblRoles)
  *
  * The primary channel is 'dev'. The legacy 'alpha' and 'beta' channels are
  * retained in VALID_CHANNELS for backwards compatibility.
  * -----------------------------------------------------------------------------
- * Usage in public_html_dev/index.php:
- *     require '../core/bootstrap.php';
+ * Usage from a front controller running under PORTAL_ENV=dev or =beta:
+ *     require_once '../core/bootstrap.php';
  *     \Portal\Core\Gatekeeper::enforce('dev');
  *     \Portal\Core\Router::dispatch($mysqli);
+ *
+ * The single front controller lives at public_html/index.php in the repo;
+ * branch-based deploy maps it to the appropriate server-side directory.
  * -----------------------------------------------------------------------------
  */
 
