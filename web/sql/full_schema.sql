@@ -1941,6 +1941,14 @@ ON DUPLICATE KEY UPDATE `filename` = `filename`;
 INSERT INTO `tblMigrations` (`filename`) VALUES ('051_email_templates.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
+INSERT INTO `tblMigrations` (`filename`) VALUES ('052_bulk_importers.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('calendar/manage/import',    'calendar/manage/import.php',    1),
+    ('leadership/manage/import',  'leadership/manage/import.php',  1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
 -- 📨 Email template store (matches migration 051)
 CREATE TABLE IF NOT EXISTS `tblEmailTemplates` (
     `templateID`      INT          NOT NULL AUTO_INCREMENT,
