@@ -197,14 +197,36 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $adminPass  = $_POST['admin_pass'] ?? '';
         $adminPass2 = $_POST['admin_pass2'] ?? '';
 
+        // 🛡️ Self-contained password policy — mirrors Auth::validatePassword() defaults
+        // (the installer runs before bootstrap.php is available).
+        $pwErrors = [];
+        if (strlen($adminPass) < 12) {
+            $pwErrors[] = 'Password must be at least 12 characters.';
+        }
+        if (strlen($adminPass) > 128) {
+            $pwErrors[] = 'Password must be no more than 128 characters.';
+        }
+        if (preg_match('/[A-Z]/', $adminPass) !== 1) {
+            $pwErrors[] = 'Password must contain at least one uppercase letter.';
+        }
+        if (preg_match('/[a-z]/', $adminPass) !== 1) {
+            $pwErrors[] = 'Password must contain at least one lowercase letter.';
+        }
+        if (preg_match('/[0-9]/', $adminPass) !== 1) {
+            $pwErrors[] = 'Password must contain at least one number.';
+        }
+        if (preg_match('/[^a-zA-Z0-9]/', $adminPass) !== 1) {
+            $pwErrors[] = 'Password must contain at least one special character.';
+        }
+
         if ($adminName === '' || $adminEmail === '' || $adminPass === '') {
             $error = 'All fields are required.';
             $step = 4;
         } elseif (filter_var($adminEmail, FILTER_VALIDATE_EMAIL) === false) {
             $error = 'Please enter a valid email address.';
             $step = 4;
-        } elseif (strlen($adminPass) < 8) {
-            $error = 'Password must be at least 8 characters.';
+        } elseif (count($pwErrors) > 0) {
+            $error = 'Password does not meet policy: ' . implode(' ', $pwErrors);
             $step = 4;
         } elseif ($adminPass !== $adminPass2) {
             $error = 'Passwords do not match.';
@@ -1108,13 +1130,31 @@ $pageTitle = 'Install — ' . ($stepTitles[$step] ?? 'WebMS Intra');
                 <div class="row">
                     <div class="col-md-6 mb-3">
                         <label for="admin_pass" class="form-label">Password</label>
-                        <input type="password" class="form-control" id="admin_pass" name="admin_pass" required minlength="8">
-                        <div class="form-text">Minimum 8 characters.</div>
+                        <input type="password" class="form-control" id="admin_pass" name="admin_pass"
+                               required minlength="12" maxlength="128"
+                               data-portal-password-input>
+                        <div class="portal-password-strength mt-2" data-portal-password-meter hidden>
+                            <div class="progress" style="height:6px;">
+                                <div class="progress-bar" role="progressbar" style="width:0%"></div>
+                            </div>
+                            <small class="form-text" data-portal-password-meter-label>Password strength</small>
+                        </div>
                     </div>
                     <div class="col-md-6 mb-3">
                         <label for="admin_pass2" class="form-label">Confirm Password</label>
-                        <input type="password" class="form-control" id="admin_pass2" name="admin_pass2" required minlength="8">
+                        <input type="password" class="form-control" id="admin_pass2" name="admin_pass2"
+                               required minlength="12" maxlength="128">
                     </div>
+                </div>
+                <div class="alert alert-light border small mb-3">
+                    <strong>Password must include:</strong>
+                    <ul class="mb-0 ps-3">
+                        <li>At least 12 characters</li>
+                        <li>At least one uppercase letter (A-Z)</li>
+                        <li>At least one lowercase letter (a-z)</li>
+                        <li>At least one number (0-9)</li>
+                        <li>At least one special character (e.g. !@#$%^&amp;*)</li>
+                    </ul>
                 </div>
 
                 <div class="d-flex justify-content-between">
@@ -1260,6 +1300,57 @@ $pageTitle = 'Install — ' . ($stepTitles[$step] ?? 'WebMS Intra');
     // Initial state — FOUC script already applied the data-* attrs; just sync the icons/titles.
     updateThemeBtn(savedTheme());
     applyCb(savedCb());
+})();
+</script>
+
+<script>
+// Password strength meter for the installer (standalone — doesn't load portal.js)
+(function () {
+    function score(value, minLength) {
+        if (!value) { return 0; }
+        var s = 0;
+        if (value.length >= minLength)  { s += 1; }
+        if (/[a-z]/.test(value))        { s += 1; }
+        if (/[A-Z]/.test(value))        { s += 1; }
+        if (/[0-9]/.test(value))        { s += 1; }
+        if (/[^a-zA-Z0-9]/.test(value)) { s += 1; }
+        return s;
+    }
+    function labelFor(s) {
+        if (s <= 1)  { return ['bg-danger',  'Very weak']; }
+        if (s === 2) { return ['bg-danger',  'Weak']; }
+        if (s === 3) { return ['bg-warning', 'Fair']; }
+        if (s === 4) { return ['bg-info',    'Strong']; }
+        return ['bg-success', 'Very strong'];
+    }
+    document.querySelectorAll('input[data-portal-password-input]').forEach(function (input) {
+        var scope = input.closest('.col-md-6, .mb-3, form') || input.parentNode;
+        var meter = scope ? scope.querySelector('[data-portal-password-meter]') : null;
+        if (!meter) { return; }
+        var bar = meter.querySelector('.progress-bar');
+        var lbl = meter.querySelector('[data-portal-password-meter-label]');
+        if (!bar) { return; }
+        var minLength = parseInt(input.getAttribute('minlength'), 10);
+        if (!minLength || minLength < 1) { minLength = 12; }
+        input.addEventListener('input', function () {
+            var v = input.value || '';
+            if (v === '') {
+                meter.hidden = true;
+                bar.style.width = '0%';
+                bar.className = 'progress-bar';
+                if (lbl) { lbl.textContent = 'Password strength'; }
+                return;
+            }
+            meter.hidden = false;
+            var sc = score(v, minLength);
+            var pct = Math.round((sc / 5) * 100);
+            var sl = labelFor(sc);
+            bar.style.width = pct + '%';
+            bar.className = 'progress-bar ' + sl[0];
+            bar.setAttribute('aria-valuenow', String(pct));
+            if (lbl) { lbl.textContent = 'Password strength: ' + sl[1]; }
+        });
+    });
 })();
 </script>
 

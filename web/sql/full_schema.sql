@@ -1064,13 +1064,21 @@ INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isSensitive`, `default
 VALUES ('auth.rateLimit.windowMinutes', '15', 0, '15')
 ON DUPLICATE KEY UPDATE `settingKey` = `settingKey`;
 
--- ─── Auth — password policy (from migration 006) ────────────────────────────
+-- ─── Auth — password policy (from migrations 006 + 041) ─────────────────────
 INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isSensitive`, `defaultValue`)
-VALUES ('auth.password.minLength', '8', 0, '8')
+VALUES ('auth.password.minLength', '12', 0, '12')
+ON DUPLICATE KEY UPDATE `settingKey` = `settingKey`;
+
+INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isSensitive`, `defaultValue`)
+VALUES ('auth.password.maxLength', '128', 0, '128')
 ON DUPLICATE KEY UPDATE `settingKey` = `settingKey`;
 
 INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isSensitive`, `defaultValue`)
 VALUES ('auth.password.requireUppercase', 'true', 0, 'true')
+ON DUPLICATE KEY UPDATE `settingKey` = `settingKey`;
+
+INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isSensitive`, `defaultValue`)
+VALUES ('auth.password.requireLowercase', 'true', 0, 'true')
 ON DUPLICATE KEY UPDATE `settingKey` = `settingKey`;
 
 INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isSensitive`, `defaultValue`)
@@ -1860,6 +1868,9 @@ INSERT INTO `tblMigrations` (`filename`) VALUES ('039_prayer_requests.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
 INSERT INTO `tblMigrations` (`filename`) VALUES ('040_captcha_providers.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('041_password_policy_hardening.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
 -- Seed the branding.hidePoweredBy setting (matches migration 038)

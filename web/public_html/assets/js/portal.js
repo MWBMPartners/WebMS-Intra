@@ -348,6 +348,82 @@
     }
 
     /* ========================================================================
+       4b. Password Strength Meter
+       ------------------------------------------------------------------------
+       Attaches to any <input type="password" data-portal-password-input>.
+       A sibling [data-portal-password-meter] element receives the live
+       strength score (0-5) as a Bootstrap progress bar + label.
+
+       Scoring (mirrors Auth::passwordPolicy on the server):
+         +1 length >= minLength (from input minlength, fallback 12)
+         +1 contains lowercase
+         +1 contains uppercase
+         +1 contains digit
+         +1 contains symbol
+       Range 0-5 -> mapped to {0,20,40,60,80,100}% bar.
+       ======================================================================== */
+    function scorePassword(value, minLength) {
+        if (!value) {
+            return 0;
+        }
+        var s = 0;
+        if (value.length >= minLength) { s += 1; }
+        if (/[a-z]/.test(value))        { s += 1; }
+        if (/[A-Z]/.test(value))        { s += 1; }
+        if (/[0-9]/.test(value))        { s += 1; }
+        if (/[^a-zA-Z0-9]/.test(value)) { s += 1; }
+        return s;
+    }
+
+    function strengthClassAndLabel(score) {
+        if (score <= 1) { return ['bg-danger',  'Very weak']; }
+        if (score === 2) { return ['bg-danger',  'Weak']; }
+        if (score === 3) { return ['bg-warning', 'Fair']; }
+        if (score === 4) { return ['bg-info',    'Strong']; }
+        return ['bg-success', 'Very strong'];
+    }
+
+    function initPasswordMeters() {
+        var inputs = document.querySelectorAll('input[data-portal-password-input]');
+        inputs.forEach(function (input) {
+            // Find the closest container that also holds the meter element
+            var meter = null;
+            var scope = input.closest('.mb-3, .col-md-6, form') || input.parentNode;
+            if (scope) {
+                meter = scope.querySelector('[data-portal-password-meter]');
+            }
+            if (!meter) {
+                return;
+            }
+            var bar = meter.querySelector('.progress-bar');
+            var lbl = meter.querySelector('[data-portal-password-meter-label]');
+            if (!bar) { return; }
+
+            var minLength = parseInt(input.getAttribute('minlength'), 10);
+            if (!minLength || minLength < 1) { minLength = 12; }
+
+            input.addEventListener('input', function () {
+                var value = input.value || '';
+                if (value === '') {
+                    meter.hidden = true;
+                    bar.style.width = '0%';
+                    bar.className = 'progress-bar';
+                    if (lbl) { lbl.textContent = 'Password strength'; }
+                    return;
+                }
+                meter.hidden = false;
+                var score = scorePassword(value, minLength);
+                var pct = Math.round((score / 5) * 100);
+                var sl = strengthClassAndLabel(score);
+                bar.style.width = pct + '%';
+                bar.className = 'progress-bar ' + sl[0];
+                bar.setAttribute('aria-valuenow', String(pct));
+                if (lbl) { lbl.textContent = 'Password strength: ' + sl[1]; }
+            });
+        });
+    }
+
+    /* ========================================================================
        5. Initialisation
        ======================================================================== */
 
@@ -357,11 +433,13 @@
             initThemeToggle();
             initCbToggle();
             initDropzones();
+            initPasswordMeters();
         });
     } else {
         initThemeToggle();
         initCbToggle();
         initDropzones();
+        initPasswordMeters();
     }
 
     // Expose public API on window.Portal

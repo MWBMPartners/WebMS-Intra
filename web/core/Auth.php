@@ -704,8 +704,10 @@ class Auth
      * Validate a password against the configurable policy stored in tblSettings.
      *
      * Settings used (all under auth.password.*):
-     *   minLength        – minimum character count (default 8)
-     *   requireUppercase – must contain A-Z and a-z (default true)
+     *   minLength        – minimum character count (default 12)
+     *   maxLength        – maximum character count (default 128 — bcrypt truncates at 72)
+     *   requireUppercase – must contain A-Z (default true)
+     *   requireLowercase – must contain a-z (default true)
      *   requireNumber    – must contain 0-9 (default true)
      *   requireSpecial   – must contain a non-alphanumeric char (default true)
      *
@@ -717,20 +719,27 @@ class Auth
     {
         $errors = [];
 
-        $minLength      = (int) (App::settings('auth.password.minLength') ?? '8');
+        $minLength      = (int) (App::settings('auth.password.minLength') ?? '12');
+        $maxLength      = (int) (App::settings('auth.password.maxLength') ?? '128');
         $requireUpper   = (App::settings('auth.password.requireUppercase') ?? 'true') === 'true';
+        $requireLower   = (App::settings('auth.password.requireLowercase') ?? 'true') === 'true';
         $requireNumber  = (App::settings('auth.password.requireNumber') ?? 'true') === 'true';
         $requireSpecial = (App::settings('auth.password.requireSpecial') ?? 'true') === 'true';
 
-        if (strlen($password) < $minLength) {
+        // 🔢 Length checks — use byte length (strlen) because that's what bcrypt sees.
+        $length = strlen($password);
+        if ($length < $minLength) {
             $errors[] = 'Password must be at least ' . $minLength . ' characters.';
+        }
+        if ($maxLength > 0 && $length > $maxLength) {
+            $errors[] = 'Password must be no more than ' . $maxLength . ' characters.';
         }
 
         if ($requireUpper === true && preg_match('/[A-Z]/', $password) !== 1) {
             $errors[] = 'Password must contain at least one uppercase letter.';
         }
 
-        if ($requireUpper === true && preg_match('/[a-z]/', $password) !== 1) {
+        if ($requireLower === true && preg_match('/[a-z]/', $password) !== 1) {
             $errors[] = 'Password must contain at least one lowercase letter.';
         }
 
@@ -743,6 +752,46 @@ class Auth
         }
 
         return ['valid' => (count($errors) === 0), 'errors' => $errors];
+    }
+
+    /**
+     * Return the active password policy as a structured array suitable for
+     * rendering on password-set forms (so users see the requirements upfront).
+     *
+     * @return array{minLength:int, maxLength:int, requireUppercase:bool, requireLowercase:bool, requireNumber:bool, requireSpecial:bool, rules:list<string>}
+     */
+    public static function passwordPolicy(): array
+    {
+        $minLength      = (int) (App::settings('auth.password.minLength') ?? '12');
+        $maxLength      = (int) (App::settings('auth.password.maxLength') ?? '128');
+        $requireUpper   = (App::settings('auth.password.requireUppercase') ?? 'true') === 'true';
+        $requireLower   = (App::settings('auth.password.requireLowercase') ?? 'true') === 'true';
+        $requireNumber  = (App::settings('auth.password.requireNumber') ?? 'true') === 'true';
+        $requireSpecial = (App::settings('auth.password.requireSpecial') ?? 'true') === 'true';
+
+        $rules = ['At least ' . $minLength . ' characters'];
+        if ($requireUpper === true) {
+            $rules[] = 'At least one uppercase letter (A-Z)';
+        }
+        if ($requireLower === true) {
+            $rules[] = 'At least one lowercase letter (a-z)';
+        }
+        if ($requireNumber === true) {
+            $rules[] = 'At least one number (0-9)';
+        }
+        if ($requireSpecial === true) {
+            $rules[] = 'At least one special character (e.g. !@#$%^&*)';
+        }
+
+        return [
+            'minLength'        => $minLength,
+            'maxLength'        => $maxLength,
+            'requireUppercase' => $requireUpper,
+            'requireLowercase' => $requireLower,
+            'requireNumber'    => $requireNumber,
+            'requireSpecial'   => $requireSpecial,
+            'rules'            => $rules,
+        ];
     }
 
     /* ====================================================================== */

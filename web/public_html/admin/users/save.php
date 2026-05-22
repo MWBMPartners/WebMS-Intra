@@ -97,6 +97,17 @@ if ($action === 'create') {
         exit();
     }
 
+    // 🛡️ Enforce password policy when a password was supplied
+    if ($password !== '') {
+        $check = Auth::validatePassword($password);
+        if ($check['valid'] === false) {
+            $_SESSION['flash_msg']  = 'Password does not meet policy: ' . implode(' ', $check['errors']);
+            $_SESSION['flash_type'] = 'danger';
+            header('Location: /admin/users');
+            exit();
+        }
+    }
+
     // 🔄 Wrap multi-table insert in a transaction for atomicity
     App::beginTransaction();
 
@@ -212,6 +223,15 @@ if ($action === 'update') {
 
     // 🔑 Update password if provided
     if ($password !== '') {
+        // 🛡️ Enforce password policy before hashing
+        $check = Auth::validatePassword($password);
+        if ($check['valid'] === false) {
+            $_SESSION['flash_msg']  = 'Password does not meet policy: ' . implode(' ', $check['errors']);
+            $_SESSION['flash_type'] = 'danger';
+            header('Location: /admin/users');
+            exit();
+        }
+
         $hash = password_hash($password, PASSWORD_DEFAULT);
         // Check if local account exists
         $stmt = $mysqli->prepare('SELECT localID FROM tblLocalAccounts WHERE userID = ? LIMIT 1');
