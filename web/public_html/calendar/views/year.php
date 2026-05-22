@@ -2,30 +2,50 @@
 // Path: public_html/calendar/views/year.php
 /**
  * -----------------------------------------------------------------------------
- * Calendar — Year Planner View Partial 🗓️
+ * Calendar — Year Planner View Partial (Wall-Planner Layout) 🗓️
  * -----------------------------------------------------------------------------
- * 12-column wall-planner layout: months as columns (left to right), days as
- * rows (1..31 top to bottom). Each cell shows day-of-week initial and any
- * events as small coloured dots.
+ * Wall-planner style year overview modelled on traditional printed planners.
  *
- * Designed to print landscape and to give a one-page overview of the whole
- * year — modelled on traditional wall-planner posters.
+ * Layout:
+ *   • 12 month columns across the top, each split into TWO sub-columns:
+ *       – Day number + day-of-week initial
+ *       – Event content (bulleted list of all events on that day)
+ *   • 31 day rows top-to-bottom. Days that don't exist for a given month
+ *     (e.g. Feb 30/31) render as blank cells so the grid stays aligned.
+ *   • Weekend cells get a tinted background (Sat = cream, Sun = peach).
+ *   • Multi-day events show on every day they cover — same background
+ *     colour, producing a continuous "band" effect down the column.
+ *   • Category colours drive cell backgrounds via --ev-color, sourced from
+ *     tblEventCategories.color (regex-validated, falls back to primary).
+ *   • Legend at the top lists every active category with its swatch.
  *
  * Receives from the router:
- *   $events, $cursor, $rangeStart, $rangeEnd
+ *   $events, $cursor, $rangeStart, $rangeEnd, $categories
  *
  * @package   Portal\Calendar
  * @license   All Rights Reserved
  * @version   0.11.0
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/136
  * -----------------------------------------------------------------------------
  */
 
 declare(strict_types=1);
 
-$esc = static fn (string $s): string => htmlspecialchars($s, ENT_QUOTES, 'UTF-8');
+$esc  = static fn (string $s): string => htmlspecialchars($s, ENT_QUOTES, 'UTF-8');
 $year = (int) $cursor->format('Y');
 
-// 🗂️ Bucket events by Y-m-d (multi-day events show on each spanned day)
+/**
+ * Whitelist a hex colour for inline-CSS injection. Returns the cleaned
+ * value or null if the input is not a safe hex token.
+ */
+$cleanHex = static function (?string $c): ?string {
+    if ($c === null || $c === '') {
+        return null;
+    }
+    return preg_match('/^#[0-9a-fA-F]{3,8}$/', $c) === 1 ? $c : null;
+};
+
+// 🗂️ Bucket events by Y-m-d, repeating multi-day events on each day they span.
 $byDate = [];
 foreach ($events as $ev) {
     $start = new DateTimeImmutable((string) $ev['startDateTime']);
@@ -45,76 +65,148 @@ foreach ($events as $ev) {
     }
 }
 
-$eventColor = static function (array $ev): string {
-    $c = (string) ($ev['categoryColor'] ?? '');
-    if (preg_match('/^#[0-9a-fA-F]{3,8}$/', $c) === 1) {
-        return $c;
-    }
-    return 'var(--portal-primary)';
-};
+$today  = (new DateTimeImmutable('today'))->format('Y-m-d');
+$months = [
+    1  => 'January',  2  => 'February', 3  => 'March',    4  => 'April',
+    5  => 'May',      6  => 'June',     7  => 'July',     8  => 'August',
+    9  => 'September',10 => 'October',  11 => 'November', 12 => 'December',
+];
 
-$today = (new DateTimeImmutable('today'))->format('Y-m-d');
-$months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+/**
+ * Decide the cell background colour for a day. If any multi-day event
+ * covers the day, use its category colour. Otherwise, weekend cells
+ * get a Sat/Sun tint. Plain weekdays get no background.
+ *
+ * @return array{bg:?string,isWeekend:bool}
+ */
+$cellBg = static function (array $dayEvents, DateTimeImmutable $dt) use ($cleanHex): array {
+    foreach ($dayEvents as $ev) {
+        $c = $cleanHex($ev['categoryColor'] ?? null);
+        if ($c !== null) {
+            return ['bg' => $c, 'isWeekend' => false];
+        }
+    }
+    $dow = (int) $dt->format('N');
+    if ($dow >= 6) {
+        return ['bg' => null, 'isWeekend' => true];
+    }
+    return ['bg' => null, 'isWeekend' => false];
+};
 ?>
 
-<div class="portal-cal-year">
-    <div class="portal-cal-year-grid">
-        <!-- Header row: month labels -->
-        <div class="portal-cal-year-cornercell" aria-hidden="true"></div>
-        <?php foreach ($months as $idx => $m): ?>
-            <div class="portal-cal-year-monthhead">
-                <a href="/calendar?view=month&amp;date=<?php echo $year; ?>-<?php echo sprintf('%02d', $idx + 1); ?>-01">
-                    <?php echo $esc($m); ?>
-                </a>
-            </div>
-        <?php endforeach; ?>
+<div class="portal-cal-yearplan">
 
-        <!-- 31 rows × 12 columns of day cells, with a day-number gutter -->
-        <?php for ($day = 1; $day <= 31; $day++): ?>
-            <div class="portal-cal-year-daynum"><?php echo $day; ?></div>
-            <?php for ($month = 1; $month <= 12; $month++): ?>
-                <?php
-                $daysInMonth = (int) (new DateTimeImmutable(sprintf('%04d-%02d-01', $year, $month)))->format('t');
-                if ($day > $daysInMonth) {
-                    echo '<div class="portal-cal-year-cell is-blank" aria-hidden="true"></div>';
-                    continue;
-                }
-                $cellDate = sprintf('%04d-%02d-%02d', $year, $month, $day);
-                $dt        = new DateTimeImmutable($cellDate);
-                $isWeekend = (int) $dt->format('N') >= 6;
-                $isToday   = $cellDate === $today;
-                $dayEv     = $byDate[$cellDate] ?? [];
+    <!-- 🎨 Legend — colour key for the categories in use on this site -->
+    <?php
+    $legendCats = array_filter($categories, static function ($c) use ($cleanHex) {
+        return $cleanHex($c['color'] ?? null) !== null;
+    });
+    ?>
+    <?php if (count($legendCats) > 0): ?>
+        <div class="portal-cal-yearplan-legend mb-2">
+            <strong class="small text-muted me-2">Key:</strong>
+            <?php foreach ($legendCats as $cat): ?>
+                <span class="portal-cal-yearplan-legend-item">
+                    <span class="portal-cal-yearplan-legend-swatch"
+                          style="background: <?php echo $esc((string) $cleanHex($cat['color'])); ?>;"></span>
+                    <?php echo $esc((string) $cat['categoryName']); ?>
+                </span>
+            <?php endforeach; ?>
+        </div>
+    <?php endif; ?>
 
-                $classes = ['portal-cal-year-cell'];
-                if ($isWeekend === true) { $classes[] = 'is-weekend'; }
-                if ($isToday === true)   { $classes[] = 'is-today'; }
-                if (count($dayEv) > 0)   { $classes[] = 'has-events'; }
-                ?>
-                <a class="<?php echo implode(' ', $classes); ?>"
-                   href="/calendar?view=day&amp;date=<?php echo $esc($cellDate); ?>"
-                   title="<?php echo $esc($dt->format('l, j F Y')); ?><?php echo count($dayEv) > 0 ? ' — ' . count($dayEv) . ' event(s)' : ''; ?>">
-                    <span class="portal-cal-year-cell-dow"><?php echo $esc(substr($dt->format('D'), 0, 1)); ?></span>
-                    <?php if (count($dayEv) > 0): ?>
-                        <span class="portal-cal-year-dots">
-                            <?php
-                            // 🎨 Up to 3 colour dots so a busy day shows pattern, not clutter.
-                            foreach (array_slice($dayEv, 0, 3) as $ev):
-                                ?>
-                                <span class="portal-cal-year-dot"
-                                      style="background: <?php echo $esc($eventColor($ev)); ?>;"></span>
-                            <?php endforeach; ?>
-                            <?php if (count($dayEv) > 3): ?>
-                                <span class="portal-cal-year-dot-more">+<?php echo count($dayEv) - 3; ?></span>
-                            <?php endif; ?>
-                        </span>
-                    <?php endif; ?>
+    <!-- 🖼️ Wall-planner grid: scrollable horizontally on narrow viewports -->
+    <div class="portal-cal-yearplan-scroll">
+        <div class="portal-cal-yearplan-grid">
+
+            <!-- Header row: month names (each spans 2 sub-columns) -->
+            <?php foreach ($months as $monthNum => $monthName): ?>
+                <a href="/calendar?view=month&amp;date=<?php echo $year; ?>-<?php echo sprintf('%02d', $monthNum); ?>-01"
+                   class="portal-cal-yearplan-monthhead"
+                   style="grid-column: span 2;">
+                    <?php echo $esc($monthName); ?>
                 </a>
+            <?php endforeach; ?>
+
+            <!-- 31 day rows × (12 months × 2 sub-columns) = 31 × 24 cells -->
+            <?php for ($day = 1; $day <= 31; $day++): ?>
+                <?php for ($month = 1; $month <= 12; $month++): ?>
+                    <?php
+                    $daysInMonth = (int) (new DateTimeImmutable(sprintf('%04d-%02d-01', $year, $month)))->format('t');
+                    if ($day > $daysInMonth) {
+                        // Blank pair of cells so the grid stays aligned
+                        echo '<div class="portal-cal-yearplan-num is-blank" aria-hidden="true"></div>';
+                        echo '<div class="portal-cal-yearplan-content is-blank" aria-hidden="true"></div>';
+                        continue;
+                    }
+                    $cellDate = sprintf('%04d-%02d-%02d', $year, $month, $day);
+                    $dt       = new DateTimeImmutable($cellDate);
+                    $isToday  = $cellDate === $today;
+                    $dow      = (int) $dt->format('N');   // 1..7 Mon..Sun
+                    $dowInit  = substr($dt->format('D'), 0, 2);  // "Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"
+                    $dayEv    = $byDate[$cellDate] ?? [];
+
+                    $info       = $cellBg($dayEv, $dt);
+                    $bgHex      = $info['bg'];
+                    $isWeekend  = $info['isWeekend'];
+
+                    // Style attrs
+                    $cellStyle = '';
+                    if ($bgHex !== null) {
+                        // Use a lightened tint of the category colour so the day
+                        // text stays readable. The category swatch + a left-border
+                        // accent at full saturation make the band still obvious.
+                        $cellStyle = 'style="background: color-mix(in srgb, '
+                                   . $esc($bgHex) . ' 28%, var(--portal-surface));'
+                                   . ' --ev-color: ' . $esc($bgHex) . ';"';
+                    }
+
+                    $contentClasses = ['portal-cal-yearplan-content'];
+                    if ($isToday === true)  { $contentClasses[] = 'is-today'; }
+                    if ($isWeekend === true) {
+                        $contentClasses[] = $dow === 6 ? 'is-saturday' : 'is-sunday';
+                    }
+                    if ($bgHex !== null) { $contentClasses[] = 'has-event'; }
+
+                    $numClasses = ['portal-cal-yearplan-num'];
+                    if ($isToday === true)  { $numClasses[] = 'is-today'; }
+                    if ($isWeekend === true) {
+                        $numClasses[] = $dow === 6 ? 'is-saturday' : 'is-sunday';
+                    }
+                    ?>
+
+                    <!-- Day number + day-of-week initial -->
+                    <a class="<?php echo implode(' ', $numClasses); ?>"
+                       href="/calendar?view=day&amp;date=<?php echo $esc($cellDate); ?>"
+                       title="<?php echo $esc($dt->format('l, j F Y')); ?>">
+                        <span class="portal-cal-yearplan-num-day"><?php echo sprintf('%02d', $day); ?></span>
+                        <span class="portal-cal-yearplan-num-dow"><?php echo $esc($dowInit); ?></span>
+                    </a>
+
+                    <!-- Event content cell -->
+                    <div class="<?php echo implode(' ', $contentClasses); ?>" <?php echo $cellStyle; ?>>
+                        <?php if (count($dayEv) > 0): ?>
+                            <ul class="portal-cal-yearplan-events">
+                                <?php foreach ($dayEv as $ev): ?>
+                                    <?php $evColor = $cleanHex($ev['categoryColor'] ?? null); ?>
+                                    <li>
+                                        <a href="/calendar/event?slug=<?php echo $esc((string) $ev['eventSlug']); ?>"
+                                           <?php if ($evColor !== null): ?>style="--ev-color: <?php echo $esc($evColor); ?>;"<?php endif; ?>
+                                           title="<?php echo $esc((string) $ev['eventName']); ?>">
+                                            <?php echo $esc((string) $ev['eventName']); ?>
+                                        </a>
+                                    </li>
+                                <?php endforeach; ?>
+                            </ul>
+                        <?php endif; ?>
+                    </div>
+                <?php endfor; ?>
             <?php endfor; ?>
-        <?php endfor; ?>
+        </div>
     </div>
 
     <p class="text-muted small mt-3 mb-0">
-        Click any day to open the day view; click a month name to jump to the month view.
-        Dots are colour-coded by category.
+        Click a month name to jump to the month view; click a day number to jump to that day.
+        Multi-day events repeat on every day they cover and share their category colour, producing a continuous band.
     </p>
 </div>
