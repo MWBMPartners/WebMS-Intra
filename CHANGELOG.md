@@ -11,6 +11,23 @@ to `alpha`, `beta`, and `main` using the heading format
 
 ## [Unreleased]
 
+### Security — Debug mode hardening in production (#54)
+
+- `Debug::isEnabled()` and `App::isDebug()` now **unconditionally refuse**
+  to enable debug mode when `PORTAL_ENV === 'prod'`, regardless of who is
+  signed in or what query parameters are present.
+- Attempts to set `?debug=true` in prod are logged once per request
+  (`DebugBlocked` activity entry with IP + request path) so probing shows
+  up in the activity log.
+- `bootstrap.php` now hardens PHP error display: in prod `display_errors`,
+  `display_startup_errors`, and `html_errors` are all forced to `0`.
+  Errors are still **reported** so they're captured by `Logger::phpError()`
+  and surface in the admin error log — they just aren't echoed into the
+  response.
+- The global exception handler already routed detailed traces through
+  `App::isDebug()`; since that now refuses prod, no stack traces / file
+  paths can leak in production even on unhandled exceptions.
+
 ### Security — Password policy hardening (#53)
 
 - **Default minimum length raised from 8 to 12** characters (configurable

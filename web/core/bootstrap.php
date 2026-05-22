@@ -80,6 +80,27 @@ if ($env === false || $env === '') {
 }
 define('PORTAL_ENV', $env);
 
+// 🛡️ PHP error display hardening
+// -----------------------------------------------------------------------------
+// In production we MUST NOT echo PHP errors / warnings into the response —
+// they can leak file paths, query fragments, and credential variable names.
+// Errors are still captured by Logger / tblErrors for admin diagnosis.
+//
+// In dev / beta we surface errors at the top of the page so developers see
+// them during active work. Admin staff on beta are expected to be technical.
+//
+// See: https://www.php.net/manual/en/errorfunc.configuration.php
+if (PORTAL_ENV === 'prod') {
+    ini_set('display_errors', '0');
+    ini_set('display_startup_errors', '0');
+    ini_set('html_errors', '0');
+    // Errors are still REPORTED so PHP's logger sees them; just not DISPLAYED.
+    error_reporting(E_ALL);
+} else {
+    ini_set('display_errors', '1');
+    error_reporting(E_ALL);
+}
+
 // 🕐 Default timezone until settings load (overridden later)
 date_default_timezone_set('UTC');
 

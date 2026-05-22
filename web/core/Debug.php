@@ -123,22 +123,77 @@ class Debug
     }
 
     /**
-     * Check whether the debug URL parameter is present.
+     * Check whether the debug URL parameter is present AND the environment
+     * permits debug mode.
      *
-     * This method intentionally does NOT check admin status – that gate is
-     * applied only at render time in renderPanel().  This design allows data
-     * collection (logQuery, log) to proceed cheaply based solely on the URL
-     * flag; the expensive admin check happens only once when the panel is
-     * actually rendered.
+     * Debug mode is **unconditionally disabled** when `PORTAL_ENV === 'prod'`,
+     * regardless of admin status, query parameters, or cookies.  Any attempt
+     * to enable it in production is logged once per request via Logger so
+     * persistent probing shows up in the activity log.
      *
-     * @return bool True if $_GET['debug'] === 'true'
+     * The admin authorization check happens later in renderPanel() — this
+     * function only answers "is the URL flag set in an env that allows it?".
+     *
+     * @return bool True if $_GET['debug'] === 'true' AND env is not prod
      */
     public static function isEnabled(): bool
     {
-        if (isset($_GET['debug']) === true && $_GET['debug'] === 'true') {
-            return true;
+        if (isset($_GET['debug']) === false || $_GET['debug'] !== 'true') {
+            return false;
         }
-        return false;
+
+        // 🛡️ Refuse debug in production, regardless of who's asking.
+        if (self::isProd() === true) {
+            self::logProdAttemptOnce();
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * Returns true if the active environment is production.
+     */
+    private static function isProd(): bool
+    {
+        if (defined('PORTAL_ENV') === false) {
+            return false;
+        }
+        return PORTAL_ENV === 'prod';
+    }
+
+    /** @var bool Guard so we only log the first prod debug attempt per request */
+    private static bool $loggedProdAttempt = false;
+
+    /**
+     * Record an attempt to enable debug mode in production. Logged at most
+     * once per request so a single page that probes ?debug=true doesn't
+     * flood the activity table.
+     */
+    private static function logProdAttemptOnce(): void
+    {
+        if (self::$loggedProdAttempt === true) {
+            return;
+        }
+        self::$loggedProdAttempt = true;
+
+        $ip = $_SERVER['HTTP_CF_CONNECTING_IP']
+            ?? $_SERVER['HTTP_X_FORWARDED_FOR']
+            ?? $_SERVER['REMOTE_ADDR']
+            ?? '';
+        if (str_contains((string) $ip, ',') === true) {
+            $ip = trim(explode(',', (string) $ip)[0]);
+        }
+        $path = $_SERVER['REQUEST_URI'] ?? '';
+
+        // 🪵 Use Logger if available; never throw — this is best-effort audit only.
+        if (class_exists('\\Portal\\Core\\Logger', false) === true) {
+            try {
+                Logger::activity('DebugBlocked', 'Debug mode attempt in prod from ' . $ip . ' at ' . $path);
+            } catch (\Throwable) {
+                // 🤷 Logging failure must never break the request.
+            }
+        }
     }
 
     /**
