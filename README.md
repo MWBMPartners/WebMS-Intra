@@ -14,8 +14,8 @@ A modular internal portal platform for organisations, providing centralised acce
 | **Routing**        | Front-controller + DB-backed router (tblRoutes)                                  | Clean URLs, app isolation, easy overrides        |
 | **Auth**           | Local accounts, MS365 OAuth, Google OAuth, WebAuthn/PassKeys, account linking    | Multi-provider SSO, passwordless support         |
 | **Multi-Site**     | Umbrella multi-site with subdomain, path-prefix, and session detection modes     | One install serves multiple locations/divisions  |
-| **UI**             | Bootstrap 5.3.3, Font Awesome 6.5.1, custom CSS design system                   | Responsive, WCAG compliant, dark mode            |
-| **PDF**            | dompdf 2.0 (in `_libraries/`, manually uploaded)                                 | Server-side PDF without external service         |
+| **UI**             | Bootstrap 5.3.3 + design tokens; light/dark/auto theme + CB-safe palette         | Responsive, WCAG-conscious, per-site themable    |
+| **PDF**            | dompdf 3.1.5 (fetched at deploy time by `tools/download-dompdf.sh`)              | Server-side PDF; pinned version vendored in CI   |
 | **Email**          | Microsoft Graph "SendAs" via shared mailbox                                      | DKIM/DMARC compliance, modern auth               |
 | **Bot Protection** | CloudFlare Turnstile (preferred) / reCAPTCHA                                     | Reduces spam without degrading UX                |
 
@@ -210,6 +210,7 @@ branch protection).
 | 8     | Translations / i18n (I18n framework, RTL support, language switcher)            | Done             |
 | 9     | Polish & Hardening (PWA, WCAG 2.1, Security Hardening)                          | Done             |
 | 10    | Multi-Site Support (umbrella orgs, site detection, 4-tier permissions)          | Done             |
+| 11    | UI Refresh + Design System (themes, CB-safe palette, per-site branding)         | Done             |
 
 ---
 
