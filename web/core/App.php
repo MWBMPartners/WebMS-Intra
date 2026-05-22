@@ -188,9 +188,10 @@ class App
 
     /**
      * Check if debug mode is active.
-     * Debug mode requires BOTH:
+     * Debug mode requires ALL THREE of:
      *   1. The URL parameter ?debug=true
-     *   2. The current user is an Admin or Root Admin
+     *   2. PORTAL_ENV is not 'prod' (production env unconditionally refuses)
+     *   3. The current user is an Admin or Root Admin
      *
      * @return bool True if debug mode is active
      */
@@ -198,6 +199,11 @@ class App
     {
         // 🔍 Check URL parameter first (quick exit if not present)
         if (isset($_GET['debug']) === false || $_GET['debug'] !== 'true') {
+            return false;
+        }
+
+        // 🛡️ Unconditionally disabled in production, regardless of role
+        if (defined('PORTAL_ENV') === true && PORTAL_ENV === 'prod') {
             return false;
         }
 
