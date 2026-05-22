@@ -109,7 +109,7 @@ if ($stmt !== false) {
 }
 
 // 📂 Count SQL files in the migrations directory
-$sqlDir = dirname(__DIR__, 2) . DIRECTORY_SEPARATOR . 'sql';
+$sqlDir = dirname(__DIR__, 2) . DIRECTORY_SEPARATOR . '_sql';
 $sqlFiles = [];
 if (is_dir($sqlDir) === true) {
     $scan = scandir($sqlDir);

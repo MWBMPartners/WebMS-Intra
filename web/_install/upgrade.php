@@ -25,7 +25,7 @@
 declare(strict_types=1);
 
 // Load the full portal bootstrap (requires working config)
-require_once dirname(__DIR__) . DIRECTORY_SEPARATOR . 'core' . DIRECTORY_SEPARATOR . 'bootstrap.php';
+require_once dirname(__DIR__) . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEPARATOR . 'bootstrap.php';
 
 use Portal\Core\App;
 use Portal\Core\Auth;

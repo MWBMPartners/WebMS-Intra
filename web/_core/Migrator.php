@@ -51,11 +51,11 @@ class Migrator
     {
         $this->db = $db;
 
-        // 📂 Determine sql/ directory path using platform-neutral constants
+        // 📂 Determine _sql/ directory path using platform-neutral constants
         if ($sqlDir !== '') {
             $this->sqlDir = rtrim($sqlDir, DIRECTORY_SEPARATOR);
         } else {
-            $this->sqlDir = PORTAL_ROOT . DIRECTORY_SEPARATOR . 'sql';
+            $this->sqlDir = PORTAL_ROOT . DIRECTORY_SEPARATOR . '_sql';
         }
 
         // 🛡️ Ensure the migrations tracking table exists
