@@ -23,7 +23,7 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   0.8.1
+ * @version   1.0.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/84
  * -----------------------------------------------------------------------------
  */
@@ -39,7 +39,10 @@ define('INSTALL_AUTH_DIR', INSTALL_ROOT . DIRECTORY_SEPARATOR . '_auth_keys');
 define('INSTALL_CREDS_FILE', INSTALL_AUTH_DIR . DIRECTORY_SEPARATOR . 'auth_creds.php');
 define('INSTALL_ENC_KEY_FILE', INSTALL_AUTH_DIR . DIRECTORY_SEPARATOR . 'enc.key');
 define('INSTALL_LOCK_FILE', INSTALL_AUTH_DIR . DIRECTORY_SEPARATOR . '.installed');
-define('INSTALL_VERSION', '0.8.1');
+// 📌 Single source of truth — same file App.php and bootstrap.php read.
+// Even though this installer is bootstrap-free, _core/version.php is a
+// plain `return <string>` and safe to `require` independently.
+define('INSTALL_VERSION', (string) (require INSTALL_ROOT . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEPARATOR . 'version.php'));
 
 // ---------------------------------------------------------------------------
 // Block re-installation if lock file exists

@@ -17,7 +17,7 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   0.8.1
+ * @version   1.0.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/84
  * -----------------------------------------------------------------------------
  */

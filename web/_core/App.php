@@ -52,8 +52,8 @@ class App
     /** @var bool Whether the user data has been loaded (to distinguish null = "not loaded" vs "not logged in") */
     private static bool $userLoaded = false;
 
-    /** @var string Portal version number */
-    private static string $version = '1.0.0';
+    /** @var string Portal version number — lazy-loaded from _core/version.php (single source of truth) */
+    private static string $version = '';
 
     /**
      * Initialise the App registry. Called from bootstrap.php after DB and settings are ready.
@@ -68,11 +68,26 @@ class App
         self::$db       = $db;
         self::$settings = $settings;
 
-        // 📌 Load version from settings if available, otherwise use default
+        // 📌 Load version from settings if available, else from _core/version.php
+        // (the single source of truth shared with the bootstrap-free installer).
         $settingsVersion = self::settings('portal.version');
         if ($settingsVersion !== null && $settingsVersion !== '') {
             self::$version = $settingsVersion;
+        } else {
+            self::$version = self::loadVersionFile();
         }
+    }
+
+    /**
+     * Read the authoritative portal version from _core/version.php.
+     * Used both by init() and as a lazy fallback in version() if init()
+     * hasn't been called yet.
+     *
+     * @return string
+     */
+    private static function loadVersionFile(): string
+    {
+        return (string) (require __DIR__ . DIRECTORY_SEPARATOR . 'version.php');
     }
 
     /**
@@ -223,6 +238,11 @@ class App
      */
     public static function version(): string
     {
+        // 🛟 Lazy-load if version() is called before init() (e.g. from a
+        // bootstrap-only script). Keeps the API safe regardless of caller order.
+        if (self::$version === '') {
+            self::$version = self::loadVersionFile();
+        }
         return self::$version;
     }
 
