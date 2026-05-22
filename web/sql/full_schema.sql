@@ -1147,6 +1147,26 @@ INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isSensitive`, `default
 VALUES ('auth.turnstile.secretKey', '', 1, '')
 ON DUPLICATE KEY UPDATE `settingKey` = `settingKey`;
 
+INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isSensitive`, `defaultValue`)
+VALUES ('auth.hcaptcha.siteKey', '', 1, '')
+ON DUPLICATE KEY UPDATE `settingKey` = `settingKey`;
+
+INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isSensitive`, `defaultValue`)
+VALUES ('auth.hcaptcha.secretKey', '', 1, '')
+ON DUPLICATE KEY UPDATE `settingKey` = `settingKey`;
+
+INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isSensitive`, `defaultValue`)
+VALUES ('auth.recaptcha.v3.action', 'submit', 0, 'submit')
+ON DUPLICATE KEY UPDATE `settingKey` = `settingKey`;
+
+INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isSensitive`, `defaultValue`)
+VALUES ('auth.recaptcha.v3.threshold', '0.5', 0, '0.5')
+ON DUPLICATE KEY UPDATE `settingKey` = `settingKey`;
+
+INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isSensitive`, `defaultValue`)
+VALUES ('auth.captcha.priority', 'turnstile,recaptcha,hcaptcha', 0, 'turnstile,recaptcha,hcaptcha')
+ON DUPLICATE KEY UPDATE `settingKey` = `settingKey`;
+
 -- ─── Auth — Google OAuth ─────────────────────────────────────────────────────
 INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isSensitive`, `defaultValue`)
 VALUES ('auth.google.clientID', '', 1, '')
@@ -1839,6 +1859,9 @@ ON DUPLICATE KEY UPDATE `filename` = `filename`;
 INSERT INTO `tblMigrations` (`filename`) VALUES ('039_prayer_requests.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
+INSERT INTO `tblMigrations` (`filename`) VALUES ('040_captcha_providers.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
 -- Seed the branding.hidePoweredBy setting (matches migration 038)
 INSERT INTO `tblSettings`
     (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`)
@@ -1912,4 +1935,10 @@ INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
     ('prayer-requests/anonymous',      'prayer-requests/anonymous.php',       0),
     ('prayer-requests/anonymous/save', 'prayer-requests/anonymous-save.php',  0),
     ('help/prayer-requests',           'help/prayer-requests.php',            0)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
+-- Seed admin captcha routes (matches migration 040)
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('admin/captcha',      'admin/captcha/index.php', 1),
+    ('admin/captcha/save', 'admin/captcha/save.php',  1)
 ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);

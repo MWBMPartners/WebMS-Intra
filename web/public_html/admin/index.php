@@ -315,6 +315,12 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     <span class="small">Integrations</span>
                 </a>
             </div>
+            <div class="col-6 col-md-4 col-lg-2">
+                <a href="/admin/captcha" class="btn btn-outline-warning w-100 d-flex flex-column align-items-center gap-1 py-3">
+                    <i class="fa-solid fa-robot fa-lg"></i>
+                    <span class="small">Captcha</span>
+                </a>
+            </div>
             <?php if (App::isUmbrellaAdmin() === true): ?>
             <div class="col-6 col-md-4 col-lg-2">
                 <a href="/admin/sites" class="btn btn-outline-dark w-100 d-flex flex-column align-items-center gap-1 py-3">

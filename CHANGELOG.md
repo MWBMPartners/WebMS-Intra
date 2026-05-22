@@ -11,6 +11,25 @@ to `alpha`, `beta`, and `main` using the heading format
 
 ## [Unreleased]
 
+### Added — Multi-provider Captcha
+
+The captcha layer now supports three providers and admin-configurable priority:
+
+- **Providers**: Cloudflare Turnstile (default first), Google reCAPTCHA
+  (v2 checkbox or v3 invisible/score), and hCaptcha.
+- **Admin UI** at `/admin/captcha` with drag-and-drop priority ordering
+  (SortableJS) and per-provider site/secret-key inputs. reCAPTCHA gets
+  a v2/v3 toggle plus action name + score-threshold inputs for v3.
+- **Priority** is stored as `auth.captcha.priority` (comma-separated keys).
+  The active provider is the first in the list with both keys configured;
+  if nothing is configured the captcha is silently skipped.
+- **reCAPTCHA v3** verification enforces both action match (anti-replay)
+  and score threshold; default action `submit`, default threshold `0.5`.
+- Migration `web/sql/040_captcha_providers.sql` adds hCaptcha key slots,
+  v3 action/threshold settings, priority setting, and admin routes.
+- `Captcha::activeProvider()`, `Captcha::listProviders()`, and
+  `Captcha::normalisePriority()` are new public helpers used by the UI.
+
 ### Added — Prayer Requests app
 
 A new portal app at `/prayer-requests` for collecting and tracking prayer
