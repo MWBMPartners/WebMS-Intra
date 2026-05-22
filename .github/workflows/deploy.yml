@@ -79,6 +79,11 @@ on:
           - alpha
           - beta
           - main
+      dry_run:
+        description: "Dry run — print what would be uploaded / DELETED on the server, without making any changes. Safe to run before structurally-significant deploys (see #107)."
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -91,6 +96,11 @@ jobs:
     # Shared lftp exclude flags. Patterns with wildcards are single-quoted in
     # YAML so they pass through the shell as literal regexes for lftp.
     env:
+      # 🧪 Dry-run mode (manual dispatch only): lftp prints what it WOULD do,
+      # including which server-side files would be DELETED by --delete, but
+      # makes no changes. Threaded into every `mirror` invocation below. See
+      # https://lftp.yar.ru/lftp-man.html → "mirror --dry-run". Issue #107.
+      LFTP_DRYRUN_FLAG: ${{ github.event.inputs.dry_run == 'true' && '--dry-run' || '' }}
       LFTP_EXCLUDES: >-
         --exclude ^\.DS_Store$
         --exclude ^Thumbs\.db$
@@ -295,11 +305,12 @@ jobs:
           REMOTE:    ${{ steps.target.outputs.remote_public }}
         run: |
           REMOTE_DIR="${REMOTE%/}/"
+          [[ -n "${LFTP_DRYRUN_FLAG}" ]] && echo "🧪 DRY RUN — no changes will be made"
           echo "Deploying web/public_html/ -> $REMOTE_DIR"
           cat > /tmp/lftp_public.txt <<LFTP_EOF
           set sftp:connect-program "ssh -o StrictHostKeyChecking=no -i $HOME/.ssh/deploy_key -p ${SFTP_PORT}"
           open sftp://${SFTP_USER}@${SFTP_HOST}:${SFTP_PORT}
-          mirror --reverse --delete --verbose --only-newer --no-empty-dirs $LFTP_EXCLUDES web/public_html/ ${REMOTE_DIR}
+          mirror --reverse --delete ${LFTP_DRYRUN_FLAG} --verbose --only-newer --no-empty-dirs $LFTP_EXCLUDES web/public_html/ ${REMOTE_DIR}
           bye
           LFTP_EOF
           lftp -f /tmp/lftp_public.txt
@@ -314,10 +325,11 @@ jobs:
           REMOTE:    ${{ steps.target.outputs.remote_public }}
         run: |
           REMOTE_DIR="${REMOTE%/}/"
+          [[ -n "${LFTP_DRYRUN_FLAG}" ]] && echo "🧪 DRY RUN — no changes will be made"
           echo "Deploying web/public_html/ -> $REMOTE_DIR"
           lftp -u "${SFTP_USER},${SFTP_PASS}" \
             -e "set sftp:auto-confirm yes; set ssl:verify-certificate no; \
-                mirror --reverse --delete --verbose --only-newer --no-empty-dirs \
+                mirror --reverse --delete ${LFTP_DRYRUN_FLAG} --verbose --only-newer --no-empty-dirs \
                 $LFTP_EXCLUDES \
                 web/public_html/ ${REMOTE_DIR}; bye" \
             "sftp://${SFTP_HOST}:${SFTP_PORT}"
@@ -351,6 +363,7 @@ jobs:
           REMOTE:    ${{ steps.target.outputs.remote_shared }}
         run: |
           REMOTE_DIR="${REMOTE%/}/"
+          [[ -n "${LFTP_DRYRUN_FLAG}" ]] && echo "🧪 DRY RUN — no changes will be made (mkdir steps still execute and are harmless)"
           echo "Deploying shared web/ (core, vendor, sql, _includes, _functions, _libraries/dompdf) -> $REMOTE_DIR"
           cat > /tmp/lftp_shared.txt <<LFTP_EOF
           set sftp:connect-program "ssh -o StrictHostKeyChecking=no -i $HOME/.ssh/deploy_key -p ${SFTP_PORT}"
@@ -358,7 +371,7 @@ jobs:
           mkdir -p -f ${REMOTE_DIR}_auth_keys
           mkdir -p -f ${REMOTE_DIR}_uploads
           mkdir -p -f ${REMOTE_DIR}_backups
-          mirror --reverse --delete --verbose --only-newer --no-empty-dirs $LFTP_EXCLUDES $WEB_ROOT_EXCLUDES web/ ${REMOTE_DIR}
+          mirror --reverse --delete ${LFTP_DRYRUN_FLAG} --verbose --only-newer --no-empty-dirs $LFTP_EXCLUDES $WEB_ROOT_EXCLUDES web/ ${REMOTE_DIR}
           bye
           LFTP_EOF
           lftp -f /tmp/lftp_shared.txt
@@ -373,13 +386,14 @@ jobs:
           REMOTE:    ${{ steps.target.outputs.remote_shared }}
         run: |
           REMOTE_DIR="${REMOTE%/}/"
+          [[ -n "${LFTP_DRYRUN_FLAG}" ]] && echo "🧪 DRY RUN — no changes will be made (mkdir steps still execute and are harmless)"
           echo "Deploying shared web/ (core, vendor, sql, _includes, _functions, _libraries/dompdf) -> $REMOTE_DIR"
           lftp -u "${SFTP_USER},${SFTP_PASS}" \
             -e "set sftp:auto-confirm yes; set ssl:verify-certificate no; \
                 mkdir -p -f ${REMOTE_DIR}_auth_keys; \
                 mkdir -p -f ${REMOTE_DIR}_uploads; \
                 mkdir -p -f ${REMOTE_DIR}_backups; \
-                mirror --reverse --delete --verbose --only-newer --no-empty-dirs \
+                mirror --reverse --delete ${LFTP_DRYRUN_FLAG} --verbose --only-newer --no-empty-dirs \
                 $LFTP_EXCLUDES $WEB_ROOT_EXCLUDES \
                 web/ ${REMOTE_DIR}; bye" \
             "sftp://${SFTP_HOST}:${SFTP_PORT}"
