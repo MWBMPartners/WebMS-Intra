@@ -230,6 +230,64 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     </div>
 </div>
 
+<!-- Section: Bot Protection / Captcha -->
+<div class="portal-card p-4 mb-4" id="captcha">
+    <h2 class="h4 mb-3"><i class="fa-solid fa-robot me-2 text-primary"></i>Bot Protection (Captcha)</h2>
+
+    <p>
+        The portal supports three captcha providers, configured at
+        <a href="/admin/captcha">/admin/captcha</a>:
+    </p>
+    <ul>
+        <li><strong>Cloudflare Turnstile</strong> — privacy-friendly default, no challenge for most users.</li>
+        <li><strong>Google reCAPTCHA</strong> — v2 (visible checkbox) or v3 (invisible, score-based). Choose via the version dropdown.</li>
+        <li><strong>hCaptcha</strong> — privacy-friendly alternative to reCAPTCHA.</li>
+    </ul>
+
+    <h5 class="mt-3 mb-2">Priority ordering</h5>
+    <p>
+        Drag the providers in the priority list to set the fallback order. The active provider is the
+        <strong>first one in the list that has both site and secret keys configured</strong>. If nothing is
+        configured, the captcha is silently skipped (forms still submit; no challenge shown).
+    </p>
+
+    <h5 class="mt-3 mb-2">reCAPTCHA v3 specifics</h5>
+    <p>
+        When using reCAPTCHA v3, you can set an <strong>action name</strong> (default: <code>submit</code>)
+        and a <strong>score threshold</strong> (default: <code>0.5</code>). Server-side verification rejects
+        any token whose action doesn't match (anti-replay) or whose score falls below the threshold.
+    </p>
+    <p class="text-muted small">
+        Anonymous prayer-request submissions and the password-reset flow both use the active captcha provider — no per-form configuration needed.
+    </p>
+</div>
+
+<!-- Section: Password Policy -->
+<div class="portal-card p-4 mb-4" id="password-policy">
+    <h2 class="h4 mb-3"><i class="fa-solid fa-shield-halved me-2 text-primary"></i>Password Policy</h2>
+
+    <p>
+        Configurable via <a href="/settings">Settings</a> under the <code>auth.password.*</code> prefix.
+        Defaults follow OWASP ASVS L1.
+    </p>
+
+    <div class="list-group list-group-flush">
+        <div class="list-group-item d-flex justify-content-between"><span><code>auth.password.minLength</code></span><strong>12</strong></div>
+        <div class="list-group-item d-flex justify-content-between"><span><code>auth.password.maxLength</code></span><strong>128</strong></div>
+        <div class="list-group-item d-flex justify-content-between"><span><code>auth.password.requireUppercase</code></span><strong>true</strong></div>
+        <div class="list-group-item d-flex justify-content-between"><span><code>auth.password.requireLowercase</code></span><strong>true</strong></div>
+        <div class="list-group-item d-flex justify-content-between"><span><code>auth.password.requireNumber</code></span><strong>true</strong></div>
+        <div class="list-group-item d-flex justify-content-between"><span><code>auth.password.requireSpecial</code></span><strong>true</strong></div>
+    </div>
+
+    <p class="mt-3 mb-0 text-muted small">
+        The policy is enforced server-side on every password-set flow: account change-password, password reset,
+        admin user create / update, and the installation wizard. A client-side strength meter (5-step Bootstrap
+        progress bar) appears on every password input as a visual aid; final validation always happens
+        server-side.
+    </p>
+</div>
+
 <!-- Section 2: User Roles -->
 <div class="portal-card p-4 mb-4" id="roles">
     <h2 class="h4 mb-3"><i class="fa-solid fa-users-gear me-2 text-primary"></i>User Roles</h2>

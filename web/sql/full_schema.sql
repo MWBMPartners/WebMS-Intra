@@ -1617,6 +1617,10 @@ INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`)
 VALUES ('help/translations', 'help/translations.php', 0)
 ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`)
+VALUES ('help/calendar', 'help/calendar.php', 0)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
 -- ─── Calendar ───────────────────────────────────────────────────────────────
 INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`)
 VALUES ('calendar', 'calendar/index.php', 0)
