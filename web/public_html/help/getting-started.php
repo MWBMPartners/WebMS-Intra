@@ -41,7 +41,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <a href="#first-time" class="badge text-bg-secondary text-decoration-none">First-Time Setup</a>
             <a href="#navigating" class="badge text-bg-secondary text-decoration-none">Navigating the Portal</a>
             <a href="#csv-export" class="badge text-bg-secondary text-decoration-none">Exporting Data</a>
-            <a href="#dark-mode" class="badge text-bg-secondary text-decoration-none">Dark Mode</a>
+            <a href="#personalisation" class="badge text-bg-secondary text-decoration-none">Personalisation (theme + accessibility)</a>
         </div>
     </div>
 </div>
@@ -225,42 +225,71 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     </div>
 </div>
 
-<!-- Section 5: Dark Mode -->
-<div class="portal-card p-4 mb-4" id="dark-mode">
-    <h2 class="h4 mb-3"><i class="fa-solid fa-moon me-2 text-primary"></i>Dark Mode</h2>
+<!-- Section 5: Personalisation -->
+<div class="portal-card p-4 mb-4" id="personalisation">
+    <h2 class="h4 mb-3"><i class="fa-solid fa-palette me-2 text-primary"></i>Personalisation (theme + accessibility)</h2>
 
-    <p>The portal includes a built-in dark mode for comfortable viewing in low-light environments.</p>
+    <p>Two small buttons sit near your avatar in the navigation bar — one for theme, one for an accessibility-friendly colour palette. Both remember your preference per browser.</p>
 
-    <h5 class="mt-3 mb-3">How to toggle dark mode</h5>
+    <h5 class="mt-4 mb-3">Theme — light / dark / auto</h5>
+
+    <p>Click the <i class="fa-solid fa-circle-half-stroke"></i> button to cycle through three states:</p>
 
     <div class="list-group list-group-flush mb-3">
         <div class="list-group-item d-flex gap-3 align-items-start">
-            <span class="badge text-bg-primary rounded-pill mt-1">1</span>
+            <span class="badge text-bg-primary rounded-pill mt-1"><i class="fa-solid fa-sun"></i></span>
             <div>
-                <strong>Locate the moon icon</strong>
-                <p class="mb-0 small text-secondary">Look for the <i class="fa-solid fa-moon"></i> button in the navigation bar (top-right area, near your avatar).</p>
+                <strong>Light</strong>
+                <p class="mb-0 small text-secondary">Light surfaces, dark text. The portal's default visual.</p>
             </div>
         </div>
         <div class="list-group-item d-flex gap-3 align-items-start">
-            <span class="badge text-bg-primary rounded-pill mt-1">2</span>
+            <span class="badge text-bg-primary rounded-pill mt-1"><i class="fa-solid fa-moon"></i></span>
             <div>
-                <strong>Click the toggle</strong>
-                <p class="mb-0 small text-secondary">The theme switches instantly between light and dark modes. No page reload is required.</p>
+                <strong>Dark</strong>
+                <p class="mb-0 small text-secondary">Dark surfaces, light text. Easier on the eyes in low light.</p>
             </div>
         </div>
         <div class="list-group-item d-flex gap-3 align-items-start">
-            <span class="badge text-bg-primary rounded-pill mt-1">3</span>
+            <span class="badge text-bg-primary rounded-pill mt-1"><i class="fa-solid fa-circle-half-stroke"></i></span>
             <div>
-                <strong>Your preference is saved</strong>
-                <p class="mb-0 small text-secondary">The portal remembers your choice in your browser's local storage. It will be applied automatically on your next visit.</p>
+                <strong>Auto</strong>
+                <p class="mb-0 small text-secondary">Follows your operating system's theme preference. If your OS switches to dark mode in the evening (e.g. macOS / Windows scheduled), the portal switches with it without a refresh.</p>
             </div>
         </div>
     </div>
 
+    <h5 class="mt-4 mb-3">Colour-blind safe palette</h5>
+
+    <p>The <i class="fa-solid fa-eye-low-vision"></i> button toggles an accessibility-friendly colour palette designed for the most common forms of colour-blindness (deuteranopia + protanopia, affecting roughly 5% of men globally).</p>
+
+    <p>When enabled, the portal swaps its status colours for combinations that don't rely on red/green contrast:</p>
+
+    <div class="list-group list-group-flush mb-3 small">
+        <div class="list-group-item">
+            <strong>Success / approved</strong>
+            <span class="text-secondary"> — bluish-green instead of pure green</span>
+        </div>
+        <div class="list-group-item">
+            <strong>Danger / rejected</strong>
+            <span class="text-secondary"> — vermillion (orange-red) instead of pure red</span>
+        </div>
+        <div class="list-group-item">
+            <strong>Warning / pending</strong>
+            <span class="text-secondary"> — bright orange (high contrast, distinguishable)</span>
+        </div>
+        <div class="list-group-item">
+            <strong>Info / accent</strong>
+            <span class="text-secondary"> — sky blue (always distinguishable)</span>
+        </div>
+    </div>
+
+    <p class="small text-secondary mb-3">The button shows as tinted when the palette is active. Your site's brand colour is unaffected — only status colours change.</p>
+
     <div class="alert alert-info d-flex gap-2" role="alert">
         <i class="fa-solid fa-circle-info mt-1"></i>
         <div>
-            <strong>Note:</strong> Dark mode is per-browser. If you use multiple browsers or devices, you will need to set it on each one separately.
+            <strong>Note:</strong> Both preferences are stored per-browser. If you use multiple browsers or devices, you'll need to set them on each one separately.
         </div>
     </div>
 </div>

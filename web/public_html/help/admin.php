@@ -46,6 +46,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <h6 class="card-title mb-2"><i class="fa-solid fa-list me-1"></i>On this page</h6>
         <div class="d-flex flex-wrap gap-2">
             <a href="#settings" class="badge text-bg-secondary text-decoration-none">Settings Management</a>
+            <a href="#site-branding" class="badge text-bg-secondary text-decoration-none">Site Branding</a>
             <a href="#roles" class="badge text-bg-secondary text-decoration-none">User Roles</a>
             <a href="#gatekeeper" class="badge text-bg-secondary text-decoration-none">Dev Site Access (Gatekeeper)</a>
             <a href="#logs" class="badge text-bg-secondary text-decoration-none">Viewing Logs</a>
@@ -161,6 +162,70 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <div class="list-group-item d-flex gap-2">
             <code class="text-nowrap">expenses.displayIcon</code>
             <span class="text-secondary">-- The Font Awesome icon class used for the app (e.g., <code>fa-solid fa-receipt</code>).</span>
+        </div>
+    </div>
+</div>
+
+<!-- Section: Site Branding -->
+<div class="portal-card p-4 mb-4" id="site-branding">
+    <h2 class="h4 mb-3"><i class="fa-solid fa-palette me-2 text-primary"></i>Site Branding</h2>
+
+    <p>Each site in this install can have its own visual identity. Branding values are configured at <a href="/admin/sites">/admin/sites/</a> by umbrella admins.</p>
+
+    <h5 class="mt-3 mb-3">What you can customise per site</h5>
+
+    <div class="list-group list-group-flush mb-3">
+        <div class="list-group-item d-flex gap-3 align-items-start">
+            <span class="badge text-bg-primary rounded-pill mt-1"><i class="fa-solid fa-signature"></i></span>
+            <div>
+                <strong>Site name</strong>
+                <p class="mb-0 small text-secondary">Display name in the navbar, browser tab title, and footer. Required.</p>
+            </div>
+        </div>
+        <div class="list-group-item d-flex gap-3 align-items-start">
+            <span class="badge text-bg-primary rounded-pill mt-1"><i class="fa-solid fa-image"></i></span>
+            <div>
+                <strong>Logo path</strong>
+                <p class="mb-0 small text-secondary">URL or path to the navbar logo. Default <code>/assets/images/logo.svg</code> shows the WebMS Intra mark.</p>
+            </div>
+        </div>
+        <div class="list-group-item d-flex gap-3 align-items-start">
+            <span class="badge text-bg-primary rounded-pill mt-1"><i class="fa-solid fa-droplet"></i></span>
+            <div>
+                <strong>Primary colour</strong>
+                <p class="mb-0 small text-secondary">Hex colour for buttons, focus rings, active nav links, app card hover, and other accents. Default <code>#5e6ad2</code> (indigo). Hover and active variants auto-derive from this colour.</p>
+            </div>
+        </div>
+        <div class="list-group-item d-flex gap-3 align-items-start">
+            <span class="badge text-bg-primary rounded-pill mt-1"><i class="fa-solid fa-star"></i></span>
+            <div>
+                <strong>Favicon path</strong>
+                <p class="mb-0 small text-secondary">URL or path to the browser-tab icon. Leave blank to use the WebMS Intra default.</p>
+            </div>
+        </div>
+        <div class="list-group-item d-flex gap-3 align-items-start">
+            <span class="badge text-bg-primary rounded-pill mt-1"><i class="fa-solid fa-copyright"></i></span>
+            <div>
+                <strong>Copyright organisation</strong>
+                <p class="mb-0 small text-secondary">Name shown in the footer copyright line. Defaults to "MWBM Partners Ltd" if blank.</p>
+            </div>
+        </div>
+    </div>
+
+    <h5 class="mt-4 mb-3">"Powered by WebMS Intra" attribution</h5>
+
+    <p>When a site uses <strong>custom branding</strong> (any of the fields above differs from the WebMS Intra default), the footer shows a small "Powered by WebMS Intra" attribution after the copyright line. A <code>&lt;meta name="generator"&gt;</code> tag is also added to the page <code>&lt;head&gt;</code> for site analysers.</p>
+
+    <p>Sites still running the default WebMS Intra branding do <em>not</em> show the attribution &mdash; the copyright line already names the product.</p>
+
+    <h6 class="mt-3 mb-2">Hiding the attribution</h6>
+
+    <p>To hide the "Powered by" attribution across all sites in this install, set the global setting <code>branding.hidePoweredBy</code> to <code>true</code> at <a href="/settings">/settings/</a>. Default is <code>false</code> (show attribution on custom-branded sites).</p>
+
+    <div class="alert alert-info d-flex gap-2 mt-3" role="alert">
+        <i class="fa-solid fa-circle-info mt-1"></i>
+        <div>
+            <strong>Tip:</strong> Branding changes apply immediately on the next page load &mdash; no deploy or cache clear needed. The hover/active/subtle colour variants automatically shift with the primary colour in modern browsers (Chrome 111+, Safari 16.2+, Firefox 113+); older browsers fall back to the indigo defaults.
         </div>
     </div>
 </div>
