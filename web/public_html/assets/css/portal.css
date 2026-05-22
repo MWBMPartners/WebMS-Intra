@@ -903,3 +903,330 @@ noscript ~ .accordion .collapse {
     color: #ffc107 !important;
     border-color: #664d03 !important;
 }
+
+/* ============================================================================
+   PR 4 — Forms / cards / alerts / buttons (global token-driven polish)
+
+   These rules override Bootstrap's defaults using the design tokens so any
+   page that uses the standard Bootstrap form / card / alert / button classes
+   automatically picks up the new design language. No markup changes needed
+   on consuming pages.
+   ============================================================================ */
+
+/* ----- Form labels ----- */
+.form-label {
+    font-weight: var(--portal-font-weight-medium);
+    font-size: var(--portal-font-size-sm);
+    color: var(--portal-text);
+    margin-bottom: 0.375rem;
+}
+
+/* ----- Form inputs ----- */
+.form-control,
+.form-select {
+    background-color: var(--portal-surface);
+    border: 1px solid var(--portal-border-strong);
+    color: var(--portal-text);
+    border-radius: var(--portal-radius-md);
+    padding: 0.5625rem 0.75rem;
+    font-size: var(--portal-font-size-base);
+    line-height: 1.4;
+    transition: border-color var(--portal-transition-fast),
+                box-shadow   var(--portal-transition-fast),
+                background-color var(--portal-transition-fast);
+}
+.form-control:hover:not(:focus):not(:disabled):not([readonly]),
+.form-select:hover:not(:focus):not(:disabled):not([readonly]) {
+    border-color: var(--portal-text-subtle);
+}
+.form-control:focus,
+.form-select:focus {
+    border-color: var(--portal-primary);
+    box-shadow: 0 0 0 3px rgba(var(--portal-primary-rgb), 0.18);
+    outline: none;
+    background-color: var(--portal-surface);
+    color: var(--portal-text);
+}
+.form-control::placeholder { color: var(--portal-text-subtle); opacity: 1; }
+.form-control:disabled,
+.form-select:disabled,
+.form-control[readonly] {
+    background-color: var(--portal-surface-hover);
+    color: var(--portal-text-muted);
+    border-color: var(--portal-border);
+    cursor: not-allowed;
+}
+
+/* ----- Form help text ----- */
+.form-text {
+    color: var(--portal-text-muted);
+    font-size: var(--portal-font-size-xs);
+    margin-top: 0.375rem;
+    line-height: 1.4;
+}
+.form-text code,
+p code,
+li code {
+    background-color: var(--portal-surface-hover);
+    color: var(--portal-text);
+    padding: 0.125rem 0.375rem;
+    border-radius: var(--portal-radius-xs);
+    font-size: 0.875em;
+    font-family: var(--portal-font-mono);
+}
+
+/* ----- Checkboxes / radios ----- */
+.form-check-input {
+    border-color: var(--portal-border-strong);
+    transition: background-color var(--portal-transition-fast),
+                border-color     var(--portal-transition-fast),
+                box-shadow       var(--portal-transition-fast);
+}
+.form-check-input:checked {
+    background-color: var(--portal-primary);
+    border-color: var(--portal-primary);
+}
+.form-check-input:focus {
+    border-color: var(--portal-primary);
+    box-shadow: 0 0 0 3px rgba(var(--portal-primary-rgb), 0.18);
+}
+.form-check-label {
+    color: var(--portal-text);
+    font-size: var(--portal-font-size-sm);
+}
+
+/* ----- Validation states ----- */
+.form-control.is-invalid,
+.form-select.is-invalid {
+    border-color: var(--portal-danger);
+}
+.form-control.is-invalid:focus,
+.form-select.is-invalid:focus {
+    box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.18);
+}
+.form-control.is-valid,
+.form-select.is-valid {
+    border-color: var(--portal-success);
+}
+.invalid-feedback {
+    color: var(--portal-danger);
+    font-size: var(--portal-font-size-xs);
+    margin-top: 0.375rem;
+}
+.valid-feedback {
+    color: var(--portal-success);
+    font-size: var(--portal-font-size-xs);
+    margin-top: 0.375rem;
+}
+
+/* ----- Cards (Bootstrap .card — global polish) ----- */
+.card {
+    background-color: var(--portal-surface);
+    border: 1px solid var(--portal-border);
+    border-radius: var(--portal-radius-lg);
+    box-shadow: var(--portal-shadow-xs);
+    overflow: hidden;
+}
+.card.shadow,
+.card.shadow-sm { box-shadow: var(--portal-shadow-md); }
+.card.shadow-lg { box-shadow: var(--portal-shadow-lg); }
+.card-header {
+    background-color: var(--portal-surface);
+    border-bottom: 1px solid var(--portal-border);
+    padding: 1rem 1.25rem;
+    font-weight: var(--portal-font-weight-medium);
+}
+.card-footer {
+    background-color: var(--portal-surface);
+    border-top: 1px solid var(--portal-border);
+    padding: 0.875rem 1.25rem;
+}
+.card-body { padding: 1.5rem; }
+
+/* Centred auth-shell pattern (login, forgot-password, reset-password).
+   Matches body that uses Bootstrap's d-flex+vh-100 centring with a card
+   inside. CSS-only enhancement — markup unchanged. */
+body.d-flex.vh-100 { background-color: var(--portal-bg); }
+body.d-flex.vh-100 > .card {
+    border-radius: var(--portal-radius-xl);
+    box-shadow: var(--portal-shadow-lg);
+    padding: 2rem !important;        /* override the p-4 utility */
+}
+body.d-flex.vh-100 > .card h1 {
+    font-weight: var(--portal-font-weight-bold);
+    letter-spacing: var(--portal-letter-spacing-tight);
+}
+
+/* ----- Alerts (Bootstrap .alert — global polish using design tokens) ----- */
+.alert {
+    border: 1px solid;
+    border-radius: var(--portal-radius-md);
+    padding: 0.875rem 1rem;
+    margin-bottom: 1.25rem;
+    font-size: var(--portal-font-size-sm);
+    line-height: 1.5;
+}
+.alert-info {
+    background-color: #eef2ff;
+    border-color:     #c7d2fe;
+    color:            #312e81;
+}
+.alert-success {
+    background-color: #f0fdf4;
+    border-color:     #bbf7d0;
+    color:            #166534;
+}
+.alert-warning {
+    background-color: #fffbeb;
+    border-color:     #fde68a;
+    color:            #92400e;
+}
+.alert-danger {
+    background-color: #fef2f2;
+    border-color:     #fecaca;
+    color:            #991b1b;
+}
+[data-bs-theme="dark"] .alert-info {
+    background-color: #1e1b4b; border-color: #312e81; color: #c7d2fe;
+}
+[data-bs-theme="dark"] .alert-success {
+    background-color: #052e16; border-color: #166534; color: #bbf7d0;
+}
+[data-bs-theme="dark"] .alert-warning {
+    background-color: #451a03; border-color: #92400e; color: #fde68a;
+}
+[data-bs-theme="dark"] .alert-danger {
+    background-color: #450a0a; border-color: #991b1b; color: #fecaca;
+}
+
+/* ----- Buttons (extend the existing .btn-primary override to the others) ----- */
+.btn {
+    font-weight: var(--portal-font-weight-medium);
+    border-radius: var(--portal-radius-sm);
+    transition: background-color var(--portal-transition-fast),
+                border-color     var(--portal-transition-fast),
+                color            var(--portal-transition-fast),
+                box-shadow       var(--portal-transition-fast);
+}
+.btn-primary {
+    --bs-btn-bg:                  var(--portal-primary);
+    --bs-btn-border-color:        var(--portal-primary);
+    --bs-btn-hover-bg:            var(--portal-primary-hover);
+    --bs-btn-hover-border-color:  var(--portal-primary-hover);
+    --bs-btn-active-bg:           var(--portal-primary-active);
+    --bs-btn-active-border-color: var(--portal-primary-active);
+}
+.btn-primary:hover {
+    box-shadow: 0 2px 8px -2px rgba(var(--portal-primary-rgb), 0.4);
+}
+.btn-success {
+    --bs-btn-bg:                  var(--portal-success);
+    --bs-btn-border-color:        var(--portal-success);
+    --bs-btn-hover-bg:            #15803d;
+    --bs-btn-hover-border-color:  #15803d;
+    --bs-btn-active-bg:           #166534;
+    --bs-btn-active-border-color: #166534;
+}
+.btn-danger {
+    --bs-btn-bg:                  var(--portal-danger);
+    --bs-btn-border-color:        var(--portal-danger);
+    --bs-btn-hover-bg:            #b91c1c;
+    --bs-btn-hover-border-color:  #b91c1c;
+}
+.btn-outline-primary {
+    --bs-btn-color:               var(--portal-primary);
+    --bs-btn-border-color:        var(--portal-primary);
+    --bs-btn-hover-bg:            var(--portal-primary);
+    --bs-btn-hover-border-color:  var(--portal-primary);
+}
+.btn-outline-secondary {
+    --bs-btn-color:               var(--portal-text-muted);
+    --bs-btn-border-color:        var(--portal-border-strong);
+    --bs-btn-hover-color:         var(--portal-text);
+    --bs-btn-hover-bg:            var(--portal-surface-hover);
+    --bs-btn-hover-border-color:  var(--portal-border-strong);
+}
+
+/* ============================================================================
+   PR 4 — portal-data-list refinement
+
+   Drop the per-row borders in favour of a single rounded border around the
+   whole list. Smoother hover. Slightly tighter desktop padding.
+   ============================================================================ */
+
+@media (min-width: 768px) {
+    .portal-data-list:has(.portal-data-row) {
+        border: 1px solid var(--portal-border);
+        border-radius: var(--portal-radius-lg);
+        overflow: hidden;
+        box-shadow: var(--portal-shadow-xs);
+    }
+    .portal-data-header {
+        background-color: var(--portal-bg);
+        border: 0;
+        border-radius: 0;
+        border-bottom: 1px solid var(--portal-border);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        font-size: var(--portal-font-size-xs);
+    }
+    .portal-data-row {
+        border: 0;
+        border-bottom: 1px solid var(--portal-border);
+        padding: 0.875rem 1rem;
+        transition: background-color var(--portal-transition-fast);
+    }
+    .portal-data-row:first-child,
+    .portal-data-header + .portal-data-row {
+        border-top: 0;
+    }
+    .portal-data-row:last-child {
+        border-bottom: 0;
+        border-radius: 0;
+    }
+    .portal-data-row:hover {
+        background-color: var(--portal-primary-subtle);
+    }
+}
+
+/* ============================================================================
+   PR 4 — portal-empty-state polish
+   ============================================================================ */
+
+.portal-empty-state {
+    padding: var(--portal-spacing-2xl) var(--portal-spacing-md);
+}
+.portal-empty-state-icon {
+    color: var(--portal-text-subtle);
+    opacity: 1;            /* was 0.3 — relied on opacity for muting, switch
+                              to a real subtle colour for better dark-mode behaviour */
+}
+.portal-empty-state-title {
+    font-size: var(--portal-font-size-xl);
+    color: var(--portal-text);
+}
+.portal-empty-state-text {
+    color: var(--portal-text-muted);
+    line-height: var(--portal-line-height-relaxed);
+}
+
+/* ============================================================================
+   PR 4 — portal-badge use design tokens (was Bootstrap RGB literals)
+   ============================================================================ */
+
+.portal-badge-pending {
+    background-color: rgba(217, 119, 6, 0.12);  /* derived from --portal-warning */
+    color: #92400e;
+}
+.portal-badge-approved {
+    background-color: rgba(22, 163, 74, 0.12);  /* derived from --portal-success */
+    color: #166534;
+}
+.portal-badge-rejected {
+    background-color: rgba(220, 38, 38, 0.12);  /* derived from --portal-danger */
+    color: #991b1b;
+}
+.portal-badge-paid {
+    background-color: rgba(6, 182, 212, 0.12);  /* derived from --portal-accent */
+    color: #155e75;
+}
