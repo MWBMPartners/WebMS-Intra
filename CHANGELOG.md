@@ -11,6 +11,30 @@ to `alpha`, `beta`, and `main` using the heading format
 
 ## [Unreleased]
 
+### Security — Password policy hardening (#53)
+
+- **Default minimum length raised from 8 to 12** characters (configurable
+  via `auth.password.minLength`).
+- Added `auth.password.maxLength` (default `128` — defends against
+  pathological inputs; bcrypt truncates at 72 anyway).
+- Added `auth.password.requireLowercase` setting (default `true`). The
+  validator previously gated the lowercase check on the `requireUppercase`
+  flag — fixed so each case requirement is independent.
+- Server-side validation is now enforced on **every** password-set flow:
+  - Reset password (`/reset-password`) — already validated; now uses
+    the shared `Auth::passwordPolicy()` helper for hints.
+  - Account change-password — already validated; same shared helper.
+  - **Admin user create/update (`/admin/users`)** — previously unvalidated.
+  - **Installer (`/install`)** — previously only checked length ≥ 8.
+- New helper `Auth::passwordPolicy()` returns the active policy as a
+  structured array (rules list + minLength/maxLength/required flags) so
+  forms can render the policy consistently.
+- **Client-side strength meter** added to all password-set forms via
+  `data-portal-password-input` + `data-portal-password-meter` attributes
+  (Bootstrap progress bar, 5-step score). Wired into `portal.js` and a
+  self-contained inline copy for the bootstrap-free installer.
+- Migration `web/sql/041_password_policy_hardening.sql`.
+
 ## [0.11.0] - 2026-05-22
 
 ### Added — Multi-provider Captcha

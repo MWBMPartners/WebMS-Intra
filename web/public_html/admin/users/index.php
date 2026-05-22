@@ -144,6 +144,9 @@ $flashMsg  = $_SESSION['flash_msg']  ?? '';
 $flashType = $_SESSION['flash_type'] ?? 'info';
 unset($_SESSION['flash_msg'], $_SESSION['flash_type']);
 
+// 🔐 Password policy for inline hints + strength meter
+$policy = Auth::passwordPolicy();
+
 // 📄 Include shared header template
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
@@ -364,11 +367,29 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         </div>
                         <div class="col-12 col-md-6">
                             <label class="form-label">Password</label>
-                            <input type="password" class="form-control" name="password" placeholder="Required if username is set">
+                            <input type="password" class="form-control" name="password"
+                                   placeholder="Required if username is set"
+                                   minlength="<?php echo (int) $policy['minLength']; ?>"
+                                   maxlength="<?php echo (int) $policy['maxLength']; ?>"
+                                   data-portal-password-input>
+                            <div class="portal-password-strength mt-2" data-portal-password-meter hidden>
+                                <div class="progress" style="height:6px;">
+                                    <div class="progress-bar" role="progressbar" style="width:0%"></div>
+                                </div>
+                                <small class="form-text" data-portal-password-meter-label>Password strength</small>
+                            </div>
                         </div>
                         <div class="col-12 col-md-6">
                             <label class="form-label">Confirm Password</label>
-                            <input type="password" class="form-control" name="password_confirm">
+                            <input type="password" class="form-control" name="password_confirm"
+                                   minlength="<?php echo (int) $policy['minLength']; ?>"
+                                   maxlength="<?php echo (int) $policy['maxLength']; ?>">
+                        </div>
+                        <div class="col-12">
+                            <div class="small text-muted">
+                                Password policy:
+                                <?php echo htmlspecialchars(implode(' • ', $policy['rules']), ENT_QUOTES, 'UTF-8'); ?>
+                            </div>
                         </div>
                         <div class="col-12">
                             <div class="form-check form-check-inline">
@@ -425,7 +446,20 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         </div>
                         <div class="col-12 col-md-6">
                             <label class="form-label">New Password</label>
-                            <input type="password" class="form-control" name="password" placeholder="Leave blank to keep current">
+                            <input type="password" class="form-control" name="password"
+                                   placeholder="Leave blank to keep current"
+                                   minlength="<?php echo (int) $policy['minLength']; ?>"
+                                   maxlength="<?php echo (int) $policy['maxLength']; ?>"
+                                   data-portal-password-input>
+                            <div class="portal-password-strength mt-2" data-portal-password-meter hidden>
+                                <div class="progress" style="height:6px;">
+                                    <div class="progress-bar" role="progressbar" style="width:0%"></div>
+                                </div>
+                                <small class="form-text" data-portal-password-meter-label>Password strength</small>
+                            </div>
+                            <div class="small text-muted mt-1">
+                                Policy: <?php echo htmlspecialchars(implode(' • ', $policy['rules']), ENT_QUOTES, 'UTF-8'); ?>
+                            </div>
                         </div>
                         <div class="col-12">
                             <div class="form-check form-check-inline">

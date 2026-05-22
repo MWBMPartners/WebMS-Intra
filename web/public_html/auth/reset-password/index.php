@@ -22,7 +22,6 @@ declare(strict_types=1);
 
 require_once dirname(__DIR__, 3) . DIRECTORY_SEPARATOR . 'core' . DIRECTORY_SEPARATOR . 'bootstrap.php';
 
-use Portal\Core\App;
 use Portal\Core\Asset;
 use Portal\Core\Auth;
 use Portal\Core\Captcha;
@@ -76,25 +75,11 @@ if ($plaintextToken === '') {
 }
 
 // -----------------------------------------------------------------------------
-// 3. 📋 Build password policy description for the user
+// 3. 📋 Resolve password policy for display + the strength meter
 // -----------------------------------------------------------------------------
 
-$minLength      = (int) (App::settings('auth.password.minLength') ?? '8');
-$requireUpper   = (App::settings('auth.password.requireUppercase') ?? 'true') === 'true';
-$requireNumber  = (App::settings('auth.password.requireNumber') ?? 'true') === 'true';
-$requireSpecial = (App::settings('auth.password.requireSpecial') ?? 'true') === 'true';
-
-$policyItems = [];
-$policyItems[] = 'At least ' . $minLength . ' characters';
-if ($requireUpper === true) {
-    $policyItems[] = 'Upper and lowercase letters';
-}
-if ($requireNumber === true) {
-    $policyItems[] = 'At least one number';
-}
-if ($requireSpecial === true) {
-    $policyItems[] = 'At least one special character';
-}
+$policy      = Auth::passwordPolicy();
+$policyItems = $policy['rules'];
 
 // -----------------------------------------------------------------------------
 // 4. 🎨 Render page
@@ -158,13 +143,24 @@ if ($requireSpecial === true) {
             <div class="mb-3">
                 <label for="password" class="form-label">New Password</label>
                 <input type="password" class="form-control" id="password" name="password"
-                       autocomplete="new-password" required autofocus>
+                       autocomplete="new-password" required autofocus
+                       minlength="<?php echo (int) $policy['minLength']; ?>"
+                       maxlength="<?php echo (int) $policy['maxLength']; ?>"
+                       data-portal-password-input>
+                <div class="portal-password-strength mt-2" data-portal-password-meter hidden>
+                    <div class="progress" style="height:6px;">
+                        <div class="progress-bar" role="progressbar" style="width:0%"></div>
+                    </div>
+                    <small class="form-text" data-portal-password-meter-label>Password strength</small>
+                </div>
             </div>
 
             <div class="mb-2">
                 <label for="password_confirm" class="form-label">Confirm New Password</label>
                 <input type="password" class="form-control" id="password_confirm" name="password_confirm"
-                       autocomplete="new-password" required>
+                       autocomplete="new-password" required
+                       minlength="<?php echo (int) $policy['minLength']; ?>"
+                       maxlength="<?php echo (int) $policy['maxLength']; ?>">
             </div>
 
             <!-- 📋 Password requirements -->
@@ -193,6 +189,7 @@ if ($requireSpecial === true) {
 
 <!-- 📦 JavaScript (CDN with local fallback) -->
 <?php echo Asset::bootstrapJs(); ?>
+<?php echo Asset::portalJs(); ?>
 
 </body>
 </html>
