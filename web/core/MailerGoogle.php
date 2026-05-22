@@ -103,7 +103,7 @@ class MailerGoogle
         $resp = curl_exec($ch);
         $code = (int) curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
         $err  = curl_error($ch);
-        curl_close($ch);
+        // PHP 8+ auto-closes cURL handles when they go out of scope; no curl_close needed.
 
         if ($resp === false) {
             Logger::errorPlatform('Gmail', 'Error', 'CURL_FAIL', 'Gmail API cURL error: ' . $err, '');
@@ -292,7 +292,7 @@ class MailerGoogle
 
         $resp = curl_exec($ch);
         $code = (int) curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
-        curl_close($ch);
+        // PHP 8+ auto-closes cURL handles; no curl_close needed.
 
         if ($resp === false) {
             throw new RuntimeException('Google token request failed (cURL error).');

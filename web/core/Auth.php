@@ -1224,11 +1224,10 @@ class Auth
 
         if ($resp === false) {
             Logger::errorPlatform('cURL', 'Error', (string) curl_errno($ch), curl_error($ch), '');
-            curl_close($ch);
+            // PHP 8+ auto-closes cURL handles; no curl_close needed.
             return null;
         }
 
-        curl_close($ch);
         return $resp;
     }
 
