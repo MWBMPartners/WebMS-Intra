@@ -295,6 +295,34 @@ inherit `#5e6ad2` until the admin sets their own brand colour. Logo and
 favicon default to `/assets/images/logo.svg` and
 `/assets/images/favicon.ico` respectively.
 
+### "Powered by WebMS Intra" footer attribution
+
+When a site uses CUSTOM branding (any branding field differs from the
+defaults defined as `Site::DEFAULT_*` constants), the footer renders a
+small "Powered by WebMS Intra" attribution after the copyright line.
+Sites running the default WebMS Intra branding don't show it — the
+copyright line already names the product.
+
+Detection (`Site::usesCustomBranding()` in `web/core/Site.php`):
+
+- `siteName` differs from `Site::DEFAULT_SITE_NAME` (`'WebMS Intra'`), OR
+- `logoPath` differs from `Site::DEFAULT_LOGO_PATH`
+  (`'/assets/images/logo.svg'`), OR
+- `primaryColor` differs from `Site::DEFAULT_PRIMARY_COLOR`
+  (`'#5e6ad2'`, compared case-insensitively), OR
+- `copyrightOrg` is non-empty (default is NULL), OR
+- `faviconPath` is non-empty and differs from the default favicon path
+
+Admins disable attribution globally via the `branding.hidePoweredBy`
+setting in `/settings/` (set to the string `'true'`). Default is
+`'false'`, so attribution is on out-of-the-box for custom-branded
+deploys.
+
+Markup lives in `web/core/templates/footer.php`; styling is in the
+`.portal-powered-by`, `.portal-powered-by-prefix`, and
+`.portal-powered-by-mark` rules in `portal.css`. The mark class is a
+hook for future hyperlinking when the WebMS Intra landing page exists.
+
 ---
 
 ## Theme modes + colour-blind palette

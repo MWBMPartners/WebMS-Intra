@@ -1832,3 +1832,13 @@ ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
 INSERT INTO `tblMigrations` (`filename`) VALUES ('037_site_favicon.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('038_branding_powered_by.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- Seed the branding.hidePoweredBy setting (matches migration 038)
+INSERT INTO `tblSettings`
+    (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`)
+VALUES
+    (NULL, 'branding.hidePoweredBy', 'false', 'false', 0)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
