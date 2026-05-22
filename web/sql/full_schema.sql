@@ -1920,6 +1920,11 @@ ON DUPLICATE KEY UPDATE `filename` = `filename`;
 INSERT INTO `tblMigrations` (`filename`) VALUES ('044_robots_and_ai_indexing_settings.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
+-- Admin Release Notes viewer route
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('admin/release-notes', 'admin/release-notes/index.php', 1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
 -- Robots / AI-indexing opt-in (matches migration 044)
 INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
     (NULL, 'site.allowIndexing',   'false', 'false', 0),

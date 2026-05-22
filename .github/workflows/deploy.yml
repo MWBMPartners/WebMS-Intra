@@ -111,7 +111,7 @@ jobs:
         --exclude ^\.gitattributes$
         --exclude ^README\.md$
         --exclude ^DEV_NOTES\.md$
-        --exclude ^CHANGELOG\.md$
+        --exclude ^FEATURES\.md$
         --exclude ^CLAUDE\.md$
         --exclude ^\.htpasswd
         --exclude ^\.vscode/
@@ -245,6 +245,12 @@ jobs:
       - name: Fetch dompdf (pinned)
         if: steps.changes.outputs.has_changes == 'true'
         run: bash tools/download-dompdf.sh
+
+      # -- Copy CHANGELOG.md into web/ so /admin/release-notes can find it.
+      #    Repo source-of-truth stays at the root; this is a build-time copy.
+      - name: Stage CHANGELOG.md for shared upload
+        if: steps.changes.outputs.has_changes == 'true'
+        run: cp CHANGELOG.md web/CHANGELOG.md
 
       # -- Install lftp --
       - name: Install lftp
