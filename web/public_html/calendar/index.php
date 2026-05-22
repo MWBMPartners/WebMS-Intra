@@ -215,7 +215,8 @@ if ($view === 'list') {
          . 'e.startDateTime, e.endDateTime, e.timezone, e.isAllDay, '
          . 'e.locationName, e.locationAddress, e.status, e.isFeatured, '
          . 'e.heroImage, '
-         . 'c.categoryName, c.color AS categoryColor, t.typeName, s.seriesName '
+         . 'c.categoryName, c.color AS categoryColor, c.displayStyle AS categoryDisplayStyle, '
+         . 't.typeName, s.seriesName '
          . 'FROM tblEvents e '
          . 'LEFT JOIN tblEventCategories c ON c.categoryID = e.categoryID '
          . 'LEFT JOIN tblEventTypes t ON t.typeID = e.typeID '
@@ -258,7 +259,8 @@ if ($view === 'list') {
          . 'e.startDateTime, e.endDateTime, e.timezone, e.isAllDay, '
          . 'e.locationName, e.locationAddress, e.status, e.isFeatured, '
          . 'e.heroImage, '
-         . 'c.categoryName, c.color AS categoryColor, t.typeName, s.seriesName '
+         . 'c.categoryName, c.color AS categoryColor, c.displayStyle AS categoryDisplayStyle, '
+         . 't.typeName, s.seriesName '
          . 'FROM tblEvents e '
          . 'LEFT JOIN tblEventCategories c ON c.categoryID = e.categoryID '
          . 'LEFT JOIN tblEventTypes t ON t.typeID = e.typeID '
@@ -285,7 +287,8 @@ if ($view === 'list') {
 // -----------------------------------------------------------------------------
 $categories = [];
 $stmtCat = $mysqli->prepare(
-    'SELECT categoryID, categoryName, color FROM tblEventCategories '
+    'SELECT categoryID, categoryName, color, displayStyle '
+    . 'FROM tblEventCategories '
     . 'WHERE isActive = 1 AND siteID = ? ORDER BY sortOrder, categoryName'
 );
 if ($stmtCat !== false) {

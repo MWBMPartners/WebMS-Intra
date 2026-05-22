@@ -562,6 +562,9 @@ CREATE TABLE IF NOT EXISTS `tblEventCategories` (
     `categoryName` VARCHAR(150) NOT NULL,
     `categorySlug` VARCHAR(100) NOT NULL COMMENT 'URL-safe slug',
     `sortOrder`    INT          NOT NULL DEFAULT 0,
+    `color`        VARCHAR(9)   DEFAULT NULL COMMENT 'Hex colour (#RRGGBB or #RRGGBBAA) for the year planner / month grid',
+    `displayStyle` ENUM('background','text') NOT NULL DEFAULT 'background'
+                   COMMENT 'How the colour renders in the year planner: tinted background vs. coloured text',
     `isActive`     TINYINT(1)   NOT NULL DEFAULT 1,
     `createdAt`    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (`categoryID`),
@@ -574,6 +577,27 @@ CREATE TABLE IF NOT EXISTS `tblEventCategories` (
         REFERENCES `tblSites` (`siteID`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
 COMMENT='Event categories with nested sub-categories.';
+
+-- -----------------------------------------------------------------------------
+-- 🗓️ tblCalendarMonthThemes — per-year-per-month strap-line shown on the
+--    year planner (e.g. "~Healthy connections~" for February 2026).
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `tblCalendarMonthThemes` (
+    `themeID`    INT          NOT NULL AUTO_INCREMENT,
+    `siteID`     INT          NOT NULL COMMENT 'FK → tblSites',
+    `year`       SMALLINT     NOT NULL,
+    `month`      TINYINT      NOT NULL COMMENT '1..12',
+    `themeText`  VARCHAR(255) NOT NULL,
+    `createdAt`  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updatedAt`  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`themeID`),
+    UNIQUE KEY `uq_cmt_site_year_month` (`siteID`, `year`, `month`),
+    KEY `idx_cmt_site_year` (`siteID`, `year`),
+    CONSTRAINT `fk_cmt_site` FOREIGN KEY (`siteID`)
+        REFERENCES `tblSites` (`siteID`) ON DELETE CASCADE,
+    CONSTRAINT `chk_cmt_month` CHECK (`month` BETWEEN 1 AND 12)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+COMMENT='Per-year-per-month strap-line shown on the calendar year planner.';
 
 
 -- -----------------------------------------------------------------------------
@@ -1661,6 +1685,10 @@ VALUES ('calendar/manage/types', 'calendar/manage/types.php', 1)
 ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 
 INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`)
+VALUES ('calendar/manage/month-themes', 'calendar/manage/month-themes.php', 1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`)
 VALUES ('calendar/export', 'calendar/export.php', 0)
 ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 
@@ -1884,6 +1912,9 @@ INSERT INTO `tblMigrations` (`filename`) VALUES ('041_password_policy_hardening.
 ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
 INSERT INTO `tblMigrations` (`filename`) VALUES ('042_calendar_default_view.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('043_calendar_categories_and_month_themes.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
 -- Seed the branding.hidePoweredBy setting (matches migration 038)
