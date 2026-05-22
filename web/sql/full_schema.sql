@@ -1932,6 +1932,25 @@ ON DUPLICATE KEY UPDATE `filename` = `filename`;
 INSERT INTO `tblMigrations` (`filename`) VALUES ('048_privacy_gdpr.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
+INSERT INTO `tblMigrations` (`filename`) VALUES ('049_rest_api_expansion.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- 🛰️ REST API enable flags (matches migration 049)
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'api.announcements.list.enabled',   'true', 'true', 0),
+    (NULL, 'api.attendance.list.enabled',      'true', 'true', 0),
+    (NULL, 'api.events.list.enabled',          'true', 'true', 0),
+    (NULL, 'api.events.detail.enabled',        'true', 'true', 0),
+    (NULL, 'api.users.list.enabled',           'true', 'true', 0),
+    (NULL, 'api.events.create.enabled',        'true', 'true', 0),
+    (NULL, 'api.events.update.enabled',        'true', 'true', 0),
+    (NULL, 'api.events.delete.enabled',        'true', 'true', 0),
+    (NULL, 'api.leadership.list.enabled',      'true', 'true', 0),
+    (NULL, 'api.tasks.list.enabled',           'true', 'true', 0),
+    (NULL, 'api.prayer-requests.list.enabled', 'true', 'true', 0),
+    (NULL, 'api.documents.list.enabled',       'true', 'true', 0)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
 -- 🇪🇺 Privacy / GDPR (matches migration 048 — closes #47)
 CREATE TABLE IF NOT EXISTS `tblConsentLog` (
     `consentID`   INT          NOT NULL AUTO_INCREMENT,
