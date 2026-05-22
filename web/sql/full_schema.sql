@@ -1951,6 +1951,11 @@ INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue
     (NULL, 'api.documents.list.enabled',       'true', 'true', 0)
 ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
 
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('api-docs',     'api-docs/index.php', 0),
+    ('openapi.json', 'openapi.json',       0)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
 -- 🇪🇺 Privacy / GDPR (matches migration 048 — closes #47)
 CREATE TABLE IF NOT EXISTS `tblConsentLog` (
     `consentID`   INT          NOT NULL AUTO_INCREMENT,

@@ -30,3 +30,9 @@ INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue
     (NULL, 'api.prayer-requests.list.enabled',  'true', 'true', 0),
     (NULL, 'api.documents.list.enabled',        'true', 'true', 0)
 ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
+-- Swagger UI route + OpenAPI JSON discovery route
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('api-docs',     'api-docs/index.php', 0),
+    ('openapi.json', 'openapi.json',       0)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);

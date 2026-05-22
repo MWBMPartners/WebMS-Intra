@@ -1,0 +1,294 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "WebMS Intra REST API",
+    "description": "Internal portal platform REST API. All endpoints require an authenticated portal session (cookie-based) and a valid CSRF token on write operations (passed via `X-CSRF-TOKEN` header or `csrf_token` body field). Every endpoint can be enabled/disabled per-site via the `api.{module}.{action}.enabled` setting.",
+    "version": "1.0.0",
+    "license": {
+      "name": "All Rights Reserved",
+      "url": "https://github.com/MWBMPartners/WebMS-Intra"
+    },
+    "contact": {
+      "name": "MWBM Partners Ltd (t/a MWservices)",
+      "url": "https://github.com/MWBMPartners/WebMS-Intra"
+    }
+  },
+  "servers": [
+    { "url": "/", "description": "Same-origin (whichever portal is serving this page)" }
+  ],
+  "security": [
+    { "sessionCookie": [], "csrfToken": [] }
+  ],
+  "tags": [
+    { "name": "Events",          "description": "Events / calendar entries" },
+    { "name": "Attendance",      "description": "Headcount sessions" },
+    { "name": "Announcements",   "description": "Per-site noticeboard" },
+    { "name": "Leadership",      "description": "Roles + assignments" },
+    { "name": "Tasks",           "description": "Reminders / tasks" },
+    { "name": "Prayer Requests", "description": "Prayer requests (visibility-aware)" },
+    { "name": "Documents",       "description": "Document library" },
+    { "name": "Users",           "description": "User directory (admin only)" }
+  ],
+  "components": {
+    "securitySchemes": {
+      "sessionCookie": {
+        "type":  "apiKey",
+        "in":    "cookie",
+        "name":  "PHPSESSID",
+        "description": "Portal session cookie set on sign-in."
+      },
+      "csrfToken": {
+        "type": "apiKey",
+        "in":   "header",
+        "name": "X-CSRF-TOKEN",
+        "description": "CSRF token. Read from `<meta name=\"csrf-token\">` in the portal HTML or from the session. Required on POST endpoints; ignored on read-only GETs."
+      }
+    },
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "required": ["status", "message"],
+        "properties": {
+          "status":  { "type": "string", "example": "error" },
+          "message": { "type": "string", "example": "Forbidden" },
+          "detail":  { "type": "string", "nullable": true }
+        }
+      },
+      "PaginatedListResponse": {
+        "type": "object",
+        "required": ["status", "data"],
+        "properties": {
+          "status": { "type": "string", "example": "success" },
+          "data": {
+            "type": "object",
+            "properties": {
+              "count":      { "type": "integer", "example": 12 },
+              "page":       { "type": "integer", "example": 1 },
+              "limit":      { "type": "integer", "example": 20 },
+              "totalItems": { "type": "integer", "example": 142 },
+              "totalPages": { "type": "integer", "example": 8 },
+              "items":      { "type": "array", "items": { "type": "object" } }
+            }
+          }
+        }
+      },
+      "Event": {
+        "type": "object",
+        "properties": {
+          "eventID":       { "type": "integer", "example": 1234 },
+          "eventName":     { "type": "string",  "example": "Sunday Service" },
+          "eventSlug":     { "type": "string",  "example": "sunday-service" },
+          "description":   { "type": "string",  "nullable": true },
+          "startDateTime": { "type": "string",  "format": "date-time" },
+          "endDateTime":   { "type": "string",  "format": "date-time", "nullable": true },
+          "timezone":      { "type": "string",  "example": "Europe/London", "nullable": true },
+          "isAllDay":      { "type": "integer", "enum": [0, 1] },
+          "locationName":  { "type": "string",  "nullable": true },
+          "status":        { "type": "string",  "enum": ["draft", "published", "cancelled", "archived"] },
+          "isPublic":      { "type": "integer", "enum": [0, 1] },
+          "isFeatured":    { "type": "integer", "enum": [0, 1] },
+          "categoryName":  { "type": "string",  "nullable": true },
+          "typeName":      { "type": "string",  "nullable": true }
+        }
+      },
+      "EventCreate": {
+        "type": "object",
+        "required": ["eventName", "startDateTime"],
+        "properties": {
+          "eventName":     { "type": "string", "example": "Worship Service" },
+          "startDateTime": { "type": "string", "format": "date-time", "example": "2026-06-01T10:00:00" },
+          "endDateTime":   { "type": "string", "format": "date-time", "nullable": true },
+          "isAllDay":      { "type": "boolean", "default": false },
+          "locationName":  { "type": "string",  "nullable": true },
+          "categoryID":    { "type": "integer", "nullable": true },
+          "typeID":        { "type": "integer", "nullable": true },
+          "status":        { "type": "string",  "enum": ["draft", "published", "cancelled", "archived"], "default": "draft" },
+          "isPublic":      { "type": "boolean", "default": true },
+          "isFeatured":    { "type": "boolean", "default": false },
+          "description":   { "type": "string",  "nullable": true },
+          "csrf_token":    { "type": "string",  "description": "CSRF token (or use X-CSRF-TOKEN header)" }
+        }
+      }
+    }
+  },
+  "paths": {
+    "/api/events/list": {
+      "get": {
+        "tags": ["Events"],
+        "summary": "List published events for the current site",
+        "parameters": [
+          { "name": "page",  "in": "query", "schema": { "type": "integer", "minimum": 1, "default": 1 } },
+          { "name": "limit", "in": "query", "schema": { "type": "integer", "minimum": 1, "maximum": 100, "default": 20 } }
+        ],
+        "responses": {
+          "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/PaginatedListResponse" } } } },
+          "401": { "description": "Auth required", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "403": { "description": "Endpoint disabled" }
+        }
+      }
+    },
+    "/api/events/detail": {
+      "get": {
+        "tags": ["Events"],
+        "summary": "Fetch a single event by ID or slug",
+        "parameters": [
+          { "name": "id",   "in": "query", "schema": { "type": "integer" } },
+          { "name": "slug", "in": "query", "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Event" } } } },
+          "404": { "description": "Not found" }
+        }
+      }
+    },
+    "/api/events/create": {
+      "post": {
+        "tags": ["Events"],
+        "summary": "Create a new event (admin only)",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EventCreate" } } }
+        },
+        "responses": {
+          "201": { "description": "Created" },
+          "400": { "description": "Validation error" },
+          "403": { "description": "Admin required or CSRF failed" }
+        }
+      }
+    },
+    "/api/events/update": {
+      "post": {
+        "tags": ["Events"],
+        "summary": "Update event fields (PATCH-style; only present fields are touched)",
+        "parameters": [
+          { "name": "id", "in": "query", "schema": { "type": "integer" }, "description": "Or pass eventID in body" }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "type": "object", "description": "Subset of EventCreate fields + eventID" } } }
+        },
+        "responses": {
+          "200": { "description": "OK" },
+          "400": { "description": "Validation error" },
+          "404": { "description": "Event not found" }
+        }
+      }
+    },
+    "/api/events/delete": {
+      "post": {
+        "tags": ["Events"],
+        "summary": "Soft-delete an event (isDeleted = 1)",
+        "parameters": [
+          { "name": "id", "in": "query", "schema": { "type": "integer" }, "description": "Or pass eventID in body" }
+        ],
+        "responses": {
+          "200": { "description": "OK" },
+          "404": { "description": "Event not found or already deleted" }
+        }
+      }
+    },
+    "/api/attendance/list": {
+      "get": {
+        "tags": ["Attendance"],
+        "summary": "List attendance sessions for the current site",
+        "parameters": [
+          { "name": "page",  "in": "query", "schema": { "type": "integer", "default": 1 } },
+          { "name": "limit", "in": "query", "schema": { "type": "integer", "default": 20 } }
+        ],
+        "responses": { "200": { "description": "OK" } }
+      }
+    },
+    "/api/announcements/list": {
+      "get": {
+        "tags": ["Announcements"],
+        "summary": "List active announcements for the current site",
+        "responses": { "200": { "description": "OK" } }
+      }
+    },
+    "/api/leadership/list": {
+      "get": {
+        "tags": ["Leadership"],
+        "summary": "List leadership roles and current assignees",
+        "parameters": [
+          { "name": "role", "in": "query", "schema": { "type": "integer" }, "description": "Optional roleID filter" }
+        ],
+        "responses": { "200": { "description": "OK" } }
+      }
+    },
+    "/api/tasks/list": {
+      "get": {
+        "tags": ["Tasks"],
+        "summary": "List tasks (own by default; admins can filter via userID)",
+        "parameters": [
+          { "name": "status", "in": "query", "schema": { "type": "string", "enum": ["open", "completed", "all"], "default": "open" } },
+          { "name": "userID", "in": "query", "schema": { "type": "integer" }, "description": "Admin-only filter" },
+          { "name": "page",   "in": "query", "schema": { "type": "integer", "default": 1 } },
+          { "name": "limit",  "in": "query", "schema": { "type": "integer", "default": 20 } }
+        ],
+        "responses": { "200": { "description": "OK" } }
+      }
+    },
+    "/api/prayer-requests/list": {
+      "get": {
+        "tags": ["Prayer Requests"],
+        "summary": "List prayer requests visible to the current user",
+        "description": "Non-admins see their own requests plus congregation-visible ones. Admins see all. Anonymous-flagged requests have `submitterID` nulled for non-admin readers.",
+        "parameters": [
+          { "name": "status", "in": "query", "schema": { "type": "string", "enum": ["pending", "active", "answered", "archived", "all"], "default": "active" } }
+        ],
+        "responses": { "200": { "description": "OK" } }
+      }
+    },
+    "/api/documents/list": {
+      "get": {
+        "tags": ["Documents"],
+        "summary": "List documents for the current site",
+        "parameters": [
+          { "name": "categoryID", "in": "query", "schema": { "type": "integer" } },
+          { "name": "page",       "in": "query", "schema": { "type": "integer", "default": 1 } },
+          { "name": "limit",      "in": "query", "schema": { "type": "integer", "default": 20 } }
+        ],
+        "responses": { "200": { "description": "OK" } }
+      }
+    },
+    "/api/users/list": {
+      "get": {
+        "tags": ["Users"],
+        "summary": "List users (admin only)",
+        "responses": {
+          "200": { "description": "OK" },
+          "403": { "description": "Admin required" }
+        }
+      }
+    },
+    "/health": {
+      "get": {
+        "summary": "Healthcheck (no auth required)",
+        "description": "Uptime probe with DB ping. Returns 200/`ok` on full health, 503/`degraded` when the DB is unreachable.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status":     { "type": "string", "example": "ok" },
+                    "env":        { "type": "string", "example": "prod" },
+                    "version":    { "type": "string", "example": "1.0.0" },
+                    "phpVersion": { "type": "string", "example": "8.5.5" },
+                    "siteID":     { "type": "integer", "example": 1 },
+                    "db":         { "type": "string", "example": "ok" },
+                    "time":       { "type": "string", "format": "date-time" }
+                  }
+                }
+              }
+            }
+          },
+          "503": { "description": "Degraded — DB unreachable" }
+        }
+      }
+    }
+  }
+}
