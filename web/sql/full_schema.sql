@@ -1923,6 +1923,20 @@ ON DUPLICATE KEY UPDATE `filename` = `filename`;
 INSERT INTO `tblMigrations` (`filename`) VALUES ('045_ratelimit_username_setting.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
+INSERT INTO `tblMigrations` (`filename`) VALUES ('046_audit_retention_settings.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- Audit / error retention + cron token (matches migration 046)
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'audit.retentionDays',   '365', '365', 0),
+    (NULL, 'errors.retentionDays',  '365', '365', 0),
+    (NULL, 'maintenance.cronToken', '',    '',    1)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('admin/maintenance/retention', 'admin/maintenance/retention.php', 1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
 -- Rate-limit by username threshold (matches migration 045 — issue #52)
 INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
     (NULL, 'auth.rateLimit.maxAttemptsByUsername', '10', '10', 0)
