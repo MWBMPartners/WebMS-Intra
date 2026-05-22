@@ -1414,6 +1414,20 @@ body.d-flex.vh-100 > .card h1 {
 }
 .portal-footer a:hover { color: var(--portal-primary); }
 
+/* "Powered by WebMS Intra" attribution — shown by footer.php when the site
+   uses custom branding and the admin hasn't opted out. Subtle by design;
+   the WebMS Intra mark sits slightly forward of the surrounding text. */
+.portal-powered-by {
+    color: var(--portal-text-subtle);
+    font-size: var(--portal-font-size-xs);
+    display: inline-block;
+}
+.portal-powered-by-prefix { color: var(--portal-text-subtle); }
+.portal-powered-by-mark {
+    color: var(--portal-text-muted);
+    font-weight: var(--portal-font-weight-medium);
+}
+
 /* ----- Dropzone refinement ----- */
 .portal-dropzone:hover,
 .portal-dropzone.dragover {

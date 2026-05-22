@@ -46,6 +46,15 @@ namespace Portal\Core;
 
 class Site
 {
+    /** Default WebMS Intra branding constants. The footer attribution logic
+     * compares the current site's branding values against these to decide
+     * whether to show "Powered by WebMS Intra". Update these alongside
+     * tblSites column defaults in full_schema.sql. */
+    public const DEFAULT_SITE_NAME     = 'WebMS Intra';
+    public const DEFAULT_LOGO_PATH     = '/assets/images/logo.svg';
+    public const DEFAULT_PRIMARY_COLOR = '#5e6ad2';
+    public const DEFAULT_FAVICON_PATH  = '/assets/images/favicon.ico';
+
     /** @var int Active site ID (defaults to 1) */
     private static int $currentSiteID = 1;
 
@@ -193,6 +202,66 @@ class Site
         }
 
         return null;
+    }
+
+    /**
+     * Detect whether the current site has CUSTOM branding —
+     * any branding field differs from the WebMS Intra defaults
+     * defined as DEFAULT_* class constants.
+     *
+     * Used by the footer template to decide whether to render
+     * "Powered by WebMS Intra" attribution. The actual show/hide is
+     * additionally gated by the `branding.hidePoweredBy` setting.
+     *
+     * Returns false when no site row has loaded (defensive — better to
+     * suppress attribution than to falsely accuse the WebMS Intra
+     * defaults of being custom).
+     *
+     * @return bool
+     */
+    public static function usesCustomBranding(): bool
+    {
+        $site = self::$currentSite;
+        if ($site === null) {
+            return false;
+        }
+
+        // siteName / logoPath / primaryColor: stored as strings; compare
+        // case-insensitively for the hex colour (where case is irrelevant)
+        // and case-sensitively for the others.
+        $siteName = (string) ($site['siteName'] ?? '');
+        if ($siteName !== '' && $siteName !== self::DEFAULT_SITE_NAME) {
+            return true;
+        }
+
+        $logoPath = (string) ($site['logoPath'] ?? '');
+        if ($logoPath !== '' && $logoPath !== self::DEFAULT_LOGO_PATH) {
+            return true;
+        }
+
+        $primaryColor = (string) ($site['primaryColor'] ?? '');
+        if ($primaryColor !== ''
+            && strcasecmp($primaryColor, self::DEFAULT_PRIMARY_COLOR) !== 0
+        ) {
+            return true;
+        }
+
+        // copyrightOrg: default is NULL/empty. Any non-empty value is custom.
+        $copyrightOrg = $site['copyrightOrg'] ?? null;
+        if ($copyrightOrg !== null && $copyrightOrg !== '') {
+            return true;
+        }
+
+        // faviconPath: default is NULL (falls back to /assets/images/favicon.ico).
+        // Any explicit value set is custom.
+        $faviconPath = $site['faviconPath'] ?? null;
+        if ($faviconPath !== null && $faviconPath !== ''
+            && $faviconPath !== self::DEFAULT_FAVICON_PATH
+        ) {
+            return true;
+        }
+
+        return false;
     }
 
     /**

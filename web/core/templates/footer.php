@@ -33,6 +33,12 @@ $yearDisplay = $copyrightYear;
 if ($copyrightYear !== $currentYear) {
     $yearDisplay = $copyrightYear . '-' . $currentYear;
 }
+
+// 🏷️ "Powered by WebMS Intra" attribution — shown when the active site uses
+// CUSTOM branding (any branding field differs from the WebMS Intra default)
+// AND the admin has not opted out via the `branding.hidePoweredBy` setting.
+$hidePoweredBy = (App::settings('branding.hidePoweredBy') === 'true');
+$showPoweredBy = ($hidePoweredBy === false) && (Site::usesCustomBranding() === true);
 ?>
 
 </div><!-- /.container -->
@@ -47,6 +53,12 @@ if ($copyrightYear !== $currentYear) {
         <span class="d-none d-md-inline ms-2 text-muted">
             v<?php echo htmlspecialchars(App::version(), ENT_QUOTES, 'UTF-8'); ?>
         </span>
+        <?php if ($showPoweredBy === true): ?>
+            <span class="portal-powered-by ms-md-2">
+                <span class="portal-powered-by-prefix">Powered by</span>
+                <span class="portal-powered-by-mark">WebMS Intra</span>
+            </span>
+        <?php endif; ?>
     </div>
 </footer>
 
