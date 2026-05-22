@@ -11,6 +11,31 @@ to `alpha`, `beta`, and `main` using the heading format
 
 ## [Unreleased]
 
+### Added — Calendar: per-month strap-lines + category display-style toggle (follow-ups to #136)
+
+Two enhancements deferred from the original calendar-views PR (#137):
+
+- **Per-month strap-lines / themes** on the year planner. A new table
+  `tblCalendarMonthThemes` stores one text line per (site, year, month)
+  that appears under each month name on `/calendar?view=year`. Managed
+  via a new admin page at `/calendar/manage/month-themes` (year picker
+  with 12 inputs; empty values delete the existing row).
+- **`tblEventCategories.color` + `tblEventCategories.displayStyle`**
+  columns. Categories can now carry a colour and choose whether that
+  colour renders as a **tinted background band** (default — used for
+  organisational scopes like "Area 8", "Conference", "Union") or as
+  **coloured text** on the default background (used for events like
+  Bank Holidays / Notable Days that just want to flag the day, not
+  fill the band).
+- Category management UI at `/calendar/manage/types` exposes a colour
+  picker + display-style dropdown for every category. Existing
+  categories get an inline form to update appearance in-place.
+- Year-planner legend renders text-style categories as a coloured
+  word rather than a swatch + name, mirroring how they'll appear in
+  the planner.
+- Migration `web/sql/043_calendar_categories_and_month_themes.sql`
+  adds the new columns, the new table, and the admin route.
+
 ### Added — Calendar multi-view modes (#136)
 
 The calendar app was previously list-view only. It now supports **seven**

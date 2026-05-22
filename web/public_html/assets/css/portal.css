@@ -1923,6 +1923,19 @@ a:focus > .app-card {
     border-radius: 3px;
     border: 1px solid var(--portal-border);
 }
+.portal-cal-yearplan-legend-text {
+    /* Text-only legend entries (e.g. Bank Holidays) — no swatch, just
+       the category name rendered in its display colour. */
+    font-size: var(--portal-font-size-sm);
+}
+
+/* Text-style event entries inside day cells — coloured text with no
+   background tint, distinguishing them from band-style events. */
+.portal-cal-yearplan-events li.is-text-style a {
+    text-decoration: underline;
+    text-decoration-thickness: 1px;
+    text-underline-offset: 2px;
+}
 
 .portal-cal-yearplan-scroll {
     overflow-x: auto;
@@ -1954,6 +1967,21 @@ a:focus > .app-card {
 .portal-cal-yearplan-monthhead:hover {
     color: var(--portal-primary);
     background: var(--portal-primary-subtle);
+}
+.portal-cal-yearplan-monthhead-name {
+    display: block;
+    font-weight: 700;
+    line-height: 1.1;
+}
+.portal-cal-yearplan-monthhead-strap {
+    display: block;
+    font-size: var(--portal-font-size-xs);
+    font-weight: 400;
+    font-style: italic;
+    color: var(--portal-text-muted);
+    margin-top: 0.15rem;
+    line-height: 1.1;
+    word-break: break-word;
 }
 
 /* Day-number sub-cell */

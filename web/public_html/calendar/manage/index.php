@@ -217,11 +217,19 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
 <?php else: ?>
 <!-- 📋 Event List + Create -->
-<div class="d-flex justify-content-between align-items-center mb-4">
+<div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
     <h1 class="mb-0"><i class="fa-solid fa-list-check me-2"></i>Manage Events</h1>
-    <button class="btn btn-success" data-bs-toggle="collapse" data-bs-target="#createEventForm">
-        <i class="fa-solid fa-plus me-1"></i> Create Event
-    </button>
+    <div class="d-flex gap-2 flex-wrap">
+        <a href="/calendar/manage/types" class="btn btn-outline-secondary">
+            <i class="fa-solid fa-tags me-1"></i> Categories &amp; Types
+        </a>
+        <a href="/calendar/manage/month-themes" class="btn btn-outline-secondary">
+            <i class="fa-solid fa-quote-left me-1"></i> Month Themes
+        </a>
+        <button class="btn btn-success" data-bs-toggle="collapse" data-bs-target="#createEventForm">
+            <i class="fa-solid fa-plus me-1"></i> Create Event
+        </button>
+    </div>
 </div>
 
 <!-- ➕ Create event form (collapsible) -->

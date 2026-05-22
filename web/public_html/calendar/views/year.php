@@ -45,6 +45,22 @@ $cleanHex = static function (?string $c): ?string {
     return preg_match('/^#[0-9a-fA-F]{3,8}$/', $c) === 1 ? $c : null;
 };
 
+// 🗓️ Per-month strap-lines from tblCalendarMonthThemes
+$monthThemes = [];   // map: monthNum => themeText
+$stmtMt = $mysqli->prepare(
+    'SELECT month, themeText FROM tblCalendarMonthThemes '
+    . 'WHERE siteID = ? AND year = ?'
+);
+if ($stmtMt !== false) {
+    $stmtMt->bind_param('ii', $siteId, $year);
+    $stmtMt->execute();
+    $r = $stmtMt->get_result();
+    while ($row = $r->fetch_assoc()) {
+        $monthThemes[(int) $row['month']] = (string) $row['themeText'];
+    }
+    $stmtMt->close();
+}
+
 // 🗂️ Bucket events by Y-m-d, repeating multi-day events on each day they span.
 $byDate = [];
 foreach ($events as $ev) {
@@ -73,14 +89,23 @@ $months = [
 ];
 
 /**
- * Decide the cell background colour for a day. If any multi-day event
- * covers the day, use its category colour. Otherwise, weekend cells
- * get a Sat/Sun tint. Plain weekdays get no background.
+ * Decide the cell appearance for a day.
+ *
+ * Walks the day's events in order and picks the first one whose category has
+ * `displayStyle = 'background'` to drive a tinted cell bg. Categories with
+ * `displayStyle = 'text'` (e.g. Bank Holidays, Notable Days) never tint the
+ * background — they only colour the event text inside the cell.
+ *
+ * If no event triggers a bg tint, weekend cells get Sat/Sun tint.
  *
  * @return array{bg:?string,isWeekend:bool}
  */
 $cellBg = static function (array $dayEvents, DateTimeImmutable $dt) use ($cleanHex): array {
     foreach ($dayEvents as $ev) {
+        $style = (string) ($ev['categoryDisplayStyle'] ?? 'background');
+        if ($style !== 'background') {
+            continue;   // text-style events don't tint the cell
+        }
         $c = $cleanHex($ev['categoryColor'] ?? null);
         if ($c !== null) {
             return ['bg' => $c, 'isWeekend' => false];
@@ -106,10 +131,21 @@ $cellBg = static function (array $dayEvents, DateTimeImmutable $dt) use ($cleanH
         <div class="portal-cal-yearplan-legend mb-2">
             <strong class="small text-muted me-2">Key:</strong>
             <?php foreach ($legendCats as $cat): ?>
+                <?php
+                $catColor = (string) $cleanHex($cat['color']);
+                $catStyle = (string) ($cat['displayStyle'] ?? 'background');
+                ?>
                 <span class="portal-cal-yearplan-legend-item">
-                    <span class="portal-cal-yearplan-legend-swatch"
-                          style="background: <?php echo $esc((string) $cleanHex($cat['color'])); ?>;"></span>
-                    <?php echo $esc((string) $cat['categoryName']); ?>
+                    <?php if ($catStyle === 'text'): ?>
+                        <span class="portal-cal-yearplan-legend-text"
+                              style="color: <?php echo $esc($catColor); ?>; font-weight: 600;">
+                            <?php echo $esc((string) $cat['categoryName']); ?>
+                        </span>
+                    <?php else: ?>
+                        <span class="portal-cal-yearplan-legend-swatch"
+                              style="background: <?php echo $esc($catColor); ?>;"></span>
+                        <?php echo $esc((string) $cat['categoryName']); ?>
+                    <?php endif; ?>
                 </span>
             <?php endforeach; ?>
         </div>
@@ -121,10 +157,16 @@ $cellBg = static function (array $dayEvents, DateTimeImmutable $dt) use ($cleanH
 
             <!-- Header row: month names (each spans 2 sub-columns) -->
             <?php foreach ($months as $monthNum => $monthName): ?>
+                <?php $strap = $monthThemes[$monthNum] ?? ''; ?>
                 <a href="/calendar?view=month&amp;date=<?php echo $year; ?>-<?php echo sprintf('%02d', $monthNum); ?>-01"
                    class="portal-cal-yearplan-monthhead"
                    style="grid-column: span 2;">
-                    <?php echo $esc($monthName); ?>
+                    <span class="portal-cal-yearplan-monthhead-name"><?php echo $esc($monthName); ?></span>
+                    <?php if ($strap !== ''): ?>
+                        <span class="portal-cal-yearplan-monthhead-strap">
+                            <?php echo $esc($strap); ?>
+                        </span>
+                    <?php endif; ?>
                 </a>
             <?php endforeach; ?>
 
@@ -188,10 +230,14 @@ $cellBg = static function (array $dayEvents, DateTimeImmutable $dt) use ($cleanH
                         <?php if (count($dayEv) > 0): ?>
                             <ul class="portal-cal-yearplan-events">
                                 <?php foreach ($dayEv as $ev): ?>
-                                    <?php $evColor = $cleanHex($ev['categoryColor'] ?? null); ?>
-                                    <li>
+                                    <?php
+                                    $evColor = $cleanHex($ev['categoryColor'] ?? null);
+                                    $evStyle = (string) ($ev['categoryDisplayStyle'] ?? 'background');
+                                    $textColored = ($evStyle === 'text' && $evColor !== null);
+                                    ?>
+                                    <li class="<?php echo $textColored === true ? 'is-text-style' : ''; ?>">
                                         <a href="/calendar/event?slug=<?php echo $esc((string) $ev['eventSlug']); ?>"
-                                           <?php if ($evColor !== null): ?>style="--ev-color: <?php echo $esc($evColor); ?>;"<?php endif; ?>
+                                           <?php if ($evColor !== null): ?>style="--ev-color: <?php echo $esc($evColor); ?>;<?php echo $textColored === true ? ' color: ' . $esc($evColor) . '; font-weight: 600;' : ''; ?>"<?php endif; ?>
                                            title="<?php echo $esc((string) $ev['eventName']); ?>">
                                             <?php echo $esc((string) $ev['eventName']); ?>
                                         </a>

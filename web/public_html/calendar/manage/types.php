@@ -72,15 +72,59 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $name     = trim($_POST['categoryName'] ?? '');
         $parentID = ((int) ($_POST['parentID'] ?? 0)) ?: null;
         $slug     = strtolower(trim(preg_replace('/[^a-zA-Z0-9]+/', '-', $name), '-'));
+
+        // 🎨 Colour + display style validation
+        $color = trim((string) ($_POST['color'] ?? ''));
+        if ($color !== '' && preg_match('/^#[0-9a-fA-F]{3,8}$/', $color) !== 1) {
+            $color = '';   // reject malformed hex silently — falls back to default
+        }
+        $colorParam = $color === '' ? null : $color;
+
+        $displayStyle = (string) ($_POST['displayStyle'] ?? 'background');
+        if ($displayStyle !== 'background' && $displayStyle !== 'text') {
+            $displayStyle = 'background';
+        }
+
         if ($name !== '') {
-            $stmt = $mysqli->prepare('INSERT INTO tblEventCategories (categoryName, categorySlug, parentID, siteID) VALUES (?, ?, ?, ?)');
+            $stmt = $mysqli->prepare(
+                'INSERT INTO tblEventCategories '
+                . '(categoryName, categorySlug, parentID, siteID, color, displayStyle) '
+                . 'VALUES (?, ?, ?, ?, ?, ?)'
+            );
             if ($stmt !== false) {
-                $stmt->bind_param('ssii', $name, $slug, $parentID, $siteId);
+                $stmt->bind_param('ssiiss', $name, $slug, $parentID, $siteId, $colorParam, $displayStyle);
                 $stmt->execute();
                 $stmt->close();
             }
             Logger::activity('CategoryCreated', 'Created event category: ' . $name, $_SESSION['user_id'] ?? null);
             $_SESSION['flash_msg'] = 'Category "' . $name . '" created.';
+            $_SESSION['flash_type'] = 'success';
+        }
+    }
+
+    if ($action === 'update' && $entity === 'category') {
+        $catID    = (int) ($_POST['categoryID'] ?? 0);
+        $color    = trim((string) ($_POST['color'] ?? ''));
+        if ($color !== '' && preg_match('/^#[0-9a-fA-F]{3,8}$/', $color) !== 1) {
+            $color = '';
+        }
+        $colorParam = $color === '' ? null : $color;
+        $displayStyle = (string) ($_POST['displayStyle'] ?? 'background');
+        if ($displayStyle !== 'background' && $displayStyle !== 'text') {
+            $displayStyle = 'background';
+        }
+
+        if ($catID > 0) {
+            $stmt = $mysqli->prepare(
+                'UPDATE tblEventCategories SET color = ?, displayStyle = ? '
+                . 'WHERE categoryID = ? AND siteID = ?'
+            );
+            if ($stmt !== false) {
+                $stmt->bind_param('ssii', $colorParam, $displayStyle, $catID, $siteId);
+                $stmt->execute();
+                $stmt->close();
+            }
+            $_SESSION['flash_msg'] = 'Category appearance updated.';
             $_SESSION['flash_type'] = 'success';
         }
     }
@@ -283,6 +327,20 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                 <?php endforeach; ?>
                             </select>
                         </div>
+                        <div class="row g-2 mb-2">
+                            <div class="col-7">
+                                <label class="form-label small mb-1">Colour</label>
+                                <input type="color" class="form-control form-control-sm form-control-color"
+                                       name="color" value="#5e6ad2" title="Pick a colour">
+                            </div>
+                            <div class="col-5">
+                                <label class="form-label small mb-1">Style</label>
+                                <select name="displayStyle" class="form-select form-select-sm">
+                                    <option value="background">Background</option>
+                                    <option value="text">Text only</option>
+                                </select>
+                            </div>
+                        </div>
                         <button type="submit" class="btn btn-sm btn-success">Add</button>
                     </form>
                 </div>
@@ -291,12 +349,54 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <div class="card-body p-0">
                 <div class="portal-data-list">
                     <?php foreach ($categoriesList as $c): ?>
-                        <div class="portal-data-row">
-                            <div class="col-8">
+                        <?php
+                        $catColor = (string) ($c['color'] ?? '');
+                        $catStyle = (string) ($c['displayStyle'] ?? 'background');
+                        ?>
+                        <div class="portal-data-row align-items-center">
+                            <div class="col-12 col-md-5">
                                 <?php echo ($c['parentID'] !== null) ? '<span class="text-muted ms-3">↳</span> ' : ''; ?>
-                                <?php echo htmlspecialchars($c['categoryName'], ENT_QUOTES, 'UTF-8'); ?>
+                                <?php if ($catColor !== '' && preg_match('/^#[0-9a-fA-F]{3,8}$/', $catColor) === 1): ?>
+                                    <?php if ($catStyle === 'text'): ?>
+                                        <span style="color: <?php echo htmlspecialchars($catColor, ENT_QUOTES, 'UTF-8'); ?>; font-weight: 600;">
+                                            <?php echo htmlspecialchars($c['categoryName'], ENT_QUOTES, 'UTF-8'); ?>
+                                        </span>
+                                    <?php else: ?>
+                                        <span class="badge"
+                                              style="background: <?php echo htmlspecialchars($catColor, ENT_QUOTES, 'UTF-8'); ?>; color: #fff;">
+                                            <?php echo htmlspecialchars($c['categoryName'], ENT_QUOTES, 'UTF-8'); ?>
+                                        </span>
+                                    <?php endif; ?>
+                                <?php else: ?>
+                                    <?php echo htmlspecialchars($c['categoryName'], ENT_QUOTES, 'UTF-8'); ?>
+                                <?php endif; ?>
                             </div>
-                            <div class="col-4 text-end">
+                            <div class="col-12 col-md-5">
+                                <form method="post" action="/calendar/manage/types" class="row g-1 align-items-center">
+                                    <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
+                                    <input type="hidden" name="action" value="update">
+                                    <input type="hidden" name="entity" value="category">
+                                    <input type="hidden" name="categoryID" value="<?php echo (int) $c['categoryID']; ?>">
+                                    <div class="col-auto">
+                                        <input type="color" class="form-control form-control-sm form-control-color"
+                                               name="color"
+                                               value="<?php echo $catColor !== '' ? htmlspecialchars($catColor, ENT_QUOTES, 'UTF-8') : '#5e6ad2'; ?>"
+                                               title="Category colour">
+                                    </div>
+                                    <div class="col-auto">
+                                        <select name="displayStyle" class="form-select form-select-sm">
+                                            <option value="background" <?php echo $catStyle === 'background' ? 'selected' : ''; ?>>Background</option>
+                                            <option value="text"       <?php echo $catStyle === 'text'       ? 'selected' : ''; ?>>Text only</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-auto">
+                                        <button type="submit" class="btn btn-sm btn-outline-primary" title="Save appearance">
+                                            <i class="fa-solid fa-save"></i>
+                                        </button>
+                                    </div>
+                                </form>
+                            </div>
+                            <div class="col-12 col-md-2 text-end">
                                 <form method="post" action="/calendar/manage/types" class="d-inline">
                                     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
                                     <input type="hidden" name="action" value="delete">
