@@ -125,6 +125,14 @@ $updateStmt->close();
 // See: https://owasp.org/www-community/attacks/Session_fixation
 session_regenerate_id(true);
 
+// 🔐 Revoke ALL trusted-device cookies for this user — if the password
+// was changed because of a suspected compromise, any "trusted device"
+// the attacker had access to is now no longer trusted.
+$pwUserId = (int) ($_SESSION['user_id'] ?? 0);
+if ($pwUserId > 0) {
+    Auth::revokeAllTrustedDevices($pwUserId);
+}
+
 // 📝 Log the successful password change
 Logger::activity('PasswordChanged', 'User changed their password');
 

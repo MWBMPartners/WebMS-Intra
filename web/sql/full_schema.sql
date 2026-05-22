@@ -1926,6 +1926,32 @@ ON DUPLICATE KEY UPDATE `filename` = `filename`;
 INSERT INTO `tblMigrations` (`filename`) VALUES ('046_audit_retention_settings.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
+INSERT INTO `tblMigrations` (`filename`) VALUES ('047_2fa_trusted_devices.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- 🔐 2FA trusted-device cookie (matches migration 047)
+CREATE TABLE IF NOT EXISTS `tblTrustedDevices` (
+    `deviceID`    INT          NOT NULL AUTO_INCREMENT,
+    `userID`      INT          NOT NULL,
+    `tokenHash`   CHAR(64)     NOT NULL COMMENT 'SHA-256 of the cookie token',
+    `label`       VARCHAR(255) DEFAULT NULL COMMENT 'User-agent snippet for the user-facing list',
+    `createdIP`   VARCHAR(45)  DEFAULT NULL,
+    `lastSeenAt`  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    `expiresAt`   DATETIME     NOT NULL,
+    `revokedAt`   DATETIME     DEFAULT NULL,
+    `createdAt`   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`deviceID`),
+    UNIQUE KEY `uq_td_token_hash` (`tokenHash`),
+    KEY `idx_td_user_active` (`userID`, `revokedAt`, `expiresAt`),
+    CONSTRAINT `fk_td_user` FOREIGN KEY (`userID`)
+        REFERENCES `tblUsers` (`userID`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+COMMENT='Trusted devices that bypass the 2FA challenge for a configured window.';
+
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'auth.twoFactor.trustedDeviceDays', '30', '30', 0)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
 -- Audit / error retention + cron token (matches migration 046)
 INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
     (NULL, 'audit.retentionDays',   '365', '365', 0),

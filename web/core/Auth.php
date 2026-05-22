@@ -797,6 +797,177 @@ class Auth
     }
 
     /* ====================================================================== */
+    /* Trusted devices (2FA — remember this device)                           */
+    /* ====================================================================== */
+
+    /**
+     * Cookie name used to remember a trusted device after a 2FA challenge.
+     * Only the SHA-256 of the cookie value is stored in tblTrustedDevices.
+     */
+    private const TRUSTED_DEVICE_COOKIE = 'portal_td';
+
+    /**
+     * Whether the given user has TOTP 2FA enabled and therefore must pass
+     * the /auth/2fa/verify challenge after primary authentication.
+     * Returns false on DB error (fail open — primary auth still applies).
+     */
+    public static function userRequires2fa(int $userId): bool
+    {
+        $stmt = App::db()->prepare(
+            'SELECT totpEnabled FROM tblUsers WHERE userID = ? LIMIT 1'
+        );
+        if ($stmt === false) {
+            return false;
+        }
+        $stmt->bind_param('i', $userId);
+        $stmt->execute();
+        $row = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+        return $row !== null && (int) ($row['totpEnabled'] ?? 0) === 1;
+    }
+
+    /**
+     * Issue a trusted-device cookie + DB record for the given user.
+     * Called right after a successful 2FA verify, only if the user ticked
+     * "Trust this device for X days".
+     */
+    public static function issueTrustedDevice(int $userId): void
+    {
+        $days = (int) (App::settings('auth.twoFactor.trustedDeviceDays') ?? '30');
+        if ($days < 1) {
+            $days = 30;
+        }
+
+        // 🔐 64-char hex token; only the SHA-256 hash is stored.
+        $token = bin2hex(random_bytes(32));
+        $hash  = hash('sha256', $token);
+
+        $expires = date('Y-m-d H:i:s', time() + ($days * 86400));
+        $label   = substr((string) ($_SERVER['HTTP_USER_AGENT'] ?? ''), 0, 255);
+        $ip      = self::clientIpForCookie();
+
+        $db = App::db();
+        $stmt = $db->prepare(
+            'INSERT INTO tblTrustedDevices (userID, tokenHash, label, createdIP, expiresAt) '
+            . 'VALUES (?, ?, ?, ?, ?)'
+        );
+        if ($stmt !== false) {
+            $stmt->bind_param('issss', $userId, $hash, $label, $ip, $expires);
+            $stmt->execute();
+            $stmt->close();
+        }
+
+        // 🍪 Set the cookie. HttpOnly + Secure + SameSite=Lax + 2FA-windowed lifetime.
+        setcookie(self::TRUSTED_DEVICE_COOKIE, $token, [
+            'expires'  => time() + ($days * 86400),
+            'path'     => '/',
+            'secure'   => (($_SERVER['HTTPS'] ?? '') !== '' && ($_SERVER['HTTPS'] ?? '') !== 'off'),
+            'httponly' => true,
+            'samesite' => 'Lax',
+        ]);
+    }
+
+    /**
+     * Check whether the requesting browser carries a valid, non-expired,
+     * non-revoked trusted-device cookie for the given user. If yes, the
+     * 2FA challenge should be skipped.
+     *
+     * Also updates lastSeenAt as a side-effect on a successful match —
+     * lets admins see "last seen" in the future device-management UI.
+     */
+    public static function deviceIsTrusted(int $userId): bool
+    {
+        $token = $_COOKIE[self::TRUSTED_DEVICE_COOKIE] ?? '';
+        if ($token === '' || ctype_xdigit($token) === false || strlen($token) !== 64) {
+            return false;
+        }
+        $hash = hash('sha256', $token);
+
+        $db = App::db();
+        $stmt = $db->prepare(
+            'SELECT deviceID FROM tblTrustedDevices '
+            . 'WHERE userID = ? AND tokenHash = ? '
+            . 'AND revokedAt IS NULL AND expiresAt > NOW() '
+            . 'LIMIT 1'
+        );
+        if ($stmt === false) {
+            return false;
+        }
+        $stmt->bind_param('is', $userId, $hash);
+        $stmt->execute();
+        $row = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+
+        if ($row === null) {
+            return false;
+        }
+
+        // 🕐 Bump lastSeenAt (ON UPDATE CURRENT_TIMESTAMP fires on any UPDATE).
+        $touch = $db->prepare(
+            'UPDATE tblTrustedDevices SET lastSeenAt = NOW() WHERE deviceID = ?'
+        );
+        if ($touch !== false) {
+            $id = (int) $row['deviceID'];
+            $touch->bind_param('i', $id);
+            $touch->execute();
+            $touch->close();
+        }
+
+        return true;
+    }
+
+    /**
+     * Revoke a single trusted device (used by /account device-management UI
+     * and on password change / account deletion).
+     */
+    public static function revokeTrustedDevice(int $deviceId, int $userId): void
+    {
+        $stmt = App::db()->prepare(
+            'UPDATE tblTrustedDevices SET revokedAt = NOW() '
+            . 'WHERE deviceID = ? AND userID = ?'
+        );
+        if ($stmt !== false) {
+            $stmt->bind_param('ii', $deviceId, $userId);
+            $stmt->execute();
+            $stmt->close();
+        }
+    }
+
+    /**
+     * Revoke ALL trusted devices for a user. Called on password change,
+     * account deletion, and when an admin disables a user.
+     */
+    public static function revokeAllTrustedDevices(int $userId): void
+    {
+        $stmt = App::db()->prepare(
+            'UPDATE tblTrustedDevices SET revokedAt = NOW() '
+            . 'WHERE userID = ? AND revokedAt IS NULL'
+        );
+        if ($stmt !== false) {
+            $stmt->bind_param('i', $userId);
+            $stmt->execute();
+            $stmt->close();
+        }
+    }
+
+    /**
+     * Client IP detection for cookie audit fields. Mirrors RateLimiter's
+     * logic — CF > XFF > REMOTE_ADDR. Kept private to Auth since it's
+     * advisory only (not used for any security gate here).
+     */
+    private static function clientIpForCookie(): string
+    {
+        $ip = $_SERVER['HTTP_CF_CONNECTING_IP']
+            ?? $_SERVER['HTTP_X_FORWARDED_FOR']
+            ?? $_SERVER['REMOTE_ADDR']
+            ?? '';
+        if (str_contains((string) $ip, ',') === true) {
+            $ip = trim(explode(',', (string) $ip)[0]);
+        }
+        return substr((string) $ip, 0, 45);
+    }
+
+    /* ====================================================================== */
     /* SSO configuration checks                                               */
     /* ====================================================================== */
 
