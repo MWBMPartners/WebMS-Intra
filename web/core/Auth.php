@@ -626,8 +626,10 @@ class Auth
 
         $identifier = strtolower(trim($identifier));
 
-        // 🛡️ Check rate limiting before attempting authentication
-        if (RateLimiter::isBlocked() === true) {
+        // 🛡️ Check rate limiting BOTH per-IP AND per-username (composite).
+        // The composite check defends single-account-targeted attacks that
+        // rotate IPs to evade the per-IP threshold (#52).
+        if (RateLimiter::isUserOrIpBlocked($identifier) === true) {
             Logger::activity('LoginBlocked', 'Rate-limited login attempt for: ' . $identifier);
             return false;
         }

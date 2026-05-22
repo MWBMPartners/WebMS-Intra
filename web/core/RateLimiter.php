@@ -33,8 +33,13 @@ namespace Portal\Core;
 
 class RateLimiter
 {
-    /** @var int Default maximum failed attempts before lockout */
+    /** @var int Default maximum failed attempts (per IP) before lockout */
     private const DEFAULT_MAX_ATTEMPTS = 5;
+
+    /** @var int Default maximum failed attempts (per username, across all IPs) — higher
+     *           threshold than per-IP because legit users can fail across devices.
+     *           Catches the "single account, rotating IPs" attack pattern. */
+    private const DEFAULT_MAX_ATTEMPTS_BY_USERNAME = 10;
 
     /** @var int Default time window in minutes for counting failures */
     private const DEFAULT_WINDOW_MINUTES = 15;
@@ -61,6 +66,53 @@ class RateLimiter
         $recentFailures = self::countRecentFailures($ip, $windowMinutes);
 
         return ($recentFailures >= $maxAttempts);
+    }
+
+    /**
+     * Check if EITHER the IP OR the username (across all IPs) is rate-limited.
+     *
+     * Use this on login forms — the composite check defends against two
+     * different attack patterns simultaneously:
+     *
+     *   - Same attacker, one IP, many usernames  → caught by the per-IP limit
+     *     (isBlocked / DEFAULT_MAX_ATTEMPTS, default 5 / 15min).
+     *   - Single targeted account, attacker rotating IPs  → caught by the
+     *     per-username limit (DEFAULT_MAX_ATTEMPTS_BY_USERNAME, default 10 /
+     *     15min) — this is the case that pure IP-based limiting misses.
+     *
+     * Also defends multi-user shared NAT scenarios: when ONE user behind a
+     * shared NAT fumbles their password, the per-username limit fires on
+     * THEIR account only, not on the NAT IP — so the rest of the office
+     * stays unblocked.
+     *
+     * @param string      $username Submitted username / email (case-folded
+     *                              internally before matching)
+     * @param string|null $ip       Client IP (null = auto-detect)
+     *
+     * @return bool True if either limit has tripped
+     */
+    public static function isUserOrIpBlocked(string $username, ?string $ip = null): bool
+    {
+        if ($ip === null) {
+            $ip = self::getClientIp();
+        }
+
+        // 🛡️ IP-only check first (cheap, existing behaviour)
+        if (self::isBlocked($ip) === true) {
+            return true;
+        }
+
+        // 🛡️ Username-only check (across all IPs)
+        $username = trim(strtolower($username));
+        if ($username === '') {
+            return false;  // nothing to match; behave like pure IP limiter
+        }
+
+        $maxByUsername  = self::getMaxAttemptsByUsername();
+        $windowMinutes  = self::getWindowMinutes();
+        $userFailures   = self::countRecentFailuresByUsername($username, $windowMinutes);
+
+        return $userFailures >= $maxByUsername;
     }
 
     /**
@@ -152,6 +204,56 @@ class RateLimiter
         $stmt->close();
 
         return (int) ($row['failCount'] ?? 0);
+    }
+
+    /**
+     * Count recent LoginFailed entries whose activityDescription mentions
+     * the given username — across ALL source IPs.
+     *
+     * The login handler logs failures as e.g.
+     *   "Failed login attempt for: alice@example.com"
+     *   "Incorrect password for: alice@example.com"
+     * so a LIKE '%username%' match catches both forms.
+     *
+     * The username is bound via prepared statement parameter so SQL
+     * injection is impossible. To prevent the user's literal '%' / '_'
+     * from broadening the LIKE pattern, we escape them before binding.
+     */
+    private static function countRecentFailuresByUsername(string $username, int $windowMinutes): int
+    {
+        // 🛡️ Escape SQL LIKE metacharacters
+        $pattern = '%' . str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $username) . '%';
+
+        $db = App::db();
+        $stmt = $db->prepare(
+            'SELECT COUNT(*) AS failCount '
+            . 'FROM tblActivityLogs '
+            . 'WHERE activityType = ? '
+            . 'AND timestamp >= DATE_SUB(NOW(), INTERVAL ? MINUTE) '
+            . 'AND LOWER(activityDescription) LIKE ?'
+        );
+        if ($stmt === false) {
+            return 0;  // fail open on DB error
+        }
+        $type = 'LoginFailed';
+        $stmt->bind_param('sis', $type, $windowMinutes, $pattern);
+        $stmt->execute();
+        $row = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+
+        return (int) ($row['failCount'] ?? 0);
+    }
+
+    /**
+     * Get the configured maximum failed attempts BY USERNAME (across all IPs).
+     */
+    private static function getMaxAttemptsByUsername(): int
+    {
+        $value = App::settings('auth.rateLimit.maxAttemptsByUsername');
+        if ($value !== null && $value !== '') {
+            return (int) $value;
+        }
+        return self::DEFAULT_MAX_ATTEMPTS_BY_USERNAME;
     }
 
     /**

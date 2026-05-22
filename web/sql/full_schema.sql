@@ -1920,6 +1920,14 @@ ON DUPLICATE KEY UPDATE `filename` = `filename`;
 INSERT INTO `tblMigrations` (`filename`) VALUES ('044_robots_and_ai_indexing_settings.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
+INSERT INTO `tblMigrations` (`filename`) VALUES ('045_ratelimit_username_setting.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- Rate-limit by username threshold (matches migration 045 — issue #52)
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'auth.rateLimit.maxAttemptsByUsername', '10', '10', 0)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
 -- Admin Release Notes viewer route
 INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
     ('admin/release-notes', 'admin/release-notes/index.php', 1)
