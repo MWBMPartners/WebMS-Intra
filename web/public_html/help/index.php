@@ -130,6 +130,21 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         </a>
     </div>
 
+    <!-- Calendar -->
+    <div class="col-12 col-sm-6 col-lg-4">
+        <a href="/help/calendar" class="text-decoration-none text-reset">
+            <div class="portal-card portal-card-branded h-100 p-4">
+                <div class="d-flex align-items-center gap-3 mb-3">
+                    <span class="d-inline-flex align-items-center justify-content-center rounded-3 bg-primary bg-opacity-10 text-primary" style="width:48px;height:48px;">
+                        <i class="fa-solid fa-calendar-days fa-lg"></i>
+                    </span>
+                    <h5 class="mb-0">Calendar</h5>
+                </div>
+                <p class="text-secondary mb-0 small">Seven view modes (day / week / month / year planner / list), date navigation, filters, and admin tools for categories and month themes.</p>
+            </div>
+        </a>
+    </div>
+
     <!-- Prayer Requests -->
     <div class="col-12 col-sm-6 col-lg-4">
         <a href="/help/prayer-requests" class="text-decoration-none text-reset">

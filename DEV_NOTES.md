@@ -1028,6 +1028,201 @@ This was tracked in Issue #82.
 
 ---
 
+## Password policy & strength validation (#53 / PR #132)
+
+`Auth::validatePassword()` and `Auth::passwordPolicy()` are the canonical
+helpers — every password-set flow goes through them (reset, account
+change-password, admin user create / update, and the standalone installer
+which carries a self-contained copy).
+
+**Settings (all `auth.password.*`):**
+
+| Key | Default | Notes |
+| --- | --- | --- |
+| `minLength` | `12` | Bumped from 8 in migration 041 (OWASP ASVS L1) |
+| `maxLength` | `128` | Defence against pathological inputs; bcrypt truncates at 72 anyway |
+| `requireUppercase` | `true` | Independent of lowercase since #132 |
+| `requireLowercase` | `true` | New flag — previously implicit |
+| `requireNumber` | `true` | |
+| `requireSpecial` | `true` | Any non-alphanumeric |
+
+`Auth::passwordPolicy()` returns the active policy as a structured array
+(rules list + min/max + required flags) so password forms can render
+hints consistently. Forms also wire up the JS strength meter via the
+`data-portal-password-input` + `data-portal-password-meter` attributes —
+`portal.js` attaches the meter on every matching input; the installer
+ships an inline copy because it loads before `bootstrap.php`.
+
+**5-step score** mirrors the server policy:
+
+- +1 length ≥ minLength
+- +1 contains lowercase
+- +1 contains uppercase
+- +1 contains digit
+- +1 contains symbol
+
+Bands: 0-1 Very weak (red), 2 Weak (red), 3 Fair (warning), 4 Strong
+(info), 5 Very strong (success).
+
+---
+
+## Multi-provider Captcha (#130)
+
+`Portal\Core\Captcha` accepts three providers — Cloudflare Turnstile,
+Google reCAPTCHA (v2 checkbox or v3 invisible-score), and hCaptcha — and
+picks the active one based on an admin-configurable priority list.
+
+**Settings:**
+
+- `auth.captcha.priority` — comma-separated provider keys
+  (default `turnstile,recaptcha,hcaptcha`); the first one with **both**
+  site + secret keys configured wins.
+- `auth.turnstile.{siteKey,secretKey}`
+- `auth.recaptcha.{siteKey,secretKey,version}` (version = `v2` or `v3`)
+- `auth.recaptcha.v3.{action,threshold}` (default action `submit`,
+  threshold `0.5`)
+- `auth.hcaptcha.{siteKey,secretKey}`
+
+**Public API (unchanged contract from previous Captcha class):**
+
+```php
+Captcha::scriptTag()          // <script> tag(s) for the active provider
+Captcha::widget()             // widget markup (or invisible hidden input for v3)
+Captcha::verify($_POST)       // server-side verification
+Captcha::isConfigured()       // true if at least one provider is wired up
+Captcha::activeProvider()     // 'turnstile' | 'recaptcha' | 'hcaptcha' | ''
+Captcha::listProviders()      // for the admin UI
+Captcha::normalisePriority()  // for the admin save handler
+```
+
+**Admin UI** lives at `/admin/captcha` — SortableJS-powered drag-and-drop
+priority list + per-provider key inputs + v2/v3 toggle + action / score
+threshold inputs for v3.
+
+**reCAPTCHA v3 verification** enforces **both** action match (anti-replay)
+and score threshold; rejections are logged via `Logger::activity()` as
+`CaptchaRejected` so probing surfaces in the activity log.
+
+---
+
+## Debug mode hardening (#54 / PR #133)
+
+`Debug::isEnabled()` and `App::isDebug()` both refuse to enable debug
+mode when `PORTAL_ENV === 'prod'`, regardless of admin status or query
+params. Defence-in-depth:
+
+1. `Debug::isEnabled()` — returns false in prod; `Debug::renderPanel()`
+   is already gated on it. Attempts in prod are logged once per request
+   as `DebugBlocked` activity (IP + path).
+2. `App::isDebug()` — same prod refusal. The global exception handler
+   in `bootstrap.php` already routes detailed traces through
+   `App::isDebug()`, so stack traces / file paths can never leak in
+   prod even on unhandled exceptions.
+3. `bootstrap.php` — forces `display_errors`, `display_startup_errors`,
+   and `html_errors` to `'0'` in prod. `error_reporting(E_ALL)` stays
+   on so `Logger::phpError()` continues to capture everything.
+
+---
+
+## Anchor / link colour theme binding (PR #135)
+
+`portal.css` binds `--portal-link` (and its hover / RGB variants) to
+Bootstrap's `--bs-link-color`, `--bs-link-color-rgb`,
+`--bs-link-hover-color`, and `--bs-link-hover-color-rgb` in both the
+light `:root` and `[data-bs-theme="dark"]` blocks. Without these
+bindings, every plain `<a>` / `.btn-link` / `.alert-link` / `.link-*`
+falls back to the browser-default blue, which clashes hard in dark mode.
+
+`install/index.php` mirrors the same binding in its self-contained
+inline `<style>` block because the installer doesn't load `portal.css`.
+
+Per-site branding still flows through: `--portal-link` resolves to
+`--portal-primary`, which `Site::branding()` overrides on
+`<html style="--portal-primary: …">`, so anchor colour follows the
+site's primary colour automatically.
+
+---
+
+## Calendar view modes (#136 / PRs #137 #138)
+
+`web/public_html/calendar/index.php` is a thin **view router**. It:
+
+1. Validates `?view=` against the whitelist
+   (`day | week | weekdays | weekend | month | year | list`).
+2. Resolves a visible date range from `?date=YYYY-MM-DD`
+   (or `YYYY-MM`, `YYYY`, falling back to today on parse failure).
+3. Fetches every event overlapping that range in **one** query
+   (no per-cell N+1).
+4. Delegates rendering to a per-view partial under `views/`.
+
+**View partials (under `web/public_html/calendar/views/`):**
+
+- `_shared_header.php` — date navigation (◀ Today ▶ + date picker),
+  view switcher, filter row.
+- `_day_columns.php` — **one** hour-timeline renderer reused by day /
+  week / weekdays / weekend, parametrised by column count. Events
+  position absolutely by start time and clip to each column's
+  `[00:00, 24:00]` window. All-day events strip above the timeline.
+- `day.php`, `week.php`, `weekdays.php`, `weekend.php` — thin wrappers
+  around `_day_columns.php` with their own day list.
+- `month.php` — 7-column 5/6-row calendar grid; up to 3 event pills
+  per cell + "+ N more" link to day view.
+- `year.php` — 12-month wall planner. 24-column grid (12 months ×
+  day-number + content sub-columns), 31 day rows, blank cells where
+  months are shorter. Multi-day event bands repeat on every covered
+  day so they read as continuous strips. Auto-built legend with
+  category swatches at the top.
+- `list.php` — the original chronological card grid.
+
+**Settings:** `calendar.defaultView` (default `month`).
+**Per-user:** `localStorage['portal-calendar-view']` remembers the
+last-used view across visits; URL `?view=` always wins.
+
+**Category styling (#138):** `tblEventCategories.color` (hex,
+regex-validated server-side) drives event background tints AND a
+left-border accent. `tblEventCategories.displayStyle` toggles between
+`'background'` (tinted band — default) and `'text'` (coloured text
+on default background — used for Bank Holidays / Notable Days that
+should flag a day rather than fill it).
+
+**Per-month strap-lines (#138):** `tblCalendarMonthThemes` stores one
+text line per `(siteID, year, month)`. Rendered as an italicised
+strap-line under each month name on the year planner. Managed via
+`/calendar/manage/month-themes` (year picker + 12 inputs; empty
+values delete the row).
+
+**Security:** all colour values are hex-validated by regex
+(`/^#[0-9a-fA-F]{3,8}$/`) **before** persistence **and**
+`htmlspecialchars`-escaped on output, blocking CSS injection via
+crafted category colours.
+
+---
+
+## Prayer Requests (#129)
+
+Self-contained app at `/prayer-requests/`. Single table
+(`tblPrayerRequests`) with status lifecycle
+(`pending → active → answered → archived`) and visibility flag
+(`leadership | congregation`).
+
+Anonymous public submission lives at `/prayer-requests/anonymous` —
+no login required — and is gated by:
+
+1. **CSRF** — session token issued by the GET form, verified on POST.
+2. **Captcha** — whichever provider is active per the
+   `auth.captcha.priority` setting (see above).
+3. **RateLimiter** — same per-IP limiter used by the login form.
+4. Hard-coded to `visibility = leadership` and `status = pending`
+   (anonymous submissions never broadcast directly to the congregation).
+5. Always redirects to the same generic success page so abusers can't
+   fingerprint success vs failure.
+
+Logged-in submitters get a "display as Anonymous" toggle — members
+see "Anonymous", but the moderation queue still shows the real
+submitter for pastoral follow-up.
+
+---
+
 ## Troubleshooting
 
 ### "CSRF" error on form submission

@@ -2,7 +2,9 @@
 
 > **Version:** 0.11.0 | **PHP** 8.5 (backward-compatible with 8.4) | **MySQL** 8.0+ | **DreamHost** shared hosting
 
-A modular internal portal platform for organisations, providing centralised access to internal tools, expense management, leadership directory, multi-site support, and more.
+A modular internal portal platform for organisations, providing centralised access to internal tools, calendar / events, attendance, expenses, leadership directory, prayer requests, announcements, document library, tasks/reminders, multi-site support, and more.
+
+📋 **For the current per-app feature inventory** (what's shipped, what's in flight, what's planned with issue numbers), see **[FEATURES.md](FEATURES.md)**.
 
 ---
 
@@ -197,20 +199,31 @@ branch protection).
 
 ## Roadmap
 
+Phase-level milestones (granular per-feature state lives in [FEATURES.md](FEATURES.md)).
+
 | Phase | Description                                                                     | Status           |
 | ----- | ------------------------------------------------------------------------------- | ---------------- |
 | 1     | Core Framework                                                                  | Done             |
 | 2     | Local Auth Enhancement (forgot/reset password, account page, policy engine)     | Done             |
 | 2.5   | Directory Restructure (web/ consolidation, deploy fix, bug fixes)               | Done             |
 | 3     | Admin UI (error logs, activity logs, user management, migration runner)         | Done             |
-| 4     | Calendar / Events / Preaching Plan                                              | Done             |
+| 4     | Calendar / Events / Preaching Plan (incl. seven view modes — see #136/#137)     | Done             |
 | 5     | Attendance Tracker                                                              | Done             |
 | 6     | Expenses — Multi-Approver, Email, PDF, Treasury                                 | Done             |
 | 7     | SSO & Auth Enhancement (Google OAuth, WebAuthn/PassKeys, Account Linking)       | Done             |
 | 8     | Translations / i18n (I18n framework, RTL support, language switcher)            | Done             |
-| 9     | Polish & Hardening (PWA, WCAG 2.1, Security Hardening)                          | Done             |
+| 9     | Polish & Hardening (PWA, WCAG 2.1, Security Hardening — incl. #53 #54)          | Done             |
 | 10    | Multi-Site Support (umbrella orgs, site detection, 4-tier permissions)          | Done             |
 | 11    | UI Refresh + Design System (themes, CB-safe palette, per-site branding)         | Done             |
+| 12    | Prayer Requests app (incl. anonymous public route — #129)                       | Done             |
+| 13    | Multi-provider Captcha (Turnstile + reCAPTCHA v2/v3 + hCaptcha — #130)          | Done             |
+
+**Currently in flight (open PRs):**
+
+- **#137** — Calendar seven view modes (Day, Week, Weekdays, Weekend, Month, Year planner, List).
+- **#138** — Calendar per-month strap-lines + category `displayStyle` toggle (background-band vs text-only) — stacked on #137.
+
+**Tracked but not started:** WordPress Multisite integration (#127), Order of Service planner with iHymns (#128), BookIT integration cluster (#97–#103), composite IP+username login rate-limit (#52), Privacy / GDPR helpers (#47), Payment integration prep (#40). See [FEATURES.md](FEATURES.md#tracked-but-not-started) for the full backlog with scope notes.
 
 ---
 
