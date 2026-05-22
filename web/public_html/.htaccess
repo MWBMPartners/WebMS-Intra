@@ -55,10 +55,11 @@ RewriteCond %{REQUEST_FILENAME} !-d
 # 🎯 Route everything else through the front controller
 RewriteRule ^(.*)$ index.php [QSA,L]
 
-# 🤫 Strip headers that leak the backend stack. PHP also calls
-#     header_remove('X-Powered-By') in bootstrap.php as the primary defence;
-#     this is the belt-and-braces Apache-layer removal.
+# 🏷️ Brand response headers.
+#     X-Powered-By is set by PHP in bootstrap.php to "WebMS-Intra/<version>"
+#     (replacing PHP's default "PHP/8.x.y"). Apache must NOT unset it here,
+#     or our branded value would be stripped along with the default.
+#     The Server header is still stripped — it leaks the Apache version.
 <IfModule mod_headers.c>
-    Header always unset X-Powered-By
     Header always unset Server
 </IfModule>
