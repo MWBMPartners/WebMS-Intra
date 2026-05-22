@@ -214,7 +214,7 @@ class I18n
             return;
         }
 
-        $langDir = PORTAL_ROOT . DIRECTORY_SEPARATOR . 'lang';
+        $langDir = PORTAL_ROOT . DIRECTORY_SEPARATOR . '_lang';
         $file    = $langDir . DIRECTORY_SEPARATOR . $locale . '.php';
 
         if (is_readable($file) === true) {
@@ -389,7 +389,7 @@ class I18n
      */
     public static function enabledLocales(): array
     {
-        $langDir = PORTAL_ROOT . DIRECTORY_SEPARATOR . 'lang';
+        $langDir = PORTAL_ROOT . DIRECTORY_SEPARATOR . '_lang';
         $enabled = [];
 
         foreach (self::$locales as $code => $meta) {

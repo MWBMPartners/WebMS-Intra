@@ -16,7 +16,7 @@
 declare(strict_types=1);
 
 // 🔧 Bootstrap
-require_once dirname(__DIR__, 2) . DIRECTORY_SEPARATOR . 'core' . DIRECTORY_SEPARATOR . 'bootstrap.php';
+require_once dirname(__DIR__, 2) . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEPARATOR . 'bootstrap.php';
 
 use Portal\Core\Auth;
 use Portal\Core\App;

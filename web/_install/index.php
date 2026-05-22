@@ -34,7 +34,7 @@ declare(strict_types=1);
 // Constants for this self-contained installer
 // ---------------------------------------------------------------------------
 define('INSTALL_ROOT', realpath(__DIR__ . DIRECTORY_SEPARATOR . '..'));
-define('INSTALL_SQL', INSTALL_ROOT . DIRECTORY_SEPARATOR . 'sql');
+define('INSTALL_SQL', INSTALL_ROOT . DIRECTORY_SEPARATOR . '_sql');
 define('INSTALL_AUTH_DIR', INSTALL_ROOT . DIRECTORY_SEPARATOR . '_auth_keys');
 define('INSTALL_CREDS_FILE', INSTALL_AUTH_DIR . DIRECTORY_SEPARATOR . 'auth_creds.php');
 define('INSTALL_ENC_KEY_FILE', INSTALL_AUTH_DIR . DIRECTORY_SEPARATOR . 'enc.key');
@@ -160,7 +160,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } else {
             $schemaFile = INSTALL_SQL . DIRECTORY_SEPARATOR . 'full_schema.sql';
             if (is_readable($schemaFile) === false) {
-                $error = 'Schema file not found: sql/full_schema.sql';
+                $error = 'Schema file not found: _sql/full_schema.sql';
                 $step = 3;
             } else {
                 $sql = file_get_contents($schemaFile);
@@ -415,7 +415,7 @@ $prereqs = [
         'value' => extension_loaded('mbstring') ? 'Loaded' : 'Missing',
     ],
     'sql_dir' => [
-        'label' => 'sql/ directory readable',
+        'label' => '_sql/ directory readable',
         'pass'  => is_dir(INSTALL_SQL) && is_readable(INSTALL_SQL),
         'value' => is_dir(INSTALL_SQL) ? 'Found' : 'Missing',
     ],
