@@ -61,13 +61,13 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
 
       # -----------------------------------------------------------------------
-      # Read current portal version from web/core/App.php
+      # Read current portal version from web/_core/version.php
       # -----------------------------------------------------------------------
       - name: Read current version
         id: version
         run: |
-          VERSION_FILE="web/core/App.php"
-          VERSION=$(grep -oP "static string \\\$version\s*=\s*'\K[^']+" "$VERSION_FILE" 2>/dev/null || echo "Unreleased")
+          VERSION_FILE="web/_core/version.php"
+          VERSION=$(grep -oP "^return\s*'\K[^']+" "$VERSION_FILE" 2>/dev/null || echo "Unreleased")
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "Version: $VERSION"
 

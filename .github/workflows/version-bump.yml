@@ -7,8 +7,8 @@
 # PURPOSE
 # -------
 # Auto-bumps the portal version on push to `alpha` or `beta`. Writes the
-# new value back to web/core/App.php and commits with [skip ci] so the
-# bump itself does not retrigger the workflow.
+# new value back to web/_core/version.php and commits with [skip ci] so
+# the bump itself does not retrigger the workflow.
 #
 # BUMP RULES
 # ----------
@@ -23,7 +23,12 @@
 #
 # SOURCE OF TRUTH
 # ---------------
-#   web/core/App.php  ->  private static string $version = 'X.Y.Z';
+#   web/_core/version.php  ->  return 'X.Y.Z';
+#
+# The file is a plain "return '<string>';" so the installer
+# (bootstrap-free, before any autoloader) can also `require` it.
+# Both the runtime (via PORTAL_VERSION constant) and the installer
+# (via INSTALL_VERSION constant) read this same file.
 # =============================================================================
 
 name: Version Bump
@@ -60,14 +65,14 @@ jobs:
           fetch-depth: 0
 
       # -----------------------------------------------------------------------
-      # Read current $version from web/core/App.php
+      # Read current version from web/_core/version.php
       # -----------------------------------------------------------------------
       - name: Read current version
         id: current
         run: |
-          VERSION_FILE="web/core/App.php"
-          # Matches: private static string $version = 'X.Y.Z';
-          CURRENT=$(grep -oP "static string \\\$version\s*=\s*'\K[^']+" "$VERSION_FILE")
+          VERSION_FILE="web/_core/version.php"
+          # Matches: return 'X.Y.Z';
+          CURRENT=$(grep -oP "^return\s*'\K[^']+" "$VERSION_FILE")
           if [[ -z "$CURRENT" ]]; then
             echo "::error::Could not read version from $VERSION_FILE"
             exit 1
@@ -128,19 +133,19 @@ jobs:
           echo "New version: $NEW (was $CURRENT)"
 
       # -----------------------------------------------------------------------
-      # Write the bumped version into App.php
+      # Write the bumped version into web/_core/version.php
       # -----------------------------------------------------------------------
-      - name: Update version in App.php
+      - name: Update version in version.php
         run: |
-          VERSION_FILE="web/core/App.php"
+          VERSION_FILE="web/_core/version.php"
           OLD="${{ steps.current.outputs.current }}"
           NEW="${{ steps.new_version.outputs.version }}"
 
-          # Replace inside: private static string $version = 'X.Y.Z';
-          sed -i "s|\(static string \\\$version\s*=\s*'\)${OLD}'|\1${NEW}'|" "$VERSION_FILE"
+          # Replace inside: return 'X.Y.Z';
+          sed -i "s|^return\s*'${OLD}'|return '${NEW}'|" "$VERSION_FILE"
 
           # Verify
-          grep "static string \$version" "$VERSION_FILE"
+          grep "^return" "$VERSION_FILE"
 
       # -----------------------------------------------------------------------
       # Commit + push with [skip ci]; retry if changelog.yml lands first
@@ -154,7 +159,7 @@ jobs:
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          git add web/core/App.php
+          git add web/_core/version.php
           if git diff --cached --quiet; then
             echo "No changes to commit"
             exit 0
