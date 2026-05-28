@@ -13,6 +13,20 @@ to `alpha`, `beta`, and `main` using the heading format
 
 ### Fixed
 
+- **`full_schema.sql` missing default site seed** (#171) — every
+  fresh install since the migrations were consolidated into
+  `web/_sql/full_schema.sql` was failing at step 3 with
+  `Cannot add or update a child row: a foreign key constraint
+  fails (...\`tblEventTypes\`, CONSTRAINT \`fk_etype_site\` FOREIGN KEY
+  (\`siteID\`) REFERENCES \`tblSites\`(\`siteID\`))`. A dozen tables
+  declare `siteID INT NOT NULL DEFAULT 1` with an FK back to
+  `tblSites`, but the consolidated schema had dropped the
+  `INSERT INTO tblSites … siteID=1 …` seed that the original
+  `015_multisite.sql` migration provided. Restored the seed at the
+  top of the data-seed section using the same idempotent
+  `INSERT … SELECT … WHERE NOT EXISTS` pattern. This was masked by
+  the original HTTP 500 (#169); now that the installer surfaces the
+  underlying MySQL message the cause is visible and fixable.
 - **Installer HTTP 500 on steps 3 and 4** (#169) — the `install_schema`
   and `create_admin` POST handlers in `web/_install/index.php` ran
   `multi_query` / `prepare` / `execute` without try/catch wrappers.
