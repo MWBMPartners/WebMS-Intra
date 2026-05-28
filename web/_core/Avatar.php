@@ -1,5 +1,5 @@
 <?php
-// Path: core/Avatar.php
+// Path: _core/Avatar.php
 /**
  * -----------------------------------------------------------------------------
  * Avatar Cascade System 🖼️

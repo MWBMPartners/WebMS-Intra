@@ -1,5 +1,5 @@
 <?php
-// Path: core/templates/error-404.php
+// Path: _core/templates/error-404.php
 /**
  * -----------------------------------------------------------------------------
  * 404 Not Found Error Page 🔍

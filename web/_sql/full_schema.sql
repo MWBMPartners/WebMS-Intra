@@ -9,16 +9,19 @@
 --   • No DROP, TRUNCATE, or DELETE — existing data is never removed
 --   • FK ordering respected       — parent tables created before children
 --
--- After running, all individual migrations (000–020) are marked as executed
--- in tblMigrations so the web-based Migrator won't re-run them.
+-- After running, all individual migrations through the highest-numbered file
+-- present in web/_sql/ are marked as executed in tblMigrations so the
+-- web-based Migrator won't re-run them.
 --
--- Covers migrations: 000–036
+-- Covers migrations: 000-052 (matches the tblMigrations seed block at the
+-- end of this file — when you add a new migration, also add its filename
+-- to that block and port its DDL/seeds into the appropriate section here).
 -- =============================================================================
 -- @package   Portal\Database
 -- @author    MWBM Partners Ltd (t/a MWservices)
 -- @copyright 2025-2026 MWBM Partners Ltd (t/a MWservices)
 -- @license   All Rights Reserved
--- @version   0.8.1
+-- @version   0.9.0
 -- =============================================================================
 
 
@@ -177,6 +180,8 @@ CREATE TABLE IF NOT EXISTS `tblUsers` (
     `isAdmin`      TINYINT(1)   DEFAULT 0,
     `isRootAdmin`  TINYINT(1)   DEFAULT 0,
     `notifyPrefs`  JSON         DEFAULT NULL COMMENT 'User notification preferences (JSON: {emailDigest, expenseUpdates, eventReminders})',
+    `totpSecret`   VARCHAR(64)  DEFAULT NULL COMMENT 'Encrypted TOTP shared secret (from migration 032)',
+    `totpEnabled`  TINYINT(1)   NOT NULL DEFAULT 0 COMMENT 'TOTP 2FA enabled flag (from migration 032)',
     `createdAt`    DATETIME     DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (`userID`),
     UNIQUE KEY `emailAddress` (`emailAddress`)
@@ -676,6 +681,7 @@ COMMENT='Named event series (can be nested). Events link to a series.';
 -- -----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS `tblRecurrenceRules` (
     `ruleID`       INT          NOT NULL AUTO_INCREMENT,
+    `siteID`       INT          NOT NULL DEFAULT 1 COMMENT 'FK → tblSites (added by migration 018)',
     `seriesID`     INT          NOT NULL COMMENT 'FK → tblEventSeries',
     `frequency`    ENUM('weekly','fortnightly','monthly','quarterly','yearly','custom')
                    NOT NULL DEFAULT 'weekly',
@@ -690,8 +696,11 @@ CREATE TABLE IF NOT EXISTS `tblRecurrenceRules` (
     `createdAt`    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (`ruleID`),
     KEY `idx_recur_series` (`seriesID`),
+    KEY `idx_recur_site` (`siteID`),
     CONSTRAINT `fk_recur_series` FOREIGN KEY (`seriesID`)
-        REFERENCES `tblEventSeries` (`seriesID`) ON DELETE CASCADE
+        REFERENCES `tblEventSeries` (`seriesID`) ON DELETE CASCADE,
+    CONSTRAINT `fk_recur_site` FOREIGN KEY (`siteID`)
+        REFERENCES `tblSites` (`siteID`) ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
 COMMENT='Recurrence rules for event series — generates individual event dates.';
 
@@ -988,6 +997,267 @@ CREATE TABLE IF NOT EXISTS `tblErrors` (
         REFERENCES `tblSites` (`siteID`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
 COMMENT='Centralised error log for all platforms/libraries. See core/Logger.php.';
+
+
+-- #############################################################################
+-- SECTION 4B: APP TABLES FROM MIGRATIONS 029-036
+-- (announcements, documents, audit trail, TOTP backup codes, workflow engine,
+--  tasks — ported from individual migration files. tblMigrations marks them
+--  executed, so fresh installs MUST have these tables here too or those
+--  apps silently break.)
+-- #############################################################################
+
+-- -----------------------------------------------------------------------------
+-- 📢 tblAnnouncements — site noticeboard posts (from migration 029)
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `tblAnnouncements` (
+    `announcementID` INT          NOT NULL AUTO_INCREMENT,
+    `siteID`         INT          NOT NULL DEFAULT 1,
+    `title`          VARCHAR(255) NOT NULL,
+    `slug`           VARCHAR(200) NOT NULL,
+    `body`           TEXT         NOT NULL,
+    `priority`       ENUM('normal','important','urgent') NOT NULL DEFAULT 'normal',
+    `isPinned`       TINYINT(1)   NOT NULL DEFAULT 0 COMMENT 'Pinned to top of list and dashboard',
+    `publishAt`      DATETIME     DEFAULT NULL COMMENT 'Scheduled publish time (NULL = immediate)',
+    `expiresAt`      DATETIME     DEFAULT NULL COMMENT 'Auto-hide after this date (NULL = never)',
+    `isPublished`    TINYINT(1)   NOT NULL DEFAULT 0,
+    `isDeleted`      TINYINT(1)   NOT NULL DEFAULT 0,
+    `createdByID`    INT          DEFAULT NULL,
+    `updatedByID`    INT          DEFAULT NULL,
+    `createdAt`      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updatedAt`      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`announcementID`),
+    UNIQUE KEY `uq_announcement_slug` (`slug`, `siteID`),
+    KEY `idx_announcement_site` (`siteID`),
+    KEY `idx_announcement_published` (`siteID`, `isPublished`, `isDeleted`, `publishAt`),
+    KEY `idx_announcement_pinned` (`siteID`, `isPinned`, `isPublished`, `isDeleted`),
+    CONSTRAINT `fk_announcement_site` FOREIGN KEY (`siteID`) REFERENCES `tblSites` (`siteID`),
+    CONSTRAINT `fk_announcement_creator` FOREIGN KEY (`createdByID`) REFERENCES `tblUsers` (`userID`) ON DELETE SET NULL,
+    CONSTRAINT `fk_announcement_updater` FOREIGN KEY (`updatedByID`) REFERENCES `tblUsers` (`userID`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+COMMENT='Site announcements / noticeboard posts';
+
+
+-- -----------------------------------------------------------------------------
+-- 📁 tblDocCategories — document library categories / folders (migration 030)
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `tblDocCategories` (
+    `categoryID`   INT          NOT NULL AUTO_INCREMENT,
+    `siteID`       INT          NOT NULL DEFAULT 1,
+    `categoryName` VARCHAR(100) NOT NULL,
+    `description`  VARCHAR(255) DEFAULT NULL,
+    `sortOrder`    INT          NOT NULL DEFAULT 0,
+    `createdAt`    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`categoryID`),
+    UNIQUE KEY `uq_doc_cat_name_site` (`categoryName`, `siteID`),
+    KEY `idx_doc_cat_site` (`siteID`),
+    CONSTRAINT `fk_doccat_site` FOREIGN KEY (`siteID`) REFERENCES `tblSites` (`siteID`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+COMMENT='Document library categories / folders';
+
+
+-- -----------------------------------------------------------------------------
+-- 📄 tblDocuments — document library files (migration 030)
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `tblDocuments` (
+    `documentID`    INT          NOT NULL AUTO_INCREMENT,
+    `siteID`        INT          NOT NULL DEFAULT 1,
+    `categoryID`    INT          DEFAULT NULL,
+    `title`         VARCHAR(255) NOT NULL,
+    `description`   TEXT         DEFAULT NULL,
+    `fileName`      VARCHAR(255) NOT NULL COMMENT 'Original upload filename',
+    `filePath`      VARCHAR(500) NOT NULL COMMENT 'Path relative to _uploads/documents/',
+    `fileSize`      INT          NOT NULL DEFAULT 0 COMMENT 'Size in bytes',
+    `mimeType`      VARCHAR(100) DEFAULT NULL,
+    `isPublished`   TINYINT(1)   NOT NULL DEFAULT 1,
+    `isDeleted`     TINYINT(1)   NOT NULL DEFAULT 0,
+    `downloadCount` INT          NOT NULL DEFAULT 0,
+    `uploadedByID`  INT          DEFAULT NULL,
+    `createdAt`     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updatedAt`     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`documentID`),
+    KEY `idx_doc_site` (`siteID`),
+    KEY `idx_doc_category` (`categoryID`),
+    KEY `idx_doc_published` (`siteID`, `isPublished`, `isDeleted`),
+    CONSTRAINT `fk_doc_site` FOREIGN KEY (`siteID`) REFERENCES `tblSites` (`siteID`),
+    CONSTRAINT `fk_doc_category` FOREIGN KEY (`categoryID`) REFERENCES `tblDocCategories` (`categoryID`) ON DELETE SET NULL,
+    CONSTRAINT `fk_doc_uploader` FOREIGN KEY (`uploadedByID`) REFERENCES `tblUsers` (`userID`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+COMMENT='Document library files';
+
+
+-- -----------------------------------------------------------------------------
+-- 📋 tblAuditTrail — before/after change tracking (migration 031)
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `tblAuditTrail` (
+    `auditID`    INT          NOT NULL AUTO_INCREMENT,
+    `siteID`     INT          DEFAULT NULL,
+    `userID`     INT          DEFAULT NULL,
+    `tableName`  VARCHAR(100) NOT NULL COMMENT 'Affected database table',
+    `recordID`   INT          NOT NULL COMMENT 'Primary key of affected record',
+    `action`     ENUM('create','update','delete') NOT NULL,
+    `fieldName`  VARCHAR(100) DEFAULT NULL COMMENT 'Specific field changed (NULL = whole record)',
+    `oldValue`   TEXT         DEFAULT NULL COMMENT 'Previous value (JSON for complex types)',
+    `newValue`   TEXT         DEFAULT NULL COMMENT 'New value (JSON for complex types)',
+    `changeSet`  JSON         DEFAULT NULL COMMENT 'Full diff: {field: {old, new}} for multi-field changes',
+    `ipAddress`  VARCHAR(45)  DEFAULT NULL,
+    `createdAt`  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`auditID`),
+    KEY `idx_audit_table_record` (`tableName`, `recordID`),
+    KEY `idx_audit_user` (`userID`),
+    KEY `idx_audit_site` (`siteID`),
+    KEY `idx_audit_date` (`createdAt`),
+    KEY `idx_audit_action` (`action`, `tableName`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+COMMENT='Detailed audit trail with before/after change tracking';
+
+
+-- -----------------------------------------------------------------------------
+-- 🔑 tblTotpBackupCodes — TOTP recovery codes (migration 032)
+-- The matching `totpSecret` + `totpEnabled` columns live inline in
+-- the tblUsers CREATE TABLE in SECTION 2.
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `tblTotpBackupCodes` (
+    `codeID`    INT          NOT NULL AUTO_INCREMENT,
+    `userID`    INT          NOT NULL,
+    `codeHash`  VARCHAR(255) NOT NULL COMMENT 'Hashed backup code',
+    `isUsed`    TINYINT(1)   NOT NULL DEFAULT 0,
+    `usedAt`    DATETIME     DEFAULT NULL,
+    `createdAt` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`codeID`),
+    KEY `idx_backup_user` (`userID`),
+    CONSTRAINT `fk_backup_user` FOREIGN KEY (`userID`) REFERENCES `tblUsers` (`userID`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+COMMENT='TOTP backup/recovery codes';
+
+
+-- -----------------------------------------------------------------------------
+-- 🔄 tblWorkflows — configurable workflow definitions (migration 034)
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `tblWorkflows` (
+    `workflowID`   INT          NOT NULL AUTO_INCREMENT,
+    `siteID`       INT          NOT NULL DEFAULT 1,
+    `workflowName` VARCHAR(100) NOT NULL,
+    `workflowKey`  VARCHAR(50)  NOT NULL COMMENT 'Machine-readable key (e.g. expense_approval)',
+    `description`  VARCHAR(255) DEFAULT NULL,
+    `isActive`     TINYINT(1)   NOT NULL DEFAULT 1,
+    `createdAt`    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updatedAt`    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`workflowID`),
+    UNIQUE KEY `uq_workflow_key_site` (`workflowKey`, `siteID`),
+    KEY `idx_workflow_site` (`siteID`),
+    CONSTRAINT `fk_workflow_site` FOREIGN KEY (`siteID`) REFERENCES `tblSites` (`siteID`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+COMMENT='Configurable workflow definitions';
+
+
+-- -----------------------------------------------------------------------------
+-- 🪜 tblWorkflowSteps — ordered stages within a workflow (migration 034)
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `tblWorkflowSteps` (
+    `stepID`        INT          NOT NULL AUTO_INCREMENT,
+    `workflowID`    INT          NOT NULL,
+    `stepOrder`     INT          NOT NULL DEFAULT 1,
+    `stepName`      VARCHAR(100) NOT NULL,
+    `stepType`      ENUM('approval','review','notification','auto') NOT NULL DEFAULT 'approval',
+    `assigneeType`  ENUM('role','user','group') NOT NULL DEFAULT 'role',
+    `assigneeValue` VARCHAR(100) DEFAULT NULL COMMENT 'Role name, userID, or groupID',
+    `autoAction`    ENUM('approve','reject','escalate') DEFAULT NULL COMMENT 'For auto steps',
+    `timeoutHours`  INT          DEFAULT NULL COMMENT 'Auto-escalate after N hours',
+    `createdAt`     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`stepID`),
+    KEY `idx_wfstep_workflow` (`workflowID`),
+    CONSTRAINT `fk_wfstep_workflow` FOREIGN KEY (`workflowID`) REFERENCES `tblWorkflows` (`workflowID`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+COMMENT='Ordered steps within a workflow';
+
+
+-- -----------------------------------------------------------------------------
+-- 🏃 tblWorkflowInstances — running workflows tied to a source record (034)
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `tblWorkflowInstances` (
+    `instanceID`  INT          NOT NULL AUTO_INCREMENT,
+    `workflowID`  INT          NOT NULL,
+    `siteID`      INT          NOT NULL DEFAULT 1,
+    `tableName`   VARCHAR(100) NOT NULL COMMENT 'Source table (e.g. tblExpenseClaims)',
+    `recordID`    INT          NOT NULL COMMENT 'PK of the source record',
+    `currentStep` INT          NOT NULL DEFAULT 1,
+    `status`      ENUM('pending','in_progress','completed','cancelled') NOT NULL DEFAULT 'pending',
+    `startedByID` INT          DEFAULT NULL,
+    `startedAt`   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `completedAt` DATETIME     DEFAULT NULL,
+    PRIMARY KEY (`instanceID`),
+    KEY `idx_wfi_workflow` (`workflowID`),
+    KEY `idx_wfi_record` (`tableName`, `recordID`),
+    KEY `idx_wfi_status` (`status`),
+    CONSTRAINT `fk_wfi_workflow` FOREIGN KEY (`workflowID`) REFERENCES `tblWorkflows` (`workflowID`),
+    CONSTRAINT `fk_wfi_starter` FOREIGN KEY (`startedByID`) REFERENCES `tblUsers` (`userID`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+COMMENT='Running workflow instances linked to source records';
+
+
+-- -----------------------------------------------------------------------------
+-- 📜 tblWorkflowActions — action log for step completions (migration 034)
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `tblWorkflowActions` (
+    `actionID`   INT          NOT NULL AUTO_INCREMENT,
+    `instanceID` INT          NOT NULL,
+    `stepID`     INT          NOT NULL,
+    `action`     ENUM('approved','rejected','escalated','skipped') NOT NULL,
+    `comment`    TEXT         DEFAULT NULL,
+    `actedByID`  INT          DEFAULT NULL,
+    `actedAt`    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`actionID`),
+    KEY `idx_wfa_instance` (`instanceID`),
+    CONSTRAINT `fk_wfa_instance` FOREIGN KEY (`instanceID`) REFERENCES `tblWorkflowInstances` (`instanceID`) ON DELETE CASCADE,
+    CONSTRAINT `fk_wfa_step` FOREIGN KEY (`stepID`) REFERENCES `tblWorkflowSteps` (`stepID`),
+    CONSTRAINT `fk_wfa_actor` FOREIGN KEY (`actedByID`) REFERENCES `tblUsers` (`userID`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+COMMENT='Action log for workflow step completions';
+
+
+-- -----------------------------------------------------------------------------
+-- ✅ tblTasks — recurring tasks + reminders (migration 036)
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `tblTasks` (
+    `taskID`             INT          NOT NULL AUTO_INCREMENT,
+    `siteID`             INT          NOT NULL DEFAULT 1,
+    `title`              VARCHAR(255) NOT NULL,
+    `description`        TEXT         DEFAULT NULL,
+    `assignedToID`       INT          DEFAULT NULL COMMENT 'FK → tblUsers',
+    `createdByID`        INT          DEFAULT NULL,
+    `priority`           ENUM('low','normal','high','urgent') NOT NULL DEFAULT 'normal',
+    `status`             ENUM('pending','in_progress','completed','cancelled') NOT NULL DEFAULT 'pending',
+    `dueDate`            DATE         DEFAULT NULL,
+    `completedAt`        DATETIME     DEFAULT NULL,
+
+    -- 🔄 Recurrence fields
+    `isRecurring`        TINYINT(1)   NOT NULL DEFAULT 0,
+    `recurrenceType`     ENUM('daily','weekly','monthly','yearly') DEFAULT NULL,
+    `recurrenceInterval` INT          DEFAULT 1 COMMENT 'Every N days/weeks/months/years',
+    `recurrenceEndDate`  DATE         DEFAULT NULL COMMENT 'Stop recurring after this date',
+    `parentTaskID`       INT          DEFAULT NULL COMMENT 'FK → tblTasks (parent recurring task)',
+
+    -- 🔔 Reminder fields
+    `reminderDate`       DATETIME     DEFAULT NULL COMMENT 'When to send reminder',
+    `reminderSent`       TINYINT(1)   NOT NULL DEFAULT 0,
+
+    `isDeleted`          TINYINT(1)   NOT NULL DEFAULT 0,
+    `createdAt`          DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updatedAt`          DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`taskID`),
+    KEY `idx_task_site` (`siteID`),
+    KEY `idx_task_assignee` (`assignedToID`),
+    KEY `idx_task_status` (`siteID`, `status`, `isDeleted`),
+    KEY `idx_task_due` (`dueDate`, `status`),
+    KEY `idx_task_reminder` (`reminderDate`, `reminderSent`),
+    KEY `idx_task_parent` (`parentTaskID`),
+    CONSTRAINT `fk_task_site` FOREIGN KEY (`siteID`) REFERENCES `tblSites` (`siteID`),
+    CONSTRAINT `fk_task_assignee` FOREIGN KEY (`assignedToID`) REFERENCES `tblUsers` (`userID`) ON DELETE SET NULL,
+    CONSTRAINT `fk_task_creator` FOREIGN KEY (`createdByID`) REFERENCES `tblUsers` (`userID`) ON DELETE SET NULL,
+    CONSTRAINT `fk_task_parent` FOREIGN KEY (`parentTaskID`) REFERENCES `tblTasks` (`taskID`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+COMMENT='Recurring tasks and reminders';
 
 
 -- #############################################################################
@@ -1791,6 +2061,137 @@ ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`)
 VALUES ('admin/users/import', 'admin/users/import.php', 1)
 ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
+
+-- #############################################################################
+-- SECTION 6B: ROUTES + SEEDS FROM MIGRATIONS 029-036
+-- (announcements, documents, audit, 2FA, workflows, tasks — matches the
+--  table definitions added in SECTION 4B above)
+-- #############################################################################
+
+-- ─── Announcements (migration 029) ──────────────────────────────────────────
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`)
+VALUES ('announcements', 'announcements/index.php', 1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`)
+VALUES ('announcements/view', 'announcements/view.php', 1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`)
+VALUES ('announcements/manage', 'announcements/manage.php', 1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`)
+VALUES ('announcements/save', 'announcements/save.php', 1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`)
+VALUES ('announcements/delete', 'announcements/delete.php', 1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
+INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isSensitive`, `siteID`)
+VALUES ('announcements.enabled', 'true', 0, NULL)
+ON DUPLICATE KEY UPDATE `settingKey` = `settingKey`;
+INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isSensitive`, `siteID`)
+VALUES ('announcements.displayName', 'Announcements', 0, NULL)
+ON DUPLICATE KEY UPDATE `settingKey` = `settingKey`;
+INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isSensitive`, `siteID`)
+VALUES ('announcements.displayIcon', 'fa-solid fa-bullhorn', 0, NULL)
+ON DUPLICATE KEY UPDATE `settingKey` = `settingKey`;
+INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isSensitive`, `siteID`)
+VALUES ('announcements.brandColor', '#fd7e14', 0, NULL)
+ON DUPLICATE KEY UPDATE `settingKey` = `settingKey`;
+
+-- ─── Documents (migration 030) ──────────────────────────────────────────────
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`)
+VALUES ('documents', 'documents/index.php', 1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`)
+VALUES ('documents/upload', 'documents/upload.php', 1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`)
+VALUES ('documents/download', 'documents/download.php', 1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`)
+VALUES ('documents/delete', 'documents/delete.php', 1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`)
+VALUES ('documents/categories', 'documents/categories.php', 1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
+INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isSensitive`, `siteID`)
+VALUES ('documents.enabled', 'true', 0, NULL)
+ON DUPLICATE KEY UPDATE `settingKey` = `settingKey`;
+INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isSensitive`, `siteID`)
+VALUES ('documents.displayName', 'Documents', 0, NULL)
+ON DUPLICATE KEY UPDATE `settingKey` = `settingKey`;
+INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isSensitive`, `siteID`)
+VALUES ('documents.displayIcon', 'fa-solid fa-folder-open', 0, NULL)
+ON DUPLICATE KEY UPDATE `settingKey` = `settingKey`;
+INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isSensitive`, `siteID`)
+VALUES ('documents.brandColor', '#6f42c1', 0, NULL)
+ON DUPLICATE KEY UPDATE `settingKey` = `settingKey`;
+INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isSensitive`, `siteID`)
+VALUES ('documents.maxFileSize', '10485760', 0, NULL)
+ON DUPLICATE KEY UPDATE `settingKey` = `settingKey`;
+
+-- ─── Audit trail (migration 031) ────────────────────────────────────────────
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`)
+VALUES ('admin/audit', 'admin/audit/index.php', 1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
+-- ─── TOTP / 2FA (migration 032) ─────────────────────────────────────────────
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`)
+VALUES ('auth/2fa/verify', 'auth/2fa/verify.php', 0)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`)
+VALUES ('auth/2fa/setup', 'auth/2fa/setup.php', 1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`)
+VALUES ('auth/2fa/disable', 'auth/2fa/disable.php', 1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
+INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isSensitive`, `siteID`)
+VALUES ('auth.totpEnabled', 'true', 0, NULL)
+ON DUPLICATE KEY UPDATE `settingKey` = `settingKey`;
+INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isSensitive`, `siteID`)
+VALUES ('auth.totpIssuer', 'WebMS Portal', 0, NULL)
+ON DUPLICATE KEY UPDATE `settingKey` = `settingKey`;
+
+-- ─── Workflow engine (migration 034) ────────────────────────────────────────
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`)
+VALUES ('admin/workflows', 'admin/workflows/index.php', 1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`)
+VALUES ('admin/workflows/save', 'admin/workflows/save.php', 1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
+-- 📋 Seed default expense-approval workflow (siteID=1 row required, seeded
+--    in SECTION 5 above). Idempotent via the (workflowKey, siteID) unique key.
+INSERT INTO `tblWorkflows` (`siteID`, `workflowName`, `workflowKey`, `description`)
+VALUES (1, 'Expense Approval', 'expense_approval', 'Default expense claim approval workflow')
+ON DUPLICATE KEY UPDATE `workflowName` = VALUES(`workflowName`);
+
+-- ─── Tasks / reminders (migration 036) ──────────────────────────────────────
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`)
+VALUES ('tasks', 'tasks/index.php', 1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`)
+VALUES ('tasks/save', 'tasks/save.php', 1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`)
+VALUES ('tasks/complete', 'tasks/complete.php', 1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
+INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isSensitive`, `siteID`)
+VALUES ('tasks.enabled', 'true', 0, NULL)
+ON DUPLICATE KEY UPDATE `settingKey` = `settingKey`;
+INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isSensitive`, `siteID`)
+VALUES ('tasks.displayName', 'Tasks', 0, NULL)
+ON DUPLICATE KEY UPDATE `settingKey` = `settingKey`;
+INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isSensitive`, `siteID`)
+VALUES ('tasks.displayIcon', 'fa-solid fa-list-check', 0, NULL)
+ON DUPLICATE KEY UPDATE `settingKey` = `settingKey`;
+INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isSensitive`, `siteID`)
+VALUES ('tasks.brandColor', '#20c997', 0, NULL)
+ON DUPLICATE KEY UPDATE `settingKey` = `settingKey`;
 
 
 -- #############################################################################

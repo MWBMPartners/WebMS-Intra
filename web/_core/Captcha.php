@@ -1,5 +1,5 @@
 <?php
-// Path: core/Captcha.php
+// Path: _core/Captcha.php
 /**
  * -----------------------------------------------------------------------------
  * Centralised Captcha Helper 🤖

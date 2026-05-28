@@ -1,5 +1,5 @@
 <?php
-// Path: core/Site.php
+// Path: _core/Site.php
 /**
  * -----------------------------------------------------------------------------
  * Multi-Site Context Manager 🌐

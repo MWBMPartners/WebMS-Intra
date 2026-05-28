@@ -1,5 +1,5 @@
 <?php
-// Path: core/ExpenseMailer.php
+// Path: _core/ExpenseMailer.php
 /**
  * -----------------------------------------------------------------------------
  * Expense Email Notification Helper 📧

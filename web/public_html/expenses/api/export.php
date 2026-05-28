@@ -26,9 +26,11 @@ use Portal\Core\CsvExporter;
 Auth::ensureSession();
 Auth::requireLogin();
 
-// 🔑 Only Admin or Approver may export expenses
-$isAdmin    = Auth::isAdmin();
-$isApprover = Auth::isApprover();
+// 🔑 Only Admin or Approver may export expenses — these gates live on App,
+//    not Auth. Auth::isAdmin() / Auth::isApprover() don't exist so the
+//    original code fatalled before any export logic could run.
+$isAdmin    = App::isAdmin();
+$isApprover = App::hasRole('Approver');
 
 if ($isAdmin === false && $isApprover === false) {
     http_response_code(403);

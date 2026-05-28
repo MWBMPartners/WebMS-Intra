@@ -1,5 +1,5 @@
 <?php
-// Path: core/templates/header.php
+// Path: _core/templates/header.php
 /**
  * -----------------------------------------------------------------------------
  * Shared Page Header Template 📄

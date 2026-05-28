@@ -1,5 +1,5 @@
 <?php
-// Path: core/RateLimiter.php
+// Path: _core/RateLimiter.php
 /**
  * -----------------------------------------------------------------------------
  * Login Rate Limiter 🛡️

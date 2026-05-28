@@ -1,5 +1,5 @@
 <?php
-// Path: core/templates/nav.php
+// Path: _core/templates/nav.php
 /**
  * -----------------------------------------------------------------------------
  * Navigation Bar Component 🧭

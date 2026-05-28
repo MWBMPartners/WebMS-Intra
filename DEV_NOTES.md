@@ -66,14 +66,17 @@ public web root the upload lands in.
 
 All three branches share **one** remote base directory on DreamHost. Per
 branch, `web/public_html/` mirrors to a different sibling; everything else
-inside `web/` (`core/`, `vendor/`, `sql/`, `_includes/`, `_functions/`) goes
-to the shared base from every branch — **last push wins for shared code**.
+inside `web/` (`_core/`, `_vendor/`, `_sql/`, `_lang/`, `_install/`,
+`_includes/`, `_functions/`) goes to the shared base from every branch —
+**last push wins for shared code**.
 
 ```text
 SFTP_BASE_PATH/
-├── core/                  ← from web/_core/         (all branches)
-├── vendor/                ← from web/_vendor/       (all branches)
-├── sql/                   ← from web/_sql/          (all branches)
+├── _core/                 ← from web/_core/         (all branches)
+├── _vendor/               ← from web/_vendor/       (all branches)
+├── _sql/                  ← from web/_sql/          (all branches)
+├── _lang/                 ← from web/_lang/         (all branches)
+├── _install/              ← from web/_install/      (all branches)
 ├── _auth_keys/            ← server-managed (excluded from sync)
 ├── _libraries/dompdf/     ← fetched at deploy time by tools/download-dompdf.sh
 ├── _uploads/              ← server-managed (excluded from sync)
@@ -701,13 +704,14 @@ All paths below are relative to `web/` (the deployable root):
 
 | Path | Purpose |
 |------|---------|
-| `core/` | Framework classes (`Portal\Core` namespace) |
-| `core/templates/` | Shared page templates (header, footer, nav, errors) |
-| `vendor/simplejwt/` | Vendored RS256 JWT verifier (no Composer) |
-| `sql/` | Numbered SQL migration files |
+| `_core/` | Framework classes (`Portal\Core` namespace) |
+| `_core/templates/` | Shared page templates (header, footer, nav, errors) |
+| `_vendor/simplejwt/` | Vendored RS256 JWT verifier (no Composer) |
+| `_sql/` | Numbered SQL migration files |
+| `_lang/` | I18n translation files (en.php, cy.php, …) |
+| `_install/` | Installation wizard and upgrade handler |
 | `public_html/` | The single web-root source; branch-based deploy maps this to `public_html/` (main), `public_html_dev/` (alpha) or `public_html_beta/` (beta) on the server |
 | `public_html/{app}/` | App controllers (e.g. `expenses/`, `auth/`, `dashboard/`) |
-| `install/` | Installation wizard and upgrade handler |
 | `_auth_keys/` | Credentials and encryption keys (gitignored, created by installer) |
 | `_uploads/` | User file uploads (gitignored) |
 | `_backups/` | Server backups (gitignored) |

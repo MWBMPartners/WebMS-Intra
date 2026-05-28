@@ -1,5 +1,5 @@
 <?php
-// Path: core/templates/error-403.php
+// Path: _core/templates/error-403.php
 /**
  * -----------------------------------------------------------------------------
  * 403 Access Denied Error Page 🚫

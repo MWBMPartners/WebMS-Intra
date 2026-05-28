@@ -1,5 +1,5 @@
 <?php
-// Path: core/I18n.php
+// Path: _core/I18n.php
 /**
  * -----------------------------------------------------------------------------
  * Internationalisation (i18n) Framework 🌐

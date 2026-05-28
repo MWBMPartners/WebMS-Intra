@@ -1,5 +1,5 @@
 <?php
-// Path: core/ExpensePdf.php
+// Path: _core/ExpensePdf.php
 /**
  * -----------------------------------------------------------------------------
  * Expense PDF Builder 🧾

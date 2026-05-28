@@ -1,5 +1,5 @@
 <?php
-// Path: core/WebAuthn.php
+// Path: _core/WebAuthn.php
 /**
  * -----------------------------------------------------------------------------
  * WebAuthn / PassKey Helper

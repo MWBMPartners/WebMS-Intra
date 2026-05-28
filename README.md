@@ -133,7 +133,7 @@ Browser -> .htaccess -> index.php -> bootstrap.php -> Router::dispatch()
 
 1. Create `_auth_keys/auth_creds.php` returning: `['db_host'=>..., 'db_user'=>..., 'db_pass'=>..., 'db_name'=>..., 'db_port'=>3306]`
 2. Generate encryption key: `openssl rand -hex 32 > _auth_keys/enc.key`
-3. Import `sql/full_schema.sql` into your database
+3. Import `_sql/full_schema.sql` into your database
 4. Create a lock file: `touch _auth_keys/.installed`
 
 ### Local Development
@@ -157,8 +157,8 @@ preferred, password fallback) on a three-branch model:
 | `beta`  | beta       | `public_html_beta/`   | Conventional Commits     |
 | `main`  | production | `public_html/`        | none — tag `v*` manually |
 
-Everything else inside `web/` (`core/`, `vendor/`, `sql/`) deploys to the
-shared remote base from every branch.
+Everything else inside `web/` (`_core/`, `_vendor/`, `_sql/`, `_lang/`,
+`_install/`) deploys to the shared remote base from every branch.
 
 Workflows in `.github/workflows/`:
 

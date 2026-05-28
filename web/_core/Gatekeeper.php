@@ -1,5 +1,5 @@
 <?php
-// Path: core/Gatekeeper.php
+// Path: _core/Gatekeeper.php
 /**
  * -----------------------------------------------------------------------------
  * Channel Gatekeeper 🚧

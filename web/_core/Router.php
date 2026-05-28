@@ -1,5 +1,5 @@
 <?php
-// Path: core/Router.php
+// Path: _core/Router.php
 /**
  * -----------------------------------------------------------------------------
  * Portal Front-Controller Router 🎯
