@@ -49,15 +49,45 @@ define('INSTALL_VERSION', (string) (require INSTALL_ROOT . DIRECTORY_SEPARATOR .
 // ---------------------------------------------------------------------------
 if (is_file(INSTALL_LOCK_FILE) === true || is_file(INSTALL_CREDS_FILE) === true) {
     http_response_code(403);
+    // 🎨 Themed lockout page — picks up the OS prefers-color-scheme and
+    // uses the same indigo palette as the rest of the installer / portal,
+    // so links / buttons are readable in both light and dark modes
+    // without relying on Bootstrap or browser defaults.
     echo '<!doctype html><html><head><title>Already Installed</title>'
+       . '<meta charset="utf-8">'
        . '<meta name="viewport" content="width=device-width,initial-scale=1">'
-       . '<style>body{font-family:system-ui;text-align:center;padding:4rem;}'
-       . '.btn{display:inline-block;padding:.6rem 1.5rem;background:#0d6efd;color:#fff;'
-       . 'text-decoration:none;border-radius:.4rem;margin-top:1rem;}</style></head>'
-       . '<body><h1>Already Installed</h1>'
+       . '<style>'
+       . ':root{'
+       .   '--bg:#f7f8fa;--surface:#ffffff;--text:#1b2330;--muted:#6b7280;'
+       .   '--border:#e5e7eb;--primary:#5e6ad2;--primary-hover:#4f5bbf;'
+       .   '--code-bg:#eef0fb;--code-text:#1b2330;'
+       . '}'
+       . '@media (prefers-color-scheme: dark){:root{'
+       .   '--bg:#0f1115;--surface:#161a22;--text:#e8eaf0;--muted:#9aa3b2;'
+       .   '--border:#2c3441;--primary:#7b86e8;--primary-hover:#8f99eb;'
+       .   '--code-bg:#1f2347;--code-text:#e8eaf0;'
+       . '}}'
+       . 'html,body{height:100%;}'
+       . 'body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;'
+       .   'background:var(--bg);color:var(--text);text-align:center;'
+       .   'padding:4rem 1.25rem;margin:0;line-height:1.55;}'
+       . '.card{max-width:560px;margin:0 auto;background:var(--surface);'
+       .   'border:1px solid var(--border);border-radius:.75rem;padding:2.5rem 2rem;'
+       .   'box-shadow:0 4px 6px -1px rgba(16,24,40,.08),0 2px 4px -2px rgba(16,24,40,.06);}'
+       . 'h1{margin:0 0 1rem;font-weight:600;letter-spacing:-.01em;}'
+       . 'p{margin:0 0 1rem;color:var(--text);}'
+       . 'code{background:var(--code-bg);color:var(--code-text);'
+       .   'padding:.125rem .4rem;border-radius:.375rem;font-size:.9em;'
+       .   'font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;}'
+       . '.btn{display:inline-block;padding:.625rem 1.25rem;background:var(--primary);'
+       .   'color:#fff;text-decoration:none;border-radius:.375rem;margin-top:1rem;'
+       .   'font-weight:500;transition:background 120ms ease;}'
+       . '.btn:hover,.btn:focus{background:var(--primary-hover);color:#fff;}'
+       . '</style></head>'
+       . '<body><div class="card"><h1>Already Installed</h1>'
        . '<p>WebMS Intra has already been installed. To re-run the installer, '
        . 'remove both the lock file and credentials file from the <code>_auth_keys/</code> directory.</p>'
-       . '<a class="btn" href="/">Go to Portal</a></body></html>';
+       . '<a class="btn" href="/">Go to Portal</a></div></body></html>';
     exit();
 }
 
@@ -464,7 +494,7 @@ $pageTitle = 'Install — ' . ($stepTitles[$step] ?? 'WebMS Intra');
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title><?php echo htmlspecialchars($pageTitle, ENT_QUOTES, 'UTF-8'); ?></title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet"
-          integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YcnS/1PTgCq0l0vD8pVNSNZS1p0H084UB" crossorigin="anonymous">
+          integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YcnS/NPqOGZ2eLNphkfv02LPMoJiDFhNSz7K" crossorigin="anonymous">
     <style>
         /* =====================================================================
          * Installer styles — comprehensive across all 6 step layouts.
@@ -859,6 +889,36 @@ $pageTitle = 'Install — ' . ($stepTitles[$step] ?? 'WebMS Intra');
         .prereq-fail { color: var(--portal-danger);  font-weight: 500; }
 
         /* =====================================================================
+         * 🔗 Defensive anchor styling — bind <a> directly to the brand link
+         * colour. `--bs-link-color` is already pointed at the indigo palette
+         * above, but if Bootstrap fails to load (CDN outage / SRI mismatch)
+         * Bootstrap's own `a { color: var(--bs-link-color); }` rule never
+         * runs and anchors fall back to the browser default (underlined
+         * blue, visited purple — particularly ugly in dark mode). This
+         * rule guarantees readability even with zero external CSS.
+         * =================================================================*/
+        a {
+            color: var(--bs-link-color);
+            text-decoration: underline;
+            text-underline-offset: 0.15em;
+        }
+        a:hover,
+        a:focus {
+            color: var(--bs-link-hover-color);
+        }
+        a:visited {
+            color: var(--bs-link-color);
+        }
+        /* Buttons-as-links keep their button look, never link-blue */
+        a.btn,
+        a.btn:hover,
+        a.btn:focus,
+        a.btn:visited {
+            text-decoration: none;
+            color: var(--bs-btn-color, inherit);
+        }
+
+        /* =====================================================================
          * Alerts (steps 3 / 5 / 6 use these heavily)
          * =================================================================*/
         .install-card .alert {
@@ -876,12 +936,36 @@ $pageTitle = 'Install — ' . ($stepTitles[$step] ?? 'WebMS Intra');
             margin: 0.5rem 0 0;
         }
         .install-card .alert li { margin: 0.25rem 0; }
+        /* Code chips inside alerts: tonal-on-tonal so they read clearly on
+         * both the light-mode pastel and the dark-mode deep-shade backgrounds,
+         * without the bright white pill that previously washed out the text. */
         .install-card .alert code {
-            background: rgba(255,255,255,0.55);
-            padding: 0.125rem 0.4rem;
+            background:    rgba(0, 0, 0, 0.08);
+            color:         currentColor;
+            padding:       0.125rem 0.4rem;
             border-radius: var(--portal-radius-sm);
-            font-size: 0.875em;
+            font-size:     0.875em;
+            font-family:   ui-monospace, SFMono-Regular, "SF Mono", Menlo,
+                           Monaco, Consolas, monospace;
         }
+        [data-bs-theme="dark"] .install-card .alert code {
+            background: rgba(255, 255, 255, 0.12);
+        }
+        /* Links inside alerts — pull from currentColor so the underline
+         * inherits the alert's own tonal foreground (dark-on-light or
+         * light-on-dark) and is always readable against the tinted bg. */
+        .install-card .alert a {
+            color: currentColor;
+            text-decoration: underline;
+            font-weight: 600;
+        }
+        .install-card .alert a:hover,
+        .install-card .alert a:focus {
+            color: currentColor;
+            opacity: 0.8;
+        }
+
+        /* Light-mode alert palettes — pastel backgrounds, deep tonal text */
         .install-card .alert-info {
             background:    #eef2ff;     /* indigo-tinted */
             border-color:  #c7d2fe;
@@ -901,6 +985,29 @@ $pageTitle = 'Install — ' . ($stepTitles[$step] ?? 'WebMS Intra');
             background:    #fef2f2;
             border-color:  #fecaca;
             color:         #991b1b;
+        }
+        /* Dark-mode alert palettes — mirrors portal.css so the installer
+         * stays consistent with the runtime portal. Deep-shade bg, light
+         * tonal text — readable, no white "punch" in dark mode. */
+        [data-bs-theme="dark"] .install-card .alert-info {
+            background:    #1e1b4b;
+            border-color:  #312e81;
+            color:         #c7d2fe;
+        }
+        [data-bs-theme="dark"] .install-card .alert-warning {
+            background:    #451a03;
+            border-color:  #92400e;
+            color:         #fde68a;
+        }
+        [data-bs-theme="dark"] .install-card .alert-success {
+            background:    #052e16;
+            border-color:  #166534;
+            color:         #bbf7d0;
+        }
+        [data-bs-theme="dark"] .install-card .alert-danger {
+            background:    #450a0a;
+            border-color:  #991b1b;
+            color:         #fecaca;
         }
         /* Top-of-card error/success messages (different markup: alert + install-card class) */
         .alert.install-card { box-shadow: none; margin-bottom: 1.5rem; }

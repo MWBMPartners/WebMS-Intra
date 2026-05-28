@@ -11,6 +11,27 @@ to `alpha`, `beta`, and `main` using the heading format
 
 ## [Unreleased]
 
+### Fixed
+
+- **Installer link colours** (#167) — fixed truncated Bootstrap 5.3.3 CSS
+  SRI hash in `web/_install/index.php` that was causing the browser to
+  reject the stylesheet, leaving anchors (most visibly the `← Back`
+  button on every step) rendered in browser-default blue. Added a
+  defensive `a { color: var(--bs-link-color); }` rule so the installer
+  stays readable even if the CDN is blocked or the integrity check
+  fails again. Added dark-mode overrides for `.alert-info`,
+  `.alert-warning`, `.alert-success`, `.alert-danger` to mirror the
+  runtime portal (`portal.css` already had them — the installer was
+  missing them because it bundles its own standalone CSS). Re-themed
+  the "Already Installed" lockout page to use the indigo palette with
+  `prefers-color-scheme` awareness.
+- **Alert links + code chips, portal-wide** (#167) — added `.alert a`
+  and `.alert code` polish to `portal.css` so anchors and inline code
+  inside any `.alert-*` box pick up the alert's own tonal foreground
+  via `currentColor`, instead of falling through to the global indigo
+  link colour (which clashes against alert-warning amber /
+  alert-success green).
+
 ## [1.0.0] - 2026-05-22 — 🚀 v1.0 launch
 
 A "bumper" release pulling everything needed for the v1.0 launch into one
