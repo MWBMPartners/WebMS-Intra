@@ -995,6 +995,19 @@ COMMENT='Centralised error log for all platforms/libraries. See core/Logger.php.
 -- (ON DUPLICATE KEY preserves existing values)
 -- #############################################################################
 
+-- 🏠 Default site (siteID=1) — bootstrap before any FK-dependent seed.
+--    A dozen tables (tblEventTypes, tblEventCategories, tblUserSites, …)
+--    declare `siteID INT NOT NULL DEFAULT 1` with an FK back to
+--    `tblSites(siteID)`. Without this row the SECTION 5B / 6 INSERTs
+--    further down trip the FK and the installer's step-3 schema run
+--    halts. Originally seeded by migration `015_multisite.sql`; dropped
+--    when the migrations were consolidated into this file — restored
+--    here. Idempotent: re-runs skip via `WHERE NOT EXISTS`.
+INSERT INTO `tblSites` (`siteID`, `siteName`, `siteKey`, `copyrightOrg`, `timezone`)
+SELECT 1, 'Portal', 'default', 'Organisation', 'UTC'
+FROM DUAL
+WHERE NOT EXISTS (SELECT 1 FROM `tblSites` WHERE `siteID` = 1);
+
 -- ─── Site settings ───────────────────────────────────────────────────────────
 INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isSensitive`, `defaultValue`)
 VALUES ('site.name', 'Portal', 0, 'Portal')
