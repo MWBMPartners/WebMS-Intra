@@ -13,6 +13,22 @@ to `alpha`, `beta`, and `main` using the heading format
 
 ### Fixed
 
+- **Installer HTTP 500 on steps 3 and 4** (#169) — the `install_schema`
+  and `create_admin` POST handlers in `web/_install/index.php` ran
+  `multi_query` / `prepare` / `execute` without try/catch wrappers.
+  Under PHP 8.1+ mysqli defaults to strict-exception mode (and
+  `installGetDb()` re-asserts it), so ANY SQL error in
+  `full_schema.sql` (DDL conflict, FK ordering, version-specific
+  syntax, privilege denied, charset mismatch, …) — or a duplicate-email
+  INSERT during admin creation — threw an uncaught
+  `mysqli_sql_exception` and fatalled the request with a bare
+  HTTP 500. The existing `if ($stmt === false)` / `$db->errno`
+  branches were dead code under strict mode. Both handlers are now
+  wrapped in `try { … } catch (\mysqli_sql_exception $e) { … }` that
+  surfaces the real MySQL message to the user and re-renders the
+  current step. The schema-error capture loop now keeps the FIRST
+  error message (was overwriting with later "Commands out of sync"
+  follow-ups).
 - **Installer link colours** (#167) — fixed truncated Bootstrap 5.3.3 CSS
   SRI hash in `web/_install/index.php` that was causing the browser to
   reject the stylesheet, leaving anchors (most visibly the `← Back`

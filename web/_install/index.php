@@ -197,26 +197,46 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $step = 3;
             } else {
                 $sql = file_get_contents($schemaFile);
-                $db->multi_query($sql);
+                // 🛡️ Wrap multi_query + result-set walking in try/catch.
+                // mysqli is in strict-exception mode (PHP 8.1+ default,
+                // also re-asserted by installGetDb()), so ANY SQL error
+                // in full_schema.sql — DDL conflict, version-specific
+                // syntax, FK ordering issue, privilege denied, etc. —
+                // would otherwise throw an uncaught mysqli_sql_exception
+                // and fatal the request with a bare HTTP 500. Catching
+                // here surfaces the real MySQL message to the user
+                // instead. The $db->errno checks below remain in place
+                // as belt-and-braces for the (now unreachable) silent-
+                // failure mode on legacy PHP <8.1 hosts.
+                try {
+                    $db->multi_query($sql);
 
-                // Consume all result sets from multi_query
-                $queryError = '';
-                do {
-                    $result = $db->store_result();
-                    if ($result !== false) {
-                        $result->free();
-                    }
-                    if ($db->errno !== 0) {
-                        $queryError = $db->error;
-                    }
-                } while ($db->more_results() === true && $db->next_result());
+                    // Consume all result sets from multi_query
+                    $queryError = '';
+                    do {
+                        $result = $db->store_result();
+                        if ($result !== false) {
+                            $result->free();
+                        }
+                        // 🪞 Keep the FIRST error — a later "Commands out
+                        //    of sync" follow-up would otherwise overwrite
+                        //    the useful root-cause message.
+                        if ($db->errno !== 0 && $queryError === '') {
+                            $queryError = $db->error;
+                        }
+                    } while ($db->more_results() === true && $db->next_result());
 
-                if ($queryError !== '') {
-                    $error = 'Schema installation error: ' . $queryError;
+                    if ($queryError !== '') {
+                        $error = 'Schema installation error: ' . $queryError;
+                        $step = 3;
+                    } else {
+                        $db->close();
+                        header('Location: ?step=4');
+                        exit();
+                    }
+                } catch (\mysqli_sql_exception $e) {
+                    $error = 'Schema installation error: ' . $e->getMessage();
                     $step = 3;
-                } else {
-                    header('Location: ?step=4');
-                    exit();
                 }
             }
             $db->close();
@@ -270,57 +290,72 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $error = 'Database connection lost. Please go back to Step 2.';
                 $step = 2;
             } else {
-                // Insert admin user
-                $hash = password_hash($adminPass, PASSWORD_DEFAULT);
-                $stmt = $db->prepare(
-                    'INSERT INTO tblUsers (fullName, emailAddress, isAdmin, isRootAdmin, isActive, createdAt, siteID) '
-                    . 'VALUES (?, ?, 1, 1, 1, NOW(), 1)'
-                );
-                if ($stmt === false) {
-                    $error = 'Failed to prepare user insert: ' . $db->error;
+                // 🛡️ Wrap the whole admin-create flow in try/catch — see
+                // step 3 above for the rationale. A duplicate-email INSERT,
+                // an FK violation, or any other constraint failure would
+                // otherwise throw an uncaught mysqli_sql_exception and
+                // fatal the request. The `$stmt === false` and
+                // `if ($stmtLocal !== false)` guards below are kept as
+                // belt-and-braces — under strict mode they're effectively
+                // dead code, but they keep the handler safe if a future
+                // change toggles mysqli_report back to silent.
+                try {
+                    // Insert admin user
+                    $hash = password_hash($adminPass, PASSWORD_DEFAULT);
+                    $stmt = $db->prepare(
+                        'INSERT INTO tblUsers (fullName, emailAddress, isAdmin, isRootAdmin, isActive, createdAt, siteID) '
+                        . 'VALUES (?, ?, 1, 1, 1, NOW(), 1)'
+                    );
+                    if ($stmt === false) {
+                        $error = 'Failed to prepare user insert: ' . $db->error;
+                        $step = 4;
+                    } else {
+                        $stmt->bind_param('ss', $adminName, $adminEmail);
+                        $stmt->execute();
+                        $newUserId = $stmt->insert_id;
+                        $stmt->close();
+
+                        // Create local auth account
+                        $stmtLocal = $db->prepare(
+                            'INSERT INTO tblLocalAccounts (userID, username, passwordHash, isVerified, createdAt) '
+                            . 'VALUES (?, ?, ?, 1, NOW())'
+                        );
+                        if ($stmtLocal !== false) {
+                            $stmtLocal->bind_param('iss', $newUserId, $adminEmail, $hash);
+                            $stmtLocal->execute();
+                            $stmtLocal->close();
+                        }
+
+                        // Assign to default site
+                        $stmtSite = $db->prepare(
+                            'INSERT INTO tblUserSites (userID, siteID, isSiteAdmin, isSiteRootAdmin, isActive) '
+                            . 'VALUES (?, 1, 1, 1, 1)'
+                        );
+                        if ($stmtSite !== false) {
+                            $stmtSite->bind_param('i', $newUserId);
+                            $stmtSite->execute();
+                            $stmtSite->close();
+                        }
+
+                        // Update default site settings with the admin's email
+                        $stmtSetting = $db->prepare(
+                            'UPDATE tblSettings SET settingValue = ? WHERE settingKey = \'site.adminEmail\' AND siteID IS NULL'
+                        );
+                        if ($stmtSetting !== false) {
+                            $stmtSetting->bind_param('s', $adminEmail);
+                            $stmtSetting->execute();
+                            $stmtSetting->close();
+                        }
+
+                        $db->close();
+                        header('Location: ?step=5');
+                        exit();
+                    }
+                } catch (\mysqli_sql_exception $e) {
+                    $error = 'Failed to create administrator: ' . $e->getMessage();
                     $step = 4;
-                } else {
-                    $stmt->bind_param('ss', $adminName, $adminEmail);
-                    $stmt->execute();
-                    $newUserId = $stmt->insert_id;
-                    $stmt->close();
-
-                    // Create local auth account
-                    $stmtLocal = $db->prepare(
-                        'INSERT INTO tblLocalAccounts (userID, username, passwordHash, isVerified, createdAt) '
-                        . 'VALUES (?, ?, ?, 1, NOW())'
-                    );
-                    if ($stmtLocal !== false) {
-                        $stmtLocal->bind_param('iss', $newUserId, $adminEmail, $hash);
-                        $stmtLocal->execute();
-                        $stmtLocal->close();
-                    }
-
-                    // Assign to default site
-                    $stmtSite = $db->prepare(
-                        'INSERT INTO tblUserSites (userID, siteID, isSiteAdmin, isSiteRootAdmin, isActive) '
-                        . 'VALUES (?, 1, 1, 1, 1)'
-                    );
-                    if ($stmtSite !== false) {
-                        $stmtSite->bind_param('i', $newUserId);
-                        $stmtSite->execute();
-                        $stmtSite->close();
-                    }
-
-                    // Update default site settings with the admin's email
-                    $stmtSetting = $db->prepare(
-                        'UPDATE tblSettings SET settingValue = ? WHERE settingKey = \'site.adminEmail\' AND siteID IS NULL'
-                    );
-                    if ($stmtSetting !== false) {
-                        $stmtSetting->bind_param('s', $adminEmail);
-                        $stmtSetting->execute();
-                        $stmtSetting->close();
-                    }
-
-                    $db->close();
-                    header('Location: ?step=5');
-                    exit();
                 }
+                $db->close();
             }
         }
     }
