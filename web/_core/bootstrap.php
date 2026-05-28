@@ -321,9 +321,21 @@ try {
 // Lightweight site detection runs before settings are loaded so we know which
 // siteID to use when fetching site-specific settings overrides.
 // Returns siteID=1 if multisite is disabled or detection fails.
-// See: core/Site.php — preDetect() method
+// See: _core/Site.php — preDetect() method
+//
+// 🛡️ Wrapped in try/catch because this runs BEFORE the global exception
+//    handler is registered (line ~420) and BEFORE settings are loaded. Under
+//    PHP 8.1+ strict mysqli mode any error in the detection queries (tblSites
+//    schema drift, FK issue, transient DB error) would otherwise produce a
+//    bare HTTP 500 for every request to the portal. Falling back to
+//    siteID=1 keeps the request alive with the default site selected.
 
-$preDetectedSiteID = \Portal\Core\Site::preDetect($mysqli);
+$preDetectedSiteID = 1;
+try {
+    $preDetectedSiteID = \Portal\Core\Site::preDetect($mysqli);
+} catch (\mysqli_sql_exception $e) {
+    error_log('[WebMS-Intra] Site::preDetect failed, falling back to siteID=1: ' . $e->getMessage());
+}
 
 // 🗝️ ---------------------------------------------------------------------------
 // 6. Settings loader – dot-notation → multidimensional array
@@ -338,30 +350,40 @@ $preDetectedSiteID = \Portal\Core\Site::preDetect($mysqli);
 
 $SETTINGS = [];
 
-$settingsStmt = $mysqli->prepare(
-    'SELECT settingKey, settingValue, isSensitive, siteID '
-    . 'FROM tblSettings '
-    . 'WHERE siteID IS NULL OR siteID = ? '
-    . 'ORDER BY siteID IS NULL DESC'
-);
-if ($settingsStmt !== false) {
-    $settingsStmt->bind_param('i', $preDetectedSiteID);
-    $settingsStmt->execute();
-    $result = $settingsStmt->get_result();
-    while ($row = $result->fetch_assoc()) {
-        $value = $row['settingValue'];
+// 🛡️ Wrapped in try/catch because this runs BEFORE the global exception
+//    handler is registered (line ~420). Under PHP 8.1+ strict mysqli mode
+//    any error here — tblSettings missing/corrupt, connection blip, charset
+//    issue — would otherwise produce a bare HTTP 500 for every request.
+//    Falling back to an empty $SETTINGS array allows the portal to render
+//    a degraded page (logged for admin diagnosis) instead of fataling.
+try {
+    $settingsStmt = $mysqli->prepare(
+        'SELECT settingKey, settingValue, isSensitive, siteID '
+        . 'FROM tblSettings '
+        . 'WHERE siteID IS NULL OR siteID = ? '
+        . 'ORDER BY siteID IS NULL DESC'
+    );
+    if ($settingsStmt !== false) {
+        $settingsStmt->bind_param('i', $preDetectedSiteID);
+        $settingsStmt->execute();
+        $result = $settingsStmt->get_result();
+        while ($row = $result->fetch_assoc()) {
+            $value = $row['settingValue'];
 
-        // 🔓 Decrypt sensitive settings (API keys, secrets etc)
-        if ($row['isSensitive'] === '1' && $value !== '' && $value !== null) {
-            $value = decrypt_setting($value);
+            // 🔓 Decrypt sensitive settings (API keys, secrets etc)
+            if ($row['isSensitive'] === '1' && $value !== '' && $value !== null) {
+                $value = decrypt_setting($value);
+            }
+
+            assign_setting($SETTINGS, $row['settingKey'], $value);
         }
-
-        assign_setting($SETTINGS, $row['settingKey'], $value);
+        $settingsStmt->close();
+    } else {
+        // 🚨 Settings query failed — log error so it's visible in admin error log
+        error_log('[WebMS-Intra] CRITICAL: Failed to prepare settings query: ' . $mysqli->error);
     }
-    $settingsStmt->close();
-} else {
-    // 🚨 Settings query failed — log error so it's visible in admin error log
-    error_log('[WebMS-Intra] CRITICAL: Failed to prepare settings query: ' . $mysqli->error);
+} catch (\mysqli_sql_exception $e) {
+    error_log('[WebMS-Intra] CRITICAL: Settings load threw mysqli_sql_exception, continuing with empty settings: ' . $e->getMessage());
 }
 
 // 🕐 Update timezone to the configured value (overrides the UTC default above)
@@ -462,21 +484,33 @@ if (isset($_GET['lang']) === true && $_GET['lang'] !== '') {
 }
 
 // 📋 Load user locale from DB into session on login (if not already set)
+//
+// 🛡️ Wrapped in try/catch — although the global exception handler IS active
+//    by this point (set above at line ~420), locale lookup failure should
+//    NOT 500 the whole request. The user's row may have been deleted, the
+//    `locale` column may be missing on a fresh install, or the DB may blip
+//    transiently. In any of those cases we silently fall back to whatever
+//    locale I18n already picked from the session / Accept-Language header,
+//    which is far better UX than a 500.
 if (session_status() === PHP_SESSION_ACTIVE
     && isset($_SESSION['user_id']) === true
     && isset($_SESSION['user_locale']) === false
 ) {
-    $localeStmt = $mysqli->prepare('SELECT locale FROM tblUsers WHERE userID = ? LIMIT 1');
-    if ($localeStmt !== false) {
-        $localeUserId = (int) $_SESSION['user_id'];
-        $localeStmt->bind_param('i', $localeUserId);
-        $localeStmt->execute();
-        $localeRow = $localeStmt->get_result()->fetch_assoc();
-        $localeStmt->close();
-        if ($localeRow !== null && $localeRow['locale'] !== null && $localeRow['locale'] !== '') {
-            $_SESSION['user_locale'] = $localeRow['locale'];
-            \Portal\Core\I18n::setLocale($localeRow['locale']);
+    try {
+        $localeStmt = $mysqli->prepare('SELECT locale FROM tblUsers WHERE userID = ? LIMIT 1');
+        if ($localeStmt !== false) {
+            $localeUserId = (int) $_SESSION['user_id'];
+            $localeStmt->bind_param('i', $localeUserId);
+            $localeStmt->execute();
+            $localeRow = $localeStmt->get_result()->fetch_assoc();
+            $localeStmt->close();
+            if ($localeRow !== null && $localeRow['locale'] !== null && $localeRow['locale'] !== '') {
+                $_SESSION['user_locale'] = $localeRow['locale'];
+                \Portal\Core\I18n::setLocale($localeRow['locale']);
+            }
         }
+    } catch (\mysqli_sql_exception $e) {
+        error_log('[WebMS-Intra] User locale lookup failed, continuing with default locale: ' . $e->getMessage());
     }
 }
 
