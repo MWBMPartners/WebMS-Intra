@@ -26,8 +26,8 @@ use Portal\Core\CsvExporter;
 Auth::ensureSession();
 Auth::requireLogin();
 
-// 🔑 Admin required
-if (Auth::isAdmin() === false) {
+// 🔑 Admin required — admin gate lives on App, not Auth.
+if (App::isAdmin() === false) {
     http_response_code(403);
     exit('Forbidden');
 }
