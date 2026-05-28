@@ -1,5 +1,5 @@
 <?php
-// Path: core/Totp.php
+// Path: _core/Totp.php
 /**
  * -----------------------------------------------------------------------------
  * Portal Core TOTP Helper

@@ -1,5 +1,5 @@
 <?php
-// Path: core/MailerGoogle.php
+// Path: _core/MailerGoogle.php
 /**
  * -----------------------------------------------------------------------------
  * Google Workspace Mailer (Gmail API) ✉️

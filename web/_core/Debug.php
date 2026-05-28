@@ -1,5 +1,5 @@
 <?php
-// Path: core/Debug.php
+// Path: _core/Debug.php
 /**
  * -----------------------------------------------------------------------------
  * Debug Mode Panel 🐛

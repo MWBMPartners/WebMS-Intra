@@ -1,5 +1,5 @@
 <?php
-// Path: core/templates/footer.php
+// Path: _core/templates/footer.php
 /**
  * -----------------------------------------------------------------------------
  * Shared Page Footer Template 📄

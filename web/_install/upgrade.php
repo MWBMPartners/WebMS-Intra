@@ -60,18 +60,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $pending = $migrator->pending(); // Refresh pending list
 }
 
-// Get all executed migrations for display
-$executed = [];
-$execStmt = $mysqli->prepare(
-    'SELECT filename, executedAt FROM tblMigrations ORDER BY filename ASC'
-);
-if ($execStmt !== false) {
-    $execStmt->execute();
-    $execResult = $execStmt->get_result();
-    while ($row = $execResult->fetch_assoc()) {
-        $executed[] = $row;
+// Get all executed migrations for display.
+// 🛡️ Wrapped in try/catch so a bad tblMigrations (corrupt, missing,
+//    permission issue) shows the admin a useful message inline on the
+//    upgrade page instead of relying on the global 500 handler. Mirrors
+//    the pattern PR #170 established for the installer step-3 fix.
+$executed     = [];
+$executedErr  = '';
+try {
+    $execStmt = $mysqli->prepare(
+        'SELECT filename, executedAt FROM tblMigrations ORDER BY filename ASC'
+    );
+    if ($execStmt !== false) {
+        $execStmt->execute();
+        $execResult = $execStmt->get_result();
+        while ($row = $execResult->fetch_assoc()) {
+            $executed[] = $row;
+        }
+        $execStmt->close();
     }
-    $execStmt->close();
+} catch (\mysqli_sql_exception $e) {
+    $executedErr = 'Could not read executed-migrations list: ' . $e->getMessage();
 }
 
 // Page metadata
@@ -175,7 +184,11 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     <h2 class="h6 mb-0">Migration History</h2>
                 </div>
                 <div class="card-body p-0">
-                    <?php if (count($executed) === 0): ?>
+                    <?php if ($executedErr !== ''): ?>
+                        <div class="alert alert-danger m-3 mb-0">
+                            <?php echo htmlspecialchars($executedErr, ENT_QUOTES, 'UTF-8'); ?>
+                        </div>
+                    <?php elseif (count($executed) === 0): ?>
                         <p class="text-muted p-3 mb-0">No migrations have been executed yet.</p>
                     <?php else: ?>
                         <table class="table table-sm table-striped mb-0">

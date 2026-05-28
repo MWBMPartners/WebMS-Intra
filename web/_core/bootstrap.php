@@ -1,5 +1,5 @@
 <?php
-// Path: core/bootstrap.php
+// Path: _core/bootstrap.php
 /**
  * -----------------------------------------------------------------------------
  * Portal Core Bootstrap 🚀

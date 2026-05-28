@@ -1,5 +1,5 @@
 <?php
-// Path: core/ApiResponse.php
+// Path: _core/ApiResponse.php
 /**
  * -----------------------------------------------------------------------------
  * JSON API Response Builder 🔌

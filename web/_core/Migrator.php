@@ -1,5 +1,5 @@
 <?php
-// Path: core/Migrator.php
+// Path: _core/Migrator.php
 /**
  * -----------------------------------------------------------------------------
  * Web-Based SQL Migration Runner 🔄
@@ -71,28 +71,42 @@ class Migrator
      */
     private function ensureMigrationsTable(): void
     {
-        // 🔍 Check if tblMigrations already exists to avoid unnecessary DDL
-        $result = $this->db->query("SHOW TABLES LIKE 'tblMigrations'");
-        if ($result !== false && $result->num_rows > 0) {
-            $result->free();
-            return;
-        }
-        if ($result !== false) {
-            $result->free();
-        }
+        // 🛡️ Both queries below are wrapped in try/catch — under PHP 8.1+
+        //    strict mysqli mode, mysqli::query() throws mysqli_sql_exception
+        //    on error rather than returning false, so the `=== false` checks
+        //    are effectively dead code. We catch the exception and rethrow
+        //    as RuntimeException with a useful message so the upgrade page
+        //    (which calls this) can surface what went wrong.
+        try {
+            // 🔍 Check if tblMigrations already exists to avoid unnecessary DDL
+            $result = $this->db->query("SHOW TABLES LIKE 'tblMigrations'");
+            if ($result !== false && $result->num_rows > 0) {
+                $result->free();
+                return;
+            }
+            if ($result !== false) {
+                $result->free();
+            }
 
-        // 📝 Create the table inline (mirrors sql/000_create_migrations_table.sql)
-        $ddl = "CREATE TABLE IF NOT EXISTS `tblMigrations` (
-            `migrationID`   INT          NOT NULL AUTO_INCREMENT,
-            `filename`      VARCHAR(255) NOT NULL,
-            `executedAt`    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            `executedByID`  INT          DEFAULT NULL,
-            PRIMARY KEY (`migrationID`),
-            UNIQUE KEY `uq_filename` (`filename`)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci";
+            // 📝 Create the table inline (mirrors _sql/000_create_migrations_table.sql)
+            $ddl = "CREATE TABLE IF NOT EXISTS `tblMigrations` (
+                `migrationID`   INT          NOT NULL AUTO_INCREMENT,
+                `filename`      VARCHAR(255) NOT NULL,
+                `executedAt`    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                `executedByID`  INT          DEFAULT NULL,
+                PRIMARY KEY (`migrationID`),
+                UNIQUE KEY `uq_filename` (`filename`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci";
 
-        if ($this->db->query($ddl) === false) {
-            throw new RuntimeException('Failed to create tblMigrations: ' . $this->db->error);
+            if ($this->db->query($ddl) === false) {
+                throw new RuntimeException('Failed to create tblMigrations: ' . $this->db->error);
+            }
+        } catch (\mysqli_sql_exception $e) {
+            throw new RuntimeException(
+                'Failed to ensure tblMigrations exists: ' . $e->getMessage(),
+                0,
+                $e
+            );
         }
     }
 

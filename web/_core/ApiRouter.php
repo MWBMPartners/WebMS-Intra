@@ -1,5 +1,5 @@
 <?php
-// Path: core/ApiRouter.php
+// Path: _core/ApiRouter.php
 /**
  * -----------------------------------------------------------------------------
  * API Request Router 🔌

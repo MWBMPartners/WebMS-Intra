@@ -1,5 +1,5 @@
 <?php
-// Path: core/Container.php
+// Path: _core/Container.php
 /**
  * -----------------------------------------------------------------------------
  * Lightweight Service Container 📦

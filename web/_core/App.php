@@ -1,5 +1,5 @@
 <?php
-// Path: core/App.php
+// Path: _core/App.php
 /**
  * -----------------------------------------------------------------------------
  * Application Registry 🏛️

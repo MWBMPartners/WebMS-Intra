@@ -1,5 +1,5 @@
 <?php
-// Path: core/Mailer.php
+// Path: _core/Mailer.php
 /**
  * -----------------------------------------------------------------------------
  * Portal Mailer — Multi-Provider Dispatcher ✉️

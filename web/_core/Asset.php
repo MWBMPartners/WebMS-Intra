@@ -1,5 +1,5 @@
 <?php
-// Path: core/Asset.php
+// Path: _core/Asset.php
 /**
  * -----------------------------------------------------------------------------
  * CDN-with-Fallback Asset Loader 📦

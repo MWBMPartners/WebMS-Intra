@@ -1,5 +1,5 @@
 <?php
-// Path: core/Validator.php
+// Path: _core/Validator.php
 /**
  * -----------------------------------------------------------------------------
  * Input Validation Framework ✅

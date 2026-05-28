@@ -18,10 +18,11 @@ Internal portal platform (PHP 8.5, backward-compatible with 8.4, MySQL 8.0, Boot
 ```
 repo root/          <- NOT deployed (docs, CI/CD only)
 web/                <- ALL deployable files (synced to server via SFTP)
-  core/             <- Framework classes (Portal\Core namespace, 26 classes)
-  vendor/simplejwt/ <- Vendored RS256 JWT verifier
-  sql/              <- Numbered SQL migrations (000-043 + full_schema.sql)
-  lang/             <- I18n translation files (en.php, cy.php, …)
+  _core/            <- Framework classes (Portal\Core namespace, 26 classes)
+  _vendor/simplejwt/<- Vendored RS256 JWT verifier
+  _sql/             <- Numbered SQL migrations (000-052 + full_schema.sql)
+  _lang/            <- I18n translation files (en.php, cy.php, …)
+  _install/         <- Standalone 6-step installation wizard (bootstrap-free)
   public_html/      <- Web root: ONE front controller + assets + app controllers.
                        Branch-based deploy mirrors this dir to the server's
                        public_html/ (main), public_html_beta/ (beta) or
@@ -32,7 +33,6 @@ web/                <- ALL deployable files (synced to server via SFTP)
   _uploads/         <- User file uploads (gitignored, server-managed)
   _backups/         <- Server snapshots (gitignored, server-managed)
   _libraries/       <- Server-managed libs incl. dompdf 3.1.5
-install/            <- Standalone 6-step installation wizard (bootstrap-free)
 ```
 
 ## Apps (shipped on `main`)

@@ -1,5 +1,5 @@
 <?php
-// Path: core/templates/error-500.php
+// Path: _core/templates/error-500.php
 /**
  * -----------------------------------------------------------------------------
  * 500 Server Error Page ⚠️
