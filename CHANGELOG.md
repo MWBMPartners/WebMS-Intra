@@ -11,6 +11,44 @@ to `alpha`, `beta`, and `main` using the heading format
 
 ## [Unreleased]
 
+### Fixed — Codebase audit follow-ups
+
+- **Bootstrap critical-path mysqli exceptions** (#173, #174, #175) — wrapped
+  three unguarded mysqli call sites in `web/_core/bootstrap.php` (settings
+  load at line 341, user-locale lookup at line 469, and `Site::preDetect()`
+  at line 326) in try/catch with graceful fallbacks. Without these, any DB
+  hiccup in the bootstrap critical path produced a bare HTTP 500 for every
+  request to the portal — bypassing the global exception handler because
+  these queries run before / outside its safety net.
+- **CI workflow paths** (#176) — `version-bump.yml` and `changelog.yml`
+  pointed at `web/core/App.php` which no longer exists (renamed to
+  `_core/version.php`). The next push to `alpha`/`beta` would have failed.
+  Workflows now read from `web/_core/version.php` using a `^return '...';`
+  grep pattern matching the new file shape.
+- **Admin/approver gates routed through Auth instead of App** (#177, #178,
+  #179, #180) — four export handlers (`admin/activity/export.php`,
+  `attendance/export.php`, `admin/users/export.php`,
+  `expenses/api/export.php`) called `Auth::isAdmin()` and `Auth::isApprover()`
+  which don't exist on `Portal\Core\Auth` — fatal on any access. Replaced
+  with `App::isAdmin()` and `App::hasRole('Approver')` (the patterns used
+  consistently elsewhere).
+- **Schema drift — missing app tables** (#184, #185, #186, #187, #191,
+  #192, #193, #194) — `web/_sql/full_schema.sql` was missing entire tables
+  from 6 migrations even though `tblMigrations` was seeded marking them
+  executed. Ported:
+  - Migration 018: `siteID` column + FK on `tblRecurrenceRules`
+  - Migration 029: `tblAnnouncements` + app routes + settings
+  - Migration 030: `tblDocCategories`, `tblDocuments` + routes + settings
+  - Migration 031: `tblAuditTrail` + admin/audit route
+  - Migration 032: `totpSecret` / `totpEnabled` columns on `tblUsers`,
+    `tblTotpBackupCodes` table, 2FA routes + settings
+  - Migration 034: `tblWorkflows`, `tblWorkflowSteps`,
+    `tblWorkflowInstances`, `tblWorkflowActions` + routes + default
+    expense-approval workflow seed
+  - Migration 036: `tblTasks` + routes + settings
+  - Schema header updated to reflect actual coverage (000-052, was
+    claiming 000-036).
+
 ### Fixed
 
 - **`full_schema.sql` missing default site seed** (#171) — every
