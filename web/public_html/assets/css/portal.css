@@ -1118,6 +1118,32 @@ body.d-flex.vh-100 > .card h1 {
 [data-bs-theme="dark"] .alert-danger {
     background-color: #450a0a; border-color: #991b1b; color: #fecaca;
 }
+/* 🔗 Links + <code> inside coloured alerts — bind to the alert's own
+ * tonal foreground (via currentColor) so they remain readable against
+ * the tinted background in both themes. Without this, anchors inherit
+ * the global indigo link colour, which can clash against alert-warning
+ * amber, alert-success green, etc. */
+.alert a {
+    color: currentColor;
+    text-decoration: underline;
+    font-weight: var(--portal-font-weight-bold);
+}
+.alert a:hover,
+.alert a:focus {
+    color: currentColor;
+    opacity: 0.8;
+}
+.alert code {
+    background-color: rgba(0, 0, 0, 0.08);
+    color: currentColor;
+    padding: 0.125rem 0.4rem;
+    border-radius: var(--portal-radius-xs);
+    font-size: 0.875em;
+    font-family: var(--portal-font-mono);
+}
+[data-bs-theme="dark"] .alert code {
+    background-color: rgba(255, 255, 255, 0.12);
+}
 
 /* ----- Buttons (extend the existing .btn-primary override to the others) ----- */
 .btn {
