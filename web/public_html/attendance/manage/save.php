@@ -91,7 +91,7 @@ if ($action === 'create') {
         . 'VALUES (?, ?, ?, ?, ?, ?)'
     );
     if ($stmt === false) {
-        $_SESSION['flash_msg']  = 'Database error creating service type.';
+        $_SESSION['flash_msg']  = t('error.db_create_service_type');
         $_SESSION['flash_type'] = 'danger';
         header('Location: /attendance/manage');
         exit();

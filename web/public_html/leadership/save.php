@@ -190,7 +190,7 @@ if ($action === 'create') {
         . 'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
     );
     if ($stmt === false) {
-        $_SESSION['flash_msg']  = 'Database error.';
+        $_SESSION['flash_msg']  = t('error.database');
         $_SESSION['flash_type'] = 'danger';
         header('Location: /leadership/assign?roleID=' . $roleID);
         exit();
@@ -239,7 +239,7 @@ if ($action === 'update') {
         . 'WHERE assignmentID = ? AND siteID = ?'
     );
     if ($stmt === false) {
-        $_SESSION['flash_msg']  = 'Database error.';
+        $_SESSION['flash_msg']  = t('error.database');
         $_SESSION['flash_type'] = 'danger';
         header('Location: /leadership');
         exit();

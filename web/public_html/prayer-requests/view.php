@@ -70,7 +70,9 @@ if ($req === null) {
     http_response_code(404);
     $pageTitle = 'Not Found';
     require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
-    echo '<div class="alert alert-warning"><i class="fa-solid fa-circle-exclamation me-1"></i>Prayer request not found.</div>';
+    echo '<div class="alert alert-warning"><i class="fa-solid fa-circle-exclamation me-1"></i>'
+        . htmlspecialchars(t('prayer_requests.error.not_found'), ENT_QUOTES, 'UTF-8')
+        . '</div>';
     echo '<a href="/prayer-requests" class="btn btn-outline-secondary"><i class="fa-solid fa-arrow-left me-1"></i> Back</a>';
     require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'footer.php';
     exit();
@@ -85,7 +87,9 @@ if ($isOwner === false && $isMod === false && $isCongregationVisible === false) 
     http_response_code(403);
     $pageTitle = 'Forbidden';
     require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
-    echo '<div class="alert alert-danger"><i class="fa-solid fa-lock me-1"></i>You do not have access to this prayer request.</div>';
+    echo '<div class="alert alert-danger"><i class="fa-solid fa-lock me-1"></i>'
+        . htmlspecialchars(t('prayer_requests.error.no_access'), ENT_QUOTES, 'UTF-8')
+        . '</div>';
     echo '<a href="/prayer-requests" class="btn btn-outline-secondary"><i class="fa-solid fa-arrow-left me-1"></i> Back</a>';
     require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'footer.php';
     exit();

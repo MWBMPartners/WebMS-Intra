@@ -54,7 +54,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // 🔍 Fetch user's TOTP secret
     $uStmt = $mysqli->prepare('SELECT totpSecret FROM tblUsers WHERE userID = ? AND totpEnabled = 1 LIMIT 1');
     if ($uStmt === false) {
-        $_SESSION['flash_msg']  = 'Database error.';
+        $_SESSION['flash_msg']  = t('error.database');
         $_SESSION['flash_type'] = 'danger';
         header('Location: /auth/2fa/verify');
         exit();

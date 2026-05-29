@@ -26,7 +26,7 @@ use Portal\Core\Site;
 // 🛡️ Umbrella admin only
 if (App::isUmbrellaAdmin() === false) {
     http_response_code(403);
-    echo 'Access denied. Umbrella admin privileges required.';
+    echo t('error.umbrella_admin_only');
     exit();
 }
 
@@ -42,7 +42,7 @@ if ($siteId <= 0) {
 $siteStmt = $db->prepare('SELECT siteID, siteName, siteKey FROM tblSites WHERE siteID = ? LIMIT 1');
 if ($siteStmt === false) {
     http_response_code(500);
-    echo 'Database error.';
+    echo t('error.database');
     exit();
 }
 $siteStmt->bind_param('i', $siteId);

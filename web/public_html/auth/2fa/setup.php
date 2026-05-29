@@ -33,7 +33,7 @@ $siteId = Site::id();
 // 🔍 Check if already enabled
 $userStmt = $mysqli->prepare('SELECT totpEnabled, emailAddress FROM tblUsers WHERE userID = ? LIMIT 1');
 if ($userStmt === false) {
-    $_SESSION['flash_msg']  = 'Database error.';
+    $_SESSION['flash_msg']  = t('error.database');
     $_SESSION['flash_type'] = 'danger';
     header('Location: /auth/account');
     exit();

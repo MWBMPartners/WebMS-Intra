@@ -93,7 +93,7 @@ if ($action === 'create') {
         . 'VALUES (?, ?, ?, ?, ?)'
     );
     if ($stmt === false) {
-        $_SESSION['flash_msg']  = 'Database error creating role.';
+        $_SESSION['flash_msg']  = t('error.db_create_role');
         $_SESSION['flash_type'] = 'danger';
         header('Location: /leadership/manage');
         exit();

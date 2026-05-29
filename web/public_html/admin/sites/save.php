@@ -31,7 +31,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 // 🛡️ Umbrella admin only
 if (App::isUmbrellaAdmin() === false) {
     http_response_code(403);
-    echo 'Access denied.';
+    echo t('error.access_denied_inline');
     exit();
 }
 
@@ -91,7 +91,7 @@ if ($siteID > 0) {
         . 'WHERE siteID = ?'
     );
     if ($stmt === false) {
-        $_SESSION['flash_msg'] = 'Database error: ' . $db->error;
+        $_SESSION['flash_msg'] = t('error.db_with_detail', ['detail' => $db->error]);
         $_SESSION['flash_type'] = 'danger';
         header('Location: /admin/sites', true, 302);
         exit();
@@ -123,7 +123,7 @@ if ($siteID > 0) {
         . 'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
     );
     if ($stmt === false) {
-        $_SESSION['flash_msg'] = 'Database error: ' . $db->error;
+        $_SESSION['flash_msg'] = t('error.db_with_detail', ['detail' => $db->error]);
         $_SESSION['flash_type'] = 'danger';
         header('Location: /admin/sites', true, 302);
         exit();

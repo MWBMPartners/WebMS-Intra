@@ -27,7 +27,7 @@ Auth::requireLogin();
 
 // 🛡️ Admin only
 if (App::isAdmin() !== true) {
-    $_SESSION['flash_msg']  = 'Access denied.';
+    $_SESSION['flash_msg']  = t('error.access_denied_inline');
     $_SESSION['flash_type'] = 'danger';
     header('Location: /dashboard');
     exit();

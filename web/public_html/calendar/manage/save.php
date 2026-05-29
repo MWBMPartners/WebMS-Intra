@@ -201,7 +201,7 @@ if ($action === 'create') {
     );
 
     if ($stmt === false) {
-        $_SESSION['flash_msg']  = 'Database error: ' . $mysqli->error;
+        $_SESSION['flash_msg']  = t('error.db_with_detail', ['detail' => $mysqli->error]);
         $_SESSION['flash_type'] = 'danger';
         header('Location: /calendar/manage');
         exit();

@@ -184,7 +184,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     . 'VALUES (?, ?, ?, ?, ?, ?, 1)'
                 );
                 if ($stmt === false) {
-                    $error = 'Database error preparing insert.';
+                    $error = t('error.db_import_prepare');
                 } else {
                     $okCount = 0;
                     foreach ($rows as $r) {

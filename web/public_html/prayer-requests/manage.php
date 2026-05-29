@@ -37,7 +37,9 @@ if (App::isAdmin() === false) {
     http_response_code(403);
     $pageTitle = 'Forbidden';
     require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
-    echo '<div class="alert alert-danger"><i class="fa-solid fa-lock me-1"></i>Moderator access required.</div>';
+    echo '<div class="alert alert-danger"><i class="fa-solid fa-lock me-1"></i>'
+        . htmlspecialchars(t('error.moderator_only'), ENT_QUOTES, 'UTF-8')
+        . '</div>';
     echo '<a href="/prayer-requests" class="btn btn-outline-secondary"><i class="fa-solid fa-arrow-left me-1"></i> Back</a>';
     require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'footer.php';
     exit();
