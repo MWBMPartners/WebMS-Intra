@@ -300,11 +300,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 // dead code, but they keep the handler safe if a future
                 // change toggles mysqli_report back to silent.
                 try {
-                    // Insert admin user
+                    // Insert admin user. Note: tblUsers has NO siteID column —
+                    // multi-site assignment is via tblUserSites (inserted
+                    // below). An earlier version of this handler included
+                    // `siteID = 1` directly on tblUsers, which fatalled the
+                    // installer step 4 with "Unknown column 'siteID'" on every
+                    // fresh install. See issue #200.
                     $hash = password_hash($adminPass, PASSWORD_DEFAULT);
                     $stmt = $db->prepare(
-                        'INSERT INTO tblUsers (fullName, emailAddress, isAdmin, isRootAdmin, isActive, createdAt, siteID) '
-                        . 'VALUES (?, ?, 1, 1, 1, NOW(), 1)'
+                        'INSERT INTO tblUsers (fullName, emailAddress, isAdmin, isRootAdmin, isActive, createdAt) '
+                        . 'VALUES (?, ?, 1, 1, 1, NOW())'
                     );
                     if ($stmt === false) {
                         $error = 'Failed to prepare user insert: ' . $db->error;

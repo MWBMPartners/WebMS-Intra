@@ -11,6 +11,41 @@ to `alpha`, `beta`, and `main` using the heading format
 
 ## [Unreleased]
 
+### Fixed — Audit follow-up #2: SQL column-name mismatches (#198)
+
+A class of bug my prior audit didn't check for: runtime SQL statements
+that reference columns which don't exist on the named table. Surfaced
+when the user hit step 4 of the installer with `Unknown column 'siteID'
+in 'field list'`. A targeted re-audit found 5 more instances of the
+same shape across 3 files.
+
+- **Installer step 4** — `web/_install/index.php:306` removed `siteID`
+  from the `tblUsers` INSERT. `tblUsers` has no `siteID` column; multi-
+  site assignment is via `tblUserSites` (already inserted on the next
+  statement).
+- **Bulk user import** — `web/public_html/admin/users/import.php:156`
+  had the identical `tblUsers.siteID` bug. Removed; `bind_param` updated.
+- **GDPR data export** — `web/public_html/auth/account/data-export.php`:
+  - `tblLinkedAccounts`: `createdAt` → `linkedAt`
+  - `tblWebAuthnCredentials`: `label` → `friendlyName`
+  - `tblExpenseClaims`: `submittedByID` → `userID`
+  Three columns the schema never had / had renamed — would have fatalled
+  every `/account/data-export` request.
+- **tblLocalAccounts schema drift** — runtime code (installer step 4 +
+  GDPR export) referenced `isVerified` and `createdAt` columns that no
+  migration ever added to `tblLocalAccounts`. Both clearly intended
+  (installer sets `isVerified = 1` for the admin; GDPR export reads
+  both). Added to `full_schema.sql` CREATE TABLE; new migration
+  `053_local_accounts_columns.sql` adds them to existing installs via
+  idempotent `ADD COLUMN IF NOT EXISTS`.
+
+The honest reason this slipped past the previous "thorough check": my
+audit prompts covered uncaught exceptions, schema-vs-migration drift,
+path drift, and CSRF/auth gates — but not "do runtime SQL column names
+exist on the named tables". Added that dimension to the audit
+playbook for the next sweep.
+
+
 ### Fixed — Codebase audit follow-ups
 
 - **Bootstrap critical-path mysqli exceptions** (#173, #174, #175) — wrapped
