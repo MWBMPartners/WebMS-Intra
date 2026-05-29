@@ -101,14 +101,22 @@ if (session_status() !== PHP_SESSION_ACTIVE) {
 // ---------------------------------------------------------------------------
 // Determine current step
 // ---------------------------------------------------------------------------
-$step = (int) ($_GET['step'] ?? ($_POST['step'] ?? 1));
+// 🪞 Step is normally 1-6, but the "existing data" choice page lives at
+//    step '2.5' as a string so a fractional step is unambiguous in URLs.
+//    We track it separately to keep the integer comparisons elsewhere
+//    in the file intact.
+$rawStep = (string) ($_GET['step'] ?? ($_POST['step'] ?? '1'));
+$isChoiceStep = ($rawStep === '2.5');
+$step = $isChoiceStep ? 2 : (int) $rawStep;
 if ($step < 1 || $step > 6) {
     $step = 1;
+    $isChoiceStep = false;
 }
 
 // Enforce step progression — cannot skip ahead without completing prior steps
-if ($step >= 3 && isset($_SESSION['install_db']) === false) {
+if (($step >= 3 || $isChoiceStep) && isset($_SESSION['install_db']) === false) {
     $step = 2; // DB credentials not yet configured
+    $isChoiceStep = false;
 }
 if ($step === 6 && is_file(INSTALL_LOCK_FILE) === false) {
     $step = 5; // Finalization not yet completed
@@ -171,8 +179,43 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         'name' => $dbName,
                         'port' => $dbPort,
                     ];
+
+                    // 🔍 Probe DB state so we can route the user appropriately.
+                    //    See _install/db_state.php for the classification rules.
+                    require_once INSTALL_ROOT
+                        . DIRECTORY_SEPARATOR . '_install'
+                        . DIRECTORY_SEPARATOR . 'db_state.php';
+                    $policy = (array) (require INSTALL_ROOT
+                        . DIRECTORY_SEPARATOR . '_install'
+                        . DIRECTORY_SEPARATOR . 'upgrade-policy.php');
+                    $state = detectDbState(
+                        $testConn,
+                        INSTALL_VERSION,
+                        $policy,
+                        is_file(INSTALL_LOCK_FILE)
+                    );
+                    $_SESSION['install_db_state'] = $state;
                     $testConn->close();
-                    header('Location: ?step=3');
+
+                    if ($state['state'] === DB_STATE_EMPTY) {
+                        // Fresh install — straight to schema install.
+                        $_SESSION['install_action'] = 'fresh';
+                        header('Location: ?step=3');
+                        exit();
+                    }
+                    if ($state['state'] === DB_STATE_INSTALLED_CURRENT) {
+                        // Lock file + tables already at code version. The
+                        // top-of-file lockout would have caught the lock
+                        // file; this path means the lock was deleted but
+                        // the DB is already current. Re-write the lock
+                        // and redirect to portal.
+                        @touch(INSTALL_LOCK_FILE);
+                        header('Location: /');
+                        exit();
+                    }
+                    // PARTIAL, INSTALLED_UPGRADE, or FRESH_REQUIRED →
+                    // render the step-2.5 choice page.
+                    header('Location: ?step=2.5');
                     exit();
                 }
 
@@ -184,6 +227,48 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 
+    // Step 2.5: Existing-data choice (Continue vs Drop)
+    if ($action === 'install_action') {
+        $choice = (string) ($_POST['install_action_choice'] ?? '');
+        $state = $_SESSION['install_db_state'] ?? null;
+        $allowContinue = is_array($state)
+            && ($state['state'] ?? '') !== DB_STATE_FRESH_REQUIRED;
+
+        if ($choice !== 'continue' && $choice !== 'drop') {
+            $error = 'Please choose how to proceed.';
+            $isChoiceStep = true;
+        } elseif ($choice === 'continue' && $allowContinue === false) {
+            $error = 'Continue is not available — this installation predates the '
+                   . 'force-fresh threshold. You must drop and rebuild.';
+            $isChoiceStep = true;
+        } elseif ($choice === 'drop') {
+            // 🛡️ Destructive — require the user to confirm by typing
+            //    the configured hostname (or 'DROP' if no hostname is
+            //    enforced by policy).
+            $policy = (array) (require INSTALL_ROOT
+                . DIRECTORY_SEPARATOR . '_install'
+                . DIRECTORY_SEPARATOR . 'upgrade-policy.php');
+            $needHost = (bool) ($policy['require_hostname_confirmation_for_drop'] ?? true);
+            $expected = $needHost === true
+                ? ($_SERVER['HTTP_HOST'] ?? 'DROP')
+                : 'DROP';
+            $typed = (string) ($_POST['drop_confirm'] ?? '');
+            if (trim($typed) !== trim($expected)) {
+                $error = 'Confirmation text didn\'t match. Type exactly: '
+                       . htmlspecialchars($expected, ENT_QUOTES, 'UTF-8');
+                $isChoiceStep = true;
+            } else {
+                $_SESSION['install_action'] = 'drop';
+                header('Location: ?step=3');
+                exit();
+            }
+        } else {
+            $_SESSION['install_action'] = 'continue';
+            header('Location: ?step=3');
+            exit();
+        }
+    }
+
     // Step 3: Install schema
     if ($action === 'install_schema') {
         $db = installGetDb();
@@ -191,6 +276,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $error = 'Database connection lost. Please go back to Step 2.';
             $step = 2;
         } else {
+            // 🪦 Drop-and-rebuild path. If the user explicitly opted for
+            //    a fresh install from step 2.5, wipe every portal table
+            //    before running full_schema.sql. We disable FK checks
+            //    for the duration so dependent tables can drop in any
+            //    order. This intentionally destroys data — the choice
+            //    page has already confirmed the user's intent.
+            if (($_SESSION['install_action'] ?? '') === 'drop') {
+                try {
+                    $db->query('SET FOREIGN_KEY_CHECKS = 0');
+                    $rs = $db->query("SHOW TABLES LIKE 'tbl%'");
+                    if ($rs !== false) {
+                        while (($r = $rs->fetch_array(MYSQLI_NUM)) !== null) {
+                            $t = (string) $r[0];
+                            if (preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/', $t) === 1) {
+                                $db->query('DROP TABLE IF EXISTS `' . $t . '`');
+                            }
+                        }
+                        $rs->free();
+                    }
+                    $db->query('SET FOREIGN_KEY_CHECKS = 1');
+                } catch (\mysqli_sql_exception $e) {
+                    $error = 'Drop-and-rebuild failed during table drop: '
+                           . $e->getMessage();
+                    $step = 3;
+                }
+                // 🪞 Step 5 will write portal.installed_version =
+                //    INSTALL_VERSION; no extra state to clear here.
+            }
+
             $schemaFile = INSTALL_SQL . DIRECTORY_SEPARATOR . 'full_schema.sql';
             if (is_readable($schemaFile) === false) {
                 $error = 'Schema file not found: _sql/full_schema.sql';
@@ -487,6 +601,41 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         if ($error === '') {
+            // 🆔 Record the version this DB is now at, AND clear any
+            //    maintenance flag the upgrade flow might have left
+            //    behind. We reconnect with the credentials just written
+            //    rather than reuse the test connection (which has been
+            //    closed several steps ago).
+            $writeDb = installGetDb();
+            if ($writeDb !== null) {
+                try {
+                    $stmt = $writeDb->prepare(
+                        "INSERT INTO `tblSettings` "
+                        . "(`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) "
+                        . "VALUES (NULL, 'portal.installed_version', ?, '', 0) "
+                        . "ON DUPLICATE KEY UPDATE `settingValue` = VALUES(`settingValue`)"
+                    );
+                    if ($stmt !== false) {
+                        $stmt->bind_param('s', $v);
+                        $v = INSTALL_VERSION;
+                        $stmt->execute();
+                        $stmt->close();
+                    }
+                    // 🚧 Clear maintenance flag in case a drop-and-rebuild
+                    //    or interrupted upgrade left it on.
+                    $writeDb->query(
+                        "UPDATE `tblSettings` "
+                        . "SET `settingValue` = '0' "
+                        . "WHERE `settingKey` = 'portal.maintenance.active'"
+                    );
+                } catch (\mysqli_sql_exception $e) {
+                    // 🛡️ Non-fatal — the install completes either way;
+                    //    the maintenance gate just falls back to the
+                    //    "legacy install — assume current" default.
+                }
+                $writeDb->close();
+            }
+
             // Create lock file to prevent re-installation
             file_put_contents(INSTALL_LOCK_FILE, date('c') . "\n" . 'Installed by WebMS Intra installer v' . INSTALL_VERSION);
 
@@ -497,6 +646,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             // Clear session install data
             unset($_SESSION['install_db']);
+            unset($_SESSION['install_action']);
+            unset($_SESSION['install_db_state']);
 
             header('Location: ?step=6');
             exit();
@@ -1317,6 +1468,119 @@ $pageTitle = 'Install — ' . ($stepTitles[$step] ?? 'WebMS Intra');
                 <div class="d-flex justify-content-between">
                     <a href="?step=1" class="btn btn-outline-secondary">&larr; Back</a>
                     <button type="submit" class="btn btn-primary">Test Connection &amp; Continue &rarr;</button>
+                </div>
+            </form>
+
+<?php elseif ($isChoiceStep === true): ?>
+            <!-- STEP 2.5: Existing-data choice -->
+            <?php
+            $stateInfo  = $_SESSION['install_db_state'] ?? ['state' => DB_STATE_PARTIAL];
+            $stateCode  = (string) ($stateInfo['state'] ?? DB_STATE_PARTIAL);
+            $tableCount = (int) ($stateInfo['table_count'] ?? 0);
+            $installedV = $stateInfo['installed_version'] ?? null;
+            $canContinue = ($stateCode !== DB_STATE_FRESH_REQUIRED);
+            $isUpgrade  = ($stateCode === DB_STATE_INSTALLED_UPGRADE);
+            $isPartial  = ($stateCode === DB_STATE_PARTIAL);
+            $isForce    = ($stateCode === DB_STATE_FRESH_REQUIRED);
+            $policyArr  = (array) (require INSTALL_ROOT
+                . DIRECTORY_SEPARATOR . '_install'
+                . DIRECTORY_SEPARATOR . 'upgrade-policy.php');
+            $confirmExpected = ((bool) ($policyArr['require_hostname_confirmation_for_drop'] ?? true))
+                ? ($_SERVER['HTTP_HOST'] ?? 'DROP')
+                : 'DROP';
+            ?>
+            <h2 class="h5 mb-3">Existing Database Detected</h2>
+
+            <?php if ($isUpgrade === true): ?>
+                <div class="alert alert-info">
+                    <strong>This portal is already installed</strong> at version
+                    <code><?php echo htmlspecialchars((string) $installedV, ENT_QUOTES, 'UTF-8'); ?></code>.
+                    The code on disk is at
+                    <code><?php echo htmlspecialchars(INSTALL_VERSION, ENT_QUOTES, 'UTF-8'); ?></code>
+                    — an upgrade is needed.
+                </div>
+            <?php elseif ($isPartial === true): ?>
+                <div class="alert alert-warning">
+                    <strong>A previous installation didn't complete.</strong>
+                    The database has <?php echo $tableCount; ?> portal tables
+                    but the installation lock file is missing.
+                    You can either continue from where you left off (your data
+                    will be preserved) or drop the existing tables and start fresh.
+                </div>
+            <?php elseif ($isForce === true): ?>
+                <div class="alert alert-danger">
+                    <strong>In-place upgrade not available.</strong>
+                    The installed version
+                    (<code><?php echo htmlspecialchars((string) $installedV, ENT_QUOTES, 'UTF-8'); ?></code>)
+                    is older than the upgrade policy's
+                    <code>fresh_required_below</code> threshold. You must drop
+                    and rebuild to install this version. Any data you wish to
+                    preserve should be backed up first.
+                </div>
+            <?php endif; ?>
+
+            <form method="post">
+                <input type="hidden" name="action" value="install_action">
+                <input type="hidden" name="step"   value="2.5">
+
+                <div class="install-card mb-3" style="padding:1rem;border:1px solid var(--bs-border-color);border-radius:.5rem;">
+                    <div class="form-check">
+                        <input class="form-check-input" type="radio"
+                               name="install_action_choice" id="choice_continue"
+                               value="continue"
+                               <?php echo $canContinue === false ? 'disabled' : 'checked'; ?>>
+                        <label class="form-check-label" for="choice_continue">
+                            <strong>Continue with existing data</strong>
+                            <?php if ($isUpgrade === true): ?>
+                                <span class="badge bg-info text-dark ms-1">Upgrade</span>
+                            <?php elseif ($isPartial === true): ?>
+                                <span class="badge bg-success text-dark ms-1">Recommended</span>
+                            <?php endif; ?>
+                            <div class="text-muted small mt-1">
+                                <?php if ($isUpgrade === true): ?>
+                                    A full JSON backup of every table will be written to
+                                    <code>web/_backups/</code> before any migration runs.
+                                    Migrations are idempotent (additive) — no data is lost.
+                                <?php else: ?>
+                                    Existing tables will pick up any missing columns via
+                                    idempotent migrations. Your data is preserved.
+                                <?php endif; ?>
+                            </div>
+                        </label>
+                    </div>
+                </div>
+
+                <div class="install-card mb-3" style="padding:1rem;border:1px solid var(--bs-border-color);border-radius:.5rem;">
+                    <div class="form-check">
+                        <input class="form-check-input" type="radio"
+                               name="install_action_choice" id="choice_drop"
+                               value="drop"
+                               <?php echo $isForce === true ? 'checked' : ''; ?>>
+                        <label class="form-check-label" for="choice_drop">
+                            <strong>Drop existing tables and start fresh</strong>
+                            <span class="badge bg-danger ms-1">Destructive</span>
+                            <div class="text-muted small mt-1">
+                                Every portal table will be <code>DROP</code>ped,
+                                then recreated from scratch. <strong>All existing
+                                data will be lost.</strong> Type the portal
+                                hostname below to confirm.
+                            </div>
+                            <div class="mt-2">
+                                <label class="form-label small" for="drop_confirm">
+                                    Confirmation (type
+                                    <code><?php echo htmlspecialchars($confirmExpected, ENT_QUOTES, 'UTF-8'); ?></code>):
+                                </label>
+                                <input type="text" class="form-control form-control-sm"
+                                       id="drop_confirm" name="drop_confirm"
+                                       placeholder="Hostname or 'DROP'">
+                            </div>
+                        </label>
+                    </div>
+                </div>
+
+                <div class="d-flex justify-content-between">
+                    <a href="?step=2" class="btn btn-outline-secondary">&larr; Back</a>
+                    <button type="submit" class="btn btn-primary">Continue &rarr;</button>
                 </div>
             </form>
 

@@ -2390,6 +2390,22 @@ ON DUPLICATE KEY UPDATE `filename` = `filename`;
 INSERT INTO `tblMigrations` (`filename`) VALUES ('059_fix_api_expenses_delete_isSensitive.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
+INSERT INTO `tblMigrations` (`filename`) VALUES ('060_portal_versioning_and_maintenance.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- 🔢 Portal version tracking + maintenance gate settings (matches migration 060).
+--    Seeded as empty here; the installer writes the actual `portal.installed_version`
+--    on step 5 finalisation, and /admin/upgrade updates it on successful migrate.
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'portal.installed_version',     '',  '',  0),
+    (NULL, 'portal.maintenance.active',    '0', '0', 0),
+    (NULL, 'portal.maintenance.message',   '',  '',  0),
+    (NULL, 'portal.upgrade.backup.enabled',           '1',  '1',  0),
+    (NULL, 'portal.upgrade.backup.keep_last_n',       '10', '10', 0),
+    (NULL, 'portal.upgrade.fresh_required_below',     '',   '',   0),
+    (NULL, 'portal.upgrade.require_hostname_confirm', '1',  '1',  0)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
 INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
     ('calendar/manage/import',    'calendar/manage/import.php',    1),
     ('leadership/manage/import',  'leadership/manage/import.php',  1)
