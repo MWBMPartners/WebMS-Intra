@@ -169,14 +169,34 @@ jobs:
           add_section "SQL injection candidates (mysqli->query / mysqli_query with \$_GET/POST/REQUEST/COOKIE)" "$SQLI"
 
           # ---- 4) XSS heuristic -------------------------------------------
-          # echo or print of $_GET/POST/REQUEST/COOKIE without htmlspecialchars on the same line
+          # echo or print of $_GET/POST/REQUEST/COOKIE without sanitisation
+          # on the same line. Lines are EXCLUDED if they contain any of:
+          #
+          #   • htmlspecialchars / htmlentities / h(          — explicit escapers
+          #   • (int) / (integer) / (float) / (double) / (bool) / (boolean)
+          #     — PHP type casts that produce values incapable of carrying
+          #       markup (the matched bytes are guaranteed to be 0-9, -, .,
+          #       or empty for bool/int casts)
+          #   • intval( / floatval( / boolval(              — function equivalents
+          #
+          # These suppressions stop the heuristic firing on idioms like
+          # `value="<?php echo (int) ($_POST['db_port'] ?? 3306); ?>"`
+          # which are safe by construction.
           XSS=$(echo "$CHANGED" | xargs -r grep -nE '(echo|print)\s+[^;]*\$_(GET|POST|REQUEST|COOKIE)' 2>/dev/null \
-              | grep -v 'htmlspecialchars\|htmlentities\|h(' || true)
+              | grep -vE 'htmlspecialchars|htmlentities|h\(|\(int\)|\(integer\)|\(float\)|\(double\)|\(bool\)|\(boolean\)|intval\(|floatval\(|boolval\(' || true)
           add_section "Possible unescaped output of user input" "$XSS"
 
           # ---- 5) CSRF heuristic -----------------------------------------
-          # form method=post lacking a csrf_token hidden input within 30 lines
-          CSRF_FILES=$(echo "$CHANGED" | xargs -r grep -lE '<form[^>]*method\s*=\s*["'\'']?post' 2>/dev/null || true)
+          # form method=post lacking any csrf_token reference anywhere in
+          # the file.
+          #
+          # Files under web/_install/ are EXCLUDED — the installation
+          # wizard runs before bootstrap.php loads (no Auth::csrfToken()
+          # available), is single-use (locks itself with _auth_keys/.installed
+          # on completion), and is a documented architectural exception.
+          # Confirmed safe at PR #170 review.
+          CSRF_FILES=$(echo "$CHANGED" | xargs -r grep -lE '<form[^>]*method\s*=\s*["'\'']?post' 2>/dev/null \
+              | grep -vE '^web/_install/' || true)
           CSRF_MISSING=""
           for f in $CSRF_FILES; do
             if ! grep -qE 'csrf_token|csrf\b' "$f"; then
