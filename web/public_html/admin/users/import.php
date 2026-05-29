@@ -152,9 +152,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $created = 0;
             $skipped = 0;
 
+            // Note: tblUsers has NO siteID column — multi-site assignment is
+            // via tblUserSites (inserted below). An earlier version of this
+            // statement included siteID directly on tblUsers, which fatalled
+            // the import with "Unknown column 'siteID'" the moment a non-
+            // admin first tried to use the importer. See issue #198.
             $insertStmt = $mysqli->prepare(
-                'INSERT INTO tblUsers (fullName, emailAddress, isAdmin, isActive, createdAt, siteID) '
-                . 'VALUES (?, ?, ?, 1, NOW(), ?)'
+                'INSERT INTO tblUsers (fullName, emailAddress, isAdmin, isActive, createdAt) '
+                . 'VALUES (?, ?, ?, 1, NOW())'
             );
             $siteStmt = $mysqli->prepare(
                 'INSERT INTO tblUserSites (userID, siteID, isActive) VALUES (?, ?, 1)'
@@ -168,7 +173,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         continue;
                     }
 
-                    $insertStmt->bind_param('ssii', $row['name'], $row['email'], $row['isAdmin'], $siteId);
+                    $insertStmt->bind_param('ssi', $row['name'], $row['email'], $row['isAdmin']);
 
                     try {
                         $insertStmt->execute();

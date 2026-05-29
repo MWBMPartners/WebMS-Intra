@@ -223,7 +223,10 @@ CREATE TABLE IF NOT EXISTS `tblLocalAccounts` (
     `username`     VARCHAR(50)  COLLATE utf8mb4_general_ci NOT NULL,
     `passwordHash` VARCHAR(255) COLLATE utf8mb4_general_ci NOT NULL
                    COMMENT 'bcrypt hash via password_hash()',
+    `isVerified`   TINYINT(1)   NOT NULL DEFAULT 0
+                   COMMENT 'Whether the email was verified before activation. Admins created via the installer are auto-verified (=1).',
     `lastLogin`    DATETIME     DEFAULT NULL,
+    `createdAt`    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (`localID`),
     UNIQUE KEY `username` (`username`),
     KEY `userID` (`userID`),
@@ -2356,6 +2359,9 @@ INSERT INTO `tblMigrations` (`filename`) VALUES ('051_email_templates.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
 INSERT INTO `tblMigrations` (`filename`) VALUES ('052_bulk_importers.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('053_local_accounts_columns.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
 INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES

@@ -89,10 +89,12 @@ $payload = [
             'SELECT localID, userID, username, isVerified, createdAt FROM tblLocalAccounts WHERE userID = ? LIMIT 1'
         ),
         'linkedAccounts' => $fetchUserRows(
-            'SELECT linkID, userID, provider, providerEmail, createdAt FROM tblLinkedAccounts WHERE userID = ?'
+            // tblLinkedAccounts uses `linkedAt` not `createdAt`
+            'SELECT linkID, userID, provider, providerEmail, linkedAt FROM tblLinkedAccounts WHERE userID = ?'
         ),
         'webauthnCredentials' => $fetchUserRows(
-            'SELECT credentialID, userID, label, transports, createdAt, lastUsedAt FROM tblWebAuthnCredentials WHERE userID = ?'
+            // tblWebAuthnCredentials uses `friendlyName` not `label`
+            'SELECT credentialID, userID, friendlyName, transports, createdAt, lastUsedAt FROM tblWebAuthnCredentials WHERE userID = ?'
         ),
         'passwordResets' => $fetchUserRows(
             'SELECT resetID, userID, expiresAt, usedAt, createdAt, createdIP FROM tblPasswordResets WHERE userID = ?'
@@ -101,7 +103,8 @@ $payload = [
             'SELECT logID, activityType, activityDescription, visitorIP, timestamp FROM tblActivityLogs WHERE userID = ? ORDER BY timestamp DESC LIMIT 5000'
         ),
         'expenseClaims' => $fetchUserRows(
-            'SELECT * FROM tblExpenseClaims WHERE submittedByID = ?'
+            // tblExpenseClaims uses `userID` not `submittedByID`
+            'SELECT * FROM tblExpenseClaims WHERE userID = ?'
         ),
         'prayerRequests' => $fetchUserRows(
             'SELECT * FROM tblPrayerRequests WHERE submitterID = ?'
