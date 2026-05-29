@@ -27,6 +27,21 @@ if (is_readable($authCredsPath) === false) {
 
 require_once dirname(__DIR__) . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEPARATOR . 'bootstrap.php';
 
+use Portal\Core\Maintenance;
 use Portal\Core\Router;
+
+// 🚧 Maintenance gate (#220).
+//    If portal.maintenance.active = '1' OR the installed_version is
+//    behind PORTAL_VERSION (indicating new code was deployed but the
+//    DB hasn't been brought up yet), gate non-admin / non-allow-listed
+//    requests to a 503 maintenance page. Admins and routes on the
+//    allow list (auth/login, admin/upgrade, admin/maintenance, assets)
+//    pass through so admins can sign in and run the upgrade.
+if (Maintenance::isActive() === true
+    && Maintenance::isAllowed(Router::extractPath()) === false
+    && Maintenance::currentUserCanBypass() === false
+) {
+    Maintenance::renderAndExit();
+}
 
 Router::dispatch($mysqli);

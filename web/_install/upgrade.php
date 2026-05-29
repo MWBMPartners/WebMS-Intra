@@ -55,9 +55,77 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     $userId = (int) ($_SESSION['user_id'] ?? 0);
+
+    // 🚧 Maintenance gate: lock public access for the duration of the
+    //    migration run. Non-admin requests will see the maintenance page;
+    //    admins (and the routes on the allow-list) can still reach the
+    //    upgrader / backup UI. Clearing happens at the end of this block,
+    //    AND we update portal.installed_version on success so the
+    //    version-drift check also stops firing.
+    \Portal\Core\Maintenance::setActive(
+        true,
+        'Applying database migrations — please wait.'
+    );
+
+    // 📦 Auto-backup before running migrations. JSON per table, written
+    //    to web/_backups/upgrade-YYYYMMDD-HHMMSS/. See DbBackup.php.
+    //    Honoured per the portal.upgrade.backup.enabled setting (default
+    //    on); errors are surfaced but do not block the upgrade by
+    //    default — the admin should review the surfaced error and
+    //    decide whether to proceed.
+    $backupSetting = (string) (\Portal\Core\App::settings()['portal']['upgrade']['backup']['enabled'] ?? '1');
+    $backupResult  = null;
+    if ($backupSetting === '1') {
+        $backup = new \Portal\Core\DbBackup($mysqli);
+        $backupResult = $backup->snapshot('pre-upgrade-' . PORTAL_VERSION);
+        if ($backupResult['success'] === false) {
+            $_SESSION['flash_msg']  = 'Backup failed: ' . ($backupResult['error'] ?? 'unknown')
+                                    . ' — aborting upgrade. Set '
+                                    . 'portal.upgrade.backup.enabled = 0 to '
+                                    . 'force-run without a backup.';
+            $_SESSION['flash_type'] = 'danger';
+            \Portal\Core\Maintenance::setActive(false);
+            header('Location: /admin/upgrade');
+            exit();
+        }
+        // 🗄️ Prune old snapshots per retention policy.
+        $keepN = (int) (\Portal\Core\App::settings()['portal']['upgrade']['backup']['keep_last_n'] ?? 10);
+        $backup->prune($keepN);
+    }
+
     $results = $migrator->runAll($userId);
     $ranMigrations = true;
     $pending = $migrator->pending(); // Refresh pending list
+
+    // 🪞 Mark every migration as successful → record current version and
+    //    release maintenance. If any migration failed, keep maintenance
+    //    on so the admin's next request still routes here.
+    $allOk = true;
+    foreach ($results as $r) {
+        if (($r['success'] ?? false) === false) {
+            $allOk = false;
+            break;
+        }
+    }
+    if ($allOk === true) {
+        try {
+            $stmt = $mysqli->prepare(
+                "INSERT INTO `tblSettings` "
+                . "(`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) "
+                . "VALUES (NULL, 'portal.installed_version', ?, '', 0) "
+                . "ON DUPLICATE KEY UPDATE `settingValue` = VALUES(`settingValue`)"
+            );
+            if ($stmt !== false) {
+                $v = (string) PORTAL_VERSION;
+                $stmt->bind_param('s', $v);
+                $stmt->execute();
+                $stmt->close();
+            }
+        } catch (\mysqli_sql_exception $e) {
+            // Non-fatal — the gate will fire again until this gets fixed.
+        }
+        \Portal\Core\Maintenance::setActive(false);
+    }
 }
 
 // Get all executed migrations for display.

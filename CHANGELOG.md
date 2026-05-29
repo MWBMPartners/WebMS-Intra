@@ -9,6 +9,137 @@ Automated sections are appended by `.github/workflows/changelog.yml` per push
 to `alpha`, `beta`, and `main` using the heading format
 `## [VERSION] - YYYY-MM-DD (branch)`.
 
+## [1.1.0] - Unreleased
+
+### Added — Installer state detection + Drop-and-rebuild option (#220)
+
+The installer now probes the target database after credentials validate and classifies into one of:
+
+- `EMPTY` — fresh install (current path)
+- `PARTIAL` — tables exist, no `.installed` lock → render step 2.5 (Continue / Drop)
+- `INSTALLED_CURRENT` — same version → redirect to portal
+- `INSTALLED_UPGRADE` — older version → step 2.5 with upgrade messaging
+- `FRESH_REQUIRED` — installed below `fresh_required_below` policy threshold → step 2.5 with continue disabled
+
+Drop-and-rebuild is gated by a typed hostname confirmation (configurable via `portal.upgrade.require_hostname_confirm`).
+
+New files:
+- `web/_install/upgrade-policy.php` — static version-threshold + backup defaults
+- `web/_install/db_state.php` — `detectDbState()` helper (bootstrap-free)
+
+Installer modifications:
+- Step 2 calls `detectDbState()` after credentials validate
+- New step `2.5` renders the choice page with state-specific messaging
+- Step 3 honours `$_SESSION['install_action']` — `'drop'` triggers `DROP TABLE` of every `tbl*` table (FK_CHECKS off) before re-running schema
+- Step 5 writes `portal.installed_version = INSTALL_VERSION` and clears any leftover maintenance flag
+
+### Added — Auto-backup before upgrade migrations + JSON snapshot engine
+
+New `Portal\Core\DbBackup` class. Used by `/admin/upgrade`:
+
+- Snapshots every `tbl*` table to `web/_backups/upgrade-YYYYMMDD-HHMMSS/{tableName}.json` before any migration runs.
+- `_manifest.json` per snapshot with schema metadata, row counts, SHA-256 hashes.
+- JSON per-table format chosen for programmatic restore (the future per-migration "rescue script" path for Tier-3 breaking changes).
+- Retention: `portal.upgrade.backup.keep_last_n` (default 10) — pruned LIFO on each successful upgrade.
+- Can be disabled via `portal.upgrade.backup.enabled = 0` (not recommended).
+
+`DbBackup::restoreTable()` reads a snapshot and re-INSERTs in a transaction. The admin restore UI is a follow-up PR.
+
+### Added — Maintenance mode (auto on during upgrade, auto off when done)
+
+New `Portal\Core\Maintenance` class + front-controller gate:
+
+- Active when EITHER `portal.maintenance.active = '1'` OR `portal.installed_version < PORTAL_VERSION` (version drift).
+- Front controller (`public_html/index.php`) renders a themed 503 maintenance page (with `prefers-color-scheme`, auto-refresh every 60s) for non-admin / non-allow-listed requests.
+- Allow list: `/auth/login`, `/auth/logout`, `/admin/upgrade`, `/admin/maintenance`, `/assets/`, `/offline`. Admins always pass through.
+- `/admin/upgrade` flips the flag on at the start of migrations, updates `portal.installed_version` on success, flips the flag off. Both signals clear automatically.
+
+### Added — Migration 060 + tblSettings registrations
+
+`web/_sql/060_portal_versioning_and_maintenance.sql` seeds the new keys:
+- `portal.installed_version`
+- `portal.maintenance.active`, `portal.maintenance.message`
+- `portal.upgrade.backup.enabled`, `portal.upgrade.backup.keep_last_n`
+- `portal.upgrade.fresh_required_below`, `portal.upgrade.require_hostname_confirm`
+
+All idempotent. Fresh installs pick them up from `full_schema.sql`'s seed; stale-DB retries get them via the migration runner from #218 / PR #219.
+
+### Changed — Version bumped 1.0.1 → 1.1.0
+
+Net-new feature surface → minor bump per semver.
+
+### Not in this PR (follow-ups)
+
+- Admin UI for browsing / restoring snapshots (`/admin/maintenance/backup`). The `DbBackup` engine is in place; the UI is a separate PR.
+- Per-migration "rescue script" mechanism for Tier-3 breaking schema changes (needed when `fresh_required_below` is first bumped above `0.0.0`).
+- Existing `/admin/settings` UI already supports editing the new `portal.upgrade.*` and `portal.maintenance.*` keys (they're regular tblSettings rows).
+
+## [1.0.1] - Unreleased
+
+### Fixed — Installer is now resilient to schema drift across retries
+
+The installer's step 3 ran `full_schema.sql` and stopped there. Because
+`CREATE TABLE IF NOT EXISTS` is a no-op when a table already exists,
+any failed install that reached step 3 successfully locked the database
+into whatever shape the schema had at that moment. If a later code
+change added a column to one of those tables (via a numbered migration),
+the user's retry would still hit the old shape — and step 4's INSERTs,
+which assume the current shape, would fatal with
+`Unknown column '<colname>' in 'field list'`.
+
+This was the root cause of three consecutive support rounds:
+- `tblUsers.siteID` doesn't exist (#198 / PR #199 — fixed the schema
+   but stale DBs still fatalled)
+- `tblLocalAccounts.isVerified` doesn't exist (this round)
+
+The schema-vs-runtime audits the project ran in #197/#199/#212/#214
+were all looking at the wrong dimension — schema vs PHP code — when
+the actual breakage was schema-on-disk vs schema-in-this-DB.
+
+**Fix**: step 3 now runs `full_schema.sql` AND then runs every
+numbered migration in `web/_sql/0NN_*.sql` order. Every migration
+uses idempotent constructs (`ADD COLUMN IF NOT EXISTS`,
+`INSERT ... ON DUPLICATE KEY UPDATE`, `DELETE FROM ... WHERE`), so
+fresh installs see them as no-ops (`full_schema.sql` already has
+every column the migrations would add) and stale-DB retries pick up
+the missing columns. The installer doesn't go through
+`Portal\Core\Migrator` because (a) Migrator filters by
+`tblMigrations`, which `full_schema.sql` seeds as fully-applied, and
+(b) the installer is bootstrap-free.
+
+### Fixed — `tblTasks` SELECT uses non-existent `dueAt` column (#218)
+
+`web/public_html/tasks/api/list.php` issued a `SELECT taskID, title,
+description, dueAt, ...` against `tblTasks`. The schema column is
+`dueDate`, not `dueAt`. The `/api/tasks/list` endpoint would 500 on
+every call. Surfaced by the widened
+`tools/audit-checks/check_sql_columns.py` — see next entry.
+
+### Changed — `check_sql_columns.py` now scans UPDATE + SELECT, not just INSERT
+
+The CI consistency check added in #214 only walked `INSERT INTO tbl
+(col, col)` column lists. It missed bugs in `UPDATE tbl SET col = ?`
+clauses and `SELECT col, col FROM tbl` lists — which is how
+`tblTasks.dueAt` slipped past the previous "exhaustive" sweep.
+
+The widened check now matches:
+
+- `INSERT INTO tbl (cols…)` (already supported)
+- `UPDATE tbl SET col = …, col = …` — bounded so we don't span across
+  PHP-concatenated multi-statement strings or beyond `WHERE` / `ORDER`
+- `SELECT col, col FROM tbl` — only when the column list is simple
+  identifiers (no functions, joins, aliases, or `*`); skips pure
+  numeric "columns" so `SELECT 1 FROM tbl WHERE …` existence checks
+  don't false-positive
+
+Line-number reporting also fixed: under PHP string concatenation,
+`'INSERT (' . 'col1, col2)'` is reconstructed for matching, which
+collapses newlines and confused the previous offset lookup. We now
+compute line numbers against the reconstructed text, which keeps the
+report within a few lines of the actual SQL.
+
+### Changed — Version bumped to 1.0.1
+
 ## [Unreleased]
 
 ### Fixed — Audit follow-up #3: cross-source consistency
