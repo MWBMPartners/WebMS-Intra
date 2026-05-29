@@ -9,6 +9,72 @@ Automated sections are appended by `.github/workflows/changelog.yml` per push
 to `alpha`, `beta`, and `main` using the heading format
 `## [VERSION] - YYYY-MM-DD (branch)`.
 
+## [1.0.1] - Unreleased
+
+### Fixed — Installer is now resilient to schema drift across retries
+
+The installer's step 3 ran `full_schema.sql` and stopped there. Because
+`CREATE TABLE IF NOT EXISTS` is a no-op when a table already exists,
+any failed install that reached step 3 successfully locked the database
+into whatever shape the schema had at that moment. If a later code
+change added a column to one of those tables (via a numbered migration),
+the user's retry would still hit the old shape — and step 4's INSERTs,
+which assume the current shape, would fatal with
+`Unknown column '<colname>' in 'field list'`.
+
+This was the root cause of three consecutive support rounds:
+- `tblUsers.siteID` doesn't exist (#198 / PR #199 — fixed the schema
+   but stale DBs still fatalled)
+- `tblLocalAccounts.isVerified` doesn't exist (this round)
+
+The schema-vs-runtime audits the project ran in #197/#199/#212/#214
+were all looking at the wrong dimension — schema vs PHP code — when
+the actual breakage was schema-on-disk vs schema-in-this-DB.
+
+**Fix**: step 3 now runs `full_schema.sql` AND then runs every
+numbered migration in `web/_sql/0NN_*.sql` order. Every migration
+uses idempotent constructs (`ADD COLUMN IF NOT EXISTS`,
+`INSERT ... ON DUPLICATE KEY UPDATE`, `DELETE FROM ... WHERE`), so
+fresh installs see them as no-ops (`full_schema.sql` already has
+every column the migrations would add) and stale-DB retries pick up
+the missing columns. The installer doesn't go through
+`Portal\Core\Migrator` because (a) Migrator filters by
+`tblMigrations`, which `full_schema.sql` seeds as fully-applied, and
+(b) the installer is bootstrap-free.
+
+### Fixed — `tblTasks` SELECT uses non-existent `dueAt` column (#218)
+
+`web/public_html/tasks/api/list.php` issued a `SELECT taskID, title,
+description, dueAt, ...` against `tblTasks`. The schema column is
+`dueDate`, not `dueAt`. The `/api/tasks/list` endpoint would 500 on
+every call. Surfaced by the widened
+`tools/audit-checks/check_sql_columns.py` — see next entry.
+
+### Changed — `check_sql_columns.py` now scans UPDATE + SELECT, not just INSERT
+
+The CI consistency check added in #214 only walked `INSERT INTO tbl
+(col, col)` column lists. It missed bugs in `UPDATE tbl SET col = ?`
+clauses and `SELECT col, col FROM tbl` lists — which is how
+`tblTasks.dueAt` slipped past the previous "exhaustive" sweep.
+
+The widened check now matches:
+
+- `INSERT INTO tbl (cols…)` (already supported)
+- `UPDATE tbl SET col = …, col = …` — bounded so we don't span across
+  PHP-concatenated multi-statement strings or beyond `WHERE` / `ORDER`
+- `SELECT col, col FROM tbl` — only when the column list is simple
+  identifiers (no functions, joins, aliases, or `*`); skips pure
+  numeric "columns" so `SELECT 1 FROM tbl WHERE …` existence checks
+  don't false-positive
+
+Line-number reporting also fixed: under PHP string concatenation,
+`'INSERT (' . 'col1, col2)'` is reconstructed for matching, which
+collapses newlines and confused the previous offset lookup. We now
+compute line numbers against the reconstructed text, which keeps the
+report within a few lines of the actual SQL.
+
+### Changed — Version bumped to 1.0.1
+
 ## [Unreleased]
 
 ### Fixed — Audit follow-up #3: cross-source consistency

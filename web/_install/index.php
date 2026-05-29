@@ -230,9 +230,83 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $error = 'Schema installation error: ' . $queryError;
                         $step = 3;
                     } else {
-                        $db->close();
-                        header('Location: ?step=4');
-                        exit();
+                        // 🪞 Apply all numbered migrations after full_schema.sql.
+                        //
+                        // Why this matters: full_schema.sql uses CREATE TABLE
+                        // IF NOT EXISTS, which is a no-op when a table already
+                        // exists. So if an earlier install attempt created
+                        // tblLocalAccounts (or any other table) under an
+                        // older shape — say without the `isVerified` column —
+                        // and then the schema was updated, the existing
+                        // table will NOT pick up the new column when the
+                        // user retries the installer. Subsequent steps
+                        // referencing that column fatal with
+                        // "Unknown column 'isVerified' in 'field list'".
+                        //
+                        // Every numbered migration uses idempotent
+                        // constructs (ADD COLUMN IF NOT EXISTS,
+                        // INSERT ... ON DUPLICATE KEY UPDATE,
+                        // DELETE FROM ... WHERE ...) — so on a true-fresh
+                        // install they're harmless no-ops (the CREATE
+                        // TABLE in full_schema.sql already contains every
+                        // column the migrations would add), but on a
+                        // stale DB they fill in the gaps and bring the
+                        // schema up to date.
+                        //
+                        // We multi_query each migration file directly
+                        // rather than going through Portal\Core\Migrator
+                        // because (a) Migrator's `pending()` filter is
+                        // tblMigrations-based, and full_schema.sql's seed
+                        // block marks every migration as already-applied
+                        // (so Migrator would see nothing pending on a
+                        // stale DB), and (b) the installer is bootstrap-
+                        // free — it can't autoload \Portal\Core\Migrator
+                        // without pulling in the rest of the framework.
+                        //
+                        // See: https://github.com/MWBMPartners/WebMS-Intra/issues/218
+                        $migrationFiles = glob(
+                            INSTALL_SQL . DIRECTORY_SEPARATOR . '[0-9][0-9][0-9]_*.sql'
+                        );
+                        if ($migrationFiles === false) {
+                            $migrationFiles = [];
+                        }
+                        sort($migrationFiles, SORT_STRING);
+                        $migError = '';
+                        foreach ($migrationFiles as $migFile) {
+                            $migSql = file_get_contents($migFile);
+                            if ($migSql === false || trim($migSql) === '') {
+                                continue;
+                            }
+                            try {
+                                $db->multi_query($migSql);
+                                do {
+                                    $r = $db->store_result();
+                                    if ($r !== false) {
+                                        $r->free();
+                                    }
+                                    if ($db->errno !== 0 && $migError === '') {
+                                        $migError = basename($migFile)
+                                            . ' — ' . $db->error;
+                                    }
+                                } while ($db->more_results() === true && $db->next_result());
+                            } catch (\mysqli_sql_exception $e) {
+                                $migError = basename($migFile)
+                                    . ' — ' . $e->getMessage();
+                                break;
+                            }
+                            if ($migError !== '') {
+                                break;
+                            }
+                        }
+
+                        if ($migError !== '') {
+                            $error = 'Migration error: ' . $migError;
+                            $step = 3;
+                        } else {
+                            $db->close();
+                            header('Location: ?step=4');
+                            exit();
+                        }
                     }
                 } catch (\mysqli_sql_exception $e) {
                     $error = 'Schema installation error: ' . $e->getMessage();

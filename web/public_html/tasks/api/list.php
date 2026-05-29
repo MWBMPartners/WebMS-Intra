@@ -50,9 +50,12 @@ if ($status === 'open') {
     $conditions[] = 'completedAt IS NOT NULL';
 }
 
-$sql = 'SELECT taskID, title, description, dueAt, completedAt, createdAt '
+// Column names match the schema: `dueDate` (not `dueAt`) — an earlier
+// draft referenced `dueAt` which doesn't exist on tblTasks (#218 deep
+// audit found via check_sql_columns.py SELECT extension).
+$sql = 'SELECT taskID, title, description, dueDate, completedAt, createdAt '
      . 'FROM tblTasks WHERE ' . implode(' AND ', $conditions) . ' '
-     . 'ORDER BY (completedAt IS NULL) DESC, dueAt ASC, createdAt DESC '
+     . 'ORDER BY (completedAt IS NULL) DESC, dueDate ASC, createdAt DESC '
      . 'LIMIT ? OFFSET ?';
 $types   .= 'ii';
 $params[] = $limit;

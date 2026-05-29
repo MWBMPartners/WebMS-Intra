@@ -58,6 +58,33 @@ INSERT_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Match: UPDATE `tblX` SET col = ?, col = ?, ...  up to the FIRST of:
+#   WHERE / ORDER / LIMIT / closing quote / new statement / end-of-string.
+# Critically we DO NOT span across PHP string concatenation joiners
+# (which could otherwise pull in a later UPDATE statement's SET clause)
+# nor across `UPDATE` / `INSERT` / `DELETE` / `SELECT` keywords that
+# would start a new statement.
+UPDATE_RE = re.compile(
+    r"UPDATE\s+(?:IGNORE\s+)?`?(tbl\w+)`?\s+SET\s+"
+    r"(.*?)"
+    r"(?:\s+WHERE\b|\s+ORDER\b|\s+LIMIT\b"
+    r"|\s+(?:INSERT|UPDATE|DELETE|SELECT)\b"
+    r"|'\s*\)|\s*$)",
+    re.IGNORECASE | re.DOTALL,
+)
+# Inside the SET clause: `colName` = expr  or  colName = expr
+SET_ASSIGN_RE = re.compile(r"`?(\w+)`?\s*=")
+
+# Match: SELECT col, col FROM `tblX` (no JOINs, no aliases — keeps the check
+# precise but narrow). Skip SELECT * patterns.
+SELECT_RE = re.compile(
+    r"SELECT\s+(?!\*)([^\n]+?)\s+FROM\s+`?(tbl\w+)`?\s*"
+    r"(?:WHERE|ORDER|GROUP|LIMIT|;|\s*$|\)|\s+(?:LEFT|INNER|RIGHT|OUTER|JOIN))",
+    re.IGNORECASE,
+)
+# Inside the SELECT column list: identifier (possibly with AS alias)
+SELECT_COL_RE = re.compile(r"`?(\w+)`?(?:\s+AS\s+\w+)?")
+
 
 def build_schema_map() -> dict[str, set[str]]:
     """Return {tableName: {column, column, …}}."""
@@ -134,9 +161,9 @@ def strip_php_comments(text: str) -> str:
     return text
 
 
-def scan_php_inserts(schema: dict[str, set[str]]) -> list[tuple[Path, int, str, str]]:
-    """Return findings: (php_file, line_no, table, missing_column)."""
-    findings: list[tuple[Path, int, str, str]] = []
+def scan_php_inserts(schema: dict[str, set[str]]) -> list[tuple[Path, int, str, str, str]]:
+    """Return findings: (php_file, line_no, table, missing_column, statement_kind)."""
+    findings: list[tuple[Path, int, str, str, str]] = []
     for root in PHP_ROOTS:
         if not root.exists():
             continue
@@ -146,27 +173,70 @@ def scan_php_inserts(schema: dict[str, set[str]]) -> list[tuple[Path, int, str, 
             except OSError:
                 continue
             text = strip_php_comments(reconstruct_php_strings(raw))
+
+            # Line numbers are computed from `text` (reconstructed), not
+            # `raw`, because string-concatenation reconstruction collapses
+            # multi-line SQL onto fewer lines — using raw.find() against
+            # collapsed strings reports wildly wrong offsets.
+            # `strip_php_comments` preserves newline count so the reported
+            # line still points within a few lines of the actual SQL.
+
+            # ── INSERT column lists ──
             for m in INSERT_RE.finditer(text):
                 tbl = m.group(1)
-                col_list = m.group(2)
-                cols = [c.strip().strip("`") for c in col_list.split(",")]
+                cols = [c.strip().strip("`") for c in m.group(2).split(",")]
                 cols = [c for c in cols if c]
-                # Sanity guard against parser fragments — column names
-                # should be `\w+`. Skip anything that doesn't parse cleanly.
                 if not cols or not all(re.fullmatch(r"\w+", c) for c in cols):
                     continue
+                line_no = text[: m.start()].count("\n") + 1
                 if tbl not in schema:
-                    findings.append(
-                        (php, raw[: raw.find(m.group(0))].count("\n") + 1,
-                         tbl, "(unknown table)")
-                    )
+                    findings.append((php, line_no, tbl, "(unknown table)", "INSERT"))
                     continue
                 for c in cols:
                     if c not in schema[tbl]:
-                        line_no = raw[: raw.find(m.group(0))].count("\n") + 1
-                        if line_no <= 0:
-                            line_no = 1
-                        findings.append((php, line_no, tbl, c))
+                        findings.append((php, line_no, tbl, c, "INSERT"))
+
+            # ── UPDATE … SET col = … assignments ──
+            for m in UPDATE_RE.finditer(text):
+                tbl = m.group(1)
+                set_body = m.group(2)
+                line_no = text[: m.start()].count("\n") + 1
+                if tbl not in schema:
+                    findings.append((php, line_no, tbl, "(unknown table)", "UPDATE"))
+                    continue
+                for assign in SET_ASSIGN_RE.finditer(set_body):
+                    col = assign.group(1)
+                    # Skip SQL keywords that may match the regex (e.g. NOW)
+                    # and skip PHP-templated placeholders.
+                    if col.upper() in {"NOW", "NULL", "TRUE", "FALSE", "AND", "OR"}:
+                        continue
+                    if col not in schema[tbl]:
+                        findings.append((php, line_no, tbl, col, "UPDATE"))
+
+            # ── SELECT col-list FROM tbl ──
+            for m in SELECT_RE.finditer(text):
+                col_body = m.group(1)
+                tbl = m.group(2)
+                line_no = text[: m.start()].count("\n") + 1
+                if tbl not in schema:
+                    findings.append((php, line_no, tbl, "(unknown table)", "SELECT"))
+                    continue
+                # Skip if the SELECT list contains anything that's not a
+                # simple identifier (functions, expressions, aliases, joins).
+                # We're after exact column references only.
+                if any(sym in col_body for sym in ("(", ")", ".", " AS ", "*", "DISTINCT")):
+                    continue
+                cols = [c.strip().strip("`") for c in col_body.split(",")]
+                # Skip pure-numeric "columns" — these are SQL literals from
+                # existence-check patterns like `SELECT 1 FROM tbl WHERE …`.
+                cols = [
+                    c for c in cols
+                    if c and re.fullmatch(r"\w+", c) and not c.isdigit()
+                ]
+                for c in cols:
+                    if c not in schema[tbl]:
+                        findings.append((php, line_no, tbl, c, "SELECT"))
+
     return findings
 
 
@@ -174,19 +244,34 @@ def check() -> int:
     schema = build_schema_map()
     print(f"Tables inspected: {len(schema)}")
     findings = scan_php_inserts(schema)
-    print(f"Column-name mismatches: {len(findings)}")
+    print(f"Column-name mismatches (INSERT + UPDATE + SELECT): {len(findings)}")
     print()
     if findings:
-        print("### Column-name mismatches\n")
-        # Deduplicate (file, line, table, col).
-        seen: set[tuple[str, int, str, str]] = set()
-        for php, line_no, tbl, col in findings:
+        # Deduplicate (file, line, table, col, kind).
+        seen: set[tuple[str, int, str, str, str]] = set()
+        deduped: list[tuple[str, int, str, str, str]] = []
+        for php, line_no, tbl, col, kind in findings:
             rel = str(php.relative_to(REPO_ROOT))
-            key = (rel, line_no, tbl, col)
+            key = (rel, line_no, tbl, col, kind)
             if key in seen:
                 continue
             seen.add(key)
-            print(f"  • {rel}:{line_no} — INSERT INTO {tbl} references column `{col}`")
+            deduped.append(key)
+
+        # Group by statement kind for readable output.
+        by_kind: dict[str, list[tuple[str, int, str, str, str]]] = {}
+        for finding in deduped:
+            by_kind.setdefault(finding[4], []).append(finding)
+
+        for kind in ("INSERT", "UPDATE", "SELECT"):
+            rows = by_kind.get(kind, [])
+            if not rows:
+                continue
+            print(f"### {kind} column-name mismatches ({len(rows)})\n")
+            for rel, line_no, tbl, col, _ in rows:
+                print(f"  • {rel}:{line_no} — {kind} on {tbl} references column `{col}`")
+            print()
+
     strict = "--strict" in sys.argv
     if findings and strict:
         return 1
