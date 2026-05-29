@@ -750,6 +750,7 @@ CREATE TABLE IF NOT EXISTS `tblEvents` (
     `isPublic`     TINYINT(1)   NOT NULL DEFAULT 1 COMMENT 'Visible on public calendar',
     `isFeatured`   TINYINT(1)   NOT NULL DEFAULT 0,
     `isDeleted`    TINYINT(1)   NOT NULL DEFAULT 0 COMMENT 'Soft delete flag',
+    `deletedAt`    DATETIME     DEFAULT NULL COMMENT 'Timestamp of soft-delete (set when isDeleted flips to 1)',
     `capacity`     INT          DEFAULT NULL COMMENT 'Max attendees (NULL = unlimited)',
 
     -- 🔢 Metadata
@@ -1670,7 +1671,7 @@ VALUES ('api.expenses.update-status.enabled', 'false', 0, 'false')
 ON DUPLICATE KEY UPDATE `settingKey` = `settingKey`;
 
 INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isSensitive`, `defaultValue`)
-VALUES ('api.expenses.delete.enabled', 'false', 1, 'false')
+VALUES ('api.expenses.delete.enabled', 'false', 0, 'false')
 ON DUPLICATE KEY UPDATE `settingKey` = `settingKey`;
 
 -- ─── Future app toggles (disabled by default) ────────────────────────────────
@@ -1816,8 +1817,15 @@ INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`)
 VALUES ('account/change-password', 'auth/account/change-password.php', 1)
 ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 
+-- 🪦 account/linked-accounts route removed — target file was never
+--    created; clicking the link 404s. Removed from this schema and
+--    DELETEd on existing installs by migration 058. See issue #205.
+--    Re-add here AND remove the DELETE in 058 if/when the page is built.
+
+-- 🔐 WebAuthn AJAX endpoint (POSTed from the login form). isProtected=0
+--    because it runs during login (pre-auth). See issue #206.
 INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`)
-VALUES ('account/linked-accounts', 'auth/account/linked-accounts.php', 1)
+VALUES ('login/webauthn', 'auth/login/webauthn.php', 0)
 ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 
 INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`)
@@ -1880,7 +1888,7 @@ VALUES ('admin/integrations', 'admin/integrations/index.php', 1)
 ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 
 INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`)
-VALUES ('admin/upgrade', '../install/upgrade.php', 1)
+VALUES ('admin/upgrade', 'admin/upgrade.php', 1)
 ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 
 -- ─── Multi-site (from migration 015) ────────────────────────────────────────
@@ -2362,6 +2370,24 @@ INSERT INTO `tblMigrations` (`filename`) VALUES ('052_bulk_importers.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
 INSERT INTO `tblMigrations` (`filename`) VALUES ('053_local_accounts_columns.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('054_events_deleted_at.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('055_admin_upgrade_route_fix.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('056_remove_redundant_api_routes.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('057_remove_dead_linked_accounts_route.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('058_login_webauthn_route.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('059_fix_api_expenses_delete_isSensitive.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
 INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES

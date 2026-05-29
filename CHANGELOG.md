@@ -11,6 +11,50 @@ to `alpha`, `beta`, and `main` using the heading format
 
 ## [Unreleased]
 
+### Fixed — Audit follow-up #3: cross-source consistency
+
+A four-dimension parallel audit (SQL ↔ schema, routes ↔ files, settings ↔
+code, i18n keys ↔ translations) surfaced 13 more findings. This entry
+covers the 6 actionable runtime bugs (#201, #202, #204, #205, #206, #207).
+Two settings findings (#203 + #208) were re-investigated and closed as
+false positives — both keys were seeded further down in
+`full_schema.sql` than the audit looked. The i18n findings (#209, #210,
+#211) are tracked separately for cleanup / triage.
+
+- **`tblEvents.deletedAt` missing column** (#201) — `events/api/delete.php`
+  sets `deletedAt = NOW()` alongside `isDeleted = 1` in its soft-delete
+  UPDATE, but the column was never added. Every admin event-delete
+  fatalled with `Unknown column 'deletedAt'`. Added to schema +
+  migration `054_events_deleted_at.sql`.
+- **`admin/upgrade` route had invalid targetFile** (#202) — pointed at
+  `../install/upgrade.php` (escapes `public_html/`, uses the
+  pre-rename `install/` name). Clicking the link 404'd. New proxy
+  file `web/public_html/admin/upgrade.php` `require`s the real handler
+  at `_install/upgrade.php`; route now points at the proxy. Migration
+  `055_admin_upgrade_route_fix.sql` repoints the route on existing
+  installs.
+- **Five redundant `api/*` routes** (#204) — migration 035 inserted
+  `api/announcements/list`, `api/attendance/list`, `api/events/detail`,
+  `api/events/list`, `api/users/list` against a routing shape the
+  router doesn't actually use (the `api/` prefix is special-cased to
+  `ApiRouter::dispatch()` which resolves `{app}/api/{action}.php`).
+  Pure dead config. Migration `056_remove_redundant_api_routes.sql`
+  DELETEs them on existing installs.
+- **Dead `account/linked-accounts` route** (#205) — target file
+  `auth/account/linked-accounts.php` was never created. Removed from
+  schema + migration `057_remove_dead_linked_accounts_route.sql`.
+- **`login/webauthn` route missing** (#206) — the WebAuthn AJAX
+  endpoint at `auth/login/webauthn.php` was called from the login
+  form via `fetch('/login/webauthn')` but had no route entry. Worked
+  via `.htaccess` fall-through until the v1.0 security hardening
+  tightened direct-PHP access; now needs the route. Added to schema +
+  migration `058_login_webauthn_route.sql`. `isProtected=0` (pre-auth).
+- **`api.expenses.delete.enabled` wrongly marked `isSensitive=1`**
+  (#207) — the value is the boolean flag `'false'`, not a credential.
+  Sensitive=1 makes the bootstrap loader try to libsodium-decrypt the
+  plaintext on every request. Flipped to 0 in schema + migration
+  `059_fix_api_expenses_delete_isSensitive.sql`.
+
 ### Fixed — Audit follow-up #2: SQL column-name mismatches (#198)
 
 A class of bug my prior audit didn't check for: runtime SQL statements
