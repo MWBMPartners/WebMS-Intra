@@ -155,7 +155,7 @@ if ($action === 'create') {
     } catch (\Throwable $ex) {
         App::rollback();
         Logger::exception($ex);
-        $_SESSION['flash_msg']  = 'Database error creating user. Please try again.';
+        $_SESSION['flash_msg']  = t('error.db_create_user');
         $_SESSION['flash_type'] = 'danger';
         header('Location: /admin/users');
         exit();

@@ -262,10 +262,30 @@ return [
     'error.page_not_found_text'     => 'The page you are looking for does not exist or may have been moved.',
     'error.access_denied'           => 'Access Denied',
     'error.access_denied_text'      => 'You do not have permission to access this page. Please contact your administrator if you believe this is an error.',
+    'error.access_denied_inline'    => 'Access denied.',
     'error.server_error'            => 'Server Error',
     'error.something_wrong'         => 'Something Went Wrong',
     'error.server_error_text'       => 'An unexpected error occurred. The issue has been logged and our team will look into it. Please try again later.',
     'error.return_to_dashboard'     => 'Return to Dashboard',
+
+    // ───── Inline error messages (flash / form failure paths) — issue #209
+    'error.database'                       => 'Database error.',
+    'error.db_create_service_type'         => 'Database error creating service type.',
+    'error.db_create_session'              => 'Database error creating session.',
+    'error.db_update_session'              => 'Database error updating session.',
+    'error.db_create_user'                 => 'Database error creating user. Please try again.',
+    'error.db_save_template'               => 'Database error saving template.',
+    'error.db_save_preferences'            => 'Database error saving preferences.',
+    'error.db_update_setting'              => 'Database error updating setting.',
+    'error.db_add_setting'                 => 'Database error adding setting.',
+    'error.db_create_role'                 => 'Database error creating role.',
+    'error.db_import_prepare'              => 'Database error preparing insert.',
+    'error.db_with_detail'                 => 'Database error: :detail',
+    'error.csrf_failed'                    => 'CSRF check failed.',
+    'error.umbrella_admin_only'            => 'Access denied. Umbrella admin privileges required.',
+    'error.moderator_only'                 => 'Moderator access required.',
+    'prayer_requests.error.not_found'      => 'Prayer request not found.',
+    'prayer_requests.error.no_access'      => 'You do not have access to this prayer request.',
 
     // =========================================================================
     // 🔘 Common UI

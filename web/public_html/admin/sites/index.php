@@ -25,7 +25,7 @@ use Portal\Core\Site;
 // 🛡️ Umbrella admin only
 if (App::isUmbrellaAdmin() === false) {
     http_response_code(403);
-    echo 'Access denied. Umbrella admin privileges required.';
+    echo t('error.umbrella_admin_only');
     exit();
 }
 

@@ -128,7 +128,7 @@ if ($action === 'create') {
     );
     if ($stmt === false) {
         $mysqli->rollback();
-        $_SESSION['flash_msg']  = 'Database error creating session.';
+        $_SESSION['flash_msg']  = t('error.db_create_session');
         $_SESSION['flash_type'] = 'danger';
         header('Location: /attendance/record');
         exit();
@@ -188,7 +188,7 @@ if ($action === 'update') {
     );
     if ($stmt === false) {
         $mysqli->rollback();
-        $_SESSION['flash_msg']  = 'Database error updating session.';
+        $_SESSION['flash_msg']  = t('error.db_update_session');
         $_SESSION['flash_type'] = 'danger';
         header('Location: /attendance');
         exit();

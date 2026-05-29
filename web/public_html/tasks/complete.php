@@ -52,7 +52,7 @@ $tStmt = $mysqli->prepare(
     'SELECT * FROM tblTasks WHERE taskID = ? AND siteID = ? AND isDeleted = 0 LIMIT 1'
 );
 if ($tStmt === false) {
-    $_SESSION['flash_msg']  = 'Database error.';
+    $_SESSION['flash_msg']  = t('error.database');
     $_SESSION['flash_type'] = 'danger';
     header('Location: /tasks');
     exit();

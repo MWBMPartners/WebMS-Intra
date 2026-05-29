@@ -106,7 +106,7 @@ $stmt = $mysqli->prepare(
 );
 if ($stmt === false) {
     Logger::errorPlatform('MySQL', 'Error', 'EMAIL_TEMPLATE_UPSERT_PREP', $mysqli->error, '');
-    $_SESSION['email_template_flash']      = 'Database error saving template.';
+    $_SESSION['email_template_flash']      = t('error.db_save_template');
     $_SESSION['email_template_flash_type'] = 'danger';
     header('Location: /admin/email-templates/edit?key=' . urlencode($key), true, 302);
     exit();

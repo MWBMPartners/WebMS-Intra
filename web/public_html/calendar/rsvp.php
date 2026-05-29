@@ -58,7 +58,7 @@ $evStmt = $mysqli->prepare(
     'SELECT eventID, eventName, capacity FROM tblEvents WHERE eventID = ? AND siteID = ? AND isDeleted = 0 LIMIT 1'
 );
 if ($evStmt === false) {
-    $_SESSION['flash_msg']  = 'Database error.';
+    $_SESSION['flash_msg']  = t('error.database');
     $_SESSION['flash_type'] = 'danger';
     header('Location: ' . $redirect);
     exit();

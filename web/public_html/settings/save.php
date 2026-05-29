@@ -77,7 +77,7 @@ if ($settingId > 0) {
     // ✏️ Update existing
     $stmt = $mysqli->prepare('UPDATE tblSettings SET settingValue = ?, isSensitive = ?, updatedAt = NOW() WHERE settingID = ?');
     if ($stmt === false) {
-        $_SESSION['flash_msg']  = 'Database error updating setting.';
+        $_SESSION['flash_msg']  = t('error.db_update_setting');
         $_SESSION['flash_type'] = 'danger';
         header('Location: /settings');
         exit();
@@ -109,7 +109,7 @@ if ($settingId > 0) {
         'INSERT INTO tblSettings (settingKey, settingValue, isSensitive, siteID, updatedAt) VALUES (?, ?, ?, ?, NOW())'
     );
     if ($stmt === false) {
-        $_SESSION['flash_msg']  = 'Database error adding setting.';
+        $_SESSION['flash_msg']  = t('error.db_add_setting');
         $_SESSION['flash_type'] = 'danger';
         header('Location: /settings');
         exit();

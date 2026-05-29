@@ -45,7 +45,7 @@ if (App::isAdmin() === false) {
 }
 if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
     http_response_code(403);
-    echo 'CSRF check failed';
+    echo t('error.csrf_failed');
     exit();
 }
 

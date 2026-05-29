@@ -71,7 +71,7 @@ if ($json === false) {
 $stmt = $mysqli->prepare('UPDATE tblUsers SET notifyPrefs = ? WHERE userID = ?');
 if ($stmt === false) {
     Logger::errorPlatform('MySQL', 'Error', 'NOTIFY_PREFS_PREP', $mysqli->error, '');
-    $_SESSION['notifications_flash']      = 'Database error saving preferences.';
+    $_SESSION['notifications_flash']      = t('error.db_save_preferences');
     $_SESSION['notifications_flash_type'] = 'danger';
     header('Location: /account/notifications', true, 302);
     exit();
