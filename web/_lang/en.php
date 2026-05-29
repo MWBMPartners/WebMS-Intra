@@ -41,6 +41,10 @@ return [
     'nav.toggle_dark_mode'  => 'Toggle dark mode',
     'nav.change_language'   => 'Change language',
 
+    // 🌐 i18n meta — used by the language switcher to badge non-English
+    //    locales that aren't yet at full key parity (#210).
+    'i18n.partial_coverage_tooltip' => 'This language is :percent% translated. Some text will appear in English where translations are missing.',
+
     // =========================================================================
     // 🔐 Authentication
     // =========================================================================

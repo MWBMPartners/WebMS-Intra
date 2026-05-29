@@ -36,6 +36,11 @@ return [
     'nav.toggle_dark_mode'  => 'Toglo modd tywyll',
     'nav.change_language'   => 'Newid iaith',
 
+    // 🌐 i18n meta (#210) — Welsh translation provided by the cy.php
+    //    translator. If untranslated, the badge text falls back to
+    //    English which is acceptable for a meta-message.
+    'i18n.partial_coverage_tooltip' => 'Mae\'r iaith hon wedi\'i chyfieithu :percent%. Bydd peth testun yn ymddangos yn Saesneg lle nad oes cyfieithiad.',
+
     // =========================================================================
     // 🔐 Authentication
     // =========================================================================

@@ -604,6 +604,21 @@ class I18n
             $html .= '<a class="dropdown-item' . $active . '" href="?lang=' . htmlspecialchars($code, ENT_QUOTES, 'UTF-8') . '">';
             $html .= htmlspecialchars($meta['native'], ENT_QUOTES, 'UTF-8');
             $html .= ' <span class="text-muted small">(' . htmlspecialchars($meta['name'], ENT_QUOTES, 'UTF-8') . ')</span>';
+
+            // 🌐 Partial-coverage indicator — see #210. Locales with < 95%
+            //    parity to en.php get a badge so users know to expect
+            //    English fallbacks for some strings.
+            $coverage = self::coverage($code);
+            if ($coverage < 0.95) {
+                $percent  = (int) round($coverage * 100);
+                $tooltip  = htmlspecialchars(
+                    self::t('i18n.partial_coverage_tooltip', ['percent' => $percent]),
+                    ENT_QUOTES,
+                    'UTF-8'
+                );
+                $html .= ' <span class="badge bg-warning text-dark ms-1" title="' . $tooltip . '">' . $percent . '%</span>';
+            }
+
             if ($code === $current) {
                 $html .= ' <i class="fa-solid fa-check ms-1"></i>';
             }
@@ -612,5 +627,42 @@ class I18n
 
         $html .= '</ul></div>';
         return $html;
+    }
+
+    /**
+     * Compute translation coverage for a locale relative to the default (en).
+     *
+     * Returns the fraction of en.php keys that have a matching entry in the
+     * given locale's strings file. Used by `languageSwitcher()` to badge
+     * locales that aren't at 100% parity so users know to expect English
+     * fallbacks for missing keys.
+     *
+     * Note: this triggers `loadStrings()` for every locale it's called on,
+     * which is fine for a per-page render (results cache in `self::$strings`)
+     * but you wouldn't want to call this on every `t()` invocation.
+     *
+     * @param string $locale Locale code (e.g. 'cy', 'fr')
+     * @return float Coverage ratio in [0.0, 1.0]. 1.0 = at parity with en.php.
+     */
+    public static function coverage(string $locale): float
+    {
+        if ($locale === 'en') {
+            return 1.0;
+        }
+        self::loadStrings('en');
+        self::loadStrings($locale);
+        $en    = self::$strings['en']    ?? [];
+        $other = self::$strings[$locale] ?? [];
+        $total = count($en);
+        if ($total === 0) {
+            return 1.0; // 🛡️ Avoid div-by-zero on a missing baseline.
+        }
+        $present = 0;
+        foreach ($en as $key => $_) {
+            if (array_key_exists($key, $other) === true) {
+                $present++;
+            }
+        }
+        return $present / $total;
     }
 }
