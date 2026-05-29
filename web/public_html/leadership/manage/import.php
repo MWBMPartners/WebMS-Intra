@@ -173,9 +173,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (count($rows) === 0) {
                 $error = 'No preview data — re-upload the file.';
             } else {
+                // Column names match the schema (#213): `startDate`,
+                // `endDate`, `createdByID` — earlier draft used
+                // `assignedAt`, `endsAt`, `assignedByID` which don't
+                // exist on tblLeadershipAssignments. PHP variable names
+                // ($assigned, $endsAt) kept for source-code continuity.
                 $stmt = $mysqli->prepare(
                     'INSERT INTO tblLeadershipAssignments '
-                    . '(roleID, userID, siteID, assignedAt, endsAt, assignedByID, isActive) '
+                    . '(roleID, userID, siteID, startDate, endDate, createdByID, isActive) '
                     . 'VALUES (?, ?, ?, ?, ?, ?, 1)'
                 );
                 if ($stmt === false) {

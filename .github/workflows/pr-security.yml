@@ -20,9 +20,18 @@
 #   6. Hardcoded-paths sanity check                — absolute /Users / /home paths in code
 #   7. Dangerous PHP functions                     — eval, exec, shell_exec, system, passthru
 #   8. Server-managed dirs touched?                — flag if PR touches _auth_keys/_uploads/_backups
+#   9. SQL column-name mismatches                  — runtime INSERT col not in CREATE TABLE
+#  10. Route targetFile existence                  — tblRoutes.targetFile resolves to a file
+#  11. Settings key consistency                    — $SETTINGS reads vs tblSettings seed
 #
 # These are HEURISTICS — false positives are expected. Review the findings,
 # don't blindly fail the merge.
+#
+# Checks 9-11 (cross-source consistency) were added after a sequence of
+# missed-bug rounds (#169 → #171 → #198 → #201/202/204/205/206/207 →
+# #213): each was a category of "code references something that doesn't
+# exist in another source" — a class the prior heuristics didn't cover.
+# The scripts live in tools/audit-checks/ and are runnable locally.
 # =============================================================================
 
 name: PR Security Checks
@@ -196,6 +205,34 @@ jobs:
           # ---- 8) Server-managed dirs touched? ---------------------------
           SERVER_TOUCH=$(echo "$CHANGED" | grep -E '^web/(_auth_keys|_uploads|_backups)/' || true)
           add_section "PR touches server-managed dirs (_auth_keys / _uploads / _backups) — confirm this is intentional" "$SERVER_TOUCH"
+
+          # ---- 9-11) Cross-source consistency checks ---------------------
+          # These run regardless of changed-file scope because they validate
+          # the WHOLE repo state — e.g. a settings-key read could be in an
+          # unchanged file, but a tblSettings INSERT removal in this PR
+          # could orphan it. Each script exits 0 even on findings (we
+          # surface in the report; PHP lint remains the only hard gate).
+
+          # 9) SQL column-name mismatches (catches #198, #201, #213 classes)
+          SQL_COLS=$(python3 tools/audit-checks/check_sql_columns.py 2>&1 | tail -n +5 || true)
+          if echo "$SQL_COLS" | grep -q '•'; then
+            add_section "SQL column-name mismatches (runtime INSERT/SELECT references column not in schema)" "$SQL_COLS"
+          fi
+
+          # 10) Route targetFile existence (catches #202, #205 classes)
+          ROUTES=$(python3 tools/audit-checks/check_route_targets.py 2>&1 | tail -n +4 || true)
+          if echo "$ROUTES" | grep -q '•'; then
+            add_section "Route targetFile missing (tblRoutes points at a file that doesn't exist)" "$ROUTES"
+          fi
+
+          # 11) Settings key consistency (catches the class #203/#208 were
+          #     filed under; both turned out to be FP but this script
+          #     walks the entire schema so it won't repeat the agent's miss)
+          SETTINGS=$(python3 tools/audit-checks/check_settings_keys.py 2>&1 | tail -n +5 || true)
+          if echo "$SETTINGS" | grep -qE '•.*no fallback'; then
+            UNGUARDED=$(echo "$SETTINGS" | sed -n '/UNGUARDED/,/###\|^$/p')
+            add_section "Unseeded settings reads (UNGUARDED — null on missing key)" "$UNGUARDED"
+          fi
 
           echo "hits=$HITS" >> "$GITHUB_OUTPUT"
           echo "Total finding sections: $HITS"
