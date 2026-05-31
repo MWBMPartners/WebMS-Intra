@@ -9,6 +9,63 @@ Automated sections are appended by `.github/workflows/changelog.yml` per push
 to `alpha`, `beta`, and `main` using the heading format
 `## [VERSION] - YYYY-MM-DD (branch)`.
 
+## [1.2.0] - Unreleased
+
+### Pre-rollout omnibus — 16 issues addressed in one branch
+
+Substantial pre-production-rollout hardening. Each item shipped, scaffolded, or scoped to a follow-up PR per the per-issue status comments.
+
+**Security + ops:**
+- `#160` Baseline security response headers (HSTS, Permissions-Policy, COOP, CORP, Referrer-Policy, X-Content-Type-Options, X-Frame-Options) — all per-site overridable via `portal.headers.*`.
+- `#142` Backup freshness check `/admin/maintenance/backup-check` with cron mode + email alerting on stale/critical state.
+- `#227` Admin backup UI `/admin/maintenance/backup` — list / inspect / run-now / per-table-restore / full-restore / delete, wraps `DbBackup`.
+- `#228` System Health page `/admin/maintenance/health` — 8 live probes (DB, disk, backups, errors, sessions, migrations, PHP, maintenance flag). JSON via `?cron=1`.
+- `#229` Critical-error alerting — Logger hook with rate-limited email dispatch, sentinel-based cooldown, severity filtering.
+- `#230` Email Deliverability admin `/admin/integrations/email` — provider summary, test send, SPF/DKIM/DMARC DNS probe.
+
+**Onboarding / UX:**
+- `#222` First-run dashboard empty-state panel with auto-detected setup checklist.
+- `#223` Help: Admin First Steps `/help/admin-first-steps` accordion.
+- `#224` UK ICO cookie consent banner in global footer.
+- `#242` Demo data load/wipe `/admin/maintenance/demo-data` (gated by `portal.demo_mode.enabled`).
+- `#237` Tour engine scaffold (`tblTours` + `tblUserTours` + welcome tour seed + `/admin/tours`). Playback JS in follow-up.
+- `#241` Print stylesheets at `assets/css/print.css`, wired into `header.php` with `data-portal-name` / `data-print-date` running header.
+
+**Core features:**
+- `#231` `Portal\Core\Sabbath` quiet-hours class with `isQuietNow()` + window computation. Two-level (org + per-user `tblUsers.sabbathHonour`). Integrated into Logger alerting.
+- `#238` `tblEvents.eventTimezone` column (display-layer conversion in follow-up).
+
+**Docs:**
+- `#226` `docs/day2-support.md` + user-facing `/help/support`.
+- `#232` `docs/rollout-plan.md` + `portal.rollout.pilot_mode` flag.
+
+### Verified already-fixed (closed with audit trail)
+
+`#173`, `#174`, `#175` — bootstrap try/catch wrappers present.
+`#176` — CI workflows already reference `web/_core/version.php`.
+`#177`, `#178`, `#179`, `#180` — export controllers use `App::isAdmin()` / `App::hasRole('Approver')`.
+`#181`, `#188` — upgrade.php + Migrator have try/catch.
+`#184`, `#185`, `#186`, `#187` — schema drift (siteID on tblRecurrenceRules, tblAnnouncements, tblDocCategories+tblDocuments, totp columns+tblTotpBackupCodes) all present in full_schema.sql.
+
+### Scoped to follow-up PRs (left open)
+
+`#161` SRI audit (gaps in Sortable + Swagger CDN tags; recommend vendoring).
+`#225` Mobile audit (requires physical devices).
+`#233` PWA offline-first with sync queue (XL).
+`#234` MS365 Graph delegate sending (XL).
+`#235` GDPR right-to-erasure (XL; needs policy doc first).
+`#236` Photo approval queue (XL; needs photo upload pipeline first).
+`#239` Invite-based onboarding (L).
+`#240` Offboarding workflow (L).
+
+### Migrations 061–070
+
+7 idempotent migrations added in this release. Fresh installs pick them up from `full_schema.sql`; stale-DB retries run them via the migration runner from PR #218.
+
+### Changed — Version bumped 1.1.1 → 1.2.0
+
+Net-new feature surface across security, ops, UX, and core → minor bump per semver.
+
 ## [1.1.1] - Unreleased
 
 ### Added — Authorised-use notice on the login screen (#221)
