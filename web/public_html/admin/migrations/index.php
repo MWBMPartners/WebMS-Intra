@@ -101,7 +101,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
             <input type="hidden" name="run" value="all">
             <button type="submit" class="btn btn-warning"
-                    onclick="return confirm('Run all <?php echo count($pendingList); ?> pending migration(s)?');">
+                    data-confirm="Run all <?php echo count($pendingList); ?> pending migration(s)?">
                 <i class="fa-solid fa-play me-1"></i> Run All Pending (<?php echo count($pendingList); ?>)
             </button>
         </form>
@@ -184,7 +184,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         <input type="hidden" name="run" value="single">
                         <input type="hidden" name="filename" value="<?php echo htmlspecialchars($file, ENT_QUOTES, 'UTF-8'); ?>">
                         <button type="submit" class="btn btn-sm btn-outline-warning"
-                                onclick="return confirm('Run migration: <?php echo htmlspecialchars($file, ENT_QUOTES, 'UTF-8'); ?>?');">
+                                data-confirm="Run migration: <?php echo htmlspecialchars($file, ENT_QUOTES, 'UTF-8'); ?>?">
                             <i class="fa-solid fa-play me-1"></i> Run
                         </button>
                     </form>

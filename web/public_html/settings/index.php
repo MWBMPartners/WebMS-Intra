@@ -230,7 +230,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                             <input type="hidden" name="action" value="delete">
                                             <input type="hidden" name="settingID" value="<?php echo (int) $row['settingID']; ?>">
                                             <button type="submit" class="btn btn-sm btn-outline-danger"
-                                                    onclick="return confirm('Delete setting: <?php echo htmlspecialchars($row['settingKey'], ENT_QUOTES, 'UTF-8'); ?>?');"
+                                                    data-confirm="Delete setting: <?php echo htmlspecialchars($row['settingKey'], ENT_QUOTES, 'UTF-8'); ?>?" data-confirm-destructive="true"
                                                     title="Delete">
                                                 <i class="fa-solid fa-trash"></i>
                                             </button>

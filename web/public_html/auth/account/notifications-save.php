@@ -68,7 +68,14 @@ if ($json === false) {
     exit();
 }
 
-$stmt = $mysqli->prepare('UPDATE tblUsers SET notifyPrefs = ? WHERE userID = ?');
+// 🕯️ Sabbath override (#231). 'inherit'/'on'/'off' validated; anything
+//    else falls back to 'inherit'. Saved alongside notifyPrefs in one UPDATE.
+$sabbathHonour = (string) ($_POST['sabbathHonour'] ?? 'inherit');
+if (in_array($sabbathHonour, ['inherit', 'on', 'off'], true) === false) {
+    $sabbathHonour = 'inherit';
+}
+
+$stmt = $mysqli->prepare('UPDATE tblUsers SET notifyPrefs = ?, sabbathHonour = ? WHERE userID = ?');
 if ($stmt === false) {
     Logger::errorPlatform('MySQL', 'Error', 'NOTIFY_PREFS_PREP', $mysqli->error, '');
     $_SESSION['notifications_flash']      = t('error.db_save_preferences');
@@ -76,7 +83,7 @@ if ($stmt === false) {
     header('Location: /account/notifications', true, 302);
     exit();
 }
-$stmt->bind_param('si', $json, $userId);
+$stmt->bind_param('ssi', $json, $sabbathHonour, $userId);
 $stmt->execute();
 $stmt->close();
 

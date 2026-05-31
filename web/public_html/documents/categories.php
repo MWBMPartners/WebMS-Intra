@@ -175,7 +175,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 <div class="col-1"><?php echo (int) $cat['sortOrder']; ?></div>
                 <div class="col-2"><span class="badge bg-secondary"><?php echo (int) $cat['docCount']; ?></span></div>
                 <div class="col-2 text-end">
-                    <form method="post" action="/documents/categories" class="d-inline" onsubmit="return confirm('Delete this category? Documents will become uncategorised.');">
+                    <form method="post" action="/documents/categories" class="d-inline" data-confirm="Delete this category? Documents will become uncategorised." data-confirm-destructive="true">
                         <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
                         <input type="hidden" name="action" value="delete">
                         <input type="hidden" name="categoryID" value="<?php echo (int) $cat['categoryID']; ?>">

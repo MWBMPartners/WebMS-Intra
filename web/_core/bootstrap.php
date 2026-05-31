@@ -111,6 +111,68 @@ if ($hidePoweredBy === false) {
     header('X-Powered-By: WebMS-Intra/' . $brandedVersion);
 }
 
+// 🛡️ Baseline security response headers (#160)
+// -----------------------------------------------------------------------------
+// Industry-standard defence-in-depth. All headers are unconditional except
+// HSTS (only sent when the request arrived over HTTPS, which is the case on
+// portal.millrdsdacambridge.uk via DreamHost's edge-redirect). Headers are
+// sent BEFORE any app handler so they apply to every response including
+// error pages and the maintenance gate.
+//
+// Each can be overridden via tblSettings (`portal.headers.<header_name>`).
+// Set the setting to an empty string to suppress the header for that key.
+if (headers_sent() === false) {
+    // 🔒 Strict-Transport-Security — only on HTTPS requests. NOT preloaded;
+    //    we want to retain the option to revert (see issue #160 caveats).
+    $isHttps = (isset($_SERVER['HTTPS']) === true && $_SERVER['HTTPS'] === 'on')
+            || (($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https');
+    if ($isHttps === true) {
+        $hsts = (string) ($SETTINGS['portal']['headers']['strict_transport_security']
+                       ?? 'max-age=31536000; includeSubDomains');
+        if ($hsts !== '') {
+            header('Strict-Transport-Security: ' . $hsts);
+        }
+    }
+
+    // 🔐 Permissions-Policy — disable APIs we don't use. Widening individual
+    //    permissions to `(self)` is a deliberate per-feature decision.
+    $perms = (string) ($SETTINGS['portal']['headers']['permissions_policy']
+                    ?? 'camera=(), microphone=(), geolocation=(), payment=(), '
+                     . 'usb=(), magnetometer=(), accelerometer=(), gyroscope=(), '
+                     . 'browsing-topics=(), interest-cohort=()');
+    if ($perms !== '') {
+        header('Permissions-Policy: ' . $perms);
+    }
+
+    // 🪟 COOP / CORP — cross-origin isolation (Spectre mitigation + resource
+    //    leak prevention). `same-origin` is the strictest sensible default.
+    $coop = (string) ($SETTINGS['portal']['headers']['coop'] ?? 'same-origin');
+    if ($coop !== '') {
+        header('Cross-Origin-Opener-Policy: ' . $coop);
+    }
+    $corp = (string) ($SETTINGS['portal']['headers']['corp'] ?? 'same-origin');
+    if ($corp !== '') {
+        header('Cross-Origin-Resource-Policy: ' . $corp);
+    }
+
+    // 📌 Referrer-Policy — limit what's sent to cross-origin links.
+    $referrer = (string) ($SETTINGS['portal']['headers']['referrer_policy']
+                       ?? 'strict-origin-when-cross-origin');
+    if ($referrer !== '') {
+        header('Referrer-Policy: ' . $referrer);
+    }
+
+    // 🛡️ X-Content-Type-Options — defeats MIME-sniffing attacks. Always on.
+    header('X-Content-Type-Options: nosniff');
+
+    // 🖼️ X-Frame-Options — block clickjacking via iframe embedding.
+    //    `SAMEORIGIN` allows our own iframes (e.g. the help app inside admin).
+    $xfo = (string) ($SETTINGS['portal']['headers']['x_frame_options'] ?? 'SAMEORIGIN');
+    if ($xfo !== '') {
+        header('X-Frame-Options: ' . $xfo);
+    }
+}
+
 // 🛡️ PHP error display hardening
 // -----------------------------------------------------------------------------
 // In production we MUST NOT echo PHP errors / warnings into the response —

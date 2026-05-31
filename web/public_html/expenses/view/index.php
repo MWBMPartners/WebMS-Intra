@@ -435,7 +435,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
             <input type="hidden" name="claimID" value="<?php echo (int) $claim['claimID']; ?>">
             <button type="submit" class="btn btn-outline-danger"
-                    onclick="return confirm('Are you sure you want to withdraw this claim? This action cannot be undone.');">
+                    data-confirm="Are you sure you want to withdraw this claim? This action cannot be undone." data-confirm-destructive="true">
                 <i class="fa-solid fa-rotate-left me-1"></i> Withdraw Claim
             </button>
         </form>

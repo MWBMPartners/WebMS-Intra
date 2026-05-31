@@ -293,7 +293,13 @@ class Asset
      */
     public static function portalJs(): string
     {
-        return '<script src="' . self::esc(self::LOCAL_PORTAL_JS) . '" defer></script>';
+        return '<script src="' . self::esc(self::LOCAL_PORTAL_JS) . '" defer></script>'
+             . "\n"
+             // 🪟 Portal.Confirm — themed confirm modal replacement (#244).
+             //    Loaded AFTER Bootstrap JS (which is required) and before
+             //    custom page scripts so data-confirm form interception is
+             //    in place by the time any handler binds.
+             . '<script src="/assets/js/portal-confirm.js" defer></script>';
     }
 
     // 🛡️ ===========================================================================

@@ -2393,6 +2393,162 @@ ON DUPLICATE KEY UPDATE `filename` = `filename`;
 INSERT INTO `tblMigrations` (`filename`) VALUES ('060_portal_versioning_and_maintenance.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
+INSERT INTO `tblMigrations` (`filename`) VALUES ('061_security_headers.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('062_help_support_route.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('063_rollout_pilot_mode.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('064_backup_freshness_check.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('065_admin_backup_ui.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('admin/maintenance/backup', 'admin/maintenance/backup.php', 1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('066_system_health.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('admin/maintenance/health', 'admin/maintenance/health.php', 1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('067_alerts_and_email_admin.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('068_first_run_admin.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('069_tours_and_demo_data.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('070_sabbath_and_timezone.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('071_polish_followups.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('072_email_templates.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('admin/integrations/email-templates', 'admin/integrations/email-templates.php', 1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'portal.i18n.minimum_coverage_for_switcher', '0', '0', 0)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'portal.sabbath.enabled',              '0',              '0',              0),
+    (NULL, 'portal.sabbath.method',               'fixed',          'fixed',          0),
+    (NULL, 'portal.sabbath.timezone',             'Europe/London',  'Europe/London',  0),
+    (NULL, 'portal.sabbath.location_lat',         '52.205',         '52.205',         0),
+    (NULL, 'portal.sabbath.location_lng',         '0.119',          '0.119',          0),
+    (NULL, 'portal.sabbath.start_offset_minutes', '0',              '0',              0),
+    (NULL, 'portal.sabbath.end_offset_minutes',   '0',              '0',              0),
+    (NULL, 'portal.sabbath.bypass_critical',      '1',              '1',              0)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
+CREATE TABLE IF NOT EXISTS `tblTours` (
+    `tourID`     INT          NOT NULL AUTO_INCREMENT,
+    `tourKey`    VARCHAR(64)  NOT NULL,
+    `version`    VARCHAR(20)  NOT NULL,
+    `title`      VARCHAR(255) NOT NULL,
+    `steps`      TEXT         NOT NULL,
+    `isActive`   TINYINT(1)   NOT NULL DEFAULT 1,
+    `forRoles`   VARCHAR(255) NOT NULL DEFAULT '',
+    `createdAt`  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`tourID`),
+    UNIQUE KEY `uq_tour_key_version` (`tourKey`, `version`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+CREATE TABLE IF NOT EXISTS `tblUserTours` (
+    `userTourID`   INT      NOT NULL AUTO_INCREMENT,
+    `userID`       INT      NOT NULL,
+    `tourID`       INT      NOT NULL,
+    `completedAt`  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`userTourID`),
+    UNIQUE KEY `uq_user_tour` (`userID`, `tourID`),
+    KEY `idx_user_tours_user` (`userID`),
+    CONSTRAINT `fk_user_tour_user` FOREIGN KEY (`userID`) REFERENCES `tblUsers`(`userID`) ON DELETE CASCADE,
+    CONSTRAINT `fk_user_tour_tour` FOREIGN KEY (`tourID`) REFERENCES `tblTours`(`tourID`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('admin/maintenance/demo-data', 'admin/maintenance/demo-data.php', 1),
+    ('admin/tours', 'admin/tours/index.php', 1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'portal.demo_mode.enabled',   '0', '0', 0),
+    (NULL, 'portal.tours.welcome_active','1', '1', 0)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('help/admin-first-steps', 'help/admin-first-steps.php', 1),
+    ('admin/settings/dismiss-first-run', 'admin/settings/dismiss-first-run.php', 1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'portal.first_run.dismissed',                '0', '0', 0),
+    (NULL, 'portal.first_run.steps.site_branding',      '0', '0', 0),
+    (NULL, 'portal.first_run.steps.email_delivery',     '0', '0', 0),
+    (NULL, 'portal.first_run.steps.test_backup',        '0', '0', 0),
+    (NULL, 'portal.first_run.steps.retention_cron',     '0', '0', 0),
+    (NULL, 'portal.first_run.steps.invite_users',       '0', '0', 0),
+    (NULL, 'portal.first_run.steps.first_announcement', '0', '0', 0)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('admin/integrations/email', 'admin/integrations/email.php', 1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'portal.alerts.recipients',       '',                '',                0),
+    (NULL, 'portal.alerts.severities',       'Critical,Fatal',  'Critical,Fatal',  0),
+    (NULL, 'portal.alerts.cooldown_minutes', '30',              '30',              0),
+    (NULL, 'email.provider',                 'smtp',            'smtp',            0),
+    (NULL, 'email.from',                     '',                '',                0)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('admin/maintenance/backup-check', 'admin/maintenance/backup-check.php', 1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'portal.backups.max_age_hours',    '36', '36', 0),
+    (NULL, 'portal.backups.alert_recipients', '',   '',   0)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'portal.rollout.pilot_mode', '1', '1', 0)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('help/support', 'help/support.php', 1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'portal.support.email', 'portal-support@millrdsdacambridge.uk', 'portal-support@millrdsdacambridge.uk', 0)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
+-- 🛡️ Baseline security response headers (matches migration 061 / issue #160).
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'portal.headers.strict_transport_security', 'max-age=31536000; includeSubDomains', 'max-age=31536000; includeSubDomains', 0),
+    (NULL, 'portal.headers.permissions_policy', 'camera=(), microphone=(), geolocation=(), payment=(), usb=(), magnetometer=(), accelerometer=(), gyroscope=(), browsing-topics=(), interest-cohort=()', 'camera=(), microphone=(), geolocation=(), payment=(), usb=(), magnetometer=(), accelerometer=(), gyroscope=(), browsing-topics=(), interest-cohort=()', 0),
+    (NULL, 'portal.headers.coop', 'same-origin', 'same-origin', 0),
+    (NULL, 'portal.headers.corp', 'same-origin', 'same-origin', 0),
+    (NULL, 'portal.headers.referrer_policy', 'strict-origin-when-cross-origin', 'strict-origin-when-cross-origin', 0),
+    (NULL, 'portal.headers.x_frame_options', 'SAMEORIGIN', 'SAMEORIGIN', 0)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
 -- 🔢 Portal version tracking + maintenance gate settings (matches migration 060).
 --    Seeded as empty here; the installer writes the actual `portal.installed_version`
 --    on step 5 finalisation, and /admin/upgrade updates it on successful migrate.

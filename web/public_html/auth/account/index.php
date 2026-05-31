@@ -442,7 +442,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                 <div class="col-auto">
                                     <?php if ($loginMethodCount > 1): ?>
                                         <form method="post" action="/account/unlink" class="d-inline"
-                                              onsubmit="return confirm('Unlink this <?php echo htmlspecialchars(providerLabel($la['provider']), ENT_QUOTES, 'UTF-8'); ?> account?');">
+                                              data-confirm="Unlink this <?php echo htmlspecialchars(providerLabel($la['provider']), ENT_QUOTES, 'UTF-8'); ?> account?"
+                                              data-confirm-destructive="true">
                                             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
                                             <input type="hidden" name="linkID" value="<?php echo (int) $la['linkID']; ?>">
                                             <button type="submit" class="btn btn-sm btn-outline-danger">
@@ -509,7 +510,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                 <div class="col-auto">
                                     <?php if ($loginMethodCount > 1): ?>
                                         <form method="post" action="/account/webauthn/delete" class="d-inline"
-                                              onsubmit="return confirm('Remove this passkey?');">
+                                              data-confirm="Remove this passkey?"
+                                              data-confirm-destructive="true">
                                             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
                                             <input type="hidden" name="credID" value="<?php echo (int) $cred['credID']; ?>">
                                             <button type="submit" class="btn btn-sm btn-outline-danger">

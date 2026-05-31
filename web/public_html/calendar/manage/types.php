@@ -284,7 +284,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                     <input type="hidden" name="entity" value="type">
                                     <input type="hidden" name="typeID" value="<?php echo (int) $t['typeID']; ?>">
                                     <button type="submit" class="btn btn-sm btn-outline-danger"
-                                            onclick="return confirm('Delete type: <?php echo htmlspecialchars($t['typeName'], ENT_QUOTES, 'UTF-8'); ?>?');">
+                                            data-confirm="Delete type: <?php echo htmlspecialchars($t['typeName'], ENT_QUOTES, 'UTF-8'); ?>?" data-confirm-destructive="true">
                                         <i class="fa-solid fa-trash"></i>
                                     </button>
                                 </form>
@@ -403,7 +403,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                     <input type="hidden" name="entity" value="category">
                                     <input type="hidden" name="categoryID" value="<?php echo (int) $c['categoryID']; ?>">
                                     <button type="submit" class="btn btn-sm btn-outline-danger"
-                                            onclick="return confirm('Delete category: <?php echo htmlspecialchars($c['categoryName'], ENT_QUOTES, 'UTF-8'); ?>?');">
+                                            data-confirm="Delete category: <?php echo htmlspecialchars($c['categoryName'], ENT_QUOTES, 'UTF-8'); ?>?" data-confirm-destructive="true">
                                         <i class="fa-solid fa-trash"></i>
                                     </button>
                                 </form>

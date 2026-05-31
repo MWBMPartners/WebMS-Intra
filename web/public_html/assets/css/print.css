@@ -1,0 +1,165 @@
+/* =============================================================================
+ * WebMS Intra — Print Stylesheet 🖨️
+ * =============================================================================
+ * Activated automatically when the browser prints, OR explicitly when the body
+ * has the `print-view` class (the per-app print pages set this so on-screen
+ * preview matches what comes out of the printer).
+ *
+ * Goals:
+ *   - Hide all navigation / chrome / interactive controls.
+ *   - Print serif body text on white background regardless of theme.
+ *   - Avoid mid-card page breaks.
+ *   - Header / footer with portal name + print date + page numbers.
+ *
+ * @see   https://github.com/MWBMPartners/WebMS-Intra/issues/241
+ * ============================================================================= */
+
+@media print, .print-view {
+    /* 🚫 Hide chrome */
+    .navbar,
+    .sidebar,
+    nav,
+    footer,
+    .footer,
+    .breadcrumb,
+    .pagination,
+    .form-control,
+    .btn:not(.btn-print-keep),
+    .modal-backdrop,
+    .alert .btn-close,
+    .dropdown,
+    .search-box,
+    [data-theme-toggle],
+    [data-bs-toggle="modal"],
+    .help-tour,
+    .cookie-banner,
+    .portal-cookie-banner,
+    .toast {
+        display: none !important;
+    }
+
+    /* 🎨 Reset theme to printable */
+    :root,
+    [data-bs-theme="dark"] {
+        --bs-body-bg: #ffffff !important;
+        --bs-body-color: #000000 !important;
+        --bs-border-color: #cccccc !important;
+        color-scheme: light !important;
+    }
+    body {
+        background: #ffffff !important;
+        color: #000000 !important;
+        font-family: Georgia, "Times New Roman", serif !important;
+        font-size: 11pt !important;
+        line-height: 1.4 !important;
+        margin: 0 !important;
+        padding: 0 !important;
+    }
+
+    /* 📐 Page setup */
+    @page {
+        margin: 1.5cm 1.5cm 2cm 1.5cm;
+        size: A4;
+    }
+    @page :first { margin-top: 1cm; }
+
+    /* 🧱 Avoid mid-section breaks */
+    .card,
+    .portal-data-list .row,
+    table,
+    blockquote,
+    figure,
+    h2 + p,
+    h3 + p {
+        page-break-inside: avoid;
+        break-inside: avoid;
+    }
+    h1, h2, h3 {
+        page-break-after: avoid;
+        break-after: avoid;
+    }
+
+    /* 🎨 Strip card backgrounds; rely on borders only */
+    .card,
+    .alert,
+    .badge {
+        background: transparent !important;
+        color: #000000 !important;
+        box-shadow: none !important;
+        border: 1px solid #cccccc !important;
+    }
+    .badge {
+        border: 1px solid #444444 !important;
+        padding: 1px 4px !important;
+        font-weight: normal !important;
+    }
+
+    /* 🔗 Show link URLs after text (only for external/significant links) */
+    a[href^="http"]:after,
+    a[href^="mailto:"]:after {
+        content: " (" attr(href) ")";
+        font-size: 0.85em;
+        color: #555555;
+        word-break: break-all;
+    }
+    /* …but not for in-portal nav links */
+    a[href^="/"]:after,
+    a[href^="#"]:after {
+        content: none;
+    }
+
+    /* 🏷️ Top-of-page running header (portal name + print date) */
+    body::before {
+        content: attr(data-portal-name) " — Printed " attr(data-print-date);
+        display: block;
+        font-size: 9pt;
+        color: #555555;
+        border-bottom: 1px solid #cccccc;
+        padding-bottom: 4pt;
+        margin-bottom: 8pt;
+    }
+
+    /* 🦶 Bottom-of-page running footer (confidentiality + page X of Y) */
+    /* Note: page X of Y requires Paged Media or browser-specific markers;
+       we settle for the confidentiality line. Browsers vary on counters. */
+    @page {
+        @bottom-center {
+            content: "Confidential — for internal use only";
+            font-size: 9pt;
+            color: #555555;
+        }
+    }
+
+    /* 📊 Tables (where used despite the "no <table>" policy — some legacy
+       app reports may still use them) */
+    table {
+        border-collapse: collapse !important;
+        width: 100% !important;
+    }
+    th, td {
+        border: 1px solid #cccccc !important;
+        padding: 4pt 6pt !important;
+    }
+    th {
+        background: #f0f0f0 !important;
+        font-weight: bold !important;
+    }
+
+    /* 📋 portal-data-list — the framework's table replacement */
+    .portal-data-list .row {
+        border-bottom: 1px solid #cccccc !important;
+        padding: 6pt 0 !important;
+    }
+
+    /* 🖼️ Images shouldn't exceed page width */
+    img {
+        max-width: 100% !important;
+        height: auto !important;
+        page-break-inside: avoid;
+    }
+
+    /* 📐 Landscape mode for explicit-landscape pages */
+    .print-landscape @page {
+        size: A4 landscape;
+    }
+}

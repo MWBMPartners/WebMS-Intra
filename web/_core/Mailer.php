@@ -52,26 +52,155 @@ class Mailer
      * Checks `mail.provider` setting and dispatches to the appropriate backend.
      * Defaults to MS365 (Microsoft Graph) for backward compatibility.
      *
-     * @param array  $to    Array of recipient email addresses
-     * @param string $subj  Email subject line
-     * @param string $html  HTML body content
-     * @param array  $files Array of absolute file paths to attach (optional)
+     * @param string|array $to    Recipient (single email or array)
+     * @param string       $subj  Email subject line
+     * @param string       $body  Body — auto-detected as HTML if it contains `<` tags
+     * @param array        $files File paths to attach
      *
      * @return bool True if sent successfully
      */
-    public static function send(array $to, string $subj, string $html, array $files = []): bool
+    public static function send(string|array $to, string $subj, string $body, array $files = []): bool
     {
         global $SETTINGS;
+
+        // 🪞 Normalise $to to an array so callers can pass a single
+        //    string without thinking about it.
+        $recipients = is_array($to) ? $to : [$to];
+
+        // 🪞 If the body looks like plain text (no HTML tags), wrap it in
+        //    the branded base template so the recipient gets a themed
+        //    email regardless of caller. Plain-text wrapper is generated
+        //    automatically by sendTemplated()'s flow when used; callers
+        //    using send() directly get the auto-wrap behaviour.
+        $looksLikeHtml = (bool) preg_match('/<[a-zA-Z][^>]*>/', $body);
+        $htmlBody = $looksLikeHtml === true
+            ? $body
+            : self::renderBase($body);
 
         // 🔀 Dispatch to the configured provider
         $provider = strtolower($SETTINGS['mail']['provider'] ?? 'ms365');
 
         if ($provider === 'google') {
-            return MailerGoogle::send($to, $subj, $html, $files);
+            return MailerGoogle::send($recipients, $subj, $htmlBody, $files);
         }
 
         // 📧 Default: Microsoft Graph (MS365)
-        return self::sendViaGraph($to, $subj, $html, $files);
+        return self::sendViaGraph($recipients, $subj, $htmlBody, $files);
+    }
+
+    /**
+     * 📨 Send a templated email (#243).
+     *
+     * Renders the named template under web/_core/templates/email/ with the
+     * given vars (escaped via htmlspecialchars), wraps in the base layout,
+     * and dispatches via send().
+     *
+     * @param string|array         $to        Recipient(s)
+     * @param string               $subject   Subject line
+     * @param string               $template  Template basename — looked up at
+     *                                        web/_core/templates/email/{name}.html.php
+     * @param array<string, mixed> $vars      Template variables
+     * @param array                $files     Attachments
+     */
+    public static function sendTemplated(
+        string|array $to,
+        string $subject,
+        string $template,
+        array $vars = [],
+        array $files = []
+    ): bool {
+        $rendered = self::renderTemplate($template, $vars);
+        if ($rendered === null) {
+            // 🪞 Template missing — fall back to a plain text mention of the
+            //    template name so the alert still reaches the recipient.
+            $rendered = sprintf(
+                "(Template '%s' missing — please contact the portal admin.)",
+                $template
+            );
+        }
+        return self::send($to, $subject, self::renderBase($rendered), $files);
+    }
+
+    /**
+     * Render the named partial template under templates/email/{name}.html.php.
+     *
+     * @return string|null Rendered HTML, or null if template not found.
+     */
+    private static function renderTemplate(string $template, array $vars): ?string
+    {
+        if (preg_match('/^[A-Za-z0-9_\-]+$/', $template) !== 1) {
+            return null;
+        }
+        $path = PORTAL_CORE
+              . DIRECTORY_SEPARATOR . 'templates'
+              . DIRECTORY_SEPARATOR . 'email'
+              . DIRECTORY_SEPARATOR . $template . '.html.php';
+        if (is_readable($path) === false) {
+            return null;
+        }
+        // 🪞 Sandbox the template — vars are extracted into local scope.
+        $render = static function (string $__path, array $__vars): string {
+            extract($__vars, EXTR_SKIP);
+            ob_start();
+            include $__path;
+            return (string) ob_get_clean();
+        };
+        try {
+            return $render($path, $vars);
+        } catch (\Throwable $e) {
+            Logger::errorPlatform('Email', 'Error', 'TPL_RENDER', $template, $e->getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Wrap the given content HTML in the branded base layout.
+     */
+    private static function renderBase(string $content): string
+    {
+        global $SETTINGS;
+        $base = PORTAL_CORE
+              . DIRECTORY_SEPARATOR . 'templates'
+              . DIRECTORY_SEPARATOR . 'email'
+              . DIRECTORY_SEPARATOR . 'base.html.php';
+        if (is_readable($base) === false) {
+            // 🪞 Base template missing — return the content as-is wrapped in
+            //    a minimal HTML shell so the email still renders.
+            return '<!doctype html><html><body style="font-family:system-ui">'
+                 . (preg_match('/<[a-zA-Z][^>]*>/', $content) === 1
+                    ? $content
+                    : '<pre style="white-space:pre-wrap">' . htmlspecialchars($content, ENT_QUOTES, 'UTF-8') . '</pre>')
+                 . '</body></html>';
+        }
+        $portalName    = (string) ($SETTINGS['site']['name'] ?? 'WebMS Intra');
+        $portalUrl     = (string) ($SETTINGS['site']['url']  ?? '');
+        $supportEmail  = (string) ($SETTINGS['portal']['support']['email'] ?? '');
+        // 🪞 Auto-wrap plain text in <p> tags so paragraphs render.
+        $contentHtml = preg_match('/<[a-zA-Z][^>]*>/', $content) === 1
+            ? $content
+            : '<p>' . nl2br(htmlspecialchars($content, ENT_QUOTES, 'UTF-8')) . '</p>';
+
+        $render = static function (
+            string $__path,
+            string $__content,
+            string $__portalName,
+            string $__portalUrl,
+            string $__supportEmail
+        ): string {
+            $content      = $__content;
+            $portalName   = $__portalName;
+            $portalUrl    = $__portalUrl;
+            $supportEmail = $__supportEmail;
+            ob_start();
+            include $__path;
+            return (string) ob_get_clean();
+        };
+        try {
+            return $render($base, $contentHtml, $portalName, $portalUrl, $supportEmail);
+        } catch (\Throwable $e) {
+            Logger::errorPlatform('Email', 'Error', 'BASE_RENDER', 'base', $e->getMessage());
+            return $contentHtml;
+        }
     }
 
     /**

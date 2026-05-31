@@ -148,7 +148,9 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     </div>
 </div>
 
-<form method="post" action="/admin/maintenance/retention" onsubmit="return confirm('This will hard-delete <?php echo number_format($preview['activity'] + $preview['errors']); ?> rows. Continue?');">
+<form method="post" action="/admin/maintenance/retention"
+      data-confirm="This will hard-delete <?php echo number_format($preview['activity'] + $preview['errors']); ?> rows. Continue?"
+      data-confirm-destructive="true">
     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
     <button type="submit" class="btn btn-warning" <?php echo ($preview['activity'] + $preview['errors']) === 0 ? 'disabled' : ''; ?>>
         <i class="fa-solid fa-broom me-1"></i> Run Sweep Now

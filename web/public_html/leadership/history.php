@@ -212,7 +212,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
                             <input type="hidden" name="assignmentID" value="<?php echo (int) $assign['assignmentID']; ?>">
                             <button type="submit" class="btn btn-sm btn-outline-danger"
-                                    onclick="return confirm('Remove this assignment?');" title="Remove">
+                                    data-confirm="Remove this assignment?" data-confirm-destructive="true" title="Remove">
                                 <i class="fa-solid fa-trash"></i>
                             </button>
                         </form>
