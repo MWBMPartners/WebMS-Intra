@@ -110,7 +110,7 @@ class Router
 
         // 🚀 Include the target app file
         // The app file has access to $db (as $mysqli via global), $SETTINGS, and all
-        // core classes via the autoloader. The template system (header.php / footer.php)
+        // core classes via the autoloader. The template engine (header.php / footer.php)
         // is used by the app file to render consistent page chrome.
         require $targetFile;
     }
