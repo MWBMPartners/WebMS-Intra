@@ -2444,6 +2444,193 @@ ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 INSERT INTO `tblMigrations` (`filename`) VALUES ('073_app_registry.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
+INSERT INTO `tblMigrations` (`filename`) VALUES ('074_rota.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('075_praise_reports.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('praise',     'praise/index.php', 1),
+    ('praise/new', 'praise/new.php',   1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'praise.enabled',     '0',              '0',              0),
+    (NULL, 'praise.displayName', 'Praise Reports', 'Praise Reports', 0),
+    (NULL, 'praise.displayIcon', 'fa-solid fa-hands-clapping', 'fa-solid fa-hands-clapping', 0)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('076_milestones.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+CREATE TABLE IF NOT EXISTS `tblUserMilestone` (
+    `milestoneID`  INT          NOT NULL AUTO_INCREMENT,
+    `userID`       INT          NOT NULL,
+    `kind`         ENUM('birthday','anniversary','baptism','joining','wedding','other') NOT NULL DEFAULT 'other',
+    `label`        VARCHAR(100) DEFAULT NULL,
+    `monthDay`     CHAR(5)      NOT NULL,
+    `originYear`   INT          DEFAULT NULL,
+    `privacy`      ENUM('private','team','members','public') NOT NULL DEFAULT 'team',
+    `createdAt`    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`milestoneID`),
+    KEY `idx_milestone_user` (`userID`),
+    KEY `idx_milestone_md`   (`monthDay`),
+    CONSTRAINT `fk_milestone_user` FOREIGN KEY (`userID`) REFERENCES `tblUsers`(`userID`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('milestones',      'milestones/index.php',  1),
+    ('milestones/me',   'milestones/me.php',     1),
+    ('milestones/save', 'milestones/save.php',   1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'milestones.enabled',           '0', '0', 0),
+    (NULL, 'milestones.digest_recipients', '',  '',  0),
+    (NULL, 'milestones.displayName',       'Milestones', 'Milestones', 0),
+    (NULL, 'milestones.displayIcon',       'fa-solid fa-cake-candles', 'fa-solid fa-cake-candles', 0)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('077_care.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+CREATE TABLE IF NOT EXISTS `tblCareCase` (
+    `caseID`        INT          NOT NULL AUTO_INCREMENT,
+    `siteID`        INT          NOT NULL DEFAULT 1,
+    `personUserID`  INT          DEFAULT NULL,
+    `personName`    VARCHAR(255) DEFAULT NULL,
+    `category`      ENUM('illness','hospital','bereavement','family','transition','other') NOT NULL DEFAULT 'other',
+    `summary`       VARCHAR(500) NOT NULL,
+    `status`        ENUM('active','resolved','long-term') NOT NULL DEFAULT 'active',
+    `openedByID`    INT          DEFAULT NULL,
+    `openedAt`      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `closedAt`      DATETIME     DEFAULT NULL,
+    PRIMARY KEY (`caseID`),
+    KEY `idx_care_case_site_status` (`siteID`, `status`),
+    KEY `idx_care_case_person` (`personUserID`),
+    CONSTRAINT `fk_care_case_site` FOREIGN KEY (`siteID`) REFERENCES `tblSites` (`siteID`),
+    CONSTRAINT `fk_care_case_person` FOREIGN KEY (`personUserID`) REFERENCES `tblUsers` (`userID`) ON DELETE SET NULL,
+    CONSTRAINT `fk_care_case_opener` FOREIGN KEY (`openedByID`) REFERENCES `tblUsers` (`userID`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+CREATE TABLE IF NOT EXISTS `tblCareVisit` (
+    `visitID`       INT      NOT NULL AUTO_INCREMENT,
+    `caseID`        INT      NOT NULL,
+    `visitedByID`   INT      NOT NULL,
+    `visitedAt`     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `kind`          ENUM('visit','call','message','prayer','other') NOT NULL DEFAULT 'visit',
+    `notes`         TEXT     DEFAULT NULL,
+    `followUpAt`    DATE     DEFAULT NULL,
+    `followUpAssignedToID` INT DEFAULT NULL,
+    `createdAt`     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`visitID`),
+    KEY `idx_care_visit_case` (`caseID`),
+    KEY `idx_care_visit_visitor` (`visitedByID`),
+    KEY `idx_care_visit_followup` (`followUpAt`, `followUpAssignedToID`),
+    CONSTRAINT `fk_care_visit_case` FOREIGN KEY (`caseID`) REFERENCES `tblCareCase` (`caseID`) ON DELETE CASCADE,
+    CONSTRAINT `fk_care_visit_visitor` FOREIGN KEY (`visitedByID`) REFERENCES `tblUsers` (`userID`) ON DELETE RESTRICT,
+    CONSTRAINT `fk_care_visit_assignee` FOREIGN KEY (`followUpAssignedToID`) REFERENCES `tblUsers` (`userID`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+CREATE TABLE IF NOT EXISTS `tblCareAccessLog` (
+    `accessID`   INT      NOT NULL AUTO_INCREMENT,
+    `caseID`     INT      NOT NULL,
+    `viewerID`   INT      NOT NULL,
+    `viewedAt`   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`accessID`),
+    KEY `idx_care_access_case` (`caseID`),
+    KEY `idx_care_access_viewer` (`viewerID`),
+    CONSTRAINT `fk_care_access_case` FOREIGN KEY (`caseID`) REFERENCES `tblCareCase` (`caseID`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('care',           'care/index.php',     1),
+    ('care/case',      'care/case.php',      1),
+    ('care/case-save', 'care/case-save.php', 1),
+    ('care/visit-save','care/visit-save.php',1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'care.enabled',           '0', '0', 0),
+    (NULL, 'care.redact_after_days', '90','90', 0),
+    (NULL, 'care.displayName',       'Care Register', 'Care Register', 0),
+    (NULL, 'care.displayIcon',       'fa-solid fa-hand-holding-heart', 'fa-solid fa-hand-holding-heart', 0)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
+CREATE TABLE IF NOT EXISTS `tblRotaRoleType` (
+    `roleTypeID`  INT          NOT NULL AUTO_INCREMENT,
+    `siteID`      INT          NOT NULL DEFAULT 1,
+    `name`        VARCHAR(100) NOT NULL,
+    `description` VARCHAR(255) DEFAULT NULL,
+    `colorHex`    VARCHAR(7)   NOT NULL DEFAULT '#5e6ad2',
+    `isActive`    TINYINT(1)   NOT NULL DEFAULT 1,
+    `createdAt`   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`roleTypeID`),
+    UNIQUE KEY `uq_rota_role_name_site` (`name`, `siteID`),
+    KEY `idx_rota_role_site` (`siteID`),
+    CONSTRAINT `fk_rota_role_site` FOREIGN KEY (`siteID`) REFERENCES `tblSites` (`siteID`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+CREATE TABLE IF NOT EXISTS `tblRotaSlot` (
+    `slotID`        INT      NOT NULL AUTO_INCREMENT,
+    `siteID`        INT      NOT NULL DEFAULT 1,
+    `roleTypeID`    INT      NOT NULL,
+    `slotDate`      DATE     NOT NULL,
+    `startTime`     TIME     DEFAULT NULL,
+    `endTime`       TIME     DEFAULT NULL,
+    `assignedToID`  INT      DEFAULT NULL,
+    `notes`         VARCHAR(500) DEFAULT NULL,
+    `reminderSentAt` DATETIME DEFAULT NULL,
+    `createdByID`   INT      DEFAULT NULL,
+    `createdAt`     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updatedAt`     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`slotID`),
+    KEY `idx_rota_slot_site_date` (`siteID`, `slotDate`),
+    KEY `idx_rota_slot_role` (`roleTypeID`),
+    KEY `idx_rota_slot_assignee` (`assignedToID`),
+    CONSTRAINT `fk_rota_slot_site` FOREIGN KEY (`siteID`) REFERENCES `tblSites` (`siteID`),
+    CONSTRAINT `fk_rota_slot_role` FOREIGN KEY (`roleTypeID`) REFERENCES `tblRotaRoleType` (`roleTypeID`) ON DELETE CASCADE,
+    CONSTRAINT `fk_rota_slot_assignee` FOREIGN KEY (`assignedToID`) REFERENCES `tblUsers` (`userID`) ON DELETE SET NULL,
+    CONSTRAINT `fk_rota_slot_creator` FOREIGN KEY (`createdByID`) REFERENCES `tblUsers` (`userID`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+CREATE TABLE IF NOT EXISTS `tblRotaSwapRequest` (
+    `swapID`           INT      NOT NULL AUTO_INCREMENT,
+    `slotID`           INT      NOT NULL,
+    `requestedByID`    INT      NOT NULL,
+    `targetUserID`     INT      DEFAULT NULL,
+    `status`           ENUM('pending','accepted','declined','cancelled') NOT NULL DEFAULT 'pending',
+    `requestMessage`   VARCHAR(500) DEFAULT NULL,
+    `responseMessage`  VARCHAR(500) DEFAULT NULL,
+    `respondedAt`      DATETIME DEFAULT NULL,
+    `createdAt`        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`swapID`),
+    KEY `idx_rota_swap_slot` (`slotID`),
+    KEY `idx_rota_swap_requester` (`requestedByID`),
+    KEY `idx_rota_swap_target` (`targetUserID`),
+    CONSTRAINT `fk_rota_swap_slot` FOREIGN KEY (`slotID`) REFERENCES `tblRotaSlot` (`slotID`) ON DELETE CASCADE,
+    CONSTRAINT `fk_rota_swap_requester` FOREIGN KEY (`requestedByID`) REFERENCES `tblUsers` (`userID`) ON DELETE CASCADE,
+    CONSTRAINT `fk_rota_swap_target` FOREIGN KEY (`targetUserID`) REFERENCES `tblUsers` (`userID`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('rota',             'rota/index.php',        1),
+    ('rota/manage',      'rota/manage.php',       1),
+    ('rota/role-types',  'rota/role-types.php',   1),
+    ('rota/slot-save',   'rota/slot-save.php',    1),
+    ('rota/swap',        'rota/swap.php',         1),
+    ('rota/swap-respond','rota/swap-respond.php', 1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'rota.enabled',              '0', '0', 0),
+    (NULL, 'rota.reminder_days_before', '3', '3', 0),
+    (NULL, 'rota.allow_open_swap',      '1', '1', 0),
+    (NULL, 'rota.displayName',          'Duty Roster', 'Duty Roster', 0),
+    (NULL, 'rota.displayIcon',          'fa-solid fa-calendar-week', 'fa-solid fa-calendar-week', 0)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
 INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
     ('admin/apps', 'admin/apps/index.php', 1)
 ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
