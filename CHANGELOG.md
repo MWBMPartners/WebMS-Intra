@@ -9,6 +9,16 @@ Automated sections are appended by `.github/workflows/changelog.yml` per push
 to `alpha`, `beta`, and `main` using the heading format
 `## [VERSION] - YYYY-MM-DD (branch)`.
 
+## [1.1.1] - Unreleased
+
+### Added — Authorised-use notice on the login screen (#221)
+
+All sign-in paths (local, MS365, Google, passkey) land on `/auth/login`, so a single notice at the bottom of that page covers every entry point. The notice is mandatory and cannot be excluded — there's no opt-out toggle:
+
+> **Authorised use only.** {site_name} is a private intranet for staff and volunteers. All sign-ins, page views, and actions are logged and retained for audit purposes. By signing in you acknowledge that you are an authorised user and consent to monitoring of your activity.
+
+i18n keys: `auth.terms_notice_heading`, `auth.terms_notice` (with `:site_name` placeholder). English + Welsh translations supplied.
+
 ## [1.1.0] - Unreleased
 
 ### Added — Installer state detection + Drop-and-rebuild option (#220)

@@ -60,6 +60,8 @@ return [
     'auth.sign_in_with_passkey'     => 'Sign in with Passkey',
     'auth.or'                       => 'or',
     'auth.or_use_passkey'           => 'or use a passkey',
+    'auth.terms_notice_heading'     => 'Authorised use only.',
+    'auth.terms_notice'             => ':site_name is a private intranet for staff and volunteers. All sign-ins, page views, and actions are logged and retained for audit purposes. By signing in you acknowledge that you are an authorised user and consent to monitoring of your activity.',
     'auth.password_reset_success'   => 'Your password has been updated. Please sign in.',
     'auth.invalid_session_token'    => 'Invalid session token. Please try again.',
     'auth.captcha_failed'           => 'Captcha verification failed.',
