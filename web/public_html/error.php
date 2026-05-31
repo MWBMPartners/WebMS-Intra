@@ -45,6 +45,9 @@ if (is_readable($bootstrap) === true) {
 
 if ($rendered === false) {
     http_response_code($code);
+    // 🤖 Apache-direct error pages bypass bootstrap so they wouldn't get
+    //    the global X-Robots-Tag from there. Explicit denial here (#247).
+    header('X-Robots-Tag: noindex, nofollow, noai, noimageai');
     $titles = [
         403 => 'Access Denied',
         404 => 'Page Not Found',

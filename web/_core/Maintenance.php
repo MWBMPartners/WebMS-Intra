@@ -167,6 +167,11 @@ class Maintenance
     {
         http_response_code(503);
         header('Retry-After: 60');
+        // 🤖 Belt-and-braces — bootstrap should already have set this,
+        //    but render the no-index policy explicitly here since this
+        //    method can be invoked before the global header dispatch
+        //    completes (#247).
+        header('X-Robots-Tag: noindex, nofollow, noai, noimageai');
 
         $customMessage = App::settings()['portal']['maintenance']['message'] ?? '';
         $messageHtml = '';
