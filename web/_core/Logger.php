@@ -228,6 +228,77 @@ class Logger
         );
         $stmt->execute();
         $stmt->close();
+
+        // 🚨 Critical-error alerting (#229).
+        //    Severities matching the configured set fire an email dispatch
+        //    to portal.alerts.recipients. Rate-limited per (platform, code,
+        //    title) fingerprint with portal.alerts.cooldown_minutes cooldown
+        //    so a runaway error doesn't spam admins. Failures here are
+        //    swallowed — alert delivery must never break the logging path.
+        try {
+            self::maybeDispatchAlert($platform, $severity, $code, $title, $detail);
+        } catch (\Throwable $ignored) {
+            error_log('Alert dispatch failed: ' . $ignored->getMessage());
+        }
+    }
+
+    private static function maybeDispatchAlert(
+        string $platform,
+        string $severity,
+        string $code,
+        string $title,
+        string $detail
+    ): void {
+        $settings   = App::settings();
+        $sevList    = (string) ($settings['portal']['alerts']['severities'] ?? 'Critical,Fatal');
+        $configured = array_map('trim', explode(',', $sevList));
+        if (in_array($severity, $configured, true) === false) {
+            return;
+        }
+        $recipientsRaw = (string) ($settings['portal']['alerts']['recipients'] ?? '');
+        $recipients    = array_filter(array_map('trim', explode(',', $recipientsRaw)));
+        if (count($recipients) === 0) {
+            return;
+        }
+
+        $cooldown   = (int) ($settings['portal']['alerts']['cooldown_minutes'] ?? 30);
+        $fingerprint = hash('sha256', $platform . '|' . $code . '|' . $title);
+        $sentinel    = PORTAL_ROOT . DIRECTORY_SEPARATOR . '_backups'
+                     . DIRECTORY_SEPARATOR . '.alert-' . substr($fingerprint, 0, 16);
+        if (is_file($sentinel) === true
+            && (time() - (int) filemtime($sentinel)) < ($cooldown * 60)
+        ) {
+            return;
+        }
+        // Touch sentinel BEFORE sending so a slow mail dispatch doesn't double-fire.
+        @touch($sentinel);
+
+        $portalName = (string) ($settings['site']['name'] ?? 'WebMS Intra');
+        $subject    = sprintf('[%s] %s — %s', $portalName, strtoupper($severity), substr($title, 0, 100));
+        $body       = sprintf(
+            "Severity: %s\nPlatform: %s\nCode: %s\nTitle: %s\n\nDetail:\n%s\n\nURL: %s\n",
+            $severity,
+            $platform,
+            $code,
+            $title,
+            substr($detail, 0, 2000),
+            $_SERVER['REQUEST_URI'] ?? ''
+        );
+        foreach ($recipients as $to) {
+            // 🪞 Use the framework Mailer if available; else fall back to mail()
+            //    so alerting works even when no provider is fully configured.
+            if (class_exists('Portal\\Core\\Mailer') === true
+                && method_exists('Portal\\Core\\Mailer', 'send') === true
+            ) {
+                try {
+                    Mailer::send($to, $subject, $body);
+                } catch (\Throwable $ignored) {
+                    @mail($to, $subject, $body);
+                }
+            } else {
+                @mail($to, $subject, $body);
+            }
+        }
     }
 
     /* ---------------------------------------------------------------------- */
