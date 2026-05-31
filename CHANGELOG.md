@@ -11,7 +11,7 @@ to `alpha`, `beta`, and `main` using the heading format
 
 ## [1.2.0] - Unreleased
 
-### Pre-rollout omnibus — 16 issues addressed in one branch
+### Pre-rollout omnibus — 19 issues addressed in one branch
 
 Substantial pre-production-rollout hardening. Each item shipped, scaffolded, or scoped to a follow-up PR per the per-issue status comments.
 
@@ -58,9 +58,31 @@ Substantial pre-production-rollout hardening. Each item shipped, scaffolded, or 
 `#239` Invite-based onboarding (L).
 `#240` Offboarding workflow (L).
 
-### Migrations 061–070
+### Added — HTML email templates + Portal.Confirm modal (post-omnibus polish)
 
-7 idempotent migrations added in this release. Fresh installs pick them up from `full_schema.sql`; stale-DB retries run them via the migration runner from PR #218.
+- **#243** `Mailer::send()` signature broadened to `string|array $to` with auto-HTML detection; new `Mailer::sendTemplated($to, $subject, $template, $vars)` helper. 4 templates shipped under `web/_core/templates/email/`: `base`, `password-reset`, `invite`, `critical-alert`. Logger alerts now use the templated `critical-alert` for nicely-formatted email. Admin preview at `/admin/integrations/email-templates`. **Side fix:** original omnibus calls to `Mailer::send()` passed string `$to` to an array-typed param — TypeError under `strict_types=1`. Signature now accepts both.
+- **#244** `Portal.Confirm` themed Bootstrap modal replacement for native `window.confirm()`. Promise-returning `Portal.Confirm.show({title, body, destructive, confirmLabel, cancelLabel})`. Auto-binds via `data-confirm` attribute on forms AND on buttons (preserving button name/value via hidden shim for multi-action forms). All 19 `confirm()` call sites migrated. CI guard `tools/audit-checks/check_no_native_confirm.py` prevents regression.
+
+### Added — Apache-level themed error pages
+
+`.htaccess` `ErrorDocument` directives route 403/404/500/503 through `/error.php` → `Router::renderError()` → themed templates. Fallback to self-contained themed HTML when bootstrap is broken (so even a bootstrap fatal renders the right brand).
+
+### Added — Welsh locale gating + per-user Sabbath override
+
+- `portal.i18n.minimum_coverage_for_switcher` setting — hides locales below threshold from the language switcher (except current). Set to `0.95` to hide Welsh until parity reached. Current locale always shown so user can switch back.
+- `/account/notifications` surfaces the `tblUsers.sabbathHonour` per-user override (inherit / on / off) when `portal.sabbath.enabled = '1'` at org level.
+
+### Fixed — Polish from omnibus review
+
+- Cookie banner class-name mismatch (`print.css` now hides `.portal-cookie-banner`).
+- Demo users now `isActive = 0` with valid bcrypt format so they cannot sign in regardless of password hash exposure.
+- System Health "Active sessions" probe rewritten to count files in `session_save_path()` (codebase uses PHP native sessions, not the non-existent `tblSessions`).
+- CSRF guard added to `/admin/settings/dismiss-first-run` handler (raised in `pr-security.yml` review of PR #245).
+- Defence-in-depth `htmlspecialchars()` on top of `urlencode()` for email-template inspect iframe src (raised in same review).
+
+### Migrations 061–072 + `demo_data.sql`
+
+13 idempotent migrations added in this release. Fresh installs pick them up from `full_schema.sql`; stale-DB retries run them via the migration runner from PR #218.
 
 ### Changed — Version bumped 1.1.1 → 1.2.0
 
