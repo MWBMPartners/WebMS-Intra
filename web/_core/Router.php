@@ -98,6 +98,16 @@ class Router
             define('PORTAL_CURRENT_APP', $pathParts[0] ?? 'dashboard');
         }
 
+        // 🚪 App enable/disable gate (#255). If the route's owning app is
+        //    registered AND disabled, render a friendly 403 explaining why
+        //    instead of letting the user hit a half-broken handler.
+        //    Routes not owned by any registered app pass through unchanged.
+        $owningApp = AppRegistry::appForRoute($path);
+        if ($owningApp !== null && AppRegistry::isEnabled((string) $owningApp['slug']) === false) {
+            self::renderAppDisabled($owningApp);
+            return;
+        }
+
         // 🚀 Include the target app file
         // The app file has access to $db (as $mysqli via global), $SETTINGS, and all
         // core classes via the autoloader. The template system (header.php / footer.php)
@@ -261,6 +271,38 @@ class Router
      *
      * @param int $code HTTP status code
      *
+     * Render the "app is disabled" page (#255). Friendly message rather
+     * than a generic 403 so users understand the feature isn't broken,
+     * just turned off.
+     *
+     * @param array<string, mixed> $app Metadata from AppRegistry.
+     */
+    public static function renderAppDisabled(array $app): void
+    {
+        http_response_code(403);
+        $pageTitle   = 'App disabled';
+        $pageSection = '';
+        $breadcrumbs = [];
+        $appName     = (string) ($app['name'] ?? 'This app');
+        $appDesc     = (string) ($app['description'] ?? '');
+        require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
+        echo '<div class="portal-error-page text-center py-5">';
+        echo '<div class="portal-error-code"><i class="fa-solid fa-power-off text-muted"></i></div>';
+        echo '<h1 class="portal-error-title">' . htmlspecialchars($appName, ENT_QUOTES, 'UTF-8') . ' is disabled</h1>';
+        if ($appDesc !== '') {
+            echo '<p class="text-muted">' . htmlspecialchars($appDesc, ENT_QUOTES, 'UTF-8') . '</p>';
+        }
+        if (App::isAdmin() === true) {
+            echo '<p>An administrator can enable this app at <a href="/admin/apps">/admin/apps</a>.</p>';
+        } else {
+            echo '<p>Please ask an administrator if you need this feature.</p>';
+        }
+        echo '<a href="/" class="btn btn-primary"><i class="fa-solid fa-house-chimney me-1"></i> Return to portal</a>';
+        echo '</div>';
+        require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'footer.php';
+    }
+
+    /**
      * @return void
      */
     public static function renderError(int $code): void
