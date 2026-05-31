@@ -2393,6 +2393,19 @@ ON DUPLICATE KEY UPDATE `filename` = `filename`;
 INSERT INTO `tblMigrations` (`filename`) VALUES ('060_portal_versioning_and_maintenance.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
+INSERT INTO `tblMigrations` (`filename`) VALUES ('061_security_headers.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- 🛡️ Baseline security response headers (matches migration 061 / issue #160).
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'portal.headers.strict_transport_security', 'max-age=31536000; includeSubDomains', 'max-age=31536000; includeSubDomains', 0),
+    (NULL, 'portal.headers.permissions_policy', 'camera=(), microphone=(), geolocation=(), payment=(), usb=(), magnetometer=(), accelerometer=(), gyroscope=(), browsing-topics=(), interest-cohort=()', 'camera=(), microphone=(), geolocation=(), payment=(), usb=(), magnetometer=(), accelerometer=(), gyroscope=(), browsing-topics=(), interest-cohort=()', 0),
+    (NULL, 'portal.headers.coop', 'same-origin', 'same-origin', 0),
+    (NULL, 'portal.headers.corp', 'same-origin', 'same-origin', 0),
+    (NULL, 'portal.headers.referrer_policy', 'strict-origin-when-cross-origin', 'strict-origin-when-cross-origin', 0),
+    (NULL, 'portal.headers.x_frame_options', 'SAMEORIGIN', 'SAMEORIGIN', 0)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
 -- 🔢 Portal version tracking + maintenance gate settings (matches migration 060).
 --    Seeded as empty here; the installer writes the actual `portal.installed_version`
 --    on step 5 finalisation, and /admin/upgrade updates it on successful migrate.
