@@ -163,8 +163,15 @@ $badge = $statusBadges[$req['status']] ?? ['secondary', 'fa-circle', ucfirst((st
             <?php echo htmlspecialchars(date('Y-m-d H:i', strtotime((string) $req['createdAt'])), ENT_QUOTES, 'UTF-8'); ?>
         </p>
 
-        <div class="mb-0" style="white-space: pre-wrap;">
-            <?php echo nl2br(htmlspecialchars((string) $req['body'], ENT_QUOTES, 'UTF-8')); ?>
+        <div class="mb-0 portal-markdown">
+            <?php
+            // 🪞 Markdown rendering (#270). Prayer requests get the safer
+            //    profile — no images, links allowed but anti-abuse tagged.
+            echo \Portal\Core\Markdown::render(
+                (string) $req['body'],
+                ['allow_images' => false, 'allow_links' => true]
+            );
+            ?>
         </div>
     </div>
 </div>
@@ -181,8 +188,13 @@ $badge = $statusBadges[$req['status']] ?? ['secondary', 'fa-circle', ucfirst((st
                     <?php echo htmlspecialchars(date('Y-m-d', strtotime((string) $req['answeredAt'])), ENT_QUOTES, 'UTF-8'); ?>
                 <?php endif; ?>
             </p>
-            <div style="white-space: pre-wrap;">
-                <?php echo nl2br(htmlspecialchars((string) $req['testimony'], ENT_QUOTES, 'UTF-8')); ?>
+            <div class="portal-markdown">
+                <?php
+                echo \Portal\Core\Markdown::render(
+                    (string) $req['testimony'],
+                    ['allow_images' => false, 'allow_links' => true]
+                );
+                ?>
             </div>
         </div>
     </div>

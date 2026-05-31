@@ -171,6 +171,28 @@ if (headers_sent() === false) {
     if ($xfo !== '') {
         header('X-Frame-Options: ' . $xfo);
     }
+
+    // 🤖 X-Robots-Tag — intranet by default; per-site override (#247).
+    //    Mirrors the <meta name="robots"> logic from header.php so API
+    //    responses, redirects, and error pages that don't render the full
+    //    template still carry the correct policy.
+    //    Indexability is governed by the same `site.allowIndexing` +
+    //    `site.allowAiIndexing` settings as the meta tags so policy stays
+    //    consistent across HTML and non-HTML responses.
+    $allowIndex   = (string) ($SETTINGS['site']['allowIndexing']   ?? 'false') === 'true';
+    $allowAiIndex = (string) ($SETTINGS['site']['allowAiIndexing'] ?? 'false') === 'true';
+    $robotsParts  = [];
+    if ($allowIndex === false) {
+        $robotsParts[] = 'noindex';
+        $robotsParts[] = 'nofollow';
+    }
+    if ($allowAiIndex === false) {
+        $robotsParts[] = 'noai';
+        $robotsParts[] = 'noimageai';
+    }
+    if (count($robotsParts) > 0) {
+        header('X-Robots-Tag: ' . implode(', ', $robotsParts));
+    }
 }
 
 // 🛡️ PHP error display hardening

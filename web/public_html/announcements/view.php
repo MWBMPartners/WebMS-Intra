@@ -111,7 +111,14 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <hr>
 
     <div class="announcement-body">
-        <?php echo nl2br(htmlspecialchars($announcement['body'], ENT_QUOTES, 'UTF-8')); ?>
+        <?php
+        // 🪞 Markdown rendering (#270). htmlspecialchars happens INSIDE
+        //    Markdown::render so user content is safe at the gate.
+        echo \Portal\Core\Markdown::render(
+            (string) $announcement['body'],
+            ['allow_images' => false, 'allow_links' => true]
+        );
+        ?>
     </div>
 
     <hr>
