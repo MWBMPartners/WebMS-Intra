@@ -289,7 +289,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 </td>
                 <td class="text-end">
                     <form method="post" class="d-inline"
-                          onsubmit="return confirm('Remove this user from the site?')">
+                          data-confirm="Remove this user from the site?" data-confirm-destructive="true">
                         <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
                         <input type="hidden" name="action" value="remove">
                         <input type="hidden" name="userID" value="<?php echo $auId; ?>">

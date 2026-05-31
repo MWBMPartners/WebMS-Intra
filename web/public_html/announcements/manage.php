@@ -210,7 +210,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     <a href="/announcements/manage?edit=<?php echo (int) $ann['announcementID']; ?>" class="btn btn-sm btn-outline-primary" title="Edit">
                         <i class="fa-solid fa-pen"></i>
                     </a>
-                    <form method="post" action="/announcements/delete" class="d-inline" onsubmit="return confirm('Delete this announcement?');">
+                    <form method="post" action="/announcements/delete" class="d-inline" data-confirm="Delete this announcement?" data-confirm-destructive="true">
                         <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
                         <input type="hidden" name="announcementID" value="<?php echo (int) $ann['announcementID']; ?>">
                         <button type="submit" class="btn btn-sm btn-outline-danger" title="Delete">

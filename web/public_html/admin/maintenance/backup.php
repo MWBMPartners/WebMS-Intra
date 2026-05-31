@@ -236,7 +236,7 @@ $csrf = Auth::csrfToken();
         <div class="card-body">
             <h2 class="h5"><i class="fa-solid fa-magnifying-glass me-1"></i>Inspecting: <?php echo htmlspecialchars($inspect, ENT_QUOTES, 'UTF-8'); ?></h2>
             <p class="text-muted small">Created <?php echo htmlspecialchars((string) ($inspectManifest['created_at'] ?? '?'), ENT_QUOTES, 'UTF-8'); ?> · reason: <?php echo htmlspecialchars((string) ($inspectManifest['reason'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></p>
-            <form method="post" class="mb-3" onsubmit="return confirm('Restore ALL tables from this snapshot? This will TRUNCATE every table in the manifest and re-INSERT rows from the JSON. Maintenance mode will activate during the restore.');">
+            <form method="post" class="mb-3" data-confirm="Restore ALL tables from this snapshot? This will TRUNCATE every table in the manifest and re-INSERT rows from the JSON. Maintenance mode will activate during the restore." data-confirm-destructive="true" data-confirm-confirm-label="Restore all">
                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                 <input type="hidden" name="action" value="restore_full">
                 <input type="hidden" name="name" value="<?php echo htmlspecialchars($inspect, ENT_QUOTES, 'UTF-8'); ?>">
@@ -252,7 +252,9 @@ $csrf = Auth::csrfToken();
                         <div class="col-md-2"><?php echo (int) ($meta['rows'] ?? 0); ?> rows</div>
                         <div class="col-md-3 small text-muted"><?php echo htmlspecialchars(substr((string) ($meta['sha256'] ?? ''), 0, 12), ENT_QUOTES, 'UTF-8'); ?>…</div>
                         <div class="col-md-3 text-end">
-                            <form method="post" class="d-inline" onsubmit="return confirm('Restore only <?php echo htmlspecialchars((string) $tableName, ENT_QUOTES, 'UTF-8'); ?>? Table will be TRUNCATEd and rows re-INSERTed.');">
+                            <form method="post" class="d-inline"
+      data-confirm="Restore only <?php echo htmlspecialchars((string) $tableName, ENT_QUOTES, 'UTF-8'); ?>? Table will be TRUNCATEd and rows re-INSERTed."
+      data-confirm-destructive="true">
                                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                                 <input type="hidden" name="action" value="restore_table">
                                 <input type="hidden" name="name" value="<?php echo htmlspecialchars($inspect, ENT_QUOTES, 'UTF-8'); ?>">
@@ -282,7 +284,7 @@ $csrf = Auth::csrfToken();
                         <div class="col-md-2"><?php echo number_format((int) $snap['rows']); ?> rows</div>
                         <div class="col-md-2 text-end">
                             <a href="?inspect=<?php echo urlencode($snap['name']); ?>" class="btn btn-outline-primary btn-sm">Inspect</a>
-                            <form method="post" class="d-inline" onsubmit="return confirm('Delete this snapshot? Cannot be undone.');">
+                            <form method="post" class="d-inline" data-confirm="Delete this snapshot? Cannot be undone." data-confirm-destructive="true">
                                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                                 <input type="hidden" name="action" value="delete">
                                 <input type="hidden" name="name" value="<?php echo htmlspecialchars($snap['name'], ENT_QUOTES, 'UTF-8'); ?>">

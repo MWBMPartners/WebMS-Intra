@@ -130,7 +130,7 @@ $csrf = Auth::csrfToken();
                 <div class="card-body">
                     <h2 class="h5">Load demo data</h2>
                     <p class="small text-muted">INSERTs ~25 users (IDs 9000-9024), demo announcements, calendar events, expenses, tasks. Idempotent: skips rows already present.</p>
-                    <form method="post" onsubmit="return confirm('Load demo data into the live database?');">
+                    <form method="post" data-confirm="Load demo data into the live database?">
                         <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                         <input type="hidden" name="action" value="load">
                         <button type="submit" class="btn btn-primary">Load demo data</button>
@@ -143,7 +143,7 @@ $csrf = Auth::csrfToken();
                 <div class="card-body">
                     <h2 class="h5 text-danger">Wipe demo data</h2>
                     <p class="small text-muted">DELETE rows where userID ≥ 9000 (or equivalent sentinel). Real records untouched.</p>
-                    <form method="post" onsubmit="return confirm('Delete all demo rows from the live database? Real data with userID < 9000 will be preserved.');">
+                    <form method="post" data-confirm="Delete all demo rows from the live database? Real data with userID < 9000 will be preserved." data-confirm-destructive="true">
                         <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                         <input type="hidden" name="action" value="wipe">
                         <button type="submit" class="btn btn-outline-danger">Wipe demo data</button>

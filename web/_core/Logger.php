@@ -286,7 +286,15 @@ class Logger
 
         $portalName = (string) ($settings['site']['name'] ?? 'WebMS Intra');
         $subject    = sprintf('[%s] %s — %s', $portalName, strtoupper($severity), substr($title, 0, 100));
-        $body       = sprintf(
+        $vars = [
+            'severity' => $severity,
+            'platform' => $platform,
+            'code'     => $code,
+            'title'    => $title,
+            'detail'   => $detail,
+            'url'      => $_SERVER['REQUEST_URI'] ?? '',
+        ];
+        $plainFallback = sprintf(
             "Severity: %s\nPlatform: %s\nCode: %s\nTitle: %s\n\nDetail:\n%s\n\nURL: %s\n",
             $severity,
             $platform,
@@ -296,18 +304,19 @@ class Logger
             $_SERVER['REQUEST_URI'] ?? ''
         );
         foreach ($recipients as $to) {
-            // 🪞 Use the framework Mailer if available; else fall back to mail()
-            //    so alerting works even when no provider is fully configured.
+            // 🪞 Use the framework Mailer's templated send if available; else
+            //    fall back to mail() so alerting works even when no provider
+            //    is fully configured.
             if (class_exists('Portal\\Core\\Mailer') === true
-                && method_exists('Portal\\Core\\Mailer', 'send') === true
+                && method_exists('Portal\\Core\\Mailer', 'sendTemplated') === true
             ) {
                 try {
-                    Mailer::send($to, $subject, $body);
+                    Mailer::sendTemplated($to, $subject, 'critical-alert', $vars);
                 } catch (\Throwable $ignored) {
-                    @mail($to, $subject, $body);
+                    @mail($to, $subject, $plainFallback);
                 }
             } else {
-                @mail($to, $subject, $body);
+                @mail($to, $subject, $plainFallback);
             }
         }
     }

@@ -211,7 +211,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     <input type="hidden" name="action" value="delete">
                     <input type="hidden" name="seriesID" value="<?php echo (int) $s['seriesID']; ?>">
                     <button type="submit" class="btn btn-sm btn-outline-danger"
-                            onclick="return confirm('Delete this series? Events will be unlinked.');">
+                            data-confirm="Delete this series? Events will be unlinked." data-confirm-destructive="true">
                         <i class="fa-solid fa-trash"></i>
                     </button>
                 </form>

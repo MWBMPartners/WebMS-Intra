@@ -181,7 +181,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                             <i class="fa-solid fa-download"></i>
                         </a>
                         <?php if (App::isAdmin() === true): ?>
-                            <form method="post" action="/documents/delete" class="d-inline" onsubmit="return confirm('Delete this document?');">
+                            <form method="post" action="/documents/delete" class="d-inline" data-confirm="Delete this document?" data-confirm-destructive="true">
                                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
                                 <input type="hidden" name="documentID" value="<?php echo (int) $doc['documentID']; ?>">
                                 <button type="submit" class="btn btn-sm btn-outline-danger" title="Delete">

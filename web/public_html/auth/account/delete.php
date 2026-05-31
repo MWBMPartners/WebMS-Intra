@@ -84,7 +84,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 </div>
 
 <form method="post" action="/account/delete/confirm"
-      onsubmit="return confirm('FINAL CONFIRMATION — delete account permanently?');">
+      data-confirm="FINAL CONFIRMATION — delete account permanently?" data-confirm-destructive="true" data-confirm-confirm-label="Delete my account">
     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
 
     <div class="mb-3">

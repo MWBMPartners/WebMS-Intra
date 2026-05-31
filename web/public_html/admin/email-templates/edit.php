@@ -142,7 +142,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             </button>
             <?php if ($site !== null): ?>
                 <button type="submit" name="action" value="revert" class="btn btn-outline-danger ms-auto"
-                        onclick="return confirm('Remove this site\'s override and revert to the global default?');">
+                        data-confirm="Remove this site's override and revert to the global default?" data-confirm-destructive="true">
                     <i class="fa-solid fa-rotate-left me-1"></i> Revert to global default
                 </button>
             <?php endif; ?>

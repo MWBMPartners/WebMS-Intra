@@ -2434,6 +2434,13 @@ ON DUPLICATE KEY UPDATE `filename` = `filename`;
 INSERT INTO `tblMigrations` (`filename`) VALUES ('071_polish_followups.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
+INSERT INTO `tblMigrations` (`filename`) VALUES ('072_email_templates.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('admin/integrations/email-templates', 'admin/integrations/email-templates.php', 1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
 INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
     (NULL, 'portal.i18n.minimum_coverage_for_switcher', '0', '0', 0)
 ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);

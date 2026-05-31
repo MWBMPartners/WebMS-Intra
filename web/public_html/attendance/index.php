@@ -311,7 +311,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
                         <input type="hidden" name="sessionID" value="<?php echo (int) $sess['sessionID']; ?>">
                         <button type="submit" class="btn btn-sm btn-outline-danger" title="Delete"
-                                onclick="return confirm('Delete this attendance record?');">
+                                data-confirm="Delete this attendance record?" data-confirm-destructive="true">
                             <i class="fa-solid fa-trash"></i>
                         </button>
                     </form>
