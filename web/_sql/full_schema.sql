@@ -2428,6 +2428,20 @@ ON DUPLICATE KEY UPDATE `filename` = `filename`;
 INSERT INTO `tblMigrations` (`filename`) VALUES ('069_tours_and_demo_data.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
+INSERT INTO `tblMigrations` (`filename`) VALUES ('070_sabbath_and_timezone.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'portal.sabbath.enabled',              '0',              '0',              0),
+    (NULL, 'portal.sabbath.method',               'fixed',          'fixed',          0),
+    (NULL, 'portal.sabbath.timezone',             'Europe/London',  'Europe/London',  0),
+    (NULL, 'portal.sabbath.location_lat',         '52.205',         '52.205',         0),
+    (NULL, 'portal.sabbath.location_lng',         '0.119',          '0.119',          0),
+    (NULL, 'portal.sabbath.start_offset_minutes', '0',              '0',              0),
+    (NULL, 'portal.sabbath.end_offset_minutes',   '0',              '0',              0),
+    (NULL, 'portal.sabbath.bypass_critical',      '1',              '1',              0)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
 CREATE TABLE IF NOT EXISTS `tblTours` (
     `tourID`     INT          NOT NULL AUTO_INCREMENT,
     `tourKey`    VARCHAR(64)  NOT NULL,

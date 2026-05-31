@@ -261,6 +261,17 @@ class Logger
             return;
         }
 
+        // 🕯️ Sabbath quiet hours (#231). Skip non-critical alerts during
+        //    the configured window; critical alerts bypass when
+        //    portal.sabbath.bypass_critical = '1' (default).
+        if (Sabbath::isQuietNow() === true) {
+            $bypass = (string) ($settings['portal']['sabbath']['bypass_critical'] ?? '1');
+            $isCritical = in_array($severity, ['Critical', 'Fatal'], true);
+            if (!($bypass === '1' && $isCritical === true)) {
+                return;
+            }
+        }
+
         $cooldown   = (int) ($settings['portal']['alerts']['cooldown_minutes'] ?? 30);
         $fingerprint = hash('sha256', $platform . '|' . $code . '|' . $title);
         $sentinel    = PORTAL_ROOT . DIRECTORY_SEPARATOR . '_backups'
