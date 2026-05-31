@@ -213,6 +213,97 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     </p>
 </section>
 
+<?php
+// 🎯 First-run empty-state panel (#222). Shown to admins only, on the
+//    dashboard, until the admin has completed (or dismissed) the
+//    initial setup checklist. Detection is heuristic — looks at a
+//    handful of "has the portal been customised?" signals.
+$showFirstRun = false;
+if (\Portal\Core\App::isAdmin() === true) {
+    $dismissed = (string) ($SETTINGS['portal']['first_run']['dismissed'] ?? '0');
+    if ($dismissed !== '1') {
+        // Signal 1: site name still at default
+        $siteNameDefault = (string) ($SETTINGS['site']['name'] ?? '') === ''
+                        || (string) ($SETTINGS['site']['name'] ?? '') === 'WebMS Intra';
+        // Signal 2: no email.from configured
+        $noEmailFrom = (string) ($SETTINGS['email']['from'] ?? '') === '';
+        // Signal 3: no announcements posted yet
+        $noAnnouncements = count($pinnedAnnouncements) === 0;
+        $signals = (int) $siteNameDefault + (int) $noEmailFrom + (int) $noAnnouncements;
+        if ($signals >= 2) {
+            $showFirstRun = true;
+        }
+    }
+}
+
+// Per-step completion tracked in tblSettings — each step key flips to '1'
+// when the admin clicks "Mark done" via the JS handler below.
+$firstRunSteps = [
+    'site_branding' => [
+        'label' => 'Configure site name + branding',
+        'href'  => '/admin/settings',
+        'done'  => (string) ($SETTINGS['portal']['first_run']['steps']['site_branding'] ?? '0') === '1'
+                || (string) ($SETTINGS['site']['name'] ?? '') !== ''
+                && (string) ($SETTINGS['site']['name'] ?? '') !== 'WebMS Intra',
+    ],
+    'email_delivery' => [
+        'label' => 'Set up email delivery (SMTP or MS365 Graph)',
+        'href'  => '/admin/integrations/email',
+        'done'  => (string) ($SETTINGS['portal']['first_run']['steps']['email_delivery'] ?? '0') === '1'
+                || (string) ($SETTINGS['email']['from'] ?? '') !== '',
+    ],
+    'test_backup' => [
+        'label' => 'Run a test backup',
+        'href'  => '/admin/maintenance/backup',
+        'done'  => (string) ($SETTINGS['portal']['first_run']['steps']['test_backup'] ?? '0') === '1',
+    ],
+    'retention_cron' => [
+        'label' => 'Configure retention cron',
+        'href'  => '/admin/maintenance/retention',
+        'done'  => (string) ($SETTINGS['portal']['first_run']['steps']['retention_cron'] ?? '0') === '1',
+    ],
+    'invite_users' => [
+        'label' => 'Invite your first volunteers',
+        'href'  => '/admin/users',
+        'done'  => (string) ($SETTINGS['portal']['first_run']['steps']['invite_users'] ?? '0') === '1',
+    ],
+    'first_announcement' => [
+        'label' => 'Post your first announcement',
+        'href'  => '/announcements',
+        'done'  => (string) ($SETTINGS['portal']['first_run']['steps']['first_announcement'] ?? '0') === '1'
+                || count($pinnedAnnouncements) > 0,
+    ],
+];
+?>
+<?php if ($showFirstRun === true): ?>
+<div class="card border-primary mb-4 portal-first-run">
+    <div class="card-body">
+        <div class="d-flex justify-content-between align-items-start mb-2">
+            <div>
+                <h2 class="h5 mb-1"><i class="fa-solid fa-wand-magic-sparkles me-1 text-primary"></i> Welcome to <?php echo htmlspecialchars((string) ($SETTINGS['site']['name'] ?? 'your portal'), ENT_QUOTES, 'UTF-8'); ?></h2>
+                <p class="text-muted small mb-0">A short setup checklist — work through these to make your portal ready for users.</p>
+            </div>
+            <form method="post" action="/admin/settings/dismiss-first-run" class="d-inline">
+                <button type="submit" class="btn btn-sm btn-link text-muted">Dismiss</button>
+            </form>
+        </div>
+        <ul class="list-unstyled mb-0">
+            <?php foreach ($firstRunSteps as $key => $step): ?>
+                <li class="py-1">
+                    <?php if ($step['done']): ?>
+                        <i class="fa-solid fa-check-circle text-success me-1"></i>
+                        <s class="text-muted"><?php echo htmlspecialchars($step['label'], ENT_QUOTES, 'UTF-8'); ?></s>
+                    <?php else: ?>
+                        <i class="fa-regular fa-circle text-muted me-1"></i>
+                        <a href="<?php echo htmlspecialchars($step['href'], ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars($step['label'], ENT_QUOTES, 'UTF-8'); ?></a>
+                    <?php endif; ?>
+                </li>
+            <?php endforeach; ?>
+        </ul>
+    </div>
+</div>
+<?php endif; ?>
+
 <!-- 📊 Stat Widgets -->
 <?php if (count($widgets) > 0): ?>
 <div class="row g-3 mb-4">

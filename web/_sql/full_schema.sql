@@ -2422,6 +2422,24 @@ ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 INSERT INTO `tblMigrations` (`filename`) VALUES ('067_alerts_and_email_admin.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
+INSERT INTO `tblMigrations` (`filename`) VALUES ('068_first_run_admin.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('help/admin-first-steps', 'help/admin-first-steps.php', 1),
+    ('admin/settings/dismiss-first-run', 'admin/settings/dismiss-first-run.php', 1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'portal.first_run.dismissed',                '0', '0', 0),
+    (NULL, 'portal.first_run.steps.site_branding',      '0', '0', 0),
+    (NULL, 'portal.first_run.steps.email_delivery',     '0', '0', 0),
+    (NULL, 'portal.first_run.steps.test_backup',        '0', '0', 0),
+    (NULL, 'portal.first_run.steps.retention_cron',     '0', '0', 0),
+    (NULL, 'portal.first_run.steps.invite_users',       '0', '0', 0),
+    (NULL, 'portal.first_run.steps.first_announcement', '0', '0', 0)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
 INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
     ('admin/integrations/email', 'admin/integrations/email.php', 1)
 ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
