@@ -20,6 +20,12 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     exit();
 }
 
+// 🛡️ CSRF — state-changing handler.
+if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
+    http_response_code(400);
+    exit('Invalid CSRF token.');
+}
+
 $db = App::db();
 try {
     $stmt = $db->prepare(

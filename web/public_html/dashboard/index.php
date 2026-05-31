@@ -284,6 +284,7 @@ $firstRunSteps = [
                 <p class="text-muted small mb-0">A short setup checklist — work through these to make your portal ready for users.</p>
             </div>
             <form method="post" action="/admin/settings/dismiss-first-run" class="d-inline">
+                <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(\Portal\Core\Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
                 <button type="submit" class="btn btn-sm btn-link text-muted">Dismiss</button>
             </form>
         </div>

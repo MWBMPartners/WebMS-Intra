@@ -90,7 +90,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <?php if (isset($_GET['select']) && in_array($_GET['select'], $templates, true)): ?>
             <div class="card">
                 <div class="card-body p-0">
-                    <iframe src="?render=<?php echo urlencode($_GET['select']); ?>"
+                    <iframe src="?render=<?php echo htmlspecialchars(urlencode($_GET['select']), ENT_QUOTES, 'UTF-8'); ?>"
                             style="width:100%;height:600px;border:none;border-radius:.5rem;"></iframe>
                 </div>
             </div>
