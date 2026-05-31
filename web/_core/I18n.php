@@ -583,6 +583,24 @@ class I18n
     public static function languageSwitcher(): string
     {
         $enabled = self::enabledLocales();
+
+        // 🚪 Hide locales below the configured coverage threshold from the
+        //    switcher (default 0 = show all). Admin opts in by setting
+        //    portal.i18n.minimum_coverage_for_switcher to e.g. 0.95.
+        //    Current locale is ALWAYS shown so the user can switch back.
+        $settings = \Portal\Core\App::settings();
+        $threshold = (float) ($settings['portal']['i18n']['minimum_coverage_for_switcher'] ?? 0);
+        if ($threshold > 0) {
+            foreach ($enabled as $code => $meta) {
+                if ($code === self::$locale) {
+                    continue;
+                }
+                if (self::coverage($code) < $threshold) {
+                    unset($enabled[$code]);
+                }
+            }
+        }
+
         if (count($enabled) <= 1) {
             return ''; // 📋 No switcher needed if only one language available
         }

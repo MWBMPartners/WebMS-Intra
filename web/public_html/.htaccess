@@ -55,6 +55,19 @@ RewriteCond %{REQUEST_FILENAME} !-d
 # 🎯 Route everything else through the front controller
 RewriteRule ^(.*)$ index.php [QSA,L]
 
+# 🪞 Apache-level error documents. The front controller renders themed pages
+#     for errors caught inside PHP via Router::renderError(), but errors that
+#     happen BEFORE PHP starts (or that Apache produces directly — e.g.
+#     denied filesystem permissions on a protected dir, mod_security blocks)
+#     would otherwise show server-default pages that leak the Apache version
+#     and a sterile error message.
+#
+#     Route each through error.php which delegates to the same themed templates.
+ErrorDocument 403 /error.php?code=403
+ErrorDocument 404 /error.php?code=404
+ErrorDocument 500 /error.php?code=500
+ErrorDocument 503 /error.php?code=503
+
 # 🏷️ Brand response headers.
 #     X-Powered-By is set by PHP in bootstrap.php to "WebMS-Intra/<version>"
 #     (replacing PHP's default "PHP/8.x.y"). Apache must NOT unset it here,

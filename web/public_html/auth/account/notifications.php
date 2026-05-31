@@ -45,18 +45,27 @@ $deliveryReady = (App::settings('notifications.deliveryReady') ?? 'false') === '
 $siteDigestOn  = (App::settings('notifications.digestEnabled')  ?? 'true')  === 'true';
 $digestDay     = (string) (App::settings('notifications.digestDay') ?? 'monday');
 
-// 📋 Read the user's current prefs JSON
+// 📋 Read the user's current prefs JSON + Sabbath override (#231)
 $prefsJson = '';
-$stmt = $mysqli->prepare('SELECT notifyPrefs FROM tblUsers WHERE userID = ? LIMIT 1');
+$sabbathHonour = 'inherit';
+$stmt = $mysqli->prepare('SELECT notifyPrefs, sabbathHonour FROM tblUsers WHERE userID = ? LIMIT 1');
 if ($stmt !== false) {
     $stmt->bind_param('i', $userId);
     $stmt->execute();
     $row = $stmt->get_result()->fetch_assoc();
-    if ($row !== null && $row['notifyPrefs'] !== null) {
-        $prefsJson = (string) $row['notifyPrefs'];
+    if ($row !== null) {
+        if (isset($row['notifyPrefs']) && $row['notifyPrefs'] !== null) {
+            $prefsJson = (string) $row['notifyPrefs'];
+        }
+        if (isset($row['sabbathHonour']) && in_array($row['sabbathHonour'], ['inherit', 'on', 'off'], true)) {
+            $sabbathHonour = (string) $row['sabbathHonour'];
+        }
     }
     $stmt->close();
 }
+
+// 🕯️ Sabbath quiet-hours feature on at the org level?
+$sabbathOrgOn = (string) (App::settings()['portal']['sabbath']['enabled'] ?? '0') === '1';
 $prefs = json_decode($prefsJson, true);
 if (is_array($prefs) === false) {
     $prefs = [];
@@ -171,6 +180,33 @@ $switchRow = static function (string $key, string $label, string $helpText) use 
             <?php echo $switchRow('accountSecurity',  'Security alerts',           'Sign-ins from new devices, password changes, 2FA enrolments. Strongly recommended — leave on.'); ?>
         </div>
     </div>
+
+    <?php if ($sabbathOrgOn === true): ?>
+    <!-- 🕯️ Sabbath quiet hours per-user override (#231) -->
+    <div class="card mb-3">
+        <div class="card-header">
+            <i class="fa-solid fa-moon me-1"></i> Sabbath quiet hours
+        </div>
+        <div class="card-body">
+            <p class="small text-muted">
+                When Sabbath quiet hours are active, non-urgent email notifications
+                from the portal are held back until the window ends.
+            </p>
+            <div class="form-check">
+                <input class="form-check-input" type="radio" name="sabbathHonour" id="sabInherit" value="inherit" <?php echo $sabbathHonour === 'inherit' ? 'checked' : ''; ?>>
+                <label class="form-check-label" for="sabInherit"><strong>Use the portal default</strong> (recommended)</label>
+            </div>
+            <div class="form-check">
+                <input class="form-check-input" type="radio" name="sabbathHonour" id="sabOn"      value="on"      <?php echo $sabbathHonour === 'on'      ? 'checked' : ''; ?>>
+                <label class="form-check-label" for="sabOn">Always honour Sabbath quiet hours for my notifications</label>
+            </div>
+            <div class="form-check">
+                <input class="form-check-input" type="radio" name="sabbathHonour" id="sabOff"     value="off"     <?php echo $sabbathHonour === 'off'     ? 'checked' : ''; ?>>
+                <label class="form-check-label" for="sabOff">Send notifications normally — don't apply quiet hours to me</label>
+            </div>
+        </div>
+    </div>
+    <?php endif; ?>
 
     <button type="submit" class="btn btn-success">
         <i class="fa-solid fa-save me-1"></i> Save preferences

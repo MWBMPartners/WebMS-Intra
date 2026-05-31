@@ -9,14 +9,16 @@
 -- when portal.demo_mode.enabled = '1'.
 -- =============================================================================
 
--- 👥 Demo users (IDs 9000-9004)
-INSERT INTO `tblUsers` (`userID`, `siteID`, `fullName`, `email`, `passwordHash`, `userRole`, `isVerified`, `createdAt`) VALUES
-    (9000, 1, 'Demo Pastor',   'demo.pastor@example.invalid',   '$2y$10$disabled.demo.user.no.real.login.allowed.000', 'admin',     1, NOW()),
-    (9001, 1, 'Demo Elder',    'demo.elder@example.invalid',    '$2y$10$disabled.demo.user.no.real.login.allowed.001', 'volunteer', 1, NOW()),
-    (9002, 1, 'Demo Deacon',   'demo.deacon@example.invalid',   '$2y$10$disabled.demo.user.no.real.login.allowed.002', 'volunteer', 1, NOW()),
-    (9003, 1, 'Demo Treasurer','demo.treasurer@example.invalid','$2y$10$disabled.demo.user.no.real.login.allowed.003', 'volunteer', 1, NOW()),
-    (9004, 1, 'Demo Member',   'demo.member@example.invalid',   '$2y$10$disabled.demo.user.no.real.login.allowed.004', 'user',      1, NOW())
-ON DUPLICATE KEY UPDATE `fullName` = VALUES(`fullName`);
+-- 👥 Demo users (IDs 9000-9004). isActive=0 ensures they cannot sign in
+--    even if the password hash were ever compromised. Hash itself is a
+--    bcrypt-formatted but cryptographically random string.
+INSERT INTO `tblUsers` (`userID`, `siteID`, `fullName`, `email`, `passwordHash`, `userRole`, `isVerified`, `isActive`, `createdAt`) VALUES
+    (9000, 1, 'Demo Pastor',   'demo.pastor@example.invalid',   '$2y$10$wWvVlS9p0c5xZbDgGqYxOu5oR3vqIPLkhMK6rj3aR4cIqkLB2WGTu', 'admin',     1, 0, NOW()),
+    (9001, 1, 'Demo Elder',    'demo.elder@example.invalid',    '$2y$10$wWvVlS9p0c5xZbDgGqYxOu5oR3vqIPLkhMK6rj3aR4cIqkLB2WGTu', 'volunteer', 1, 0, NOW()),
+    (9002, 1, 'Demo Deacon',   'demo.deacon@example.invalid',   '$2y$10$wWvVlS9p0c5xZbDgGqYxOu5oR3vqIPLkhMK6rj3aR4cIqkLB2WGTu', 'volunteer', 1, 0, NOW()),
+    (9003, 1, 'Demo Treasurer','demo.treasurer@example.invalid','$2y$10$wWvVlS9p0c5xZbDgGqYxOu5oR3vqIPLkhMK6rj3aR4cIqkLB2WGTu', 'volunteer', 1, 0, NOW()),
+    (9004, 1, 'Demo Member',   'demo.member@example.invalid',   '$2y$10$wWvVlS9p0c5xZbDgGqYxOu5oR3vqIPLkhMK6rj3aR4cIqkLB2WGTu', 'user',      1, 0, NOW())
+ON DUPLICATE KEY UPDATE `isActive` = 0;
 
 -- 📢 Demo announcements
 INSERT INTO `tblAnnouncements` (`siteID`, `title`, `slug`, `body`, `priority`, `isPinned`, `isPublished`, `createdByID`, `createdAt`) VALUES

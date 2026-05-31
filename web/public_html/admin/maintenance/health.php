@@ -123,17 +123,32 @@ try {
     $probes['Errors (24h)'] = ['state' => 'warn', 'label' => 'Query failed', 'detail' => $e->getMessage()];
 }
 
-// 5. Sessions
-try {
-    $rs = $db->query("SELECT COUNT(*) AS c FROM tblSessions WHERE lastSeenAt > DATE_SUB(NOW(), INTERVAL 30 MINUTE)");
-    $active = $rs !== false ? (int) ($rs->fetch_assoc()['c'] ?? 0) : 0;
-    if ($rs !== false) {
-        $rs->free();
+// 5. Sessions — PHP native sessions, count files in the configured save_path
+$sessSavePath = (string) (session_save_path() ?: sys_get_temp_dir());
+$sessCount = 0;
+$sessDetail = '';
+if (is_dir($sessSavePath) === true && is_readable($sessSavePath) === true) {
+    $entries = @scandir($sessSavePath);
+    if (is_array($entries) === true) {
+        // PHP names session files sess_<id>; count files modified in last 30 min.
+        $cutoff = time() - (30 * 60);
+        foreach ($entries as $e) {
+            if (str_starts_with($e, 'sess_') === false) {
+                continue;
+            }
+            $mt = @filemtime($sessSavePath . DIRECTORY_SEPARATOR . $e);
+            if ($mt !== false && $mt >= $cutoff) {
+                $sessCount++;
+            }
+        }
+        $sessDetail = sprintf('Files in %s (last 30 min)', $sessSavePath);
+    } else {
+        $sessDetail = 'save_path not readable';
     }
-    $probes['Active sessions'] = ['state' => 'ok', 'label' => sprintf('%d', $active), 'detail' => 'Last 30 min'];
-} catch (\Throwable $e) {
-    $probes['Active sessions'] = ['state' => 'warn', 'label' => 'Query failed', 'detail' => $e->getMessage()];
+} else {
+    $sessDetail = 'save_path unreadable: ' . $sessSavePath;
 }
+$probes['Active sessions'] = ['state' => 'ok', 'label' => sprintf('%d', $sessCount), 'detail' => $sessDetail];
 
 // 6. Migrations
 try {

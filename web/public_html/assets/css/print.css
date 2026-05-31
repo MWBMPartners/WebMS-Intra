@@ -33,6 +33,7 @@
     [data-bs-toggle="modal"],
     .help-tour,
     .cookie-banner,
+    .portal-cookie-banner,
     .toast {
         display: none !important;
     }
