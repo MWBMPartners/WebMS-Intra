@@ -2447,6 +2447,20 @@ ON DUPLICATE KEY UPDATE `filename` = `filename`;
 INSERT INTO `tblMigrations` (`filename`) VALUES ('074_rota.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
+INSERT INTO `tblMigrations` (`filename`) VALUES ('075_praise_reports.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('praise',     'praise/index.php', 1),
+    ('praise/new', 'praise/new.php',   1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'praise.enabled',     '0',              '0',              0),
+    (NULL, 'praise.displayName', 'Praise Reports', 'Praise Reports', 0),
+    (NULL, 'praise.displayIcon', 'fa-solid fa-hands-clapping', 'fa-solid fa-hands-clapping', 0)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
 CREATE TABLE IF NOT EXISTS `tblRotaRoleType` (
     `roleTypeID`  INT          NOT NULL AUTO_INCREMENT,
     `siteID`      INT          NOT NULL DEFAULT 1,
