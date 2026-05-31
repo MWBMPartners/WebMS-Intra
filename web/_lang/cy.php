@@ -56,6 +56,8 @@ return [
     'auth.sign_in_with_passkey'     => 'Mewngofnodi gyda Passkey',
     'auth.or'                       => 'neu',
     'auth.or_use_passkey'           => 'neu defnyddiwch passkey',
+    'auth.terms_notice_heading'     => 'Defnydd awdurdodedig yn unig.',
+    'auth.terms_notice'             => 'Mae :site_name yn fewnrwyd preifat ar gyfer staff a gwirfoddolwyr. Mae pob mewngofnodi, golwg tudalen, a gweithred yn cael eu cofnodi a\'u cadw at ddibenion archwilio. Drwy fewngofnodi rydych chi\'n cydnabod eich bod yn ddefnyddiwr awdurdodedig ac yn cydsynio i fonitro eich gweithgarwch.',
     'auth.password_reset_success'   => 'Mae eich cyfrinair wedi\'i ddiweddaru. Mewngofnodwch os gwelwch yn dda.',
     'auth.invalid_session_token'    => 'Tocyn sesiwn annilys. Ceisiwch eto.',
     'auth.captcha_failed'           => 'Methwyd dilysu captcha.',

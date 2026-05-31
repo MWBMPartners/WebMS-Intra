@@ -238,6 +238,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         <div id="passkeyLoginStatus" class="small mt-2 text-center"></div>
     </div>
 
+    <!-- 📜 Authorised-use notice (#221). Implied-consent terms required for
+         all sign-in paths (local, MS365, Google, passkey) — every route
+         lands on this page, so the notice is enforced for everyone. -->
+    <div class="alert alert-secondary small mt-4 mb-0 py-2 px-3" role="note">
+        <strong><?php echo htmlspecialchars(t('auth.terms_notice_heading'), ENT_QUOTES, 'UTF-8'); ?></strong>
+        <span class="text-muted">
+            <?php echo htmlspecialchars(
+                t('auth.terms_notice', [
+                    'site_name' => $SETTINGS['site']['name'] ?? 'This portal',
+                ]),
+                ENT_QUOTES,
+                'UTF-8'
+            ); ?>
+        </span>
+    </div>
+
 </div>
 
 <!-- 📦 JavaScript (CDN with local fallback) -->
