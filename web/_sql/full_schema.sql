@@ -2402,6 +2402,18 @@ ON DUPLICATE KEY UPDATE `filename` = `filename`;
 INSERT INTO `tblMigrations` (`filename`) VALUES ('063_rollout_pilot_mode.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
+INSERT INTO `tblMigrations` (`filename`) VALUES ('064_backup_freshness_check.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('admin/maintenance/backup-check', 'admin/maintenance/backup-check.php', 1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'portal.backups.max_age_hours',    '36', '36', 0),
+    (NULL, 'portal.backups.alert_recipients', '',   '',   0)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
 INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
     (NULL, 'portal.rollout.pilot_mode', '1', '1', 0)
 ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
