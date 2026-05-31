@@ -2399,6 +2399,13 @@ ON DUPLICATE KEY UPDATE `filename` = `filename`;
 INSERT INTO `tblMigrations` (`filename`) VALUES ('062_help_support_route.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
+INSERT INTO `tblMigrations` (`filename`) VALUES ('063_rollout_pilot_mode.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'portal.rollout.pilot_mode', '1', '1', 0)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
 INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
     ('help/support', 'help/support.php', 1)
 ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
