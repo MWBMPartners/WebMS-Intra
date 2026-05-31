@@ -2621,6 +2621,22 @@ INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue
     (NULL, 'visitors.displayIcon',               'fa-solid fa-user-plus', 'fa-solid fa-user-plus', 0)
 ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
 
+INSERT INTO `tblMigrations` (`filename`) VALUES ('079_directory.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('directory',             'directory/index.php',   1),
+    ('directory/profile',     'directory/profile.php', 1),
+    ('directory/my-settings', 'directory/me.php',      1),
+    ('directory/save',        'directory/save.php',    1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'directory.enabled',     '0', '0', 0),
+    (NULL, 'directory.displayName', 'Member Directory', 'Member Directory', 0),
+    (NULL, 'directory.displayIcon', 'fa-solid fa-address-book', 'fa-solid fa-address-book', 0)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
 CREATE TABLE IF NOT EXISTS `tblRotaRoleType` (
     `roleTypeID`  INT          NOT NULL AUTO_INCREMENT,
     `siteID`      INT          NOT NULL DEFAULT 1,
