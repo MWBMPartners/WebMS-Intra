@@ -22,7 +22,7 @@ $siteId = Site::id();
 // Coordinator dropdown — users with the configured role + admins.
 $coordRole = (string) (App::settings()['visitors']['coordinator_role'] ?? 'visitor_coordinator');
 $coords    = [];
-$rs = $db->query("SELECT userID, fullName FROM tblUsers WHERE siteID = " . $siteId . " AND isActive = 1 ORDER BY fullName");
+$rs = $db->query("SELECT userID, fullName FROM tblUsers WHERE isActive = 1 ORDER BY fullName");
 if ($rs !== false) {
     while ($r = $rs->fetch_assoc()) {
         $coords[] = $r;

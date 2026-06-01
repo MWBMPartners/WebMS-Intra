@@ -13,7 +13,13 @@
 declare(strict_types=1);
 
 use Portal\Core\App;
+use Portal\Core\Auth;
 use Portal\Core\Site;
+
+// 🪞 Start a session even for anonymous visitors so we can issue + verify
+//    a CSRF token. The form is captcha-gated for bot protection AND
+//    CSRF-gated for state-changing intent (#281 security review).
+Auth::ensureSession();
 
 $siteId = Site::id();
 $enabled = (string) (App::settings()['visitors']['public_capture_enabled'] ?? '0') === '1';
@@ -27,10 +33,16 @@ $flash = '';
 $flashType = 'info';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $name  = trim((string) ($_POST['fullName'] ?? ''));
-    $email = trim((string) ($_POST['email'] ?? ''));
-    $phone = trim((string) ($_POST['phone'] ?? ''));
-    $notes = trim((string) ($_POST['notes'] ?? ''));
+    // 🛡️ CSRF — even for anonymous visitors, we issue a session-scoped
+    //    token so the POST proves it came from a form we rendered.
+    if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
+        $flash = 'Form expired — please reload the page and try again.';
+        $flashType = 'danger';
+    } else {
+        $name  = trim((string) ($_POST['fullName'] ?? ''));
+        $email = trim((string) ($_POST['email'] ?? ''));
+        $phone = trim((string) ($_POST['phone'] ?? ''));
+        $notes = trim((string) ($_POST['notes'] ?? ''));
 
     // 🛡️ Captcha — uses existing portal captcha if configured.
     $captchaOk = true;
@@ -67,10 +79,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $flash = 'Sorry — something went wrong. Please try again later.';
             $flashType = 'danger';
         }
+        }
     }
 }
 
 $portalName = htmlspecialchars((string) (App::settings()['site']['name'] ?? 'our portal'), ENT_QUOTES, 'UTF-8');
+$csrfToken  = Auth::csrfToken();
 ?>
 <!doctype html>
 <html lang="en">
@@ -103,6 +117,7 @@ button{margin-top:1rem;padding:.625rem 1.25rem;background:var(--primary);color:#
     <?php endif; ?>
     <?php if ($flashType !== 'success'): ?>
         <form method="post">
+            <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrfToken, ENT_QUOTES, 'UTF-8'); ?>">
             <label>Your name</label>
             <input type="text" name="fullName" required maxlength="255">
             <label>Email</label>

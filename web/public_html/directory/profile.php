@@ -29,13 +29,13 @@ if ($id <= 0) {
 
 $u = null;
 $stmt = $db->prepare(
-    'SELECT userID, fullName, email, displayBio, displayPhone, displayAddress, displayPhoto, '
+    'SELECT userID, fullName, emailAddress AS email, displayBio, displayPhone, displayAddress, displayPhoto, '
     . '       visibilityName, visibilityRoles, visibilityEmail, visibilityPhone, visibilityAddress, '
     . '       visibilityBio, visibilityPhoto '
-    . 'FROM tblUsers WHERE userID = ? AND siteID = ? LIMIT 1'
+    . 'FROM tblUsers WHERE userID = ? LIMIT 1'
 );
 if ($stmt !== false) {
-    $stmt->bind_param('ii', $id, $siteId);
+    $stmt->bind_param('i', $id);
     $stmt->execute();
     $u = $stmt->get_result()->fetch_assoc();
     $stmt->close();
