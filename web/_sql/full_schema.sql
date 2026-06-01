@@ -2651,6 +2651,13 @@ INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
     ('account/calendar-feed', 'calendar/account-feed.php', 1)
 ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 
+INSERT INTO `tblMigrations` (`filename`) VALUES ('081_sabbath_admin.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('admin/settings/sabbath', 'admin/settings/sabbath/index.php', 1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
 CREATE TABLE IF NOT EXISTS `tblRotaRoleType` (
     `roleTypeID`  INT          NOT NULL AUTO_INCREMENT,
     `siteID`      INT          NOT NULL DEFAULT 1,
