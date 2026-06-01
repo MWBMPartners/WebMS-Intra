@@ -26,12 +26,12 @@ $q = trim((string) ($_GET['q'] ?? ''));
 // 🔍 Search — name LIKE only (privacy by default). Result rows respect
 //    per-field visibility at display time.
 $users = [];
-$sql = 'SELECT userID, fullName, displayBio, displayPhone, email, displayAddress, displayPhoto, '
+$sql = 'SELECT userID, fullName, displayBio, displayPhone, emailAddress AS email, displayAddress, displayPhoto, '
      . '       visibilityName, visibilityRoles, visibilityEmail, visibilityPhone, visibilityAddress, '
      . '       visibilityBio, visibilityPhoto '
-     . 'FROM tblUsers WHERE siteID = ? AND isActive = 1';
-$types = 'i';
-$params = [$siteId];
+     . 'FROM tblUsers WHERE isActive = 1';
+$types = '';
+$params = [];
 if ($q !== '') {
     $sql .= ' AND fullName LIKE ?';
     $types .= 's';

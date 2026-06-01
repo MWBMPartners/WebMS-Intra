@@ -33,7 +33,7 @@ $db = App::db();
 // 🪞 Resolve the user's site for scoping. Multi-site users are not
 //    currently supported in the feed — picks their primary.
 $siteId = 1;
-$stmt = $db->prepare('SELECT siteID FROM tblUsers WHERE userID = ? LIMIT 1');
+$stmt = $db->prepare('SELECT siteID FROM tblUserSites WHERE userID = ? AND isActive = 1 ORDER BY siteID LIMIT 1');
 if ($stmt !== false) {
     $stmt->bind_param('i', $userId);
     $stmt->execute();

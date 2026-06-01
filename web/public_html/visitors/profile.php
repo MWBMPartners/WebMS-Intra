@@ -61,7 +61,7 @@ if ($stmt !== false) {
 }
 
 $users = [];
-$rs = $db->query("SELECT userID, fullName FROM tblUsers WHERE siteID = " . $siteId . " AND isActive = 1 ORDER BY fullName");
+$rs = $db->query("SELECT userID, fullName FROM tblUsers WHERE isActive = 1 ORDER BY fullName");
 if ($rs !== false) {
     while ($r = $rs->fetch_assoc()) {
         $users[] = $r;

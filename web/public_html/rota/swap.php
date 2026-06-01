@@ -71,7 +71,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && Auth::verifyCsrf($_POST['csrf_token
 
 // Other users (excluding self) for the dropdown
 $users = [];
-$rs = $db->query('SELECT userID, fullName FROM tblUsers WHERE siteID = ' . $siteId . ' AND userID <> ' . $userId . ' AND isActive = 1 ORDER BY fullName');
+$rs = $db->query('SELECT userID, fullName FROM tblUsers WHERE userID <> ' . $userId . ' AND isActive = 1 ORDER BY fullName');
 if ($rs !== false) {
     while ($r = $rs->fetch_assoc()) {
         $users[] = $r;

@@ -25,10 +25,10 @@ $stmt = $db->prepare(
     'SELECT displayBio, displayPhone, displayAddress, '
     . '       visibilityName, visibilityRoles, visibilityEmail, visibilityPhone, visibilityAddress, '
     . '       visibilityBio, visibilityPhoto '
-    . 'FROM tblUsers WHERE userID = ? AND siteID = ? LIMIT 1'
+    . 'FROM tblUsers WHERE userID = ? LIMIT 1'
 );
 if ($stmt !== false) {
-    $stmt->bind_param('ii', $userId, $siteId);
+    $stmt->bind_param('i', $userId);
     $stmt->execute();
     $u = $stmt->get_result()->fetch_assoc();
     $stmt->close();
