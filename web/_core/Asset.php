@@ -299,7 +299,11 @@ class Asset
              //    Loaded AFTER Bootstrap JS (which is required) and before
              //    custom page scripts so data-confirm form interception is
              //    in place by the time any handler binds.
-             . '<script src="/assets/js/portal-confirm.js" defer></script>';
+             . '<script src="/assets/js/portal-confirm.js" defer></script>'
+             . "\n"
+             // 🎯 Portal.Tour — "what's new" tour playback (#253). Auto-fetches
+             //    the active tour for the user on authenticated pages.
+             . '<script src="/assets/js/portal-tour.js" defer></script>';
     }
 
     // 🛡️ ===========================================================================

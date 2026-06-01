@@ -77,6 +77,14 @@ class Mailer
             ? $body
             : self::renderBase($body);
 
+        // 🪞 Plain-text alternative (#254). Auto-derive from the HTML if the
+        //    caller didn't supply one. This goes into the providers'
+        //    multipart/alternative bodies so clients that prefer (or only
+        //    accept) plain text get a readable version.
+        $plainBody = $looksLikeHtml === true
+            ? self::htmlToPlain($body)
+            : $body;
+
         // 🔀 Dispatch to the configured provider
         $provider = strtolower($SETTINGS['mail']['provider'] ?? 'ms365');
 
@@ -269,6 +277,49 @@ class Mailer
     }
 
     /** Build attachment array (<= 4MB each inline) */
+    /**
+     * Derive a plain-text alternative from an HTML body. Used for
+     * multipart/alternative emission (#254). Strips tags, decodes
+     * entities, collapses whitespace.
+     *
+     * Note: MS365 Graph's sendMail accepts HTML body and lets Microsoft
+     * generate the plain-text alternative server-side, so this helper
+     * is most useful for SMTP and any future provider that needs both
+     * parts on the wire.
+     */
+    public static function htmlToPlain(string $html): string
+    {
+        // Convert <br> / </p> / </div> / </li> to newlines BEFORE strip.
+        $intermediate = (string) preg_replace(
+            ['/<br\\s*\\/?>/i', '/<\\/(p|div|li|h[1-6]|tr)\\s*>/i'],
+            ["\n", "\n"],
+            $html
+        );
+        // Convert <a href="X">Y</a> → "Y (X)" so users on plain-text clients
+        // still see the URLs.
+        $intermediate = (string) preg_replace_callback(
+            '/<a[^>]+href="([^"]+)"[^>]*>(.*?)<\\/a>/i',
+            static function (array $m): string {
+                $text = trim(strip_tags($m[2]));
+                return $text !== '' && $text !== $m[1] ? $text . ' (' . $m[1] . ')' : $m[1];
+            },
+            $intermediate
+        );
+        $text = strip_tags($intermediate);
+        $text = html_entity_decode($text, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        // Collapse runs of blank lines and trim each line.
+        $lines = preg_split('/\\R/', $text);
+        $clean = [];
+        foreach ((array) $lines as $line) {
+            $line = trim((string) $line);
+            if ($line === '' && (count($clean) === 0 || end($clean) === '')) {
+                continue;
+            }
+            $clean[] = $line;
+        }
+        return trim(implode("\n", $clean));
+    }
+
     private static function attach(array $paths): array
     {
         $out = [];

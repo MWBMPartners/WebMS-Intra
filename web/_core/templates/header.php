@@ -157,7 +157,7 @@ header("Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-i
     <link rel="stylesheet" href="/assets/css/print.css" media="print">
     <link rel="stylesheet" href="/assets/css/print.css" media="screen" onload="this.media='not all'" disabled>
 </head>
-<body data-portal-name="<?php echo htmlspecialchars((string) ($SETTINGS['site']['name'] ?? 'Portal'), ENT_QUOTES, 'UTF-8'); ?>" data-print-date="<?php echo htmlspecialchars(date('Y-m-d'), ENT_QUOTES, 'UTF-8'); ?>">
+<body data-portal-name="<?php echo htmlspecialchars((string) ($SETTINGS['site']['name'] ?? 'Portal'), ENT_QUOTES, 'UTF-8'); ?>" data-print-date="<?php echo htmlspecialchars(date('Y-m-d'), ENT_QUOTES, 'UTF-8'); ?>" data-portal-authenticated="<?php echo \Portal\Core\Auth::check() === true ? '1' : '0'; ?>">
 
 <!-- ⚠️ Global noscript banner — visible only when JS is disabled -->
 <noscript>
