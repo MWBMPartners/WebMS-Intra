@@ -2795,6 +2795,15 @@ INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
     ('api/tours/complete', 'api/tours/complete.php', 1)
 ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 
+-- 🎛️ Settings group sub-pages (matches migration 083 / #252)
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('admin/settings/alerts',      'admin/settings/group.php', 1),
+    ('admin/settings/backups',     'admin/settings/group.php', 1),
+    ('admin/settings/headers',     'admin/settings/group.php', 1),
+    ('admin/settings/upgrade',     'admin/settings/group.php', 1),
+    ('admin/settings/maintenance', 'admin/settings/group.php', 1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
 INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
     ('help/admin-first-steps', 'help/admin-first-steps.php', 1),
     ('admin/settings/dismiss-first-run', 'admin/settings/dismiss-first-run.php', 1)
