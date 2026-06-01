@@ -2143,3 +2143,77 @@ a:focus > .app-card {
         display: none;
     }
 }
+
+/* =============================================================================
+ * Portal.Tour — "what's new" tour overlay (#253)
+ * ============================================================================= */
+.portal-tour-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 1080;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(16, 24, 40, 0.55);
+    padding: 1rem;
+}
+.portal-tour-card {
+    position: relative;
+    max-width: 420px;
+    width: 100%;
+    background: var(--bs-body-bg, #fff);
+    color: var(--bs-body-color, #1b2330);
+    border: 1px solid var(--bs-border-color, #e5e7eb);
+    border-radius: 0.75rem;
+    box-shadow: 0 12px 32px rgba(16, 24, 40, 0.25);
+    padding: 1.5rem;
+}
+.portal-tour-skip {
+    position: absolute;
+    top: 0.5rem;
+    right: 0.75rem;
+    background: none;
+    border: none;
+    font-size: 1.5rem;
+    line-height: 1;
+    color: var(--bs-secondary-color, #6b7280);
+    cursor: pointer;
+}
+.portal-tour-card-title {
+    font-size: 1.125rem;
+    font-weight: 600;
+    margin: 0 0 0.5rem;
+}
+.portal-tour-card-body {
+    color: var(--bs-secondary-color, #6b7280);
+    margin-bottom: 1.25rem;
+}
+.portal-tour-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+}
+.portal-tour-indicator {
+    font-size: 0.8125rem;
+    color: var(--bs-secondary-color, #6b7280);
+}
+.portal-tour-actions {
+    display: flex;
+    gap: 0.5rem;
+}
+.portal-tour-highlight {
+    position: relative;
+    z-index: 1081;
+    outline: 3px solid var(--bs-primary, #5e6ad2);
+    outline-offset: 3px;
+    border-radius: 0.375rem;
+    animation: portal-tour-pulse 1.5s ease-in-out infinite;
+}
+@keyframes portal-tour-pulse {
+    0%, 100% { outline-color: var(--bs-primary, #5e6ad2); }
+    50% { outline-color: rgba(94, 106, 210, 0.4); }
+}
+@media print {
+    .portal-tour-overlay { display: none !important; }
+}

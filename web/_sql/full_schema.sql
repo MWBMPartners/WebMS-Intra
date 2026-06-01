@@ -2789,6 +2789,12 @@ INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue
     (NULL, 'portal.tours.welcome_active','1', '1', 0)
 ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
 
+-- 🎯 Tour playback API routes (matches migration 082 / #253)
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('api/tours/active',   'api/tours/active.php',   1),
+    ('api/tours/complete', 'api/tours/complete.php', 1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
 INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
     ('help/admin-first-steps', 'help/admin-first-steps.php', 1),
     ('admin/settings/dismiss-first-run', 'admin/settings/dismiss-first-run.php', 1)
