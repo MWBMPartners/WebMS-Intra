@@ -3184,3 +3184,17 @@ INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue
     (NULL, 'reading_plans.displayName',      'Reading Plans', 'Reading Plans', 0),
     (NULL, 'reading_plans.displayIcon',      'fa-solid fa-book-open', 'fa-solid fa-book-open', 0)
 ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('085_qr.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('qr',                  'qr.php',                        1),
+    ('admin/settings/qr',   'admin/settings/qr/index.php',   1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'portal.qr.provider',              'local', 'local', 0),
+    (NULL, 'portal.qr.cuercode.api_endpoint', '',      '',      0),
+    (NULL, 'portal.qr.cuercode.api_key',      '',      '',      1)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
