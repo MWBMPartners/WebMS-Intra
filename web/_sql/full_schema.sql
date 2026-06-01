@@ -2637,6 +2637,20 @@ INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue
     (NULL, 'directory.displayIcon', 'fa-solid fa-address-book', 'fa-solid fa-address-book', 0)
 ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
 
+INSERT INTO `tblMigrations` (`filename`) VALUES ('080_ical_feed.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+ALTER TABLE `tblUsers`
+    ADD COLUMN IF NOT EXISTS `calendarToken` VARCHAR(64) DEFAULT NULL;
+
+ALTER TABLE `tblUsers`
+    ADD INDEX IF NOT EXISTS `idx_user_calendar_token` (`calendarToken`);
+
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('calendar.ics',          'calendar/feed.php',         0),
+    ('account/calendar-feed', 'calendar/account-feed.php', 1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
 CREATE TABLE IF NOT EXISTS `tblRotaRoleType` (
     `roleTypeID`  INT          NOT NULL AUTO_INCREMENT,
     `siteID`      INT          NOT NULL DEFAULT 1,
