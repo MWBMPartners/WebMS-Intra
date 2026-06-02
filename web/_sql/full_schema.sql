@@ -3276,3 +3276,725 @@ INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue
     (NULL, 'offboarding.displayName',      'Offboarding', 'Offboarding', 0),
     (NULL, 'offboarding.displayIcon',      'fa-solid fa-door-open', 'fa-solid fa-door-open', 0)
 ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('088_resources.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+CREATE TABLE IF NOT EXISTS `tblResource` (
+    `resourceID`        INT          NOT NULL AUTO_INCREMENT,
+    `siteID`            INT          NOT NULL DEFAULT 1,
+    `name`              VARCHAR(255) NOT NULL,
+    `description`       TEXT         DEFAULT NULL,
+    `category`          ENUM('room','equipment','vehicle','other') NOT NULL DEFAULT 'room',
+    `capacity`          INT          DEFAULT NULL,
+    `location`          VARCHAR(255) DEFAULT NULL,
+    `requiresApproval`  TINYINT(1)   NOT NULL DEFAULT 0,
+    `hourlyRatePence`   INT          DEFAULT NULL,
+    `bufferMinutes`     INT          NOT NULL DEFAULT 0,
+    `isActive`          TINYINT(1)   NOT NULL DEFAULT 1,
+    `createdAt`         DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`resourceID`),
+    KEY `idx_resource_site_active` (`siteID`, `isActive`),
+    CONSTRAINT `fk_resource_site` FOREIGN KEY (`siteID`) REFERENCES `tblSites`(`siteID`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+CREATE TABLE IF NOT EXISTS `tblResourceBooking` (
+    `bookingID`     INT          NOT NULL AUTO_INCREMENT,
+    `resourceID`    INT          NOT NULL,
+    `bookedByID`    INT          NOT NULL,
+    `startAt`       DATETIME     NOT NULL,
+    `endAt`         DATETIME     NOT NULL,
+    `purpose`       VARCHAR(255) DEFAULT NULL,
+    `status`        ENUM('pending','approved','declined','cancelled') NOT NULL DEFAULT 'pending',
+    `approvedByID`  INT          DEFAULT NULL,
+    `approvedAt`    DATETIME     DEFAULT NULL,
+    `declineReason` VARCHAR(500) DEFAULT NULL,
+    `notes`         TEXT         DEFAULT NULL,
+    `createdAt`     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`bookingID`),
+    KEY `idx_booking_resource_start` (`resourceID`, `startAt`),
+    KEY `idx_booking_status` (`status`, `startAt`),
+    KEY `idx_booking_booker` (`bookedByID`),
+    CONSTRAINT `fk_booking_resource`     FOREIGN KEY (`resourceID`)   REFERENCES `tblResource`(`resourceID`) ON DELETE CASCADE,
+    CONSTRAINT `fk_booking_booker`       FOREIGN KEY (`bookedByID`)   REFERENCES `tblUsers`(`userID`)        ON DELETE RESTRICT,
+    CONSTRAINT `fk_booking_approver`     FOREIGN KEY (`approvedByID`) REFERENCES `tblUsers`(`userID`)        ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('resources',             'resources/index.php',         1),
+    ('resources/resource',    'resources/resource.php',      1),
+    ('resources/book',        'resources/book.php',          1),
+    ('resources/my-bookings', 'resources/my-bookings.php',   1),
+    ('resources/approvals',   'resources/approvals.php',     1),
+    ('resources/action',      'resources/action.php',        1),
+    ('resources/manage',      'resources/manage.php',        1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'resources.enabled',         '0', '0', 0),
+    (NULL, 'resources.default_buffer',  '15','15', 0),
+    (NULL, 'resources.lookahead_days',  '90','90', 0),
+    (NULL, 'resources.displayName',     'Resource Booking', 'Resource Booking', 0),
+    (NULL, 'resources.displayIcon',     'fa-solid fa-building', 'fa-solid fa-building', 0)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('089_service_plans.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+CREATE TABLE IF NOT EXISTS `tblServicePlan` (
+    `planID`        INT          NOT NULL AUTO_INCREMENT,
+    `siteID`        INT          NOT NULL DEFAULT 1,
+    `eventID`       INT          DEFAULT NULL,
+    `title`         VARCHAR(255) NOT NULL,
+    `serviceDate`   DATE         NOT NULL,
+    `status`        ENUM('draft','published','archived') NOT NULL DEFAULT 'draft',
+    `preparedByID`  INT          DEFAULT NULL,
+    `createdAt`     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updatedAt`     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`planID`),
+    KEY `idx_sp_site_date` (`siteID`, `serviceDate`),
+    KEY `idx_sp_event` (`eventID`),
+    CONSTRAINT `fk_sp_site`     FOREIGN KEY (`siteID`)       REFERENCES `tblSites`(`siteID`),
+    CONSTRAINT `fk_sp_event`    FOREIGN KEY (`eventID`)      REFERENCES `tblEvents`(`eventID`) ON DELETE SET NULL,
+    CONSTRAINT `fk_sp_prepared` FOREIGN KEY (`preparedByID`) REFERENCES `tblUsers`(`userID`)   ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+CREATE TABLE IF NOT EXISTS `tblServicePlanItem` (
+    `itemID`        INT          NOT NULL AUTO_INCREMENT,
+    `planID`        INT          NOT NULL,
+    `sectionType`   ENUM('greeting','song','prayer','scripture','sermon','offering','communion','special_music','announcement','reading','other') NOT NULL DEFAULT 'other',
+    `position`      INT          NOT NULL DEFAULT 0,
+    `title`         VARCHAR(255) DEFAULT NULL,
+    `presenterID`   INT          DEFAULT NULL,
+    `presenterText` VARCHAR(255) DEFAULT NULL,
+    `durationMin`   INT          DEFAULT NULL,
+    `notes`         TEXT         DEFAULT NULL,
+    PRIMARY KEY (`itemID`),
+    KEY `idx_spi_plan_position` (`planID`, `position`),
+    CONSTRAINT `fk_spi_plan`      FOREIGN KEY (`planID`)      REFERENCES `tblServicePlan`(`planID`) ON DELETE CASCADE,
+    CONSTRAINT `fk_spi_presenter` FOREIGN KEY (`presenterID`) REFERENCES `tblUsers`(`userID`)      ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('service-plans',          'service-plans/index.php',     1),
+    ('service-plans/new',      'service-plans/new.php',       1),
+    ('service-plans/edit',     'service-plans/edit.php',      1),
+    ('service-plans/save',     'service-plans/save.php',      1),
+    ('service-plans/print',    'service-plans/print.php',     1),
+    ('service-plans/item-save','service-plans/item-save.php', 1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'service_plans.enabled',     '0', '0', 0),
+    (NULL, 'service_plans.displayName', 'Service Plans', 'Service Plans', 0),
+    (NULL, 'service_plans.displayIcon', 'fa-solid fa-list-ol', 'fa-solid fa-list-ol', 0)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
+-- =============================================================================
+-- Livestream (migration 090, #273)
+-- =============================================================================
+
+CREATE TABLE IF NOT EXISTS `tblLivestreamChannel` (
+    `channelID`          INT          NOT NULL AUTO_INCREMENT,
+    `siteID`             INT          NOT NULL DEFAULT 1,
+    `name`               VARCHAR(255) NOT NULL,
+    `platform`           ENUM('youtube','youtube-live','vimeo','twitch','facebook','custom') NOT NULL DEFAULT 'youtube',
+    `channelOrVideoId`   VARCHAR(100) DEFAULT NULL,
+    `embedHtmlOverride`  TEXT         DEFAULT NULL COMMENT 'Used when platform=custom',
+    `isPrimary`          TINYINT(1)   NOT NULL DEFAULT 0,
+    `createdAt`          DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`channelID`),
+    KEY `idx_lsc_site` (`siteID`),
+    CONSTRAINT `fk_lsc_site` FOREIGN KEY (`siteID`) REFERENCES `tblSites`(`siteID`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+CREATE TABLE IF NOT EXISTS `tblLivestreamSchedule` (
+    `scheduleID` INT          NOT NULL AUTO_INCREMENT,
+    `channelID`  INT          NOT NULL,
+    `dayOfWeek`  TINYINT      NOT NULL COMMENT '0=Sun, 6=Sat',
+    `startTime`  TIME         NOT NULL,
+    `endTime`    TIME         NOT NULL,
+    `timezone`   VARCHAR(50)  NOT NULL DEFAULT 'Europe/London',
+    `isActive`   TINYINT(1)   NOT NULL DEFAULT 1,
+    PRIMARY KEY (`scheduleID`),
+    KEY `idx_lss_channel_dow` (`channelID`, `dayOfWeek`),
+    CONSTRAINT `fk_lss_channel` FOREIGN KEY (`channelID`) REFERENCES `tblLivestreamChannel`(`channelID`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('live',                'live/index.php',          1),
+    ('admin/livestream',    'admin/livestream/index.php', 1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'livestream.enabled',     '0', '0', 0),
+    (NULL, 'livestream.displayName', 'Livestream', 'Livestream', 0),
+    (NULL, 'livestream.displayIcon', 'fa-solid fa-tower-broadcast', 'fa-solid fa-tower-broadcast', 0)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
+-- =============================================================================
+-- Recordings library (migration 091, #264)
+-- =============================================================================
+
+CREATE TABLE IF NOT EXISTS `tblRecording` (
+    `recordingID`     INT          NOT NULL AUTO_INCREMENT,
+    `siteID`          INT          NOT NULL DEFAULT 1,
+    `title`           VARCHAR(255) NOT NULL,
+    `presenterID`     INT          DEFAULT NULL,
+    `presenterText`   VARCHAR(255) DEFAULT NULL,
+    `recordedAt`      DATE         DEFAULT NULL,
+    `durationSeconds` INT          DEFAULT NULL,
+    `kind`            ENUM('sermon','teaching','music','event','other') NOT NULL DEFAULT 'sermon',
+    `scripture`       VARCHAR(255) DEFAULT NULL,
+    `topics`          VARCHAR(500) DEFAULT NULL,
+    `summary`         TEXT         DEFAULT NULL,
+    `filePath`        VARCHAR(255) DEFAULT NULL,
+    `fileSize`        BIGINT       DEFAULT NULL,
+    `mimeType`        VARCHAR(100) DEFAULT NULL,
+    `externalUrl`     VARCHAR(500) DEFAULT NULL,
+    `thumbnailPath`   VARCHAR(255) DEFAULT NULL,
+    `isPublished`     TINYINT(1)   NOT NULL DEFAULT 1,
+    `uploadedByID`    INT          DEFAULT NULL,
+    `createdAt`       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`recordingID`),
+    KEY `idx_rec_site_date` (`siteID`, `recordedAt`),
+    KEY `idx_rec_kind`      (`kind`),
+    CONSTRAINT `fk_rec_site`      FOREIGN KEY (`siteID`)       REFERENCES `tblSites`(`siteID`),
+    CONSTRAINT `fk_rec_presenter` FOREIGN KEY (`presenterID`)  REFERENCES `tblUsers`(`userID`) ON DELETE SET NULL,
+    CONSTRAINT `fk_rec_uploader`  FOREIGN KEY (`uploadedByID`) REFERENCES `tblUsers`(`userID`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+CREATE TABLE IF NOT EXISTS `tblRecordingTopic` (
+    `topicID`    INT          NOT NULL AUTO_INCREMENT,
+    `siteID`     INT          NOT NULL DEFAULT 1,
+    `topic`      VARCHAR(100) NOT NULL,
+    `useCount`   INT          NOT NULL DEFAULT 0,
+    PRIMARY KEY (`topicID`),
+    UNIQUE KEY `uq_rt_site_topic` (`siteID`, `topic`),
+    CONSTRAINT `fk_rt_site` FOREIGN KEY (`siteID`) REFERENCES `tblSites`(`siteID`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+CREATE TABLE IF NOT EXISTS `tblRecordingPlay` (
+    `playID`      INT      NOT NULL AUTO_INCREMENT,
+    `recordingID` INT      NOT NULL,
+    `userID`      INT      DEFAULT NULL,
+    `playedAt`    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `ipHash`      CHAR(64) DEFAULT NULL,
+    PRIMARY KEY (`playID`),
+    KEY `idx_rp_recording` (`recordingID`, `playedAt`),
+    CONSTRAINT `fk_rp_recording` FOREIGN KEY (`recordingID`) REFERENCES `tblRecording`(`recordingID`) ON DELETE CASCADE,
+    CONSTRAINT `fk_rp_user`      FOREIGN KEY (`userID`)      REFERENCES `tblUsers`(`userID`)       ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('recordings',         'recordings/index.php',   1),
+    ('recordings/view',    'recordings/view.php',    1),
+    ('recordings/manage',  'recordings/manage.php',  1),
+    ('recordings/upload',  'recordings/upload.php',  1),
+    ('recordings/save',    'recordings/save.php',    1),
+    ('recordings/delete',  'recordings/delete.php',  1),
+    ('recordings/stream',  'recordings/stream.php',  1),
+    ('recordings.rss',     'recordings/feed.php',    1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'recordings.enabled',        '0', '0', 0),
+    (NULL, 'recordings.displayName',    'Recordings', 'Recordings', 0),
+    (NULL, 'recordings.displayIcon',    'fa-solid fa-microphone-lines', 'fa-solid fa-microphone-lines', 0),
+    (NULL, 'recordings.max_upload_mb',  '200', '200', 0),
+    (NULL, 'recordings.podcast_author', '', '', 0)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
+-- =============================================================================
+-- Zoom integration (migration 092, #274)
+-- =============================================================================
+
+CREATE TABLE IF NOT EXISTS `tblZoomAccount` (
+    `accountID`            INT          NOT NULL AUTO_INCREMENT,
+    `siteID`               INT          NOT NULL DEFAULT 1,
+    `userID`               INT          DEFAULT NULL,
+    `zoomUserId`           VARCHAR(100) NOT NULL,
+    `zoomAccountEmail`     VARCHAR(255) DEFAULT NULL,
+    `refreshTokenEnc`      TEXT         NOT NULL,
+    `accessTokenEnc`       TEXT         DEFAULT NULL,
+    `accessTokenExpiresAt` DATETIME     DEFAULT NULL,
+    `scopes`               VARCHAR(500) DEFAULT NULL,
+    `createdAt`            DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updatedAt`            DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`accountID`),
+    UNIQUE KEY `uq_za_site_user` (`siteID`, `userID`),
+    CONSTRAINT `fk_za_site` FOREIGN KEY (`siteID`) REFERENCES `tblSites`(`siteID`),
+    CONSTRAINT `fk_za_user` FOREIGN KEY (`userID`) REFERENCES `tblUsers`(`userID`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+CREATE TABLE IF NOT EXISTS `tblZoomMeeting` (
+    `meetingID`      INT          NOT NULL AUTO_INCREMENT,
+    `siteID`         INT          NOT NULL DEFAULT 1,
+    `eventID`        INT          DEFAULT NULL,
+    `accountID`      INT          NOT NULL,
+    `zoomMeetingId`  VARCHAR(50)  NOT NULL,
+    `joinUrl`        VARCHAR(500) NOT NULL,
+    `startUrl`       VARCHAR(1000) DEFAULT NULL,
+    `passcode`       VARCHAR(50)  DEFAULT NULL,
+    `topic`          VARCHAR(255) DEFAULT NULL,
+    `isRecurring`    TINYINT(1)   NOT NULL DEFAULT 0,
+    `recordingUrl`   VARCHAR(500) DEFAULT NULL,
+    `createdByID`    INT          DEFAULT NULL,
+    `createdAt`      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`meetingID`),
+    KEY `idx_zm_event`   (`eventID`),
+    KEY `idx_zm_zoom_id` (`zoomMeetingId`),
+    CONSTRAINT `fk_zm_site`    FOREIGN KEY (`siteID`)      REFERENCES `tblSites`(`siteID`),
+    CONSTRAINT `fk_zm_account` FOREIGN KEY (`accountID`)   REFERENCES `tblZoomAccount`(`accountID`) ON DELETE CASCADE,
+    CONSTRAINT `fk_zm_creator` FOREIGN KEY (`createdByID`) REFERENCES `tblUsers`(`userID`)         ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('admin/integrations/zoom',            'admin/integrations/zoom/index.php',      1),
+    ('admin/integrations/zoom/connect',    'admin/integrations/zoom/connect.php',    1),
+    ('admin/integrations/zoom/callback',   'admin/integrations/zoom/callback.php',   1),
+    ('admin/integrations/zoom/disconnect', 'admin/integrations/zoom/disconnect.php', 1),
+    ('admin/integrations/zoom/save',       'admin/integrations/zoom/save.php',       1),
+    ('admin/integrations/zoom/webhook',    'admin/integrations/zoom/webhook.php',    0),
+    ('account/integrations/zoom',          'account/integrations/zoom.php',          1),
+    ('calendar/zoom-create',               'calendar/zoom-create.php',               1),
+    ('calendar/zoom-remove',               'calendar/zoom-remove.php',               1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'zoom.enabled',         '0', '0', 0),
+    (NULL, 'zoom.displayName',     'Zoom', 'Zoom', 0),
+    (NULL, 'zoom.displayIcon',     'fa-solid fa-video', 'fa-solid fa-video', 0),
+    (NULL, 'zoom.mode',            'org', 'org', 0),
+    (NULL, 'zoom.clientID',        '', '', 0),
+    (NULL, 'zoom.clientSecret',    '', '', 1),
+    (NULL, 'zoom.webhookSecret',   '', '', 1)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
+-- =============================================================================
+-- Newsletter (migration 093, #269)
+-- =============================================================================
+
+CREATE TABLE IF NOT EXISTS `tblNewsletter` (
+    `newsletterID`  INT          NOT NULL AUTO_INCREMENT,
+    `siteID`        INT          NOT NULL DEFAULT 1,
+    `title`         VARCHAR(255) NOT NULL,
+    `slug`          VARCHAR(200) DEFAULT NULL,
+    `subject`       VARCHAR(255) DEFAULT NULL,
+    `segmentID`     INT          DEFAULT NULL,
+    `status`        ENUM('draft','scheduled','sending','sent','cancelled') NOT NULL DEFAULT 'draft',
+    `scheduledFor`  DATETIME     DEFAULT NULL,
+    `sentAt`        DATETIME     DEFAULT NULL,
+    `sentCount`     INT          NOT NULL DEFAULT 0,
+    `createdByID`   INT          DEFAULT NULL,
+    `createdAt`     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updatedAt`     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`newsletterID`),
+    KEY `idx_nl_site_status` (`siteID`, `status`),
+    CONSTRAINT `fk_nl_site`    FOREIGN KEY (`siteID`)      REFERENCES `tblSites`(`siteID`),
+    CONSTRAINT `fk_nl_creator` FOREIGN KEY (`createdByID`) REFERENCES `tblUsers`(`userID`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+CREATE TABLE IF NOT EXISTS `tblNewsletterContent` (
+    `contentID`     INT          NOT NULL AUTO_INCREMENT,
+    `newsletterID`  INT          NOT NULL,
+    `blockType`     ENUM('text','image','heading','divider','cta','announcements','events','prayers','sermon') NOT NULL DEFAULT 'text',
+    `position`      INT          NOT NULL DEFAULT 0,
+    `payload`       TEXT         DEFAULT NULL,
+    PRIMARY KEY (`contentID`),
+    KEY `idx_nlc_newsletter_pos` (`newsletterID`, `position`),
+    CONSTRAINT `fk_nlc_newsletter` FOREIGN KEY (`newsletterID`) REFERENCES `tblNewsletter`(`newsletterID`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+CREATE TABLE IF NOT EXISTS `tblNewsletterSegment` (
+    `segmentID`  INT          NOT NULL AUTO_INCREMENT,
+    `siteID`     INT          NOT NULL DEFAULT 1,
+    `name`       VARCHAR(255) NOT NULL,
+    `ruleJson`   TEXT         DEFAULT NULL,
+    `createdAt`  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`segmentID`),
+    KEY `idx_ns_site` (`siteID`),
+    CONSTRAINT `fk_ns_site` FOREIGN KEY (`siteID`) REFERENCES `tblSites`(`siteID`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+CREATE TABLE IF NOT EXISTS `tblNewsletterRecipient` (
+    `recipientID`   INT      NOT NULL AUTO_INCREMENT,
+    `newsletterID`  INT      NOT NULL,
+    `userID`        INT      NOT NULL,
+    `emailAddress`  VARCHAR(255) NOT NULL,
+    `unsubToken`    CHAR(40) NOT NULL,
+    `deliveredAt`   DATETIME DEFAULT NULL,
+    `openedAt`      DATETIME DEFAULT NULL,
+    `clickedAt`     DATETIME DEFAULT NULL,
+    `errorMsg`      VARCHAR(255) DEFAULT NULL,
+    PRIMARY KEY (`recipientID`),
+    UNIQUE KEY `uq_nlr_token` (`unsubToken`),
+    KEY `idx_nlr_newsletter` (`newsletterID`),
+    KEY `idx_nlr_user` (`userID`),
+    CONSTRAINT `fk_nlr_newsletter` FOREIGN KEY (`newsletterID`) REFERENCES `tblNewsletter`(`newsletterID`) ON DELETE CASCADE,
+    CONSTRAINT `fk_nlr_user`       FOREIGN KEY (`userID`)       REFERENCES `tblUsers`(`userID`)           ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+CREATE TABLE IF NOT EXISTS `tblNewsletterSubscription` (
+    `subscriptionID` INT          NOT NULL AUTO_INCREMENT,
+    `siteID`         INT          NOT NULL DEFAULT 1,
+    `userID`         INT          NOT NULL,
+    `optedIn`        TINYINT(1)   NOT NULL DEFAULT 1,
+    `unsubToken`     CHAR(40)     NOT NULL,
+    `updatedAt`      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`subscriptionID`),
+    UNIQUE KEY `uq_nls_site_user` (`siteID`, `userID`),
+    UNIQUE KEY `uq_nls_token`     (`unsubToken`),
+    CONSTRAINT `fk_nls_site` FOREIGN KEY (`siteID`) REFERENCES `tblSites`(`siteID`),
+    CONSTRAINT `fk_nls_user` FOREIGN KEY (`userID`) REFERENCES `tblUsers`(`userID`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('newsletter',                'newsletter/index.php',             1),
+    ('newsletter/new',            'newsletter/edit.php',              1),
+    ('newsletter/edit',           'newsletter/edit.php',              1),
+    ('newsletter/save',           'newsletter/save.php',              1),
+    ('newsletter/block-save',     'newsletter/block-save.php',        1),
+    ('newsletter/block-delete',   'newsletter/block-delete.php',      1),
+    ('newsletter/preview',        'newsletter/preview.php',           1),
+    ('newsletter/recipients',     'newsletter/recipients.php',        1),
+    ('newsletter/send',           'newsletter/send.php',              1),
+    ('newsletter/segments',       'newsletter/segments.php',          1),
+    ('newsletter/segments/save',  'newsletter/segments-save.php',     1),
+    ('newsletter/track/open',     'newsletter/track-open.php',        0),
+    ('newsletter/track/click',    'newsletter/track-click.php',       0),
+    ('account/notifications',     'account/notifications.php',        1),
+    ('unsubscribe',               'newsletter/unsubscribe.php',       0)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'newsletter.enabled',         '0', '0', 0),
+    (NULL, 'newsletter.displayName',     'Newsletter', 'Newsletter', 0),
+    (NULL, 'newsletter.displayIcon',     'fa-solid fa-envelope-open-text', 'fa-solid fa-envelope-open-text', 0),
+    (NULL, 'newsletter.provider',        'internal', 'internal', 0),
+    (NULL, 'newsletter.fromName',        '', '', 0),
+    (NULL, 'newsletter.fromAddress',     '', '', 0),
+    (NULL, 'newsletter.trackOpens',      '0', '0', 0),
+    (NULL, 'newsletter.trackClicks',     '0', '0', 0),
+    (NULL, 'newsletter.batchPerHour',    '100', '100', 0),
+    (NULL, 'newsletter.mailermatt.apiKey',  '', '', 1),
+    (NULL, 'newsletter.mailermatt.baseUrl', '', '', 0)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
+-- =============================================================================
+-- Giving / contributions log (migration 094, #266)
+-- =============================================================================
+
+CREATE TABLE IF NOT EXISTS `tblGivingCategory` (
+    `categoryID`  INT          NOT NULL AUTO_INCREMENT,
+    `siteID`      INT          NOT NULL DEFAULT 1,
+    `name`        VARCHAR(255) NOT NULL,
+    `description` VARCHAR(500) DEFAULT NULL,
+    `isActive`    TINYINT(1)   NOT NULL DEFAULT 1,
+    `defaultFund` VARCHAR(100) DEFAULT NULL,
+    `sortOrder`   INT          NOT NULL DEFAULT 0,
+    `createdAt`   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`categoryID`),
+    KEY `idx_gc_site` (`siteID`),
+    CONSTRAINT `fk_gc_site` FOREIGN KEY (`siteID`) REFERENCES `tblSites`(`siteID`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+CREATE TABLE IF NOT EXISTS `tblGivingEntry` (
+    `entryID`      INT          NOT NULL AUTO_INCREMENT,
+    `siteID`       INT          NOT NULL DEFAULT 1,
+    `donorID`      INT          DEFAULT NULL,
+    `donorName`    VARCHAR(255) DEFAULT NULL,
+    `categoryID`   INT          NOT NULL,
+    `amountPence`  INT          NOT NULL,
+    `currency`     CHAR(3)      NOT NULL DEFAULT 'GBP',
+    `donatedAt`    DATE         NOT NULL,
+    `method`       ENUM('cash','cheque','bank-transfer','card','standing-order','other') NOT NULL DEFAULT 'cash',
+    `reference`    VARCHAR(100) DEFAULT NULL,
+    `notes`        TEXT         DEFAULT NULL,
+    `recordedByID` INT          DEFAULT NULL,
+    `createdAt`    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updatedAt`    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`entryID`),
+    KEY `idx_ge_site_date`     (`siteID`, `donatedAt`),
+    KEY `idx_ge_donor_date`    (`donorID`, `donatedAt`),
+    KEY `idx_ge_category_date` (`categoryID`, `donatedAt`),
+    CONSTRAINT `fk_ge_site`     FOREIGN KEY (`siteID`)       REFERENCES `tblSites`(`siteID`),
+    CONSTRAINT `fk_ge_donor`    FOREIGN KEY (`donorID`)      REFERENCES `tblUsers`(`userID`)         ON DELETE SET NULL,
+    CONSTRAINT `fk_ge_category` FOREIGN KEY (`categoryID`)   REFERENCES `tblGivingCategory`(`categoryID`),
+    CONSTRAINT `fk_ge_recorder` FOREIGN KEY (`recordedByID`) REFERENCES `tblUsers`(`userID`)         ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+CREATE TABLE IF NOT EXISTS `tblGiftAidDeclaration` (
+    `declarationID` INT          NOT NULL AUTO_INCREMENT,
+    `siteID`        INT          NOT NULL DEFAULT 1,
+    `donorID`       INT          NOT NULL,
+    `status`        ENUM('active','lapsed','withdrawn') NOT NULL DEFAULT 'active',
+    `validFrom`     DATE         NOT NULL,
+    `validTo`       DATE         DEFAULT NULL,
+    `address`       VARCHAR(500) DEFAULT NULL,
+    `postcode`      VARCHAR(20)  DEFAULT NULL,
+    `acceptedAt`    DATETIME     DEFAULT NULL,
+    `acceptedIP`    VARCHAR(45)  DEFAULT NULL,
+    `signaturePath` VARCHAR(255) DEFAULT NULL,
+    `notes`         TEXT         DEFAULT NULL,
+    `createdAt`     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`declarationID`),
+    KEY `idx_gad_site_donor` (`siteID`, `donorID`),
+    CONSTRAINT `fk_gad_site`  FOREIGN KEY (`siteID`)  REFERENCES `tblSites`(`siteID`),
+    CONSTRAINT `fk_gad_donor` FOREIGN KEY (`donorID`) REFERENCES `tblUsers`(`userID`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('giving',              'giving/index.php',         1),
+    ('giving/manage',       'giving/manage.php',        1),
+    ('giving/entry-save',   'giving/entry-save.php',    1),
+    ('giving/entry-delete', 'giving/entry-delete.php',  1),
+    ('giving/categories',   'giving/categories.php',    1),
+    ('giving/cat-save',     'giving/cat-save.php',      1),
+    ('giving/gift-aid',     'giving/gift-aid.php',      1),
+    ('giving/gad-save',     'giving/gad-save.php',      1),
+    ('giving/my-statement', 'giving/my-statement.php',  1),
+    ('giving/reports',      'giving/reports.php',       1),
+    ('giving/hmrc-export',  'giving/hmrc-export.php',   1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'giving.enabled',     '0', '0', 0),
+    (NULL, 'giving.displayName', 'Giving', 'Giving', 0),
+    (NULL, 'giving.displayIcon', 'fa-solid fa-hand-holding-dollar', 'fa-solid fa-hand-holding-dollar', 0),
+    (NULL, 'giving.currency',    'GBP', 'GBP', 0),
+    (NULL, 'giving.charityName', '', '', 0),
+    (NULL, 'giving.charityNumber','', '', 0),
+    (NULL, 'giving.hmrcRef',     '', '', 0)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
+-- =============================================================================
+-- SMS notifications (migration 095, #272)
+-- =============================================================================
+
+CREATE TABLE IF NOT EXISTS `tblSmsMessage` (
+    `messageID`        INT          NOT NULL AUTO_INCREMENT,
+    `siteID`           INT          NOT NULL DEFAULT 1,
+    `recipientUserID`  INT          DEFAULT NULL,
+    `recipientNumber`  VARCHAR(20)  NOT NULL,
+    `body`             VARCHAR(800) NOT NULL,
+    `category`         VARCHAR(50)  NOT NULL DEFAULT 'general',
+    `status`           ENUM('queued','sent','delivered','failed') NOT NULL DEFAULT 'queued',
+    `provider`         VARCHAR(30)  NOT NULL DEFAULT 'twilio',
+    `providerRef`      VARCHAR(100) DEFAULT NULL,
+    `costPence`        INT          DEFAULT NULL,
+    `errorMsg`         VARCHAR(255) DEFAULT NULL,
+    `sentAt`           DATETIME     DEFAULT NULL,
+    `createdAt`        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`messageID`),
+    KEY `idx_sms_site_date` (`siteID`, `createdAt`),
+    KEY `idx_sms_user`      (`recipientUserID`),
+    CONSTRAINT `fk_sms_site` FOREIGN KEY (`siteID`) REFERENCES `tblSites`(`siteID`),
+    CONSTRAINT `fk_sms_user` FOREIGN KEY (`recipientUserID`) REFERENCES `tblUsers`(`userID`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+CREATE TABLE IF NOT EXISTS `tblUserSmsPreference` (
+    `preferenceID`        INT          NOT NULL AUTO_INCREMENT,
+    `siteID`              INT          NOT NULL DEFAULT 1,
+    `userID`              INT          NOT NULL,
+    `phoneNumber`         VARCHAR(20)  NOT NULL,
+    `isVerified`          TINYINT(1)   NOT NULL DEFAULT 0,
+    `verificationCode`    VARCHAR(10)  DEFAULT NULL,
+    `verificationExpires` DATETIME     DEFAULT NULL,
+    `categories`          VARCHAR(255) NOT NULL DEFAULT 'critical_alerts',
+    `updatedAt`           DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`preferenceID`),
+    UNIQUE KEY `uq_sp_site_user` (`siteID`, `userID`),
+    CONSTRAINT `fk_sp_site` FOREIGN KEY (`siteID`) REFERENCES `tblSites`(`siteID`),
+    CONSTRAINT `fk_sp_user` FOREIGN KEY (`userID`) REFERENCES `tblUsers`(`userID`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('admin/sms',          'admin/sms/index.php',    1),
+    ('admin/sms/save',     'admin/sms/save.php',     1),
+    ('admin/sms/send',     'admin/sms/send.php',     1),
+    ('account/sms',        'account/sms.php',        1),
+    ('account/sms/verify', 'account/sms-verify.php', 1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'sms.enabled',          '0', '0', 0),
+    (NULL, 'sms.displayName',      'SMS', 'SMS', 0),
+    (NULL, 'sms.displayIcon',      'fa-solid fa-comment-sms', 'fa-solid fa-comment-sms', 0),
+    (NULL, 'sms.provider',         'twilio', 'twilio', 0),
+    (NULL, 'sms.dailyCap',         '100', '100', 0),
+    (NULL, 'sms.fromNumber',       '', '', 0),
+    (NULL, 'sms.twilio.sid',       '', '', 0),
+    (NULL, 'sms.twilio.token',     '', '', 1),
+    (NULL, 'sms.messagebird.apiKey','', '', 1),
+    (NULL, 'sms.aws.accessKey',    '', '', 0),
+    (NULL, 'sms.aws.secret',       '', '', 1),
+    (NULL, 'sms.aws.region',       'eu-west-1', 'eu-west-1', 0)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
+-- =============================================================================
+-- Project fundraising (migration 096, #267)
+-- =============================================================================
+
+CREATE TABLE IF NOT EXISTS `tblProject` (
+    `projectID`         INT          NOT NULL AUTO_INCREMENT,
+    `siteID`            INT          NOT NULL DEFAULT 1,
+    `slug`              VARCHAR(200) NOT NULL,
+    `title`             VARCHAR(255) NOT NULL,
+    `description`       TEXT         DEFAULT NULL,
+    `targetAmountPence` INT          NOT NULL,
+    `currency`          CHAR(3)      NOT NULL DEFAULT 'GBP',
+    `startedAt`         DATE         DEFAULT NULL,
+    `endsAt`            DATE         DEFAULT NULL,
+    `status`            ENUM('planning','active','funded','completed','cancelled') NOT NULL DEFAULT 'planning',
+    `coverImagePath`    VARCHAR(255) DEFAULT NULL,
+    `isPublic`          TINYINT(1)   NOT NULL DEFAULT 1,
+    `createdByID`       INT          DEFAULT NULL,
+    `createdAt`         DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updatedAt`         DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`projectID`),
+    UNIQUE KEY `uq_p_site_slug` (`siteID`, `slug`),
+    KEY `idx_p_status` (`status`),
+    CONSTRAINT `fk_p_site`    FOREIGN KEY (`siteID`)      REFERENCES `tblSites`(`siteID`),
+    CONSTRAINT `fk_p_creator` FOREIGN KEY (`createdByID`) REFERENCES `tblUsers`(`userID`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+CREATE TABLE IF NOT EXISTS `tblProjectPledge` (
+    `pledgeID`     INT          NOT NULL AUTO_INCREMENT,
+    `projectID`    INT          NOT NULL,
+    `donorID`      INT          DEFAULT NULL,
+    `donorName`    VARCHAR(255) DEFAULT NULL,
+    `donorEmail`   VARCHAR(255) DEFAULT NULL,
+    `amountPence`  INT          NOT NULL,
+    `pledgedAt`    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `fulfilledAt`  DATETIME     DEFAULT NULL,
+    `givingEntryID` INT         DEFAULT NULL,
+    `isAnonymous`  TINYINT(1)   NOT NULL DEFAULT 0,
+    `message`      VARCHAR(500) DEFAULT NULL,
+    PRIMARY KEY (`pledgeID`),
+    KEY `idx_pp_project` (`projectID`),
+    KEY `idx_pp_donor`   (`donorID`),
+    CONSTRAINT `fk_pp_project` FOREIGN KEY (`projectID`) REFERENCES `tblProject`(`projectID`) ON DELETE CASCADE,
+    CONSTRAINT `fk_pp_donor`   FOREIGN KEY (`donorID`)   REFERENCES `tblUsers`(`userID`)     ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+CREATE TABLE IF NOT EXISTS `tblProjectUpdate` (
+    `updateID`   INT      NOT NULL AUTO_INCREMENT,
+    `projectID`  INT      NOT NULL,
+    `postedByID` INT      DEFAULT NULL,
+    `postedAt`   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `content`    TEXT     NOT NULL,
+    PRIMARY KEY (`updateID`),
+    KEY `idx_pu_project_date` (`projectID`, `postedAt`),
+    CONSTRAINT `fk_pu_project` FOREIGN KEY (`projectID`)  REFERENCES `tblProject`(`projectID`) ON DELETE CASCADE,
+    CONSTRAINT `fk_pu_poster`  FOREIGN KEY (`postedByID`) REFERENCES `tblUsers`(`userID`)     ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('projects',              'projects/index.php',         0),
+    ('projects/view',         'projects/view.php',          0),
+    ('projects/pledge',       'projects/pledge.php',        0),
+    ('projects/manage',       'projects/manage.php',        1),
+    ('projects/manage-save',  'projects/manage-save.php',   1),
+    ('projects/update-post',  'projects/update-post.php',   1),
+    ('projects/fulfil',       'projects/fulfil.php',        1),
+    ('projects/my-pledges',   'projects/my-pledges.php',    1),
+    ('projects/contributors', 'projects/contributors.php',  0)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'projects.enabled',     '0', '0', 0),
+    (NULL, 'projects.displayName', 'Projects', 'Projects', 0),
+    (NULL, 'projects.displayIcon', 'fa-solid fa-bullseye', 'fa-solid fa-bullseye', 0),
+    (NULL, 'projects.currency',    'GBP', 'GBP', 0)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
+-- =============================================================================
+-- Payment processor (migration 097, #268)
+-- =============================================================================
+
+CREATE TABLE IF NOT EXISTS `tblPaymentMethod` (
+    `methodID`        INT          NOT NULL AUTO_INCREMENT,
+    `siteID`          INT          NOT NULL DEFAULT 1,
+    `userID`          INT          NOT NULL,
+    `provider`        ENUM('stripe','paypal','gocardless') NOT NULL,
+    `customerRef`     VARCHAR(100) DEFAULT NULL,
+    `methodRef`       VARCHAR(100) NOT NULL,
+    `label`           VARCHAR(100) DEFAULT NULL,
+    `isDefault`       TINYINT(1)   NOT NULL DEFAULT 0,
+    `createdAt`       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`methodID`),
+    UNIQUE KEY `uq_pm_method` (`provider`, `methodRef`),
+    KEY `idx_pm_user`   (`userID`),
+    CONSTRAINT `fk_pm_site` FOREIGN KEY (`siteID`) REFERENCES `tblSites`(`siteID`),
+    CONSTRAINT `fk_pm_user` FOREIGN KEY (`userID`) REFERENCES `tblUsers`(`userID`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+CREATE TABLE IF NOT EXISTS `tblPayment` (
+    `paymentID`        INT          NOT NULL AUTO_INCREMENT,
+    `siteID`           INT          NOT NULL DEFAULT 1,
+    `userID`           INT          DEFAULT NULL,
+    `provider`         ENUM('stripe','paypal','gocardless') NOT NULL,
+    `providerRef`      VARCHAR(100) NOT NULL,
+    `idempotencyKey`   VARCHAR(80)  DEFAULT NULL,
+    `amountPence`      INT          NOT NULL,
+    `feePence`         INT          DEFAULT NULL,
+    `currency`         CHAR(3)      NOT NULL DEFAULT 'GBP',
+    `status`           ENUM('pending','succeeded','failed','refunded') NOT NULL DEFAULT 'pending',
+    `purpose`          ENUM('giving','pledge','membership','other') NOT NULL DEFAULT 'other',
+    `purposeRef`       VARCHAR(100) DEFAULT NULL,
+    `isRecurring`      TINYINT(1)   NOT NULL DEFAULT 0,
+    `errorMsg`         VARCHAR(255) DEFAULT NULL,
+    `occurredAt`       DATETIME     DEFAULT NULL,
+    `createdAt`        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`paymentID`),
+    UNIQUE KEY `uq_pay_provider_ref` (`provider`, `providerRef`),
+    KEY `idx_pay_site_date` (`siteID`, `createdAt`),
+    KEY `idx_pay_user`      (`userID`),
+    KEY `idx_pay_purpose`   (`purpose`, `purposeRef`),
+    CONSTRAINT `fk_pay_site` FOREIGN KEY (`siteID`) REFERENCES `tblSites`(`siteID`),
+    CONSTRAINT `fk_pay_user` FOREIGN KEY (`userID`) REFERENCES `tblUsers`(`userID`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+CREATE TABLE IF NOT EXISTS `tblWebhookEvent` (
+    `eventID`     INT          NOT NULL AUTO_INCREMENT,
+    `provider`    VARCHAR(30)  NOT NULL,
+    `eventType`   VARCHAR(100) NOT NULL,
+    `providerRef` VARCHAR(100) DEFAULT NULL,
+    `payload`     MEDIUMTEXT   DEFAULT NULL,
+    `verified`    TINYINT(1)   NOT NULL DEFAULT 0,
+    `handledAt`   DATETIME     DEFAULT NULL,
+    `errorMsg`    VARCHAR(255) DEFAULT NULL,
+    `receivedAt`  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`eventID`),
+    UNIQUE KEY `uq_we_provider_ref` (`provider`, `providerRef`),
+    KEY `idx_we_received` (`receivedAt`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('payments',                      'payments/index.php',           1),
+    ('payments/save',                 'payments/save.php',            1),
+    ('payments/refund',               'payments/refund.php',          1),
+    ('payments/checkout',             'payments/checkout.php',        1),
+    ('payments/return',               'payments/return.php',          1),
+    ('payments/webhook',              'payments/webhook.php',         0),
+    ('account/payment-methods',       'account/payment-methods.php',  1),
+    ('account/payment-methods/delete','account/pm-delete.php',        1),
+    ('account/recurring',             'account/recurring.php',        1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'payments.enabled',           '0', '0', 0),
+    (NULL, 'payments.displayName',       'Payments', 'Payments', 0),
+    (NULL, 'payments.displayIcon',       'fa-solid fa-credit-card', 'fa-solid fa-credit-card', 0),
+    (NULL, 'payments.provider',          'stripe', 'stripe', 0),
+    (NULL, 'payments.test_mode',         '1', '1', 0),
+    (NULL, 'payments.currency',          'GBP', 'GBP', 0),
+    (NULL, 'payments.stripe.publishable','', '', 0),
+    (NULL, 'payments.stripe.secret',     '', '', 1),
+    (NULL, 'payments.stripe.webhookSecret','', '', 1),
+    (NULL, 'payments.paypal.clientId',   '', '', 0),
+    (NULL, 'payments.paypal.secret',     '', '', 1),
+    (NULL, 'payments.gocardless.token',  '', '', 1),
+    (NULL, 'payments.gocardless.webhookSecret','', '', 1)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
