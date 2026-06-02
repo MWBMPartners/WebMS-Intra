@@ -66,9 +66,20 @@ $host = $_SERVER['HTTP_HOST'] ?? 'portal';
                 https://<?php echo htmlspecialchars($host, ENT_QUOTES, 'UTF-8'); ?>/calendar.ics?token=<?php echo htmlspecialchars($newToken, ENT_QUOTES, 'UTF-8'); ?>
             </code>
         </div>
-        <p class="mt-2 small mb-0">
-            <strong>To use it:</strong> copy the URL above, then in your calendar app add a new subscription / iCal feed using this URL.
-        </p>
+        <div class="row g-3 mt-2">
+            <div class="col-md-8">
+                <p class="small mb-0">
+                    <strong>To use it:</strong> copy the URL above, then in your calendar app add a new subscription / iCal feed using this URL.
+                </p>
+            </div>
+            <div class="col-md-4 text-center">
+                <?php
+                $feedUrl = 'https://' . ($_SERVER['HTTP_HOST'] ?? 'portal') . '/calendar.ics?token=' . $newToken;
+                ?>
+                <p class="small text-muted mb-1">Scan on a phone:</p>
+                <object data="/qr?content=<?php echo urlencode($feedUrl); ?>&size=160" type="image/svg+xml" style="max-width:160px"></object>
+            </div>
+        </div>
     </div>
 <?php endif; ?>
 

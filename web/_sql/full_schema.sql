@@ -3108,3 +3108,171 @@ INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
     ('admin/captcha',      'admin/captcha/index.php', 1),
     ('admin/captcha/save', 'admin/captcha/save.php',  1)
 ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('084_reading_plans.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+CREATE TABLE IF NOT EXISTS `tblReadingPlan` (
+    `planID`       INT          NOT NULL AUTO_INCREMENT,
+    `siteID`       INT          NOT NULL DEFAULT 1,
+    `slug`         VARCHAR(100) NOT NULL,
+    `name`         VARCHAR(255) NOT NULL,
+    `description`  TEXT         DEFAULT NULL,
+    `kind`         ENUM('bible','book','curriculum','custom') NOT NULL DEFAULT 'bible',
+    `totalDays`    INT          NOT NULL DEFAULT 365,
+    `isPublic`     TINYINT(1)   NOT NULL DEFAULT 1,
+    `createdByID`  INT          DEFAULT NULL,
+    `createdAt`    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`planID`),
+    UNIQUE KEY `uq_rp_slug_site` (`slug`, `siteID`),
+    KEY `idx_rp_site_kind` (`siteID`, `kind`),
+    CONSTRAINT `fk_rp_site` FOREIGN KEY (`siteID`) REFERENCES `tblSites` (`siteID`),
+    CONSTRAINT `fk_rp_creator` FOREIGN KEY (`createdByID`) REFERENCES `tblUsers` (`userID`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+CREATE TABLE IF NOT EXISTS `tblReadingPlanDay` (
+    `dayID`     INT          NOT NULL AUTO_INCREMENT,
+    `planID`    INT          NOT NULL,
+    `dayNumber` INT          NOT NULL,
+    `label`     VARCHAR(255) NOT NULL,
+    `content`   TEXT         DEFAULT NULL,
+    PRIMARY KEY (`dayID`),
+    UNIQUE KEY `uq_rpd_plan_day` (`planID`, `dayNumber`),
+    CONSTRAINT `fk_rpd_plan` FOREIGN KEY (`planID`) REFERENCES `tblReadingPlan` (`planID`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+CREATE TABLE IF NOT EXISTS `tblReadingPlanEnrollment` (
+    `enrollmentID` INT      NOT NULL AUTO_INCREMENT,
+    `planID`       INT      NOT NULL,
+    `userID`       INT      NOT NULL,
+    `startedAt`    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `completedAt`  DATETIME DEFAULT NULL,
+    `currentDay`   INT      NOT NULL DEFAULT 1,
+    PRIMARY KEY (`enrollmentID`),
+    UNIQUE KEY `uq_rpe_plan_user` (`planID`, `userID`),
+    KEY `idx_rpe_user` (`userID`),
+    CONSTRAINT `fk_rpe_plan` FOREIGN KEY (`planID`) REFERENCES `tblReadingPlan` (`planID`) ON DELETE CASCADE,
+    CONSTRAINT `fk_rpe_user` FOREIGN KEY (`userID`) REFERENCES `tblUsers` (`userID`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+CREATE TABLE IF NOT EXISTS `tblReadingPlanProgress` (
+    `progressID`   INT      NOT NULL AUTO_INCREMENT,
+    `enrollmentID` INT      NOT NULL,
+    `dayNumber`    INT      NOT NULL,
+    `completedAt`  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`progressID`),
+    UNIQUE KEY `uq_rpp_enrollment_day` (`enrollmentID`, `dayNumber`),
+    CONSTRAINT `fk_rpp_enrollment` FOREIGN KEY (`enrollmentID`) REFERENCES `tblReadingPlanEnrollment` (`enrollmentID`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+INSERT INTO `tblReadingPlan` (`siteID`, `slug`, `name`, `description`, `kind`, `totalDays`, `isPublic`) VALUES
+    (1, 'bible-in-a-year',     'Bible in a Year',       'Read the whole Bible over 365 days, roughly 3-4 chapters per day.', 'bible', 365, 1),
+    (1, 'bible-chronological', 'Bible Chronologically', 'Read the Bible in the order events occurred.', 'bible', 365, 1)
+ON DUPLICATE KEY UPDATE `name` = VALUES(`name`);
+
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('reading-plans',          'reading-plans/index.php',  1),
+    ('reading-plans/my',       'reading-plans/my.php',     1),
+    ('reading-plans/plan',     'reading-plans/plan.php',   1),
+    ('reading-plans/enroll',   'reading-plans/enroll.php', 1),
+    ('reading-plans/check',    'reading-plans/check.php',  1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'reading_plans.enabled',          '0', '0', 0),
+    (NULL, 'reading_plans.daily_reminder',   '1', '1', 0),
+    (NULL, 'reading_plans.displayName',      'Reading Plans', 'Reading Plans', 0),
+    (NULL, 'reading_plans.displayIcon',      'fa-solid fa-book-open', 'fa-solid fa-book-open', 0)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('085_qr.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('qr',                  'qr.php',                        1),
+    ('admin/settings/qr',   'admin/settings/qr/index.php',   1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'portal.qr.provider',              'local', 'local', 0),
+    (NULL, 'portal.qr.cuercode.api_endpoint', '',      '',      0),
+    (NULL, 'portal.qr.cuercode.api_key',      '',      '',      1)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('086_invites.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+CREATE TABLE IF NOT EXISTS `tblInvitation` (
+    `invitationID`  INT          NOT NULL AUTO_INCREMENT,
+    `siteID`        INT          NOT NULL DEFAULT 1,
+    `email`         VARCHAR(255) NOT NULL,
+    `tokenHash`     CHAR(64)     NOT NULL,
+    `intendedRole`  VARCHAR(64)  DEFAULT NULL,
+    `welcomeMessage` TEXT        DEFAULT NULL,
+    `expiresAt`     DATETIME     NOT NULL,
+    `acceptedAt`    DATETIME     DEFAULT NULL,
+    `acceptedByID`  INT          DEFAULT NULL,
+    `revokedAt`     DATETIME     DEFAULT NULL,
+    `revokedByID`   INT          DEFAULT NULL,
+    `createdByID`   INT          NOT NULL,
+    `createdAt`     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`invitationID`),
+    UNIQUE KEY `uq_invite_token` (`tokenHash`),
+    KEY `idx_invite_site_email` (`siteID`, `email`),
+    KEY `idx_invite_status` (`acceptedAt`, `revokedAt`, `expiresAt`),
+    CONSTRAINT `fk_invite_site` FOREIGN KEY (`siteID`) REFERENCES `tblSites` (`siteID`),
+    CONSTRAINT `fk_invite_accepted_user` FOREIGN KEY (`acceptedByID`) REFERENCES `tblUsers` (`userID`) ON DELETE SET NULL,
+    CONSTRAINT `fk_invite_revoked_user`  FOREIGN KEY (`revokedByID`)  REFERENCES `tblUsers` (`userID`) ON DELETE SET NULL,
+    CONSTRAINT `fk_invite_creator`       FOREIGN KEY (`createdByID`)  REFERENCES `tblUsers` (`userID`) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('invites',         'invites/index.php',        1),
+    ('invites/new',     'invites/new.php',          1),
+    ('invites/save',    'invites/save.php',         1),
+    ('invites/revoke',  'invites/revoke.php',       1),
+    ('auth/invite',     'invites/accept.php',       0)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'invites.enabled',           '0',  '0',  0),
+    (NULL, 'invites.default_expiry_days','7',  '7',  0),
+    (NULL, 'invites.default_role',      'user','user',0),
+    (NULL, 'invites.displayName',       'Invitations', 'Invitations', 0),
+    (NULL, 'invites.displayIcon',       'fa-solid fa-envelope-open-text', 'fa-solid fa-envelope-open-text', 0)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('087_offboarding.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+CREATE TABLE IF NOT EXISTS `tblOffboarding` (
+    `offboardingID`  INT          NOT NULL AUTO_INCREMENT,
+    `userID`         INT          NOT NULL,
+    `effectiveDate`  DATE         NOT NULL,
+    `reason`         VARCHAR(500) DEFAULT NULL,
+    `dataDisposition` ENUM('retain','anonymise','delete') NOT NULL DEFAULT 'retain',
+    `offboardedByID` INT          NOT NULL,
+    `offboardedAt`   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `rehiredAt`      DATETIME     DEFAULT NULL,
+    `rehiredByID`    INT          DEFAULT NULL,
+    `stepsLog`       JSON         DEFAULT NULL,
+    PRIMARY KEY (`offboardingID`),
+    KEY `idx_offboard_user` (`userID`),
+    CONSTRAINT `fk_offboard_user`         FOREIGN KEY (`userID`)         REFERENCES `tblUsers`(`userID`) ON DELETE CASCADE,
+    CONSTRAINT `fk_offboard_by`           FOREIGN KEY (`offboardedByID`) REFERENCES `tblUsers`(`userID`) ON DELETE RESTRICT,
+    CONSTRAINT `fk_offboard_rehired_by`   FOREIGN KEY (`rehiredByID`)    REFERENCES `tblUsers`(`userID`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('offboarding',         'offboarding/index.php',     1),
+    ('offboarding/user',    'offboarding/user.php',      1),
+    ('offboarding/do',      'offboarding/do.php',        1),
+    ('offboarding/rehire',  'offboarding/rehire.php',    1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'offboarding.enabled',          '0',  '0',  0),
+    (NULL, 'offboarding.undo_window_days', '7',  '7',  0),
+    (NULL, 'offboarding.displayName',      'Offboarding', 'Offboarding', 0),
+    (NULL, 'offboarding.displayIcon',      'fa-solid fa-door-open', 'fa-solid fa-door-open', 0)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
