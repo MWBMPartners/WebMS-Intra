@@ -71,12 +71,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && Auth::verifyCsrf($_POST['csrf_token
 
 // Other users (excluding self) for the dropdown
 $users = [];
-$rs = $db->query('SELECT userID, fullName FROM tblUsers WHERE userID <> ' . $userId . ' AND isActive = 1 ORDER BY fullName');
-if ($rs !== false) {
+$uStmt = $db->prepare('SELECT userID, fullName FROM tblUsers WHERE userID <> ? AND isActive = 1 ORDER BY fullName');
+if ($uStmt !== false) {
+    $uStmt->bind_param('i', $userId);
+    $uStmt->execute();
+    $rs = $uStmt->get_result();
     while ($r = $rs->fetch_assoc()) {
         $users[] = $r;
     }
-    $rs->free();
+    $uStmt->close();
 }
 
 $pageTitle   = 'Request Swap';
