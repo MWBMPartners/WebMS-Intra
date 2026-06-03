@@ -20,6 +20,7 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Asset;
+use Portal\Core\Auth;
 use Portal\Core\Debug;
 use Portal\Core\Site;
 
@@ -127,59 +128,6 @@ if ($cookieBannerEnabled === true && isset($_COOKIE['portal_consent_cookies']) =
 if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(function () {});
 }
-</script>
-
-<!-- 🍪 Cookie consent banner (#224). UK ICO compliance.
-     Banner only renders client-side when no consent cookie is present.
-     Storage: consent cookie (12-month expiry) with categories: essential
-     (always on), functional, analytics. Granular page at /privacy/consent. -->
-<div id="portalCookieBanner"
-     class="portal-cookie-banner d-none"
-     role="dialog"
-     aria-label="Cookie consent"
-     style="position:fixed;bottom:0;left:0;right:0;z-index:1050;padding:1rem;background:var(--bs-body-bg);border-top:1px solid var(--bs-border-color);box-shadow:0 -4px 12px rgba(0,0,0,0.08);">
-    <div class="container d-flex flex-column flex-md-row align-items-md-center gap-3">
-        <div class="flex-grow-1 small">
-            <strong>Cookies.</strong> We use essential cookies to sign you in and remember preferences.
-            Optional cookies help us improve the portal. See our
-            <a href="/privacy/consent">consent settings</a> or our
-            <a href="/privacy">privacy notice</a>.
-        </div>
-        <div class="d-flex gap-2 flex-shrink-0">
-            <button type="button" class="btn btn-outline-secondary btn-sm" data-cookie-action="essential">Essential only</button>
-            <button type="button" class="btn btn-primary btn-sm" data-cookie-action="all">Accept all</button>
-        </div>
-    </div>
-</div>
-<script nonce="<?php echo htmlspecialchars(\Portal\Core\App::cspNonce(), ENT_QUOTES, 'UTF-8'); ?>">
-(function () {
-    var name = 'portal_consent';
-    var existing = document.cookie.split(';').some(function (c) {
-        return c.trim().indexOf(name + '=') === 0;
-    });
-    if (existing === true) {
-        return;
-    }
-    var banner = document.getElementById('portalCookieBanner');
-    if (banner === null) {
-        return;
-    }
-    banner.classList.remove('d-none');
-    function setConsent(level) {
-        // 12-month expiry
-        var d = new Date();
-        d.setTime(d.getTime() + (365 * 24 * 60 * 60 * 1000));
-        document.cookie = name + '=' + encodeURIComponent(level)
-                        + '; expires=' + d.toUTCString()
-                        + '; path=/; SameSite=Lax; Secure';
-        banner.classList.add('d-none');
-    }
-    banner.querySelectorAll('[data-cookie-action]').forEach(function (btn) {
-        btn.addEventListener('click', function () {
-            setConsent(btn.getAttribute('data-cookie-action'));
-        });
-    });
-})();
 </script>
 
 </body>

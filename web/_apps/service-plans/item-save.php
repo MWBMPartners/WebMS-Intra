@@ -49,10 +49,13 @@ try {
         }
         // Find next position.
         $next = 1;
-        $rs = $db->query('SELECT COALESCE(MAX(position), 0) + 1 AS next FROM tblServicePlanItem WHERE planID = ' . $planId);
-        if ($rs !== false) {
-            $next = (int) $rs->fetch_assoc()['next'];
-            $rs->free();
+        $nextStmt = $db->prepare('SELECT COALESCE(MAX(position), 0) + 1 AS next FROM tblServicePlanItem WHERE planID = ?');
+        if ($nextStmt !== false) {
+            $nextStmt->bind_param('i', $planId);
+            $nextStmt->execute();
+            $row = $nextStmt->get_result()->fetch_assoc();
+            $next = (int) ($row['next'] ?? 1);
+            $nextStmt->close();
         }
         $stmt = $db->prepare(
             'INSERT INTO tblServicePlanItem (planID, sectionType, position, title) VALUES (?, ?, ?, ?)'

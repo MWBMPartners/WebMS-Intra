@@ -67,8 +67,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && Auth::verifyCsrf($_POST['csrf_token
 }
 
 $rows = [];
-$rs = $db->query('SELECT roleTypeID, name, description, colorHex FROM tblRotaRoleType WHERE siteID = ' . $siteId . ' ORDER BY name');
-if ($rs !== false) {
+$rtStmt = $db->prepare('SELECT roleTypeID, name, description, colorHex FROM tblRotaRoleType WHERE siteID = ? ORDER BY name');
+if ($rtStmt !== false) {
+    $rtStmt->bind_param('i', $siteId);
+    $rtStmt->execute();
+    $rs = $rtStmt->get_result();
     while ($r = $rs->fetch_assoc()) {
         $rows[] = $r;
     }
