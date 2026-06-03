@@ -4,7 +4,11 @@
 > [CHANGELOG.md](CHANGELOG.md) for chronological history and to [README.md](README.md)
 > for setup, deployment, and licence info.
 >
-> **Snapshot:** 2026-05-22 · **Version on `main`:** 0.11.0
+> **Snapshot:** 2026-06-03 · **Version on `main`:** 1.2.0
+> · **Major recent landings:** waves 3/4/5 apps (~16 new apps),
+> `_apps/` defence-in-depth refactor (#159), nonce-based CSP (#144),
+> external error monitor (#143), PWA offline write queue (#233),
+> REST API write-side CRUD (#157).
 > · **In-flight branches:** `feat/calendar-view-modes` (PR #137),
 > `feat/calendar-themes-and-display-style` (PR #138)
 
@@ -410,3 +414,92 @@ When these merge, the 🛠️ markers above flip to ✅ without further edits to
 | #106 | Enforce signed commits |
 | #105 | Prod secrets behind GitHub Environment + reviewer gate |
 | #107 | SFTP `--delete` operational documentation (partially addressed by PR #134) |
+
+---
+
+## Waves 3 / 4 / 5 — install-on-demand apps (2026-06)
+
+All apps default `enabled = 0` and toggle per-site via `/admin/apps`. Every app
+ships with a `_core/apps/{slug}.php` config that AppRegistry auto-discovers,
+a `_core/{Slug}.php` helper class, a numbered SQL migration, and route +
+setting seeds.
+
+### Wave 3 (#283) — PR landed 2026-06-02
+
+| App | Issue | Migration | Status |
+|---|---|---|---|
+| Reading Plans (Bible-in-a-year, chronological, streak counter) | #265 | 084 | ✅ |
+| QR generator + CueRCode adapter slot | #275 | 085 | ✅ (CueRCode hash empty pending its public API) |
+| Invite-based onboarding (SHA-256 hashed tokens, public acceptance route) | #239 | 086 | ✅ |
+| One-click offboarding (7-step atomic revocation + 7-day rehire window) | #240 | 087 | ✅ |
+
+### Wave 4 (#284) — PR landed 2026-06-02
+
+| App | Issue | Migration | Status |
+|---|---|---|---|
+| Resources (room/asset booking with overlap conflict detection) | #263 | 088 | ✅ |
+| Service Plans (run-sheet builder, printable) | #262 | 089 | ✅ |
+| Livestream (YouTube/Vimeo/Twitch/Facebook embed + countdown) | #273 | 090 | ✅ |
+| Recordings (RSS podcast feed + HTTP Range streaming + FULLTEXT search) | #264 | 091 | ✅ |
+| Zoom (OAuth, meeting creation from calendar, webhook HMAC) | #274 | 092 | ✅ |
+| Newsletter (composer with auto-pulled content blocks, provider abstraction → MailerMatt slot) | #269 | 093 | ✅ |
+| Giving (tithe log, Gift Aid digital declaration, HMRC schedule CSV, year-end PDF) | #266 | 094 | ✅ |
+| SMS (Twilio + MessageBird + SigV4-signed AWS SNS; verification + per-category opt-in + Sabbath quiet hours) | #272 | 095 | ✅ |
+| Projects (public fundraising page, pledge thermometer, captcha-gated anonymous pledges) | #267 | 096 | ✅ |
+| Payments (Stripe Checkout + v1 HMAC webhook + refund; side-effects into Giving/Projects) | #268 | 097 | ✅ |
+
+### Wave 5 (#285) — PR landed 2026-06-03
+
+| Item | Issue | Migration | Status |
+|---|---|---|---|
+| Transcription (Whisper / AssemblyAI / local; FULLTEXT search; click-to-timestamp) | #276 | 098 | ✅ |
+| Translation (Anthropic / OpenAI / Google / DeepL / LibreTranslate; content-addressable cache) | #278 | 099 | ✅ |
+| AI Assist (Anthropic / OpenAI / ollama; editable prompt templates; cap + daily limit + audit) | #277 | 100 | ✅ |
+| GDPR Article 17 erasure engine (19-table catalogue, sealed audit chain, 1-month SLA queue) | #235 | 101 | ✅ |
+| Photos (4-tier visibility, moderation queue, EXIF-aware GD re-encode for non-privileged downloads) | #236 | 102 | ✅ |
+| Off-site backup (weekly AES-256-CBC to rclone/S3/SFTP) | #249 | 103 | ✅ |
+| Disaster-recovery runbook + `/help/disaster-recovery` | #250 | 104 | ✅ |
+| CDN SRI audit script + Asset helpers for Sortable + Swagger UI | #161 | — | ✅ (4 hashes empty pending curl-and-fill) |
+| End-to-end MySQL migration test harness (docker-compose 8.0.36 + 3-phase script) | #248 | — | ✅ (Docker required to actually run) |
+| Static mobile readiness audit + worksheet (29 fix targets surfaced) | #225 | — | ✅ (device walk-through still needs hardware) |
+
+### Post-wave-5 hardening (PRs #286-#293, 2026-06-03)
+
+| Item | Issue | PR | Status |
+|---|---|---|---|
+| Rename-aftermath doc sweep (README, CLAUDE.md, DEV_NOTES, full_schema header) | #189, #182, #183, #194, #190, #191, #192, #193 | #286 | ✅ |
+| `auto-merge-alpha.yml` verification (0 runs — workflow correct, awaiting first alpha PR) | #147 | #287 | ✅ |
+| App controllers moved from `public_html/` into `_apps/` outside the webroot | #159 | #288 | ✅ |
+| Nonce-based CSP `script-src` tightening + `App::cspNonce()` | #144 | #289 | ✅ |
+| External error monitor — `Portal\Core\ErrorMonitor` adapter for Sentry / GlitchTip | #143 | #290 | ✅ |
+| REST API write-side CRUD: Announcements / Tasks / Prayer Requests / Leadership (10 new endpoints) | #157 | #291 | 🟡 (Documents / Attendance / Expenses deferred) |
+| PWA offline write queue + sync-on-reconnect (`Portal.OfflineQueue` IndexedDB module + `/account/offline-queue`) | #233 | #292 | ✅ |
+| Codebase audit sweep — duplicate cookie banner removed; missing `Auth` import fixed; 6 SQL int-concat queries → prepared statements | — | #293 | ✅ |
+
+---
+
+## Audit scripts (`tools/audit-checks/`)
+
+CI-runnable static audits invoked from PHP-static-analysis workflow:
+
+| Script | What it catches |
+|---|---|
+| `check_route_targets.py` | `tblRoutes.targetFile` pointing at a non-existent file |
+| `check_sql_columns.py` | INSERT/UPDATE/SELECT referencing a column not in `full_schema.sql` |
+| `check_no_native_confirm.py` | Inline `confirm()` calls bypassing `Portal.Confirm` modal |
+| `check_settings_keys.py` | Code reading a setting key not seeded in any migration |
+| `check_cdn_sri.py` | `<script>`/`<link>` to a known CDN host without `integrity=` |
+| `check_migration_idempotency.py` | DDL without `IF NOT EXISTS` / inserts without `ON DUPLICATE KEY UPDATE` |
+| `check_mobile_readiness.py` | Hard-coded widths > 320 px, bare `<table>`, missing `accept=`, modal without `modal-fullscreen-sm-down` |
+
+Audit pass status as of 2026-06-03: **0 missing routes · 0 column mismatches · 0 native confirms · 0 CDN tags without SRI**. Mobile readiness reports 29 informational findings (concrete fix targets); migration idempotency reports 19 historical (pre-multi-site cohort, already deployed and Migrator-protected).
+
+---
+
+## Infrastructure helpers (`tools/`)
+
+| Path | Purpose |
+|---|---|
+| `tools/audit-checks/` | Static-analysis scripts (above) |
+| `tools/e2e-migrations/` | docker-compose MySQL 8.0.36 + `run.sh` 3-phase migration smoke test (#248) |
+| `tools/offsite-backup/` | Reference `sync-offsite.sh` + `log-offsite-result.php` (admin copies into gitignored `web/_backups/`) (#249) |
