@@ -86,7 +86,26 @@ header('X-Frame-Options: SAMEORIGIN');
 header('Referrer-Policy: strict-origin-when-cross-origin');
 header('Permissions-Policy: camera=(), microphone=(), geolocation=()');
 header('Strict-Transport-Security: max-age=63072000; includeSubDomains; preload');
-header("Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; font-src 'self' https://cdnjs.cloudflare.com; img-src 'self' data:; connect-src 'self'; frame-src https://challenges.cloudflare.com; base-uri 'self'; form-action 'self'");
+// 🔐 Content Security Policy (#144 — nonce-based tightening).
+//    Per-request nonce on script-src so modern browsers strictly enforce
+//    the nonce against inline <script> tags (XSS-injected ones lacking
+//    the matching nonce are refused). 'unsafe-inline' kept as a
+//    fallback for browsers that don't understand nonces — CSP3 specifies
+//    that nonce overrides 'unsafe-inline' on supporting browsers, so
+//    this is purely additive defence-in-depth.
+//
+//    style-src retains 'unsafe-inline' for now — style nonce-ing is a
+//    larger refactor scoped as a follow-up to #144.
+$csp_nonce = \Portal\Core\App::cspNonce();
+header("Content-Security-Policy: default-src 'self'; "
+    . "script-src 'self' 'nonce-{$csp_nonce}' 'unsafe-inline' https://cdn.jsdelivr.net https://challenges.cloudflare.com; "
+    . "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; "
+    . "font-src 'self' https://cdnjs.cloudflare.com; "
+    . "img-src 'self' data:; "
+    . "connect-src 'self'; "
+    . "frame-src https://challenges.cloudflare.com; "
+    . "base-uri 'self'; "
+    . "form-action 'self'");
 
 // 🎨 Determine initial theme from localStorage (handled by JS, default light)
 ?>
@@ -134,7 +153,7 @@ header("Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-i
     <?php echo Asset::portalCss(); ?>
 
     <!-- 🌙 Prevent FOUC: apply saved theme + accessibility prefs before paint -->
-    <script>
+    <script nonce="<?php echo htmlspecialchars(\Portal\Core\App::cspNonce(), ENT_QUOTES, 'UTF-8'); ?>">
     (function(){
         var html = document.documentElement;
         // Theme: 'light' / 'dark' / 'auto' (or null/missing = 'auto' default).
