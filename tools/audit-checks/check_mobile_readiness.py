@@ -52,13 +52,44 @@ HEADER_TEMPLATE = REPO_ROOT / "web" / "_core" / "templates" / "header.php"
 
 # Hard-coded large pixel widths inside style="…" or width="NNN" attrs.
 # We skip values <= 320 (a CSS-pixel iPhone fits 320, so smaller is fine).
+# Crucial: (?<![\w-]) blocks matches inside `max-width` and `min-width` —
+# those are responsive and don't overflow.
 WIDTH_PX_RE = re.compile(
-    r'(?:style="[^"]*\bwidth\s*:\s*(\d{3,})\s*px|width\s*=\s*["\']?(\d{3,})["\']?)',
+    r'(?:style="[^"]*(?<![\w-])width\s*:\s*(\d{3,})\s*px|(?<![\w-])width\s*=\s*["\']?(\d{3,})["\']?)',
     re.IGNORECASE,
 )
 
 # Bare <table> not preceded within ~120 chars by .table-responsive.
 TABLE_RE = re.compile(r"<table\b[^>]*>", re.IGNORECASE)
+
+# Skip <table> matches that fall inside an HTML comment, a PHP doc /
+# line comment, or a PHP string literal — these are mentions, not
+# rendered tags.
+HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
+PHP_BLOCK_COMMENT_RE = re.compile(r"/\*.*?\*/", re.DOTALL)
+PHP_LINE_COMMENT_RE  = re.compile(r"//[^\n]*")
+
+
+def is_inside_excluded_range(text: str, offset: int) -> bool:
+    """Return True if offset falls inside an HTML comment, PHP comment,
+    or a PHP-emitted string literal (e.g. `. '<table…'`)."""
+    for pat in (HTML_COMMENT_RE, PHP_BLOCK_COMMENT_RE, PHP_LINE_COMMENT_RE):
+        for m in pat.finditer(text):
+            if m.start() <= offset < m.end():
+                return True
+    # PHP string literal containing the tag (preceded by . ' or = ' or , ').
+    # Walk back ≤120 chars looking for an unmatched opening quote.
+    window_start = max(0, offset - 200)
+    window = text[window_start:offset]
+    # Strip away PHP heredoc markers (rare in this codebase) and count
+    # unescaped single quotes.
+    single = sum(1 for i, ch in enumerate(window) if ch == "'" and (i == 0 or window[i - 1] != "\\"))
+    if single % 2 == 1:
+        return True
+    double = sum(1 for i, ch in enumerate(window) if ch == '"' and (i == 0 or window[i - 1] != "\\"))
+    if double % 2 == 1:
+        return True
+    return False
 RESPONSIVE_WRAP_RE = re.compile(r"table-responsive", re.IGNORECASE)
 
 # File inputs without accept/capture hints.
@@ -120,6 +151,19 @@ def scan_file(path: Path) -> list[tuple[int, str]]:
 
     # Bare tables.
     for m in TABLE_RE.finditer(text):
+        # Skip matches inside HTML/PHP comments or PHP string literals
+        # (mentions of <table>, not rendered tags).
+        if is_inside_excluded_range(text, m.start()) is True:
+            continue
+        # Skip lines that look like PHP string concatenation emitting
+        # email-template HTML (`. '<table…'`). The audit's quote-pairity
+        # falls down on multi-string concatenated payloads; this catches
+        # the common pattern without needing a real PHP tokeniser.
+        line_start = text.rfind('\n', 0, m.start()) + 1
+        line_prefix = text[line_start:m.start()].lstrip()
+        if line_prefix.startswith(". '") or line_prefix.startswith('. "') or \
+           line_prefix.startswith("= '") or line_prefix.startswith('= "'):
+            continue
         # Look back 200 chars for table-responsive wrapper.
         ctx_start = max(0, m.start() - 200)
         ctx = text[ctx_start:m.start()]
