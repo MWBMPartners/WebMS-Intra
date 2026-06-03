@@ -67,6 +67,10 @@ $showPoweredBy = ($hidePoweredBy === false) && (Site::usesCustomBranding() === t
 
 <?php echo Asset::portalJs(); ?>
 
+<!-- 📥 Offline queue (#233) — IndexedDB-backed write buffer for forms with
+     data-offline-queueable. Auto-drains on `online` event + visibilitychange. -->
+<script defer src="/assets/js/portal-offline.js"></script>
+
 <?php
 // 🐛 Debug panel (only renders for admins with ?debug=true)
 echo Debug::renderPanel();
