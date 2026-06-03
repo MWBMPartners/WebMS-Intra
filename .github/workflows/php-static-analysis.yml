@@ -72,6 +72,7 @@ jobs:
           >
               <projectFiles>
                   <directory name="web/_core" />
+                  <directory name="web/_apps" />
                   <directory name="web/public_html" />
                   <directory name="web/_install" />
                   <ignoreFiles>

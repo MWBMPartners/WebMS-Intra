@@ -55,7 +55,7 @@ define('PORTAL_START_TIME', microtime(true));
 define('PORTAL_ROOT', realpath(__DIR__ . DIRECTORY_SEPARATOR . '..'));
 
 define('PORTAL_CORE',   PORTAL_ROOT . DIRECTORY_SEPARATOR . '_core');
-define('PORTAL_APPS',   PORTAL_ROOT . DIRECTORY_SEPARATOR . 'public_html');
+define('PORTAL_APPS',   PORTAL_ROOT . DIRECTORY_SEPARATOR . '_apps');
 define('PORTAL_VENDOR', PORTAL_ROOT . DIRECTORY_SEPARATOR . '_vendor');
 define('PORTAL_SQL',    PORTAL_ROOT . DIRECTORY_SEPARATOR . '_sql');
 

@@ -26,7 +26,7 @@ class ApiRouter
      * 🔌 Dispatch an API request to the appropriate handler.
      *
      * API routes follow the pattern: api/{appName}/{action}
-     * which maps to: public_html/{appName}/api/{action}.php
+     * which maps to: _apps/{appName}/api/{action}.php  (since #159)
      *
      * @param string $path The full API path (e.g. "api/expenses/list")
      * @return void

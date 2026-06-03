@@ -25,7 +25,7 @@ import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-PHP_ROOTS = [REPO_ROOT / "web" / "public_html"]
+PHP_ROOTS = [REPO_ROOT / "web" / "_apps", REPO_ROOT / "web" / "public_html"]
 
 # Match: onsubmit="return confirm(...)"  OR  onclick="return confirm(...)"
 NATIVE_CONFIRM_RE = re.compile(

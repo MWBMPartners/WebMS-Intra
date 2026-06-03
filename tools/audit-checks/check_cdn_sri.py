@@ -29,7 +29,7 @@ import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-SCAN_DIRS = [REPO_ROOT / "web" / "public_html", REPO_ROOT / "web" / "_core"]
+SCAN_DIRS = [REPO_ROOT / "web" / "_apps", REPO_ROOT / "web" / "public_html", REPO_ROOT / "web" / "_core"]
 
 CDN_HOSTS = (
     "cdn.jsdelivr.net",
