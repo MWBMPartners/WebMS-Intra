@@ -1296,6 +1296,52 @@ Use the workflow_dispatch **dry-run** input on `deploy.yml` to preview what
 a deploy would change (and crucially, what it would delete) before pushing.
 See issue #107 for the full rationale and mitigation list.
 
+## End-to-end migration test (#248)
+
+Before each release, run every migration through a real MySQL 8.0.36
+container to catch what the static `check_sql_columns.py` and `check_migration_idempotency.py` audits miss:
+
+- Statement order — a later migration assuming a table a previous one
+  forgot to create.
+- FK constraints that pass static parsing but blow up at runtime on
+  real data shapes.
+- Genuine non-idempotency that the static audit can't model (e.g. a
+  trigger that errors second-time-round).
+
+### Procedure
+
+Requires `docker` + `docker compose` on your local machine.
+
+```bash
+tools/e2e-migrations/run.sh                # all three phases (~30s)
+tools/e2e-migrations/run.sh --skip-stale   # phases 1+2 only
+tools/e2e-migrations/run.sh --keep         # leave container up for poking
+```
+
+The script drives three phases:
+1. **Fresh install** — apply every `web/_sql/NNN_*.sql` in order to an
+   empty DB. Any SQL error fails the run.
+2. **Idempotency** — re-run the same loop. Schema row counts
+   (information_schema.tables/columns/statistics) must be unchanged.
+3. **Stale-DB upgrade** — wipe, apply first half, then apply the rest.
+   Catch-up must reach the same final state as fresh install.
+
+See `tools/e2e-migrations/README.md` for details.
+
+### Static idempotency audit
+
+`tools/audit-checks/check_migration_idempotency.py` is the fast
+first-pass. Flags `CREATE TABLE` without `IF NOT EXISTS`, `ADD COLUMN`
+without `IF NOT EXISTS`, and `INSERT` without `ON DUPLICATE KEY UPDATE`
+or `INSERT IGNORE`. Quote-aware splitter — `;` inside string literals
+and comments doesn't fragment the parse.
+
+Some old migrations (014-018, 037, 043) flag because they used pre-multi-site
+patterns without the `IF NOT EXISTS` clause. These have already run in
+production and the Migrator wrapper skips already-applied files, so
+they're safe. **New migrations must pass cleanly** — drop a non-idempotent
+DDL in a fresh migration and the audit will catch it.
+
 ## Adding a new CDN dependency (#161)
 
 Every `<script>` and `<link>` tag pointing at a third-party CDN MUST carry

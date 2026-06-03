@@ -1,0 +1,25 @@
+# End-to-end migration test harness — see tools/e2e-migrations/run.sh
+# Spins up a disposable MySQL 8.0.36 instance matching the production
+# server's minimum supported version (ADD COLUMN IF NOT EXISTS needs >=8.0.29).
+services:
+  mysql:
+    image: mysql:8.0.36
+    container_name: portal-e2e-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: e2e-root
+      MYSQL_DATABASE: portal_e2e
+      MYSQL_USER: portal
+      MYSQL_PASSWORD: e2e-portal
+    ports:
+      - "33069:3306"  # uncommon host port so we don't clash with local mysql
+    command: >
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_general_ci
+      --default-authentication-plugin=caching_sha2_password
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-pe2e-root"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+    tmpfs:
+      - /var/lib/mysql  # in-memory storage; no persistence between runs
