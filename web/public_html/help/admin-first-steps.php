@@ -162,6 +162,8 @@ endif;
                     <li>Confirm a snapshot directory appears under <code>web/_backups/</code>.</li>
                 </ol>
                 <p>Also wire the backup freshness check to cron (similar to retention) — see <a href="/admin/maintenance/backup-check">/admin/maintenance/backup-check</a>.</p>
+                <p><strong>Print this for the 3am drawer:</strong>
+                <a href="/help/disaster-recovery">/help/disaster-recovery</a> — quick reference + link to the full command-by-command runbook.</p>
             </div>
         </div>
     </div>

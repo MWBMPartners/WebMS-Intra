@@ -36,7 +36,9 @@ Response time = "we've seen it and replied to you". Fix time = "deployed to prod
 
 ## 4. Critical incident path
 
-When a Critical issue is identified:
+When a Critical issue is identified, follow the
+[disaster-recovery runbook](disaster-recovery-runbook.md) — it covers
+the steps below command-by-command.
 
 1. Maintenance mode goes on (`/admin/maintenance` or `portal.maintenance.active = '1'`).
 2. Reporter + congregation notified via a single email blast.

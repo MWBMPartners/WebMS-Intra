@@ -4323,3 +4323,11 @@ INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue
     (NULL, 'backup.offsite.keepMonthly', '12', '12', 0),
     (NULL, 'backup.offsite.alertEmail',  '', '', 0)
 ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
+-- =============================================================================
+-- Disaster-recovery in-portal route (migration 104, #250)
+-- =============================================================================
+
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('help/disaster-recovery', 'help/disaster-recovery.php', 1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
