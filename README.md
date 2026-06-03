@@ -125,7 +125,7 @@ Browser -> .htaccess -> index.php -> bootstrap.php -> Router::dispatch()
 ### Upgrading
 
 1. Upload the updated `web/` files to the server (FTP sync)
-2. Navigate to Admin > Upgrade (or `/install/upgrade.php`)
+2. Navigate to Admin > Upgrade (or `/admin/upgrade.php`)
 3. Review and run any pending SQL migrations
 4. Verify the portal is working correctly
 

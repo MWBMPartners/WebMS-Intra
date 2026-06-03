@@ -20,7 +20,7 @@ repo root/          <- NOT deployed (docs, CI/CD only)
 web/                <- ALL deployable files (synced to server via SFTP)
   _core/            <- Framework classes (Portal\Core namespace, 26 classes)
   _vendor/simplejwt/<- Vendored RS256 JWT verifier
-  _sql/             <- Numbered SQL migrations (000-052 + full_schema.sql)
+  _sql/             <- Numbered SQL migrations (000-104 + full_schema.sql)
   _lang/            <- I18n translation files (en.php, cy.php, …)
   _install/         <- Standalone 6-step installation wizard (bootstrap-free)
   public_html/      <- Web root: ONE front controller + assets + app controllers.
@@ -70,7 +70,7 @@ Calendar/Events/Preaching Plan is ONE app ("Events") — `/calendar` covers view
 - Detailed inline comments with reference links where applicable
 - File header comments must include: file path, description, package, author, copyright (All Rights Reserved), version
 
-## Key Constants (defined in core/bootstrap.php)
+## Key Constants (defined in _core/bootstrap.php)
 
 - `PORTAL_ROOT` -- web/ on server
 - `PORTAL_CORE` -- web/_core/
@@ -117,4 +117,4 @@ When making changes:
 - macOS case-insensitive: use two-step rename for case changes
 - Never commit: `_auth_keys/`, `_uploads/`, `_backups/`, `_libraries/`, `.env`, `*.key`
 - Deploy workflow syncs `web/` only, excluding server-managed dirs
-- Shared dirs (`core/`, `vendor/`, `sql/`, `_includes/`, `_functions/`, `_libraries/`) mirror with `--delete` — manual server-side edits to these dirs vanish on the next deploy (see DEV_NOTES.md → Troubleshooting)
+- Shared dirs (`_core/`, `_vendor/`, `_sql/`, `_includes/`, `_functions/`, `_libraries/`) mirror with `--delete` — manual server-side edits to these dirs vanish on the next deploy (see DEV_NOTES.md → Troubleshooting)

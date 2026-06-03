@@ -13,7 +13,7 @@
 -- present in web/_sql/ are marked as executed in tblMigrations so the
 -- web-based Migrator won't re-run them.
 --
--- Covers migrations: 000-052 (matches the tblMigrations seed block at the
+-- Covers migrations: 000-104 (matches the tblMigrations seed block at the
 -- end of this file — when you add a new migration, also add its filename
 -- to that block and port its DDL/seeds into the appropriate section here).
 -- =============================================================================
