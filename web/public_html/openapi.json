@@ -14,32 +14,62 @@
     }
   },
   "servers": [
-    { "url": "/", "description": "Same-origin (whichever portal is serving this page)" }
+    {
+      "url": "/",
+      "description": "Same-origin (whichever portal is serving this page)"
+    }
   ],
   "security": [
-    { "sessionCookie": [], "csrfToken": [] }
+    {
+      "sessionCookie": [],
+      "csrfToken": []
+    }
   ],
   "tags": [
-    { "name": "Events",          "description": "Events / calendar entries" },
-    { "name": "Attendance",      "description": "Headcount sessions" },
-    { "name": "Announcements",   "description": "Per-site noticeboard" },
-    { "name": "Leadership",      "description": "Roles + assignments" },
-    { "name": "Tasks",           "description": "Reminders / tasks" },
-    { "name": "Prayer Requests", "description": "Prayer requests (visibility-aware)" },
-    { "name": "Documents",       "description": "Document library" },
-    { "name": "Users",           "description": "User directory (admin only)" }
+    {
+      "name": "Events",
+      "description": "Events / calendar entries"
+    },
+    {
+      "name": "Attendance",
+      "description": "Headcount sessions"
+    },
+    {
+      "name": "Announcements",
+      "description": "Per-site noticeboard"
+    },
+    {
+      "name": "Leadership",
+      "description": "Roles + assignments"
+    },
+    {
+      "name": "Tasks",
+      "description": "Reminders / tasks"
+    },
+    {
+      "name": "Prayer Requests",
+      "description": "Prayer requests (visibility-aware)"
+    },
+    {
+      "name": "Documents",
+      "description": "Document library"
+    },
+    {
+      "name": "Users",
+      "description": "User directory (admin only)"
+    }
   ],
   "components": {
     "securitySchemes": {
       "sessionCookie": {
-        "type":  "apiKey",
-        "in":    "cookie",
-        "name":  "PHPSESSID",
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "PHPSESSID",
         "description": "Portal session cookie set on sign-in."
       },
       "csrfToken": {
         "type": "apiKey",
-        "in":   "header",
+        "in": "header",
         "name": "X-CSRF-TOKEN",
         "description": "CSRF token. Read from `<meta name=\"csrf-token\">` in the portal HTML or from the session. Required on POST endpoints; ignored on read-only GETs."
       }
@@ -47,27 +77,65 @@
     "schemas": {
       "Error": {
         "type": "object",
-        "required": ["status", "message"],
+        "required": [
+          "status",
+          "message"
+        ],
         "properties": {
-          "status":  { "type": "string", "example": "error" },
-          "message": { "type": "string", "example": "Forbidden" },
-          "detail":  { "type": "string", "nullable": true }
+          "status": {
+            "type": "string",
+            "example": "error"
+          },
+          "message": {
+            "type": "string",
+            "example": "Forbidden"
+          },
+          "detail": {
+            "type": "string",
+            "nullable": true
+          }
         }
       },
       "PaginatedListResponse": {
         "type": "object",
-        "required": ["status", "data"],
+        "required": [
+          "status",
+          "data"
+        ],
         "properties": {
-          "status": { "type": "string", "example": "success" },
+          "status": {
+            "type": "string",
+            "example": "success"
+          },
           "data": {
             "type": "object",
             "properties": {
-              "count":      { "type": "integer", "example": 12 },
-              "page":       { "type": "integer", "example": 1 },
-              "limit":      { "type": "integer", "example": 20 },
-              "totalItems": { "type": "integer", "example": 142 },
-              "totalPages": { "type": "integer", "example": 8 },
-              "items":      { "type": "array", "items": { "type": "object" } }
+              "count": {
+                "type": "integer",
+                "example": 12
+              },
+              "page": {
+                "type": "integer",
+                "example": 1
+              },
+              "limit": {
+                "type": "integer",
+                "example": 20
+              },
+              "totalItems": {
+                "type": "integer",
+                "example": 142
+              },
+              "totalPages": {
+                "type": "integer",
+                "example": 8
+              },
+              "items": {
+                "type": "array",
+                "items": {
+                  "type": "object"
+                }
+              }
             }
           }
         }
@@ -75,38 +143,143 @@
       "Event": {
         "type": "object",
         "properties": {
-          "eventID":       { "type": "integer", "example": 1234 },
-          "eventName":     { "type": "string",  "example": "Sunday Service" },
-          "eventSlug":     { "type": "string",  "example": "sunday-service" },
-          "description":   { "type": "string",  "nullable": true },
-          "startDateTime": { "type": "string",  "format": "date-time" },
-          "endDateTime":   { "type": "string",  "format": "date-time", "nullable": true },
-          "timezone":      { "type": "string",  "example": "Europe/London", "nullable": true },
-          "isAllDay":      { "type": "integer", "enum": [0, 1] },
-          "locationName":  { "type": "string",  "nullable": true },
-          "status":        { "type": "string",  "enum": ["draft", "published", "cancelled", "archived"] },
-          "isPublic":      { "type": "integer", "enum": [0, 1] },
-          "isFeatured":    { "type": "integer", "enum": [0, 1] },
-          "categoryName":  { "type": "string",  "nullable": true },
-          "typeName":      { "type": "string",  "nullable": true }
+          "eventID": {
+            "type": "integer",
+            "example": 1234
+          },
+          "eventName": {
+            "type": "string",
+            "example": "Sunday Service"
+          },
+          "eventSlug": {
+            "type": "string",
+            "example": "sunday-service"
+          },
+          "description": {
+            "type": "string",
+            "nullable": true
+          },
+          "startDateTime": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "endDateTime": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "timezone": {
+            "type": "string",
+            "example": "Europe/London",
+            "nullable": true
+          },
+          "isAllDay": {
+            "type": "integer",
+            "enum": [
+              0,
+              1
+            ]
+          },
+          "locationName": {
+            "type": "string",
+            "nullable": true
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "draft",
+              "published",
+              "cancelled",
+              "archived"
+            ]
+          },
+          "isPublic": {
+            "type": "integer",
+            "enum": [
+              0,
+              1
+            ]
+          },
+          "isFeatured": {
+            "type": "integer",
+            "enum": [
+              0,
+              1
+            ]
+          },
+          "categoryName": {
+            "type": "string",
+            "nullable": true
+          },
+          "typeName": {
+            "type": "string",
+            "nullable": true
+          }
         }
       },
       "EventCreate": {
         "type": "object",
-        "required": ["eventName", "startDateTime"],
+        "required": [
+          "eventName",
+          "startDateTime"
+        ],
         "properties": {
-          "eventName":     { "type": "string", "example": "Worship Service" },
-          "startDateTime": { "type": "string", "format": "date-time", "example": "2026-06-01T10:00:00" },
-          "endDateTime":   { "type": "string", "format": "date-time", "nullable": true },
-          "isAllDay":      { "type": "boolean", "default": false },
-          "locationName":  { "type": "string",  "nullable": true },
-          "categoryID":    { "type": "integer", "nullable": true },
-          "typeID":        { "type": "integer", "nullable": true },
-          "status":        { "type": "string",  "enum": ["draft", "published", "cancelled", "archived"], "default": "draft" },
-          "isPublic":      { "type": "boolean", "default": true },
-          "isFeatured":    { "type": "boolean", "default": false },
-          "description":   { "type": "string",  "nullable": true },
-          "csrf_token":    { "type": "string",  "description": "CSRF token (or use X-CSRF-TOKEN header)" }
+          "eventName": {
+            "type": "string",
+            "example": "Worship Service"
+          },
+          "startDateTime": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2026-06-01T10:00:00"
+          },
+          "endDateTime": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "isAllDay": {
+            "type": "boolean",
+            "default": false
+          },
+          "locationName": {
+            "type": "string",
+            "nullable": true
+          },
+          "categoryID": {
+            "type": "integer",
+            "nullable": true
+          },
+          "typeID": {
+            "type": "integer",
+            "nullable": true
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "draft",
+              "published",
+              "cancelled",
+              "archived"
+            ],
+            "default": "draft"
+          },
+          "isPublic": {
+            "type": "boolean",
+            "default": true
+          },
+          "isFeatured": {
+            "type": "boolean",
+            "default": false
+          },
+          "description": {
+            "type": "string",
+            "nullable": true
+          },
+          "csrf_token": {
+            "type": "string",
+            "description": "CSRF token (or use X-CSRF-TOKEN header)"
+          }
         }
       }
     }
@@ -114,150 +287,393 @@
   "paths": {
     "/api/events/list": {
       "get": {
-        "tags": ["Events"],
+        "tags": [
+          "Events"
+        ],
         "summary": "List published events for the current site",
         "parameters": [
-          { "name": "page",  "in": "query", "schema": { "type": "integer", "minimum": 1, "default": 1 } },
-          { "name": "limit", "in": "query", "schema": { "type": "integer", "minimum": 1, "maximum": 100, "default": 20 } }
+          {
+            "name": "page",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          }
         ],
         "responses": {
-          "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/PaginatedListResponse" } } } },
-          "401": { "description": "Auth required", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
-          "403": { "description": "Endpoint disabled" }
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaginatedListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Auth required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Endpoint disabled"
+          }
         }
       }
     },
     "/api/events/detail": {
       "get": {
-        "tags": ["Events"],
+        "tags": [
+          "Events"
+        ],
         "summary": "Fetch a single event by ID or slug",
         "parameters": [
-          { "name": "id",   "in": "query", "schema": { "type": "integer" } },
-          { "name": "slug", "in": "query", "schema": { "type": "string" } }
+          {
+            "name": "id",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "slug",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "responses": {
-          "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Event" } } } },
-          "404": { "description": "Not found" }
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Event"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found"
+          }
         }
       }
     },
     "/api/events/create": {
       "post": {
-        "tags": ["Events"],
+        "tags": [
+          "Events"
+        ],
         "summary": "Create a new event (admin only)",
         "requestBody": {
           "required": true,
-          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EventCreate" } } }
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EventCreate"
+              }
+            }
+          }
         },
         "responses": {
-          "201": { "description": "Created" },
-          "400": { "description": "Validation error" },
-          "403": { "description": "Admin required or CSRF failed" }
+          "201": {
+            "description": "Created"
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "403": {
+            "description": "Admin required or CSRF failed"
+          }
         }
       }
     },
     "/api/events/update": {
       "post": {
-        "tags": ["Events"],
+        "tags": [
+          "Events"
+        ],
         "summary": "Update event fields (PATCH-style; only present fields are touched)",
         "parameters": [
-          { "name": "id", "in": "query", "schema": { "type": "integer" }, "description": "Or pass eventID in body" }
+          {
+            "name": "id",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Or pass eventID in body"
+          }
         ],
         "requestBody": {
           "required": true,
-          "content": { "application/json": { "schema": { "type": "object", "description": "Subset of EventCreate fields + eventID" } } }
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "description": "Subset of EventCreate fields + eventID"
+              }
+            }
+          }
         },
         "responses": {
-          "200": { "description": "OK" },
-          "400": { "description": "Validation error" },
-          "404": { "description": "Event not found" }
+          "200": {
+            "description": "OK"
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "404": {
+            "description": "Event not found"
+          }
         }
       }
     },
     "/api/events/delete": {
       "post": {
-        "tags": ["Events"],
+        "tags": [
+          "Events"
+        ],
         "summary": "Soft-delete an event (isDeleted = 1)",
         "parameters": [
-          { "name": "id", "in": "query", "schema": { "type": "integer" }, "description": "Or pass eventID in body" }
+          {
+            "name": "id",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Or pass eventID in body"
+          }
         ],
         "responses": {
-          "200": { "description": "OK" },
-          "404": { "description": "Event not found or already deleted" }
+          "200": {
+            "description": "OK"
+          },
+          "404": {
+            "description": "Event not found or already deleted"
+          }
         }
       }
     },
     "/api/attendance/list": {
       "get": {
-        "tags": ["Attendance"],
+        "tags": [
+          "Attendance"
+        ],
         "summary": "List attendance sessions for the current site",
         "parameters": [
-          { "name": "page",  "in": "query", "schema": { "type": "integer", "default": 1 } },
-          { "name": "limit", "in": "query", "schema": { "type": "integer", "default": 20 } }
+          {
+            "name": "page",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 1
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 20
+            }
+          }
         ],
-        "responses": { "200": { "description": "OK" } }
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
       }
     },
     "/api/announcements/list": {
       "get": {
-        "tags": ["Announcements"],
+        "tags": [
+          "Announcements"
+        ],
         "summary": "List active announcements for the current site",
-        "responses": { "200": { "description": "OK" } }
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
       }
     },
     "/api/leadership/list": {
       "get": {
-        "tags": ["Leadership"],
+        "tags": [
+          "Leadership"
+        ],
         "summary": "List leadership roles and current assignees",
         "parameters": [
-          { "name": "role", "in": "query", "schema": { "type": "integer" }, "description": "Optional roleID filter" }
+          {
+            "name": "role",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Optional roleID filter"
+          }
         ],
-        "responses": { "200": { "description": "OK" } }
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
       }
     },
     "/api/tasks/list": {
       "get": {
-        "tags": ["Tasks"],
+        "tags": [
+          "Tasks"
+        ],
         "summary": "List tasks (own by default; admins can filter via userID)",
         "parameters": [
-          { "name": "status", "in": "query", "schema": { "type": "string", "enum": ["open", "completed", "all"], "default": "open" } },
-          { "name": "userID", "in": "query", "schema": { "type": "integer" }, "description": "Admin-only filter" },
-          { "name": "page",   "in": "query", "schema": { "type": "integer", "default": 1 } },
-          { "name": "limit",  "in": "query", "schema": { "type": "integer", "default": 20 } }
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "open",
+                "completed",
+                "all"
+              ],
+              "default": "open"
+            }
+          },
+          {
+            "name": "userID",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Admin-only filter"
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 1
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 20
+            }
+          }
         ],
-        "responses": { "200": { "description": "OK" } }
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
       }
     },
     "/api/prayer-requests/list": {
       "get": {
-        "tags": ["Prayer Requests"],
+        "tags": [
+          "Prayer Requests"
+        ],
         "summary": "List prayer requests visible to the current user",
         "description": "Non-admins see their own requests plus congregation-visible ones. Admins see all. Anonymous-flagged requests have `submitterID` nulled for non-admin readers.",
         "parameters": [
-          { "name": "status", "in": "query", "schema": { "type": "string", "enum": ["pending", "active", "answered", "archived", "all"], "default": "active" } }
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "pending",
+                "active",
+                "answered",
+                "archived",
+                "all"
+              ],
+              "default": "active"
+            }
+          }
         ],
-        "responses": { "200": { "description": "OK" } }
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
       }
     },
     "/api/documents/list": {
       "get": {
-        "tags": ["Documents"],
+        "tags": [
+          "Documents"
+        ],
         "summary": "List documents for the current site",
         "parameters": [
-          { "name": "categoryID", "in": "query", "schema": { "type": "integer" } },
-          { "name": "page",       "in": "query", "schema": { "type": "integer", "default": 1 } },
-          { "name": "limit",      "in": "query", "schema": { "type": "integer", "default": 20 } }
+          {
+            "name": "categoryID",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 1
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 20
+            }
+          }
         ],
-        "responses": { "200": { "description": "OK" } }
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
       }
     },
     "/api/users/list": {
       "get": {
-        "tags": ["Users"],
+        "tags": [
+          "Users"
+        ],
         "summary": "List users (admin only)",
         "responses": {
-          "200": { "description": "OK" },
-          "403": { "description": "Admin required" }
+          "200": {
+            "description": "OK"
+          },
+          "403": {
+            "description": "Admin required"
+          }
         }
       }
     },
@@ -274,19 +690,598 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "status":     { "type": "string", "example": "ok" },
-                    "env":        { "type": "string", "example": "prod" },
-                    "version":    { "type": "string", "example": "1.0.0" },
-                    "phpVersion": { "type": "string", "example": "8.5.5" },
-                    "siteID":     { "type": "integer", "example": 1 },
-                    "db":         { "type": "string", "example": "ok" },
-                    "time":       { "type": "string", "format": "date-time" }
+                    "status": {
+                      "type": "string",
+                      "example": "ok"
+                    },
+                    "env": {
+                      "type": "string",
+                      "example": "prod"
+                    },
+                    "version": {
+                      "type": "string",
+                      "example": "1.0.0"
+                    },
+                    "phpVersion": {
+                      "type": "string",
+                      "example": "8.5.5"
+                    },
+                    "siteID": {
+                      "type": "integer",
+                      "example": 1
+                    },
+                    "db": {
+                      "type": "string",
+                      "example": "ok"
+                    },
+                    "time": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
                   }
                 }
               }
             }
           },
-          "503": { "description": "Degraded — DB unreachable" }
+          "503": {
+            "description": "Degraded \u2014 DB unreachable"
+          }
+        }
+      }
+    },
+    "/api/announcements/create": {
+      "post": {
+        "tags": [
+          "Announcements"
+        ],
+        "summary": "Create an announcement (admin)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "title",
+                  "body"
+                ],
+                "properties": {
+                  "title": {
+                    "type": "string"
+                  },
+                  "body": {
+                    "type": "string"
+                  },
+                  "priority": {
+                    "type": "string",
+                    "enum": [
+                      "normal",
+                      "important",
+                      "urgent"
+                    ]
+                  },
+                  "isPinned": {
+                    "type": "boolean"
+                  },
+                  "isPublished": {
+                    "type": "boolean"
+                  },
+                  "publishAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "expiresAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated / OK"
+          },
+          "201": {
+            "description": "Created"
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "403": {
+            "description": "Auth / role check failed"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
+      }
+    },
+    "/api/announcements/update": {
+      "post": {
+        "tags": [
+          "Announcements"
+        ],
+        "summary": "Update an announcement partially (admin)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "announcementID"
+                ],
+                "properties": {
+                  "announcementID": {
+                    "type": "integer"
+                  },
+                  "title": {
+                    "type": "string"
+                  },
+                  "body": {
+                    "type": "string"
+                  },
+                  "priority": {
+                    "type": "string",
+                    "enum": [
+                      "normal",
+                      "important",
+                      "urgent"
+                    ]
+                  },
+                  "isPinned": {
+                    "type": "boolean"
+                  },
+                  "isPublished": {
+                    "type": "boolean"
+                  },
+                  "publishAt": {
+                    "type": "string",
+                    "format": "date-time",
+                    "nullable": true
+                  },
+                  "expiresAt": {
+                    "type": "string",
+                    "format": "date-time",
+                    "nullable": true
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated / OK"
+          },
+          "201": {
+            "description": "Updated"
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "403": {
+            "description": "Auth / role check failed"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
+      }
+    },
+    "/api/announcements/delete": {
+      "post": {
+        "tags": [
+          "Announcements"
+        ],
+        "summary": "Soft-delete an announcement (admin)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "announcementID"
+                ],
+                "properties": {
+                  "announcementID": {
+                    "type": "integer"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated / OK"
+          },
+          "201": {
+            "description": "Deleted"
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "403": {
+            "description": "Auth / role check failed"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
+      }
+    },
+    "/api/tasks/create": {
+      "post": {
+        "tags": [
+          "Tasks"
+        ],
+        "summary": "Create a task",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "title"
+                ],
+                "properties": {
+                  "title": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "assignedToID": {
+                    "type": "integer"
+                  },
+                  "priority": {
+                    "type": "string",
+                    "enum": [
+                      "low",
+                      "normal",
+                      "high",
+                      "urgent"
+                    ]
+                  },
+                  "dueDate": {
+                    "type": "string",
+                    "format": "date"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated / OK"
+          },
+          "201": {
+            "description": "Created"
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "403": {
+            "description": "Auth / role check failed"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
+      }
+    },
+    "/api/tasks/complete": {
+      "post": {
+        "tags": [
+          "Tasks"
+        ],
+        "summary": "Mark a task complete (assignee or admin only)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "taskID"
+                ],
+                "properties": {
+                  "taskID": {
+                    "type": "integer"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated / OK"
+          },
+          "201": {
+            "description": "Completed"
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "403": {
+            "description": "Auth / role check failed"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
+      }
+    },
+    "/api/tasks/delete": {
+      "post": {
+        "tags": [
+          "Tasks"
+        ],
+        "summary": "Delete a task (creator or admin only)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "taskID"
+                ],
+                "properties": {
+                  "taskID": {
+                    "type": "integer"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated / OK"
+          },
+          "201": {
+            "description": "Deleted"
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "403": {
+            "description": "Auth / role check failed"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
+      }
+    },
+    "/api/prayer-requests/create": {
+      "post": {
+        "tags": [
+          "Prayer Requests"
+        ],
+        "summary": "Submit a prayer request (logged-in)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "subject",
+                  "body"
+                ],
+                "properties": {
+                  "subject": {
+                    "type": "string"
+                  },
+                  "body": {
+                    "type": "string"
+                  },
+                  "visibility": {
+                    "type": "string",
+                    "enum": [
+                      "leadership",
+                      "congregation"
+                    ]
+                  },
+                  "isAnonymous": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated / OK"
+          },
+          "201": {
+            "description": "Created"
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "403": {
+            "description": "Auth / role check failed"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
+      }
+    },
+    "/api/prayer-requests/moderate": {
+      "post": {
+        "tags": [
+          "Prayer Requests"
+        ],
+        "summary": "Moderate a prayer request (admin or prayer_team role)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "requestID",
+                  "status"
+                ],
+                "properties": {
+                  "requestID": {
+                    "type": "integer"
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "active",
+                      "answered",
+                      "archived"
+                    ]
+                  },
+                  "testimony": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated / OK"
+          },
+          "201": {
+            "description": "Moderated"
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "403": {
+            "description": "Auth / role check failed"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
+      }
+    },
+    "/api/leadership/assign": {
+      "post": {
+        "tags": [
+          "Leadership"
+        ],
+        "summary": "Assign a leadership role to a user or external person (admin)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "roleID"
+                ],
+                "properties": {
+                  "roleID": {
+                    "type": "integer"
+                  },
+                  "userID": {
+                    "type": "integer",
+                    "nullable": true
+                  },
+                  "personName": {
+                    "type": "string"
+                  },
+                  "personEmail": {
+                    "type": "string"
+                  },
+                  "startDate": {
+                    "type": "string",
+                    "format": "date"
+                  },
+                  "endDate": {
+                    "type": "string",
+                    "format": "date"
+                  },
+                  "notes": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated / OK"
+          },
+          "201": {
+            "description": "Created"
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "403": {
+            "description": "Auth / role check failed"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
+      }
+    },
+    "/api/leadership/unassign": {
+      "post": {
+        "tags": [
+          "Leadership"
+        ],
+        "summary": "End an active leadership assignment (admin)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "assignmentID"
+                ],
+                "properties": {
+                  "assignmentID": {
+                    "type": "integer"
+                  },
+                  "endDate": {
+                    "type": "string",
+                    "format": "date"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated / OK"
+          },
+          "201": {
+            "description": "Unassigned"
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "403": {
+            "description": "Auth / role check failed"
+          },
+          "404": {
+            "description": "Not found"
+          }
         }
       }
     }
