@@ -74,21 +74,29 @@ class Router
             Auth::requireLogin();
         }
 
-        // 📂 Build the full path to the target app file
-        $targetFile = PORTAL_APPS . DIRECTORY_SEPARATOR
-                    . str_replace('/', DIRECTORY_SEPARATOR, $route['targetFile']);
-
-        // ✅ Verify the target file exists and is readable
+        // 📂 Build the full path to the target app file. Try PORTAL_APPS
+        //    first (where all app controllers live after #159), then fall
+        //    back to public_html/ for the small set of entry-point pages
+        //    that intentionally live in the webroot (Swagger UI, openapi.json,
+        //    Apache ErrorDocument target, PWA offline fallback).
+        $relTarget = str_replace('/', DIRECTORY_SEPARATOR, $route['targetFile']);
+        $targetFile = PORTAL_APPS . DIRECTORY_SEPARATOR . $relTarget;
         if (is_readable($targetFile) === false) {
-            Logger::errorPlatform(
-                'Router',
-                'Error',
-                '404',
-                'Route target file not found',
-                'routeKey=' . $path . ' targetFile=' . $route['targetFile']
-            );
-            self::renderError(404);
-            return;
+            $fallbackFile = PORTAL_ROOT . DIRECTORY_SEPARATOR . 'public_html'
+                          . DIRECTORY_SEPARATOR . $relTarget;
+            if (is_readable($fallbackFile) === true) {
+                $targetFile = $fallbackFile;
+            } else {
+                Logger::errorPlatform(
+                    'Router',
+                    'Error',
+                    '404',
+                    'Route target file not found',
+                    'routeKey=' . $path . ' targetFile=' . $route['targetFile']
+                );
+                self::renderError(404);
+                return;
+            }
         }
 
         // 📌 Define the current app section for navigation highlighting
@@ -213,8 +221,12 @@ class Router
         }
 
         // 📵 Offline fallback page (served by service worker when no network)
+        //    Lives in public_html/offline/ rather than _apps/ — the service
+        //    worker fetches it via a direct URL, and Apache must be able to
+        //    serve it as a static asset under the webroot.
         if ($path === 'offline') {
-            require PORTAL_APPS . DIRECTORY_SEPARATOR . 'offline' . DIRECTORY_SEPARATOR . 'index.php';
+            require PORTAL_ROOT . DIRECTORY_SEPARATOR . 'public_html'
+                  . DIRECTORY_SEPARATOR . 'offline' . DIRECTORY_SEPARATOR . 'index.php';
             return true;
         }
 

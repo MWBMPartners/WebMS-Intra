@@ -18,10 +18,11 @@ Git repo root (NOT deployed)          Server: portal.millrdsdacambridge.uk/
 ├── DEV_NOTES.md                       ├── _auth_keys/    (server-managed)
 ├── README.md                          ├── _libraries/    (server-managed)
 └── web/ ─── contents deployed ──────► ├── _uploads/      (server-managed)
-    ├── _core/                         ├── _backups/      (server-managed)
+    ├── _core/                         ├── _apps/         (app controllers, #159)
+    ├── _apps/        (#159)           ├── _backups/      (server-managed)
     ├── _vendor/                       ├── _includes/
     ├── _sql/                          ├── _functions/
-    ├── _lang/                         ├── public_html/   (web root + apps)
+    ├── _lang/                         ├── public_html/   (front controller + static)
     ├── _install/                      ├── public_html_dev/   (alpha branch deploy)
     ├── _includes/                     ├── public_html_beta/  (beta branch deploy)
     ├── _functions/                    ├── private_html/
@@ -73,6 +74,7 @@ inside `web/` (`_core/`, `_vendor/`, `_sql/`, `_lang/`, `_install/`,
 ```text
 SFTP_BASE_PATH/
 ├── _core/                 ← from web/_core/         (all branches)
+├── _apps/                 ← from web/_apps/         (all branches, #159)
 ├── _vendor/               ← from web/_vendor/       (all branches)
 ├── _sql/                  ← from web/_sql/          (all branches)
 ├── _lang/                 ← from web/_lang/         (all branches)

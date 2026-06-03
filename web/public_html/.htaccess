@@ -7,9 +7,12 @@
 #
 # SECURITY: Direct access to .php files anywhere under public_html/ is BLOCKED
 # (returns 404). The only entry points that may execute PHP via direct URL are
-# /index.php (the front controller itself) and /api-docs/ (Swagger UI viewer,
-# served via Apache's DirectoryIndex). Every other PHP file is reached via
-# the front-controller -> Router -> tblRoutes pipeline.
+# /index.php (the front controller itself), /api-docs/ (Swagger UI viewer,
+# served via Apache's DirectoryIndex), and /error.php (Apache ErrorDocument
+# target — must remain externally reachable as Apache invokes it for 4xx/5xx
+# subrequests). Every other PHP file lives in web/_apps/ outside the webroot
+# entirely after #159 and is reached via the front-controller → Router →
+# tblRoutes pipeline.
 #
 # This means a probe like "/expenses/submit/save.php" returns 404 — no leak of
 # the backend language, no way to bypass the router's auth + CSRF gates by
@@ -34,14 +37,18 @@ RewriteRule ^ - [F]
 RewriteCond %{THE_REQUEST} ^(GET|POST|HEAD)\s/index\.php[\s?]
 RewriteRule ^index\.php$ / [R=301,L]
 
-# 🛡️ Deny direct access to ANY .php file except the two known entry points.
+# 🛡️ Deny direct access to ANY .php file except the three known entry points.
 #     Order matters: this MUST run before the existing-file pass-through
 #     below, otherwise Apache would serve the .php file directly.
-#     /index.php must stay exempt here so the internal rewrite from a
-#     clean URL still resolves to the front controller.
+#       /index.php           — front controller (rewrite target)
+#       /api-docs/index.php  — Swagger UI bundle (DirectoryIndex)
+#       /error.php           — Apache ErrorDocument target
+#     After #159 the webroot contains only those three .php files; every
+#     app controller now lives in web/_apps/ outside the webroot entirely.
 RewriteCond %{REQUEST_URI} \.php$
 RewriteCond %{REQUEST_URI} !^/index\.php$
 RewriteCond %{REQUEST_URI} !^/api-docs/index\.php$
+RewriteCond %{REQUEST_URI} !^/error\.php$
 RewriteRule .* - [R=404,L]
 
 # 📁 Skip rewriting for existing static files (CSS, JS, images, fonts,

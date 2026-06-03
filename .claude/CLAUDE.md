@@ -19,15 +19,21 @@ Internal portal platform (PHP 8.5, backward-compatible with 8.4, MySQL 8.0, Boot
 repo root/          <- NOT deployed (docs, CI/CD only)
 web/                <- ALL deployable files (synced to server via SFTP)
   _core/            <- Framework classes (Portal\Core namespace, 26 classes)
+  _apps/            <- App controllers — outside the webroot (#159). Every
+                       app's PHP handlers live here; Router resolves
+                       tblRoutes.targetFile against PORTAL_APPS = _apps/.
   _vendor/simplejwt/<- Vendored RS256 JWT verifier
   _sql/             <- Numbered SQL migrations (000-104 + full_schema.sql)
   _lang/            <- I18n translation files (en.php, cy.php, …)
   _install/         <- Standalone 6-step installation wizard (bootstrap-free)
-  public_html/      <- Web root: ONE front controller + assets + app controllers.
-                       Branch-based deploy mirrors this dir to the server's
-                       public_html/ (main), public_html_beta/ (beta) or
-                       public_html_dev/ (alpha) — no per-channel copy in repo.
-    index.php, .htaccess, assets/
+  public_html/      <- Web root: ONLY the front controller + static assets +
+                       the 3 entry-point PHP files (index.php, api-docs/,
+                       error.php) Apache can serve directly. Every other
+                       PHP file lives in _apps/. Branch-based deploy mirrors
+                       this dir to the server's public_html/ (main),
+                       public_html_beta/ (beta) or public_html_dev/ (alpha).
+    index.php, error.php, .htaccess, manifest.json, openapi.json,
+    robots.txt, sw.js, assets/, api-docs/, offline/
   private_html/, public_html_landing/, public_html_redir/  <- non-app server dirs
   _auth_keys/       <- Credentials + encryption key (gitignored, server-managed)
   _uploads/         <- User file uploads (gitignored, server-managed)
@@ -74,7 +80,7 @@ Calendar/Events/Preaching Plan is ONE app ("Events") — `/calendar` covers view
 
 - `PORTAL_ROOT` -- web/ on server
 - `PORTAL_CORE` -- web/_core/
-- `PORTAL_APPS` -- web/public_html/
+- `PORTAL_APPS` -- web/_apps/ (since #159)
 - `PORTAL_VENDOR` -- web/_vendor/
 - `PORTAL_SQL` -- web/_sql/
 - `PORTAL_ENV` -- 'dev', 'beta', or 'prod' (auto-detected from DOCUMENT_ROOT)

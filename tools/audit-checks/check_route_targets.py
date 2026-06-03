@@ -5,7 +5,7 @@ Route target-file existence check.
 Parses every `INSERT INTO tblRoutes (...) VALUES ('routeKey', 'targetFile', ...)`
 statement across the SQL files (full_schema.sql + numbered migrations) and
 verifies that each targetFile resolves to an actual file under
-web/public_html/.
+web/_apps/ (#159 moved app controllers out of public_html for defence-in-depth).
 
 Catches the #202 / #205 class of bug (route registered but file missing,
 or route pointing at a path the front controller can't reach).
@@ -28,7 +28,11 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SQL_DIR = REPO_ROOT / "web" / "_sql"
-APPS_DIR = REPO_ROOT / "web" / "public_html"
+APPS_DIR = REPO_ROOT / "web" / "_apps"
+# Public fallback dir — small set of entry-point pages legitimately live
+# in the webroot (Swagger UI, openapi.json, PWA offline fallback). Router
+# checks _apps/ first then falls back to public_html/.
+PUBLIC_DIR = REPO_ROOT / "web" / "public_html"
 
 # Match: INSERT INTO `tblRoutes` (..) VALUES ('key', 'target', ...)
 # Note: tolerate backticks, varying whitespace, multi-line VALUES.
@@ -51,7 +55,7 @@ EXCLUDED_ROUTES: set[str] = {
 }
 
 # Path EXCLUSIONS — targets we know don't resolve to files under
-# public_html/ but are still valid (handled by the Router special
+# _apps/ but are still valid (handled by the Router special
 # case or via a proxy).
 EXCLUDED_TARGET_PREFIXES: tuple[str, ...] = (
     "../",  # any escape-out target is its own bug class — we already
@@ -127,8 +131,13 @@ def check() -> int:
             missing.append((route_key, target, sql, line_no))
             continue
         full = APPS_DIR / target
-        if not full.is_file():
-            missing.append((route_key, target, sql, line_no))
+        if full.is_file():
+            continue
+        # Mirror the Router's _apps → public_html fallback for entry-point
+        # pages (Swagger UI, openapi.json, PWA offline fallback).
+        if (PUBLIC_DIR / target).is_file():
+            continue
+        missing.append((route_key, target, sql, line_no))
 
     print(f"Routes inspected (final state): {len(final)}")
     print(f"Missing target files: {len(missing)}")

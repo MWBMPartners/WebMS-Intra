@@ -36,6 +36,7 @@ SQL_DIR = REPO_ROOT / "web" / "_sql"
 PHP_ROOTS = [
     REPO_ROOT / "web" / "_install",
     REPO_ROOT / "web" / "_core",
+    REPO_ROOT / "web" / "_apps",
     REPO_ROOT / "web" / "public_html",
 ]
 

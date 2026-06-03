@@ -72,11 +72,9 @@ WebMS-Intra/                         # Git repository root (NOT deployed)
     ├── _uploads/                    # User file uploads (gitignored)
     ├── _backups/                    # Server backups (gitignored)
     │
-    │  ── Apache DocumentRoot — the ONLY web-accessible tree ──
-    ├── public_html/                 # Production web root
-    │   ├── index.php                # Front controller
-    │   ├── .htaccess                # URL rewriting
-    │   ├── assets/                  # CSS, JS, images, webfonts
+    │
+    │  ── App controllers (outside webroot, #159) ──
+    ├── _apps/                       # Every app's PHP handlers
     │   ├── auth/                    # Login, forgot/reset password, account
     │   ├── dashboard/               # Portal home with app cards
     │   ├── expenses/                # Expense claim lifecycle
@@ -86,7 +84,28 @@ WebMS-Intra/                         # Git repository root (NOT deployed)
     │   ├── admin/                   # Admin panel (sites, users, logs, migrations)
     │   ├── help/                    # Help centre pages
     │   ├── site/                    # Site switcher handler
-    │   └── settings/                # Admin settings UI
+    │   ├── settings/                # Admin settings UI
+    │   └── …                        # ~35 more app dirs (account, announcements,
+    │                                  api, care, directory, documents, events,
+    │                                  giving, invites, live, milestones,
+    │                                  newsletter, offboarding, payments,
+    │                                  photos, praise, prayer-requests, privacy,
+    │                                  projects, reading-plans, recordings,
+    │                                  resources, rota, service-plans, tasks,
+    │                                  users, visitors)
+    │
+    │  ── Apache DocumentRoot — the ONLY web-accessible tree ──
+    ├── public_html/                 # Production web root — lean (#159)
+    │   ├── index.php                # Front controller (only PHP entry point)
+    │   ├── error.php                # Apache ErrorDocument target
+    │   ├── .htaccess                # URL rewriting + .php deny
+    │   ├── assets/                  # CSS, JS, images, webfonts
+    │   ├── api-docs/                # Swagger UI (DirectoryIndex)
+    │   ├── offline/                 # PWA offline fallback page
+    │   ├── manifest.json
+    │   ├── openapi.json
+    │   ├── robots.txt
+    │   └── sw.js                    # Service worker
     ├── private_html/                # Private / non-live files
     ├── public_html_landing/         # Pre-launch landing page
     └── public_html_redir/           # Redirect page

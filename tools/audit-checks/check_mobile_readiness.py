@@ -37,7 +37,7 @@ import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-SCAN_DIRS = [REPO_ROOT / "web" / "public_html", REPO_ROOT / "web" / "_core" / "templates"]
+SCAN_DIRS = [REPO_ROOT / "web" / "_apps", REPO_ROOT / "web" / "public_html", REPO_ROOT / "web" / "_core" / "templates"]
 
 # Email templates use fixed-width table layouts because mail clients
 # don't render Bootstrap responsive utilities. Genuine false positives.
