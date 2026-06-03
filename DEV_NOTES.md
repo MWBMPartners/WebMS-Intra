@@ -1296,6 +1296,59 @@ Use the workflow_dispatch **dry-run** input on `deploy.yml` to preview what
 a deploy would change (and crucially, what it would delete) before pushing.
 See issue #107 for the full rationale and mitigation list.
 
+## Adding a new CDN dependency (#161)
+
+Every `<script>` and `<link>` tag pointing at a third-party CDN MUST carry
+an `integrity="sha384-…"` attribute and `crossorigin="anonymous"`. Without
+SRI, a compromise of the CDN serves arbitrary JS/CSS to every visitor
+simultaneously — and SRI is the only client-side mitigation.
+
+The `tools/audit-checks/check_cdn_sri.py` script scans every PHP / HTML
+file under `web/` and flags any CDN tag without an `integrity=` attribute.
+It runs in CI and locally — drop a tag without SRI and the check fails.
+
+### Procedure
+
+1. **Pin the version.** SRI requires exact byte matching, so `@latest`
+   and unpinned major versions (`bootstrap@5`) will break the check on
+   every release. Use an exact patch version (`bootstrap@5.3.3`).
+
+2. **Generate the hash:**
+   ```bash
+   curl -sL https://cdn.jsdelivr.net/npm/<package>@<version>/<file> \
+     | openssl dgst -sha384 -binary \
+     | openssl base64 -A
+   ```
+   Prefix the output with `sha384-`.
+
+3. **Add to `web/_core/Asset.php`:**
+   - Add a `*_VERSION` constant (one source of truth for bumps).
+   - Add a `CDN_*` URL constant building from the version.
+   - Add a `*_INTEGRITY` hash constant from the curl/openssl pipeline.
+   - Add a helper method (`Asset::sortableJs()` style) that calls
+     `self::css()` or `self::js()` with the constants. Helpers attach
+     SRI automatically and route an `onerror` to the local fallback.
+
+4. **Use the helper, never raw `<script>`:**
+   ```php
+   <?php echo \Portal\Core\Asset::sortableJs(); ?>
+   ```
+   Inline `<script src="https://cdn…">` tags will be caught by the audit
+   AND don't get the local-fallback handler.
+
+5. **Run the audit:**
+   ```bash
+   python3 tools/audit-checks/check_cdn_sri.py
+   ```
+   Should report `No CDN tags missing integrity= attribute.` ✅
+
+### Currently-unfilled hashes
+
+The Sortable + Swagger UI helpers ship with empty integrity constants
+(TODO markers in `Asset.php`). The tags still render, but without
+integrity verification. To fill them, run the curl/openssl command
+above and update the four `*_INTEGRITY` constants in `Asset.php`.
+
 ---
 
 Last updated: May 2026
