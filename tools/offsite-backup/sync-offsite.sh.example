@@ -1,0 +1,156 @@
+#!/usr/bin/env bash
+# -----------------------------------------------------------------------------
+# Off-site backup sync — DreamHost cron-compatible
+# -----------------------------------------------------------------------------
+# Copy this script + log-offsite-result.php into web/_backups/ on the
+# server (a gitignored directory), make it executable, then schedule via
+# DreamHost's web panel:
+#
+#   cp tools/offsite-backup/sync-offsite.sh.example web/_backups/sync-offsite.sh
+#   cp tools/offsite-backup/log-offsite-result.php  web/_backups/log-offsite-result.php
+#   chmod +x web/_backups/sync-offsite.sh
+#
+#   Schedule:    Weekly, Sundays, 04:00 UTC
+#   Command:     /home/USER/portal/web/_backups/sync-offsite.sh
+#
+# What it does:
+#   1. Picks the newest snapshot dir under web/_backups/.
+#   2. tars + gzips it.
+#   3. Encrypts with AES-256-CBC, key file at _auth_keys/offsite.key.
+#   4. Pushes to the configured destination (rclone | s3 | sftp).
+#   5. Prunes older off-site copies to keep-weekly / keep-monthly window.
+#   6. Writes a status line into tblOffsiteSyncLog via the helper PHP.
+#   7. Emails the alertEmail setting on failure.
+#
+# Reference: https://github.com/MWBMPartners/webMS-Intra/issues/249
+# -----------------------------------------------------------------------------
+
+set -euo pipefail
+
+# Resolve PORTAL_ROOT to web/ regardless of whether this script is run
+# from web/_backups/ (the deployed location) or tools/offsite-backup/ (the
+# repo location). We expect web/_backups/ + web/_auth_keys/ to exist
+# relative to PORTAL_ROOT.
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+if [[ -d "${SCRIPT_DIR}/../_auth_keys" ]]; then
+    PORTAL_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"        # web/_backups → web/
+elif [[ -d "${SCRIPT_DIR}/../../web/_auth_keys" ]]; then
+    PORTAL_ROOT="$(cd "${SCRIPT_DIR}/../../web" && pwd)" # tools/offsite-backup → web/
+else
+    echo "Cannot locate PORTAL_ROOT (expected web/_auth_keys/ near script)." >&2
+    exit 1
+fi
+
+BACKUPS_DIR="${PORTAL_ROOT}/_backups"
+KEY_FILE="${PORTAL_ROOT}/_auth_keys/offsite.key"
+LOG_PHP="${BACKUPS_DIR}/log-offsite-result.php"
+
+# --- Destination (pick ONE block; comment out the others) -------------------
+# A. rclone remote (Backblaze B2, R2, GDrive, OneDrive, …)
+DESTINATION="rclone"
+RCLONE_REMOTE="myremote:portal-backups"
+
+# B. AWS S3 / S3-compatible
+# DESTINATION="s3"
+# S3_BUCKET="s3://my-bucket/portal-backups"
+
+# C. SFTP to a second host
+# DESTINATION="sftp"
+# SFTP_TARGET="user@backup.example.com:portal-backups/"
+
+KEEP_WEEKLY=8
+KEEP_MONTHLY=12
+ALERT_EMAIL=""
+
+# --- Helpers ----------------------------------------------------------------
+
+die() {
+    local msg="$1"
+    echo "ERROR: ${msg}" >&2
+    php "${LOG_PHP}" --status=failed --destination="${DESTINATION}" --error="${msg}" --output="$(cat /tmp/portal-offsite-$$.log 2>/dev/null || true)" || true
+    if [[ -n "${ALERT_EMAIL}" ]]; then
+        echo "${msg}" | mail -s "[Portal] Off-site backup FAILED" "${ALERT_EMAIL}" || true
+    fi
+    rm -f /tmp/portal-offsite-$$.log /tmp/portal-offsite-$$.bundle.tar.gz /tmp/portal-offsite-$$.bundle.enc
+    exit 1
+}
+
+trap 'die "Script interrupted"' INT TERM
+LOG_TMP="/tmp/portal-offsite-$$.log"
+exec > >(tee -a "${LOG_TMP}") 2>&1
+
+if [[ ! -r "${KEY_FILE}" ]]; then
+    die "Encryption key not found at ${KEY_FILE}. Generate one: openssl rand -base64 64 > '${KEY_FILE}' && chmod 600 '${KEY_FILE}'"
+fi
+
+# --- 1. Pick newest snapshot ------------------------------------------------
+
+LATEST_SNAP="$(ls -1td "${BACKUPS_DIR}"/snapshot-* 2>/dev/null | head -1 || true)"
+if [[ -z "${LATEST_SNAP}" ]]; then
+    die "No snapshot found under ${BACKUPS_DIR}"
+fi
+SNAP_NAME="$(basename "${LATEST_SNAP}")"
+echo "Selected snapshot: ${SNAP_NAME}"
+
+# --- 2. Bundle + encrypt ---------------------------------------------------
+
+BUNDLE="/tmp/portal-offsite-$$.bundle.tar.gz"
+ENC="/tmp/portal-offsite-$$.bundle.enc"
+tar -czf "${BUNDLE}" -C "${BACKUPS_DIR}" "${SNAP_NAME}"
+openssl enc -aes-256-cbc -salt -pbkdf2 -in "${BUNDLE}" -out "${ENC}" -pass "file:${KEY_FILE}"
+BUNDLE_SIZE="$(stat -c%s "${ENC}" 2>/dev/null || stat -f%z "${ENC}")"
+echo "Bundle size: ${BUNDLE_SIZE} bytes"
+
+REMOTE_NAME="${SNAP_NAME}.tar.gz.enc"
+
+# --- 3. Upload --------------------------------------------------------------
+
+START_TS="$(date +%s)"
+case "${DESTINATION}" in
+    rclone)
+        command -v rclone >/dev/null 2>&1 || die "rclone not installed"
+        rclone copyto "${ENC}" "${RCLONE_REMOTE}/${REMOTE_NAME}" --quiet
+        ;;
+    s3)
+        command -v aws >/dev/null 2>&1 || die "aws CLI not installed"
+        aws s3 cp "${ENC}" "${S3_BUCKET}/${REMOTE_NAME}" --no-progress
+        ;;
+    sftp)
+        scp -q "${ENC}" "${SFTP_TARGET}${REMOTE_NAME}"
+        ;;
+    *)
+        die "Unknown DESTINATION: ${DESTINATION}"
+        ;;
+esac
+END_TS="$(date +%s)"
+DURATION=$((END_TS - START_TS))
+echo "Upload completed in ${DURATION}s"
+
+# --- 4. Prune --------------------------------------------------------------
+
+case "${DESTINATION}" in
+    rclone)
+        # Keep the most recent KEEP_WEEKLY copies; older than that, keep one
+        # per month for KEEP_MONTHLY months. Simplified: keep the N newest.
+        TOTAL_KEEP=$((KEEP_WEEKLY + KEEP_MONTHLY))
+        rclone lsf --format "pt" --files-only --order-by modtime,desc "${RCLONE_REMOTE}" \
+            | awk -v keep="${TOTAL_KEEP}" 'NR > keep { print }' \
+            | awk -F';' '{ print $1 }' \
+            | while read -r OLD; do
+                [[ -n "${OLD}" ]] && rclone delete "${RCLONE_REMOTE}/${OLD}" || true
+            done
+        ;;
+    s3|sftp)
+        echo "Retention pruning for ${DESTINATION} is destination-specific — set a lifecycle rule on the bucket / a cron on the SFTP host."
+        ;;
+esac
+
+# --- 5. Cleanup + log success ----------------------------------------------
+
+rm -f "${BUNDLE}" "${ENC}"
+php "${LOG_PHP}" --status=success --destination="${DESTINATION}" \
+    --snapshot="${SNAP_NAME}" --bundle-size="${BUNDLE_SIZE}" \
+    --duration-sec="${DURATION}" --output="$(cat "${LOG_TMP}")" || true
+rm -f "${LOG_TMP}"
+
+echo "Off-site backup complete."
