@@ -56,7 +56,12 @@ try {
         $stmt->close();
     }
     // 🪞 Auto-bump status from 'new' to 'in-touch' on first contact.
-    $db->query("UPDATE tblVisitor SET status = 'in-touch' WHERE visitorID = " . $id . " AND status = 'new'");
+    $bumpStmt = $db->prepare("UPDATE tblVisitor SET status = 'in-touch' WHERE visitorID = ? AND status = 'new'");
+    if ($bumpStmt !== false) {
+        $bumpStmt->bind_param('i', $id);
+        $bumpStmt->execute();
+        $bumpStmt->close();
+    }
 } catch (\Throwable $e) {
     \Portal\Core\Logger::errorPlatform('Visitors', 'Warning', 'CONTACT_SAVE', $e->getMessage(), '');
 }

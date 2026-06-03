@@ -182,3 +182,29 @@ function networkFirst(request) {
         });
     });
 }
+
+// =========================================================================
+// 📤 Background Sync — drain Portal.OfflineQueue when connectivity returns (#233)
+// =========================================================================
+// Pages register the 'portal-offline-sync' tag via:
+//   navigator.serviceWorker.ready.then(r => r.sync.register('portal-offline-sync'))
+// The browser dispatches `sync` events to this worker when network returns.
+// The worker posts a message back to all client pages asking them to drain
+// the IndexedDB queue (clients hold the DB connection; SW can but ours
+// chooses to delegate to the page so the queue UI updates).
+self.addEventListener('sync', function (event) {
+    if (event.tag === 'portal-offline-sync') {
+        event.waitUntil((async function () {
+            var clients = await self.clients.matchAll({ includeUncontrolled: true });
+            clients.forEach(function (client) {
+                client.postMessage({ type: 'portal-drain-queue' });
+            });
+        }()));
+    }
+});
+
+self.addEventListener('message', function (event) {
+    if (event.data && event.data.type === 'portal-skip-waiting') {
+        self.skipWaiting();
+    }
+});

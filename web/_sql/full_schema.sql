@@ -4331,6 +4331,24 @@ ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
 INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
     ('help/disaster-recovery', 'help/disaster-recovery.php', 1)
 ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
+-- =============================================================================
+-- External error monitoring (migration 105, #143)
+-- =============================================================================
+
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('admin/integrations/monitoring',      'admin/integrations/monitoring/index.php', 1),
+    ('admin/integrations/monitoring/save', 'admin/integrations/monitoring/save.php',  1),
+    ('admin/integrations/monitoring/test', 'admin/integrations/monitoring/test.php',  1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'monitoring.enabled',     '0', '0', 0),
+    (NULL, 'monitoring.sentryDsn',   '',  '',  1),
+    (NULL, 'monitoring.environment', '',  '',  0),
+    (NULL, 'monitoring.sampleRate',  '1.0', '1.0', 0)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
 -- =============================================================================
 -- Migration 106: REST API write-side CRUD endpoints (#157)
 -- =============================================================================
@@ -4372,4 +4390,12 @@ INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue
     (NULL, 'api.leadership.assign.enabled',        'true', 'true', 0),
     (NULL, 'api.leadership.unassign.enabled',      'true', 'true', 0)
 ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
+-- =============================================================================
+-- Migration 107: Offline queue user-inspector route (#233)
+-- =============================================================================
+
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('account/offline-queue', 'account/offline-queue.php', 1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 

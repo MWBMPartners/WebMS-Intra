@@ -25,8 +25,11 @@ $siteId = Site::id();
 
 // Fetch role types + upcoming slots + users for the assignee dropdown
 $roleTypes = [];
-$rs = $db->query('SELECT roleTypeID, name, colorHex FROM tblRotaRoleType WHERE siteID = ' . $siteId . ' AND isActive = 1 ORDER BY name');
-if ($rs !== false) {
+$rtStmt = $db->prepare('SELECT roleTypeID, name, colorHex FROM tblRotaRoleType WHERE siteID = ? AND isActive = 1 ORDER BY name');
+if ($rtStmt !== false) {
+    $rtStmt->bind_param('i', $siteId);
+    $rtStmt->execute();
+    $rs = $rtStmt->get_result();
     while ($r = $rs->fetch_assoc()) {
         $roleTypes[] = $r;
     }

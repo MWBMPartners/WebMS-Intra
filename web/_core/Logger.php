@@ -240,6 +240,17 @@ class Logger
         } catch (\Throwable $ignored) {
             error_log('Alert dispatch failed: ' . $ignored->getMessage());
         }
+
+        // 📡 External error monitor (#143). When monitoring.enabled = '1' AND
+        //    monitoring.sentryDsn is set, forward the event to Sentry /
+        //    GlitchTip. Both accept the same store-API envelope. Silent
+        //    no-op when not configured. Wrapped in try/catch so any
+        //    transport / config failure can never break the logging path.
+        try {
+            ErrorMonitor::capture($platform, $severity, $code, $title, $detail, $userId);
+        } catch (\Throwable $ignored) {
+            error_log('Error monitor capture failed: ' . $ignored->getMessage());
+        }
     }
 
     private static function maybeDispatchAlert(

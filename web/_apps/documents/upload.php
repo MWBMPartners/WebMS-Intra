@@ -154,8 +154,9 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
             <div class="mb-3">
                 <label for="document" class="form-label">File <span class="text-danger">*</span></label>
-                <input type="file" class="form-control" id="document" name="document" required>
-                <small class="text-muted">Maximum size: <?php echo round($maxSize / 1048576, 1); ?> MB</small>
+                <input type="file" class="form-control" id="document" name="document" required
+                       accept="application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation,image/*,text/plain,text/csv">
+                <small class="text-muted">Maximum size: <?php echo round($maxSize / 1048576, 1); ?> MB · iOS users will see Photo Library + Files alongside the file picker.</small>
             </div>
 
             <div class="mb-3">

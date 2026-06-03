@@ -78,12 +78,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && Auth::verifyCsrf($_POST['csrf_token
 }
 
 $rows = [];
-$rs = $db->query('SELECT * FROM tblResource WHERE siteID = ' . $siteId . ' AND isActive = 1 ORDER BY category, name');
-if ($rs !== false) {
+$rStmt = $db->prepare('SELECT * FROM tblResource WHERE siteID = ? AND isActive = 1 ORDER BY category, name');
+if ($rStmt !== false) {
+    $rStmt->bind_param('i', $siteId);
+    $rStmt->execute();
+    $rs = $rStmt->get_result();
     while ($r = $rs->fetch_assoc()) {
         $rows[] = $r;
     }
-    $rs->free();
+    $rStmt->close();
 }
 
 $defaultBuffer = (int) (App::settings()['resources']['default_buffer'] ?? 15);
