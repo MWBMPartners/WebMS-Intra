@@ -88,6 +88,49 @@ Substantial pre-production-rollout hardening. Each item shipped, scaffolded, or 
 
 Net-new feature surface across security, ops, UX, and core → minor bump per semver.
 
+### Added — Waves 3 / 4 / 5 install-on-demand apps (PRs #283 / #284 / #285)
+
+16 new apps shipped across three branches, all on top of the App Registry pattern (`_core/apps/{slug}.php` auto-discovery, `enabled = 0` default, per-site toggle at `/admin/apps`).
+
+**Wave 3 (#283):** `#265` Reading Plans (Bible-in-a-Year, streak counter) · `#275` QR generator + CueRCode adapter slot · `#239` Invite-based onboarding (SHA-256 hashed tokens, public acceptance route) · `#240` One-click offboarding (7-step atomic revocation + 7-day rehire window).
+
+**Wave 4 (#284):** `#263` Resources (room/asset booking with overlap conflict detection) · `#262` Service Plans (printable run-sheet builder) · `#273` Livestream (YouTube/Vimeo/Twitch/Facebook embed + countdown) · `#264` Recordings (RSS podcast feed + HTTP Range streaming + FULLTEXT search) · `#274` Zoom (OAuth + meeting creation from calendar + webhook HMAC verification) · `#269` Newsletter (composer with auto-pulled content blocks, provider abstraction reserves a `webMailerMatt` slot) · `#266` Giving (tithe log, Gift Aid digital declaration, HMRC Schedule CSV, dompdf year-end statement) · `#272` SMS (Twilio + MessageBird + SigV4-signed AWS SNS, verification, per-category opt-in, Sabbath quiet hours) · `#267` Projects (public fundraising pages with captcha-gated anonymous pledges, thermometer, updates feed) · `#268` Payments (Stripe Checkout + v1 HMAC webhook + refund; side-effects route into Giving + Projects via `tblPayment.purpose`).
+
+**Wave 5 (#285):** `#276` Transcription (Whisper / AssemblyAI / local whisper.cpp, FULLTEXT search, click-to-timestamp) · `#278` Translation (Anthropic / OpenAI / Google / DeepL / LibreTranslate, content-addressable cache, 10-locale heuristic detection including Welsh) · `#277` AI Assist (Anthropic / OpenAI / ollama, 4 editable prompt-template kinds, monthly cap + per-user daily limit + audit trail) · `#235` GDPR Article 17 erasure engine (19-table catalogue, sealed audit chain via chained SHA-256, one-month SLA queue) · `#236` Photos (4-tier role visibility, moderation queue, EXIF-aware GD re-encode strips metadata for non-privileged downloads) · `#249` Off-site backup (weekly AES-256-CBC to rclone/S3/SFTP) · `#250` Disaster-recovery runbook + in-portal landing · `#161` CDN SRI audit + Asset helpers for Sortable + Swagger UI · `#248` End-to-end MySQL migration test harness · `#225` Static mobile readiness audit + worksheet.
+
+### Added — Post-wave-5 infrastructure hardening (PRs #286-#293)
+
+- **PR #286** — Doc sweep cleaning up `core/` / `vendor/` / `sql/` → `_core/` / `_vendor/` / `_sql/` references (#189, #182, #183, #194). Issues #190, #191, #192, #193 verified already-resolved.
+- **PR #287** — `auto-merge-alpha.yml` verification (#147). Workflow structurally correct; 0 runs to date because no PR has ever targeted `alpha`. Documented re-verification procedure + 6-month delete-if-still-unused criterion in DEV_NOTES.
+- **PR #288** — Defence-in-depth refactor (#159): **317 PHP files** in 37 app dirs `git mv`'d from `web/public_html/` to `web/_apps/`. Only entry-point files (`index.php`, `error.php`, `api-docs/index.php`) remain in the webroot. Router falls back to `public_html/` for legitimate-entry-point routes.
+- **PR #289** — Nonce-based CSP `script-src` tightening (#144). New `App::cspNonce()` static method (16-byte hex, request-memoised). Modern browsers strictly enforce the nonce; `'unsafe-inline'` retained as a fallback for older browsers per CSP3 semantics.
+- **PR #290** — External error monitor (#143). New `Portal\Core\ErrorMonitor` adapter — Sentry- and GlitchTip-compatible store-API envelope; SigV4-style auth via `X-Sentry-Auth` header; 2 s connect + 5 s total timeout; sample-rate gate; admin smoke-test endpoint. Hooked into `Logger::errorPlatform()` alongside the existing critical-alert dispatch.
+- **PR #291** — REST API write-side CRUD (#157): 10 new endpoints — Announcements full CRUD; Tasks create/complete/delete; Prayer Requests create/moderate; Leadership assign/unassign. OpenAPI spec now has 23 paths (up from 13). Documents/Attendance/Expenses deferred (different module shapes).
+- **PR #292** — PWA offline write queue (#233). New `Portal.OfflineQueue` IndexedDB module; `data-offline-queueable` form interceptor; Background Sync API integration in `sw.js`; `/account/offline-queue` user inspector; connection indicator dot in footer. `X-Offline-Queued-At` header carries the original submission timestamp to receiving endpoints.
+- **PR #293** — Codebase audit sweep: duplicate cookie banner in `footer.php` removed (was bypassing the GDPR consent pipeline); missing `Auth` import in `footer.php` fixed (would have thrown `ClassNotFoundException` on first cookie-banner render); 6 SQL `int`-concatenation queries converted to prepared statements for consistency with the rest of the codebase (no security impact — all int-cast at source).
+
+### Changed — `_apps/` defence-in-depth refactor (PR #288)
+
+Architectural-level change: every app controller now lives **outside** `public_html/`. The `PORTAL_APPS` constant in `bootstrap.php` now points at `web/_apps/`. Router-level fallback to `public_html/` for the small set of routes that legitimately render entry-point pages (Swagger UI, openapi.json, PWA offline fallback). `.htaccess` deny-`.php` rule simplified — exempts only the 3 known entry points (`index.php`, `api-docs/index.php`, `error.php`). All 7 audit scripts updated to scan `_apps/` alongside `public_html/`.
+
+### Audit scripts (`tools/audit-checks/`)
+
+Three new static-analysis scripts added across the post-wave-5 work:
+
+- `check_cdn_sri.py` (#161) — flags `<script>`/`<link>` tags pointing at known CDN hosts without `integrity=` attributes.
+- `check_migration_idempotency.py` (#248) — flags `CREATE TABLE` / `ADD COLUMN` / `CREATE INDEX` without `IF NOT EXISTS` and `INSERT` without `ON DUPLICATE KEY UPDATE` / `INSERT IGNORE`. Quote-aware splitter respects `;` inside string literals.
+- `check_mobile_readiness.py` (#225) — flags missing `<meta viewport>`, hard-coded widths > 320 px, bare `<table>` outside `.table-responsive`, file inputs without `accept=`, modals without `modal-fullscreen-sm-down`.
+
+### Audit pass status (2026-06-03)
+
+- `check_route_targets.py`: 304 routes, **0 missing target files**
+- `check_sql_columns.py`: 109 tables, **0 mismatches**
+- `check_no_native_confirm.py`: **0 findings**
+- `check_cdn_sri.py`: **0 findings**
+- `check_settings_keys.py`: 3 informational (all have `??` fallbacks)
+- `check_migration_idempotency.py`: 19 informational (pre-multi-site historical cohort, Migrator-protected)
+- `check_mobile_readiness.py`: 29 informational fix targets (concrete sweep candidates)
+
 ## [1.1.1] - Unreleased
 
 ### Added — Authorised-use notice on the login screen (#221)
