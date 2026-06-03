@@ -1296,6 +1296,105 @@ Use the workflow_dispatch **dry-run** input on `deploy.yml` to preview what
 a deploy would change (and crucially, what it would delete) before pushing.
 See issue #107 for the full rationale and mitigation list.
 
+## End-to-end migration test (#248)
+
+Before each release, run every migration through a real MySQL 8.0.36
+container to catch what the static `check_sql_columns.py` and `check_migration_idempotency.py` audits miss:
+
+- Statement order — a later migration assuming a table a previous one
+  forgot to create.
+- FK constraints that pass static parsing but blow up at runtime on
+  real data shapes.
+- Genuine non-idempotency that the static audit can't model (e.g. a
+  trigger that errors second-time-round).
+
+### Procedure
+
+Requires `docker` + `docker compose` on your local machine.
+
+```bash
+tools/e2e-migrations/run.sh                # all three phases (~30s)
+tools/e2e-migrations/run.sh --skip-stale   # phases 1+2 only
+tools/e2e-migrations/run.sh --keep         # leave container up for poking
+```
+
+The script drives three phases:
+1. **Fresh install** — apply every `web/_sql/NNN_*.sql` in order to an
+   empty DB. Any SQL error fails the run.
+2. **Idempotency** — re-run the same loop. Schema row counts
+   (information_schema.tables/columns/statistics) must be unchanged.
+3. **Stale-DB upgrade** — wipe, apply first half, then apply the rest.
+   Catch-up must reach the same final state as fresh install.
+
+See `tools/e2e-migrations/README.md` for details.
+
+### Static idempotency audit
+
+`tools/audit-checks/check_migration_idempotency.py` is the fast
+first-pass. Flags `CREATE TABLE` without `IF NOT EXISTS`, `ADD COLUMN`
+without `IF NOT EXISTS`, and `INSERT` without `ON DUPLICATE KEY UPDATE`
+or `INSERT IGNORE`. Quote-aware splitter — `;` inside string literals
+and comments doesn't fragment the parse.
+
+Some old migrations (014-018, 037, 043) flag because they used pre-multi-site
+patterns without the `IF NOT EXISTS` clause. These have already run in
+production and the Migrator wrapper skips already-applied files, so
+they're safe. **New migrations must pass cleanly** — drop a non-idempotent
+DDL in a fresh migration and the audit will catch it.
+
+## Adding a new CDN dependency (#161)
+
+Every `<script>` and `<link>` tag pointing at a third-party CDN MUST carry
+an `integrity="sha384-…"` attribute and `crossorigin="anonymous"`. Without
+SRI, a compromise of the CDN serves arbitrary JS/CSS to every visitor
+simultaneously — and SRI is the only client-side mitigation.
+
+The `tools/audit-checks/check_cdn_sri.py` script scans every PHP / HTML
+file under `web/` and flags any CDN tag without an `integrity=` attribute.
+It runs in CI and locally — drop a tag without SRI and the check fails.
+
+### Procedure
+
+1. **Pin the version.** SRI requires exact byte matching, so `@latest`
+   and unpinned major versions (`bootstrap@5`) will break the check on
+   every release. Use an exact patch version (`bootstrap@5.3.3`).
+
+2. **Generate the hash:**
+   ```bash
+   curl -sL https://cdn.jsdelivr.net/npm/<package>@<version>/<file> \
+     | openssl dgst -sha384 -binary \
+     | openssl base64 -A
+   ```
+   Prefix the output with `sha384-`.
+
+3. **Add to `web/_core/Asset.php`:**
+   - Add a `*_VERSION` constant (one source of truth for bumps).
+   - Add a `CDN_*` URL constant building from the version.
+   - Add a `*_INTEGRITY` hash constant from the curl/openssl pipeline.
+   - Add a helper method (`Asset::sortableJs()` style) that calls
+     `self::css()` or `self::js()` with the constants. Helpers attach
+     SRI automatically and route an `onerror` to the local fallback.
+
+4. **Use the helper, never raw `<script>`:**
+   ```php
+   <?php echo \Portal\Core\Asset::sortableJs(); ?>
+   ```
+   Inline `<script src="https://cdn…">` tags will be caught by the audit
+   AND don't get the local-fallback handler.
+
+5. **Run the audit:**
+   ```bash
+   python3 tools/audit-checks/check_cdn_sri.py
+   ```
+   Should report `No CDN tags missing integrity= attribute.` ✅
+
+### Currently-unfilled hashes
+
+The Sortable + Swagger UI helpers ship with empty integrity constants
+(TODO markers in `Asset.php`). The tags still render, but without
+integrity verification. To fill them, run the curl/openssl command
+above and update the four `*_INTEGRITY` constants in `Asset.php`.
+
 ---
 
 Last updated: May 2026

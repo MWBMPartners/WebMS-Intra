@@ -301,10 +301,9 @@ $providerIcon = static function (string $key): string {
 </form>
 
 <!-- ============================================================================ -->
-<!-- 🪜 Drag-and-drop init (SortableJS via CDN with graceful no-op fallback) -->
+<!-- 🪜 Drag-and-drop init (SortableJS via Asset helper — SRI when configured) -->
 <!-- ============================================================================ -->
-<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"
-        crossorigin="anonymous"></script>
+<?php echo \Portal\Core\Asset::sortableJs(); ?>
 <script>
 (function () {
     var list  = document.getElementById('captchaPriorityList');

@@ -42,7 +42,7 @@ header('Referrer-Policy: strict-origin-when-cross-origin');
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="robots" content="noindex, nofollow">
     <title>WebMS Intra REST API — Documentation</title>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.17.14/swagger-ui.css">
+    <?php echo \Portal\Core\Asset::swaggerUiCss(); ?>
     <style>
         body { margin: 0; background: #fafafa; }
         .topbar { display: none !important; }
@@ -53,8 +53,8 @@ header('Referrer-Policy: strict-origin-when-cross-origin');
 
 <div id="swagger-ui"></div>
 
-<script src="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.17.14/swagger-ui-bundle.js" crossorigin="anonymous"></script>
-<script src="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.17.14/swagger-ui-standalone-preset.js" crossorigin="anonymous"></script>
+<?php echo \Portal\Core\Asset::swaggerUiJs(); ?>
+<?php echo \Portal\Core\Asset::swaggerUiPresetJs(); ?>
 <script>
 (function () {
     function init() {

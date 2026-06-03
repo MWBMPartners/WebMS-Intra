@@ -3998,3 +3998,336 @@ INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue
     (NULL, 'payments.gocardless.token',  '', '', 1),
     (NULL, 'payments.gocardless.webhookSecret','', '', 1)
 ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
+-- =============================================================================
+-- Transcription (migration 098, #276)
+-- =============================================================================
+
+CREATE TABLE IF NOT EXISTS `tblTranscript` (
+    `transcriptID` INT          NOT NULL AUTO_INCREMENT,
+    `recordingID`  INT          NOT NULL,
+    `provider`     VARCHAR(30)  NOT NULL DEFAULT 'openai',
+    `status`       ENUM('queued','processing','completed','failed') NOT NULL DEFAULT 'queued',
+    `language`     VARCHAR(10)  DEFAULT NULL,
+    `fullText`     MEDIUMTEXT   DEFAULT NULL,
+    `jsonSegments` MEDIUMTEXT   DEFAULT NULL,
+    `durationSec`  INT          DEFAULT NULL,
+    `costPence`    INT          DEFAULT NULL,
+    `errorMsg`     VARCHAR(255) DEFAULT NULL,
+    `queuedAt`     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `generatedAt`  DATETIME     DEFAULT NULL,
+    PRIMARY KEY (`transcriptID`),
+    UNIQUE KEY `uq_t_recording` (`recordingID`),
+    KEY `idx_t_status` (`status`),
+    CONSTRAINT `fk_t_recording` FOREIGN KEY (`recordingID`) REFERENCES `tblRecording`(`recordingID`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+CREATE TABLE IF NOT EXISTS `tblTranscriptSearch` (
+    `searchID`     INT      NOT NULL AUTO_INCREMENT,
+    `transcriptID` INT      NOT NULL,
+    `recordingID`  INT      NOT NULL,
+    `siteID`       INT      NOT NULL DEFAULT 1,
+    `body`         MEDIUMTEXT NOT NULL,
+    PRIMARY KEY (`searchID`),
+    UNIQUE KEY `uq_ts_transcript` (`transcriptID`),
+    KEY `idx_ts_site` (`siteID`),
+    FULLTEXT KEY `ft_ts_body` (`body`),
+    CONSTRAINT `fk_ts_transcript` FOREIGN KEY (`transcriptID`) REFERENCES `tblTranscript`(`transcriptID`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('admin/transcription',       'admin/transcription/index.php',  1),
+    ('admin/transcription/save',  'admin/transcription/save.php',   1),
+    ('admin/transcription/run',   'admin/transcription/run.php',    1),
+    ('recordings/search',         'recordings/search.php',          1),
+    ('recordings/transcript',     'recordings/transcript.php',      1),
+    ('recordings/transcribe',     'recordings/transcribe.php',      1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'transcription.enabled',         '0', '0', 0),
+    (NULL, 'transcription.displayName',     'Transcription', 'Transcription', 0),
+    (NULL, 'transcription.displayIcon',     'fa-solid fa-closed-captioning', 'fa-solid fa-closed-captioning', 0),
+    (NULL, 'transcription.provider',        'openai', 'openai', 0),
+    (NULL, 'transcription.language',        'en', 'en', 0),
+    (NULL, 'transcription.batchSize',       '5', '5', 0),
+    (NULL, 'transcription.openai.apiKey',   '', '', 1),
+    (NULL, 'transcription.openai.model',    'whisper-1', 'whisper-1', 0),
+    (NULL, 'transcription.assemblyai.apiKey','', '', 1),
+    (NULL, 'transcription.local.binPath',   '/usr/local/bin/whisper', '/usr/local/bin/whisper', 0)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
+-- =============================================================================
+-- Translation (migration 099, #278)
+-- =============================================================================
+
+CREATE TABLE IF NOT EXISTS `tblContentTranslation` (
+    `translationID`     INT          NOT NULL AUTO_INCREMENT,
+    `sourceTable`       VARCHAR(64)  NOT NULL,
+    `sourceID`          INT          NOT NULL,
+    `sourceField`       VARCHAR(64)  NOT NULL DEFAULT 'body',
+    `sourceLanguage`    VARCHAR(10)  NOT NULL,
+    `targetLanguage`    VARCHAR(10)  NOT NULL,
+    `translatedContent` MEDIUMTEXT   NOT NULL,
+    `provider`          VARCHAR(30)  NOT NULL DEFAULT 'anthropic',
+    `qualityScore`      TINYINT      DEFAULT NULL,
+    `costPence`         INT          DEFAULT NULL,
+    `translatedAt`      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`translationID`),
+    UNIQUE KEY `uq_ct_lookup` (`sourceTable`, `sourceID`, `sourceField`, `targetLanguage`),
+    KEY `idx_ct_dated` (`translatedAt`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+CREATE TABLE IF NOT EXISTS `tblUserTranslationPref` (
+    `userID`        INT        NOT NULL,
+    `autoTranslate` TINYINT(1) NOT NULL DEFAULT 0,
+    `updatedAt`     DATETIME   NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`userID`),
+    CONSTRAINT `fk_utp_user` FOREIGN KEY (`userID`) REFERENCES `tblUsers`(`userID`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('admin/translation',      'admin/translation/index.php',  1),
+    ('admin/translation/save', 'admin/translation/save.php',   1),
+    ('api/translate',          'api/translate.php',            1),
+    ('account/translation',    'account/translation.php',      1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'translation.enabled',          '0', '0', 0),
+    (NULL, 'translation.displayName',      'Translation', 'Translation', 0),
+    (NULL, 'translation.displayIcon',      'fa-solid fa-language', 'fa-solid fa-language', 0),
+    (NULL, 'translation.provider',         'anthropic', 'anthropic', 0),
+    (NULL, 'translation.monthCapPence',    '5000', '5000', 0),
+    (NULL, 'translation.anthropic.apiKey', '', '', 1),
+    (NULL, 'translation.anthropic.model',  'claude-haiku-4-5-20251001', 'claude-haiku-4-5-20251001', 0),
+    (NULL, 'translation.openai.apiKey',    '', '', 1),
+    (NULL, 'translation.openai.model',     'gpt-4o-mini', 'gpt-4o-mini', 0),
+    (NULL, 'translation.google.apiKey',    '', '', 1),
+    (NULL, 'translation.deepl.apiKey',     '', '', 1),
+    (NULL, 'translation.libre.baseUrl',    'https://libretranslate.com', 'https://libretranslate.com', 0),
+    (NULL, 'translation.libre.apiKey',     '', '', 1)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
+-- =============================================================================
+-- AI-assisted drafting (migration 100, #277)
+-- =============================================================================
+
+CREATE TABLE IF NOT EXISTS `tblAiPrompt` (
+    `promptID`       INT          NOT NULL AUTO_INCREMENT,
+    `siteID`         INT          NOT NULL DEFAULT 1,
+    `kind`           VARCHAR(50)  NOT NULL,
+    `promptTemplate` MEDIUMTEXT   NOT NULL,
+    `isActive`       TINYINT(1)   NOT NULL DEFAULT 1,
+    `updatedAt`      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`promptID`),
+    UNIQUE KEY `uq_ap_site_kind` (`siteID`, `kind`),
+    CONSTRAINT `fk_ap_site` FOREIGN KEY (`siteID`) REFERENCES `tblSites`(`siteID`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+CREATE TABLE IF NOT EXISTS `tblAiUsage` (
+    `usageID`      INT          NOT NULL AUTO_INCREMENT,
+    `siteID`       INT          NOT NULL DEFAULT 1,
+    `userID`       INT          DEFAULT NULL,
+    `promptKind`   VARCHAR(50)  NOT NULL,
+    `provider`     VARCHAR(30)  NOT NULL,
+    `inputTokens`  INT          NOT NULL DEFAULT 0,
+    `outputTokens` INT          NOT NULL DEFAULT 0,
+    `costPence`    INT          NOT NULL DEFAULT 0,
+    `inputSample`  MEDIUMTEXT   DEFAULT NULL,
+    `outputSample` MEDIUMTEXT   DEFAULT NULL,
+    `occurredAt`   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`usageID`),
+    KEY `idx_au_site_date` (`siteID`, `occurredAt`),
+    KEY `idx_au_user`      (`userID`),
+    CONSTRAINT `fk_au_site` FOREIGN KEY (`siteID`) REFERENCES `tblSites`(`siteID`),
+    CONSTRAINT `fk_au_user` FOREIGN KEY (`userID`) REFERENCES `tblUsers`(`userID`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('admin/ai-assist',         'admin/ai-assist/index.php',  1),
+    ('admin/ai-assist/save',    'admin/ai-assist/save.php',   1),
+    ('admin/ai-assist/prompt',  'admin/ai-assist/prompt.php', 1),
+    ('api/ai-assist/improve',   'api/ai-improve.php',         1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'ai_assist.enabled',            '0', '0', 0),
+    (NULL, 'ai_assist.displayName',        'AI Assist', 'AI Assist', 0),
+    (NULL, 'ai_assist.displayIcon',        'fa-solid fa-wand-magic-sparkles', 'fa-solid fa-wand-magic-sparkles', 0),
+    (NULL, 'ai_assist.provider',           'anthropic', 'anthropic', 0),
+    (NULL, 'ai_assist.monthCapPence',      '5000', '5000', 0),
+    (NULL, 'ai_assist.userDailyCap',       '20', '20', 0),
+    (NULL, 'ai_assist.audience',           'congregation', 'congregation', 0),
+    (NULL, 'ai_assist.anthropic.apiKey',   '', '', 1),
+    (NULL, 'ai_assist.anthropic.model',    'claude-haiku-4-5-20251001', 'claude-haiku-4-5-20251001', 0),
+    (NULL, 'ai_assist.openai.apiKey',      '', '', 1),
+    (NULL, 'ai_assist.openai.model',       'gpt-4o-mini', 'gpt-4o-mini', 0),
+    (NULL, 'ai_assist.local.baseUrl',      'http://localhost:11434', 'http://localhost:11434', 0),
+    (NULL, 'ai_assist.local.model',        'llama3.2', 'llama3.2', 0)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
+-- =============================================================================
+-- GDPR erasure (migration 101, #235)
+-- =============================================================================
+
+CREATE TABLE IF NOT EXISTS `tblErasureRequest` (
+    `requestID`        INT          NOT NULL AUTO_INCREMENT,
+    `siteID`           INT          NOT NULL DEFAULT 1,
+    `userID`           INT          DEFAULT NULL,
+    `subjectEmail`     VARCHAR(255) NOT NULL,
+    `subjectName`      VARCHAR(255) DEFAULT NULL,
+    `confirmToken`     CHAR(64)     DEFAULT NULL,
+    `status`           ENUM('pending_confirmation','pending_review','processing','completed','cancelled','failed') NOT NULL DEFAULT 'pending_confirmation',
+    `requestedAt`      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `confirmedAt`      DATETIME     DEFAULT NULL,
+    `dueBy`            DATETIME     NOT NULL,
+    `processedAt`      DATETIME     DEFAULT NULL,
+    `processedByID`    INT          DEFAULT NULL,
+    `reasonRetained`   TEXT         DEFAULT NULL,
+    `notes`            TEXT         DEFAULT NULL,
+    PRIMARY KEY (`requestID`),
+    KEY `idx_er_status` (`status`),
+    KEY `idx_er_due`    (`dueBy`),
+    CONSTRAINT `fk_er_site` FOREIGN KEY (`siteID`) REFERENCES `tblSites`(`siteID`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+CREATE TABLE IF NOT EXISTS `tblErasureAudit` (
+    `auditID`     INT          NOT NULL AUTO_INCREMENT,
+    `requestID`   INT          NOT NULL,
+    `action`      VARCHAR(50)  NOT NULL,
+    `tableName`   VARCHAR(64)  NOT NULL,
+    `recordKey`   VARCHAR(255) DEFAULT NULL,
+    `details`     TEXT         DEFAULT NULL,
+    `chainHash`   CHAR(64)     NOT NULL,
+    `loggedAt`    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`auditID`),
+    KEY `idx_ea_request` (`requestID`),
+    CONSTRAINT `fk_ea_request` FOREIGN KEY (`requestID`) REFERENCES `tblErasureRequest`(`requestID`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('account/my-data',           'account/my-data.php',           1),
+    ('account/erasure-request',   'account/erasure-request.php',   1),
+    ('account/erasure-confirm',   'account/erasure-confirm.php',   0),
+    ('admin/erasure-requests',    'admin/erasure/index.php',       1),
+    ('admin/erasure-requests/process', 'admin/erasure/process.php', 1),
+    ('admin/erasure-requests/report',  'admin/erasure/report.php',  1),
+    ('privacy/policy',            'privacy/policy.php',            0)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'privacy.allowAccountDelete', 'true', 'true', 0),
+    (NULL, 'privacy.erasureContact',     '', '', 0),
+    (NULL, 'privacy.financialRetentionYears', '6', '6', 0)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
+-- =============================================================================
+-- Photos (migration 102, #236)
+-- =============================================================================
+
+CREATE TABLE IF NOT EXISTS `tblPhotoAlbum` (
+    `albumID`     INT          NOT NULL AUTO_INCREMENT,
+    `siteID`      INT          NOT NULL DEFAULT 1,
+    `name`        VARCHAR(255) NOT NULL,
+    `slug`        VARCHAR(200) NOT NULL,
+    `description` TEXT         DEFAULT NULL,
+    `visibility`  ENUM('public','volunteers','staff','admin_only') NOT NULL DEFAULT 'staff',
+    `coverPhotoID` INT         DEFAULT NULL,
+    `createdByID` INT          DEFAULT NULL,
+    `createdAt`   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`albumID`),
+    UNIQUE KEY `uq_pa_site_slug` (`siteID`, `slug`),
+    CONSTRAINT `fk_pa_site` FOREIGN KEY (`siteID`) REFERENCES `tblSites`(`siteID`),
+    CONSTRAINT `fk_pa_user` FOREIGN KEY (`createdByID`) REFERENCES `tblUsers`(`userID`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+CREATE TABLE IF NOT EXISTS `tblPhoto` (
+    `photoID`           INT          NOT NULL AUTO_INCREMENT,
+    `siteID`            INT          NOT NULL DEFAULT 1,
+    `albumID`           INT          DEFAULT NULL,
+    `uploadedByUserID`  INT          DEFAULT NULL,
+    `filePath`          VARCHAR(255) NOT NULL,
+    `originalFilename`  VARCHAR(255) DEFAULT NULL,
+    `mimeType`          VARCHAR(60)  DEFAULT NULL,
+    `fileSize`          INT          DEFAULT NULL,
+    `widthPx`           INT          DEFAULT NULL,
+    `heightPx`          INT          DEFAULT NULL,
+    `caption`           TEXT         DEFAULT NULL,
+    `visibility`        ENUM('public','volunteers','staff','admin_only','inherit') NOT NULL DEFAULT 'inherit',
+    `status`            ENUM('pending_approval','approved','rejected') NOT NULL DEFAULT 'pending_approval',
+    `moderatedByID`     INT          DEFAULT NULL,
+    `moderatedAt`       DATETIME     DEFAULT NULL,
+    `rejectionReason`   VARCHAR(500) DEFAULT NULL,
+    `takenAt`           DATETIME     DEFAULT NULL,
+    `createdAt`         DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`photoID`),
+    KEY `idx_ph_site_status` (`siteID`, `status`),
+    KEY `idx_ph_album`       (`albumID`),
+    KEY `idx_ph_uploader`    (`uploadedByUserID`),
+    CONSTRAINT `fk_ph_site`     FOREIGN KEY (`siteID`)           REFERENCES `tblSites`(`siteID`),
+    CONSTRAINT `fk_ph_album`    FOREIGN KEY (`albumID`)          REFERENCES `tblPhotoAlbum`(`albumID`) ON DELETE SET NULL,
+    CONSTRAINT `fk_ph_uploader` FOREIGN KEY (`uploadedByUserID`) REFERENCES `tblUsers`(`userID`)       ON DELETE SET NULL,
+    CONSTRAINT `fk_ph_moderator` FOREIGN KEY (`moderatedByID`)   REFERENCES `tblUsers`(`userID`)       ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('photos',                'photos/index.php',          0),
+    ('photos/album',          'photos/album.php',          0),
+    ('photos/view',           'photos/view.php',           0),
+    ('photos/serve',          'photos/serve.php',          0),
+    ('photos/serve-raw',      'photos/serve-raw.php',      1),
+    ('photos/upload',         'photos/upload.php',         1),
+    ('admin/photos/queue',    'admin/photos/queue.php',    1),
+    ('admin/photos/moderate', 'admin/photos/moderate.php', 1),
+    ('admin/photos/albums',   'admin/photos/albums.php',   1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'photos.enabled',         '0', '0', 0),
+    (NULL, 'photos.displayName',     'Photos', 'Photos', 0),
+    (NULL, 'photos.displayIcon',     'fa-solid fa-images', 'fa-solid fa-images', 0),
+    (NULL, 'photos.maxUploadMb',     '15', '15', 0),
+    (NULL, 'photos.defaultVisibility','staff', 'staff', 0)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
+-- =============================================================================
+-- Off-site backup sync log (migration 103, #249)
+-- =============================================================================
+
+CREATE TABLE IF NOT EXISTS `tblOffsiteSyncLog` (
+    `logID`       INT          NOT NULL AUTO_INCREMENT,
+    `runAt`       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `triggeredBy` VARCHAR(50)  NOT NULL DEFAULT 'cron',
+    `destination` VARCHAR(50)  NOT NULL,
+    `snapshotName` VARCHAR(255) DEFAULT NULL,
+    `bundleSize`  BIGINT       DEFAULT NULL,
+    `durationSec` INT          DEFAULT NULL,
+    `status`      ENUM('success','failed','skipped') NOT NULL,
+    `errorMsg`    VARCHAR(500) DEFAULT NULL,
+    `output`      MEDIUMTEXT   DEFAULT NULL,
+    PRIMARY KEY (`logID`),
+    KEY `idx_osl_run` (`runAt`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('admin/maintenance/offsite-backup',     'admin/maintenance/offsite-backup.php',     1),
+    ('admin/maintenance/offsite-backup/run', 'admin/maintenance/offsite-backup-run.php', 1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'backup.offsite.enabled',     '0', '0', 0),
+    (NULL, 'backup.offsite.destination', 'rclone', 'rclone', 0),
+    (NULL, 'backup.offsite.rcloneRemote', '', '', 0),
+    (NULL, 'backup.offsite.keepWeekly',  '8', '8', 0),
+    (NULL, 'backup.offsite.keepMonthly', '12', '12', 0),
+    (NULL, 'backup.offsite.alertEmail',  '', '', 0)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
+-- =============================================================================
+-- Disaster-recovery in-portal route (migration 104, #250)
+-- =============================================================================
+
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('help/disaster-recovery', 'help/disaster-recovery.php', 1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);

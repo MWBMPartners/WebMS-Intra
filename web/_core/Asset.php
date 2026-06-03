@@ -47,8 +47,21 @@ class Asset
     /** @var string Font Awesome icon library version */
     private const FONTAWESOME_VERSION = '6.5.1';
 
+    /** @var string SortableJS version — drag-reorder lib used in admin captcha priority UI */
+    private const SORTABLE_VERSION = '1.15.2';
+
+    /** @var string Swagger UI version — interactive API explorer at /api-docs */
+    private const SWAGGER_VERSION = '5.17.14';
+
     // 🔐 ---------------------------------------------------------------------------
     // SRI integrity hashes – regenerate whenever the library version changes
+    //
+    // To regenerate after a version bump:
+    //   curl -sL <CDN_URL> | openssl dgst -sha384 -binary | openssl base64 -A
+    //   then prefix the result with "sha384-"
+    //
+    // The check_cdn_sri.py audit fails any CDN tag missing integrity= so
+    // new contributors won't accidentally drop a tag without one.
     // -----------------------------------------------------------------------------
 
     /** @var string SRI hash for Bootstrap 5.3.3 CSS (jsdelivr CDN) */
@@ -62,6 +75,26 @@ class Asset
     /** @var string SRI hash for Font Awesome 6.5.1 all.min.css (cdnjs CDN) */
     private const FONTAWESOME_CSS_INTEGRITY =
         'sha384-t1nt8BQoYMLFN5p42tRAtuAAFQaCQDDkGnRm3LqTMXRg5r4EbSJz7GZBG0NqXKOF';
+
+    /**
+     * @var string SRI hash for SortableJS 1.15.2 (jsdelivr CDN).
+     *
+     * TODO(#161): fill from `curl -sL <CDN_URL> | openssl dgst -sha384 -binary
+     * | openssl base64 -A` once someone with network access runs the command.
+     * The check_cdn_sri.py audit will keep flagging this gap until the hash
+     * lands. Empty for now — tag emits without integrity= attribute so the
+     * page keeps working; CDN-compromise mitigation only kicks in once filled.
+     */
+    private const SORTABLE_JS_INTEGRITY = '';
+
+    /** @var string SRI hash for swagger-ui 5.17.14 swagger-ui.css (jsdelivr CDN) — TODO(#161) */
+    private const SWAGGER_CSS_INTEGRITY = '';
+
+    /** @var string SRI hash for swagger-ui 5.17.14 swagger-ui-bundle.js (jsdelivr CDN) — TODO(#161) */
+    private const SWAGGER_JS_INTEGRITY = '';
+
+    /** @var string SRI hash for swagger-ui 5.17.14 swagger-ui-standalone-preset.js (jsdelivr CDN) — TODO(#161) */
+    private const SWAGGER_PRESET_INTEGRITY = '';
 
     // 📂 ---------------------------------------------------------------------------
     // Local fallback paths (relative to the web root)
@@ -108,6 +141,22 @@ class Asset
     private const CDN_FONTAWESOME_CSS =
         'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/' . self::FONTAWESOME_VERSION
         . '/css/all.min.css';
+
+    /** @var string CDN URL for SortableJS */
+    private const CDN_SORTABLE_JS =
+        'https://cdn.jsdelivr.net/npm/sortablejs@' . self::SORTABLE_VERSION . '/Sortable.min.js';
+
+    /** @var string CDN URL for Swagger UI CSS */
+    private const CDN_SWAGGER_CSS =
+        'https://cdn.jsdelivr.net/npm/swagger-ui-dist@' . self::SWAGGER_VERSION . '/swagger-ui.css';
+
+    /** @var string CDN URL for Swagger UI bundle */
+    private const CDN_SWAGGER_JS =
+        'https://cdn.jsdelivr.net/npm/swagger-ui-dist@' . self::SWAGGER_VERSION . '/swagger-ui-bundle.js';
+
+    /** @var string CDN URL for Swagger UI standalone preset */
+    private const CDN_SWAGGER_PRESET =
+        'https://cdn.jsdelivr.net/npm/swagger-ui-dist@' . self::SWAGGER_VERSION . '/swagger-ui-standalone-preset.js';
 
     // 🏗️ ===========================================================================
     // Public API – generic tag builders
@@ -281,6 +330,50 @@ class Asset
     public static function portalCss(): string
     {
         return '<link rel="stylesheet" href="' . self::esc(self::LOCAL_PORTAL_CSS) . '">';
+    }
+
+    /**
+     * SortableJS drag-reorder lib via jsdelivr CDN.
+     *
+     * Used by the admin captcha priority UI. No local fallback today —
+     * vendoring is a follow-up; the onerror handler in js() routes a
+     * missing-fallback as a no-op (the page degrades to no drag, not broken).
+     *
+     * @return string HTML <script> tag
+     */
+    public static function sortableJs(): string
+    {
+        return self::js(self::CDN_SORTABLE_JS, '', self::SORTABLE_JS_INTEGRITY, 'Sortable');
+    }
+
+    /**
+     * Swagger UI CSS via jsdelivr CDN. Used at /api-docs.
+     *
+     * @return string HTML <link> tag
+     */
+    public static function swaggerUiCss(): string
+    {
+        return self::css(self::CDN_SWAGGER_CSS, '', self::SWAGGER_CSS_INTEGRITY);
+    }
+
+    /**
+     * Swagger UI bundle JS via jsdelivr CDN. Used at /api-docs.
+     *
+     * @return string HTML <script> tag
+     */
+    public static function swaggerUiJs(): string
+    {
+        return self::js(self::CDN_SWAGGER_JS, '', self::SWAGGER_JS_INTEGRITY, 'SwaggerUIBundle');
+    }
+
+    /**
+     * Swagger UI standalone preset JS via jsdelivr CDN. Used at /api-docs.
+     *
+     * @return string HTML <script> tag
+     */
+    public static function swaggerUiPresetJs(): string
+    {
+        return self::js(self::CDN_SWAGGER_PRESET, '', self::SWAGGER_PRESET_INTEGRITY, 'SwaggerUIStandalonePreset');
     }
 
     /**
