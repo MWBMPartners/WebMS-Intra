@@ -56,6 +56,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <?php if (count($tours) === 0): ?>
             <p class="text-muted mb-0">No tours defined yet. The welcome tour seeded by migration 069 should appear here after install.</p>
         <?php else: ?>
+            <div class="table-responsive">
             <table class="table table-sm">
                 <thead><tr><th>Key</th><th>Title</th><th>Version</th><th>Status</th></tr></thead>
                 <tbody>
@@ -69,6 +70,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     <?php endforeach; ?>
                 </tbody>
             </table>
+            </div>
         <?php endif; ?>
     </div>
 </div>

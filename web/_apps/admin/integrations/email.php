@@ -193,6 +193,7 @@ $csrf = Auth::csrfToken();
         <?php if ($senderDomain === ''): ?>
             <p class="text-muted mb-0">Configure <code>email.from</code> before this probe can run.</p>
         <?php else: ?>
+            <div class="table-responsive">
             <table class="table table-sm">
                 <thead><tr><th>Record</th><th>Status</th><th>Value</th></tr></thead>
                 <tbody>
@@ -207,6 +208,7 @@ $csrf = Auth::csrfToken();
                     <?php endforeach; ?>
                 </tbody>
             </table>
+            </div>
             <p class="small text-muted mb-0">Missing SPF/DKIM/DMARC causes mail to land in spam. DreamHost docs cover the SPF and DKIM records to add for shared hosting.</p>
         <?php endif; ?>
     </div>

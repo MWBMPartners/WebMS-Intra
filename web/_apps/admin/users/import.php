@@ -234,6 +234,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
     <div class="card">
         <div class="card-body p-0">
+            <div class="table-responsive">
             <table class="table table-sm table-striped mb-0">
                 <thead><tr><th>Row</th><th>Name</th><th>Email</th><th>Result</th></tr></thead>
                 <tbody>
@@ -253,6 +254,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 <?php endforeach; ?>
                 </tbody>
             </table>
+            </div>
         </div>
     </div>
 
@@ -275,6 +277,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
     <div class="card mb-3">
         <div class="card-body p-0">
+            <div class="table-responsive">
             <table class="table table-sm table-striped mb-0">
                 <thead><tr><th>Row</th><th>Name</th><th>Email</th><th>Admin</th><th>Status</th></tr></thead>
                 <tbody>
@@ -295,6 +298,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 <?php endforeach; ?>
                 </tbody>
             </table>
+            </div>
         </div>
     </div>
 
