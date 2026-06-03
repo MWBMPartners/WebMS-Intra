@@ -418,6 +418,46 @@ for `prefers-color-scheme` changes when in `auto` mode.
 
 ---
 
+## Workflow: `auto-merge-alpha.yml` — verified-correct-but-unfired (#147)
+
+**Verification date:** 2026-06-03 · **Status:** unfired (0 runs since creation)
+
+The workflow at `.github/workflows/auto-merge-alpha.yml` calls
+`gh pr merge --auto --squash` on any PR whose `base` is `alpha`, then waits
+for the merge and dispatches `deploy.yml` so the alpha environment updates
+(the dispatch is required because GitHub's anti-recursion rule suppresses
+push events attributed to `GITHUB_TOKEN`).
+
+It has **zero runs** to date because **no PR has been opened against `alpha`**
+in the entire history of the repo — every PR (#280 - #286 reviewed) has
+targeted `main` directly. The workflow is structurally correct (trigger,
+permissions, command syntax all match GitHub's auto-merge contract), it
+simply has not had the opportunity to execute.
+
+### Re-verification procedure when alpha is actually exercised
+
+```bash
+git checkout alpha
+git checkout -b test-auto-merge-$(date +%s)
+echo "" >> README.md  # trivial no-op
+git commit -am "test: auto-merge smoke"
+git push -u origin HEAD
+gh pr create --base alpha --title "test: auto-merge smoke" --body "verifying #147"
+# Wait ≤30s for "Auto-Merge Alpha PRs" run to appear in Actions tab.
+# PR should show the green "auto-merge" badge.
+# Once required checks pass, GitHub auto-merges and dispatches deploy.yml.
+gh pr view --json autoMergeRequest,mergeStateStatus
+```
+
+### Decision
+
+Workflow retained, **not deleted**. Cost of keeping it = zero (it
+only runs when triggered). Cost of deleting = re-authoring the
+trigger/permissions/dispatch logic if the team starts using alpha.
+Delete only if alpha branch usage stays at zero for the next 6 months.
+
+---
+
 ## Branch protection & rulesets — gotchas
 
 Two GitHub mechanisms can guard a branch in parallel: classic **branch
