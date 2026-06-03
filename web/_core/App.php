@@ -260,6 +260,32 @@ class App
     }
 
     /**
+     * Return the per-request CSP nonce.
+     *
+     * Generated lazily on first call and memoised for the request lifetime.
+     * Inline <script> tags in shared templates ship with `nonce="<?= …
+     * App::cspNonce() ?>"` so modern browsers strictly enforce the nonce
+     * against `script-src 'nonce-NNN'` in the CSP header.
+     *
+     * Per CSP3, the presence of a `'nonce-…'` source overrides
+     * `'unsafe-inline'` for <script>/<style> tags in supporting browsers;
+     * older browsers that don't understand nonces still fall back to the
+     * existing `'unsafe-inline'` permission, so this is purely additive —
+     * no breakage on legacy clients, real XSS-injection mitigation on
+     * modern ones.
+     *
+     * @link https://www.w3.org/TR/CSP3/#match-element-to-source-list
+     */
+    public static function cspNonce(): string
+    {
+        static $nonce = null;
+        if ($nonce === null) {
+            $nonce = bin2hex(random_bytes(16));
+        }
+        return $nonce;
+    }
+
+    /**
      * Check if the current user has a specific role.
      *
      * @param string $roleKey The role key to check (e.g. "admin", "treasurer")

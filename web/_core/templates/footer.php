@@ -97,7 +97,7 @@ if ($cookieBannerEnabled === true && isset($_COOKIE['portal_consent_cookies']) =
         <a class="btn btn-sm btn-link ms-auto" href="/privacy">More info</a>
     </div>
 </aside>
-<script>
+<script nonce="<?php echo htmlspecialchars(\Portal\Core\App::cspNonce(), ENT_QUOTES, 'UTF-8'); ?>">
 (function () {
     var banner = document.getElementById('portal-cookie-banner');
     if (!banner) { return; }
@@ -123,7 +123,7 @@ if ($cookieBannerEnabled === true && isset($_COOKIE['portal_consent_cookies']) =
 <?php endif; ?>
 
 <!-- 📱 PWA: Service Worker registration -->
-<script>
+<script nonce="<?php echo htmlspecialchars(\Portal\Core\App::cspNonce(), ENT_QUOTES, 'UTF-8'); ?>">
 if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(function () {});
 }
@@ -151,7 +151,7 @@ if ('serviceWorker' in navigator) {
         </div>
     </div>
 </div>
-<script>
+<script nonce="<?php echo htmlspecialchars(\Portal\Core\App::cspNonce(), ENT_QUOTES, 'UTF-8'); ?>">
 (function () {
     var name = 'portal_consent';
     var existing = document.cookie.split(';').some(function (c) {
