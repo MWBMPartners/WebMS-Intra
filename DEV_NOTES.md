@@ -12,9 +12,9 @@ code lives inside `web/`**, which maps directly to the server domain directory:
 
 ```
 Git repo root (NOT deployed)          Server: portal.millrdsdacambridge.uk/
-├── .claude/                           ├── core/
-├── .github/workflows/deploy.yml       ├── vendor/
-├── CHANGELOG.md                       ├── sql/
+├── .claude/                           ├── _core/
+├── .github/workflows/deploy.yml       ├── _vendor/
+├── CHANGELOG.md                       ├── _sql/
 ├── DEV_NOTES.md                       ├── _auth_keys/    (server-managed)
 ├── README.md                          ├── _libraries/    (server-managed)
 └── web/ ─── contents deployed ──────► ├── _uploads/      (server-managed)
