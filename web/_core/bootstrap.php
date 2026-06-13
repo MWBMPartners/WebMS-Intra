@@ -64,6 +64,23 @@ define('PORTAL_SQL',    PORTAL_ROOT . DIRECTORY_SEPARATOR . '_sql');
 // See _core/version.php for the release-bump procedure.
 define('PORTAL_VERSION', (string) (require PORTAL_CORE . DIRECTORY_SEPARATOR . 'version.php'));
 
+// 🏷️ Product brand fallbacks — system-level brand layer (issue #296).
+// Sits ABOVE the existing tenant-level `branding.*` settings (Site::branding()):
+//   tenant override > $SETTINGS['product']['*'] > these constants.
+// The constants represent the FINAL fallback chain — the values shipped when
+// settings haven't loaded yet or rows are missing. Once $SETTINGS is loaded
+// the relevant rows take precedence. See _core/brand-defaults.php for the
+// full preset registry and the documented two-layer brand model.
+$PORTAL_BRAND_DEFAULTS = (require PORTAL_CORE . DIRECTORY_SEPARATOR . 'brand-defaults.php')[''] ?? [
+    'name'      => 'WebMS Intra',
+    'tagline'   => 'Internal Management System',
+    'publisher' => 'MWBM Partners Ltd (t/a MWservices)',
+];
+define('PORTAL_PRODUCT_NAME_DEFAULT',      (string) $PORTAL_BRAND_DEFAULTS['name']);
+define('PORTAL_PRODUCT_TAGLINE_DEFAULT',   (string) $PORTAL_BRAND_DEFAULTS['tagline']);
+define('PORTAL_PRODUCT_PUBLISHER_DEFAULT', (string) $PORTAL_BRAND_DEFAULTS['publisher']);
+unset($PORTAL_BRAND_DEFAULTS);
+
 // 🌍 Determine runtime environment flag (dev | beta | prod)
 // Priority: 1) PORTAL_ENV env var  2) directory name detection  3) default 'dev'
 // Primary directories: public_html (prod), public_html_beta (beta), public_html_dev (dev)
@@ -93,22 +110,34 @@ define('PORTAL_ENV', $env);
 // <meta name="generator"> tag). The PHP default leaks the backend stack
 // AND the exact PHP version, useful only to attackers looking up CVEs.
 //
-// The actual header value depends on `branding.hidePoweredBy`:
-//   - 'true'   → strip the header entirely (no brand reveal at all)
-//   - else     → "WebMS-Intra/<version>"  (default)
+// The actual header value depends on:
+//   - `branding.hidePoweredBy = 'true'`  → strip entirely (no brand reveal)
+//   - else  → "<product.name>/<portal version>"  where product.name comes from
+//             the settings row (set by the installer's organisation-type step)
+//             or falls back to PORTAL_PRODUCT_NAME_DEFAULT.
 //
-// The setting is read from $SETTINGS directly (already populated above);
-// we can't use App::settings() yet because App::init() runs later.
+// $SETTINGS is read directly because App::init() runs later in bootstrap.
 // See: https://www.php.net/manual/en/function.header.php
+// See: web/_core/brand-defaults.php for the product brand layer (issue #296).
 if (function_exists('header_remove') === true) {
     header_remove('X-Powered-By');
 }
 $hidePoweredBy = ($SETTINGS['branding']['hidePoweredBy'] ?? 'false') === 'true';
 if ($hidePoweredBy === false) {
-    // 📋 Use the DB-settings override if present, else the authoritative
-    // PORTAL_VERSION constant (loaded from _core/version.php above).
-    $brandedVersion = (string) ($SETTINGS['portal']['version'] ?? PORTAL_VERSION);
-    header('X-Powered-By: WebMS-Intra/' . $brandedVersion);
+    // 📋 Resolve product name + version with full fallback chain.
+    //    The header() call refuses values with CRLF since PHP 5.1.2, so even
+    //    a malicious admin editing the setting cannot smuggle headers — the
+    //    call emits a warning and skips rather than including them.
+    $brandedName    = (string) ($SETTINGS['product']['name']    ?? PORTAL_PRODUCT_NAME_DEFAULT);
+    $brandedVersion = (string) ($SETTINGS['portal']['version']  ?? PORTAL_VERSION);
+    // 🧹 Replace whitespace in the brand name (e.g. "WebMS Intra" → "WebMS-Intra")
+    //    so the header parses as a single token. Header field values can contain
+    //    spaces in theory, but tokens (the de-facto X-Powered-By convention) cannot.
+    $brandedNameToken = (string) preg_replace('/\s+/', '-', trim($brandedName));
+    if ($brandedNameToken === '') {
+        $brandedNameToken = PORTAL_PRODUCT_NAME_DEFAULT;
+    }
+    header('X-Powered-By: ' . $brandedNameToken . '/' . $brandedVersion);
 }
 
 // 🛡️ Baseline security response headers (#160)

@@ -18,7 +18,10 @@
  * -----------------------------------------------------------------------------
  */
 declare(strict_types=1);
-$portalName   = $portalName   ?? 'WebMS Intra';
+// 🏷️ Resolve product brand if caller didn't supply one (#296).
+//    Site::productName() reads from $SETTINGS['product']['name'] →
+//    PORTAL_PRODUCT_NAME_DEFAULT → final hardcoded fallback.
+$portalName   = $portalName   ?? (class_exists(\Portal\Core\Site::class) === true ? \Portal\Core\Site::productName() : 'WebMS Intra');
 $portalUrl    = $portalUrl    ?? '';
 $supportEmail = $supportEmail ?? '';
 $content      = $content      ?? '';

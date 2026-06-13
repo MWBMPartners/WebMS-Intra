@@ -1,6 +1,9 @@
 # =============================================================================
-# WebMS Intra — robots.txt
+# Portal — robots.txt
 # =============================================================================
+# Static file; brand-neutral. Per the multi-brand product layer (#296), the
+# product name displayed in user surfaces is settings-driven; this file's
+# crawler directives are identical across brands so it remains static.
 # This is an INTERNAL portal. By default we deny every crawler and explicitly
 # call out known AI training / answer-engine bots to leave no ambiguity.
 #

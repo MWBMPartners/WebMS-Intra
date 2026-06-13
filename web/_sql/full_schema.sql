@@ -2732,11 +2732,23 @@ INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue
 ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
 
 INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
-    ('admin/apps', 'admin/apps/index.php', 1)
+    ('admin/apps', 'admin/apps/index.php', 1),
+    -- 📱 Brand-aware PWA manifest (issue #296) — static manifest.json removed
+    --    in favour of a brand-aware PHP controller. Browsers fetch this before
+    --    login so isProtected=0.
+    ('manifest.json', 'manifest.php', 0)
 ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 
+-- 🏷️ Product brand layer (issue #296) — system-level brand identity that sits
+--    above the existing per-tenant `branding.*` settings. The installer's
+--    Step 1.5 "organisation type" pick seeds these to a matching preset; the
+--    rows ship with the historical "WebMS Intra" defaults so fresh installs
+--    that skip the picker keep current behaviour.
 INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
-    (NULL, 'portal.industry', '', '', 0)
+    (NULL, 'portal.industry',   '',                                     '',                                     0),
+    (NULL, 'product.name',      'WebMS Intra',                          'WebMS Intra',                          0),
+    (NULL, 'product.tagline',   'Internal Management System',           'Internal Management System',           0),
+    (NULL, 'product.publisher', 'MWBM Partners Ltd (t/a MWservices)',   'MWBM Partners Ltd (t/a MWservices)',   0)
 ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
 
 INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES

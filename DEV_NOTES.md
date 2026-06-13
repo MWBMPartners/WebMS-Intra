@@ -310,17 +310,20 @@ inherit `#5e6ad2` until the admin sets their own brand colour. Logo and
 favicon default to `/assets/images/logo.svg` and
 `/assets/images/favicon.ico` respectively.
 
-### "Powered by WebMS Intra" footer attribution
+### "Powered by &lt;product&gt;" footer attribution
 
 When a site uses CUSTOM branding (any branding field differs from the
-defaults defined as `Site::DEFAULT_*` constants), the footer renders a
-small "Powered by WebMS Intra" attribution after the copyright line.
-Sites running the default WebMS Intra branding don't show it — the
+ACTIVE product brand — see "Two-layer brand model" below), the footer
+renders a small "Powered by &lt;product&gt;" attribution after the
+copyright line, where `<product>` resolves via `Site::productName()`.
+Sites running the active product brand defaults don't show it — the
 copyright line already names the product.
 
 Detection (`Site::usesCustomBranding()` in `web/_core/Site.php`):
 
-- `siteName` differs from `Site::DEFAULT_SITE_NAME` (`'WebMS Intra'`), OR
+- `siteName` differs from `Site::productName()` (active product name
+  resolved from `product.name` setting / `PORTAL_PRODUCT_NAME_DEFAULT`
+  constant / `Site::DEFAULT_SITE_NAME` cold-start fallback), OR
 - `logoPath` differs from `Site::DEFAULT_LOGO_PATH`
   (`'/assets/images/logo.svg'`), OR
 - `primaryColor` differs from `Site::DEFAULT_PRIMARY_COLOR`
@@ -336,12 +339,116 @@ deploys.
 Markup lives in `web/_core/templates/footer.php`; styling is in the
 `.portal-powered-by`, `.portal-powered-by-prefix`, and
 `.portal-powered-by-mark` rules in `portal.css`. The mark class is a
-hook for future hyperlinking when the WebMS Intra landing page exists.
+hook for future hyperlinking when the product landing page exists.
 
-The same detection ALSO drives a `<meta name="generator" content="WebMS Intra">`
+The same detection ALSO drives a `<meta name="generator" content="<product>">`
 tag in `web/_core/templates/header.php`. This is the standard SaaS / CMS
 attribution mechanism — invisible to humans, picked up by site analysers
 like Wappalyzer + "View page source" + browser dev tools.
+
+---
+
+## Two-layer brand model (issue #296)
+
+There are TWO independent branding layers in the portal. They compose
+top-down at render time.
+
+```text
+┌─ Layer 1 — PRODUCT (system) ────────────────────────────────────┐
+│   Set ONCE at install via the installer's Step 1.5 picker.       │
+│   Lives in tblSettings (siteID=NULL) as product.* + portal.industry. │
+│   Drives: <meta name="generator">, footer "Powered by …",        │
+│   X-Powered-By header, PWA manifest name/description,            │
+│   installer wizard heading + footer.                             │
+└──────────────────────────────────────────────────────────────────┘
+                       ▼ overridden by ▼
+┌─ Layer 2 — TENANT (per-site, already shipped) ──────────────────┐
+│   Set per-site via /admin/sites/<id>/branding.                   │
+│   Lives in tblSites columns + `branding.*` settings.             │
+│   Drives: page chrome (siteName, logo, colour, favicon),         │
+│   copyright org, "Powered by …" visibility opt-out.              │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+**Resolution rule everywhere**: tenant override > product default >
+hardcoded constant.
+
+### Why two layers
+
+Tenants already had `branding.*` (Linear-style per-org skin). Adding a
+SECOND layer above lets the same codebase ship as different sub-brands
+without forking — `WebMS Intra` for the generic install, `ChurchMS` for
+church installs, future `SchoolMS` / `CharityMS` etc. for other verticals.
+Tenant branding stays decoupled; an install branded as `ChurchMS` can
+still be deployed for `Mill Road SDA Cambridge` and the latter wins in
+the chrome.
+
+### Product brand presets
+
+Defined in `web/_core/brand-defaults.php` as a `return [...]` array keyed
+by `portal.industry` value (`generic`, `church`, `school`, `nonprofit`,
+`community`, `small-business`). Each preset declares `name`, `tagline`,
+`publisher`, `assetFolder`, and a human `displayLabel` for the installer
+dropdown.
+
+The file is **bootstrap-free** — it cannot reference any class, function,
+or constant from elsewhere — so the installer (which runs before the
+framework loads) can `require` it the same way the runtime does.
+
+### Resolution helpers
+
+| Helper | Reads from | Used by |
+| --- | --- | --- |
+| `Site::productName()` | `App::settings('product.name')` → `PORTAL_PRODUCT_NAME_DEFAULT` → `DEFAULT_SITE_NAME` | header meta, footer mark, X-Powered-By, manifest |
+| `Site::productTagline()` | `App::settings('product.tagline')` → `PORTAL_PRODUCT_TAGLINE_DEFAULT` | manifest description, installer subtitle |
+| `Site::productPublisher()` | `App::settings('product.publisher')` → `PORTAL_PRODUCT_PUBLISHER_DEFAULT` | footer copyright |
+
+The `PORTAL_PRODUCT_*_DEFAULT` constants are seeded in `bootstrap.php`
+from `brand-defaults.php`'s generic preset, so they're already valid
+strings before `$SETTINGS` is loaded.
+
+### Picking the brand at install time
+
+The installer wizard's **Step 1.5 — Organisation Type** (encoded as the
+string `'1.5'` in URLs, alongside the existing `'2.5'` data-choice page)
+shows a dropdown of preset display labels. The chosen industry key is
+stored in `$_SESSION['install_industry']`; all subsequent steps display
+the matching brand. After `full_schema.sql` runs, Step 3 INSERTs the
+preset's `name` / `tagline` / `publisher` values plus the industry key
+into `tblSettings`.
+
+### Changing brand post-install
+
+The brand is fully reversible: admins can edit `portal.industry`,
+`product.name`, `product.tagline`, or `product.publisher` via
+`/admin/settings`. Changing `portal.industry` does **not** auto-rewrite
+the other rows — the admin may have customised them. Re-seeding is a
+manual SQL exercise if a full preset reset is wanted; documented as a
+v1.x follow-up.
+
+### Per-brand assets
+
+Per-brand asset folders live at
+`web/public_html/assets/images/brands/<assetFolder>/{logo,icon-192,icon-512}.svg`.
+The brand-aware `manifest.php` controller resolves the active preset's
+`assetFolder` and serves icons from there; it falls back to the existing
+`/assets/images/{logo,icon-192,icon-512}.svg` placeholders if the per-brand
+file isn't present yet. v1 ships placeholder copies for `generic` and
+`church`; designers replace with distinct artwork in a follow-up PR
+without touching code.
+
+### Where the brand is NOT applied
+
+By design, these surfaces stay as `WebMS Intra` regardless of preset:
+
+- PHP `@package WebMS Intra` / `@author MWBM Partners Ltd` doc-tags —
+  these document code authorship, not user-facing branding.
+- `error_log('[WebMS-Intra] …')` server-log prefixes — codebase identity
+  for operators reading logs, not user-facing brand.
+- `robots.txt` — comment header is brand-neutral so the static file
+  can be served without going through a PHP controller.
+- `openapi.json` `info.title` — developer-facing surface; brand-aware
+  conversion deferred to a v1.x follow-up.
 
 ---
 

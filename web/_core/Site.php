@@ -46,10 +46,21 @@ namespace Portal\Core;
 
 class Site
 {
-    /** Default WebMS Intra branding constants. The footer attribution logic
-     * compares the current site's branding values against these to decide
-     * whether to show "Powered by WebMS Intra". Update these alongside
-     * tblSites column defaults in full_schema.sql. */
+    /** Default branding constants used as the FINAL fallback when neither the
+     * site row nor the product brand layer (settings) yields a value. The
+     * footer attribution + meta-generator logic compares the current site's
+     * branding against the *resolved product name* (see productName() below),
+     * not against DEFAULT_SITE_NAME — the latter is just the cold-start
+     * cradle when settings haven't been loaded yet. Update these alongside
+     * tblSites column defaults in full_schema.sql.
+     *
+     * 🏷️ Multi-brand product layer (issue #296):
+     *   The product brand (WebMS Intra / ChurchMS / etc.) is selected at
+     *   install time and stored in $SETTINGS['product']['name']. The
+     *   constants below are the "if even the settings table is missing"
+     *   fallback — they preserve historical behaviour for cold-start
+     *   scenarios but no longer represent the canonical brand name.
+     */
     public const DEFAULT_SITE_NAME     = 'WebMS Intra';
     public const DEFAULT_LOGO_PATH     = '/assets/images/logo.svg';
     public const DEFAULT_PRIMARY_COLOR = '#5e6ad2';
@@ -205,17 +216,94 @@ class Site
     }
 
     /**
-     * Detect whether the current site has CUSTOM branding —
-     * any branding field differs from the WebMS Intra defaults
-     * defined as DEFAULT_* class constants.
+     * Resolve the active product name — short brand string used by header
+     * meta-generator, footer powered-by mark, and the X-Powered-By header.
      *
-     * Used by the footer template to decide whether to render
-     * "Powered by WebMS Intra" attribution. The actual show/hide is
+     * Resolution order:
+     *   1. $SETTINGS['product']['name']           (set by installer / admin)
+     *   2. PORTAL_PRODUCT_NAME_DEFAULT constant   (set in bootstrap.php)
+     *   3. self::DEFAULT_SITE_NAME                (final cold-start fallback)
+     *
+     * Read at call time (not cached) so admin edits to the setting take
+     * effect on the next render without a redeploy.
+     *
+     * @return string
+     */
+    public static function productName(): string
+    {
+        // Use the App settings registry (which reflects DB + the in-memory
+        // override map) when available. Falls back to the constant which
+        // bootstrap.php seeded from _core/brand-defaults.php.
+        if (class_exists(App::class) === true) {
+            $fromSettings = App::settings('product.name');
+            if ($fromSettings !== null && $fromSettings !== '') {
+                return (string) $fromSettings;
+            }
+        }
+        if (defined('PORTAL_PRODUCT_NAME_DEFAULT') === true) {
+            return (string) PORTAL_PRODUCT_NAME_DEFAULT;
+        }
+        return self::DEFAULT_SITE_NAME;
+    }
+
+    /**
+     * Resolve the active product tagline — long brand string used by the
+     * installer wizard subtitle, /admin/about, and the PWA manifest
+     * description.
+     *
+     * @return string
+     */
+    public static function productTagline(): string
+    {
+        if (class_exists(App::class) === true) {
+            $fromSettings = App::settings('product.tagline');
+            if ($fromSettings !== null && $fromSettings !== '') {
+                return (string) $fromSettings;
+            }
+        }
+        if (defined('PORTAL_PRODUCT_TAGLINE_DEFAULT') === true) {
+            return (string) PORTAL_PRODUCT_TAGLINE_DEFAULT;
+        }
+        return 'Internal Management System';
+    }
+
+    /**
+     * Resolve the active product publisher / copyright org. Per multi-brand
+     * decision #4, this is ALWAYS "MWBM Partners Ltd (t/a MWservices)"
+     * regardless of which sub-brand is installed — sub-brands are MWBM
+     * products, not white-labels. Stored as a setting only so admins can
+     * customise it for their own white-label deals if desired.
+     *
+     * @return string
+     */
+    public static function productPublisher(): string
+    {
+        if (class_exists(App::class) === true) {
+            $fromSettings = App::settings('product.publisher');
+            if ($fromSettings !== null && $fromSettings !== '') {
+                return (string) $fromSettings;
+            }
+        }
+        if (defined('PORTAL_PRODUCT_PUBLISHER_DEFAULT') === true) {
+            return (string) PORTAL_PRODUCT_PUBLISHER_DEFAULT;
+        }
+        return 'MWBM Partners Ltd (t/a MWservices)';
+    }
+
+    /**
+     * Detect whether the current site has CUSTOM branding — any branding
+     * field differs from the active product brand defaults (resolved via
+     * productName() above, NOT the DEFAULT_SITE_NAME constant). This lets a
+     * ChurchMS-branded install correctly show "Powered by ChurchMS" to a
+     * tenant that has customised its own siteName.
+     *
+     * Used by the footer template to decide whether to render the
+     * "Powered by <product>" attribution. The actual show/hide is
      * additionally gated by the `branding.hidePoweredBy` setting.
      *
      * Returns false when no site row has loaded (defensive — better to
-     * suppress attribution than to falsely accuse the WebMS Intra
-     * defaults of being custom).
+     * suppress attribution than to falsely accuse the product defaults
+     * of being custom).
      *
      * @return bool
      */
@@ -228,9 +316,12 @@ class Site
 
         // siteName / logoPath / primaryColor: stored as strings; compare
         // case-insensitively for the hex colour (where case is irrelevant)
-        // and case-sensitively for the others.
-        $siteName = (string) ($site['siteName'] ?? '');
-        if ($siteName !== '' && $siteName !== self::DEFAULT_SITE_NAME) {
+        // and case-sensitively for the others. The product brand layer
+        // (issue #296) means the "default" siteName isn't a fixed string;
+        // we compare against productName() which is brand-aware.
+        $siteName    = (string) ($site['siteName'] ?? '');
+        $productName = self::productName();
+        if ($siteName !== '' && $siteName !== $productName) {
             return true;
         }
 
