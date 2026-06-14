@@ -36,9 +36,9 @@ Auth::ensureSession();
 Auth::requireLogin();
 
 // 🚦 Feature gate
-$featureEnabled      = (App::settings('prayerRequests.enabled') ?? 'true') === 'true';
-$congregationEnabled = (App::settings('prayerRequests.allowCongregationFeed') ?? 'true') === 'true';
-$requireModeration   = (App::settings('prayerRequests.requireModeration') ?? 'true') === 'true';
+$featureEnabled      = (App::settings('prayer-requests.enabled') ?? 'true') === 'true';
+$congregationEnabled = (App::settings('prayer-requests.allowCongregationFeed') ?? 'true') === 'true';
+$requireModeration   = (App::settings('prayer-requests.requireModeration') ?? 'true') === 'true';
 
 if ($featureEnabled === false) {
     header('Location: /prayer-requests', true, 302);

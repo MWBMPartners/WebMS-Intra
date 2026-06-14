@@ -1,4 +1,131 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" fill="none">
-  <rect width="48" height="48" rx="10" fill="#0d6efd"/>
-  <text x="50%" y="50%" dominant-baseline="central" text-anchor="middle" fill="white" font-family="system-ui, sans-serif" font-weight="700" font-size="20">P</text>
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+================================================================================
+  WebMS Intra — Brand mark (generic preset)
+================================================================================
+  Designed: 2026-06-14 · Original logo work (in-house) · Editable via Inkscape /
+  Illustrator / VS Code.
+
+  COMPOSITION
+  ───────────────────────────────────────────────────────────────────────────────
+  • SYMBOL (left): a rounded square in product-indigo (#5e6ad2). Inside, three
+    stacked rounded bars represent the portal's "stacked list" metaphor — every
+    app surfaces structured rows of data, and the symbol nods to that.
+  • WORDMARK (right): "WebMS" in a clean geometric sans (Inter; system fallback
+    chain). A smaller "INTRA" secondary mark sits below for the full product
+    name.
+
+  STYLE FAMILY
+  ───────────────────────────────────────────────────────────────────────────────
+  This mark shares its symbol geometry + wordmark style with the church preset
+  (./brands/church/logo.svg). The two read as siblings: same shape, same type,
+  different inner glyph + a single accent cross for the church mark.
+
+  ANIMATION
+  ───────────────────────────────────────────────────────────────────────────────
+  Subtle 4.5s gradient breathing on the symbol (indigo → slightly-lighter
+  indigo and back) via SMIL <animate>. Pauses on prefers-reduced-motion.
+
+  EDITABILITY
+  ───────────────────────────────────────────────────────────────────────────────
+  • Layers are explicit <g> elements with id + inkscape:label set so they
+    appear named in Inkscape / Illustrator's Layers panel.
+  • Colours come from named hex values in the gradient stops + fills. Update
+    them once at the top of the <defs> + on the wordmark <text> fills.
+  • To make the wordmark TRULY font-independent (no system-font dependency),
+    open this file in Inkscape, select the "Wordmark" layer, Path → Object to
+    Path, and save. This converts each glyph to <path> data inline. The
+    current <text> approach prioritises editability; convert-to-path is the
+    final step before deploying as a static brand asset.
+
+  USAGE
+  ───────────────────────────────────────────────────────────────────────────────
+  Read by /manifest.json's brand-aware PHP controller as a logo image when no
+  per-tenant logo override is set (see web/public_html/manifest.php and the
+  brand cascade documented in DEV_NOTES "Two-layer brand model").
+================================================================================
+-->
+<svg xmlns="http://www.w3.org/2000/svg"
+     xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+     viewBox="0 0 240 64"
+     width="240" height="64"
+     role="img"
+     aria-label="WebMS Intra">
+
+  <title>WebMS Intra</title>
+  <desc>WebMS Intra brand mark — rounded indigo square with three stacked white bars representing the portal's data-row metaphor, paired with a geometric WebMS wordmark and a small INTRA secondary label.</desc>
+
+  <!-- ============================================================ -->
+  <!-- Shared style: font fallback + reduced-motion handling.       -->
+  <!-- ============================================================ -->
+  <style>
+    @media (prefers-reduced-motion: reduce) {
+      .symbol-anim { animation: none !important; }
+    }
+    .wordmark-text {
+      font-family: 'Inter', 'SF Pro Display', 'Segoe UI Variable',
+                   system-ui, -apple-system, 'Helvetica Neue', Arial, sans-serif;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+      font-feature-settings: 'ss01' on, 'cv11' on;
+    }
+  </style>
+
+  <!-- ============================================================ -->
+  <!-- LAYER: Symbol (left)                                          -->
+  <!-- ============================================================ -->
+  <g id="layer-symbol"
+     inkscape:groupmode="layer"
+     inkscape:label="Symbol — rounded square + stacked bars">
+
+    <defs>
+      <!-- Vertical gradient for the symbol. Stops animate slowly to
+           produce the "breathing" effect — locked to the church mark's
+           identical timing so siblings animate in sync side-by-side. -->
+      <linearGradient id="brand-gradient-generic" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#7a85e8">
+          <animate attributeName="stop-color"
+                   values="#7a85e8; #5e6ad2; #7a85e8"
+                   dur="4.5s"
+                   repeatCount="indefinite"
+                   class="symbol-anim" />
+        </stop>
+        <stop offset="100%" stop-color="#5e6ad2">
+          <animate attributeName="stop-color"
+                   values="#5e6ad2; #4f5bbf; #5e6ad2"
+                   dur="4.5s"
+                   repeatCount="indefinite"
+                   class="symbol-anim" />
+        </stop>
+      </linearGradient>
+    </defs>
+
+    <!-- Rounded square — the platform container. 48×48 with 12px corners
+         (25%) gives a modern SaaS proportion. -->
+    <rect x="8" y="8" width="48" height="48" rx="12" ry="12"
+          fill="url(#brand-gradient-generic)" />
+
+    <!-- Inner stacked-bars glyph. Three rounded horizontal bars reading
+         as a list / stack of data rows. Margins x:[18,46], y:[18,46]. -->
+    <g inkscape:label="Inner glyph — three stacked bars" fill="#ffffff">
+      <rect x="18" y="20"   width="28" height="5" rx="2.5" />
+      <rect x="18" y="29.5" width="20" height="5" rx="2.5" />
+      <rect x="18" y="39"   width="28" height="5" rx="2.5" />
+    </g>
+  </g>
+
+  <!-- ============================================================ -->
+  <!-- LAYER: Wordmark (right)                                       -->
+  <!-- ============================================================ -->
+  <g id="layer-wordmark"
+     inkscape:groupmode="layer"
+     inkscape:label="Wordmark — WebMS Intra">
+
+    <text x="76" y="38" class="wordmark-text"
+          font-size="26" fill="#1b2330">WebMS</text>
+
+    <text x="76" y="54" class="wordmark-text"
+          font-size="11" font-weight="500"
+          letter-spacing="0.18em" fill="#6b7280">INTRA</text>
+  </g>
 </svg>

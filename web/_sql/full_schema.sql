@@ -3095,11 +3095,11 @@ COMMENT='Prayer requests submitted by members or anonymously via the public rout
 
 -- Seed default prayer-request settings (matches migration 039)
 INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
-    (NULL, 'prayerRequests.enabled',              'true',  'true',  0),
-    (NULL, 'prayerRequests.allowAnonymous',       'true',  'true',  0),
-    (NULL, 'prayerRequests.allowCongregationFeed','true',  'true',  0),
-    (NULL, 'prayerRequests.requireModeration',    'true',  'true',  0),
-    (NULL, 'prayerRequests.allowTestimony',       'true',  'true',  0)
+    (NULL, 'prayer-requests.enabled',              'true',  'true',  0),
+    (NULL, 'prayer-requests.allowAnonymous',       'true',  'true',  0),
+    (NULL, 'prayer-requests.allowCongregationFeed','true',  'true',  0),
+    (NULL, 'prayer-requests.requireModeration',    'true',  'true',  0),
+    (NULL, 'prayer-requests.allowTestimony',       'true',  'true',  0)
 ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
 
 -- Seed prayer-request routes (matches migration 039)

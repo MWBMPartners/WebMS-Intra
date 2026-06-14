@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+================================================================================
+  WebMS — Wordmark (no symbol, no subtag)
+================================================================================
+  ONE continuous wordmark, no space between "Web" and "MS". The MS portion is
+  italic + slightly heavier weight + slightly more vibrant indigo, marking it
+  as the brand signature without breaking the wordmark into two pieces.
+
+  Construction:
+   • Single <text> element with a <tspan> for the MS — guarantees no gap
+     (a separate <text> would be kerned by browsers, never quite touching).
+   • font-style on the tspan = italic. font-weight steps from 800 (prefix) to
+     900 (MS) for subtle emphasis.
+   • Fill colour shifts from #1b2330 (near-black) on prefix to #4f5bbf (brand
+     indigo) on MS — same hue family as the symbol, ties the wordmark to the
+     emblem visually.
+   • Font fallback chain leads with characterful display sans (DM Sans,
+     Geist, Söhne, Schibsted Grotesk) — falls back to system Display weight
+     on macOS / Windows. For TRUE font-independent deployment, convert the
+     <text> to paths in Inkscape (Path → Object to Path).
+
+  WHY NOT A CUSTOM PATH FOR "MS"?
+   The previous iteration used hand-drawn paths for the MS as a "monogram
+   signature". The result read as a crude logo doodle, not a refined wordmark.
+   Sticking with proper italic typography gives the elegance the brand needs;
+   the differentiation comes from weight + colour + italic, not from drawing
+   amateur letterforms by hand.
+================================================================================
+-->
+<svg xmlns="http://www.w3.org/2000/svg"
+     xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+     viewBox="0 0 220 64"
+     width="220" height="64"
+     role="img" aria-label="WebMS">
+  <title>WebMS</title>
+
+  <style>
+    .wordmark {
+      font-family: 'DM Sans', 'Geist', 'Söhne', 'Schibsted Grotesk',
+                   'Inter Display', 'SF Pro Display', 'Segoe UI Variable',
+                   system-ui, -apple-system, 'Helvetica Neue', sans-serif;
+      font-weight: 800;
+      letter-spacing: -0.025em;
+    }
+    .wordmark .ms {
+      font-style: italic;
+      font-weight: 900;
+      letter-spacing: -0.04em;
+    }
+  </style>
+
+  <!-- ONE continuous wordmark. <tspan> stays inline so there's literally no
+       gap between "Web" and "MS" — the browser treats them as one word. -->
+  <text class="wordmark" x="0" y="52" font-size="56" fill="#1b2330">Web<tspan class="ms" fill="#4f5bbf">MS</tspan></text>
+</svg>

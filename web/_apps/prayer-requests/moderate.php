@@ -85,6 +85,9 @@ $newStatus     = null;
 $newVisibility = null;
 $setAnswered   = false;
 $setTestimony  = null;
+// 🙏 Prayer chain partner assignment (#311). NULL = no change; 0 = unassign;
+//    >0 = assign to that user.
+$assignToUserId = null;
 
 switch ($action) {
     case 'approve':
@@ -96,7 +99,7 @@ switch ($action) {
     case 'answer':
         $newStatus   = 'answered';
         $setAnswered = true;
-        if ((App::settings('prayerRequests.allowTestimony') ?? 'true') === 'true'
+        if ((App::settings('prayer-requests.allowTestimony') ?? 'true') === 'true'
             && $testimony !== ''
         ) {
             $setTestimony = mb_substr($testimony, 0, 4000);
@@ -106,10 +109,20 @@ switch ($action) {
         $newVisibility = 'leadership';
         break;
     case 'visibility-congregation':
-        if ((App::settings('prayerRequests.allowCongregationFeed') ?? 'true') === 'true') {
+        if ((App::settings('prayer-requests.allowCongregationFeed') ?? 'true') === 'true') {
             $newVisibility = 'congregation';
         } else {
             $newVisibility = 'leadership';
+        }
+        break;
+    case 'assign':
+        // 🙏 Assign (or unassign) to a prayer partner (#311). The partner
+        //    sees the request at /account/my-prayer-list. We accept 0 to
+        //    explicitly unassign; positive IDs go through a foreign-key
+        //    check at DB level (fk_pr_assigned).
+        $assignToUserId = (int) ($_POST['assignedToUserID'] ?? 0);
+        if ($assignToUserId < 0) {
+            $assignToUserId = 0;
         }
         break;
     default:
@@ -139,6 +152,19 @@ if ($setTestimony !== null) {
     $set[]    = 'testimony = ?';
     $types   .= 's';
     $params[] = $setTestimony;
+}
+// 🙏 Prayer chain assignment (#311). 0 means "unassign"; >0 means set the
+//    specified userID + stamp assignedAt to NOW.
+if ($assignToUserId !== null) {
+    if ($assignToUserId === 0) {
+        $set[] = 'assignedToUserID = NULL';
+        $set[] = 'assignedAt = NULL';
+    } else {
+        $set[]    = 'assignedToUserID = ?';
+        $types   .= 'i';
+        $params[] = $assignToUserId;
+        $set[]    = 'assignedAt = NOW()';
+    }
 }
 
 $sql = 'UPDATE tblPrayerRequests SET ' . implode(', ', $set)

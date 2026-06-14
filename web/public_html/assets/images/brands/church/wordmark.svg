@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+================================================================================
+  ChurchMS — Wordmark (no symbol, no subtag)
+================================================================================
+  Sibling to ./generic/wordmark.svg — identical typography + treatment, only
+  the prefix changes. See that file for the full design rationale.
+================================================================================
+-->
+<svg xmlns="http://www.w3.org/2000/svg"
+     xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+     viewBox="0 0 300 64"
+     width="300" height="64"
+     role="img" aria-label="ChurchMS">
+  <title>ChurchMS</title>
+
+  <style>
+    .wordmark {
+      font-family: 'DM Sans', 'Geist', 'Söhne', 'Schibsted Grotesk',
+                   'Inter Display', 'SF Pro Display', 'Segoe UI Variable',
+                   system-ui, -apple-system, 'Helvetica Neue', sans-serif;
+      font-weight: 800;
+      letter-spacing: -0.025em;
+    }
+    .wordmark .ms {
+      font-style: italic;
+      font-weight: 900;
+      letter-spacing: -0.04em;
+    }
+  </style>
+
+  <text class="wordmark" x="0" y="52" font-size="56" fill="#1b2330">Church<tspan class="ms" fill="#4f5bbf">MS</tspan></text>
+</svg>

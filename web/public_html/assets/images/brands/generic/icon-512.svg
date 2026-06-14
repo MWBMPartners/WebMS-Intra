@@ -1,4 +1,25 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
-  <rect width="512" height="512" rx="80" fill="#0d6efd"/>
-  <text x="256" y="345" font-family="system-ui,sans-serif" font-size="280" font-weight="700" fill="#fff" text-anchor="middle">P</text>
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- WebMS Intra — 512×512 PWA icon (symbol only). Identical shape language
+     to icon-192.svg, scaled to 512 for high-DPI install prompts and the
+     splash screen. See ./logo.svg for full design notes. -->
+<svg xmlns="http://www.w3.org/2000/svg"
+     viewBox="0 0 512 512" width="512" height="512"
+     role="img" aria-label="WebMS Intra">
+  <title>WebMS Intra</title>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#7a85e8">
+        <animate attributeName="stop-color" values="#7a85e8;#5e6ad2;#7a85e8" dur="4.5s" repeatCount="indefinite"/>
+      </stop>
+      <stop offset="100%" stop-color="#5e6ad2">
+        <animate attributeName="stop-color" values="#5e6ad2;#4f5bbf;#5e6ad2" dur="4.5s" repeatCount="indefinite"/>
+      </stop>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="116" ry="116" fill="url(#bg)"/>
+  <g fill="#ffffff">
+    <rect x="122" y="156" width="268" height="48" rx="24"/>
+    <rect x="122" y="232" width="192" height="48" rx="24"/>
+    <rect x="122" y="308" width="268" height="48" rx="24"/>
+  </g>
 </svg>

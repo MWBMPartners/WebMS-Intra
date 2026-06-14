@@ -35,8 +35,8 @@ use Portal\Core\Captcha;
 Auth::ensureSession();
 
 // 🚦 Feature gates
-$featureEnabled   = (App::settings('prayerRequests.enabled') ?? 'true') === 'true';
-$anonymousEnabled = (App::settings('prayerRequests.allowAnonymous') ?? 'true') === 'true';
+$featureEnabled   = (App::settings('prayer-requests.enabled') ?? 'true') === 'true';
+$anonymousEnabled = (App::settings('prayer-requests.allowAnonymous') ?? 'true') === 'true';
 
 $siteName  = (string) (App::settings('site.name') ?? 'Portal');
 $submitted = isset($_GET['submitted']) === true && $_GET['submitted'] === '1';

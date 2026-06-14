@@ -448,7 +448,45 @@ By design, these surfaces stay as `WebMS Intra` regardless of preset:
 - `robots.txt` — comment header is brand-neutral so the static file
   can be served without going through a PHP controller.
 - `openapi.json` `info.title` — developer-facing surface; brand-aware
-  conversion deferred to a v1.x follow-up.
+  conversion deferred to a v1.x follow-up (see below).
+
+### Deferred follow-ups from the brand-layer PR (#297)
+
+Tracked as separate issues; called out here so they don't get lost
+between PRs.
+
+1. **Distinct sub-brand artwork** — the `assets/images/brands/<type>/`
+   folders currently contain placeholder copies of the generic SVGs
+   so the `manifest.php` resolver finds something. Designers replace
+   the artwork in a follow-up without touching code; the controller
+   discovers new files at next render. ChurchMS gets the first
+   distinct logo pass; school / charity / community / small-business
+   stay placeholders until those presets need to ship.
+
+2. **`openapi.json` brand-aware conversion** — `info.title`,
+   `info.contact.name`, and `info.contact.url` are still hardcoded to
+   `WebMS Intra REST API` / `MWBM Partners Ltd …` regardless of the
+   active brand. Pattern would mirror `manifest.json` → `manifest.php`:
+   move the static spec to `web/_core/api-spec.json`, add
+   `web/public_html/openapi.php` that loads it and rewrites the
+   `info` block before emitting, route via tblRoutes. Deferred because
+   the OpenAPI surface is developer-facing (Swagger UI viewers,
+   integrators) and the same brand value reads cleanly in both
+   contexts.
+
+3. **`prayerRequests.*` → `prayer-requests.*` setting-key naming
+   standardisation** — drift dating to the original prayer-requests
+   app (PR #129). Every other app uses kebab-case slugs as setting
+   prefixes (`prayer-requests` is the directory name, `tblRoutes`
+   key, app slug). The setting key is camelCase. A migration would
+   rename the rows in `tblSettings` AND update the three handlers
+   that read `App::settings('prayerRequests.*')`. Mechanical work;
+   only deferred because it touches a wide-blast-radius app and
+   isn't urgent enough to bundle into this PR.
+
+Each is filed as its own GitHub issue with `for consideration` label
+so the per-item decision happens later. Search the issue tracker for
+"deferred from #297" to find them.
 
 ---
 

@@ -35,7 +35,7 @@ Auth::ensureSession();
 Auth::requireLogin();
 
 // 🚦 Feature gate
-if ((App::settings('prayerRequests.enabled') ?? 'true') !== 'true') {
+if ((App::settings('prayer-requests.enabled') ?? 'true') !== 'true') {
     header('Location: /prayer-requests', true, 302);
     exit();
 }
@@ -70,13 +70,13 @@ if ($visibility !== 'leadership' && $visibility !== 'congregation') {
 
 // 🔒 Downgrade visibility if congregation feed is disabled site-wide
 if ($visibility === 'congregation'
-    && (App::settings('prayerRequests.allowCongregationFeed') ?? 'true') !== 'true'
+    && (App::settings('prayer-requests.allowCongregationFeed') ?? 'true') !== 'true'
 ) {
     $visibility = 'leadership';
 }
 
 // 🚦 Decide initial status based on moderation setting
-$requireModeration = (App::settings('prayerRequests.requireModeration') ?? 'true') === 'true';
+$requireModeration = (App::settings('prayer-requests.requireModeration') ?? 'true') === 'true';
 $initialStatus     = $requireModeration === true ? 'pending' : 'active';
 
 // 🌐 Capture context

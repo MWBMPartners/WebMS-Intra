@@ -1,4 +1,164 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" fill="none">
-  <rect width="48" height="48" rx="10" fill="#0d6efd"/>
-  <text x="50%" y="50%" dominant-baseline="central" text-anchor="middle" fill="white" font-family="system-ui, sans-serif" font-weight="700" font-size="20">P</text>
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+================================================================================
+  ChurchMS — Brand mark (church preset, sibling to WebMS generic mark)
+================================================================================
+  Designed: 2026-06-14 · Original logo work (in-house) · Editable via Inkscape /
+  Illustrator / VS Code.
+
+  COMPOSITION
+  ───────────────────────────────────────────────────────────────────────────────
+  • SYMBOL (left): same rounded indigo square as the generic WebMS mark, so
+    the two read as siblings of one product family. The INSIDE is a clean
+    geometric church silhouette: arched door + body + pitched roof + steeple
+    + cross. Single-colour cutout style — the silhouette is white, the
+    arched door shows the indigo background through as negative space.
+  • WORDMARK (right): "ChurchMS" in the same geometric sans as WebMS, with
+    a "CHURCH MANAGEMENT" secondary label below mirroring "INTRA".
+
+  STYLE FAMILY
+  ───────────────────────────────────────────────────────────────────────────────
+  Sibling to ./brands/generic/logo.svg. Identical container geometry, same
+  colour palette, same wordmark type. Differentiated by the inner glyph
+  (church silhouette vs. stacked bars) and the wordmark text. The two marks
+  read clearly as siblings of one product family — exactly the intent of the
+  multi-brand product layer (issue #296).
+
+  ANIMATION
+  ───────────────────────────────────────────────────────────────────────────────
+  Same 4.5s gradient breathing on the rounded square as the generic mark
+  (identical timing), so the two marks animate in lock-step when shown
+  together. The church silhouette itself stays static — the "breath" comes
+  through as a subtle background pulse.
+
+  EDITABILITY
+  ───────────────────────────────────────────────────────────────────────────────
+  • Each part of the silhouette (door / body / roof / steeple / cross) is its
+    own <rect> or <path> inside the "Church silhouette" layer, so designers
+    can tweak proportions in Inkscape without re-drawing the whole shape.
+  • The cross is constructed from two <rect>s so its thickness / arm length
+    is independently editable.
+  • Font fallback chain on the wordmark — for true font independence, run
+    Inkscape's Path → Object to Path on the wordmark layer.
+
+  WHY A CHURCH SHAPE, NOT JUST A CROSS
+  ───────────────────────────────────────────────────────────────────────────────
+  A full church silhouette reads as "place of worship / congregational
+  community" rather than "Christianity as a faith". This matters for the
+  multi-brand preset model — ChurchMS aims to suit any Christian-tradition
+  install (Methodist / Anglican / SDA / Baptist / Pentecostal / Quaker etc.)
+  whose internal community-management need is the same regardless of
+  liturgical style. A church BUILDING is the shared symbol; a cross alone
+  reads more denominationally specific.
+================================================================================
+-->
+<svg xmlns="http://www.w3.org/2000/svg"
+     xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+     viewBox="0 0 320 64"
+     width="320" height="64"
+     role="img"
+     aria-label="ChurchMS">
+
+  <title>ChurchMS</title>
+  <desc>ChurchMS brand mark — rounded indigo square containing a clean white church silhouette (steeple with cross, pitched roof, body with arched door), paired with a geometric ChurchMS wordmark and a CHURCH MANAGEMENT secondary label.</desc>
+
+  <style>
+    @media (prefers-reduced-motion: reduce) {
+      .symbol-anim { animation: none !important; }
+    }
+    .wordmark-text {
+      font-family: 'Inter', 'SF Pro Display', 'Segoe UI Variable',
+                   system-ui, -apple-system, 'Helvetica Neue', Arial, sans-serif;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+      font-feature-settings: 'ss01' on, 'cv11' on;
+    }
+  </style>
+
+  <!-- ============================================================ -->
+  <!-- LAYER: Symbol (left)                                          -->
+  <!-- ============================================================ -->
+  <g id="layer-symbol"
+     inkscape:groupmode="layer"
+     inkscape:label="Symbol — rounded square + church silhouette">
+
+    <defs>
+      <!-- Same gradient palette + timing as the WebMS mark. -->
+      <linearGradient id="brand-gradient-church" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#7a85e8">
+          <animate attributeName="stop-color"
+                   values="#7a85e8; #5e6ad2; #7a85e8"
+                   dur="4.5s"
+                   repeatCount="indefinite"
+                   class="symbol-anim" />
+        </stop>
+        <stop offset="100%" stop-color="#5e6ad2">
+          <animate attributeName="stop-color"
+                   values="#5e6ad2; #4f5bbf; #5e6ad2"
+                   dur="4.5s"
+                   repeatCount="indefinite"
+                   class="symbol-anim" />
+        </stop>
+      </linearGradient>
+    </defs>
+
+    <!-- Rounded square — identical to the generic mark for sibling family. -->
+    <rect x="8" y="8" width="48" height="48" rx="12" ry="12"
+          fill="url(#brand-gradient-church)" />
+
+    <!-- ====================================================== -->
+    <!-- Church silhouette — built from 5 named shapes so each   -->
+    <!-- can be edited independently in Inkscape.               -->
+    <!-- All shapes white, sitting on indigo background.        -->
+    <!-- ====================================================== -->
+    <g inkscape:label="Church silhouette" fill="#ffffff">
+
+      <!-- 1. Cross on top of steeple — two small rounded rectangles
+              forming a + at the very top of the symbol. -->
+      <g inkscape:label="Cross">
+        <rect x="31" y="11" width="2"   height="8"   rx="0.8" />
+        <rect x="29" y="13.5" width="6" height="2.5" rx="0.8" />
+      </g>
+
+      <!-- 2. Steeple — narrow vertical extension between cross and roof.
+              Acts as the spire base. -->
+      <rect inkscape:label="Steeple"
+            x="30" y="18" width="4" height="4" />
+
+      <!-- 3. Pitched roof — triangle covering the body's width. The
+              peak sits where the steeple meets it; eaves extend slightly
+              beyond the body for proportion. -->
+      <path inkscape:label="Roof"
+            d="M 14,32 L 32,21 L 50,32 Z" />
+
+      <!-- 4. Body / nave — main rectangular building. Sits below the
+              roof; the arched-door cutout is layered ON TOP so it
+              punches through this fill back to the indigo background. -->
+      <rect inkscape:label="Body / Nave"
+            x="17" y="32" width="30" height="17" />
+    </g>
+
+    <!-- 5. Arched door — drawn in INDIGO matching the background to
+            create a punched-through effect without using mask/clipPath
+            (keeps the SVG flat + Inkscape-editable). Rounded top arch
+            via two corner radii on a <path>. -->
+    <path inkscape:label="Door (arch cutout)"
+          fill="#5e6ad2"
+          d="M 28,49 L 28,42 Q 28,38 32,38 Q 36,38 36,42 L 36,49 Z" />
+  </g>
+
+  <!-- ============================================================ -->
+  <!-- LAYER: Wordmark (right)                                       -->
+  <!-- ============================================================ -->
+  <g id="layer-wordmark"
+     inkscape:groupmode="layer"
+     inkscape:label="Wordmark — ChurchMS">
+
+    <text x="76" y="38" class="wordmark-text"
+          font-size="26" fill="#1b2330">ChurchMS</text>
+
+    <text x="76" y="54" class="wordmark-text"
+          font-size="11" font-weight="500"
+          letter-spacing="0.14em" fill="#6b7280">CHURCH MANAGEMENT</text>
+  </g>
 </svg>
