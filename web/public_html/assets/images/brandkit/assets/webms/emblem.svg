@@ -1,0 +1,21 @@
+<?xml version="1.0"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="100%" height="100%" preserveAspectRatio="xMidYMid meet" role="img" aria-label="WebMS emblem">
+  <title>WebMS emblem</title>
+  <desc>Abstract connection / structure / data mark: a central hub module linked to three outer nodes. Layers: each part is a named group with its own title/desc. HOW TO RECOLOUR: every colour is a named token in <defs> (brand, ink, grey, etc.) referenced by fill=&#34;url(#token)&#34;. Edit a token&#39;s stop-color(s) once to recolour everywhere it is used.</defs></desc>
+  <defs>
+    <linearGradient id="brand" gradientUnits="userSpaceOnUse" x1="8" y1="6" x2="56" y2="58"><desc>BRAND token — primary indigo gradient. Edit these two stop-colors to recolour the brand (emblem + &#34;MS&#34;) everywhere it is referenced via fill=&#34;url(#brand)&#34;.</desc><stop offset="0" stop-color="#5e6ad2"></stop><stop offset="1" stop-color="#7a85e8"></stop></linearGradient>
+  </defs>
+  <g id="emblem" fill="url(#brand)">
+      <g id="web-connections"><title>Connections</title><desc>Three rounded links binding the hub to each node.</desc>
+        <rect id="web-link-top" x="18.70" y="20.70" width="26.60" height="4.60" rx="2.30" transform="rotate(-90.00 32 23)"></rect>
+        <rect id="web-link-bl" x="7.78" y="39.70" width="29.44" height="4.60" rx="2.30" transform="rotate(139.90 22.5 42)"></rect>
+        <rect id="web-link-br" x="26.78" y="39.70" width="29.44" height="4.60" rx="2.30" transform="rotate(40.10 41.5 42)"></rect>
+      </g>
+      <g id="web-nodes"><title>Nodes</title><desc>Three outer endpoints (pages / clients in the system).</desc>
+        <circle cx="32" cy="12" r="5"></circle><circle cx="13" cy="50" r="5"></circle><circle cx="51" cy="50" r="5"></circle>
+      </g>
+      <g id="web-hub"><title>Hub</title><desc>Central module the structure is built around.</desc>
+        <rect x="24" y="26" width="16" height="16" rx="5"></rect>
+      </g>
+  </g>
+</svg>

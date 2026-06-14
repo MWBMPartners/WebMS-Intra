@@ -59,14 +59,14 @@ return [
         'name'        => 'WebMS Intra',
         'tagline'     => 'Internal Management System',
         'publisher'   => 'MWBM Partners Ltd (t/a MWservices)',
-        'assetFolder' => 'generic',
+        'assetFolder' => 'webms-intra',
         'displayLabel' => 'Generic — internal management portal',
     ],
     'generic' => [
         'name'        => 'WebMS Intra',
         'tagline'     => 'Internal Management System',
         'publisher'   => 'MWBM Partners Ltd (t/a MWservices)',
-        'assetFolder' => 'generic',
+        'assetFolder' => 'webms-intra',
         'displayLabel' => 'Generic — internal management portal',
     ],
 
@@ -76,7 +76,7 @@ return [
         'name'        => 'ChurchMS',
         'tagline'     => 'Church Management System',
         'publisher'   => 'MWBM Partners Ltd (t/a MWservices)',
-        'assetFolder' => 'church',
+        'assetFolder' => 'churchms',
         'displayLabel' => 'Church / Place of Worship',
     ],
 
@@ -86,7 +86,8 @@ return [
         'name'        => 'SchoolMS',
         'tagline'     => 'School Management System',
         'publisher'   => 'MWBM Partners Ltd (t/a MWservices)',
-        'assetFolder' => 'school',
+        // Falls back to webms-intra assets until distinct artwork ships (#306).
+        'assetFolder' => 'webms-intra',
         'displayLabel' => 'School / Education',
     ],
 
@@ -95,7 +96,8 @@ return [
         'name'        => 'CharityMS',
         'tagline'     => 'Charity Management System',
         'publisher'   => 'MWBM Partners Ltd (t/a MWservices)',
-        'assetFolder' => 'nonprofit',
+        // Falls back to webms-intra assets until distinct artwork ships (#306).
+        'assetFolder' => 'webms-intra',
         'displayLabel' => 'Charity / Non-profit',
     ],
 
@@ -104,7 +106,8 @@ return [
         'name'        => 'CommunityMS',
         'tagline'     => 'Community Management System',
         'publisher'   => 'MWBM Partners Ltd (t/a MWservices)',
-        'assetFolder' => 'community',
+        // Falls back to webms-intra assets until distinct artwork ships (#306).
+        'assetFolder' => 'webms-intra',
         'displayLabel' => 'Community / Membership organisation',
     ],
 
@@ -113,7 +116,8 @@ return [
         'name'        => 'BusinessMS',
         'tagline'     => 'Business Management System',
         'publisher'   => 'MWBM Partners Ltd (t/a MWservices)',
-        'assetFolder' => 'small-business',
+        // Falls back to webms-intra assets until distinct artwork ships (#306).
+        'assetFolder' => 'webms-intra',
         'displayLabel' => 'Small business',
     ],
 ];

@@ -1,0 +1,30 @@
+/* ============================================================
+   WebMS brand tokens
+   One source of truth for the brand palette. Import this in your
+   app and reference the variables in CSS.
+
+   NOTE: the SVG files themselves use literal hex values (this
+   tool's SVG store strips <style>, so CSS variables can't live
+   inside the SVGs). To recolour an SVG, either edit its
+   <linearGradient> stops / fill="" values, or find-and-replace
+   the hex codes below.
+   ============================================================ */
+:root {
+  --brand:    #5e6ad2; /* indigo — primary brand colour                */
+  --brand-2:  #7a85e8; /* indigo light — gradient end & breathing glow */
+  --ink:      #23263a; /* near-black — wordmark prefix                 */
+  --grey:     #8b90a0; /* muted grey — descriptor / subtag             */
+  --intra:    #a3a9b6; /* light grey — the "Intra" suffix word         */
+}
+
+/* ---- Breathing emblem (use with an INLINED <svg>, not <img>) ----
+   Give the outer wrapper group class="brand-breathe" and the lighter
+   duplicate group class="brand-glow". See animation-demo.html. */
+.brand-breathe { transform-box: fill-box; transform-origin: 50% 50%; animation: brand-breathe 4.5s ease-in-out infinite; }
+.brand-glow    { animation: brand-glow 4.5s ease-in-out infinite; }
+@keyframes brand-breathe { 0%,100% { transform: scale(1); } 50% { transform: scale(1.04); } }
+@keyframes brand-glow    { 0%,100% { opacity: 0; }          50% { opacity: .5; } }
+@media (prefers-reduced-motion: reduce) {
+  .brand-breathe, .brand-glow { animation: none; }
+  .brand-glow { opacity: 0; }
+}

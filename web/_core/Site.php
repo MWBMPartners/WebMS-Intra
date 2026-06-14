@@ -64,7 +64,7 @@ class Site
     public const DEFAULT_SITE_NAME     = 'WebMS Intra';
     public const DEFAULT_LOGO_PATH     = '/assets/images/logo.svg';
     public const DEFAULT_PRIMARY_COLOR = '#5e6ad2';
-    public const DEFAULT_FAVICON_PATH  = '/assets/images/favicon.ico';
+    public const DEFAULT_FAVICON_PATH  = '/assets/images/icon.svg';
 
     /** @var int Active site ID (defaults to 1) */
     private static int $currentSiteID = 1;
