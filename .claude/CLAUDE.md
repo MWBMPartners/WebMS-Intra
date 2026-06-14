@@ -4,7 +4,8 @@
 
 Internal portal platform (PHP 8.5, backward-compatible with 8.4, MySQL 8.0, Bootstrap 5.3.3) hosted on DreamHost shared hosting. No CLI, no Composer.
 
-- **Version:** 0.11.0 (on `main`)
+- **Version:** 1.2.0 (on `main`; bump in `web/_core/version.php` — single source of truth)
+- **Brand layer:** runtime product brand picked at install (#296, PR #297). Presets: `WebMS Intra` (generic, default), `ChurchMS` (church). School/charity/community/small-business stubbed. See `web/_core/brand-defaults.php` + `Site::productName()`. PWA manifest is a brand-aware PHP controller (`manifest.php`); `openapi.json` is still static (deferred — see DEV_NOTES "Deferred follow-ups from PR #297").
 - **Licence:** All Rights Reserved — MWBM Partners Ltd (t/a MWservices)
 - **Repo:** github.com/MWBMPartners/WebMS-Intra
 - **Server:** portal.millrdsdacambridge.uk

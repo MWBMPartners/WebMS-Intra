@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- ChurchMS — 512×512 PWA icon. Same church silhouette as the 192px
+     version, scaled (multiply coordinates by 8/3 ≈ 2.67). See ./logo.svg
+     for full design notes. -->
+<svg xmlns="http://www.w3.org/2000/svg"
+     viewBox="0 0 512 512" width="512" height="512"
+     role="img" aria-label="ChurchMS">
+  <title>ChurchMS</title>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#7a85e8">
+        <animate attributeName="stop-color" values="#7a85e8;#5e6ad2;#7a85e8" dur="4.5s" repeatCount="indefinite"/>
+      </stop>
+      <stop offset="100%" stop-color="#5e6ad2">
+        <animate attributeName="stop-color" values="#5e6ad2;#4f5bbf;#5e6ad2" dur="4.5s" repeatCount="indefinite"/>
+      </stop>
+    </linearGradient>
+  </defs>
+
+  <rect width="512" height="512" rx="116" ry="116" fill="url(#bg)"/>
+
+  <!-- Church silhouette — proportions match the 192px icon, scaled 2.67×. -->
+  <g fill="#ffffff">
+    <!-- Cross at top -->
+    <rect x="244" y="54"  width="24" height="84" rx="8"/>
+    <rect x="212" y="80"  width="88" height="26" rx="8"/>
+
+    <!-- Steeple base -->
+    <rect x="236" y="134" width="40" height="36"/>
+
+    <!-- Pitched roof -->
+    <path d="M 96 244 L 256 132 L 416 244 Z"/>
+
+    <!-- Body / nave -->
+    <rect x="128" y="244" width="256" height="184"/>
+  </g>
+
+  <!-- Arched door (cutout via background-coloured fill). -->
+  <path fill="#5e6ad2"
+        d="M 212 428 L 212 348 Q 212 308 256 308 Q 300 308 300 348 L 300 428 Z"/>
+</svg>

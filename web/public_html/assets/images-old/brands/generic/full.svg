@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+================================================================================
+  WebMS — Full lockup (emblem + wordmark + subtag)
+================================================================================
+  Master mark — emblem on the left, wordmark stacked on top of subtag on the
+  right. Wordmark uses the same italic-MS-as-tspan treatment as
+  ./wordmark.svg (no gap, italic, heavier weight, brand indigo). Subtag is
+  the supporting "Website Management System" line in muted letterspaced caps.
+================================================================================
+-->
+<svg xmlns="http://www.w3.org/2000/svg"
+     xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+     viewBox="0 0 380 96"
+     width="380" height="96"
+     role="img" aria-label="WebMS — Website Management System">
+  <title>WebMS — Website Management System</title>
+  <desc>Full WebMS brand lockup: rounded indigo emblem with the stacked-bars glyph on the left; WebMS wordmark on the top right (Web in dark display sans, MS in italic indigo heavier weight, no space); WEBSITE MANAGEMENT SYSTEM subtag in muted letterspaced caps below.</desc>
+
+  <style>
+    @media (prefers-reduced-motion: reduce) {
+      .emblem-anim { animation: none !important; }
+    }
+    .wordmark {
+      font-family: 'DM Sans', 'Geist', 'Söhne', 'Schibsted Grotesk',
+                   'Inter Display', 'SF Pro Display', 'Segoe UI Variable',
+                   system-ui, -apple-system, 'Helvetica Neue', sans-serif;
+      font-weight: 800;
+      letter-spacing: -0.025em;
+    }
+    .wordmark .ms {
+      font-style: italic;
+      font-weight: 900;
+      letter-spacing: -0.04em;
+    }
+    .subtag {
+      font-family: 'Inter', 'SF Pro Text', 'Segoe UI', system-ui, sans-serif;
+      font-weight: 500;
+      letter-spacing: 0.16em;
+    }
+  </style>
+
+  <defs>
+    <linearGradient id="brand-grad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#7a85e8">
+        <animate attributeName="stop-color" values="#7a85e8;#5e6ad2;#7a85e8" dur="4.5s" repeatCount="indefinite" class="emblem-anim" />
+      </stop>
+      <stop offset="100%" stop-color="#5e6ad2">
+        <animate attributeName="stop-color" values="#5e6ad2;#4f5bbf;#5e6ad2" dur="4.5s" repeatCount="indefinite" class="emblem-anim" />
+      </stop>
+    </linearGradient>
+  </defs>
+
+  <!-- LAYER: Emblem (left, full lockup height). -->
+  <g inkscape:groupmode="layer" inkscape:label="Emblem"
+     transform="translate(8 16)">
+    <rect width="64" height="64" rx="14" fill="url(#brand-grad)" />
+    <g fill="#ffffff">
+      <rect x="14" y="18" width="36" height="6" rx="3"/>
+      <rect x="14" y="29" width="24" height="6" rx="3"/>
+      <rect x="14" y="40" width="36" height="6" rx="3"/>
+    </g>
+  </g>
+
+  <!-- LAYER: Wordmark. Continuous text + tspan, no gap. -->
+  <g inkscape:groupmode="layer" inkscape:label="Wordmark"
+     transform="translate(92 0)">
+    <text class="wordmark" x="0" y="54" font-size="46" fill="#1b2330">Web<tspan class="ms" fill="#4f5bbf">MS</tspan></text>
+  </g>
+
+  <!-- LAYER: Subtag. -->
+  <g inkscape:groupmode="layer" inkscape:label="Subtag"
+     transform="translate(92 0)">
+    <text class="subtag" x="0" y="80" font-size="11" fill="#6b7280">WEBSITE MANAGEMENT SYSTEM</text>
+  </g>
+</svg>

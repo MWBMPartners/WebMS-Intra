@@ -41,8 +41,8 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 Auth::ensureSession();
 
 // 🚦 Feature gates — bounce silently if disabled
-$featureEnabled   = (App::settings('prayerRequests.enabled') ?? 'true') === 'true';
-$anonymousEnabled = (App::settings('prayerRequests.allowAnonymous') ?? 'true') === 'true';
+$featureEnabled   = (App::settings('prayer-requests.enabled') ?? 'true') === 'true';
+$anonymousEnabled = (App::settings('prayer-requests.allowAnonymous') ?? 'true') === 'true';
 if ($featureEnabled === false || $anonymousEnabled === false) {
     header('Location: /prayer-requests/anonymous', true, 302);
     exit();

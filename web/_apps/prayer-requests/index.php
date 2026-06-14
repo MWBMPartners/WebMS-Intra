@@ -38,9 +38,9 @@ $userId = (int) ($user['userID'] ?? 0);
 $isMod  = App::isAdmin();
 
 // 🔎 Feature flags
-$featureEnabled       = (App::settings('prayerRequests.enabled') ?? 'true') === 'true';
-$congregationEnabled  = (App::settings('prayerRequests.allowCongregationFeed') ?? 'true') === 'true';
-$anonymousEnabled     = (App::settings('prayerRequests.allowAnonymous') ?? 'true') === 'true';
+$featureEnabled       = (App::settings('prayer-requests.enabled') ?? 'true') === 'true';
+$congregationEnabled  = (App::settings('prayer-requests.allowCongregationFeed') ?? 'true') === 'true';
+$anonymousEnabled     = (App::settings('prayer-requests.allowAnonymous') ?? 'true') === 'true';
 
 // -----------------------------------------------------------------------------
 // 📋 Fetch the current user's own requests (newest first, limit 20)

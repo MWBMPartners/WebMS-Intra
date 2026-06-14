@@ -11,6 +11,31 @@ to `alpha`, `beta`, and `main` using the heading format
 
 ## [1.2.0] - Unreleased
 
+### Multi-brand product layer — `ChurchMS` / `SchoolMS` / … sub-brands (#296)
+
+System-level brand identity that sits ABOVE the existing per-tenant `branding.*` cascade. The installer's new **Step 1.5 — Organisation Type** picks a preset bundle; the install rebrands display surfaces (header meta, footer attribution, X-Powered-By header, PWA manifest name, installer wizard itself) to the matching short name and tagline. Tenant branding (`Site::branding()`) still beats product defaults — a `Mill Road SDA Cambridge` site on a `ChurchMS` install keeps its own siteName in chrome.
+
+**Decisions baked in:**
+- **Runtime-only brand** — same codebase, settings-driven; admins can change `portal.industry` post-install via `/admin/settings`.
+- **Preset bundles include defaults but not enforcement** — same app mix across all brands; admins can re-enable anything (existing `/admin/apps` mechanism from #255).
+- **Per-brand asset folders shipped** — `assets/images/brands/{generic,church}/` with placeholder copies; designers replace with distinct artwork in a follow-up.
+- **Publisher always "MWBM Partners Ltd"** — sub-brands are MWBM products, not white-labels.
+
+**Shipping in this PR:**
+- `_core/brand-defaults.php` — preset registry (generic / church / school / nonprofit / community / small-business).
+- `_core/Site.php::productName() / productTagline() / productPublisher()` — resolution helpers with full fallback chain.
+- `bootstrap.php` — `PORTAL_PRODUCT_NAME_DEFAULT` / `…_TAGLINE_DEFAULT` / `…_PUBLISHER_DEFAULT` constants loaded from brand-defaults; X-Powered-By header reads from `$SETTINGS['product']['name']` with cold-start fallback to the constant.
+- `_core/templates/header.php` + `footer.php` — meta generator + powered-by mark resolve via `Site::productName()`.
+- `_install/index.php` — new Step 1.5 dropdown picker; Step 3 schema install seeds `portal.industry` + `product.{name,tagline,publisher}` after `full_schema.sql` runs.
+- `public_html/manifest.php` (new) — replaces static `manifest.json`. Routed via tblRoutes; emits brand-aware PWA manifest + per-brand icons (with fallback to generic asset folder when sub-brand assets aren't present yet).
+- Migration `108_product_brand_layer.sql` — seeds the 3 new `product.*` rows and the `manifest.json` route on existing installs.
+- `full_schema.sql` — same seeds for fresh installs.
+
+**Known follow-ups deliberately deferred:**
+- `openapi.json` brand-aware conversion (developer-facing surface, lower priority).
+- Distinct sub-brand artwork (asset folders currently contain placeholder copies of generic).
+- School / Charity / Community / Small-Business preset polish (presets present but unverified beyond round-trip).
+
 ### Pre-rollout omnibus — 19 issues addressed in one branch
 
 Substantial pre-production-rollout hardening. Each item shipped, scaffolded, or scoped to a follow-up PR per the per-issue status comments.

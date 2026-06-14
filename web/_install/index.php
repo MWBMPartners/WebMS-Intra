@@ -44,6 +44,13 @@ define('INSTALL_LOCK_FILE', INSTALL_AUTH_DIR . DIRECTORY_SEPARATOR . '.installed
 // plain `return <string>` and safe to `require` independently.
 define('INSTALL_VERSION', (string) (require INSTALL_ROOT . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEPARATOR . 'version.php'));
 
+// 🏷️ Brand presets (issue #296) — loaded from _core/brand-defaults.php.
+// Same bootstrap-free contract: plain `return <array>` so we can require
+// it without the autoloader. We resolve the active preset from the session
+// (set by the new Step 1.5 "organisation type" pick) and fall back to the
+// generic preset for any earlier step where the user hasn't chosen yet.
+$INSTALL_BRAND_PRESETS = (array) (require INSTALL_ROOT . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEPARATOR . 'brand-defaults.php');
+
 // ---------------------------------------------------------------------------
 // Block re-installation if lock file exists
 // ---------------------------------------------------------------------------
@@ -85,7 +92,7 @@ if (is_file(INSTALL_LOCK_FILE) === true || is_file(INSTALL_CREDS_FILE) === true)
        . '.btn:hover,.btn:focus{background:var(--primary-hover);color:#fff;}'
        . '</style></head>'
        . '<body><div class="card"><h1>Already Installed</h1>'
-       . '<p>WebMS Intra has already been installed. To re-run the installer, '
+       . '<p>The portal has already been installed. To re-run the installer, '
        . 'remove both the lock file and credentials file from the <code>_auth_keys/</code> directory.</p>'
        . '<a class="btn" href="/">Go to Portal</a></div></body></html>';
     exit();
@@ -101,16 +108,20 @@ if (session_status() !== PHP_SESSION_ACTIVE) {
 // ---------------------------------------------------------------------------
 // Determine current step
 // ---------------------------------------------------------------------------
-// 🪞 Step is normally 1-6, but the "existing data" choice page lives at
-//    step '2.5' as a string so a fractional step is unambiguous in URLs.
-//    We track it separately to keep the integer comparisons elsewhere
-//    in the file intact.
+// 🪞 Step is normally 1-6, with two fractional intermediate pages encoded as
+//    string steps so they remain unambiguous in URLs without changing the
+//    integer comparisons used throughout the file:
+//      • '1.5' — organisation type (brand) picker (issue #296)
+//      • '2.5' — existing-data choice (continue / drop)
+//    Tracked via separate booleans so the integer $step still flows linearly.
 $rawStep = (string) ($_GET['step'] ?? ($_POST['step'] ?? '1'));
-$isChoiceStep = ($rawStep === '2.5');
-$step = $isChoiceStep ? 2 : (int) $rawStep;
+$isIndustryStep = ($rawStep === '1.5');
+$isChoiceStep   = ($rawStep === '2.5');
+$step = $isChoiceStep ? 2 : ($isIndustryStep ? 1 : (int) $rawStep);
 if ($step < 1 || $step > 6) {
     $step = 1;
     $isChoiceStep = false;
+    $isIndustryStep = false;
 }
 
 // Enforce step progression — cannot skip ahead without completing prior steps
@@ -121,6 +132,18 @@ if (($step >= 3 || $isChoiceStep) && isset($_SESSION['install_db']) === false) {
 if ($step === 6 && is_file(INSTALL_LOCK_FILE) === false) {
     $step = 5; // Finalization not yet completed
 }
+
+// 🏷️ Resolve the active brand preset from the session pick (Step 1.5).
+//    Defaults to the generic preset for steps that haven't picked yet.
+//    All hardcoded "WebMS Intra" references in the installer use these
+//    variables, so the wizard rebrands the moment the admin chooses.
+$selectedIndustry = (string) ($_SESSION['install_industry'] ?? '');
+$INSTALL_BRAND = $INSTALL_BRAND_PRESETS[$selectedIndustry]
+              ?? $INSTALL_BRAND_PRESETS['']
+              ?? ['name' => 'WebMS Intra', 'tagline' => 'Internal Management System', 'publisher' => 'MWBM Partners Ltd (t/a MWservices)'];
+$INSTALL_PRODUCT_NAME      = (string) ($INSTALL_BRAND['name']      ?? 'WebMS Intra');
+$INSTALL_PRODUCT_TAGLINE   = (string) ($INSTALL_BRAND['tagline']   ?? 'Internal Management System');
+$INSTALL_PRODUCT_PUBLISHER = (string) ($INSTALL_BRAND['publisher'] ?? 'MWBM Partners Ltd (t/a MWservices)');
 
 // ---------------------------------------------------------------------------
 // Handle POST submissions
@@ -267,6 +290,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             header('Location: ?step=3');
             exit();
         }
+    }
+
+    // Step 1.5: Save organisation type (industry preset pick).
+    //    Stores the choice in session only — actual tblSettings seeding
+    //    happens in Step 3 after full_schema.sql runs.
+    if ($action === 'select_industry') {
+        $picked = (string) ($_POST['industry'] ?? '');
+        // Defensive: only accept keys that exist in the brand presets file.
+        if (isset($INSTALL_BRAND_PRESETS[$picked]) === false) {
+            $picked = '';
+        }
+        $_SESSION['install_industry'] = $picked;
+        header('Location: ?step=2');
+        exit();
     }
 
     // Step 3: Install schema
@@ -417,6 +454,40 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             $error = 'Migration error: ' . $migError;
                             $step = 3;
                         } else {
+                            // 🏷️ Seed the product brand preset chosen in Step 1.5
+                            //    (issue #296). Writes the resolved name / tagline
+                            //    / publisher plus portal.industry into tblSettings.
+                            //    For the default (generic) pick we still upsert so
+                            //    the rows exist with sensible values for /admin/settings.
+                            $brandError = '';
+                            try {
+                                $brandSql = 'INSERT INTO `tblSettings` '
+                                          . '(`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) '
+                                          . 'VALUES (NULL, ?, ?, ?, 0) '
+                                          . 'ON DUPLICATE KEY UPDATE `settingValue` = VALUES(`settingValue`), '
+                                          . '`defaultValue` = VALUES(`defaultValue`)';
+                                $brandStmt = $db->prepare($brandSql);
+                                if ($brandStmt !== false) {
+                                    foreach ([
+                                        'portal.industry'   => $selectedIndustry,
+                                        'product.name'      => $INSTALL_PRODUCT_NAME,
+                                        'product.tagline'   => $INSTALL_PRODUCT_TAGLINE,
+                                        'product.publisher' => $INSTALL_PRODUCT_PUBLISHER,
+                                    ] as $key => $value) {
+                                        $strValue = (string) $value;
+                                        $brandStmt->bind_param('sss', $key, $strValue, $strValue);
+                                        $brandStmt->execute();
+                                    }
+                                    $brandStmt->close();
+                                }
+                            } catch (\mysqli_sql_exception $e) {
+                                // Non-fatal — the rows already have safe defaults
+                                // from migration 108 / 073. Log a soft warning so
+                                // the admin can re-pick via /admin/settings.
+                                $brandError = $e->getMessage();
+                                error_log('[WebMS-Intra] Installer brand seed: ' . $brandError);
+                            }
+
                             $db->close();
                             header('Location: ?step=4');
                             exit();
@@ -637,7 +708,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
 
             // Create lock file to prevent re-installation
-            file_put_contents(INSTALL_LOCK_FILE, date('c') . "\n" . 'Installed by WebMS Intra installer v' . INSTALL_VERSION);
+            file_put_contents(INSTALL_LOCK_FILE, date('c') . "\n" . 'Installed by ' . $INSTALL_PRODUCT_NAME . ' installer v' . INSTALL_VERSION);
 
             // Set restrictive permissions
             chmod(INSTALL_CREDS_FILE, 0640);
@@ -750,7 +821,7 @@ $stepTitles = [
     5 => 'Finalize Setup',
     6 => 'Installation Complete',
 ];
-$pageTitle = 'Install — ' . ($stepTitles[$step] ?? 'WebMS Intra');
+$pageTitle = 'Install — ' . ($stepTitles[$step] ?? $INSTALL_PRODUCT_NAME);
 
 ?><!doctype html>
 <html lang="en">
@@ -1358,7 +1429,7 @@ $pageTitle = 'Install — ' . ($stepTitles[$step] ?? 'WebMS Intra');
 
     <!-- Header -->
     <div class="install-header">
-        <h1>WebMS Intra</h1>
+        <h1><?php echo htmlspecialchars($INSTALL_PRODUCT_NAME, ENT_QUOTES, 'UTF-8'); ?></h1>
         <p class="install-tagline">Installation Wizard &mdash; v<?php echo INSTALL_VERSION; ?></p>
     </div>
 
@@ -1389,10 +1460,48 @@ $pageTitle = 'Install — ' . ($stepTitles[$step] ?? 'WebMS Intra');
     <div class="card install-card shadow-sm">
         <div class="card-body p-4">
 
-<?php if ($step === 1): ?>
+<?php if ($isIndustryStep === true): ?>
+            <!-- STEP 1.5: Organisation Type — picks the product brand preset (#296) -->
+            <h2 class="h5 mb-3">What kind of organisation is this?</h2>
+            <p>The portal can ship as a generic management system, or as a tailored sub-brand (e.g. <strong>ChurchMS</strong> for places of worship). Your choice affects only the visible product name, tagline, and default assets — every app and feature remains available.</p>
+            <p class="text-muted small">You can change this later via Admin &rarr; Settings &rarr; <code>portal.industry</code>.</p>
+
+            <form method="post" autocomplete="off">
+                <input type="hidden" name="action" value="select_industry">
+                <input type="hidden" name="step" value="1.5">
+
+                <div class="mb-3">
+                    <label for="industry" class="form-label">Organisation type</label>
+                    <select id="industry" name="industry" class="form-select" required>
+                        <?php foreach ($INSTALL_BRAND_PRESETS as $key => $preset):
+                            // Skip the unnamed alias of generic — '' and 'generic' map to the same preset
+                            if ($key === '') { continue; }
+                            $isSelected = ($key === $selectedIndustry);
+                        ?>
+                            <option value="<?php echo htmlspecialchars((string) $key, ENT_QUOTES, 'UTF-8'); ?>"
+                                    <?php echo $isSelected === true ? 'selected' : ''; ?>>
+                                <?php echo htmlspecialchars((string) ($preset['displayLabel'] ?? $key), ENT_QUOTES, 'UTF-8'); ?>
+                                — will install as <?php echo htmlspecialchars((string) ($preset['name'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
+                    <div class="form-text">
+                        Picking <em>Generic</em> keeps the historical <strong>WebMS Intra</strong> branding.
+                        Picking <em>Church / Place of Worship</em> rebrands the install to <strong>ChurchMS</strong>.
+                        Other sub-brands (School, Charity, Community, Small Business) are placeholders for v1.x — pick them only if you're previewing.
+                    </div>
+                </div>
+
+                <div class="d-flex gap-2">
+                    <a href="?step=1" class="btn btn-outline-secondary">&larr; Back</a>
+                    <button type="submit" class="btn btn-primary">Continue &rarr;</button>
+                </div>
+            </form>
+
+<?php elseif ($step === 1): ?>
             <!-- STEP 1: Welcome & Prerequisites -->
             <h2 class="h5 mb-3">Welcome</h2>
-            <p>This wizard will guide you through installing WebMS Intra. Before proceeding, let's check that your server meets the requirements.</p>
+            <p>This wizard will guide you through installing <?php echo htmlspecialchars($INSTALL_PRODUCT_NAME, ENT_QUOTES, 'UTF-8'); ?>. Before proceeding, let's check that your server meets the requirements.</p>
 
             <h3 class="h6 mt-4 mb-2">Server Prerequisites</h3>
             <table class="table table-sm">
@@ -1415,7 +1524,7 @@ $pageTitle = 'Install — ' . ($stepTitles[$step] ?? 'WebMS Intra');
             </table>
 
             <?php if ($allPrereqsPassed === true): ?>
-                <a href="?step=2" class="btn btn-primary">Continue &rarr;</a>
+                <a href="?step=1.5" class="btn btn-primary">Continue &rarr;</a>
             <?php else: ?>
                 <div class="alert alert-warning mt-3 mb-0">
                     Some prerequisites are not met. Please resolve the issues above before continuing.
@@ -1696,7 +1805,7 @@ $pageTitle = 'Install — ' . ($stepTitles[$step] ?? 'WebMS Intra');
 <?php elseif ($step === 6): ?>
             <!-- STEP 6: Complete -->
             <h2 class="h5 mb-3 text-success">Installation Complete!</h2>
-            <p>WebMS Intra has been successfully installed. Your portal is ready to use.</p>
+            <p><?php echo htmlspecialchars($INSTALL_PRODUCT_NAME, ENT_QUOTES, 'UTF-8'); ?> has been successfully installed. Your portal is ready to use.</p>
 
             <div class="alert alert-success">
                 <ul class="mb-0">
@@ -1728,7 +1837,7 @@ $pageTitle = 'Install — ' . ($stepTitles[$step] ?? 'WebMS Intra');
 
     <!-- Footer -->
     <div class="install-footer">
-        WebMS Intra v<?php echo INSTALL_VERSION; ?> &copy; <?php echo date('Y'); ?> MWBM Partners Ltd (t/a MWservices)
+        <?php echo htmlspecialchars($INSTALL_PRODUCT_NAME, ENT_QUOTES, 'UTF-8'); ?> v<?php echo INSTALL_VERSION; ?> &copy; <?php echo date('Y'); ?> <?php echo htmlspecialchars($INSTALL_PRODUCT_PUBLISHER, ENT_QUOTES, 'UTF-8'); ?>
     </div>
 
 </div>

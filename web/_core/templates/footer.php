@@ -35,11 +35,14 @@ if ($copyrightYear !== $currentYear) {
     $yearDisplay = $copyrightYear . '-' . $currentYear;
 }
 
-// 🏷️ "Powered by WebMS Intra" attribution — shown when the active site uses
-// CUSTOM branding (any branding field differs from the WebMS Intra default)
-// AND the admin has not opted out via the `branding.hidePoweredBy` setting.
+// 🏷️ "Powered by <product>" attribution — shown when the active site uses
+// CUSTOM branding (any branding field differs from the active product brand
+// default) AND the admin has not opted out via `branding.hidePoweredBy`.
+// The product name (WebMS Intra / ChurchMS / etc.) comes from the brand
+// layer added in issue #296. See Site::productName().
 $hidePoweredBy = (App::settings('branding.hidePoweredBy') === 'true');
 $showPoweredBy = ($hidePoweredBy === false) && (Site::usesCustomBranding() === true);
+$productName   = Site::productName();
 ?>
 
 </div><!-- /.container -->
@@ -57,7 +60,7 @@ $showPoweredBy = ($hidePoweredBy === false) && (Site::usesCustomBranding() === t
         <?php if ($showPoweredBy === true): ?>
             <span class="portal-powered-by ms-md-2">
                 <span class="portal-powered-by-prefix">Powered by</span>
-                <span class="portal-powered-by-mark">WebMS Intra</span>
+                <span class="portal-powered-by-mark"><?php echo htmlspecialchars($productName, ENT_QUOTES, 'UTF-8'); ?></span>
             </span>
         <?php endif; ?>
     </div>

@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- WebMS Intra — square PWA icon (symbol only, no wordmark).
+     Sibling to ./icon-512.svg and ../church/icon-192.svg. Same animation
+     timing as the full logo so they breathe in sync. See ./logo.svg for
+     full design notes. -->
+<svg xmlns="http://www.w3.org/2000/svg"
+     viewBox="0 0 192 192" width="192" height="192"
+     role="img" aria-label="WebMS Intra">
+  <title>WebMS Intra</title>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#7a85e8">
+        <animate attributeName="stop-color" values="#7a85e8;#5e6ad2;#7a85e8" dur="4.5s" repeatCount="indefinite"/>
+      </stop>
+      <stop offset="100%" stop-color="#5e6ad2">
+        <animate attributeName="stop-color" values="#5e6ad2;#4f5bbf;#5e6ad2" dur="4.5s" repeatCount="indefinite"/>
+      </stop>
+    </linearGradient>
+  </defs>
+  <!-- Rounded square container (matches PWA / iOS icon corner radius) -->
+  <rect width="192" height="192" rx="44" ry="44" fill="url(#bg)"/>
+  <!-- Stacked bars glyph — three rows, scaled up from the logo proportions -->
+  <g fill="#ffffff">
+    <rect x="46" y="58"  width="100" height="18" rx="9"/>
+    <rect x="46" y="87"  width="72"  height="18" rx="9"/>
+    <rect x="46" y="116" width="100" height="18" rx="9"/>
+  </g>
+</svg>

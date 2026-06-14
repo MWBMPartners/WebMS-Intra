@@ -41,14 +41,28 @@ $breadcrumbs = $breadcrumbs ?? [];
 // portal.css's design tokens shift to the site's brand colour automatically.
 $siteName    = Site::branding('name') ?? App::settings('site.name') ?? 'Portal';
 $siteColor   = Site::branding('color') ?? '#5e6ad2';
-$siteFavicon = Site::branding('favicon') ?? '/assets/images/favicon.ico';
+// 🏷️ Brand-aware favicon (Claude Design brand kit). Resolution chain:
+//   1. Tenant override (Site::branding('favicon'))
+//   2. Active brand's icon.svg (resolved from brand-defaults.php assetFolder)
+//   3. Top-level fallback at /assets/images/icon.svg.
+$activeAssetFolder = (function (): string {
+    $industry = (string) (App::settings('portal.industry') ?? '');
+    $presets  = (array) (require PORTAL_CORE . DIRECTORY_SEPARATOR . 'brand-defaults.php');
+    $preset   = $presets[$industry] ?? $presets[''] ?? [];
+    return (string) ($preset['assetFolder'] ?? 'webms-intra');
+})();
+$brandIconPath = '/assets/images/brands/' . $activeAssetFolder . '/icon.svg';
+$siteFavicon   = Site::branding('favicon') ?? $brandIconPath;
 
-// 🏷️ "Powered by WebMS Intra" attribution — same rule as the footer span.
+// 🏷️ "Powered by <product>" attribution — same rule as the footer span.
 // Custom-branded sites get a <meta name="generator"> tag so site analysers
 // (Wappalyzer, browser dev tools, etc.) can attribute the platform.
 // Admins opt out via the `branding.hidePoweredBy` setting.
+// The product name (WebMS Intra / ChurchMS / etc.) comes from the brand
+// layer — see issue #296 and Site::productName().
 $showPoweredByMeta = (App::settings('branding.hidePoweredBy') !== 'true')
     && (Site::usesCustomBranding() === true);
+$productName = Site::productName();
 
 // 🤖 Robots / AI-crawler policy.
 // Internal-facing portal by default — meta-robots emits noindex,nofollow
@@ -136,12 +150,13 @@ header("Content-Security-Policy: default-src 'self'; "
     <meta name="CCBot"         content="<?php echo htmlspecialchars($aiRobotsContent, ENT_QUOTES, 'UTF-8'); ?>">
 
     <?php if ($showPoweredByMeta === true): ?>
-    <meta name="generator" content="WebMS Intra">
+    <meta name="generator" content="<?php echo htmlspecialchars($productName, ENT_QUOTES, 'UTF-8'); ?>">
     <?php endif; ?>
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <link rel="manifest" href="/manifest.json">
-    <link rel="icon" href="<?php echo htmlspecialchars($siteFavicon, ENT_QUOTES, 'UTF-8'); ?>">
+    <link rel="icon" type="image/svg+xml" href="<?php echo htmlspecialchars($siteFavicon, ENT_QUOTES, 'UTF-8'); ?>">
+    <link rel="apple-touch-icon" href="<?php echo htmlspecialchars($brandIconPath, ENT_QUOTES, 'UTF-8'); ?>">
     <link rel="apple-touch-icon" href="/assets/images/icon-192.svg">
     <title><?php echo htmlspecialchars($pageTitle . ' - ' . $siteName, ENT_QUOTES, 'UTF-8'); ?></title>
 

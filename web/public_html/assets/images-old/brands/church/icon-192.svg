@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- ChurchMS — square PWA icon (symbol only).
+     Same church silhouette as ./logo.svg, scaled to a 192×192 canvas with
+     coordinates multiplied by 4 from the 48×48 logo symbol area.
+     Identical animation timing to the generic icon so siblings breathe in
+     sync. See ./logo.svg for full design notes. -->
+<svg xmlns="http://www.w3.org/2000/svg"
+     viewBox="0 0 192 192" width="192" height="192"
+     role="img" aria-label="ChurchMS">
+  <title>ChurchMS</title>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#7a85e8">
+        <animate attributeName="stop-color" values="#7a85e8;#5e6ad2;#7a85e8" dur="4.5s" repeatCount="indefinite"/>
+      </stop>
+      <stop offset="100%" stop-color="#5e6ad2">
+        <animate attributeName="stop-color" values="#5e6ad2;#4f5bbf;#5e6ad2" dur="4.5s" repeatCount="indefinite"/>
+      </stop>
+    </linearGradient>
+  </defs>
+
+  <!-- Rounded square container — matches PWA / iOS icon corner radius. -->
+  <rect width="192" height="192" rx="44" ry="44" fill="url(#bg)"/>
+
+  <!-- Church silhouette — white on indigo. -->
+  <g fill="#ffffff">
+    <!-- Cross at top -->
+    <rect x="92" y="20"  width="8"  height="32" rx="3"/>
+    <rect x="80" y="30"  width="32" height="10" rx="3"/>
+
+    <!-- Steeple base -->
+    <rect x="88" y="50" width="16" height="14"/>
+
+    <!-- Pitched roof -->
+    <path d="M 36 92 L 96 50 L 156 92 Z"/>
+
+    <!-- Body / nave -->
+    <rect x="48" y="92" width="96" height="68"/>
+  </g>
+
+  <!-- Arched door punched through (drawn in indigo to match background). -->
+  <path fill="#5e6ad2"
+        d="M 80 160 L 80 130 Q 80 116 96 116 Q 112 116 112 130 L 112 160 Z"/>
+</svg>

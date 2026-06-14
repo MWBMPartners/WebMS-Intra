@@ -1,4 +1,22 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
-  <rect width="512" height="512" rx="80" fill="#0d6efd"/>
-  <text x="256" y="345" font-family="system-ui,sans-serif" font-size="280" font-weight="700" fill="#fff" text-anchor="middle">P</text>
+<?xml version="1.0"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="100%" height="100%" preserveAspectRatio="xMidYMid meet" role="img" aria-label="WebMS-Intra app icon">
+  <title>WebMS-Intra app icon</title>
+  <desc>WebMS network held inside a rounded portal frame that opens at the base — the internal-tools portal sub-brand of WebMS. White emblem on a rounded indigo tile. HOW TO RECOLOUR: every colour is a named token in <defs> (brand, ink, grey, intra, on-brand) referenced by url(#token). Edit a token&#39;s stop-color(s) once to recolour everywhere it is used.</defs></desc>
+  <defs>
+    <linearGradient id="brand" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="64" y2="64"><desc>BRAND token — primary indigo gradient. Edit these two stop-colors to recolour the brand everywhere it is referenced via fill/stroke=&#34;url(#brand)&#34;.</desc><stop offset="0" stop-color="#5e6ad2"></stop><stop offset="1" stop-color="#7a85e8"></stop></linearGradient>
+    <linearGradient id="on-brand"><desc>ON-BRAND token — emblem colour on the indigo tile. Edit the stop-colors to recolour everything referencing url(#on-brand).</desc><stop offset="0" stop-color="#ffffff"></stop><stop offset="1" stop-color="#ffffff"></stop></linearGradient>
+  </defs>
+  <g id="container"><title>App tile</title><desc>Rounded indigo gradient tile.</desc>
+    <rect x="0" y="0" width="64" height="64" rx="14" fill="url(#brand)"></rect>
+  </g>
+  <g id="emblem" fill="url(#on-brand)" transform="translate(12.16 12.16) scale(0.62)">
+      <g id="portal-frame"><title>Portal frame</title><desc>Rounded frame open at the base — an internal space with a way in (the &#34;Portal&#34;).</desc>
+        <path fill="none" stroke="url(#on-brand)" stroke-width="3" stroke-linecap="round" d="M39,60 H45 A15,15 0 0 0 60,45 V19 A15,15 0 0 0 45,4 H19 A15,15 0 0 0 4,19 V45 A15,15 0 0 0 19,60 H25"></path>
+      </g>
+      <g id="network" transform="translate(7.680 7.680) scale(0.76)"><title>Network</title><desc>The WebMS connection mark, scaled to sit inside the portal frame.</desc>
+        <rect id="web-link-top" x="18.70" y="20.70" width="26.60" height="4.60" rx="2.30" transform="rotate(-90.00 32 23)"></rect> <rect id="web-link-bl" x="7.78" y="39.70" width="29.44" height="4.60" rx="2.30" transform="rotate(139.90 22.5 42)"></rect> <rect id="web-link-br" x="26.78" y="39.70" width="29.44" height="4.60" rx="2.30" transform="rotate(40.10 41.5 42)"></rect>
+        <circle cx="32" cy="12" r="5"></circle><circle cx="13" cy="50" r="5"></circle><circle cx="51" cy="50" r="5"></circle>
+        <rect x="24" y="26" width="16" height="16" rx="5"></rect>
+      </g>
+  </g>
 </svg>

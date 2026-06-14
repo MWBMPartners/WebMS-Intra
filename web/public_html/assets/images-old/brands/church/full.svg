@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+================================================================================
+  ChurchMS — Full lockup (emblem + wordmark + subtag)
+================================================================================
+  Sibling to ./generic/full.svg. Same construction, same typography. Only
+  the emblem (church silhouette vs stacked bars) + the prefix + the subtag
+  wording differ.
+================================================================================
+-->
+<svg xmlns="http://www.w3.org/2000/svg"
+     xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+     viewBox="0 0 460 96"
+     width="460" height="96"
+     role="img" aria-label="ChurchMS — Church Management System">
+  <title>ChurchMS — Church Management System</title>
+  <desc>Full ChurchMS brand lockup: rounded indigo emblem with church silhouette (steeple, roof, body, arched door) on the left; ChurchMS wordmark on the top right (Church in dark display sans, MS in italic indigo heavier weight, no space); CHURCH MANAGEMENT SYSTEM subtag in muted letterspaced caps below.</desc>
+
+  <style>
+    @media (prefers-reduced-motion: reduce) {
+      .emblem-anim { animation: none !important; }
+    }
+    .wordmark {
+      font-family: 'DM Sans', 'Geist', 'Söhne', 'Schibsted Grotesk',
+                   'Inter Display', 'SF Pro Display', 'Segoe UI Variable',
+                   system-ui, -apple-system, 'Helvetica Neue', sans-serif;
+      font-weight: 800;
+      letter-spacing: -0.025em;
+    }
+    .wordmark .ms {
+      font-style: italic;
+      font-weight: 900;
+      letter-spacing: -0.04em;
+    }
+    .subtag {
+      font-family: 'Inter', 'SF Pro Text', 'Segoe UI', system-ui, sans-serif;
+      font-weight: 500;
+      letter-spacing: 0.16em;
+    }
+  </style>
+
+  <defs>
+    <linearGradient id="brand-grad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#7a85e8">
+        <animate attributeName="stop-color" values="#7a85e8;#5e6ad2;#7a85e8" dur="4.5s" repeatCount="indefinite" class="emblem-anim" />
+      </stop>
+      <stop offset="100%" stop-color="#5e6ad2">
+        <animate attributeName="stop-color" values="#5e6ad2;#4f5bbf;#5e6ad2" dur="4.5s" repeatCount="indefinite" class="emblem-anim" />
+      </stop>
+    </linearGradient>
+  </defs>
+
+  <!-- Emblem (church silhouette). -->
+  <g inkscape:groupmode="layer" inkscape:label="Emblem"
+     transform="translate(8 16)">
+    <rect width="64" height="64" rx="14" fill="url(#brand-grad)" />
+    <g fill="#ffffff">
+      <rect x="29" y="10" width="6"  height="14" rx="2"/>
+      <rect x="24" y="13" width="16" height="6"  rx="2"/>
+      <rect x="29" y="24" width="6"  height="6"/>
+      <path d="M 8 42 L 32 22 L 56 42 Z"/>
+      <rect x="14" y="42" width="36" height="20"/>
+    </g>
+    <path fill="#5e6ad2" d="M 26 62 L 26 52 Q 26 47 32 47 Q 38 47 38 52 L 38 62 Z"/>
+  </g>
+
+  <g inkscape:groupmode="layer" inkscape:label="Wordmark"
+     transform="translate(92 0)">
+    <text class="wordmark" x="0" y="54" font-size="46" fill="#1b2330">Church<tspan class="ms" fill="#4f5bbf">MS</tspan></text>
+  </g>
+
+  <g inkscape:groupmode="layer" inkscape:label="Subtag"
+     transform="translate(92 0)">
+    <text class="subtag" x="0" y="80" font-size="11" fill="#6b7280">CHURCH MANAGEMENT SYSTEM</text>
+  </g>
+</svg>

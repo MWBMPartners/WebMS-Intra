@@ -1,5 +1,14 @@
 # WebMS Intra — Features
 
+> 🏷️ **Product brand layer (#296)** — the same codebase ships under
+> several sub-brands picked at install time: `WebMS Intra` (generic),
+> `ChurchMS` (church / place of worship), and placeholder presets for
+> `SchoolMS` / `CharityMS` / `CommunityMS` / `BusinessMS`. Affects only
+> display surfaces (name, tagline, PWA install prompt, X-Powered-By
+> header, footer attribution). Tenant branding (per-site `siteName`,
+> logo, colour) still beats the product layer. See DEV_NOTES "Two-layer
+> brand model" for the resolution cascade.
+>
 > **Living working summary.** Kept current alongside the codebase. Refer to
 > [CHANGELOG.md](CHANGELOG.md) for chronological history and to [README.md](README.md)
 > for setup, deployment, and licence info.
@@ -37,7 +46,8 @@ Foundational classes loaded by every request via `bootstrap.php`. All ✅.
 | `App` | Service registry — `db()`, `settings()`, `user()`, `isAdmin()`, `siteId()`, transaction helpers |
 | `Auth` | Sessions, CSRF, local + MS365 + Google OAuth + WebAuthn, password policy, 2FA TOTP, account linking |
 | `Router`, `ApiRouter` | Front-controller URL dispatch + dedicated JSON API dispatch |
-| `Site` | Multi-site context — detection, branding, per-site settings overrides |
+| `Site` | Multi-site context — detection, branding, per-site settings overrides; product-brand resolution helpers `productName()` / `productTagline()` / `productPublisher()` (#296) |
+| `AppRegistry` | Single source of truth for installable apps; powers `/admin/apps` toggle + Router enablement gating + industry filter (#255) |
 | `Captcha` | Provider-agnostic — Turnstile / reCAPTCHA v2+v3 / hCaptcha with admin-configurable priority |
 | `Mailer`, `MailerGoogle` | Microsoft Graph "SendAs" + Google Workspace SendAs |
 | `ExpenseMailer`, `ExpensePdf`, `Pdf` | Expense email notifier, PDF generator, dompdf wrapper |

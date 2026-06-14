@@ -10,7 +10,7 @@ return [
     'category'    => 'community',
     'industries'  => ['church'],
     'route'       => 'prayer-requests',
-    'settingKey'  => 'prayerRequests.enabled',
+    'settingKey'  => 'prayer-requests.enabled',
     'isCore'      => false,
     'version'     => '1.0.0',
 ];
