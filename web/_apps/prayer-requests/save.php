@@ -128,6 +128,15 @@ if ($ok === false) {
 
 Logger::activity('PrayerRequestSubmitted', 'Request #' . $newId . ' submitted (status=' . $initialStatus . ')');
 
+// 🪝 Outbound webhook (#324) — fire-and-forget. Never blocks the user flow.
+\Portal\Core\WebhookDispatcher::emit('prayer-requests.created', [
+    'requestID'    => $newId,
+    'subject'      => $subject,
+    'isAnonymous'  => $isAnonymous === 1,
+    'status'       => $initialStatus,
+    'visibility'   => $visibility,
+]);
+
 // 🔀 Redirect — pending shows a "thanks, awaiting review" message; active jumps straight to view
 if ($initialStatus === 'pending') {
     header('Location: /prayer-requests?submitted=1', true, 302);
