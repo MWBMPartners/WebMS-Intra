@@ -108,6 +108,43 @@ class Auth
         }
     }
 
+    /**
+     * Check whether the active user is an event coordinator for the given
+     * event (#341). Coordinators have edit / manage rights for ONE event
+     * without site-wide admin privileges. Admins implicitly pass this check.
+     *
+     * Usage in event-mutating handlers:
+     *   if (App::isAdmin() === false && Auth::isCoordinatorOf($eventId) === false) {
+     *       http_response_code(403); exit('Forbidden');
+     *   }
+     */
+    public static function isCoordinatorOf(int $eventId): bool
+    {
+        if ($eventId <= 0 || self::check() === false) {
+            return false;
+        }
+        if (App::isAdmin() === true) {
+            return true;
+        }
+        $userId = (int) ($_SESSION['user_id'] ?? 0);
+        if ($userId <= 0) {
+            return false;
+        }
+        $db = App::db();
+        $stmt = $db->prepare(
+            'SELECT 1 FROM tblEventCoordinators '
+            . 'WHERE eventID = ? AND userID = ? AND revokedAt IS NULL LIMIT 1'
+        );
+        if ($stmt === false) {
+            return false;
+        }
+        $stmt->bind_param('ii', $eventId, $userId);
+        $stmt->execute();
+        $ok = (bool) $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+        return $ok;
+    }
+
     /* ====================================================================== */
     /* CSRF protection                                                        */
     /* ====================================================================== */
