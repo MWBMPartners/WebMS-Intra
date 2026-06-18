@@ -170,10 +170,88 @@ if (Auth::check() === true) {
 
 // 📄 Include shared header template
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
+
+// 🌐 Schema.org JSON-LD Event markup (#328) — SEO + rich-snippet eligibility.
+//     Conditional on isPublic + status to avoid leaking unpublished/draft events
+//     into search index. Only emitted on public events.
+if (($event['isPublic'] ?? '0') === '1' && in_array($event['status'] ?? '', ['published', 'cancelled', 'postponed'], true) === true):
+    $eventStatusSchema = [
+        'published' => 'https://schema.org/EventScheduled',
+        'cancelled' => 'https://schema.org/EventCancelled',
+        'postponed' => 'https://schema.org/EventPostponed',
+    ];
+    $tz = (string) ($event['timezone'] ?? 'Europe/London');
+    try {
+        $dtStart = new \DateTimeImmutable((string) $event['startDateTime'], new \DateTimeZone($tz));
+        $dtEnd   = !empty($event['endDateTime']) ? new \DateTimeImmutable((string) $event['endDateTime'], new \DateTimeZone($tz)) : null;
+    } catch (\Exception $e) { $dtStart = null; $dtEnd = null; }
+
+    $eventUrl = (isset($_SERVER['HTTPS']) === true && $_SERVER['HTTPS'] === 'on' ? 'https://' : 'http://')
+              . (string) ($_SERVER['HTTP_HOST'] ?? '') . '/calendar/event?slug='
+              . rawurlencode((string) $event['eventSlug']);
+    $heroAbsUrl = !empty($event['heroImage'])
+        ? (isset($_SERVER['HTTPS']) === true && $_SERVER['HTTPS'] === 'on' ? 'https://' : 'http://')
+          . (string) ($_SERVER['HTTP_HOST'] ?? '') . '/assets/uploads/calendar/' . (string) $event['heroImage']
+        : null;
+
+    $jsonLd = [
+        '@context'      => 'https://schema.org',
+        '@type'         => 'Event',
+        'name'          => (string) $event['eventName'],
+        'description'   => (string) ($event['description'] ?? ''),
+        'eventStatus'   => $eventStatusSchema[$event['status']] ?? 'https://schema.org/EventScheduled',
+        'eventAttendanceMode' => 'https://schema.org/OfflineEventAttendanceMode',
+        'organizer'     => [ '@type' => 'Organization', 'name' => Site::productName() ],
+        'url'           => $eventUrl,
+    ];
+    if ($dtStart instanceof \DateTimeImmutable) {
+        $jsonLd['startDate'] = $dtStart->format('c');
+    }
+    if ($dtEnd instanceof \DateTimeImmutable) {
+        $jsonLd['endDate'] = $dtEnd->format('c');
+    }
+    if (!empty($event['locationName']) || !empty($event['locationAddress'])) {
+        $jsonLd['location'] = [
+            '@type' => 'Place',
+            'name'    => (string) ($event['locationName']    ?? ''),
+            'address' => (string) ($event['locationAddress'] ?? ''),
+        ];
+    }
+    if ($heroAbsUrl !== null) {
+        $jsonLd['image'] = [$heroAbsUrl];
+    }
+    echo "\n<script type=\"application/ld+json\">"
+        . json_encode($jsonLd, JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT)
+        . "</script>\n";
+endif;
 ?>
 
 <!-- 📅 Event Detail -->
 <article class="mb-5">
+
+    <?php // 🚫 Cancellation / postponement broadcast banner (#337) ?>
+    <?php if ($event['status'] === 'cancelled'): ?>
+        <div class="alert alert-danger mb-4">
+            <h2 class="h5"><i class="fa-solid fa-ban me-2"></i>This event has been cancelled</h2>
+            <?php if (!empty($event['cancelReason'])): ?>
+                <p class="mb-1"><?php echo nl2br(htmlspecialchars((string) $event['cancelReason'], ENT_QUOTES, 'UTF-8')); ?></p>
+            <?php endif; ?>
+            <?php if (!empty($event['statusChangedAt'])): ?>
+                <p class="small text-muted mb-0">Updated <?php echo htmlspecialchars(date('j M Y, H:i', strtotime((string) $event['statusChangedAt'])), ENT_QUOTES, 'UTF-8'); ?>.</p>
+            <?php endif; ?>
+        </div>
+    <?php elseif ($event['status'] === 'postponed'): ?>
+        <div class="alert alert-warning mb-4">
+            <h2 class="h5"><i class="fa-solid fa-pause me-2"></i>This event has been postponed</h2>
+            <?php if (!empty($event['cancelReason'])): ?>
+                <p class="mb-1"><?php echo nl2br(htmlspecialchars((string) $event['cancelReason'], ENT_QUOTES, 'UTF-8')); ?></p>
+            <?php endif; ?>
+            <?php if (!empty($event['statusChangedAt'])): ?>
+                <p class="small text-muted mb-0">Updated <?php echo htmlspecialchars(date('j M Y, H:i', strtotime((string) $event['statusChangedAt'])), ENT_QUOTES, 'UTF-8'); ?>. Check back for the new date.</p>
+            <?php endif; ?>
+        </div>
+    <?php endif; ?>
+
     <!-- 🖼️ Hero image -->
     <?php if ($event['heroImage'] !== null && $event['heroImage'] !== ''): ?>
         <div class="mb-4">

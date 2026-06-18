@@ -90,42 +90,55 @@ if ($response === 'cancel') {
     exit();
 }
 
-// 🔍 Check capacity (if set)
+// 🤝 Guest +N count (#334) — how many guests is the responder bringing?
+//     Clamped to a reasonable cap so a typo doesn't flood the waitlist.
+$guestCount = max(0, min(20, (int) ($_POST['guestCount'] ?? 0)));
+
+// 🔍 Check capacity + decide confirmed vs waitlist (#334).
+$rsvpStatus = 'confirmed';
+$waitlistFlash = '';
 if ($event['capacity'] !== null && $response === 'going') {
+    // Count confirmed seats already taken (excluding this user's existing row).
     $capStmt = $mysqli->prepare(
-        'SELECT COUNT(*) AS cnt FROM tblEventRSVPs WHERE eventID = ? AND response = \'going\' AND userID != ?'
+        'SELECT COALESCE(SUM(1 + guestCount), 0) AS seats '
+        . 'FROM tblEventRSVPs '
+        . 'WHERE eventID = ? AND response = "going" AND status = "confirmed" AND userID != ?'
     );
+    $seatsTaken = 0;
     if ($capStmt !== false) {
         $capStmt->bind_param('ii', $eventId, $userId);
         $capStmt->execute();
-        $currentCount = (int) ($capStmt->get_result()->fetch_assoc()['cnt'] ?? 0);
+        $seatsTaken = (int) ($capStmt->get_result()->fetch_assoc()['seats'] ?? 0);
         $capStmt->close();
-
-        if ($currentCount >= (int) $event['capacity']) {
-            $_SESSION['flash_msg']  = 'This event is at full capacity.';
-            $_SESSION['flash_type'] = 'warning';
-            header('Location: ' . $redirect);
-            exit();
-        }
+    }
+    $seatsWanted = 1 + $guestCount;
+    $cap         = (int) $event['capacity'];
+    if ($seatsTaken + $seatsWanted > $cap) {
+        // 📋 Auto-waitlist instead of rejecting outright — user gets a slot when
+        //     someone above drops out. Chronological promotion happens in v1.1
+        //     (settings hook + cron will sweep waitlistedAt order).
+        $rsvpStatus = 'waitlist';
+        $waitlistFlash = ' Capacity reached — you are on the waitlist.';
     }
 }
 
-// 📋 Upsert RSVP (INSERT ON DUPLICATE KEY UPDATE)
+// 📋 Upsert RSVP — bumps to confirmed/waitlist as appropriate.
 $stmt = $mysqli->prepare(
-    'INSERT INTO tblEventRSVPs (eventID, userID, siteID, response) '
-    . 'VALUES (?, ?, ?, ?) '
-    . 'ON DUPLICATE KEY UPDATE response = VALUES(response), updatedAt = NOW()'
+    'INSERT INTO tblEventRSVPs (eventID, userID, siteID, response, guestCount, status, waitlistedAt) '
+    . 'VALUES (?, ?, ?, ?, ?, ?, ' . ($rsvpStatus === 'waitlist' ? 'NOW()' : 'NULL') . ') '
+    . 'ON DUPLICATE KEY UPDATE response = VALUES(response), guestCount = VALUES(guestCount), '
+    . '                         status = VALUES(status), waitlistedAt = VALUES(waitlistedAt), updatedAt = NOW()'
 );
 if ($stmt !== false) {
-    $stmt->bind_param('iiis', $eventId, $userId, $siteId, $response);
+    $stmt->bind_param('iiisis', $eventId, $userId, $siteId, $response, $guestCount, $rsvpStatus);
     $stmt->execute();
     $stmt->close();
 }
 
 $labels = ['going' => 'Going', 'maybe' => 'Maybe', 'not_going' => 'Not going'];
-Logger::activity('EventRSVP', 'RSVP ' . ($labels[$response] ?? $response) . ' for: ' . $event['eventName'], $userId);
+Logger::activity('EventRSVP', 'RSVP ' . ($labels[$response] ?? $response) . ' (+' . $guestCount . ', ' . $rsvpStatus . ') for: ' . $event['eventName'], $userId);
 
-$_SESSION['flash_msg']  = 'RSVP saved — ' . ($labels[$response] ?? $response) . '.';
-$_SESSION['flash_type'] = 'success';
+$_SESSION['flash_msg']  = 'RSVP saved — ' . ($labels[$response] ?? $response) . '.' . $waitlistFlash;
+$_SESSION['flash_type'] = $rsvpStatus === 'waitlist' ? 'warning' : 'success';
 header('Location: ' . $redirect);
 exit();
