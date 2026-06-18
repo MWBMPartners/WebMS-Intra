@@ -110,6 +110,30 @@ if ($stmt !== false) {
     $stmt->close();
 }
 
+// 📚 Fetch event-scoped documents from the document library (#351).
+//     Distinct from tblEventMaterials (the simple per-event attachment
+//     table above) — these are tblDocuments rows whose eventID has been
+//     set to this event. Honours isPublished + isDeleted gates so drafts
+//     never leak to the public event page.
+$eventDocs = [];
+$stmt = $mysqli->prepare(
+    'SELECT d.documentID, d.title, d.description, d.fileName, d.fileSize, d.mimeType, '
+    . '       d.downloadCount, d.createdAt, c.categoryName '
+    . 'FROM tblDocuments d '
+    . 'LEFT JOIN tblDocCategories c ON c.categoryID = d.categoryID '
+    . 'WHERE d.eventID = ? AND d.siteID = ? AND d.isPublished = 1 AND d.isDeleted = 0 '
+    . 'ORDER BY c.sortOrder, d.title ASC'
+);
+if ($stmt !== false) {
+    $stmt->bind_param('ii', $event['eventID'], $siteId);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    while ($r = $result->fetch_assoc()) {
+        $eventDocs[] = $r;
+    }
+    $stmt->close();
+}
+
 // 📋 Fetch event themes
 $themes = [];
 $stmt = $mysqli->prepare(
@@ -349,6 +373,42 @@ endif;
                                 <?php if ($mat['fileSize'] !== null): ?>
                                     <small class="text-muted">(<?php echo round((int) $mat['fileSize'] / 1024); ?> KB)</small>
                                 <?php endif; ?>
+                            </div>
+                        <?php endforeach; ?>
+                    </div>
+                </div>
+            <?php endif; ?>
+
+            <!-- 📚 Documents (per-event library link, #351) -->
+            <?php if (count($eventDocs) > 0): ?>
+                <div class="card mb-4">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0"><i class="fa-solid fa-folder-open me-2"></i>Documents</h5>
+                        <a href="/documents?event=<?php echo (int) $event['eventID']; ?>" class="small text-decoration-none">View in library &rarr;</a>
+                    </div>
+                    <div class="card-body">
+                        <?php foreach ($eventDocs as $doc): ?>
+                            <div class="d-flex align-items-start gap-2 mb-3">
+                                <i class="fa-solid fa-file-lines text-primary mt-1"></i>
+                                <div class="flex-grow-1">
+                                    <a href="/documents/download?id=<?php echo (int) $doc['documentID']; ?>"
+                                       class="text-decoration-none fw-semibold">
+                                        <?php echo htmlspecialchars((string) $doc['title'], ENT_QUOTES, 'UTF-8'); ?>
+                                    </a>
+                                    <?php if (!empty($doc['categoryName'])): ?>
+                                        <span class="badge bg-light text-dark border ms-1"><?php echo htmlspecialchars((string) $doc['categoryName'], ENT_QUOTES, 'UTF-8'); ?></span>
+                                    <?php endif; ?>
+                                    <?php if (!empty($doc['description'])): ?>
+                                        <div class="small text-muted mt-1"><?php echo htmlspecialchars(mb_substr((string) $doc['description'], 0, 200), ENT_QUOTES, 'UTF-8'); ?></div>
+                                    <?php endif; ?>
+                                    <div class="small text-muted">
+                                        <?php if ($doc['fileSize'] !== null): ?>
+                                            <i class="fa-solid fa-database me-1"></i><?php echo round((int) $doc['fileSize'] / 1024); ?> KB
+                                            &middot;
+                                        <?php endif; ?>
+                                        <i class="fa-solid fa-download me-1"></i><?php echo (int) $doc['downloadCount']; ?> downloads
+                                    </div>
+                                </div>
                             </div>
                         <?php endforeach; ?>
                     </div>
