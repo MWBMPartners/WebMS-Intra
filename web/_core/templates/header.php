@@ -51,7 +51,7 @@ $activeAssetFolder = (function (): string {
     $preset   = $presets[$industry] ?? $presets[''] ?? [];
     return (string) ($preset['assetFolder'] ?? 'webms-intra');
 })();
-$brandIconPath = '/assets/images/brands/' . $activeAssetFolder . '/icon.svg';
+$brandIconPath = '/assets/images/brandkit/assets/' . $activeAssetFolder . '/icon.svg';
 $siteFavicon   = Site::branding('favicon') ?? $brandIconPath;
 
 // 🏷️ "Powered by <product>" attribution — same rule as the footer span.

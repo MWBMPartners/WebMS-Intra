@@ -43,27 +43,33 @@ $productTagline = Site::productTagline();
 $siteColor = Site::branding('color') ?? '#0d6efd';
 
 // 🖼️ Resolve per-brand asset paths.
-//    Folder = $brandPresets[<industry>]['assetFolder'] (e.g. 'church').
+//    Folder = $brandPresets[<industry>]['assetFolder'] (e.g. 'churchms').
 //    Each folder is expected to contain logo.svg + icon-{192,512}.svg.
 //    If the folder is missing on disk, fall back to the existing
 //    /assets/images/* placeholders so PWA install never breaks.
+//
+//    NB: filesystem path resolves under PORTAL_ROOT/public_html/ — the
+//    older code path constructed it under PORTAL_APPS/ which was always
+//    a miss (PORTAL_APPS is _apps/, not public_html/assets/) and the
+//    is_readable branch never fired. Fixed alongside the brands/ →
+//    brandkit/assets/ folder move.
 $industry  = (string) (App::settings('portal.industry') ?? '');
 $presets   = (array) (require PORTAL_CORE . DIRECTORY_SEPARATOR . 'brand-defaults.php');
 $preset    = $presets[$industry] ?? $presets[''] ?? [];
-$assetDir  = (string) ($preset['assetFolder'] ?? 'generic');
-$brandRoot = PORTAL_APPS . DIRECTORY_SEPARATOR . 'assets'
-           . DIRECTORY_SEPARATOR . 'images'
-           . DIRECTORY_SEPARATOR . 'brands'
+$assetDir  = (string) ($preset['assetFolder'] ?? 'webms-intra');
+$brandRoot = PORTAL_ROOT . DIRECTORY_SEPARATOR . 'public_html'
+           . DIRECTORY_SEPARATOR . 'assets' . DIRECTORY_SEPARATOR . 'images'
+           . DIRECTORY_SEPARATOR . 'brandkit' . DIRECTORY_SEPARATOR . 'assets'
            . DIRECTORY_SEPARATOR . $assetDir;
 
 $icon192 = is_readable($brandRoot . DIRECTORY_SEPARATOR . 'icon-192.svg')
-    ? '/assets/images/brands/' . $assetDir . '/icon-192.svg'
+    ? '/assets/images/brandkit/assets/' . $assetDir . '/icon-192.svg'
     : '/assets/images/icon-192.svg';
 $icon512 = is_readable($brandRoot . DIRECTORY_SEPARATOR . 'icon-512.svg')
-    ? '/assets/images/brands/' . $assetDir . '/icon-512.svg'
+    ? '/assets/images/brandkit/assets/' . $assetDir . '/icon-512.svg'
     : '/assets/images/icon-512.svg';
 $logo    = is_readable($brandRoot . DIRECTORY_SEPARATOR . 'logo.svg')
-    ? '/assets/images/brands/' . $assetDir . '/logo.svg'
+    ? '/assets/images/brandkit/assets/' . $assetDir . '/logo.svg'
     : '/assets/images/logo.svg';
 
 // 🧱 Build the manifest. Field order kept stable so diff-driven debugging
