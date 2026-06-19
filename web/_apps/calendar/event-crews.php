@@ -83,6 +83,13 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <h1 class="h4 mb-2"><i class="fa-solid fa-people-group me-2 text-primary"></i>Crews — <?php echo htmlspecialchars((string) $event['eventName'], ENT_QUOTES, 'UTF-8'); ?></h1>
     <p class="text-muted small">Forms-only v1. Drag-and-drop is a v1.1 polish layer.</p>
 
+    <form method="post" action="/calendar/event/crews/auto-build" class="d-inline-block mb-3"
+          onsubmit="return confirm('Distribute all approved registrations across these crews, balancing by grade?');">
+        <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
+        <input type="hidden" name="eventID" value="<?php echo $eventId; ?>">
+        <button type="submit" class="btn btn-sm btn-success"><i class="fa-solid fa-shuffle me-1"></i>Auto-build from registrations</button>
+    </form>
+
     <details class="mb-4">
         <summary class="btn btn-sm btn-outline-primary"><i class="fa-solid fa-plus me-1"></i>Add a crew</summary>
         <form method="post" action="/calendar/event/crews/save" class="row g-2 mt-2 align-items-end p-2 bg-light rounded">
