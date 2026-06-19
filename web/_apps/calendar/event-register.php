@@ -18,6 +18,7 @@
 declare(strict_types=1);
 
 use Portal\Core\Auth;
+use Portal\Core\Captcha;
 use Portal\Core\Site;
 
 $slug = trim((string) ($_GET['slug'] ?? ''));
@@ -50,8 +51,12 @@ if (!empty($event['registrationClosesAt']) && strtotime((string) $event['registr
 
 $pageTitle = 'Register — ' . (string) $event['eventName'];
 $csrf = htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8');
+$captchaConfigured = class_exists(Captcha::class) === true && Captcha::isConfigured() === true;
 
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
+if ($captchaConfigured === true) {
+    echo Captcha::scriptTag();
+}
 ?>
 
 <div class="container py-4" style="max-width:720px;">
@@ -133,6 +138,10 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 I consent to photos of the participant being used in event-related materials.
             </label>
         </div>
+
+        <?php if ($captchaConfigured === true): ?>
+            <div class="mb-3"><?php echo Captcha::widget(); ?></div>
+        <?php endif; ?>
 
         <button type="submit" class="btn btn-primary btn-lg"><i class="fa-solid fa-paper-plane me-1"></i>Submit registration</button>
         <a href="/calendar/event?slug=<?php echo htmlspecialchars($slug, ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-link">Cancel</a>

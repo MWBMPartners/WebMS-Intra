@@ -15,7 +15,9 @@
 declare(strict_types=1);
 
 use Portal\Core\Auth;
+use Portal\Core\Captcha;
 use Portal\Core\Logger;
+use Portal\Core\Mailer;
 use Portal\Core\Site;
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') { header('Location: /calendar', true, 302); exit(); }
@@ -23,6 +25,14 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') { header('Location: /calendar', true,
 Auth::ensureSession();
 if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
     http_response_code(400); exit('Bad request.');
+}
+
+// 🤖 Captcha gate (#348). Skip if no provider configured.
+if (class_exists(Captcha::class) === true && Captcha::isConfigured() === true) {
+    if (Captcha::verify($_POST) === false) {
+        Logger::activity('EventRegistrationCaptchaFailed', 'Slug=' . ($_POST['slug'] ?? ''));
+        http_response_code(400); exit('Captcha failed — please go back and try again.');
+    }
 }
 
 $slug = trim((string) ($_POST['slug'] ?? ''));
@@ -97,6 +107,18 @@ $newId = (int) $stmt->insert_id;
 $stmt->close();
 
 Logger::activity('EventRegistrationReceived', 'Event #' . $eventIdInt . ' registration #' . $newId . ' (' . $fullName . ')');
+
+// 📧 Email confirmation to registrant (#348).
+if ($parentEmailArg !== null && class_exists(Mailer::class) === true && method_exists(Mailer::class, 'send') === true) {
+    $confirmSubject = 'Registration received — ' . (string) $event['eventName'];
+    $confirmBody    = '<p>Hi' . ($parentName !== '' ? ' ' . htmlspecialchars($parentName, ENT_QUOTES, 'UTF-8') : '') . ',</p>'
+        . '<p>We\'ve received the registration for <strong>'
+        . htmlspecialchars($fullName, ENT_QUOTES, 'UTF-8')
+        . '</strong> for <strong>' . htmlspecialchars((string) $event['eventName'], ENT_QUOTES, 'UTF-8') . '</strong>.</p>'
+        . '<p>Status: <strong>Pending review</strong>. We will be in touch once it has been confirmed.</p>'
+        . '<p>If you have questions, just reply to this email.</p>';
+    @Mailer::send($parentEmailArg, $confirmSubject, $confirmBody);
+}
 
 if (class_exists('\\Portal\\Core\\WebhookDispatcher') === true) {
     $payload = ['eventID' => $eventIdInt, 'registrationID' => $newId, 'fullName' => $fullName, 'grade' => $grade];
