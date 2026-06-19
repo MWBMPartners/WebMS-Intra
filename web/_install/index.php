@@ -850,11 +850,24 @@ $pageTitle = 'Install — ' . ($stepTitles[$step] ?? $INSTALL_PRODUCT_NAME);
         // $INSTALL_BRAND_ASSET_FOLDER swaps in that brand's icon folder on the
         // very next render — no JS needed, the form POST → redirect cycle
         // re-resolves brand on the way back to the next step.
+        //
+        // 📐 Format fallback order matters: browsers pick the FIRST format
+        // they understand. Order is therefore:
+        //   1. image/svg+xml  → Chrome 80+, Firefox 41+, Safari 9+, Edge.
+        //   2. image/png      → everything else with multi-size hinting.
+        //   3. apple-touch-icon (PNG) → iOS/iPadOS home-screen.
+        //   4. alternate icon (favicon.ico) → legacy IE, very old Safari.
+        // SVG sources are vector; PNG variants are rendered from the same
+        // SVG at build time via rsvg-convert and committed to the repo so
+        // no runtime image processing is needed on DreamHost shared.
         $faviconBase = '/assets/images/brands/' . htmlspecialchars($INSTALL_BRAND_ASSET_FOLDER, ENT_QUOTES, 'UTF-8');
     ?>
-    <link rel="icon"             type="image/svg+xml" href="<?php echo $faviconBase; ?>/icon.svg">
-    <link rel="apple-touch-icon" sizes="192x192"      href="<?php echo $faviconBase; ?>/icon-192.svg">
-    <link rel="apple-touch-icon" sizes="512x512"      href="<?php echo $faviconBase; ?>/icon-512.svg">
+    <link rel="icon"             type="image/svg+xml"            href="<?php echo $faviconBase; ?>/icon.svg">
+    <link rel="icon"             type="image/png" sizes="32x32"  href="<?php echo $faviconBase; ?>/icon-32.png">
+    <link rel="icon"             type="image/png" sizes="16x16"  href="<?php echo $faviconBase; ?>/icon-16.png">
+    <link rel="apple-touch-icon" sizes="192x192"                 href="<?php echo $faviconBase; ?>/icon-192.png">
+    <link rel="apple-touch-icon" sizes="512x512"                 href="<?php echo $faviconBase; ?>/icon-512.png">
+    <link rel="alternate icon"   type="image/x-icon"             href="<?php echo $faviconBase; ?>/favicon.ico">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet"
           integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YcnS/NPqOGZ2eLNphkfv02LPMoJiDFhNSz7K" crossorigin="anonymous">
     <style>
