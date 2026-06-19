@@ -115,6 +115,12 @@ class Asset
     /** @var string Local path for portal stylesheet */
     private const LOCAL_PORTAL_CSS = '/assets/css/portal.css';
 
+    /** @var string Local brand fonts CSS (Plus Jakarta Sans @font-face) */
+    private const LOCAL_BRAND_FONTS_CSS = '/assets/css/brand-fonts.css';
+
+    /** @var string Local Plus Jakarta Sans WOFF2 (regular weight) — used as <link rel="preload"> hint */
+    private const LOCAL_BRAND_FONT_PRELOAD = '/assets/fonts/plus-jakarta-sans/plus-jakarta-sans-400.woff2';
+
     /** @var string Local path for portal script */
     private const LOCAL_PORTAL_JS = '/assets/js/portal.js';
 
@@ -330,6 +336,25 @@ class Asset
     public static function portalCss(): string
     {
         return '<link rel="stylesheet" href="' . self::esc(self::LOCAL_PORTAL_CSS) . '">';
+    }
+
+    /**
+     * Brand fonts CSS — self-hosted Plus Jakarta Sans @font-face declarations
+     * (5 weights, latin subset, ~12 KB each). Drives every page's body font
+     * via the --portal-font-family CSS variable. Should be emitted in <head>
+     * BEFORE portal.css so the variable is resolved when portal.css reads it.
+     *
+     * Includes a <link rel="preload"> hint for the regular weight so the
+     * browser can start fetching the font in parallel with the CSS — fewer
+     * milliseconds of fallback-font FOUT on first paint.
+     *
+     * @return string HTML <link> tag(s)
+     */
+    public static function brandFontsCss(): string
+    {
+        return '<link rel="preload" href="' . self::esc(self::LOCAL_BRAND_FONT_PRELOAD)
+             . '" as="font" type="font/woff2" crossorigin="anonymous">'
+             . '<link rel="stylesheet" href="' . self::esc(self::LOCAL_BRAND_FONTS_CSS) . '">';
     }
 
     /**

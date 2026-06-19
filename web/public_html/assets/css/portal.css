@@ -77,7 +77,11 @@
     --bs-link-hover-color-rgb: var(--portal-link-rgb);
 
     /* ----- Typography ----- */
-    --portal-font-family:      system-ui, -apple-system, "Segoe UI", Roboto,
+    /* 🅰️ Brand font: Plus Jakarta Sans, self-hosted (see brand-fonts.css for
+     * the @font-face declarations). Falls back to the system stack during
+     * the FOUT window AND for legacy browsers that fail to load WOFF2.
+     * One-file source of truth — change this line to swap brand font. */
+    --portal-font-family:      "Plus Jakarta Sans", system-ui, -apple-system, "Segoe UI", Roboto,
                                "Helvetica Neue", Arial, sans-serif;
     --portal-font-mono:        ui-monospace, SFMono-Regular, "SF Mono", Menlo,
                                Monaco, Consolas, "Liberation Mono", monospace;

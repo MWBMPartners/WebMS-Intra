@@ -75,7 +75,7 @@ if (is_file(INSTALL_LOCK_FILE) === true || is_file(INSTALL_CREDS_FILE) === true)
        .   '--code-bg:#1f2347;--code-text:#e8eaf0;'
        . '}}'
        . 'html,body{height:100%;}'
-       . 'body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;'
+       . 'body{font-family:"Plus Jakarta Sans",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;'
        .   'background:var(--bg);color:var(--text);text-align:center;'
        .   'padding:4rem 1.25rem;margin:0;line-height:1.55;}'
        . '.card{max-width:560px;margin:0 auto;background:var(--surface);'
@@ -1003,7 +1003,7 @@ $pageTitle = 'Install — ' . ($stepTitles[$step] ?? $INSTALL_PRODUCT_NAME);
         body {
             background: var(--portal-bg);
             color: var(--portal-text);
-            font-family: system-ui, -apple-system, "Segoe UI", Roboto,
+            font-family: "Plus Jakarta Sans", system-ui, -apple-system, "Segoe UI", Roboto,
                          "Helvetica Neue", Arial, sans-serif;
             font-size: 0.9375rem;
             line-height: 1.5;

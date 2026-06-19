@@ -1,0 +1,86 @@
+/**
+ * =============================================================================
+ * Brand fonts — Plus Jakarta Sans 🅰️
+ * =============================================================================
+ * Self-hosted WOFF2 (latin subset) — one file per weight, ~12 KB each.
+ * Loaded ONCE per page via the global <head> in:
+ *   • web/_core/templates/header.php  (runtime portal pages)
+ *   • web/_install/index.php          (bootstrap-free installer)
+ *
+ * No CDN / Google Fonts dependency — keeps the portal GDPR-friendly (no
+ * external request leaking the visitor IP at every page load) and avoids
+ * the third-party FOIT on flaky connections.
+ *
+ * Weights ship per the brand guidance in `brandkit/README.md`:
+ *   400 — body text default
+ *   500 — UI mid-emphasis (buttons, labels)
+ *   600 — descriptor / sub-heading
+ *   700 — wordmark prefix
+ *   800 — `MS` emphasis / heading lockup
+ *
+ * font-display: swap — text renders immediately in the system stack, then
+ * swaps to Plus Jakarta Sans once the woff2 has loaded. Better LCP than
+ * the default `auto` (which can blank-text the page for up to 3s).
+ *
+ * @package   Portal
+ * @author    MWBM Partners Ltd (t/a MWservices)
+ * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
+ * @version   1.0.0
+ * =============================================================================
+ */
+
+@font-face {
+    font-family: 'Plus Jakarta Sans';
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url('/assets/fonts/plus-jakarta-sans/plus-jakarta-sans-400.woff2') format('woff2');
+}
+
+@font-face {
+    font-family: 'Plus Jakarta Sans';
+    font-style: normal;
+    font-weight: 500;
+    font-display: swap;
+    src: url('/assets/fonts/plus-jakarta-sans/plus-jakarta-sans-500.woff2') format('woff2');
+}
+
+@font-face {
+    font-family: 'Plus Jakarta Sans';
+    font-style: normal;
+    font-weight: 600;
+    font-display: swap;
+    src: url('/assets/fonts/plus-jakarta-sans/plus-jakarta-sans-600.woff2') format('woff2');
+}
+
+@font-face {
+    font-family: 'Plus Jakarta Sans';
+    font-style: normal;
+    font-weight: 700;
+    font-display: swap;
+    src: url('/assets/fonts/plus-jakarta-sans/plus-jakarta-sans-700.woff2') format('woff2');
+}
+
+@font-face {
+    font-family: 'Plus Jakarta Sans';
+    font-style: normal;
+    font-weight: 800;
+    font-display: swap;
+    src: url('/assets/fonts/plus-jakarta-sans/plus-jakarta-sans-800.woff2') format('woff2');
+}
+
+/* -----------------------------------------------------------------------------
+ * NB: this file contains ONLY @font-face declarations — by design.
+ *
+ * The `--portal-font-family` CSS variable that drives <body> and all UI
+ * components lives in portal.css alongside the rest of the design tokens.
+ * portal.css's variable definition lists 'Plus Jakarta Sans' as the first
+ * family, followed by the system stack as fallback. That gives ONE place to
+ * change to swap the brand font — find-and-replace in portal.css, and the
+ * `<body>` + every component re-derives.
+ *
+ * Keeping this file pure (no :root, no body selector) means importing
+ * brand-fonts.css adds the font-face declarations to ANY page without
+ * forcing layout side-effects on host pages that may already have their
+ * own typography.
+ * -------------------------------------------------------------------------- */
