@@ -1,20 +1,24 @@
 {
     "name": "mwbmpartners/webms-intra",
-    "description": "Internal portal platform — manifest-only composer.json for Dependabot CVE watching. No `composer install` is ever run; libraries are vendored manually under web/_vendor/ and web/_libraries/ because DreamHost shared hosting has no CLI. See DEV_NOTES.md for the manifest-only rationale (#145).",
+    "description": "Internal portal platform — manifest-only composer.json for Dependabot CVE watching. We never run composer install: DreamHost shared hosting has no CLI. Libraries are vendored manually under web/_vendor/ and web/_libraries/. This file exists so Dependabot can watch Packagist for CVEs against the exact versions we ship. See DEV_NOTES.md → 'Manifest-only composer.json' for the rationale (#145).",
     "type": "project",
     "license": "proprietary",
     "homepage": "https://github.com/MWBMPartners/WebMS-Intra",
     "require": {
         "php": "^8.4",
-        "_comment": "kelvinmo/simplejwt is vendored under web/_vendor/simplejwt/ — Dependabot watches Packagist for CVEs against this exact version even though we don't run composer install.",
         "kelvinmo/simplejwt": "^0.7",
-        "_comment_dompdf": "dompdf 3.1.5 is server-managed under web/_libraries/ (gitignored); declared here so Dependabot reports any future CVEs.",
         "dompdf/dompdf": "^3.1"
     },
     "config": {
         "platform": {
             "php": "8.4"
-        },
-        "_comment": "We never run composer install in this repo. The lock file is intentionally absent."
+        }
+    },
+    "extra": {
+        "manifest-only": true,
+        "vendored-paths": {
+            "kelvinmo/simplejwt": "web/_vendor/simplejwt/",
+            "dompdf/dompdf": "web/_libraries/ (gitignored, server-managed)"
+        }
     }
 }
