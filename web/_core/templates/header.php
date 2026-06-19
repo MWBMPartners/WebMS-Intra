@@ -161,6 +161,7 @@ header("Content-Security-Policy: default-src 'self'; "
     <title><?php echo htmlspecialchars($pageTitle . ' - ' . $siteName, ENT_QUOTES, 'UTF-8'); ?></title>
 
     <!-- 🎨 Stylesheets (CDN with local fallback, RTL variant if needed) -->
+    <?php echo Asset::brandFontsCss(); ?>
     <?php echo Asset::bootstrapCss(I18n::isRtl()); ?>
 
     <?php echo Asset::fontAwesomeCss(); ?>
