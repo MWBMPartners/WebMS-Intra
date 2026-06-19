@@ -9,9 +9,83 @@ Automated sections are appended by `.github/workflows/changelog.yml` per push
 to `alpha`, `beta`, and `main` using the heading format
 `## [VERSION] - YYYY-MM-DD (branch)`.
 
-## [1.2.0] - Unreleased
+## [1.3.0] - 2026-06-19 (main)
 
-### Multi-brand product layer — `ChurchMS` / `SchoolMS` / … sub-brands (#296)
+PR #340 — events platform overhaul + COP + ChurchMS verticals + ops hygiene. **36 issues across 39 commits in one consolidated PR.** The Multi-brand product layer section originally drafted for 1.2.0 (see further down) shipped as part of this release.
+
+### 🗓️ Events Calendar — easy wins (7)
+
+- **#326** Public Submit-an-Event + moderation queue.
+- **#328** Schema.org JSON-LD on event page.
+- **#331** Photo view alongside the seven existing view modes.
+- **#334** Guest +N RSVPs with auto-waitlist on capacity.
+- **#337** Cancellation / postponement broadcast banner.
+- **#338** VTIMEZONE + TZID + RRULE in iCal output (RFC 5545).
+- **#339** Per-site unique event slug.
+
+### 🛡️ Ops hygiene (3)
+
+- **#161** SRI audit — 5 missing integrity hashes filled.
+- **#145** `composer.json` manifest + Dependabot composer ecosystem entry for CVE watching.
+- **#147** `auto-merge-alpha.yml` re-verified; still dormant, kept.
+
+### 📚 Calendar extension (1)
+
+- **#351** Per-event document library link (`tblDocuments.eventID` + event-page render + upload prefill).
+
+### 🎯 VBS Pro bundle — foundation (5)
+
+- **#341** Event coordinator role — `Auth::isCoordinatorOf()` + `tblEventCoordinators` junction. Foundation primitive composed by every other VBS-flow endpoint.
+- **#342** **Volunteer resource portal** at `/account/my-volunteering` — the user-explicit differentiator vs VBS Pro. Pure read-side composition; per-event team/role/docs.
+- **#345** Multi-day attendance grid + walk-in enrol (`tblEventAttendance`).
+- **#343** Crew / group builder (forms-only v1; data model SortableJS-ready).
+- **#344** Volunteer job board with capacity indicators.
+
+### 🎯 VBS workflow completion (3)
+
+- **#350** Bulk email by crew / job / RSVP segment (`tblEventBroadcasts`).
+- **#346** Per-event public landing page at `/e/<slug>` — branded hero + live countdown + QR + register CTA.
+- **#347** Per-event registration with VBS-relevant fields (`tblEventRegistrations`) + admin moderation list.
+
+### 🗓️ Calendar polish trio (3)
+
+- **#332** Multiple primary organisers per event (`tblEventOrgs` junction).
+- **#335** Anonymous email-link RSVP — 256-bit token, `hash_equals`, server-side expiry (`tblEventRSVPInvites`).
+- **#329** Event lifecycle email reminders — 24h / 1h / day-of, cron-driven (`tblEventReminderLog`).
+
+### 🛡️ Safeguarding + auto-distribute (2)
+
+- **#310** DBS safeguarding tracking (`tblDbsChecks`). Optional coordinator gate via `safeguarding.dbs_required_for_coordinators`.
+- **#349** Auto-build crews + auto-assign volunteers by deepest-deficit-first.
+
+### 🗓️ TEC remaining (4)
+
+- **#336** Embeddable event widgets — iframe + `widget.js` drop-in.
+- **#330** Faceted filter bar — location + search + date range on `/calendar`.
+- **#333** Per-occurrence overrides on recurring series (`tblEventOccurrenceOverrides`).
+- **#327** External ICS calendar feed aggregator — in-house parser, cron-driven (`tblExternalFeeds`).
+
+### ⛪ COP / public-facing (5)
+
+- **#348** Public registration: captcha gate + email confirmation (extends #347).
+- **#314** Anonymous self check-in for events — SHA-256-hashed IP, kiosk / QR / self source.
+- **#315** Decision Moments tracker — 6 quick-tap categories per event.
+- **#316** Salvation / decision card tracker — public form + admin follow-up workflow.
+- **#318** Livestream session analytics — CORS-friendly ping endpoint + admin dashboard.
+
+### 🎵 ChurchMS verticals (3)
+
+- **#305** Denominational reporting templates with CSV export.
+- **#309** Song library + CCLI tracking — FULLTEXT-ready (`tblSongs`).
+- **#298** Kids check-in / check-out with 6-digit safeguarding badge codes.
+
+### 🧰 Infrastructure
+
+- **`Portal\Core\Settings`** — new thin static wrapper around `$SETTINGS` (fixed latent bug in earlier files that called `Settings::get()` against a class that didn't exist).
+- **Router::handleSpecialRoutes** — prefix-match dispatcher for `/e/<slug>`.
+- 25 idempotent SQL migrations (112–136).
+
+### Multi-brand product layer — `ChurchMS` / `SchoolMS` / … sub-brands (#296) — folded in from 1.2.0 draft
 
 System-level brand identity that sits ABOVE the existing per-tenant `branding.*` cascade. The installer's new **Step 1.5 — Organisation Type** picks a preset bundle; the install rebrands display surfaces (header meta, footer attribution, X-Powered-By header, PWA manifest name, installer wizard itself) to the matching short name and tagline. Tenant branding (`Site::branding()`) still beats product defaults — a `Mill Road SDA Cambridge` site on a `ChurchMS` install keeps its own siteName in chrome.
 
