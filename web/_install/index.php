@@ -145,7 +145,7 @@ $INSTALL_PRODUCT_NAME      = (string) ($INSTALL_BRAND['name']      ?? 'WebMS Int
 $INSTALL_PRODUCT_TAGLINE   = (string) ($INSTALL_BRAND['tagline']   ?? 'Internal Management System');
 $INSTALL_PRODUCT_PUBLISHER = (string) ($INSTALL_BRAND['publisher'] ?? 'MWBM Partners Ltd (t/a MWservices)');
 
-// 🎨 Asset folder slug — points at web/public_html/assets/images/brands/<slug>/.
+// 🎨 Asset folder slug — points at web/public_html/assets/images/brandkit/assets/<slug>/.
 //    Drives the favicon + apple-touch-icon in the installer head. The default
 //    (webms-intra) ships first; once Step 1.5 saves the picked industry into
 //    $_SESSION['install_industry'], the next render of the wizard automatically
@@ -860,7 +860,7 @@ $pageTitle = 'Install — ' . ($stepTitles[$step] ?? $INSTALL_PRODUCT_NAME);
         // SVG sources are vector; PNG variants are rendered from the same
         // SVG at build time via rsvg-convert and committed to the repo so
         // no runtime image processing is needed on DreamHost shared.
-        $faviconBase = '/assets/images/brands/' . htmlspecialchars($INSTALL_BRAND_ASSET_FOLDER, ENT_QUOTES, 'UTF-8');
+        $faviconBase = '/assets/images/brandkit/assets/' . htmlspecialchars($INSTALL_BRAND_ASSET_FOLDER, ENT_QUOTES, 'UTF-8');
     ?>
     <link rel="icon"             type="image/svg+xml"            href="<?php echo $faviconBase; ?>/icon.svg">
     <link rel="icon"             type="image/png" sizes="32x32"  href="<?php echo $faviconBase; ?>/icon-32.png">

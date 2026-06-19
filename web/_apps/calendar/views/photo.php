@@ -31,7 +31,7 @@ use Portal\Core\Site;
 <?php else: ?>
     <div class="row g-3 calendar-photo-grid">
         <?php
-        $brandFallback = '/assets/images/brands/' . htmlspecialchars(
+        $brandFallback = '/assets/images/brandkit/assets/' . htmlspecialchars(
             'webms-intra', ENT_QUOTES, 'UTF-8'
         ) . '/full.svg';
         ?>
