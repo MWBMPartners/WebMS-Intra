@@ -142,7 +142,33 @@ class Auth
         $stmt->execute();
         $ok = (bool) $stmt->get_result()->fetch_assoc();
         $stmt->close();
-        return $ok;
+        if ($ok === false) {
+            return false;
+        }
+
+        // 🛡️ DBS gate (#310). When safeguarding.dbs_required_for_coordinators
+        //    is enabled, a coordinator must hold a valid (non-expired,
+        //    non-revoked) DBS check or this method returns false. Settings
+        //    lookup is per-request so toggling takes effect immediately.
+        if ((string) Settings::get('safeguarding.dbs_required_for_coordinators', '0') === '1') {
+            $stmt = $db->prepare(
+                'SELECT 1 FROM tblDbsChecks '
+                . 'WHERE userID = ? AND status = "valid" AND expiresAt >= CURDATE() '
+                . 'ORDER BY dbsCheckID DESC LIMIT 1'
+            );
+            if ($stmt === false) {
+                return false;
+            }
+            $stmt->bind_param('i', $userId);
+            $stmt->execute();
+            $hasDbs = (bool) $stmt->get_result()->fetch_assoc();
+            $stmt->close();
+            if ($hasDbs === false) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /* ====================================================================== */
