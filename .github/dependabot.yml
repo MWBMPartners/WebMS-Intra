@@ -3,8 +3,9 @@
 # =============================================================================
 # Watches for security + version updates in:
 #   - GitHub Actions (workflow versions)
+#   - Composer (manifest-only — `composer install` is never run; manifest
+#     declares vendored libraries so Dependabot can report CVEs)
 #   - npm (none yet — placeholder so adding a package.json later auto-picks up)
-#   - Composer (placeholder — see #145 for composer.json work)
 #
 # Docs: https://docs.github.com/en/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
 # =============================================================================
@@ -32,3 +33,22 @@ updates:
       gh-actions:
         patterns:
           - "*"
+
+  # Composer (manifest-only — see composer.json + DEV_NOTES "Vendored library
+  # CVE watching" for the rationale). DreamHost shared hosting has no CLI
+  # so we never run `composer install`; the manifest exists purely so
+  # Dependabot opens a PR when a watched library has a published CVE.
+  - package-ecosystem: "composer"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "Europe/London"
+    open-pull-requests-limit: 5
+    labels:
+      - "type: security"
+      - "priority: medium"
+    commit-message:
+      prefix: "deps(composer)"
+      include: "scope"

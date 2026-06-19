@@ -242,6 +242,19 @@ class Router
             return true;
         }
 
+        // 📣 Per-event public landing page (#346) — short URL /e/<slug>.
+        //    The trailing segment is captured into $_GET['slug'] and the
+        //    page (web/_apps/calendar/public-landing.php) renders the
+        //    branded hero + countdown + RSVP CTA.
+        if (str_starts_with($path, 'e/') === true) {
+            $slug = substr($path, 2);
+            if (preg_match('/^[a-z0-9][a-z0-9\-]{0,79}$/i', $slug) === 1) {
+                $_GET['slug'] = $slug;
+                require PORTAL_APPS . DIRECTORY_SEPARATOR . 'calendar' . DIRECTORY_SEPARATOR . 'public-landing.php';
+                return true;
+            }
+        }
+
         return false;
     }
 

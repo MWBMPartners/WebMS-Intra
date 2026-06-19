@@ -100,7 +100,17 @@ if ($cursor === null) {
 // -----------------------------------------------------------------------------
 $filterCategory = trim((string) ($_GET['category'] ?? ''));
 $filterType     = trim((string) ($_GET['type'] ?? ''));
+$filterLocation = trim((string) ($_GET['location'] ?? ''));
+$filterSearch   = trim((string) ($_GET['q'] ?? ''));
+$filterFrom     = trim((string) ($_GET['from'] ?? ''));
+$filterTo       = trim((string) ($_GET['to'] ?? ''));
 $showPast       = ($_GET['past'] ?? '') === '1';   // list-view only
+
+// 🛡️ Length-clamp + format-validate new filters.
+$filterLocation = mb_substr($filterLocation, 0, 80);
+$filterSearch   = mb_substr($filterSearch, 0, 80);
+if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $filterFrom) !== 1) { $filterFrom = ''; }
+if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $filterTo)   !== 1) { $filterTo   = ''; }
 
 $siteId = Site::id();
 
@@ -190,6 +200,29 @@ if ($filterType !== '') {
     $conditions[] = 'e.typeID = ?';
     $params[]     = (int) $filterType;
     $types       .= 'i';
+}
+// 🔍 Faceted filters (#330)
+if ($filterLocation !== '') {
+    $conditions[] = 'e.locationName LIKE ?';
+    $params[]     = '%' . $filterLocation . '%';
+    $types       .= 's';
+}
+if ($filterSearch !== '') {
+    $conditions[] = '(e.eventName LIKE ? OR e.description LIKE ?)';
+    $needle       = '%' . $filterSearch . '%';
+    $params[]     = $needle;
+    $params[]     = $needle;
+    $types       .= 'ss';
+}
+if ($filterFrom !== '') {
+    $conditions[] = 'e.startDateTime >= ?';
+    $params[]     = $filterFrom . ' 00:00:00';
+    $types       .= 's';
+}
+if ($filterTo !== '') {
+    $conditions[] = 'e.startDateTime <= ?';
+    $params[]     = $filterTo . ' 23:59:59';
+    $types       .= 's';
 }
 
 if ($view === 'list') {

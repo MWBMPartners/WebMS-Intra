@@ -49,6 +49,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $title       = trim($_POST['title'] ?? '');
     $description = trim($_POST['description'] ?? '');
     $categoryId  = ($_POST['categoryID'] ?? '') !== '' ? (int) $_POST['categoryID'] : null;
+    // 📅 Optional per-event linkage (#351). Accept eventID from POST OR
+    //     pre-fill via ?eventID=N query string (deep-link from event page).
+    $eventId     = ($_POST['eventID'] ?? '') !== '' ? (int) $_POST['eventID'] : null;
 
     // 🔍 Validate file
     if (isset($_FILES['document']) === false || $_FILES['document']['error'] !== UPLOAD_ERR_OK) {
@@ -96,18 +99,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         exit();
     }
 
-    // 📋 Insert record
+    // 📋 Insert record (with optional eventID linkage, #351).
     $stmt = $mysqli->prepare(
-        'INSERT INTO tblDocuments (siteID, categoryID, title, description, fileName, filePath, fileSize, mimeType, uploadedByID) '
-        . 'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        'INSERT INTO tblDocuments (siteID, categoryID, eventID, title, description, fileName, filePath, fileSize, mimeType, uploadedByID) '
+        . 'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
     );
     if ($stmt !== false) {
         $origName = $file['name'];
         $fileSize = (int) $file['size'];
         $mimeType = $file['type'];
         $stmt->bind_param(
-            'iissssisi',
-            $siteId, $categoryId, $title, $description, $origName, $safeName, $fileSize, $mimeType, $userId
+            'iiissssisi',
+            $siteId, $categoryId, $eventId, $title, $description, $origName, $safeName, $fileSize, $mimeType, $userId
         );
         $stmt->execute();
         $stmt->close();
@@ -133,6 +136,21 @@ if ($catStmt !== false) {
         $categories[] = $row;
     }
     $catStmt->close();
+}
+
+// 📅 Optional event-link pre-fill (#351). Deep-link from /calendar/event
+//     can pass ?eventID=N so the upload is auto-scoped. We confirm the
+//     event exists + is on the current site before exposing it.
+$prefillEvent = null;
+$prefillEventId = (int) ($_GET['eventID'] ?? 0);
+if ($prefillEventId > 0) {
+    $eStmt = $mysqli->prepare('SELECT eventID, eventName FROM tblEvents WHERE eventID = ? AND siteID = ? AND isDeleted = 0 LIMIT 1');
+    if ($eStmt !== false) {
+        $eStmt->bind_param('ii', $prefillEventId, $siteId);
+        $eStmt->execute();
+        $prefillEvent = $eStmt->get_result()->fetch_assoc() ?: null;
+        $eStmt->close();
+    }
 }
 
 // 📌 Page metadata
@@ -181,6 +199,16 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     <?php endforeach; ?>
                 </select>
             </div>
+
+            <?php // 📅 Per-event linkage (#351) — pre-filled from ?eventID=N deep-link. ?>
+            <?php if ($prefillEvent !== null): ?>
+                <div class="mb-3">
+                    <label for="eventID" class="form-label">Linked event</label>
+                    <input type="text" class="form-control" id="eventIDDisplay" value="<?php echo htmlspecialchars((string) $prefillEvent['eventName'], ENT_QUOTES, 'UTF-8'); ?>" disabled>
+                    <input type="hidden" name="eventID" value="<?php echo (int) $prefillEvent['eventID']; ?>">
+                    <small class="text-muted">This document will appear on the event's public page.</small>
+                </div>
+            <?php endif; ?>
 
             <div class="d-flex gap-2">
                 <button type="submit" class="btn btn-primary">

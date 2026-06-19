@@ -68,6 +68,10 @@ class Asset
     private const BOOTSTRAP_CSS_INTEGRITY =
         'sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YcnS/NPqOGZ2eLNphkfv02LPMoJiDFhNSz7K';
 
+    /** @var string SRI hash for Bootstrap 5.3.3 RTL CSS (jsdelivr CDN) */
+    private const BOOTSTRAP_RTL_CSS_INTEGRITY =
+        'sha384-dpuaG1suU0eT09tx5plTaGMLBsfDLzUCCUXOY2j/LSvXYuG6Bqs43ALlhIqAJVRb';
+
     /** @var string SRI hash for Bootstrap 5.3.3 JS bundle (jsdelivr CDN) */
     private const BOOTSTRAP_JS_INTEGRITY =
         'sha384-0pUGZvbkm6XF6gxjEnlmuGrJXVbNuzT9qBBavbLwCsOGabYfZo0T0to5eqruptLy';
@@ -76,25 +80,21 @@ class Asset
     private const FONTAWESOME_CSS_INTEGRITY =
         'sha384-t1nt8BQoYMLFN5p42tRAtuAAFQaCQDDkGnRm3LqTMXRg5r4EbSJz7GZBG0NqXKOF';
 
-    /**
-     * @var string SRI hash for SortableJS 1.15.2 (jsdelivr CDN).
-     *
-     * TODO(#161): fill from `curl -sL <CDN_URL> | openssl dgst -sha384 -binary
-     * | openssl base64 -A` once someone with network access runs the command.
-     * The check_cdn_sri.py audit will keep flagging this gap until the hash
-     * lands. Empty for now — tag emits without integrity= attribute so the
-     * page keeps working; CDN-compromise mitigation only kicks in once filled.
-     */
-    private const SORTABLE_JS_INTEGRITY = '';
+    /** @var string SRI hash for SortableJS 1.15.2 (jsdelivr CDN) */
+    private const SORTABLE_JS_INTEGRITY =
+        'sha384-BSxuMLxX+FCbTdYec3TbXlnMGEEM2QXTFdtDaveen71o+jswm2J36+xFqp8k4VHM';
 
-    /** @var string SRI hash for swagger-ui 5.17.14 swagger-ui.css (jsdelivr CDN) — TODO(#161) */
-    private const SWAGGER_CSS_INTEGRITY = '';
+    /** @var string SRI hash for swagger-ui 5.17.14 swagger-ui.css (jsdelivr CDN) */
+    private const SWAGGER_CSS_INTEGRITY =
+        'sha384-wxLW6kwyHktdDGr6Pv1zgm/VGJh99lfUbzSn6HNHBENZlCN7W602k9VkGdxuFvPn';
 
-    /** @var string SRI hash for swagger-ui 5.17.14 swagger-ui-bundle.js (jsdelivr CDN) — TODO(#161) */
-    private const SWAGGER_JS_INTEGRITY = '';
+    /** @var string SRI hash for swagger-ui 5.17.14 swagger-ui-bundle.js (jsdelivr CDN) */
+    private const SWAGGER_JS_INTEGRITY =
+        'sha384-wmyclcVGX/WhUkdkATwhaK1X1JtiNrr2EoYJ+diV3vj4v6OC5yCeSu+yW13SYJep';
 
-    /** @var string SRI hash for swagger-ui 5.17.14 swagger-ui-standalone-preset.js (jsdelivr CDN) — TODO(#161) */
-    private const SWAGGER_PRESET_INTEGRITY = '';
+    /** @var string SRI hash for swagger-ui 5.17.14 swagger-ui-standalone-preset.js (jsdelivr CDN) */
+    private const SWAGGER_PRESET_INTEGRITY =
+        'sha384-2YH8WDRaj7V2OqU/trsmzSagmk/E2SutiCsGkdgoQwC9pNUJV1u/141DHB6jgs8t';
 
     // 📂 ---------------------------------------------------------------------------
     // Local fallback paths (relative to the web root)
@@ -276,7 +276,7 @@ class Asset
             return self::css(
                 self::CDN_BOOTSTRAP_RTL_CSS,
                 self::LOCAL_BOOTSTRAP_RTL_CSS,
-                '' // 📋 SRI hash omitted for RTL variant — local fallback handles integrity
+                self::BOOTSTRAP_RTL_CSS_INTEGRITY
             );
         }
 

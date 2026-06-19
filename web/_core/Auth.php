@@ -108,6 +108,69 @@ class Auth
         }
     }
 
+    /**
+     * Check whether the active user is an event coordinator for the given
+     * event (#341). Coordinators have edit / manage rights for ONE event
+     * without site-wide admin privileges. Admins implicitly pass this check.
+     *
+     * Usage in event-mutating handlers:
+     *   if (App::isAdmin() === false && Auth::isCoordinatorOf($eventId) === false) {
+     *       http_response_code(403); exit('Forbidden');
+     *   }
+     */
+    public static function isCoordinatorOf(int $eventId): bool
+    {
+        if ($eventId <= 0 || self::check() === false) {
+            return false;
+        }
+        if (App::isAdmin() === true) {
+            return true;
+        }
+        $userId = (int) ($_SESSION['user_id'] ?? 0);
+        if ($userId <= 0) {
+            return false;
+        }
+        $db = App::db();
+        $stmt = $db->prepare(
+            'SELECT 1 FROM tblEventCoordinators '
+            . 'WHERE eventID = ? AND userID = ? AND revokedAt IS NULL LIMIT 1'
+        );
+        if ($stmt === false) {
+            return false;
+        }
+        $stmt->bind_param('ii', $eventId, $userId);
+        $stmt->execute();
+        $ok = (bool) $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+        if ($ok === false) {
+            return false;
+        }
+
+        // 🛡️ DBS gate (#310). When safeguarding.dbs_required_for_coordinators
+        //    is enabled, a coordinator must hold a valid (non-expired,
+        //    non-revoked) DBS check or this method returns false. Settings
+        //    lookup is per-request so toggling takes effect immediately.
+        if ((string) Settings::get('safeguarding.dbs_required_for_coordinators', '0') === '1') {
+            $stmt = $db->prepare(
+                'SELECT 1 FROM tblDbsChecks '
+                . 'WHERE userID = ? AND status = "valid" AND expiresAt >= CURDATE() '
+                . 'ORDER BY dbsCheckID DESC LIMIT 1'
+            );
+            if ($stmt === false) {
+                return false;
+            }
+            $stmt->bind_param('i', $userId);
+            $stmt->execute();
+            $hasDbs = (bool) $stmt->get_result()->fetch_assoc();
+            $stmt->close();
+            if ($hasDbs === false) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     /* ====================================================================== */
     /* CSRF protection                                                        */
     /* ====================================================================== */

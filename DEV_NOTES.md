@@ -567,7 +567,9 @@ for `prefers-color-scheme` changes when in `auto` mode.
 
 ## Workflow: `auto-merge-alpha.yml` — verified-correct-but-unfired (#147)
 
-**Verification date:** 2026-06-03 · **Status:** unfired (0 runs since creation)
+**Last verification:** 2026-06-19 (originally 2026-06-03) · **Status:** unfired (still 0 runs since creation)
+
+**2026-06-19 re-audit**: `gh run list --workflow auto-merge-alpha.yml --limit 20` returns `[]`. `gh pr list --base alpha --state all --limit 20` returns `[]`. No PR has ever targeted the `alpha` branch; the workflow has never executed. Decision below stands — retained, not deleted. Re-audit every ~6 months; if alpha branch usage stays at zero for the next audit window, revisit deletion.
 
 The workflow at `.github/workflows/auto-merge-alpha.yml` calls
 `gh pr merge --auto --squash` on any PR whose `base` is `alpha`, then waits

@@ -110,6 +110,30 @@ if ($stmt !== false) {
     $stmt->close();
 }
 
+// 📚 Fetch event-scoped documents from the document library (#351).
+//     Distinct from tblEventMaterials (the simple per-event attachment
+//     table above) — these are tblDocuments rows whose eventID has been
+//     set to this event. Honours isPublished + isDeleted gates so drafts
+//     never leak to the public event page.
+$eventDocs = [];
+$stmt = $mysqli->prepare(
+    'SELECT d.documentID, d.title, d.description, d.fileName, d.fileSize, d.mimeType, '
+    . '       d.downloadCount, d.createdAt, c.categoryName '
+    . 'FROM tblDocuments d '
+    . 'LEFT JOIN tblDocCategories c ON c.categoryID = d.categoryID '
+    . 'WHERE d.eventID = ? AND d.siteID = ? AND d.isPublished = 1 AND d.isDeleted = 0 '
+    . 'ORDER BY c.sortOrder, d.title ASC'
+);
+if ($stmt !== false) {
+    $stmt->bind_param('ii', $event['eventID'], $siteId);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    while ($r = $result->fetch_assoc()) {
+        $eventDocs[] = $r;
+    }
+    $stmt->close();
+}
+
 // 📋 Fetch event themes
 $themes = [];
 $stmt = $mysqli->prepare(
@@ -170,10 +194,88 @@ if (Auth::check() === true) {
 
 // 📄 Include shared header template
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
+
+// 🌐 Schema.org JSON-LD Event markup (#328) — SEO + rich-snippet eligibility.
+//     Conditional on isPublic + status to avoid leaking unpublished/draft events
+//     into search index. Only emitted on public events.
+if (($event['isPublic'] ?? '0') === '1' && in_array($event['status'] ?? '', ['published', 'cancelled', 'postponed'], true) === true):
+    $eventStatusSchema = [
+        'published' => 'https://schema.org/EventScheduled',
+        'cancelled' => 'https://schema.org/EventCancelled',
+        'postponed' => 'https://schema.org/EventPostponed',
+    ];
+    $tz = (string) ($event['timezone'] ?? 'Europe/London');
+    try {
+        $dtStart = new \DateTimeImmutable((string) $event['startDateTime'], new \DateTimeZone($tz));
+        $dtEnd   = !empty($event['endDateTime']) ? new \DateTimeImmutable((string) $event['endDateTime'], new \DateTimeZone($tz)) : null;
+    } catch (\Exception $e) { $dtStart = null; $dtEnd = null; }
+
+    $eventUrl = (isset($_SERVER['HTTPS']) === true && $_SERVER['HTTPS'] === 'on' ? 'https://' : 'http://')
+              . (string) ($_SERVER['HTTP_HOST'] ?? '') . '/calendar/event?slug='
+              . rawurlencode((string) $event['eventSlug']);
+    $heroAbsUrl = !empty($event['heroImage'])
+        ? (isset($_SERVER['HTTPS']) === true && $_SERVER['HTTPS'] === 'on' ? 'https://' : 'http://')
+          . (string) ($_SERVER['HTTP_HOST'] ?? '') . '/assets/uploads/calendar/' . (string) $event['heroImage']
+        : null;
+
+    $jsonLd = [
+        '@context'      => 'https://schema.org',
+        '@type'         => 'Event',
+        'name'          => (string) $event['eventName'],
+        'description'   => (string) ($event['description'] ?? ''),
+        'eventStatus'   => $eventStatusSchema[$event['status']] ?? 'https://schema.org/EventScheduled',
+        'eventAttendanceMode' => 'https://schema.org/OfflineEventAttendanceMode',
+        'organizer'     => [ '@type' => 'Organization', 'name' => Site::productName() ],
+        'url'           => $eventUrl,
+    ];
+    if ($dtStart instanceof \DateTimeImmutable) {
+        $jsonLd['startDate'] = $dtStart->format('c');
+    }
+    if ($dtEnd instanceof \DateTimeImmutable) {
+        $jsonLd['endDate'] = $dtEnd->format('c');
+    }
+    if (!empty($event['locationName']) || !empty($event['locationAddress'])) {
+        $jsonLd['location'] = [
+            '@type' => 'Place',
+            'name'    => (string) ($event['locationName']    ?? ''),
+            'address' => (string) ($event['locationAddress'] ?? ''),
+        ];
+    }
+    if ($heroAbsUrl !== null) {
+        $jsonLd['image'] = [$heroAbsUrl];
+    }
+    echo "\n<script type=\"application/ld+json\">"
+        . json_encode($jsonLd, JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT)
+        . "</script>\n";
+endif;
 ?>
 
 <!-- 📅 Event Detail -->
 <article class="mb-5">
+
+    <?php // 🚫 Cancellation / postponement broadcast banner (#337) ?>
+    <?php if ($event['status'] === 'cancelled'): ?>
+        <div class="alert alert-danger mb-4">
+            <h2 class="h5"><i class="fa-solid fa-ban me-2"></i>This event has been cancelled</h2>
+            <?php if (!empty($event['cancelReason'])): ?>
+                <p class="mb-1"><?php echo nl2br(htmlspecialchars((string) $event['cancelReason'], ENT_QUOTES, 'UTF-8')); ?></p>
+            <?php endif; ?>
+            <?php if (!empty($event['statusChangedAt'])): ?>
+                <p class="small text-muted mb-0">Updated <?php echo htmlspecialchars(date('j M Y, H:i', strtotime((string) $event['statusChangedAt'])), ENT_QUOTES, 'UTF-8'); ?>.</p>
+            <?php endif; ?>
+        </div>
+    <?php elseif ($event['status'] === 'postponed'): ?>
+        <div class="alert alert-warning mb-4">
+            <h2 class="h5"><i class="fa-solid fa-pause me-2"></i>This event has been postponed</h2>
+            <?php if (!empty($event['cancelReason'])): ?>
+                <p class="mb-1"><?php echo nl2br(htmlspecialchars((string) $event['cancelReason'], ENT_QUOTES, 'UTF-8')); ?></p>
+            <?php endif; ?>
+            <?php if (!empty($event['statusChangedAt'])): ?>
+                <p class="small text-muted mb-0">Updated <?php echo htmlspecialchars(date('j M Y, H:i', strtotime((string) $event['statusChangedAt'])), ENT_QUOTES, 'UTF-8'); ?>. Check back for the new date.</p>
+            <?php endif; ?>
+        </div>
+    <?php endif; ?>
+
     <!-- 🖼️ Hero image -->
     <?php if ($event['heroImage'] !== null && $event['heroImage'] !== ''): ?>
         <div class="mb-4">
@@ -271,6 +373,42 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                 <?php if ($mat['fileSize'] !== null): ?>
                                     <small class="text-muted">(<?php echo round((int) $mat['fileSize'] / 1024); ?> KB)</small>
                                 <?php endif; ?>
+                            </div>
+                        <?php endforeach; ?>
+                    </div>
+                </div>
+            <?php endif; ?>
+
+            <!-- 📚 Documents (per-event library link, #351) -->
+            <?php if (count($eventDocs) > 0): ?>
+                <div class="card mb-4">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0"><i class="fa-solid fa-folder-open me-2"></i>Documents</h5>
+                        <a href="/documents?event=<?php echo (int) $event['eventID']; ?>" class="small text-decoration-none">View in library &rarr;</a>
+                    </div>
+                    <div class="card-body">
+                        <?php foreach ($eventDocs as $doc): ?>
+                            <div class="d-flex align-items-start gap-2 mb-3">
+                                <i class="fa-solid fa-file-lines text-primary mt-1"></i>
+                                <div class="flex-grow-1">
+                                    <a href="/documents/download?id=<?php echo (int) $doc['documentID']; ?>"
+                                       class="text-decoration-none fw-semibold">
+                                        <?php echo htmlspecialchars((string) $doc['title'], ENT_QUOTES, 'UTF-8'); ?>
+                                    </a>
+                                    <?php if (!empty($doc['categoryName'])): ?>
+                                        <span class="badge bg-light text-dark border ms-1"><?php echo htmlspecialchars((string) $doc['categoryName'], ENT_QUOTES, 'UTF-8'); ?></span>
+                                    <?php endif; ?>
+                                    <?php if (!empty($doc['description'])): ?>
+                                        <div class="small text-muted mt-1"><?php echo htmlspecialchars(mb_substr((string) $doc['description'], 0, 200), ENT_QUOTES, 'UTF-8'); ?></div>
+                                    <?php endif; ?>
+                                    <div class="small text-muted">
+                                        <?php if ($doc['fileSize'] !== null): ?>
+                                            <i class="fa-solid fa-database me-1"></i><?php echo round((int) $doc['fileSize'] / 1024); ?> KB
+                                            &middot;
+                                        <?php endif; ?>
+                                        <i class="fa-solid fa-download me-1"></i><?php echo (int) $doc['downloadCount']; ?> downloads
+                                    </div>
+                                </div>
                             </div>
                         <?php endforeach; ?>
                     </div>

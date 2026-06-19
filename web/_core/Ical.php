@@ -46,21 +46,32 @@ class Ical
         $lines[] = 'X-WR-CALNAME:' . self::escapeText($calendarName);
         $lines[] = 'X-WR-TIMEZONE:' . self::escapeText($timezone);
 
+        // 🌍 VTIMEZONE block (#338) — RFC 5545 §3.6.5. Emit a minimal but
+        //     correct VTIMEZONE so clients (Apple Calendar, Outlook, Google)
+        //     can render local times. Without this, our feed forces UTC
+        //     ("Z") timestamps and clients misrepresent local-time events.
+        //     We emit STANDARD + DAYLIGHT for the next year using PHP's
+        //     DateTimeZone transitions so DST is correctly modelled.
+        $lines = array_merge($lines, self::vtimezoneBlock($timezone));
+
         foreach ($events as $e) {
             $lines[] = 'BEGIN:VEVENT';
             $lines[] = 'UID:' . self::escapeText((string) $e['uid']);
             $lines[] = 'DTSTAMP:' . gmdate('Ymd\THis\Z');
             $startsAt = (string) $e['startsAt'];
             $allDay = ($e['allDay'] ?? false) === true;
+            $eventTz = (string) ($e['timezone'] ?? $timezone);
             if ($allDay === true) {
                 $lines[] = 'DTSTART;VALUE=DATE:' . gmdate('Ymd', strtotime($startsAt));
                 if (isset($e['endsAt']) === true && $e['endsAt'] !== null && $e['endsAt'] !== '') {
                     $lines[] = 'DTEND;VALUE=DATE:' . gmdate('Ymd', strtotime((string) $e['endsAt']) + 86400);
                 }
             } else {
-                $lines[] = 'DTSTART:' . gmdate('Ymd\THis\Z', strtotime($startsAt));
+                // 🕐 Emit with TZID so the time renders in the right zone
+                //     instead of "floating" — RFC 5545 §3.3.5.
+                $lines[] = 'DTSTART;TZID=' . self::escapeText($eventTz) . ':' . self::localTime($startsAt, $eventTz);
                 if (isset($e['endsAt']) === true && $e['endsAt'] !== null && $e['endsAt'] !== '') {
-                    $lines[] = 'DTEND:' . gmdate('Ymd\THis\Z', strtotime((string) $e['endsAt']));
+                    $lines[] = 'DTEND;TZID=' . self::escapeText($eventTz) . ':' . self::localTime((string) $e['endsAt'], $eventTz);
                 }
             }
             $lines[] = 'SUMMARY:' . self::escapeText((string) $e['summary']);
@@ -73,6 +84,13 @@ class Ical
             if (isset($e['url']) === true && $e['url'] !== null && $e['url'] !== '') {
                 $lines[] = 'URL:' . (string) $e['url'];
             }
+            // 🔁 RRULE emission (#338) — when the caller provides recurrence
+            //     metadata (mapped from tblEventRecurrence), emit a real RRULE
+            //     instead of expanding occurrences upstream. Mirrors RFC 5545
+            //     §3.8.5.3 patterns: FREQ + (INTERVAL) + (BYDAY) + (UNTIL|COUNT).
+            if (isset($e['rrule']) === true && $e['rrule'] !== null && $e['rrule'] !== '') {
+                $lines[] = 'RRULE:' . (string) $e['rrule'];
+            }
             $lines[] = 'SEQUENCE:' . (int) ($e['sequence'] ?? 0);
             if (isset($e['lastModified']) === true && $e['lastModified'] !== null) {
                 $lines[] = 'LAST-MODIFIED:' . gmdate('Ymd\THis\Z', strtotime((string) $e['lastModified']));
@@ -82,6 +100,69 @@ class Ical
 
         $lines[] = 'END:VCALENDAR';
         return implode("\r\n", array_map([self::class, 'fold'], $lines)) . "\r\n";
+    }
+
+    /**
+     * Build a minimal VTIMEZONE block for the given IANA timezone (#338).
+     * Walks the next 24 months of DST transitions to emit STANDARD + DAYLIGHT
+     * components. Returns a string array of lines.
+     *
+     * @return array<int, string>
+     */
+    private static function vtimezoneBlock(string $tz): array
+    {
+        try {
+            $zone = new \DateTimeZone($tz);
+        } catch (\Exception $e) {
+            return [];
+        }
+        $lines = ['BEGIN:VTIMEZONE', 'TZID:' . self::escapeText($tz)];
+
+        $now = time();
+        $end = $now + (86400 * 365 * 2);
+        $transitions = $zone->getTransitions($now - 86400 * 30, $end) ?: [];
+        if (count($transitions) < 2) {
+            $lines[] = 'BEGIN:STANDARD';
+            $lines[] = 'DTSTART:19700101T000000';
+            $lines[] = 'TZOFFSETFROM:+0000';
+            $lines[] = 'TZOFFSETTO:+0000';
+            $lines[] = 'END:STANDARD';
+            $lines[] = 'END:VTIMEZONE';
+            return $lines;
+        }
+        $prev = $transitions[0];
+        for ($i = 1, $n = count($transitions); $i < $n; $i++) {
+            $t = $transitions[$i];
+            $comp = $t['isdst'] === true ? 'DAYLIGHT' : 'STANDARD';
+            $lines[] = 'BEGIN:' . $comp;
+            $lines[] = 'DTSTART:' . gmdate('Ymd\THis', (int) $t['ts']);
+            $lines[] = 'TZOFFSETFROM:' . self::offsetToHHMM((int) $prev['offset']);
+            $lines[] = 'TZOFFSETTO:'   . self::offsetToHHMM((int) $t['offset']);
+            $lines[] = 'TZNAME:' . (string) $t['abbr'];
+            $lines[] = 'END:' . $comp;
+            $prev = $t;
+        }
+        $lines[] = 'END:VTIMEZONE';
+        return $lines;
+    }
+
+    private static function offsetToHHMM(int $offsetSec): string
+    {
+        $sign  = $offsetSec < 0 ? '-' : '+';
+        $abs   = abs($offsetSec);
+        $hh    = (int) floor($abs / 3600);
+        $mm    = (int) floor(($abs % 3600) / 60);
+        return $sign . str_pad((string) $hh, 2, '0', STR_PAD_LEFT) . str_pad((string) $mm, 2, '0', STR_PAD_LEFT);
+    }
+
+    private static function localTime(string $datetime, string $tz): string
+    {
+        try {
+            $dt = new \DateTimeImmutable($datetime, new \DateTimeZone('UTC'));
+            return $dt->setTimezone(new \DateTimeZone($tz))->format('Ymd\THis');
+        } catch (\Exception $e) {
+            return gmdate('Ymd\THis', strtotime($datetime));
+        }
     }
 
     /**

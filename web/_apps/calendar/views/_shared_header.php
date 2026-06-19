@@ -185,6 +185,29 @@ $viewMeta = [
                 <?php endforeach; ?>
             </select>
         </div>
+        <?php // 🔍 Faceted filters (#330) ?>
+        <div class="col-12 col-md-3">
+            <label for="cal-loc" class="form-label small mb-0">Location</label>
+            <input type="text" id="cal-loc" name="location" class="form-control form-control-sm"
+                   maxlength="80" placeholder="e.g. Hall"
+                   value="<?php echo htmlspecialchars($filterLocation ?? '', ENT_QUOTES, 'UTF-8'); ?>">
+        </div>
+        <div class="col-12 col-md-3">
+            <label for="cal-q" class="form-label small mb-0">Search</label>
+            <input type="text" id="cal-q" name="q" class="form-control form-control-sm"
+                   maxlength="80" placeholder="Keyword"
+                   value="<?php echo htmlspecialchars($filterSearch ?? '', ENT_QUOTES, 'UTF-8'); ?>">
+        </div>
+        <div class="col-6 col-md-2">
+            <label for="cal-from" class="form-label small mb-0">From</label>
+            <input type="date" id="cal-from" name="from" class="form-control form-control-sm"
+                   value="<?php echo htmlspecialchars($filterFrom ?? '', ENT_QUOTES, 'UTF-8'); ?>">
+        </div>
+        <div class="col-6 col-md-2">
+            <label for="cal-to" class="form-label small mb-0">To</label>
+            <input type="date" id="cal-to" name="to" class="form-control form-control-sm"
+                   value="<?php echo htmlspecialchars($filterTo ?? '', ENT_QUOTES, 'UTF-8'); ?>">
+        </div>
         <?php if ($view === 'list'): ?>
             <div class="col-12 col-md-3">
                 <div class="form-check form-switch mt-2">
@@ -194,10 +217,13 @@ $viewMeta = [
                 </div>
             </div>
         <?php endif; ?>
-        <div class="col-12 col-md-3">
-            <button type="submit" class="btn btn-sm btn-outline-primary w-100">
-                <i class="fa-solid fa-filter me-1"></i> Apply filters
+        <div class="col-12 col-md-3 d-flex gap-1">
+            <button type="submit" class="btn btn-sm btn-outline-primary flex-grow-1">
+                <i class="fa-solid fa-filter me-1"></i> Apply
             </button>
+            <a href="/calendar?view=<?php echo htmlspecialchars($view, ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-sm btn-outline-secondary" title="Clear filters">
+                <i class="fa-solid fa-rotate-left"></i>
+            </a>
         </div>
     </form>
 </div>
