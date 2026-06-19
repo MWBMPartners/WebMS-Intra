@@ -26,6 +26,7 @@
 declare(strict_types=1);
 
 use Portal\Core\App;
+use Portal\Core\Asset;
 use Portal\Core\Auth;
 use Portal\Core\Site;
 
@@ -141,12 +142,15 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
     <?php if ($isNew !== true): ?>
         <h2 class="h6 mt-4">Slide items (<?php echo count($items); ?>)</h2>
+        <?php if ($canWrite === true && count($items) > 1): ?>
+            <p class="small text-muted"><i class="fa-solid fa-arrows-up-down me-1"></i>Drag rows to reorder, or use the arrow buttons. Order saves automatically.</p>
+        <?php endif; ?>
         <?php if (count($items) === 0): ?>
             <p class="text-muted small">No slides yet.</p>
         <?php else: ?>
-            <div class="portal-data-list mb-3">
+            <div class="portal-data-list mb-3" id="planItemList" data-plan-id="<?php echo (int) $plan['planID']; ?>">
             <?php foreach ($items as $i): ?>
-                <div class="portal-data-row">
+                <div class="portal-data-row" data-item-id="<?php echo (int) $i['itemID']; ?>"<?php if ($canWrite === true): ?> style="cursor: grab;"<?php endif; ?>>
                     <div class="portal-data-row-main">
                         <span class="badge bg-secondary me-1"><?php echo (int) $i['sortOrder']; ?></span>
                         <strong><?php
@@ -256,4 +260,47 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <p class="text-muted small">Save the plan first; you can add slide items once it has an ID.</p>
     <?php endif; ?>
 </div>
-<?php require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'footer.php'; ?>
+<?php
+// 🔀 SortableJS drag-reorder (#308 Phase 3) — Asset helper supplies the
+//    CDN URL + SRI integrity. Degrades gracefully: if the script fails
+//    to load, the up/down buttons still work.
+if ($isNew !== true && $canWrite === true && count($items) > 1) {
+    echo Asset::sortableJs();
+    ?>
+<script>
+(function () {
+    'use strict';
+    if (typeof Sortable === 'undefined') return;
+    const list = document.getElementById('planItemList');
+    if (!list) return;
+    const planID = list.dataset.planId;
+    const csrf   = <?php echo json_encode($csrf); ?>;
+
+    Sortable.create(list, {
+        animation: 150,
+        ghostClass: 'bg-light',
+        handle: '.portal-data-row-main',
+        onEnd: async function () {
+            const rows = list.querySelectorAll('.portal-data-row[data-item-id]');
+            const body = new URLSearchParams();
+            body.append('csrf_token', csrf);
+            body.append('planID', planID);
+            rows.forEach(r => body.append('items[]', r.dataset.itemId));
+            try {
+                const res = await fetch('/worship/plan/reorder', { method: 'POST', body: body });
+                const j = await res.json();
+                if (!j || !j.ok) console.warn('Reorder rejected:', j);
+                // Update visible sort numbers without a full reload.
+                rows.forEach((r, idx) => {
+                    const badge = r.querySelector('.badge.bg-secondary');
+                    if (badge) badge.textContent = String(idx + 1);
+                });
+            } catch (e) { console.error('Reorder error:', e); }
+        }
+    });
+})();
+</script>
+    <?php
+}
+require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'footer.php';
+?>
