@@ -13,13 +13,20 @@
 > [CHANGELOG.md](CHANGELOG.md) for chronological history and to [README.md](README.md)
 > for setup, deployment, and licence info.
 >
-> **Snapshot:** 2026-06-03 · **Version on `main`:** 1.2.0
-> · **Major recent landings:** waves 3/4/5 apps (~16 new apps),
-> `_apps/` defence-in-depth refactor (#159), nonce-based CSP (#144),
-> external error monitor (#143), PWA offline write queue (#233),
-> REST API write-side CRUD (#157).
-> · **In-flight branches:** `feat/calendar-view-modes` (PR #137),
-> `feat/calendar-themes-and-display-style` (PR #138)
+> **Snapshot:** 2026-06-19 · **Version on `main`:** 1.3.0
+> · **Major recent landings:** PR #340 (36 issues / 39 commits) —
+> events platform overhaul (registration form builder, public landing
+> page at `/e/<slug>`, embeddable widgets, ICS feed importer, per-occurrence
+> overrides, faceted filter bar, multiple primary organisers,
+> anonymous email-link RSVP, event lifecycle reminders, broadcast
+> bulk-email), VBS bundle (coordinator role, volunteer resource portal,
+> multi-day attendance grid, crew + job board, auto-build),
+> COP recordkeeping (anonymous attendance, decision moments, salvation
+> cards, livestream analytics), ChurchMS verticals (denominational
+> reports, song library + CCLI, kids check-in/out with safeguarding
+> badges), DBS safeguarding tracking.
+> · **In-flight branches:** `chore/post-merge-cleanups` (composer fix +
+> version bump + this snapshot update).
 
 ---
 
