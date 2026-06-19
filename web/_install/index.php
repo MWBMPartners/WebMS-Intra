@@ -145,6 +145,21 @@ $INSTALL_PRODUCT_NAME      = (string) ($INSTALL_BRAND['name']      ?? 'WebMS Int
 $INSTALL_PRODUCT_TAGLINE   = (string) ($INSTALL_BRAND['tagline']   ?? 'Internal Management System');
 $INSTALL_PRODUCT_PUBLISHER = (string) ($INSTALL_BRAND['publisher'] ?? 'MWBM Partners Ltd (t/a MWservices)');
 
+// 🎨 Asset folder slug — points at web/public_html/assets/images/brands/<slug>/.
+//    Drives the favicon + apple-touch-icon in the installer head. The default
+//    (webms-intra) ships first; once Step 1.5 saves the picked industry into
+//    $_SESSION['install_industry'], the next render of the wizard automatically
+//    swaps in that brand's icons (ChurchMS → churchms/icon.svg, etc.).
+//    Stub presets (school/charity/community/business) still reference
+//    webms-intra/ in brand-defaults.php until distinct artwork ships.
+$INSTALL_BRAND_ASSET_FOLDER = (string) ($INSTALL_BRAND['assetFolder'] ?? 'webms-intra');
+// Light defensive cleanup — only allow lowercase alphanumerics + dashes in the
+// path segment, even though brand-defaults.php is trusted source. Avoids any
+// chance of a malformed preset injecting /../ into the favicon URL.
+if (preg_match('/^[a-z0-9\-]{1,40}$/', $INSTALL_BRAND_ASSET_FOLDER) !== 1) {
+    $INSTALL_BRAND_ASSET_FOLDER = 'webms-intra';
+}
+
 // ---------------------------------------------------------------------------
 // Handle POST submissions
 // ---------------------------------------------------------------------------
@@ -829,6 +844,17 @@ $pageTitle = 'Install — ' . ($stepTitles[$step] ?? $INSTALL_PRODUCT_NAME);
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title><?php echo htmlspecialchars($pageTitle, ENT_QUOTES, 'UTF-8'); ?></title>
+    <?php
+        // 🎨 Brand-aware favicons. Default is WebMS Intra; once the admin picks
+        // "Church" (or any other industry) at Step 1.5, the session-backed
+        // $INSTALL_BRAND_ASSET_FOLDER swaps in that brand's icon folder on the
+        // very next render — no JS needed, the form POST → redirect cycle
+        // re-resolves brand on the way back to the next step.
+        $faviconBase = '/assets/images/brands/' . htmlspecialchars($INSTALL_BRAND_ASSET_FOLDER, ENT_QUOTES, 'UTF-8');
+    ?>
+    <link rel="icon"             type="image/svg+xml" href="<?php echo $faviconBase; ?>/icon.svg">
+    <link rel="apple-touch-icon" sizes="192x192"      href="<?php echo $faviconBase; ?>/icon-192.svg">
+    <link rel="apple-touch-icon" sizes="512x512"      href="<?php echo $faviconBase; ?>/icon-512.svg">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet"
           integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YcnS/NPqOGZ2eLNphkfv02LPMoJiDFhNSz7K" crossorigin="anonymous">
     <style>
