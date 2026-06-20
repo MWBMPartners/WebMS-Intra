@@ -141,6 +141,45 @@ class ApiResponse
     }
 
     /**
+     * Require a valid API key on the request (#323 Phase 1). Bypasses the
+     * session entirely — reads the bearer token from the Authorization
+     * header, verifies via ApiKey::findByPlaintext, optionally checks scopes.
+     *
+     * Use INSTEAD of requireAuth in API handlers that want to be reachable
+     * by external integrations. Use ALONGSIDE if a handler can accept either
+     * (try requireApiKey first, fall back to requireAuth).
+     *
+     * Returns the key row so the handler can read keyID + siteID + scopes
+     * without re-querying.
+     *
+     * @param array<int, string> $requiredScopes Empty = any active key OK
+     *
+     * @return array<string, mixed> The matched key row
+     */
+    public static function requireApiKey(array $requiredScopes = []): array
+    {
+        $auth = (string) (
+            $_SERVER['HTTP_AUTHORIZATION']
+            ?? $_SERVER['REDIRECT_HTTP_AUTHORIZATION']
+            ?? ''
+        );
+        if (str_starts_with($auth, 'Bearer ') === false) {
+            self::error('Bearer token required in Authorization header', 401);
+        }
+        $token = trim(substr($auth, 7));
+        $row   = ApiKey::findByPlaintext($token);
+        if ($row === null) {
+            self::error('Invalid or expired API key', 401);
+        }
+        foreach ($requiredScopes as $scope) {
+            if (ApiKey::hasScope($row, (string) $scope) === false) {
+                self::error('API key missing required scope: ' . (string) $scope, 403);
+            }
+        }
+        return $row;
+    }
+
+    /**
      * Filter sensitive fields from data before sending via API.
      * Removes any keys that are marked as sensitive or contain personal data.
      *
@@ -154,6 +193,7 @@ class ApiResponse
         // 📌 Default sensitive field names that should never appear in API output
         $defaultSensitive = [
             'passwordHash',
+            'keyHash',       // tblApiKeys (#323 Phase 1) — never leak the hashed token
             'clientSecret',
             'secretKey',
             'encKey',
