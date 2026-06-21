@@ -24,7 +24,6 @@ use Portal\Core\Auth;
 use Portal\Core\Logger;
 use Portal\Core\Site;
 
-ApiResponse::setJsonHeaders();
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') { ApiResponse::error('POST required', 405); }
 
 ApiResponse::requireAuth();
@@ -72,7 +71,7 @@ if ($affected === 0) {
 
 Logger::activity('LiveChatModerated', 'msg=' . $messageId . ' → ' . $newStatus);
 
-ApiResponse::ok([
+ApiResponse::success([
     'messageID' => $messageId,
     'status'    => $newStatus,
 ]);

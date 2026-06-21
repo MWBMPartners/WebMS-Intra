@@ -23,7 +23,6 @@ use Portal\Core\ApiResponse;
 use Portal\Core\Settings;
 use Portal\Core\Site;
 
-ApiResponse::setJsonHeaders();
 header('Access-Control-Allow-Origin: *');
 header('Cache-Control: no-store');
 
@@ -63,7 +62,7 @@ $stmt->close();
 
 $lastId = count($messages) > 0 ? (int) $messages[count($messages) - 1]['messageID'] : $sinceId;
 
-ApiResponse::ok([
+ApiResponse::success([
     'messages' => $messages,
     'lastID'   => $lastId,
     'count'    => count($messages),

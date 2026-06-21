@@ -40,7 +40,6 @@ use Portal\Core\Logger;
 use Portal\Core\Settings;
 use Portal\Core\Site;
 
-ApiResponse::setJsonHeaders();
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: POST, OPTIONS');
 header('Access-Control-Allow-Headers: Content-Type');
@@ -143,7 +142,7 @@ $stmt->close();
 LiveChat::recordSend($mysqli, $siteId, $sessionToken, $ip);
 Logger::activity('LiveChatSent', 'msg=' . $messageId . ' status=' . $status);
 
-ApiResponse::ok([
+ApiResponse::success([
     'messageID' => $messageId,
     'status'    => $status,
 ]);
