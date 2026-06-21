@@ -119,4 +119,25 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     </div>
 <?php endif; ?>
 
+<?php
+// 💬 Viewer chat widget injection (#313 Phase 2 / #317 Phase 2).
+//    The widget binds to a specific eventID supplied via ?eventID=N. The host
+//    shares the URL with the bound eventID when going live for that event.
+//    Chat is gated server-side by chat.enabled + api.livechat.*.enabled and
+//    the sessionToken-exists guard against tblLivestreamSessions; this PHP
+//    block just emits a div + the loader script, defensively side-effect-free
+//    if the eventID is missing or invalid.
+$widgetEventId = (int) ($_GET['eventID'] ?? 0);
+if ($widgetEventId > 0) {
+    $stmt = $mysqli->prepare('SELECT 1 FROM tblEvents WHERE eventID = ? AND siteID = ? AND isDeleted = 0 LIMIT 1');
+    $stmt->bind_param('ii', $widgetEventId, $siteId);
+    $stmt->execute();
+    $eventOk = (bool) $stmt->get_result()->fetch_assoc();
+    $stmt->close();
+    if ($eventOk === true): ?>
+    <div class="mt-3" data-livechat-widget data-event-id="<?php echo (int) $widgetEventId; ?>"></div>
+    <script src="/assets/js/livechat-widget.js" defer></script>
+<?php endif;
+}
+?>
 <?php require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'footer.php'; ?>
