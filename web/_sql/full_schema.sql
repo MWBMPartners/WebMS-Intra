@@ -4411,3 +4411,685 @@ INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
     ('account/offline-queue', 'account/offline-queue.php', 1)
 ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 
+
+-- =============================================================================
+-- Tables added in numbered migrations 105+ — appended for fresh-install parity.
+-- Maintained automatically; do NOT hand-edit duplicates. See the same
+-- definitions in web/_sql/{105..144}_*.sql for the source of truth + comments.
+-- =============================================================================
+
+-- ── from 110_easy_wins_bundle.sql ──────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS `tblRecordingNote` (
+    `noteID`        INT          NOT NULL AUTO_INCREMENT,
+    `recordingID`   INT          NOT NULL,
+    `format`        ENUM('markdown','pdf','fill_in_blanks') NOT NULL DEFAULT 'markdown',
+    `body`          MEDIUMTEXT   DEFAULT NULL
+                    COMMENT 'Markdown source (when format=markdown)',
+    `documentPath`  VARCHAR(255) DEFAULT NULL
+                    COMMENT 'Path under _uploads/recording-notes/ (when format=pdf, v2)',
+    `publishedAt`   DATETIME     DEFAULT NULL
+                    COMMENT 'NULL = unpublished draft (only the author + admins see it)',
+    `createdByID`   INT          DEFAULT NULL,
+    `createdAt`     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updatedAt`     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`noteID`),
+    KEY `idx_rn_recording` (`recordingID`),
+    CONSTRAINT `fk_rn_recording` FOREIGN KEY (`recordingID`) REFERENCES `tblRecording`(`recordingID`) ON DELETE CASCADE,
+    CONSTRAINT `fk_rn_user`      FOREIGN KEY (`createdByID`) REFERENCES `tblUsers`(`userID`)       ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- ── from 111_cop_easy_wins.sql ──────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS `tblPushSubscriptions` (
+    `subID`        INT          NOT NULL AUTO_INCREMENT,
+    `siteID`       INT          NOT NULL DEFAULT 1,
+    `userID`       INT          DEFAULT NULL
+                   COMMENT 'NULL = anonymous device subscription',
+    `endpoint`     VARCHAR(500) NOT NULL
+                   COMMENT 'Push service URL from PushSubscription.endpoint',
+    `p256dhKey`    VARCHAR(255) NOT NULL
+                   COMMENT 'Subscriber public key (base64url)',
+    `authKey`      VARCHAR(255) NOT NULL
+                   COMMENT 'Auth secret (base64url)',
+    `userAgent`    VARCHAR(255) DEFAULT NULL,
+    -- Per-channel opt-in. Channels: 'livestream' (we are live), 'reminders'
+    -- (upcoming service in 1h), 'announcements'. JSON array of channel keys.
+    `channels`     VARCHAR(500) NOT NULL DEFAULT '["livestream","reminders"]',
+    `createdAt`    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `lastUsedAt`   DATETIME     DEFAULT NULL,
+    `isActive`     TINYINT(1)   NOT NULL DEFAULT 1,
+    PRIMARY KEY (`subID`),
+    UNIQUE KEY `uq_ps_endpoint` (`endpoint`(255)),
+    KEY `idx_ps_user`   (`userID`),
+    KEY `idx_ps_site`   (`siteID`, `isActive`),
+    CONSTRAINT `fk_ps_site` FOREIGN KEY (`siteID`) REFERENCES `tblSites`(`siteID`),
+    CONSTRAINT `fk_ps_user` FOREIGN KEY (`userID`) REFERENCES `tblUsers`(`userID`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- ── from 111_cop_easy_wins.sql ──────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS `tblWebhooks` (
+    `webhookID`     INT          NOT NULL AUTO_INCREMENT,
+    `siteID`        INT          NOT NULL DEFAULT 1,
+    `name`          VARCHAR(100) NOT NULL,
+    -- Comma-separated event keys the webhook subscribes to. Wildcard 'all'
+    -- subscribes to every event. Pattern: 'app.action' (e.g.
+    -- 'prayer-requests.created', 'expenses.approved', 'livestream.started').
+    `eventTypes`    VARCHAR(500) NOT NULL DEFAULT 'all',
+    `targetUrl`     VARCHAR(500) NOT NULL,
+    -- HMAC-SHA256 signing secret. Receiver verifies via X-Webhook-Signature
+    -- header (hex of HMAC over the request body).
+    `signingSecret` VARCHAR(255) NOT NULL,
+    `isActive`     TINYINT(1)   NOT NULL DEFAULT 1,
+    `createdByID`  INT          DEFAULT NULL,
+    `createdAt`    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `lastDeliveryAt` DATETIME    DEFAULT NULL,
+    PRIMARY KEY (`webhookID`),
+    KEY `idx_wh_site_active` (`siteID`, `isActive`),
+    CONSTRAINT `fk_wh_site` FOREIGN KEY (`siteID`) REFERENCES `tblSites`(`siteID`),
+    CONSTRAINT `fk_wh_user` FOREIGN KEY (`createdByID`) REFERENCES `tblUsers`(`userID`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- ── from 111_cop_easy_wins.sql ──────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS `tblWebhookDeliveries` (
+    `deliveryID`    BIGINT       NOT NULL AUTO_INCREMENT,
+    `webhookID`     INT          NOT NULL,
+    `eventType`     VARCHAR(100) NOT NULL,
+    `payload`       MEDIUMTEXT   NOT NULL COMMENT 'JSON event payload as sent',
+    `payloadHash`   CHAR(64)     DEFAULT NULL COMMENT 'sha256 of payload (for replay dedupe)',
+    `status`        ENUM('pending','delivered','failed','dead') NOT NULL DEFAULT 'pending',
+    `attemptCount`  INT          NOT NULL DEFAULT 0,
+    `lastAttemptAt` DATETIME     DEFAULT NULL,
+    `responseCode`  INT          DEFAULT NULL,
+    `responseSnippet` VARCHAR(500) DEFAULT NULL COMMENT 'first 500 chars of response body for debug',
+    `createdAt`     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`deliveryID`),
+    KEY `idx_wd_webhook`  (`webhookID`, `status`),
+    KEY `idx_wd_pending`  (`status`, `lastAttemptAt`),
+    CONSTRAINT `fk_wd_webhook` FOREIGN KEY (`webhookID`) REFERENCES `tblWebhooks`(`webhookID`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- ── from 114_event_coordinator_role.sql ──────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS `tblEventCoordinators` (
+    `coordinatorID` INT          NOT NULL AUTO_INCREMENT,
+    `eventID`       INT          NOT NULL,
+    `userID`        INT          NOT NULL,
+    `grantedByID`   INT          DEFAULT NULL COMMENT 'Admin who granted (NULL = system / migration)',
+    `grantedAt`     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `revokedAt`     DATETIME     DEFAULT NULL COMMENT 'Soft-revoke for audit; non-NULL = inactive',
+    -- v1 = full edit for the assigned event. Bitfield / JSON permissions
+    -- would be the natural v1.1 extension if we ever want read-only
+    -- coordinators (e.g. checked-in volunteers viewing the briefing only).
+    `permissions`   VARCHAR(50)  NOT NULL DEFAULT 'full',
+    PRIMARY KEY (`coordinatorID`),
+    UNIQUE KEY `uq_ec_event_user` (`eventID`, `userID`),
+    KEY `idx_ec_user_active` (`userID`, `revokedAt`),
+    CONSTRAINT `fk_ec_event` FOREIGN KEY (`eventID`) REFERENCES `tblEvents`(`eventID`) ON DELETE CASCADE,
+    CONSTRAINT `fk_ec_user`  FOREIGN KEY (`userID`)  REFERENCES `tblUsers`(`userID`)  ON DELETE CASCADE,
+    CONSTRAINT `fk_ec_grantor` FOREIGN KEY (`grantedByID`) REFERENCES `tblUsers`(`userID`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- ── from 116_multi_day_attendance_grid.sql ──────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS `tblEventAttendance` (
+    `attendanceID` INT      NOT NULL AUTO_INCREMENT,
+    `eventID`      INT      NOT NULL,
+    `userID`       INT      DEFAULT NULL COMMENT 'NULL for walk-in (anonymous) attendees',
+    `walkinName`   VARCHAR(120) DEFAULT NULL COMMENT 'Display name when userID IS NULL',
+    `dayDate`      DATE     NOT NULL COMMENT 'Which day of the event this check-in represents',
+    `markedByID`   INT      DEFAULT NULL COMMENT 'Coordinator / admin who clicked the cell',
+    `markedAt`     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `notes`        VARCHAR(255) DEFAULT NULL,
+    PRIMARY KEY (`attendanceID`),
+    UNIQUE KEY `uq_attendance_unique` (`eventID`, `userID`, `walkinName`, `dayDate`),
+    KEY `idx_attendance_event_day` (`eventID`, `dayDate`),
+    KEY `idx_attendance_user`      (`userID`),
+    CONSTRAINT `fk_attend_event`  FOREIGN KEY (`eventID`)    REFERENCES `tblEvents`(`eventID`) ON DELETE CASCADE,
+    CONSTRAINT `fk_attend_user`   FOREIGN KEY (`userID`)     REFERENCES `tblUsers`(`userID`)  ON DELETE SET NULL,
+    CONSTRAINT `fk_attend_marker` FOREIGN KEY (`markedByID`) REFERENCES `tblUsers`(`userID`)  ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- ── from 117_event_crews.sql ──────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS `tblEventCrews` (
+    `crewID`            INT          NOT NULL AUTO_INCREMENT,
+    `eventID`           INT          NOT NULL,
+    `name`              VARCHAR(80)  NOT NULL,
+    `color`             VARCHAR(20)  NOT NULL DEFAULT '#5e6ad2'
+                        COMMENT 'CSS colour for crew chip rendering',
+    `gradesAccepted`    VARCHAR(100) DEFAULT NULL
+                        COMMENT 'Comma-separated grade list (e.g. "P,K,1,2,3") — purely advisory in v1',
+    `sortOrder`         INT          NOT NULL DEFAULT 0,
+    `createdAt`         DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`crewID`),
+    KEY `idx_crew_event_sort` (`eventID`, `sortOrder`),
+    CONSTRAINT `fk_crew_event` FOREIGN KEY (`eventID`) REFERENCES `tblEvents`(`eventID`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- ── from 117_event_crews.sql ──────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS `tblEventCrewMembers` (
+    `membershipID`  INT          NOT NULL AUTO_INCREMENT,
+    `crewID`        INT          NOT NULL,
+    `userID`        INT          DEFAULT NULL
+                    COMMENT 'NULL for non-portal-user external participants',
+    `externalName`  VARCHAR(120) DEFAULT NULL,
+    `role`          ENUM('participant','leader') NOT NULL DEFAULT 'participant',
+    `sortOrder`     INT          NOT NULL DEFAULT 0,
+    `addedAt`       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`membershipID`),
+    KEY `idx_crewmember_crew` (`crewID`, `role`, `sortOrder`),
+    KEY `idx_crewmember_user` (`userID`),
+    CONSTRAINT `fk_crewmember_crew` FOREIGN KEY (`crewID`) REFERENCES `tblEventCrews`(`crewID`) ON DELETE CASCADE,
+    CONSTRAINT `fk_crewmember_user` FOREIGN KEY (`userID`) REFERENCES `tblUsers`(`userID`)    ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- ── from 118_event_jobs.sql ──────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS `tblEventJobs` (
+    `jobID`           INT          NOT NULL AUTO_INCREMENT,
+    `eventID`         INT          NOT NULL,
+    `name`            VARCHAR(120) NOT NULL,
+    `description`     TEXT         DEFAULT NULL,
+    `capacityNeeded`  INT          NOT NULL DEFAULT 1,
+    `sortOrder`       INT          NOT NULL DEFAULT 0,
+    `createdAt`       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`jobID`),
+    KEY `idx_job_event_sort` (`eventID`, `sortOrder`),
+    CONSTRAINT `fk_job_event` FOREIGN KEY (`eventID`) REFERENCES `tblEvents`(`eventID`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- ── from 118_event_jobs.sql ──────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS `tblEventJobAssignments` (
+    `assignmentID`  INT          NOT NULL AUTO_INCREMENT,
+    `jobID`         INT          NOT NULL,
+    `userID`        INT          DEFAULT NULL COMMENT 'NULL for external volunteers',
+    `externalName`  VARCHAR(120) DEFAULT NULL,
+    `assignedAt`    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`assignmentID`),
+    KEY `idx_jobassign_job`  (`jobID`),
+    KEY `idx_jobassign_user` (`userID`),
+    CONSTRAINT `fk_jobassign_job`  FOREIGN KEY (`jobID`)  REFERENCES `tblEventJobs`(`jobID`)   ON DELETE CASCADE,
+    CONSTRAINT `fk_jobassign_user` FOREIGN KEY (`userID`) REFERENCES `tblUsers`(`userID`)     ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- ── from 119_event_broadcast.sql ──────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS `tblEventBroadcasts` (
+    `broadcastID`   INT          NOT NULL AUTO_INCREMENT,
+    `eventID`       INT          NOT NULL,
+    `sentByID`      INT          DEFAULT NULL,
+    `segment`       VARCHAR(60)  NOT NULL COMMENT 'all-rsvps / all-volunteers / crew:<id> / job:<id>',
+    `subject`       VARCHAR(255) NOT NULL,
+    `body`          MEDIUMTEXT   NOT NULL,
+    `recipientCount` INT         NOT NULL DEFAULT 0,
+    `sentAt`        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`broadcastID`),
+    KEY `idx_broadcast_event` (`eventID`, `sentAt`),
+    CONSTRAINT `fk_broadcast_event` FOREIGN KEY (`eventID`) REFERENCES `tblEvents`(`eventID`) ON DELETE CASCADE,
+    CONSTRAINT `fk_broadcast_user`  FOREIGN KEY (`sentByID`) REFERENCES `tblUsers`(`userID`)  ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- ── from 120_event_multiple_orgs.sql ──────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS `tblEventOrgs` (
+    `eventOrgID`  INT          NOT NULL AUTO_INCREMENT,
+    `eventID`     INT          NOT NULL,
+    `orgName`     VARCHAR(255) NOT NULL,
+    `orgUrl`      VARCHAR(500) DEFAULT NULL,
+    `isPrimary`   TINYINT(1)   NOT NULL DEFAULT 1
+                  COMMENT '1 = primary co-organiser (shown prominently); 0 = partner',
+    `sortOrder`   INT          NOT NULL DEFAULT 0,
+    `addedAt`     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`eventOrgID`),
+    KEY `idx_eorg_event_primary` (`eventID`, `isPrimary`, `sortOrder`),
+    CONSTRAINT `fk_eorg_event` FOREIGN KEY (`eventID`) REFERENCES `tblEvents`(`eventID`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- ── from 121_event_rsvp_tokens.sql ──────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS `tblEventRSVPInvites` (
+    `inviteID`     INT          NOT NULL AUTO_INCREMENT,
+    `eventID`      INT          NOT NULL,
+    `email`        VARCHAR(255) NOT NULL,
+    `displayName`  VARCHAR(120) DEFAULT NULL,
+    `token`        VARCHAR(64)  NOT NULL,
+    `createdByID`  INT          DEFAULT NULL,
+    `createdAt`    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `expiresAt`    DATETIME     NOT NULL,
+    `usedAt`       DATETIME     DEFAULT NULL,
+    `response`     ENUM('going','maybe','declined') DEFAULT NULL,
+    PRIMARY KEY (`inviteID`),
+    UNIQUE KEY `uq_invite_token` (`token`),
+    UNIQUE KEY `uq_invite_event_email` (`eventID`, `email`),
+    KEY `idx_invite_event` (`eventID`),
+    CONSTRAINT `fk_rsvpinvite_event`   FOREIGN KEY (`eventID`)     REFERENCES `tblEvents`(`eventID`) ON DELETE CASCADE,
+    CONSTRAINT `fk_rsvpinvite_creator` FOREIGN KEY (`createdByID`) REFERENCES `tblUsers`(`userID`)   ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- ── from 122_event_reminders.sql ──────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS `tblEventReminderLog` (
+    `reminderID`      INT NOT NULL AUTO_INCREMENT,
+    `eventID`         INT NOT NULL,
+    `reminderType`    ENUM('24h','1h','day') NOT NULL,
+    `recipientCount`  INT NOT NULL DEFAULT 0,
+    `sentAt`          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`reminderID`),
+    UNIQUE KEY `uq_reminder` (`eventID`, `reminderType`),
+    KEY `idx_reminder_sent` (`sentAt`),
+    CONSTRAINT `fk_reminder_event` FOREIGN KEY (`eventID`) REFERENCES `tblEvents`(`eventID`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- ── from 124_event_registrations.sql ──────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS `tblEventRegistrations` (
+    `registrationID`         INT          NOT NULL AUTO_INCREMENT,
+    `eventID`                INT          NOT NULL,
+    -- Participant
+    `fullName`               VARCHAR(120) NOT NULL,
+    `dateOfBirth`            DATE         DEFAULT NULL,
+    `grade`                  VARCHAR(10)  DEFAULT NULL COMMENT 'P / K / 1 / 2 / ... / 12 / Y13',
+    `gender`                 ENUM('male','female','other','prefer-not') DEFAULT NULL,
+    `shirtSize`              ENUM('YS','YM','YL','XS','S','M','L','XL','XXL') DEFAULT NULL,
+    -- Health / safety
+    `allergies`              VARCHAR(500) DEFAULT NULL,
+    `medicalNotes`           VARCHAR(1000) DEFAULT NULL,
+    -- Parent / guardian (where applicable)
+    `parentName`             VARCHAR(120) DEFAULT NULL,
+    `parentPhone`            VARCHAR(40)  DEFAULT NULL,
+    `parentEmail`            VARCHAR(255) DEFAULT NULL,
+    -- Consent + emergency
+    `photoConsent`           TINYINT(1)   NOT NULL DEFAULT 0,
+    `emergencyContactName`   VARCHAR(120) DEFAULT NULL,
+    `emergencyContactPhone`  VARCHAR(40)  DEFAULT NULL,
+    -- Lifecycle
+    `status`                 ENUM('pending','approved','rejected','waitlisted') NOT NULL DEFAULT 'pending',
+    `notes`                  VARCHAR(500) DEFAULT NULL COMMENT 'Internal moderation notes',
+    `source`                 VARCHAR(40)  NOT NULL DEFAULT 'public-form',
+    `createdAt`              DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `reviewedByID`           INT          DEFAULT NULL,
+    `reviewedAt`             DATETIME     DEFAULT NULL,
+    PRIMARY KEY (`registrationID`),
+    KEY `idx_reg_event_status` (`eventID`, `status`, `createdAt`),
+    KEY `idx_reg_parent_email` (`parentEmail`),
+    CONSTRAINT `fk_reg_event`    FOREIGN KEY (`eventID`)     REFERENCES `tblEvents`(`eventID`) ON DELETE CASCADE,
+    CONSTRAINT `fk_reg_reviewer` FOREIGN KEY (`reviewedByID`) REFERENCES `tblUsers`(`userID`)  ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- ── from 125_dbs_safeguarding.sql ──────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS `tblDbsChecks` (
+    `dbsCheckID`     INT          NOT NULL AUTO_INCREMENT,
+    `userID`         INT          NOT NULL,
+    `dbsType`        ENUM('basic','standard','enhanced','enhanced-barred') NOT NULL,
+    `referenceNumber` VARCHAR(60) DEFAULT NULL COMMENT 'DBS certificate reference',
+    `issuedDate`     DATE         NOT NULL,
+    `expiresAt`      DATE         NOT NULL COMMENT 'Most orgs renew every 3 years',
+    `status`         ENUM('valid','expired','revoked') NOT NULL DEFAULT 'valid',
+    `recordedByID`   INT          DEFAULT NULL,
+    `recordedAt`     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `notes`          VARCHAR(500) DEFAULT NULL,
+    PRIMARY KEY (`dbsCheckID`),
+    KEY `idx_dbs_user_status`   (`userID`, `status`, `expiresAt`),
+    KEY `idx_dbs_expiring_soon` (`expiresAt`, `status`),
+    CONSTRAINT `fk_dbs_user`     FOREIGN KEY (`userID`)       REFERENCES `tblUsers`(`userID`) ON DELETE CASCADE,
+    CONSTRAINT `fk_dbs_recorder` FOREIGN KEY (`recordedByID`) REFERENCES `tblUsers`(`userID`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- ── from 128_event_occurrence_overrides.sql ──────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS `tblEventOccurrenceOverrides` (
+    `overrideID`        INT          NOT NULL AUTO_INCREMENT,
+    `eventID`           INT          NOT NULL,
+    `occurrenceDate`    DATE         NOT NULL COMMENT 'Original scheduled date being overridden',
+    `isCancelled`       TINYINT(1)   NOT NULL DEFAULT 0,
+    `overrideName`      VARCHAR(255) DEFAULT NULL COMMENT 'NULL = inherit series name',
+    `overrideStartTime` TIME         DEFAULT NULL COMMENT 'NULL = inherit series time',
+    `overrideEndTime`   TIME         DEFAULT NULL,
+    `overrideLocation`  VARCHAR(255) DEFAULT NULL,
+    `notes`             VARCHAR(1000) DEFAULT NULL,
+    `createdByID`       INT          DEFAULT NULL,
+    `createdAt`         DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`overrideID`),
+    UNIQUE KEY `uq_override_event_date` (`eventID`, `occurrenceDate`),
+    CONSTRAINT `fk_override_event`   FOREIGN KEY (`eventID`)     REFERENCES `tblEvents`(`eventID`) ON DELETE CASCADE,
+    CONSTRAINT `fk_override_creator` FOREIGN KEY (`createdByID`) REFERENCES `tblUsers`(`userID`)   ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- ── from 129_external_calendar_feeds.sql ──────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS `tblExternalFeeds` (
+    `feedID`          INT          NOT NULL AUTO_INCREMENT,
+    `siteID`          INT          NOT NULL,
+    `name`            VARCHAR(120) NOT NULL,
+    `url`             VARCHAR(2000) NOT NULL,
+    `fetchEveryMins`  INT          NOT NULL DEFAULT 360 COMMENT 'How often to refetch (default 6h)',
+    `categoryID`      INT          DEFAULT NULL COMMENT 'Auto-assign imported events to this category',
+    `isActive`        TINYINT(1)   NOT NULL DEFAULT 1,
+    `lastFetchedAt`   DATETIME     DEFAULT NULL,
+    `lastFetchStatus` VARCHAR(255) DEFAULT NULL,
+    `lastImportCount` INT          NOT NULL DEFAULT 0,
+    `createdByID`     INT          DEFAULT NULL,
+    `createdAt`       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`feedID`),
+    KEY `idx_feed_site_active` (`siteID`, `isActive`),
+    CONSTRAINT `fk_feed_site`    FOREIGN KEY (`siteID`)     REFERENCES `tblSites`(`siteID`) ON DELETE CASCADE,
+    CONSTRAINT `fk_feed_creator` FOREIGN KEY (`createdByID`) REFERENCES `tblUsers`(`userID`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- ── from 130_anonymous_attendance.sql ──────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS `tblAnonymousCheckins` (
+    `checkinID`     INT NOT NULL AUTO_INCREMENT,
+    `eventID`       INT NOT NULL,
+    `headcount`     INT NOT NULL DEFAULT 1 COMMENT 'How many people checking in together',
+    `source`        ENUM('self','kiosk','qr') NOT NULL DEFAULT 'self',
+    `userAgent`     VARCHAR(255) DEFAULT NULL,
+    `ipHash`        CHAR(64) DEFAULT NULL COMMENT 'SHA-256 of IP for soft-dedup, NOT raw IP',
+    `checkedInAt`   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`checkinID`),
+    KEY `idx_checkin_event` (`eventID`, `checkedInAt`),
+    CONSTRAINT `fk_anoncheckin_event` FOREIGN KEY (`eventID`) REFERENCES `tblEvents`(`eventID`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- ── from 131_decision_moments.sql ──────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS `tblDecisionMoments` (
+    `momentID`     INT NOT NULL AUTO_INCREMENT,
+    `eventID`      INT NOT NULL,
+    `momentType`   ENUM('first-decision','rededication','baptism-request','membership-interest','prayer-request','other') NOT NULL,
+    `count`        INT NOT NULL DEFAULT 0,
+    `notes`        VARCHAR(500) DEFAULT NULL,
+    `recordedByID` INT DEFAULT NULL,
+    `updatedAt`    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`momentID`),
+    UNIQUE KEY `uq_moment_event_type` (`eventID`, `momentType`),
+    CONSTRAINT `fk_moment_event` FOREIGN KEY (`eventID`) REFERENCES `tblEvents`(`eventID`) ON DELETE CASCADE,
+    CONSTRAINT `fk_moment_user`  FOREIGN KEY (`recordedByID`) REFERENCES `tblUsers`(`userID`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- ── from 132_salvation_cards.sql ──────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS `tblSalvationCards` (
+    `cardID`         INT NOT NULL AUTO_INCREMENT,
+    `siteID`         INT NOT NULL,
+    `eventID`        INT DEFAULT NULL COMMENT 'Optional event context',
+    `fullName`       VARCHAR(120) NOT NULL,
+    `email`          VARCHAR(255) DEFAULT NULL,
+    `phone`          VARCHAR(40)  DEFAULT NULL,
+    `address`        VARCHAR(500) DEFAULT NULL,
+    `decision`       ENUM('first-time','rededication','baptism','membership','bible-study','prayer','other') NOT NULL DEFAULT 'first-time',
+    `prayerRequest`  VARCHAR(1000) DEFAULT NULL,
+    `status`         ENUM('new','assigned','contacted','complete','archived') NOT NULL DEFAULT 'new',
+    `assignedToID`   INT DEFAULT NULL,
+    `notes`          VARCHAR(2000) DEFAULT NULL COMMENT 'Internal follow-up notes',
+    `createdAt`      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updatedAt`      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`cardID`),
+    KEY `idx_card_site_status` (`siteID`, `status`, `createdAt`),
+    KEY `idx_card_assigned`    (`assignedToID`),
+    CONSTRAINT `fk_card_site`     FOREIGN KEY (`siteID`)       REFERENCES `tblSites`(`siteID`) ON DELETE CASCADE,
+    CONSTRAINT `fk_card_event`    FOREIGN KEY (`eventID`)      REFERENCES `tblEvents`(`eventID`) ON DELETE SET NULL,
+    CONSTRAINT `fk_card_assignee` FOREIGN KEY (`assignedToID`) REFERENCES `tblUsers`(`userID`)  ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- ── from 133_livestream_analytics.sql ──────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS `tblLivestreamSessions` (
+    `sessionID`    INT NOT NULL AUTO_INCREMENT,
+    `siteID`       INT NOT NULL,
+    `eventID`      INT DEFAULT NULL,
+    `sessionToken` CHAR(64) NOT NULL COMMENT 'Random token from the embed player; client-issued',
+    `joinedAt`     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `lastPingAt`   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `leftAt`       DATETIME DEFAULT NULL,
+    `userAgent`    VARCHAR(255) DEFAULT NULL,
+    `ipCountry`    CHAR(2) DEFAULT NULL,
+    PRIMARY KEY (`sessionID`),
+    UNIQUE KEY `uq_session_token` (`sessionToken`),
+    KEY `idx_session_event`      (`eventID`, `joinedAt`),
+    KEY `idx_session_lastping`   (`lastPingAt`),
+    CONSTRAINT `fk_lss_site`  FOREIGN KEY (`siteID`)  REFERENCES `tblSites`(`siteID`)   ON DELETE CASCADE,
+    CONSTRAINT `fk_lss_event` FOREIGN KEY (`eventID`) REFERENCES `tblEvents`(`eventID`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- ── from 135_song_library.sql ──────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS `tblSongs` (
+    `songID`         INT NOT NULL AUTO_INCREMENT,
+    `siteID`         INT NOT NULL,
+    `title`          VARCHAR(255) NOT NULL,
+    `author`         VARCHAR(255) DEFAULT NULL,
+    `ccliNumber`     VARCHAR(40)  DEFAULT NULL,
+    `copyrightLine`  VARCHAR(500) DEFAULT NULL COMMENT 'e.g. © 1995 Kingsway Thankyou Music',
+    `defaultKey`     VARCHAR(10)  DEFAULT NULL,
+    `defaultTempo`   VARCHAR(20)  DEFAULT NULL COMMENT 'BPM or descriptor',
+    `lyrics`         MEDIUMTEXT   DEFAULT NULL,
+    `tags`           VARCHAR(255) DEFAULT NULL COMMENT 'Comma-separated themes',
+    `isActive`       TINYINT(1)   NOT NULL DEFAULT 1,
+    `createdByID`    INT DEFAULT NULL,
+    `createdAt`      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updatedAt`      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`songID`),
+    KEY `idx_song_site_title` (`siteID`, `title`),
+    KEY `idx_song_ccli`       (`ccliNumber`),
+    FULLTEXT KEY `ft_song_search` (`title`, `author`, `lyrics`),
+    CONSTRAINT `fk_song_site`    FOREIGN KEY (`siteID`)      REFERENCES `tblSites`(`siteID`) ON DELETE CASCADE,
+    CONSTRAINT `fk_song_creator` FOREIGN KEY (`createdByID`) REFERENCES `tblUsers`(`userID`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- ── from 136_kid_checkin.sql ──────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS `tblKidProfiles` (
+    `childID`                INT NOT NULL AUTO_INCREMENT,
+    `siteID`                 INT NOT NULL,
+    `parentUserID`           INT DEFAULT NULL,
+    `fullName`               VARCHAR(120) NOT NULL,
+    `dateOfBirth`            DATE DEFAULT NULL,
+    `allergies`              VARCHAR(500) DEFAULT NULL,
+    `medicalNotes`           VARCHAR(1000) DEFAULT NULL,
+    `photoConsent`           TINYINT(1) NOT NULL DEFAULT 0,
+    `pickupAuthorisedNames`  VARCHAR(500) DEFAULT NULL COMMENT 'Comma-separated names allowed to collect',
+    `isActive`               TINYINT(1) NOT NULL DEFAULT 1,
+    `createdAt`              DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`childID`),
+    KEY `idx_kid_site_active` (`siteID`, `isActive`),
+    KEY `idx_kid_parent`      (`parentUserID`),
+    CONSTRAINT `fk_kid_site`   FOREIGN KEY (`siteID`)       REFERENCES `tblSites`(`siteID`) ON DELETE CASCADE,
+    CONSTRAINT `fk_kid_parent` FOREIGN KEY (`parentUserID`) REFERENCES `tblUsers`(`userID`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- ── from 136_kid_checkin.sql ──────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS `tblKidCheckins` (
+    `checkinID`         INT NOT NULL AUTO_INCREMENT,
+    `childID`           INT NOT NULL,
+    `eventID`           INT DEFAULT NULL,
+    `badgeCode`         CHAR(6) NOT NULL COMMENT 'Numeric code shown on parent + child badge',
+    `checkedInAt`       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `checkedInByID`     INT DEFAULT NULL,
+    `checkedOutAt`      DATETIME DEFAULT NULL,
+    `checkedOutByID`    INT DEFAULT NULL,
+    `pickupName`        VARCHAR(120) DEFAULT NULL,
+    PRIMARY KEY (`checkinID`),
+    KEY `idx_kc_child`     (`childID`, `checkedInAt`),
+    KEY `idx_kc_open`      (`checkedOutAt`),
+    CONSTRAINT `fk_kc_child` FOREIGN KEY (`childID`) REFERENCES `tblKidProfiles`(`childID`) ON DELETE CASCADE,
+    CONSTRAINT `fk_kc_event` FOREIGN KEY (`eventID`) REFERENCES `tblEvents`(`eventID`)     ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- ── from 137_worship_service_plans.sql ──────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS `tblServicePlans` (
+    `planID`        INT          NOT NULL AUTO_INCREMENT,
+    `siteID`        INT          NOT NULL,
+    `eventID`       INT          DEFAULT NULL COMMENT 'Optional event binding; NULL = re-usable template',
+    `name`          VARCHAR(120) NOT NULL,
+    `notes`         VARCHAR(1000) DEFAULT NULL COMMENT 'Operator-only context notes shown on the editor',
+    `isActive`      TINYINT(1)   NOT NULL DEFAULT 1,
+    `createdByID`   INT          DEFAULT NULL,
+    `createdAt`     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updatedAt`     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`planID`),
+    KEY `idx_plan_site_active` (`siteID`, `isActive`, `updatedAt`),
+    KEY `idx_plan_event`       (`eventID`),
+    CONSTRAINT `fk_plan_site`    FOREIGN KEY (`siteID`)      REFERENCES `tblSites`(`siteID`) ON DELETE CASCADE,
+    CONSTRAINT `fk_plan_event`   FOREIGN KEY (`eventID`)     REFERENCES `tblEvents`(`eventID`) ON DELETE SET NULL,
+    CONSTRAINT `fk_plan_creator` FOREIGN KEY (`createdByID`) REFERENCES `tblUsers`(`userID`)  ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- ── from 137_worship_service_plans.sql ──────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS `tblServicePlanItems` (
+    `itemID`        INT          NOT NULL AUTO_INCREMENT,
+    `planID`        INT          NOT NULL,
+    `sortOrder`     INT          NOT NULL DEFAULT 0,
+    `itemType`      ENUM('song','text','verse') NOT NULL DEFAULT 'text',
+    `songID`        INT          DEFAULT NULL COMMENT 'Required when itemType=song; references tblSongs (#309)',
+    `slideTitle`    VARCHAR(255) DEFAULT NULL COMMENT 'For verse: the reference (e.g. "John 3:16"); for text: optional heading',
+    `slideBody`     MEDIUMTEXT   DEFAULT NULL COMMENT 'For text/verse: the rendered text. Songs read from tblSongs.lyrics at render time.',
+    `slideNotes`    VARCHAR(500) DEFAULT NULL COMMENT 'Operator-only notes; NEVER projected on the display',
+    `createdAt`     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`itemID`),
+    KEY `idx_planitem_plan_sort` (`planID`, `sortOrder`),
+    KEY `idx_planitem_song`      (`songID`),
+    CONSTRAINT `fk_planitem_plan` FOREIGN KEY (`planID`) REFERENCES `tblServicePlans`(`planID`) ON DELETE CASCADE,
+    CONSTRAINT `fk_planitem_song` FOREIGN KEY (`songID`) REFERENCES `tblSongs`(`songID`)        ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- ── from 138_worship_present_state.sql ──────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS `tblServicePlanState` (
+    `planID`            INT          NOT NULL,
+    `currentItemID`     INT          DEFAULT NULL,
+    `isBlank`           TINYINT(1)   NOT NULL DEFAULT 0
+                        COMMENT 'Logo / brand background instead of slide',
+    `isBlack`           TINYINT(1)   NOT NULL DEFAULT 0
+                        COMMENT 'Solid black — between songs / silence',
+    `updatedByID`       INT          DEFAULT NULL,
+    `updatedAt`         DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`planID`),
+    KEY `idx_state_updated`   (`updatedAt`),
+    CONSTRAINT `fk_state_plan`    FOREIGN KEY (`planID`)      REFERENCES `tblServicePlans`(`planID`) ON DELETE CASCADE,
+    CONSTRAINT `fk_state_user`    FOREIGN KEY (`updatedByID`) REFERENCES `tblUsers`(`userID`)        ON DELETE SET NULL,
+    CONSTRAINT `fk_state_item`    FOREIGN KEY (`currentItemID`) REFERENCES `tblServicePlanItems`(`itemID`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- ── from 139_worship_phase3.sql ──────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS `tblCcliUsage` (
+    `usageID`     INT NOT NULL AUTO_INCREMENT,
+    `siteID`      INT NOT NULL,
+    `songID`      INT NOT NULL,
+    `planID`      INT DEFAULT NULL,
+    `itemID`      INT DEFAULT NULL,
+    `playedAt`    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `operatorID`  INT DEFAULT NULL,
+    PRIMARY KEY (`usageID`),
+    KEY `idx_ccli_site_played` (`siteID`, `playedAt`),
+    KEY `idx_ccli_song`        (`songID`, `playedAt`),
+    CONSTRAINT `fk_ccli_site` FOREIGN KEY (`siteID`) REFERENCES `tblSites`(`siteID`) ON DELETE CASCADE,
+    CONSTRAINT `fk_ccli_song` FOREIGN KEY (`songID`) REFERENCES `tblSongs`(`songID`) ON DELETE CASCADE,
+    CONSTRAINT `fk_ccli_plan` FOREIGN KEY (`planID`) REFERENCES `tblServicePlans`(`planID`) ON DELETE SET NULL,
+    CONSTRAINT `fk_ccli_item` FOREIGN KEY (`itemID`) REFERENCES `tblServicePlanItems`(`itemID`) ON DELETE SET NULL,
+    CONSTRAINT `fk_ccli_user` FOREIGN KEY (`operatorID`) REFERENCES `tblUsers`(`userID`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- ── from 141_api_keys.sql ──────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS `tblApiKeys` (
+    `keyID`        INT          NOT NULL AUTO_INCREMENT,
+    `siteID`       INT          NOT NULL,
+    `name`         VARCHAR(120) NOT NULL COMMENT 'Human-readable label shown in the admin UI',
+    `keyHash`      CHAR(64)     NOT NULL COMMENT 'sha256(plaintext) — plaintext is never stored',
+    `keyPrefix`    VARCHAR(12)  NOT NULL COMMENT 'Visible prefix for admin identification (e.g. wbms_3f2c)',
+    `scopes`       VARCHAR(500) DEFAULT NULL COMMENT 'CSV of scope strings — Phase 2 enforces, Phase 1 stores',
+    `expiresAt`    DATETIME     DEFAULT NULL COMMENT 'Optional hard expiry; NULL = no expiry',
+    `lastUsedAt`   DATETIME     DEFAULT NULL,
+    `lastUsedIP`   VARCHAR(45)  DEFAULT NULL COMMENT 'IPv4 (15 chars) or IPv6 (45 chars max)',
+    `isActive`     TINYINT(1)   NOT NULL DEFAULT 1,
+    `createdByID`  INT          DEFAULT NULL,
+    `createdAt`    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `revokedAt`    DATETIME     DEFAULT NULL,
+    `revokedByID`  INT          DEFAULT NULL,
+    PRIMARY KEY (`keyID`),
+    UNIQUE KEY `uq_apikey_hash`     (`keyHash`),
+    KEY        `idx_apikey_site`    (`siteID`, `isActive`),
+    KEY        `idx_apikey_expires` (`expiresAt`),
+    CONSTRAINT `fk_apikey_site`    FOREIGN KEY (`siteID`)      REFERENCES `tblSites`(`siteID`) ON DELETE CASCADE,
+    CONSTRAINT `fk_apikey_creator` FOREIGN KEY (`createdByID`) REFERENCES `tblUsers`(`userID`) ON DELETE SET NULL,
+    CONSTRAINT `fk_apikey_revoker` FOREIGN KEY (`revokedByID`) REFERENCES `tblUsers`(`userID`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- ── from 142_discipleship_pathways.sql ──────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS `tblPathways` (
+    `pathwayID`    INT           NOT NULL AUTO_INCREMENT,
+    `siteID`       INT           NOT NULL,
+    `name`         VARCHAR(120)  NOT NULL
+                                 COMMENT 'Pathway label shown to admins and (Phase 2+) members',
+    `description`  VARCHAR(1000) DEFAULT NULL
+                                 COMMENT 'Operator-facing summary of who this pathway is for',
+    `isActive`     TINYINT(1)    NOT NULL DEFAULT 1
+                                 COMMENT 'Soft-delete flag; inactive pathways hidden from selectors',
+    `createdByID`  INT           DEFAULT NULL,
+    `createdAt`    DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updatedAt`    DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`pathwayID`),
+    KEY `idx_pathway_site_active` (`siteID`, `isActive`, `updatedAt`),
+    CONSTRAINT `fk_pathway_site`    FOREIGN KEY (`siteID`)      REFERENCES `tblSites`(`siteID`) ON DELETE CASCADE,
+    CONSTRAINT `fk_pathway_creator` FOREIGN KEY (`createdByID`) REFERENCES `tblUsers`(`userID`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- ── from 142_discipleship_pathways.sql ──────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS `tblPathwaySteps` (
+    `stepID`          INT           NOT NULL AUTO_INCREMENT,
+    `pathwayID`       INT           NOT NULL,
+    `sortOrder`       INT           NOT NULL DEFAULT 0,
+    `name`            VARCHAR(255)  NOT NULL
+                                    COMMENT 'Short step title (e.g. "Attend welcome class")',
+    `description`     VARCHAR(1000) DEFAULT NULL
+                                    COMMENT 'Longer explanation of the step, shown to the member (Phase 2+)',
+    `completionHint`  VARCHAR(500)  DEFAULT NULL
+                                    COMMENT 'How a coordinator should mark this complete (e.g. "Tick when baptised")',
+    `isOptional`      TINYINT(1)    NOT NULL DEFAULT 0
+                                    COMMENT 'If 1, completion does not block pathway completion in Phase 2',
+    `createdAt`       DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updatedAt`       DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`stepID`),
+    KEY `idx_pathstep_pathway_sort` (`pathwayID`, `sortOrder`),
+    CONSTRAINT `fk_pathstep_pathway` FOREIGN KEY (`pathwayID`) REFERENCES `tblPathways`(`pathwayID`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- ── from 143_cop_live_chat.sql ──────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS `tblLiveChatMessages` (
+    `messageID`      INT          NOT NULL AUTO_INCREMENT,
+    `siteID`         INT          NOT NULL,
+    `eventID`        INT          NOT NULL,
+    `sessionToken`   VARCHAR(64)  NOT NULL COMMENT 'Matches tblLivestreamSessions.sessionToken; anonymous identity',
+    `displayName`    VARCHAR(40)  NOT NULL,
+    `body`           VARCHAR(500) NOT NULL,
+    `senderIP`       VARCHAR(45)  DEFAULT NULL COMMENT 'IPv4 or IPv6 — kept for moderation audit only',
+    `status`         ENUM('pending','approved','hidden','flagged') NOT NULL DEFAULT 'pending',
+    `flagReason`     VARCHAR(120) DEFAULT NULL COMMENT 'profanity-stub, low-rep, etc.',
+    `moderatedByID`  INT          DEFAULT NULL,
+    `moderatedAt`    DATETIME     DEFAULT NULL,
+    `createdAt`      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`messageID`),
+    KEY `idx_chat_event_status`  (`eventID`, `status`, `createdAt`),
+    KEY `idx_chat_token`         (`sessionToken`),
+    KEY `idx_chat_site`          (`siteID`, `status`, `createdAt`),
+    CONSTRAINT `fk_chat_site`      FOREIGN KEY (`siteID`)        REFERENCES `tblSites`(`siteID`) ON DELETE CASCADE,
+    CONSTRAINT `fk_chat_event`     FOREIGN KEY (`eventID`)       REFERENCES `tblEvents`(`eventID`) ON DELETE CASCADE,
+    CONSTRAINT `fk_chat_moderator` FOREIGN KEY (`moderatedByID`) REFERENCES `tblUsers`(`userID`)  ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- ── from 143_cop_live_chat.sql ──────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS `tblLiveRateLimits` (
+    `limitID`       INT          NOT NULL AUTO_INCREMENT,
+    `sessionToken`  VARCHAR(64)  DEFAULT NULL,
+    `senderIP`      VARCHAR(45)  DEFAULT NULL,
+    `eventType`     VARCHAR(40)  NOT NULL COMMENT 'e.g. chat.send',
+    `createdAt`     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`limitID`),
+    KEY `idx_ratelimit_token` (`sessionToken`, `eventType`, `createdAt`),
+    KEY `idx_ratelimit_ip`    (`senderIP`, `eventType`, `createdAt`),
+    KEY `idx_ratelimit_prune` (`createdAt`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- ── from 144_host_push_prompts.sql ──────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS `tblLivePrompts` (
+    `promptID`     INT          NOT NULL AUTO_INCREMENT,
+    `siteID`       INT          NOT NULL,
+    `eventID`      INT          NOT NULL,
+    `promptType`   ENUM('decision-call','prayer-request','give-now','announcement') NOT NULL,
+    `title`        VARCHAR(120) NOT NULL,
+    `body`         VARCHAR(500) DEFAULT NULL,
+    `ctaLabel`     VARCHAR(60)  DEFAULT NULL,
+    `ctaUrl`       VARCHAR(500) DEFAULT NULL COMMENT 'Server-validated http/https or root-relative; NEVER javascript: data: etc.',
+    `publishedAt`  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `expiresAt`    DATETIME     NOT NULL COMMENT 'Hard expiry; default 5min from publishedAt',
+    `createdByID`  INT          DEFAULT NULL,
+    `dismissedAt`  DATETIME     DEFAULT NULL COMMENT 'Coordinator can manually dismiss before expiry',
+    PRIMARY KEY (`promptID`),
+    KEY `idx_prompt_event_active` (`eventID`, `expiresAt`, `dismissedAt`),
+    KEY `idx_prompt_site`         (`siteID`, `publishedAt`),
+    CONSTRAINT `fk_prompt_site`    FOREIGN KEY (`siteID`)      REFERENCES `tblSites`(`siteID`)  ON DELETE CASCADE,
+    CONSTRAINT `fk_prompt_event`   FOREIGN KEY (`eventID`)     REFERENCES `tblEvents`(`eventID`) ON DELETE CASCADE,
+    CONSTRAINT `fk_prompt_creator` FOREIGN KEY (`createdByID`) REFERENCES `tblUsers`(`userID`)   ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
