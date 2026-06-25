@@ -9,6 +9,55 @@ Automated sections are appended by `.github/workflows/changelog.yml` per push
 to `alpha`, `beta`, and `main` using the heading format
 `## [VERSION] - YYYY-MM-DD (branch)`.
 
+## [1.4.0-dev] - Unreleased
+
+Post-1.3.0 Phase-1 ships. Brand font + worship engine landed first; the rest is foundational primitives for the COP / engagement / discipleship surfaces.
+
+### Worship Presentation Engine — full v1 (#308, PR #355)
+
+- Service plans (3-table model: `tblServicePlans` + `tblServicePlanItems` + `tblServicePlanState`).
+- Live operator console at `/worship/present?planID=N` with touch + keyboard shortcuts (arrow / space / pageup-down / B / W / S).
+- Public projector display at `/worship/display?t=<token>` — 64-char hex display token, polled at 500ms.
+- SortableJS drag-reorder + song verse auto-split (per `worship.song_verse_separator` regex) + `tblCcliUsage` audit log + quarterly CSV export at `/admin/reports/ccli`.
+
+### Plus Jakarta Sans modular embed (#356)
+
+- Self-hosted WOFF2 (5 weights, latin subset, ~12 KB each).
+- One-line swap via `--portal-font-family` in `portal.css`.
+- New `Asset::brandFontsCss()` helper. Installer also picks up the font (bootstrap-free wiring in `_install/index.php`).
+- Brand assets relocated from `/assets/images/brands/` to `/assets/images/brandkit/assets/` (the older path no longer exists; manifest.php `is_readable` path bug surfaced + fixed in the same commit).
+
+### Virtual Host Console Phase 1 (#317, PR #357)
+
+- New `Portal\Core\HostConsole` helper class (5 static methods composing existing COP table reads).
+- `/admin/host-console` event picker + `/admin/host-console/event?id=N` cockpit with 'Watching now' tile + 7-day sparkline + 6 decision-moment tallies + latest 15 salvation cards.
+- Auto-refresh via `<meta refresh content="30">` (JS / SSE upgrade is Phase 2).
+
+### Public API key infrastructure Phase 1 (#323, PR #357)
+
+- `tblApiKeys` — siteID-scoped, sha256-hashed at rest, visible prefix for admin identification.
+- `Portal\Core\ApiKey` class — `mint` / `findByPlaintext` / `hasScope` / `revoke` / `rotate`. Token format `wbms_` + 32 hex (128 bits entropy).
+- `ApiResponse::requireApiKey($scopes = [])` helper — reads `Authorization: Bearer`, verifies, returns key row.
+- `keyHash` added to `ApiResponse::$defaultSensitive` so future JSON handlers can't leak it.
+- Admin CRUD at `/admin/integrations/api-keys` with one-time plaintext display banner.
+- NOT yet wired: `/api/v1/*` router refactor + write-side CRUD (Phase 2+).
+
+### Discipleship Pathway Tracker Phase 1 (#303, PR #358)
+
+- `tblPathways` + `tblPathwaySteps` (siteID-scoped, sortOrder, isActive).
+- AppRegistry entry at `_core/apps/discipleship.php`, gated by `discipleship.enabled` setting (default `false`).
+- Admin CRUD: `/admin/discipleship` (list) + pathway form (combined new + edit + step picker) + 7 routes.
+- NO per-user progress yet, NO auto-completion, NO mentor relationships, NO member-facing routes — Phase 2+.
+
+### COP Online Engagement Phase 1 — viewer chat + admin moderation (#313, PR #358)
+
+- `tblLiveChatMessages` + `tblLiveRateLimits` + `stream_moderator` role seed (idempotent `WHERE NOT EXISTS`).
+- `Portal\Core\LiveChat` helper class — sessionToken validation, sliding-window rate limit (fail-CLOSED on prepare failure), profanity stub, IP detection.
+- 3 public/admin API endpoints (`api/livechat/{send,list,moderate}`) — routed via ApiRouter's 3-segment convention with `api.livechat.*.enabled = 'true'` settings seeded.
+- `/admin/live/chat` moderation queue page.
+- Public `/send`: NO CSRF (third-party embed cookies break it); instead a `sessionToken`-exists guard against `tblLivestreamSessions` plus first-message-only captcha (Turnstile / reCAPTCHA / hCaptcha tokens are single-use).
+- Viewer-side chat UI on the `/live` embed page is Phase 2.
+
 ## [1.3.0] - 2026-06-19 (main)
 
 PR #340 — events platform overhaul + COP + ChurchMS verticals + ops hygiene. **36 issues across 39 commits in one consolidated PR.** The Multi-brand product layer section originally drafted for 1.2.0 (see further down) shipped as part of this release.
