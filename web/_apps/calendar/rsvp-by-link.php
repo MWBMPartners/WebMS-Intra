@@ -114,6 +114,11 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <?php endif; ?>
 
             <form method="post" class="d-flex flex-column gap-2">
+                <?php // Auth lives on the token in the URL; the CSRF token is included for
+                      // any session-side validation that may want it (e.g. once a viewer
+                      // has logged in mid-flow). Skipped at the handler when the t= token
+                      // resolves a valid invite row. ?>
+                <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(\Portal\Core\Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
                 <input type="hidden" name="t" value="<?php echo htmlspecialchars($token, ENT_QUOTES, 'UTF-8'); ?>">
                 <button type="submit" name="response" value="going" class="btn btn-success btn-lg"><i class="fa-solid fa-check me-1"></i>Yes, I'm going</button>
                 <button type="submit" name="response" value="maybe" class="btn btn-warning btn-lg"><i class="fa-solid fa-question me-1"></i>Maybe</button>

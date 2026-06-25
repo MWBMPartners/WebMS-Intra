@@ -759,6 +759,28 @@ CREATE TABLE IF NOT EXISTS `tblEvents` (
     `createdAt`    DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
     `updatedAt`    DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
 
+    -- 📝 Submission moderation (#326 — added by migration 112)
+    `submissionStatus`   ENUM('pending','approved','rejected') DEFAULT NULL
+                          COMMENT 'NULL = admin-created; non-NULL = went through public submission moderation',
+    `submittedByID`      INT           DEFAULT NULL COMMENT 'FK → tblUsers when submitter logged in; NULL for anonymous',
+    `submitterName`      VARCHAR(120)  DEFAULT NULL,
+    `submitterEmail`     VARCHAR(255)  DEFAULT NULL,
+    `submittedAt`        DATETIME      DEFAULT NULL,
+    `moderatedByID`      INT           DEFAULT NULL,
+    `moderatedAt`        DATETIME      DEFAULT NULL,
+    `moderationNote`     TEXT          DEFAULT NULL,
+
+    -- 🚫 Cancellation audit (#337 — added by migration 112)
+    `cancelReason`       TEXT          DEFAULT NULL,
+    `statusChangedByID`  INT           DEFAULT NULL,
+    `statusChangedAt`    DATETIME      DEFAULT NULL,
+
+    -- 🎟️ Registration window (#347 — added by migration 124)
+    `capacityCount`         INT          DEFAULT NULL COMMENT 'NULL = unlimited',
+    `registrationEnabled`   TINYINT(1)   NOT NULL DEFAULT 0,
+    `registrationOpensAt`   DATETIME     DEFAULT NULL,
+    `registrationClosesAt`  DATETIME     DEFAULT NULL,
+
     PRIMARY KEY (`eventID`),
     UNIQUE KEY `uq_event_slug` (`eventSlug`),
     KEY `idx_event_series`   (`seriesID`),
@@ -859,16 +881,21 @@ COMMENT='Downloadable materials/documents attached to events.';
 -- (from migration 028)
 -- -----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS `tblEventRSVPs` (
-    `rsvpID`    INT         NOT NULL AUTO_INCREMENT,
-    `eventID`   INT         NOT NULL,
-    `userID`    INT         NOT NULL,
-    `siteID`    INT         NOT NULL DEFAULT 1,
-    `response`  ENUM('going','maybe','not_going') NOT NULL DEFAULT 'going',
-    `createdAt` DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    `updatedAt` DATETIME    DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
+    `rsvpID`       INT         NOT NULL AUTO_INCREMENT,
+    `eventID`      INT         NOT NULL,
+    `userID`       INT         NOT NULL,
+    `siteID`       INT         NOT NULL DEFAULT 1,
+    `response`     ENUM('going','maybe','not_going') NOT NULL DEFAULT 'going',
+    `guestCount`   INT         NOT NULL DEFAULT 0 COMMENT '#334 +N guests (added by migration 112)',
+    `status`       ENUM('confirmed','waitlist','cancelled') NOT NULL DEFAULT 'confirmed'
+                    COMMENT '#334 waitlist support (added by migration 112)',
+    `waitlistedAt` DATETIME    DEFAULT NULL COMMENT 'Stamped when moved to waitlist (added by migration 112)',
+    `createdAt`    DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updatedAt`    DATETIME    DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (`rsvpID`),
-    UNIQUE KEY `uq_event_user` (`eventID`, `userID`),
-    KEY `idx_event_response` (`eventID`, `response`)
+    UNIQUE KEY `uq_event_user`     (`eventID`, `userID`),
+    KEY        `idx_event_response` (`eventID`, `response`),
+    KEY        `idx_event_rsvp_status` (`eventID`, `status`, `createdAt`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
 COMMENT='Event RSVP/registration responses';
 
@@ -4411,43 +4438,6 @@ INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
     ('account/offline-queue', 'account/offline-queue.php', 1)
 ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 
-
--- =============================================================================
--- Column additions from ALTER TABLE migrations 110+ — kept in full_schema.sql
--- so fresh installs land on the same final shape that an upgraded install
--- ends up with. (Migrations themselves are still the source of truth for
--- upgrades; this block is the read-side mirror for the security check
--- heuristics and any tool that scans full_schema.sql for column lists.)
--- =============================================================================
-
--- ── from 112_events_calendar_easy_wins.sql (#326 + #337) ────────────────────
-ALTER TABLE `tblEvents`
-    ADD COLUMN IF NOT EXISTS `submissionStatus`   ENUM('pending','approved','rejected') DEFAULT NULL
-        COMMENT 'NULL = admin-created; non-NULL = public submission moderation (#326)',
-    ADD COLUMN IF NOT EXISTS `submittedByID`      INT          DEFAULT NULL,
-    ADD COLUMN IF NOT EXISTS `submitterName`      VARCHAR(120) DEFAULT NULL,
-    ADD COLUMN IF NOT EXISTS `submitterEmail`     VARCHAR(255) DEFAULT NULL,
-    ADD COLUMN IF NOT EXISTS `submittedAt`        DATETIME     DEFAULT NULL,
-    ADD COLUMN IF NOT EXISTS `moderatedByID`      INT          DEFAULT NULL,
-    ADD COLUMN IF NOT EXISTS `moderatedAt`        DATETIME     DEFAULT NULL,
-    ADD COLUMN IF NOT EXISTS `moderationNote`     TEXT         DEFAULT NULL,
-    ADD COLUMN IF NOT EXISTS `cancelReason`       TEXT         DEFAULT NULL COMMENT '#337',
-    ADD COLUMN IF NOT EXISTS `statusChangedByID`  INT          DEFAULT NULL,
-    ADD COLUMN IF NOT EXISTS `statusChangedAt`    DATETIME     DEFAULT NULL;
-
--- ── from 112 — tblEventRSVPs #334 waitlist support ─────────────────────────
-ALTER TABLE `tblEventRSVPs`
-    ADD COLUMN IF NOT EXISTS `guestCount`   INT NOT NULL DEFAULT 0 COMMENT '#334 +N guests',
-    ADD COLUMN IF NOT EXISTS `status`       ENUM('confirmed','waitlist','cancelled') NOT NULL DEFAULT 'confirmed' COMMENT '#334',
-    ADD COLUMN IF NOT EXISTS `waitlistedAt` DATETIME DEFAULT NULL COMMENT '#334';
-
--- ── from 124_event_registrations.sql (#347 capacity + registration) ────────
-ALTER TABLE `tblEvents`
-    ADD COLUMN IF NOT EXISTS `capacityCount`        INT          DEFAULT NULL
-        COMMENT '#347 capped attendance count (NULL = unlimited)',
-    ADD COLUMN IF NOT EXISTS `registrationEnabled`  TINYINT(1) NOT NULL DEFAULT 0,
-    ADD COLUMN IF NOT EXISTS `registrationOpensAt`  DATETIME     DEFAULT NULL,
-    ADD COLUMN IF NOT EXISTS `registrationClosesAt` DATETIME     DEFAULT NULL;
 
 -- =============================================================================
 -- Tables added in numbered migrations 105+ — appended for fresh-install parity.
