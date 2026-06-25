@@ -44,7 +44,7 @@ if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
 $recordingId = (int) ($_POST['recordingID'] ?? 0);
 $noteId      = (int) ($_POST['noteID'] ?? 0);
 $body        = trim((string) ($_POST['body'] ?? ''));
-$publish     = (string) ($_POST['publish'] ?? '') === '1';
+$shouldPublish     = (string) ($_POST['publish'] ?? '') === '1';
 $userId      = (int) ($_SESSION['user_id'] ?? 0);
 $siteId      = Site::id();
 
@@ -71,7 +71,7 @@ if ($ok === false) {
 if ($noteId > 0) {
     $stmt = $mysqli->prepare(
         'UPDATE tblRecordingNote '
-        . 'SET body = ?, publishedAt = ' . ($publish === true ? 'IFNULL(publishedAt, NOW())' : 'NULL') . ' '
+        . 'SET body = ?, publishedAt = ' . ($shouldPublish === true ? 'IFNULL(publishedAt, NOW())' : 'NULL') . ' '
         . 'WHERE noteID = ? AND recordingID = ?'
     );
     if ($stmt !== false) {
@@ -82,7 +82,7 @@ if ($noteId > 0) {
 } else {
     $stmt = $mysqli->prepare(
         'INSERT INTO tblRecordingNote (recordingID, format, body, publishedAt, createdByID) '
-        . 'VALUES (?, "markdown", ?, ' . ($publish === true ? 'NOW()' : 'NULL') . ', ?)'
+        . 'VALUES (?, "markdown", ?, ' . ($shouldPublish === true ? 'NOW()' : 'NULL') . ', ?)'
     );
     if ($stmt !== false) {
         $stmt->bind_param('isi', $recordingId, $body, $userId);
@@ -91,7 +91,7 @@ if ($noteId > 0) {
     }
 }
 
-Logger::activity('RecordingNoteSaved', 'Recording #' . $recordingId . ', publish=' . ($publish === true ? 'yes' : 'no'));
+Logger::activity('RecordingNoteSaved', 'Recording #' . $recordingId . ', publish=' . ($shouldPublish === true ? 'yes' : 'no'));
 
 header('Location: /recordings/view?id=' . $recordingId, true, 303);
 exit();
