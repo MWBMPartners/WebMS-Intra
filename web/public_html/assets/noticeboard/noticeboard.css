@@ -1,0 +1,11 @@
+/* WebMS Noticeboard — global styles (CSP-friendly external sheet).
+   Inline styling drives the rest of the UI; only these can't be inlined. */
+@import url('https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&family=Instrument+Serif:ital@0;1&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap');
+
+#noticeboard-root, #noticeboard-root * { box-sizing: border-box; }
+#noticeboard-root { font-family: 'IBM Plex Sans', system-ui, sans-serif; }
+
+@keyframes drawerIn { from { transform: translateX(102%); } to { transform: translateX(0); } }
+@keyframes modalIn  { from { opacity: 0; transform: translateY(14px) scale(.96); } to { opacity: 1; transform: none; } }
+
+x-dc { display: none !important; }
