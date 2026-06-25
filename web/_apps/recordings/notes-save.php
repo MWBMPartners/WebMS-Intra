@@ -68,22 +68,23 @@ if ($ok === false) {
     exit('Recording not found');
 }
 
+// 🛡️ Static SQL — branch by $shouldPublish chooses one of two fully-formed
+//    prepared statements, no string interpolation into the SET / VALUES body.
 if ($noteId > 0) {
-    $stmt = $mysqli->prepare(
-        'UPDATE tblRecordingNote '
-        . 'SET body = ?, publishedAt = ' . ($shouldPublish === true ? 'IFNULL(publishedAt, NOW())' : 'NULL') . ' '
-        . 'WHERE noteID = ? AND recordingID = ?'
-    );
+    $sql = $shouldPublish === true
+        ? 'UPDATE tblRecordingNote SET body = ?, publishedAt = IFNULL(publishedAt, NOW()) WHERE noteID = ? AND recordingID = ?'
+        : 'UPDATE tblRecordingNote SET body = ?, publishedAt = NULL WHERE noteID = ? AND recordingID = ?';
+    $stmt = $mysqli->prepare($sql);
     if ($stmt !== false) {
         $stmt->bind_param('sii', $body, $noteId, $recordingId);
         $stmt->execute();
         $stmt->close();
     }
 } else {
-    $stmt = $mysqli->prepare(
-        'INSERT INTO tblRecordingNote (recordingID, format, body, publishedAt, createdByID) '
-        . 'VALUES (?, "markdown", ?, ' . ($shouldPublish === true ? 'NOW()' : 'NULL') . ', ?)'
-    );
+    $sql = $shouldPublish === true
+        ? 'INSERT INTO tblRecordingNote (recordingID, format, body, publishedAt, createdByID) VALUES (?, "markdown", ?, NOW(), ?)'
+        : 'INSERT INTO tblRecordingNote (recordingID, format, body, publishedAt, createdByID) VALUES (?, "markdown", ?, NULL, ?)';
+    $stmt = $mysqli->prepare($sql);
     if ($stmt !== false) {
         $stmt->bind_param('isi', $recordingId, $body, $userId);
         $stmt->execute();

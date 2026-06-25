@@ -2974,7 +2974,7 @@ ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
 
 INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
     ('api-docs',     'api-docs/index.php', 0),
-    ('openapi.json', 'openapi.json',       0)
+    ('openapi.json', 'openapi.php',        0)
 ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 
 -- 🇪🇺 Privacy / GDPR (matches migration 048 — closes #47)
