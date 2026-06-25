@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS `tblLiveChatMessages` (
 
 CREATE TABLE IF NOT EXISTS `tblLiveRateLimits` (
     `limitID`       INT          NOT NULL AUTO_INCREMENT,
+    `siteID`        INT          NOT NULL COMMENT 'For per-tenant audit + cleanup scoping',
     `sessionToken`  VARCHAR(64)  DEFAULT NULL,
     `senderIP`      VARCHAR(45)  DEFAULT NULL,
     `eventType`     VARCHAR(40)  NOT NULL COMMENT 'e.g. chat.send',
@@ -43,6 +44,7 @@ CREATE TABLE IF NOT EXISTS `tblLiveRateLimits` (
     PRIMARY KEY (`limitID`),
     KEY `idx_ratelimit_token` (`sessionToken`, `eventType`, `createdAt`),
     KEY `idx_ratelimit_ip`    (`senderIP`, `eventType`, `createdAt`),
+    KEY `idx_ratelimit_site`  (`siteID`, `eventType`, `createdAt`),
     KEY `idx_ratelimit_prune` (`createdAt`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 

@@ -4413,6 +4413,43 @@ ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 
 
 -- =============================================================================
+-- Column additions from ALTER TABLE migrations 110+ — kept in full_schema.sql
+-- so fresh installs land on the same final shape that an upgraded install
+-- ends up with. (Migrations themselves are still the source of truth for
+-- upgrades; this block is the read-side mirror for the security check
+-- heuristics and any tool that scans full_schema.sql for column lists.)
+-- =============================================================================
+
+-- ── from 112_events_calendar_easy_wins.sql (#326 + #337) ────────────────────
+ALTER TABLE `tblEvents`
+    ADD COLUMN IF NOT EXISTS `submissionStatus`   ENUM('pending','approved','rejected') DEFAULT NULL
+        COMMENT 'NULL = admin-created; non-NULL = public submission moderation (#326)',
+    ADD COLUMN IF NOT EXISTS `submittedByID`      INT          DEFAULT NULL,
+    ADD COLUMN IF NOT EXISTS `submitterName`      VARCHAR(120) DEFAULT NULL,
+    ADD COLUMN IF NOT EXISTS `submitterEmail`     VARCHAR(255) DEFAULT NULL,
+    ADD COLUMN IF NOT EXISTS `submittedAt`        DATETIME     DEFAULT NULL,
+    ADD COLUMN IF NOT EXISTS `moderatedByID`      INT          DEFAULT NULL,
+    ADD COLUMN IF NOT EXISTS `moderatedAt`        DATETIME     DEFAULT NULL,
+    ADD COLUMN IF NOT EXISTS `moderationNote`     TEXT         DEFAULT NULL,
+    ADD COLUMN IF NOT EXISTS `cancelReason`       TEXT         DEFAULT NULL COMMENT '#337',
+    ADD COLUMN IF NOT EXISTS `statusChangedByID`  INT          DEFAULT NULL,
+    ADD COLUMN IF NOT EXISTS `statusChangedAt`    DATETIME     DEFAULT NULL;
+
+-- ── from 112 — tblEventRSVPs #334 waitlist support ─────────────────────────
+ALTER TABLE `tblEventRSVPs`
+    ADD COLUMN IF NOT EXISTS `guestCount`   INT NOT NULL DEFAULT 0 COMMENT '#334 +N guests',
+    ADD COLUMN IF NOT EXISTS `status`       ENUM('confirmed','waitlist','cancelled') NOT NULL DEFAULT 'confirmed' COMMENT '#334',
+    ADD COLUMN IF NOT EXISTS `waitlistedAt` DATETIME DEFAULT NULL COMMENT '#334';
+
+-- ── from 124_event_registrations.sql (#347 capacity + registration) ────────
+ALTER TABLE `tblEvents`
+    ADD COLUMN IF NOT EXISTS `capacityCount`        INT          DEFAULT NULL
+        COMMENT '#347 capped attendance count (NULL = unlimited)',
+    ADD COLUMN IF NOT EXISTS `registrationEnabled`  TINYINT(1) NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS `registrationOpensAt`  DATETIME     DEFAULT NULL,
+    ADD COLUMN IF NOT EXISTS `registrationClosesAt` DATETIME     DEFAULT NULL;
+
+-- =============================================================================
 -- Tables added in numbered migrations 105+ — appended for fresh-install parity.
 -- Maintained automatically; do NOT hand-edit duplicates. See the same
 -- definitions in web/_sql/{105..144}_*.sql for the source of truth + comments.
@@ -5061,6 +5098,7 @@ CREATE TABLE IF NOT EXISTS `tblLiveChatMessages` (
 -- ── from 143_cop_live_chat.sql ──────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS `tblLiveRateLimits` (
     `limitID`       INT          NOT NULL AUTO_INCREMENT,
+    `siteID`        INT          NOT NULL COMMENT 'For per-tenant audit + cleanup scoping',
     `sessionToken`  VARCHAR(64)  DEFAULT NULL,
     `senderIP`      VARCHAR(45)  DEFAULT NULL,
     `eventType`     VARCHAR(40)  NOT NULL COMMENT 'e.g. chat.send',
@@ -5068,6 +5106,7 @@ CREATE TABLE IF NOT EXISTS `tblLiveRateLimits` (
     PRIMARY KEY (`limitID`),
     KEY `idx_ratelimit_token` (`sessionToken`, `eventType`, `createdAt`),
     KEY `idx_ratelimit_ip`    (`senderIP`, `eventType`, `createdAt`),
+    KEY `idx_ratelimit_site`  (`siteID`, `eventType`, `createdAt`),
     KEY `idx_ratelimit_prune` (`createdAt`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
@@ -5093,3 +5132,37 @@ CREATE TABLE IF NOT EXISTS `tblLivePrompts` (
     CONSTRAINT `fk_prompt_creator` FOREIGN KEY (`createdByID`) REFERENCES `tblUsers`(`userID`)   ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
+
+-- ── from 145_noticeboard.sql ──────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS `tblNoticeboardPosters` (
+    `posterID`    INT          NOT NULL AUTO_INCREMENT,
+    `siteID`      INT          NOT NULL DEFAULT 1,
+    `title`       VARCHAR(255) NOT NULL,
+    `kicker`      VARCHAR(120) NOT NULL DEFAULT '',
+    `category`    VARCHAR(40)  NOT NULL DEFAULT 'Other',
+    `scheduleType` ENUM('once','weekly') NOT NULL DEFAULT 'once',
+    `eventDate`   DATE         DEFAULT NULL COMMENT 'For scheduleType=once',
+    `weekday`     TINYINT      DEFAULT NULL COMMENT '0=Sun … 6=Sat, for scheduleType=weekly',
+    `eventTime`   TIME         DEFAULT NULL,
+    `location`    VARCHAR(255) NOT NULL DEFAULT '',
+    `link`        VARCHAR(1024) NOT NULL DEFAULT '' COMMENT 'Official event page (opened on second tap)',
+    `mediaType`   ENUM('text','image','video','canva') NOT NULL DEFAULT 'text',
+    `mediaUrl`    VARCHAR(1024) NOT NULL DEFAULT '' COMMENT 'Image/video URL (mediaType image|video)',
+    `canvaUrl`    VARCHAR(1024) NOT NULL DEFAULT '' COMMENT 'Canva embed URL (mediaType canva)',
+    `thumbUrl`    VARCHAR(1024) NOT NULL DEFAULT '' COMMENT 'Optional board thumbnail for canva posters',
+    `colorIndex`  TINYINT      NOT NULL DEFAULT 0,
+    `aspect`      VARCHAR(12)  NOT NULL DEFAULT '4/5',
+    `useSerif`    TINYINT(1)   NOT NULL DEFAULT 0,
+    `sortOrder`   INT          NOT NULL DEFAULT 0 COMMENT 'Manual override; board otherwise sorts chronologically',
+    `isDeleted`   TINYINT(1)   NOT NULL DEFAULT 0,
+    `createdByID` INT          DEFAULT NULL,
+    `updatedByID` INT          DEFAULT NULL,
+    `createdAt`   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updatedAt`   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`posterID`),
+    KEY `idx_poster_site` (`siteID`, `isDeleted`),
+    KEY `idx_poster_date` (`siteID`, `isDeleted`, `eventDate`),
+    CONSTRAINT `fk_poster_site` FOREIGN KEY (`siteID`) REFERENCES `tblSites` (`siteID`),
+    CONSTRAINT `fk_poster_creator` FOREIGN KEY (`createdByID`) REFERENCES `tblUsers` (`userID`) ON DELETE SET NULL,
+    CONSTRAINT `fk_poster_updater` FOREIGN KEY (`updatedByID`) REFERENCES `tblUsers` (`userID`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci

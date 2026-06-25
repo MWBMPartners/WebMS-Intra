@@ -60,21 +60,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $stmt->execute();
     $stmt->close();
 
-    // 📋 Mirror into tblEventRSVPs as an anonymous row (userID NULL) so the
-    //     broadcaster + headcount + manage UI all see the response.
-    $eventIdInt = (int) $invite['eventID'];
-    $email      = (string) $invite['email'];
-    $name       = (string) ($invite['displayName'] ?? '');
-    $status     = $response === 'going' ? 'confirmed' : 'pending';
-
-    $stmt = $mysqli->prepare(
-        'INSERT INTO tblEventRSVPs (eventID, externalEmail, externalName, response, status, source) '
-        . 'VALUES (?, ?, ?, ?, ?, "email-link") '
-        . 'ON DUPLICATE KEY UPDATE response = VALUES(response), status = VALUES(status)'
-    );
-    $stmt->bind_param('issss', $eventIdInt, $email, $name, $response, $status);
-    @$stmt->execute(); // Mute on schema variants — UPDATE the invite is the source of truth.
-    $stmt->close();
+    // 📋 The invite row is the source of truth. Earlier drafts tried to
+    //    mirror the response into tblEventRSVPs as an anonymous row, but
+    //    that table requires userID NOT NULL and has no externalEmail/
+    //    externalName/source columns — every previous attempt fataled at
+    //    prepare() and was silently swallowed. Downstream consumers
+    //    (broadcaster, headcount, manage UI) join tblEventRSVPInvites
+    //    directly when they need anonymous responses.
 
     Logger::activity('EventInviteResponded', 'Invite #' . $inviteId . ' = ' . $response);
 
