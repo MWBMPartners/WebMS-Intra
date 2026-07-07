@@ -13,7 +13,13 @@
 > [CHANGELOG.md](CHANGELOG.md) for chronological history and to [README.md](README.md)
 > for setup, deployment, and licence info.
 >
-> **Snapshot:** 2026-06-19 · **Version on `main`:** 1.3.0
+> **Snapshot:** 2026-06-21 · **Version on `main`:** 1.3.0 (1.4.0-dev in flight on PR #358)
+>
+> **Phase 1 ships sitting on PR #358 — Discipleship Pathway Tracker (#303) + COP Live Chat (#313).** The latter shipped with structural reworks the adversarial review caught (file relocation to ApiRouter's 3-segment convention; CSRF dropped on public /send replaced with sessionToken-exists guard; first-message-only captcha; rate-limit fail-CLOSED).
+>
+> **Already merged to main since the prior snapshot:** PR #355 worship engine (#308 full v1: schema + CRUD + live operator + projector + state polling + SortableJS drag-reorder + song verse auto-split + CCLI usage log + brand asset folder move to /brandkit/assets/). PR #356 Plus Jakarta Sans modular embed (self-hosted, single-source-of-truth via Asset::brandFontsCss + --portal-font-family — one-line swap for future brand-font changes). PR #357 #317 Virtual Host Console Phase 1 + #323 API key infrastructure Phase 1 (`Portal\Core\HostConsole` + `Portal\Core\ApiKey` + `ApiResponse::requireApiKey($scopes)`).
+>
+> **Original snapshot retained below for reference:** 2026-06-19 · **Version on `main`:** 1.3.0
 > · **Major recent landings:** PR #340 (36 issues / 39 commits) —
 > events platform overhaul (registration form builder, public landing
 > page at `/e/<slug>`, embeddable widgets, ICS feed importer, per-occurrence
@@ -226,12 +232,38 @@ Roles + assignments + history.
 
 ### 📣 Announcements — `/announcements/` ✅ (#89)
 
-Per-site noticeboard.
+Per-site text announcements (short-form notices with visibility windows). Distinct from the visual poster wall in the Noticeboard app.
 
 - Manage / view / save / delete.
 - Visibility windows (start + end dates).
 
 **Tables:** `tblAnnouncements`
+
+---
+
+### 📌 Noticeboard — `/noticeboard/` ✅ (#360)
+
+Visual poster wall — pinboard of event posters. Distinct from the text-based Announcements app.
+
+**Features:**
+- Poster cards (image / video / Canva embed / text-only) with colour, aspect, and serif toggles
+- Scheduling: one-off event (date) OR weekly recurrence (weekday + time)
+- Manual sort ordering (drag-and-drop persisted); auto-fallback to chronological
+- QR share panel — links to poster's deep-link URL, server-encoded via `Portal\Core\Qr` and pinned to the current host
+- Site-admin gated writes; any authenticated user can view
+
+**Tables:** `tblNoticeboardPosters`
+
+**Routes / API:**
+- `GET  /noticeboard`             — board page (authed)
+- `GET  /api/noticeboard/list`    — poster feed (authed)
+- `POST /api/noticeboard/save`    — bulk upsert (site-admin, CSRF, cross-site guard)
+- `GET  /api/noticeboard/qr`      — QR PNG/SVG (authed, host-pinned)
+
+**Phase 1 limitations:**
+- Media pasted as `data:` URIs is rejected (real upload pipeline follow-up)
+- Whole-set replace on save — last-writer-wins if two admins edit simultaneously
+- Google Fonts blocked by CSP → typography degrades to system-font stack
 
 ---
 

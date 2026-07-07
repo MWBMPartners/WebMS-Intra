@@ -35,13 +35,17 @@ $siteId = Site::id();
 // 📋 Next upcoming event on this site. Public visibility only (no
 //    leadership-only events leak via the public widget feed).
 $nextEvent = null;
+// 🛡️ Column names match the tblEvents schema: eventName (NOT title),
+//    locationName (NOT location), isPublic (NOT visibility), status
+//    ENUM with 'cancelled' value (NOT isCancelled bool).
 $stmt = $mysqli->prepare(
-    'SELECT eventID, title, location, startDateTime, endDateTime '
+    'SELECT eventID, eventName AS title, locationName AS location, startDateTime, endDateTime '
     . 'FROM tblEvents '
     . 'WHERE siteID = ? '
-    . '  AND (visibility = "public" OR visibility = "members") '
+    . '  AND isPublic = 1 '
+    . '  AND isDeleted = 0 '
+    . '  AND status = "published" '
     . '  AND startDateTime >= NOW() '
-    . '  AND isCancelled = 0 '
     . 'ORDER BY startDateTime ASC LIMIT 1'
 );
 if ($stmt !== false) {

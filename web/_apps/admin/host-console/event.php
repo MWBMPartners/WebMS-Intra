@@ -167,5 +167,89 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             Manage all cards at <a href="/admin/decision-cards">/admin/decision-cards</a>.
         </p>
     <?php endif; ?>
+
+    <hr class="my-4">
+
+    <h2 class="h6"><i class="fa-solid fa-bullhorn me-1 text-primary"></i>Push prompt to viewers</h2>
+    <p class="small text-muted">Overlays on the viewer chat widget. Auto-expires in 5 min unless dismissed sooner. CTA URL must be empty, root-relative, or http(s) — javascript:/data:/vbscript: rejected.</p>
+    <form id="hostPromptForm" class="row g-2">
+        <input type="hidden" name="eventID" value="<?php echo (int) $eventId; ?>">
+        <div class="col-md-3">
+            <label class="form-label small">Type</label>
+            <select name="promptType" class="form-select form-select-sm" required>
+                <option value="announcement">📢 Announcement</option>
+                <option value="decision-call">🙌 Decision call</option>
+                <option value="prayer-request">🙏 Prayer request</option>
+                <option value="give-now">💛 Give now</option>
+            </select>
+        </div>
+        <div class="col-md-9">
+            <label class="form-label small">Title <span class="text-danger">*</span></label>
+            <input type="text" name="title" maxlength="120" required class="form-control form-control-sm" placeholder="e.g. Stand if you'd like prayer">
+        </div>
+        <div class="col-12">
+            <label class="form-label small">Body (optional)</label>
+            <input type="text" name="body" maxlength="500" class="form-control form-control-sm">
+        </div>
+        <div class="col-md-4">
+            <label class="form-label small">CTA label (optional)</label>
+            <input type="text" name="ctaLabel" maxlength="60" class="form-control form-control-sm" placeholder="e.g. Give now">
+        </div>
+        <div class="col-md-5">
+            <label class="form-label small">CTA URL (optional)</label>
+            <input type="text" name="ctaUrl" maxlength="500" class="form-control form-control-sm" placeholder="/giving or https://…">
+        </div>
+        <div class="col-md-3 d-flex align-items-end">
+            <button type="submit" class="btn btn-primary btn-sm w-100">
+                <i class="fa-solid fa-paper-plane me-1"></i>Push to viewers
+            </button>
+        </div>
+        <div class="col-12 small" id="hostPromptStatus"></div>
+    </form>
 </div>
+
+<script>
+(function () {
+    'use strict';
+    const form   = document.getElementById('hostPromptForm');
+    const status = document.getElementById('hostPromptStatus');
+    if (!form) { return; }
+    const csrf = <?php echo json_encode(\Portal\Core\Auth::csrfToken()); ?>;
+
+    form.addEventListener('submit', async (ev) => {
+        ev.preventDefault();
+        status.textContent = '';
+        const payload = {
+            csrf_token: csrf,
+            eventID: Number(form.elements['eventID'].value),
+            promptType: form.elements['promptType'].value,
+            title: form.elements['title'].value,
+            body: form.elements['body'].value,
+            ctaLabel: form.elements['ctaLabel'].value,
+            ctaUrl: form.elements['ctaUrl'].value,
+        };
+        try {
+            const r = await fetch('/api/livechat/prompt-publish', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrf },
+                body: JSON.stringify(payload),
+                credentials: 'same-origin',
+            });
+            const j = await r.json().catch(() => null);
+            if (!r.ok) {
+                const msg = (j && j.error && (j.error.message || j.error)) || ('HTTP ' + r.status);
+                status.innerHTML = '<span class="text-danger">' + String(msg).replace(/[<>&]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;'})[c]) + '</span>';
+                return;
+            }
+            status.innerHTML = '<span class="text-success">✅ Prompt pushed (id ' + (j.data.prompt.promptID || '?') + ', expires ' + (j.data.prompt.expiresAt || '?') + ').</span>';
+            form.elements['title'].value = '';
+            form.elements['body'].value = '';
+            form.elements['ctaLabel'].value = '';
+            form.elements['ctaUrl'].value = '';
+        } catch (e) {
+            status.innerHTML = '<span class="text-danger">Network error.</span>';
+        }
+    });
+})();
+</script>
 <?php require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'footer.php'; ?>

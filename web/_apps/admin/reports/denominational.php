@@ -28,7 +28,22 @@ $data = ['rows' => [], 'columns' => [], 'title' => ''];
 if ($report === 'attendance-by-quarter' && $qStart !== null) {
     $data['title']   = 'Attendance by quarter — ' . $quarter;
     $data['columns'] = ['Date', 'Service', 'Headcount'];
-    $stmt = $mysqli->prepare('SELECT sessionDate, sessionType, headcount FROM tblAttendance WHERE siteID = ? AND sessionDate BETWEEN ? AND ? ORDER BY sessionDate');
+    // 🛡️ tblAttendance (singular) does not exist. Attendance lives in
+    //    tblAttendanceSessions (one row per service session, FK to
+    //    tblAttendanceServiceTypes via serviceTypeID) joined to
+    //    tblAttendanceCounts (one row per group within that session,
+    //    headcount INT). Aggregate the counts so the report shows
+    //    total headcount per session.
+    $stmt = $mysqli->prepare(
+        'SELECT s.sessionDate, t.typeName AS sessionType, COALESCE(SUM(c.headcount), 0) AS headcount '
+        . 'FROM tblAttendanceSessions s '
+        . 'JOIN tblAttendanceServiceTypes t ON t.serviceTypeID = s.serviceTypeID '
+        . 'LEFT JOIN tblAttendanceCounts c ON c.sessionID = s.sessionID '
+        . 'WHERE s.siteID = ? AND s.isDeleted = 0 '
+        . '  AND s.sessionDate BETWEEN ? AND ? '
+        . 'GROUP BY s.sessionID '
+        . 'ORDER BY s.sessionDate, t.typeName'
+    );
     if ($stmt !== false) {
         $stmt->bind_param('iss', $siteId, $qStart, $qEnd);
         $stmt->execute();

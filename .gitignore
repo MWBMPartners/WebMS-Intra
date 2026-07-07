@@ -16,6 +16,10 @@ Thumbs.db
 # Claude auto-memory symlink (local machine path, not portable)
 #.claude/MEMORY.md
 
+# Claude Code per-instance settings (enabled plugins etc — per-machine, not repo config)
+.claude/settings.json
+.claude/settings.local.json
+
 # Secrets and credentials (NEVER commit these)
 web/_auth_keys/
 .env

@@ -54,7 +54,8 @@ web/                <- ALL deployable files (synced to server via SFTP)
 | attendance | `/attendance` | Sessions, headcount by service type, reports, CSV |
 | expenses | `/expenses` | Submit, approve, treasury, withdraw, multi-approver, PDF, CSV |
 | leadership | `/leadership` | Roles + assignments + history + CSV |
-| announcements | `/announcements` | Per-site noticeboard |
+| announcements | `/announcements` | Per-site text announcements |
+| noticeboard | `/noticeboard` | Visual poster wall (Canva embeds, image/video/text posters, weekday recurrence, QR share) |
 | documents | `/documents` | File library with categories |
 | tasks | `/tasks` | Reminders / task list |
 | api | `/api/*` | Read-only JSON endpoints (attendance, announcements, users, events) |
@@ -86,8 +87,22 @@ Calendar/Events/Preaching Plan is ONE app ("Events") — `/calendar` covers view
 - `PORTAL_SQL` -- web/_sql/
 - `PORTAL_ENV` -- 'dev', 'beta', or 'prod' (auto-detected from DOCUMENT_ROOT)
 
+## ApiRouter routing trap (apply on every new api/* endpoint)
+
+- **`api/*` paths IGNORE tblRoutes.** `Router::handleSpecialRoutes` intercepts them and hands off to `ApiRouter::dispatch`, which splits the path into `appName` + `action` and loads `_apps/{appName}/api/{action}.php`. Handler at any other path is unreachable.
+- **Every endpoint needs `api.{appName}.{action}.enabled = 'true'`** seeded in `tblSettings` or ApiRouter returns 403.
+- **Don't register `api/...` routes in `tblRoutes`** — either the handler is at the convention path (settings flag does the gating) or it's dead code.
+- **Adjacent gotcha**: the `ApiResponse` class exposes `::success()`, NOT `::ok()`. `::setJsonHeaders()` is `private`. Grep `_core/ApiResponse.php` for method names before calling.
+
 ## Recent ships (chronological)
 
+- **PR #358** (in flight) — #303 Discipleship Pathway Tracker Phase 1 + #313 COP Live Chat Phase 1 + Phase 2 (push prompts + viewer widget) + #317 Virtual Host Console Phase 2 (overlap on `tblLivePrompts`) + #360 Community Noticeboard Phase 1 (poster wall, self-hosted React, page-scoped CSP extension). Includes a Phase 1 hotfix (`::ok`→`::success`) and multiple security-check-clean bug fixes.
+- **PR #357** — #317 Phase 1 + #323 API key infrastructure Phase 1.
+- **PR #356** — Plus Jakarta Sans modular embed.
+- **PR #355** — Worship Presentation Engine full v1.
+- **PR #354** — Post-merge cleanups (composer fix + 1.3.0 + installer favicons).
+- **PR #340** — Events platform overhaul (36 issues / 39 commits).
+- **PR #297** — Multi-brand product layer (#296).
 - **PR #129** — Prayer Requests app (logged-in + anonymous public route)
 - **PR #130** — Multi-provider Captcha (Turnstile / reCAPTCHA v2+v3 / hCaptcha) with admin priority drag-and-drop
 - **PR #131** — Release prep v0.11.0 (version bump + CHANGELOG stamp)

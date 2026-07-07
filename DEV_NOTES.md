@@ -1586,4 +1586,36 @@ above and update the four `*_INTEGRITY` constants in `Asset.php`.
 
 ---
 
+## Noticeboard React bundle (#360 / PR #358)
+
+The board's frontend at `web/public_html/assets/noticeboard/noticeboard.{css,noeval.js}` is **generated** — the `dc-runtime` header on line 1 of the JS files marks it. Do not hand-edit. Rebuild from the Claude Design page (https://claude.ai/design/p/6fab711c-d550-4200-8d96-42d6751a5fba) when the source component changes.
+
+Two variants exist in the design output:
+- `noticeboard.js` — eval variant (runtime-Babel from unpkg). **Never wire this in.** The portal CSP disallows `unsafe-eval` and does not allowlist unpkg, so it cannot run.
+- `noticeboard.noeval.js` — precompiled variant, wired in `_apps/noticeboard/index.php`.
+
+### React hosting
+
+React 18.3.1 UMD is **self-hosted** at `web/public_html/assets/vendor/react/`:
+- `react-18.3.1.production.min.js` — sha384 `DGyLxAyjq0f9SPpVevD6IgztCFlnMF6oW/XQGmfe+IsZ8TqEiDrcHkMLKI6fiB/Z`
+- `react-dom-18.3.1.production.min.js` — sha384 `gTGxhz21lVGYNMcdJOyq01Edg0jhn/c22nsx0kyqP0TxaV5WVdsSH1fSDUf5YJj1`
+
+The bundle's `loadReactUmd()` short-circuits when `window.React` / `window.ReactDOM` pre-exist — so the CSP-blocked unpkg fetch path never fires when React is pre-loaded via the self-hosted `<script nonce defer>` tags. Verify SRI on any bundle regeneration; the hashes must match the strings embedded at `noticeboard.noeval.js:1495,1497`.
+
+### Page-scoped CSP extension contract
+
+`_core/templates/header.php` accepts three optional variables set by a page controller BEFORE the `require ... 'header.php';` line:
+
+- `$cspImgExtra`   — space-separated source list appended to `img-src`
+- `$cspMediaExtra` — space-separated source list appended to `media-src` (new directive; behaviour-neutral vs the previous `default-src 'self'` fallback when unset)
+- `$cspFrameExtra` — space-separated source list appended to `frame-src`
+
+Extensions are per-page — the underlying `default-src / img-src / frame-src` remain unchanged for every other page. `_apps/noticeboard/index.php` sets `https:` on img/media and `https://www.canva.com` on frame.
+
+### Typography
+
+The bundle template injects a `fonts.googleapis.com` stylesheet (Bricolage Grotesque / Instrument Serif / IBM Plex). The portal CSP does not allowlist Google Fonts (self-hosting stance, PR #356), so the board degrades gracefully to `system-ui` stacks. Follow-up issue tracks self-hosting these faces (or restyling to Plus Jakarta Sans).
+
+---
+
 Last updated: May 2026
