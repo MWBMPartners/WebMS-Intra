@@ -58,6 +58,15 @@ Post-1.3.0 Phase-1 ships. Brand font + worship engine landed first; the rest is 
 - Public `/send`: NO CSRF (third-party embed cookies break it); instead a `sessionToken`-exists guard against `tblLivestreamSessions` plus first-message-only captcha (Turnstile / reCAPTCHA / hCaptcha tokens are single-use).
 - Viewer-side chat UI on the `/live` embed page is Phase 2.
 
+### Community Noticeboard — poster wall Phase 1 (#360, PR #358)
+
+- New app: visual poster wall for churches / community sites (Canva embeds, image/video/text posters, once/weekly scheduling, colour/aspect/serif styling, QR share).
+- Handlers: `web/_apps/noticeboard/index.php` + `api/{list,save,qr}.php`. Enablement-flag gated via `api.noticeboard.{list,save,qr}.enabled` (ApiRouter convention).
+- Schema: `tblNoticeboardPosters` (migration 145). Seeds route + display settings.
+- Frontend: prebuilt React bundle at `/assets/noticeboard/noticeboard.noeval.js` + `.css`. React 18.3.1 UMD self-hosted at `/assets/vendor/react/` (SRI-verified against hashes embedded in the bundle).
+- Page-scoped CSP extension mechanism in `_core/templates/header.php` (`$cspImgExtra` / `$cspMediaExtra` / `$cspFrameExtra`) — widens img/media/frame directives on the /noticeboard page only. Global CSP unchanged.
+- Security hardening: cross-site poster write guard on save (foreign posterIDs insert as new); URL scheme allowlist on `link` / `image` / `thumb` (http(s):// or root-relative only); Canva URL pinned to `www.canva.com`; QR endpoint pins to current host via strict parse_url + honours encoder's ~250-char ceiling; `Qr::pngBytes()`→`Qr::generate()` fatal fixed; `save.php` bind_param arity 20→21 fatal fixed.
+
 ## [1.3.0] - 2026-06-19 (main)
 
 PR #340 — events platform overhaul + COP + ChurchMS verticals + ops hygiene. **36 issues across 39 commits in one consolidated PR.** The Multi-brand product layer section originally drafted for 1.2.0 (see further down) shipped as part of this release.
