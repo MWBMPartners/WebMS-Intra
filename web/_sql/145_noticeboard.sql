@@ -1,13 +1,16 @@
 -- =============================================================================
--- Migration 0XX: Noticeboard (pinboard) — posters
+-- Migration 145: Community Noticeboard — poster wall (#360)
 -- =============================================================================
--- Renumber the 0XX prefix to the next free migration number in _sql/ before
--- running. Mirrors the conventions in 029_announcements.sql.
+-- Mirrors the conventions in 029_announcements.sql. Distinct from the
+-- announcements app: visual poster wall (Canva embeds, media, weekday
+-- recurrence, colour/aspect/serif styling, QR share).
 --
 --   App route:   /noticeboard            (page, protected)
 --   API:         /api/noticeboard/list   (GET  — any logged-in user)
 --                /api/noticeboard/save   (POST — site admins only)
 --                /api/noticeboard/qr     (GET  — QR PNG/SVG via Portal\Core\Qr)
+--
+-- @link https://github.com/MWBMPartners/WebMS-Intra/issues/360
 -- =============================================================================
 
 -- 📋 Posters table

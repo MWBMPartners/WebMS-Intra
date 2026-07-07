@@ -4440,6 +4440,25 @@ ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 
 
 -- =============================================================================
+-- Migration 145: Community Noticeboard — poster wall (#360)
+-- =============================================================================
+
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('noticeboard', 'noticeboard/index.php', 1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'noticeboard.enabled',            'true',                  'true',                  0),
+    (NULL, 'noticeboard.displayName',        'Noticeboard',           'Noticeboard',           0),
+    (NULL, 'noticeboard.displayIcon',        'fa-solid fa-thumbtack', 'fa-solid fa-thumbtack', 0),
+    (NULL, 'noticeboard.brandColor',         '#caa063',               '#caa063',               0),
+    (NULL, 'api.noticeboard.list.enabled',   'true',                  'true',                  0),
+    (NULL, 'api.noticeboard.save.enabled',   'true',                  'true',                  0),
+    (NULL, 'api.noticeboard.qr.enabled',     'true',                  'true',                  0)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
+
+-- =============================================================================
 -- Tables added in numbered migrations 105+ — appended for fresh-install parity.
 -- Maintained automatically; do NOT hand-edit duplicates. See the same
 -- definitions in web/_sql/{105..144}_*.sql for the source of truth + comments.
@@ -5156,3 +5175,4 @@ CREATE TABLE IF NOT EXISTS `tblNoticeboardPosters` (
     CONSTRAINT `fk_poster_creator` FOREIGN KEY (`createdByID`) REFERENCES `tblUsers` (`userID`) ON DELETE SET NULL,
     CONSTRAINT `fk_poster_updater` FOREIGN KEY (`updatedByID`) REFERENCES `tblUsers` (`userID`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+COMMENT='Noticeboard (pinboard) posters';
