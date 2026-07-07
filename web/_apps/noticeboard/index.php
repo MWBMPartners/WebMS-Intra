@@ -26,6 +26,13 @@ $nonce   = App::cspNonce();
 $pageTitle   = 'Noticeboard';
 $pageSection = 'noticeboard';
 $breadcrumbs = ['Dashboard' => '/', 'Noticeboard' => ''];
+
+// 🔐 Board needs Canva iframes + externally-hosted poster media on THIS page only.
+//    See _core/templates/header.php CSP extension contract.
+$cspImgExtra   = 'https:';
+$cspMediaExtra = 'https:';
+$cspFrameExtra = 'https://www.canva.com';
+
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 
@@ -64,10 +71,13 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 </script>
 
 <!-- Mount the board. The EVAL-FREE bundle registers the precompiled component
-     and reads window.NoticeboardHost on mount — so the portal CSP does NOT need
-     'unsafe-eval'. It only needs to allow React from unpkg in script-src
-     (or self-host React + ReactDOM as window.React/ReactDOM before this tag). -->
+     and reads window.NoticeboardHost on mount. React 18.3.1 UMD is self-hosted
+     under /assets/vendor/react/ and loaded before the bundle (nonce'd, deferred);
+     loadReactUmd() in noeval.js short-circuits when window.React / window.ReactDOM
+     pre-exist so no unpkg fetch happens. -->
 <link rel="stylesheet" href="/assets/noticeboard/noticeboard.css">
+<script nonce="<?php echo htmlspecialchars($nonce, ENT_QUOTES, 'UTF-8'); ?>" src="/assets/vendor/react/react-18.3.1.production.min.js" defer></script>
+<script nonce="<?php echo htmlspecialchars($nonce, ENT_QUOTES, 'UTF-8'); ?>" src="/assets/vendor/react/react-dom-18.3.1.production.min.js" defer></script>
 <script nonce="<?php echo htmlspecialchars($nonce, ENT_QUOTES, 'UTF-8'); ?>" src="/assets/noticeboard/noticeboard.noeval.js" defer></script>
 
 <?php require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'footer.php'; ?>
