@@ -111,13 +111,47 @@ header('Strict-Transport-Security: max-age=63072000; includeSubDomains; preload'
 //    style-src retains 'unsafe-inline' for now — style nonce-ing is a
 //    larger refactor scoped as a follow-up to #144.
 $csp_nonce = \Portal\Core\App::cspNonce();
+// 🔐 Page-scoped CSP extensions — a controller may set
+//    $cspImgExtra / $cspMediaExtra / $cspFrameExtra (space-separated
+//    source lists) BEFORE requiring header.php to widen those directives
+//    for that page only.
+//
+//    HARDENING: the extension string is interpolated verbatim into the CSP
+//    header, so we REFUSE any value containing characters that could smuggle
+//    additional directives (';', CR/LF) or break out of the token stream
+//    (single/double quote). trim() alone would be insufficient — a future
+//    caller passing tainted data (settings value, query param, per-site
+//    config) could otherwise add 'sandbox', 'worker-src *', 'report-uri
+//    https://attacker.tld/x', etc. Silent-drop keeps the base policy intact.
+//
+//    OPT-IN: media-src is only emitted when a page sets $cspMediaExtra, so
+//    pages that don't opt in continue to fall through to default-src 'self'
+//    exactly as before — behaviour-neutral for every existing page.
+$cspExtSanitise = static function ($raw): string {
+    if (isset($raw) === false) {
+        return '';
+    }
+    $s = trim((string) $raw);
+    if ($s === '') {
+        return '';
+    }
+    if (preg_match('/[;\r\n\'"]/', $s) === 1) {
+        return '';
+    }
+    return ' ' . $s;
+};
+$cspImgExtra   = $cspExtSanitise($cspImgExtra   ?? null);
+$cspMediaExtra = $cspExtSanitise($cspMediaExtra ?? null);
+$cspFrameExtra = $cspExtSanitise($cspFrameExtra ?? null);
+$mediaSrcDirective = $cspMediaExtra !== '' ? "media-src 'self'{$cspMediaExtra}; " : '';
 header("Content-Security-Policy: default-src 'self'; "
     . "script-src 'self' 'nonce-{$csp_nonce}' 'unsafe-inline' https://cdn.jsdelivr.net https://challenges.cloudflare.com; "
     . "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; "
     . "font-src 'self' https://cdnjs.cloudflare.com; "
-    . "img-src 'self' data:; "
+    . "img-src 'self' data:{$cspImgExtra}; "
     . "connect-src 'self'; "
-    . "frame-src https://challenges.cloudflare.com; "
+    . $mediaSrcDirective
+    . "frame-src https://challenges.cloudflare.com{$cspFrameExtra}; "
     . "base-uri 'self'; "
     . "form-action 'self'");
 
