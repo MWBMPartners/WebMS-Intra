@@ -24,7 +24,7 @@ if (App::isSiteAdmin() === false) {
     ApiResponse::error('Admin access required', 403);
 }
 
-// CSRF — header sent by the bridge.
+// 🛡️ CSRF — header sent by the bridge.
 $csrf = (string) ($_SERVER['HTTP_X_CSRF_TOKEN'] ?? '');
 if (Auth::verifyCsrf($csrf) === false) {
     ApiResponse::error('Invalid CSRF token', 400);
@@ -40,8 +40,48 @@ $db     = App::db();
 $siteId = Site::id();
 $userId = (int) ($_SESSION['user_id'] ?? 0);
 
+// 🛡️ Scheme allowlist — http(s) absolute or root-relative only. Matches the
+//    LivePrompt ctaUrl precedent (PR #358) — prevents javascript:… hrefs
+//    (board opens `link` on second tap) and off-scheme media URLs.
+$safeUrl = static function (string $u): string {
+    $u = trim($u);
+    if ($u === '') {
+        return '';
+    }
+    return preg_match('#^(https?://|/)#i', $u) === 1 ? $u : '';
+};
+
+// 🛡️ Pre-transaction validation pass — abort BEFORE opening the transaction
+//    so a single offending poster doesn't leave half a write half-committed.
+foreach ($body['posters'] as $p) {
+    $mediaUrl = (string) ($p['image'] ?? '');
+    if (str_starts_with($mediaUrl, 'data:') === true) {
+        ApiResponse::error(
+            'Upload files via the media library; data: URIs are not accepted here',
+            422
+        );
+    }
+}
+
 App::beginTransaction();
 try {
+    // 🛡️ Cross-site write guard — preload posterIDs that ALREADY belong to
+    //    this site. A crafted `posterID` from another tenant's board would
+    //    otherwise overwrite that row's content silently (siteID is NOT in
+    //    the UPDATE list, so ownership doesn't even transfer — it's a pure
+    //    cross-tenant deface). Any foreign claim is nulled → INSERT as new.
+    $validIds = [];
+    $vs = $db->prepare('SELECT posterID FROM tblNoticeboardPosters WHERE siteID = ?');
+    if ($vs !== false) {
+        $vs->bind_param('i', $siteId);
+        $vs->execute();
+        $vr = $vs->get_result();
+        while ($v = $vr->fetch_assoc()) {
+            $validIds[(int) $v['posterID']] = true;
+        }
+        $vs->close();
+    }
+
     $keepIds = [];
 
     $up = $db->prepare(
@@ -62,11 +102,17 @@ try {
     foreach ($body['posters'] as $p) {
         // Client ids look like "p123" (existing) or "p<timestamp>" (new). Only a
         // pure numeric DB id maps to an existing row; anything else inserts fresh.
-        $cid      = (string) ($p['id'] ?? '');
-        $dbId     = (preg_match('/^p(\d{1,9})$/', $cid, $m) === 1) ? (int) $m[1] : null;
+        $cid  = (string) ($p['id'] ?? '');
+        $dbId = (preg_match('/^p(\d{1,9})$/', $cid, $m) === 1) ? (int) $m[1] : null;
+        // 🛡️ Cross-site guard: foreign posterID → insert as fresh row.
+        if ($dbId !== null && isset($validIds[$dbId]) === false) {
+            $dbId = null;
+        }
 
-        $title    = trim((string) ($p['title'] ?? ''));
-        if ($title === '') { continue; }
+        $title = trim((string) ($p['title'] ?? ''));
+        if ($title === '') {
+            continue;
+        }
 
         $kicker   = (string) ($p['kicker'] ?? '');
         $category = (string) ($p['category'] ?? 'Other');
@@ -75,29 +121,35 @@ try {
         $weekday  = ($schedule === 'weekly' && isset($p['weekday'])) ? (int) $p['weekday'] : null;
         $time     = !empty($p['time']) ? ((string) $p['time']) . ':00' : null;
         $location = (string) ($p['location'] ?? '');
-        $link     = (string) ($p['link'] ?? '');
+        $link     = $safeUrl((string) ($p['link'] ?? ''));
 
-        $mt       = (string) ($p['mediaType'] ?? 'image');
-        $canva    = (string) ($p['canva'] ?? '');
-        $mediaUrl = (string) ($p['image'] ?? '');
-        if ($canva !== '')              { $mt = 'canva'; }
-        elseif ($mediaUrl === '')       { $mt = 'text'; }
-        elseif ($mt !== 'video')        { $mt = 'image'; }
-        $thumb    = (string) ($p['thumb'] ?? '');
+        // 🛡️ Sanitise media URLs BEFORE the $mt derivation — mediaType
+        //    depends on $canva / $mediaUrl emptiness.
+        $mediaUrl = $safeUrl((string) ($p['image'] ?? ''));
+        $canva    = trim((string) ($p['canva'] ?? ''));
+        if ($canva !== '' && preg_match('#^https://www\.canva\.com/#i', $canva) !== 1) {
+            $canva = '';
+        }
+        $thumb = $safeUrl((string) ($p['thumb'] ?? ''));
+
+        $mt = (string) ($p['mediaType'] ?? 'image');
+        if ($canva !== '') {
+            $mt = 'canva';
+        } elseif ($mediaUrl === '') {
+            $mt = 'text';
+        } elseif ($mt !== 'video') {
+            $mt = 'image';
+        }
 
         $colorIndex = (int) ($p['colorIndex'] ?? 0);
         $aspect     = (string) ($p['aspect'] ?? '4/5');
         $useSerif   = !empty($p['serif']) ? 1 : 0;
         $order++;
 
-        // NOTE: reject base64 data: URIs server-side — push real uploads through
-        // your media pipeline and store the resulting URL instead.
-        if (str_starts_with($mediaUrl, 'data:') === true) {
-            ApiResponse::error('Upload files via the media library; data: URIs are not accepted here', 422);
-        }
-
+        // 🛡️ 21 placeholders → 21-char type string. NULLs bind fine under 'i'/'s'.
+        //    (Previous 20-char literal 'iissssssssssssssisii' fataled every save.)
         $up->bind_param(
-            'iissssssssssssssisii',
+            'iisssssisssssssisiiii',
             $dbId, $siteId, $title, $kicker, $category, $schedule, $date, $weekday, $time,
             $location, $link, $mt, $mediaUrl, $canva, $thumb, $colorIndex, $aspect, $useSerif,
             $order, $userId, $userId
@@ -107,7 +159,7 @@ try {
     }
     $up->close();
 
-    // Soft-delete rows no longer present.
+    // 🗑️ Soft-delete rows no longer present in the payload.
     if (count($keepIds) > 0) {
         $in    = implode(',', array_fill(0, count($keepIds), '?'));
         $types = 'i' . str_repeat('i', count($keepIds));
