@@ -22,23 +22,30 @@ ApiResponse::requireAuth();
 ApiResponse::requireEnabled('api.noticeboard.qr.enabled');
 
 $data = (string) ($_GET['data'] ?? '');
-if ($data === '' || strlen($data) > 1024) {
+// 📏 QrEncoder tops out around version-10 byte-mode capacity (~250 chars) with
+//    no explicit throw on overflow; cap conservatively so we fail loudly.
+if ($data === '' || strlen($data) > 300) {
     ApiResponse::error('Missing or oversized data parameter', 422);
 }
 
-// Only allow our own deep links to be encoded (prevents open QR-redirector abuse).
+// 🛡️ Only allow our own deep links to be encoded (prevents open QR-redirector
+//    abuse). Strict-parse the host so substring collisions like
+//    `https://evil.com/?x=<our-host>` don't slip through.
 $host = (string) ($_SERVER['HTTP_HOST'] ?? '');
-if ($host !== '' && str_contains($data, '://') === true && str_contains($data, $host) === false) {
-    ApiResponse::error('QR data must reference this site', 422);
+if (str_contains($data, '://') === true) {
+    $qrHost = (string) (parse_url($data, PHP_URL_HOST) ?? '');
+    if ($host === '' || strcasecmp($qrHost, $host) !== 0) {
+        ApiResponse::error('QR data must reference this site', 422);
+    }
 }
 
-// --- Option A: portal's built-in encoder (default) -------------------------
-// Adjust to Portal\Core\Qr's real signature if it differs in your version.
-$png = Qr::pngBytes($data, 320);          // e.g. (string $text, int $size): string
-header('Content-Type: image/png');
+// 📸 Portal's built-in encoder — returns ['mime' => string, 'bytes' => string].
+//    PNG when gd is loaded, SVG fallback otherwise; Content-Type follows suit.
+$qr = Qr::generate($data, ['size' => 320, 'format' => 'png']);
+header('Content-Type: ' . $qr['mime']);
 header('Cache-Control: public, max-age=86400');
 header('X-Content-Type-Options: nosniff');
-echo $png;
+echo $qr['bytes'];
 exit();
 
 // --- Option B: dedicated CueRCode service ----------------------------------
