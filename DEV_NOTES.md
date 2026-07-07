@@ -1586,7 +1586,7 @@ above and update the four `*_INTEGRITY` constants in `Asset.php`.
 
 ---
 
-## Noticeboard React bundle
+## Noticeboard React bundle (#360 / PR #358)
 
 The board's frontend at `web/public_html/assets/noticeboard/noticeboard.{css,noeval.js}` is **generated** — the `dc-runtime` header on line 1 of the JS files marks it. Do not hand-edit. Rebuild from the Claude Design page (https://claude.ai/design/p/6fab711c-d550-4200-8d96-42d6751a5fba) when the source component changes.
 
