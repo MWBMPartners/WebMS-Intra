@@ -1,5 +1,98 @@
 # Changelog
 
+
+## [1.2.0] - 2026-07-07 (alpha)
+- 2 apps + iCal feed + admin polish — 7 issues (#258, #261, #271, #251, #254, #253, #252) (#281)
+- 4 community/pastoral apps: Rota + Praise + Milestones + Care (#256, #260, #259, #257) (#280)
+- Apps wave 3: Reading Plans + QR + Invite onboarding + Offboarding (#265, #275, #239, #240) (#283)
+- Apps wave 4: 10 apps — Resources, Service Plans, Livestream, Recordings, Zoom, Newsletter, Giving, SMS, Projects, Payments (#284)
+- Apps wave 5: Transcription, Translation, AI Assist, GDPR, Photos + 5 infra/security items (#285)
+- Audit fixes: bootstrap try/catch + schema drift port + admin gates + CI paths + cleanup (#173-#194) (#197)
+- Foundation: App Registry + Markdown + X-Robots-Tag + CHANGELOG (#246, #247, #255, #270) (#279)
+- Pre-rollout omnibus: 19 issues, 13 migrations, 1.1.1 → 1.2.0 (#245)
+- chore(noticeboard): remove unusable eval-variant bundle (#360)
+- chore+feat: post-merge cleanups + installer brand-aware favicons (#354)
+- chore: v1.0.0 follow-ups — installer path fix + X-Powered-By branding (#165)
+- ci: add cross-source consistency checks to pr-security.yml (#213) (#214)
+- docs: sweep stale rename-aftermath references (#189, #182, #183, #194) (#286)
+- feat(api): API key infrastructure — mint/revoke/rotate + requireApiKey helper (#323 Phase 1)
+- feat(api): write-side CRUD for Announcements, Tasks, Prayer Requests, Leadership (#157) (#291)
+- feat(auth): authorised-use notice on the login screen (1.1.1) (#221)
+- feat(brand): embed Plus Jakarta Sans across the portal — self-hosted, modular
+- feat(brand): product brand layer — runtime ChurchMS / SchoolMS sub-brands (#296)
+- feat(brand): wire in Claude Design brand kit — six-asset structure per brand
+- feat(brand+easywins): 5 follow-ups bundled — 2 deferred from #297 + 3 church-vertical easy wins
+- feat(cop): trio of Church Online Platform easy wins — countdown widget + push + webhooks
+- feat(core): page-scoped CSP extension variables in header template (#360)
+- feat(discipleship): Phase 1 — pathway + step schema + admin CRUD (#303)
+- feat(events): anonymous email-link RSVP — no portal account needed (#335)
+- feat(events): anonymous self check-in for events (#314)
+- feat(events): auto-build crews + auto-assign jobs (#349)
+- feat(events): bundle 7 Events Calendar easy wins from competitive audit
+- feat(events): decision moments tracker — tap-to-count per service (#315)
+- feat(events): embeddable event widgets — iframe + JS drop-in (#336)
+- feat(events): event broadcast / bulk-email by crew/job/segment (#350)
+- feat(events): event coordinator role — delegate single-event management (#341)
+- feat(events): event crew / group builder (forms-only v1) (#343)
+- feat(events): event lifecycle email reminders — 24h + 1h + day-of (#329)
+- feat(events): event volunteer job board with capacity indicators (#344)
+- feat(events): external calendar feed aggregator — ICS importer (#327)
+- feat(events): faceted filter bar — location + search + date range (#330)
+- feat(events): multi-day attendance grid + walk-in enrol (#345)
+- feat(events): multiple primary organisers per event (#332)
+- feat(events): per-event document library link on public event page (#351)
+- feat(events): per-event public landing page at /e/<slug> (#346)
+- feat(events): per-event registration with VBS-relevant fields (#347)
+- feat(events): per-occurrence overrides on recurring series (#333)
+- feat(events): public registration — captcha + email confirmation (#348)
+- feat(events): surface auto-build / auto-assign buttons on crews + jobs UIs (#349)
+- feat(events): volunteer resource portal — /my-volunteering composite read (#342)
+- feat(host-console): read-only host cockpit composing COP primitives (#317 Phase 1)
+- feat(host-console+live-chat): push prompts + viewer chat widget + ping route fix (#317 Phase 2 + #313 Phase 2)
+- feat(install/upgrade): migration runner + state detection + maintenance mode + JSON backups (1.0.1 → 1.1.0) (#220)
+- feat(kids): children's ministry check-in / out with badge code (#298)
+- feat(live-chat): viewer chat + admin moderation (#313 Phase 1)
+- feat(livestream): livestream session analytics (#318)
+- feat(noticeboard): self-host React 18.3.1 UMD + wire board under nonce CSP (#360)
+- feat(noticeboard): static assets (frontend bundle)
+- feat(ops): external error monitor (Sentry / GlitchTip) (#143) (#290)
+- feat(pwa): offline write queue + sync-on-reconnect (#233) (#292)
+- feat(reports): denominational reporting templates (#305)
+- feat(safeguarding): DBS tracking + Auth::isCoordinatorOf gate (#310)
+- feat(salvation): decision card tracker (#316)
+- feat(worship): SortableJS drag-reorder + song verse split + CCLI usage log (#308 Phase 3)
+- feat(worship): live operator + projector display + state polling (#308 Phase 2)
+- feat(worship): service plans — schema + CRUD (#308 Phase 1)
+- feat(worship): song library + CCLI tracking (#309)
+- fix(audit): codebase sweep — duplicate cookie banner + missing Auth import + SQL concat cleanups (#293)
+- fix(core): add Portal\Core\Settings wrapper class
+- fix(events): wire /e/<slug> prefix into Router::handleSpecialRoutes (#346)
+- fix(installer): catch mysqli_sql_exception in steps 3 + 4 (#169) (#170)
+- fix(live-chat): ApiResponse::ok→success + drop private setJsonHeaders call (#313 Phase 1 hotfix)
+- fix(noticeboard): qr.php — use Qr::generate, strict host pinning, encoder-safe length cap (#360)
+- fix(noticeboard): save.php — bind_param arity, cross-site poster guard, URL scheme allowlist (#360)
+- fix(schema): backfill full_schema.sql with 35 tables from migrations 105+
+- fix(security): post-#281 schema-drift + CSRF findings (#282)
+- fix(security-check): inline ALTER columns into CREATE TABLE blocks + CSRF on rsvp-by-link form
+- fix(security-check): real bugs + schema backfill + noticeboard app (PR #358)
+- fix(security-check): rename \$publish → \$shouldPublish to dodge heuristic false-positive
+- fix(security-check): static SQL in notes-save + openapi.json route → openapi.php
+- fix(sql): migration 145 header + full_schema noticeboard terminator and seed parity (#360)
+- fix(sql): seed default tblSites row in full_schema.sql (#171) (#172)
+- fix(ui): installer link colours + portal alert link/code polish (#167) (#168)
+- fix(ui): mobile-readiness sweep — 29 → 0 findings (#225) (#295)
+- fix: SQL column-name mismatches across installer + import + GDPR export (#198) (#199)
+- fix: cross-source consistency audit follow-up #3 (#201 #202 #204 #205 #206 #207) (#212)
+- i18n: partial-coverage badge in the language switcher (#210) (#217)
+- i18n: remove 24 truly-dead translation keys from en.php (#211) (#216)
+- i18n: wrap user-facing hardcoded strings with t() (#209) (#215)
+- ops(security): SRI audit — fill missing integrity hashes (#161)
+- refactor(brand): /assets/images/brands/ → /assets/images/brandkit/assets/
+- refactor(security): move app controllers from public_html/ into _apps/ (#159) (#288)
+- refactor(version): single source of truth in _core/version.php (#166)
+- release: v1.0.0 launch sprint — 16 commits, 17 deferred issues, full security audit (#158)
+- security(csp): nonce-based script-src tightening (#144) (#289)
+
 All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
