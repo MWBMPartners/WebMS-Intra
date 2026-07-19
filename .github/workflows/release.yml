@@ -83,21 +83,21 @@ jobs:
             echo "Release ${VERSION}" > "$NOTES_FILE"
           else
             python3 - "$VERSION" <<'PYEOF' > "$NOTES_FILE"
-            import re, sys
-            version = sys.argv[1]
-            with open('CHANGELOG.md', 'r') as f:
-                content = f.read()
-            # Capture every "## [VERSION] ..." section until the next "## ["
-            pattern = (
-                r'## \[' + re.escape(version) + r'\][^\n]*\n'
-                r'(?:(?!^## \[).*\n?)*'
-            )
-            matches = re.findall(pattern, content, flags=re.MULTILINE)
-            if matches:
-                print('\n'.join(m.rstrip() for m in matches))
-            else:
-                print(f'Release {version}')
-            PYEOF
+          import re, sys
+          version = sys.argv[1]
+          with open('CHANGELOG.md', 'r') as f:
+              content = f.read()
+          # Capture every "## [VERSION] ..." section until the next "## ["
+          pattern = (
+              r'## \[' + re.escape(version) + r'\][^\n]*\n'
+              r'(?:(?!^## \[).*\n?)*'
+          )
+          matches = re.findall(pattern, content, flags=re.MULTILINE)
+          if matches:
+              print('\n'.join(m.rstrip() for m in matches))
+          else:
+              print(f'Release {version}')
+          PYEOF
           fi
 
           echo "----- release notes -----"

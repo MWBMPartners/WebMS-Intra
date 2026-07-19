@@ -70,12 +70,12 @@ on:
   workflow_dispatch:
     inputs:
       target:
-        description: "Override deploy target (alpha / beta / main). Leave blank to use the current branch."
+        description: "Override deploy target (alpha / beta / main). Use 'auto' to deploy the current branch."
         required: false
         type: choice
-        default: ""
+        default: "auto"
         options:
-          - ""
+          - "auto"
           - alpha
           - beta
           - main
@@ -156,7 +156,7 @@ jobs:
           DEV_PATH:  ${{ secrets.SFTP_DEV_PATH }}
         run: |
           MANUAL_TARGET="${{ github.event.inputs.target }}"
-          if [[ -n "$MANUAL_TARGET" ]]; then
+          if [[ -n "$MANUAL_TARGET" && "$MANUAL_TARGET" != "auto" ]]; then
             CHANNEL="$MANUAL_TARGET"
             echo "Manual dispatch override: $CHANNEL"
           else
