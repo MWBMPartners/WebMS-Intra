@@ -1983,6 +1983,10 @@ INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`)
 VALUES ('help/calendar', 'help/calendar.php', 0)
 ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`)
+VALUES ('help/noticeboard', 'help/noticeboard.php', 0)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
 -- ─── Calendar ───────────────────────────────────────────────────────────────
 INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`)
 VALUES ('calendar', 'calendar/index.php', 0)
@@ -5644,4 +5648,7 @@ INSERT INTO `tblMigrations` (`filename`) VALUES ('144_host_push_prompts.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
 INSERT INTO `tblMigrations` (`filename`) VALUES ('145_noticeboard.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('146_noticeboard_help_route.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;

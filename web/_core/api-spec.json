@@ -55,6 +55,10 @@
       "description": "Document library"
     },
     {
+      "name": "Noticeboard",
+      "description": "Visual poster wall (Canva embeds, image/video/text posters)"
+    },
+    {
       "name": "Users",
       "description": "User directory (admin only)"
     }
@@ -279,6 +283,178 @@
           "csrf_token": {
             "type": "string",
             "description": "CSRF token (or use X-CSRF-TOKEN header)"
+          }
+        }
+      },
+      "NoticeboardPoster": {
+        "type": "object",
+        "description": "Poster as returned by GET /api/noticeboard/list (DB columns already mapped to the field names the board component reads).",
+        "properties": {
+          "id": {
+            "type": "string",
+            "example": "p42",
+            "description": "Client-facing id; the literal string \"p\" + posterID."
+          },
+          "title": {
+            "type": "string"
+          },
+          "kicker": {
+            "type": "string",
+            "description": "Short eyebrow line shown above the title."
+          },
+          "category": {
+            "type": "string",
+            "example": "Community"
+          },
+          "schedule": {
+            "type": "string",
+            "enum": [
+              "once",
+              "weekly"
+            ]
+          },
+          "date": {
+            "type": "string",
+            "format": "date",
+            "description": "Set when schedule=once; empty string otherwise."
+          },
+          "weekday": {
+            "type": "integer",
+            "nullable": true,
+            "description": "0=Sunday … 6=Saturday. Set when schedule=weekly, otherwise null."
+          },
+          "time": {
+            "type": "string",
+            "example": "19:30",
+            "description": "24-hour HH:MM, or empty string if not set."
+          },
+          "location": {
+            "type": "string"
+          },
+          "link": {
+            "type": "string",
+            "description": "Official event page. The board opens this when the enlarged poster is tapped a second time."
+          },
+          "mediaType": {
+            "type": "string",
+            "enum": [
+              "image",
+              "video",
+              "canva"
+            ],
+            "description": "Text-only posters (no image/canva) are reported here as \"image\" with an empty image URL."
+          },
+          "image": {
+            "type": "string",
+            "description": "Media URL, for mediaType image|video."
+          },
+          "canva": {
+            "type": "string",
+            "description": "Canva embed URL, for mediaType canva."
+          },
+          "thumb": {
+            "type": "string",
+            "description": "Optional board thumbnail override for Canva posters."
+          },
+          "colorIndex": {
+            "type": "integer",
+            "example": 0,
+            "description": "Index into the board's built-in accent-colour palette."
+          },
+          "aspect": {
+            "type": "string",
+            "example": "4/5",
+            "description": "Poster tile aspect ratio, e.g. \"4/5\", \"3/4\", \"1/1\"."
+          },
+          "serif": {
+            "type": "boolean",
+            "description": "true = editorial serif title font, false = bold sans-serif."
+          }
+        }
+      },
+      "PosterInput": {
+        "type": "object",
+        "description": "One poster in the `posters` array sent to POST /api/noticeboard/save. The client always sends the FULL desired board state — any existing poster whose id is missing from the array is soft-deleted.",
+        "required": [
+          "title"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "example": "p42",
+            "description": "Pass the existing \"p<posterID>\" to update that poster. Omit, or use a fresh client-generated id (e.g. \"p<timestamp>\"), to insert a new one — an id that doesn't belong to this site is treated as new rather than overwriting another site's poster."
+          },
+          "title": {
+            "type": "string",
+            "description": "Required — rows with an empty/whitespace-only title are silently skipped."
+          },
+          "kicker": {
+            "type": "string"
+          },
+          "category": {
+            "type": "string",
+            "default": "Other"
+          },
+          "schedule": {
+            "type": "string",
+            "enum": [
+              "once",
+              "weekly"
+            ],
+            "default": "once"
+          },
+          "date": {
+            "type": "string",
+            "format": "date",
+            "description": "Used when schedule=once."
+          },
+          "weekday": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 6,
+            "description": "Used when schedule=weekly (0=Sunday … 6=Saturday)."
+          },
+          "time": {
+            "type": "string",
+            "example": "19:30"
+          },
+          "location": {
+            "type": "string"
+          },
+          "link": {
+            "type": "string",
+            "description": "http(s):// absolute or a root-relative (\"/…\") path only — any other scheme (e.g. javascript:) is silently stripped to empty."
+          },
+          "mediaType": {
+            "type": "string",
+            "enum": [
+              "image",
+              "video"
+            ],
+            "description": "Server-side derived value wins: forced to \"canva\" if canva is set, or \"text\" if neither canva nor image is set."
+          },
+          "image": {
+            "type": "string",
+            "description": "Media URL for image/video posters. data: URIs are rejected with 422 — upload via the media library and pass its URL instead."
+          },
+          "canva": {
+            "type": "string",
+            "description": "Canva embed/share URL. Must start with https://www.canva.com/ or it is discarded."
+          },
+          "thumb": {
+            "type": "string"
+          },
+          "colorIndex": {
+            "type": "integer",
+            "default": 0
+          },
+          "aspect": {
+            "type": "string",
+            "default": "4/5"
+          },
+          "serif": {
+            "type": "boolean",
+            "default": false
           }
         }
       }
@@ -513,6 +689,175 @@
         "responses": {
           "200": {
             "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/noticeboard/list": {
+      "get": {
+        "tags": [
+          "Noticeboard"
+        ],
+        "summary": "List active posters on the current site's noticeboard",
+        "description": "Any authenticated user may read. Returns every non-deleted poster for the current site, ordered by manual sort order then event date.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/NoticeboardPoster"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Auth required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Endpoint disabled"
+          }
+        }
+      }
+    },
+    "/api/noticeboard/qr": {
+      "get": {
+        "tags": [
+          "Noticeboard"
+        ],
+        "summary": "Render a QR code image for a noticeboard share link",
+        "description": "Any authenticated user may read. `data` must be this site's own host if it includes a scheme — the endpoint refuses to act as an open QR redirector for arbitrary third-party URLs.",
+        "parameters": [
+          {
+            "name": "data",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 300
+            },
+            "description": "Text or URL to encode. Must resolve to this same host when it contains a scheme (e.g. https://…)."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "QR image — PNG when the gd extension is available, SVG fallback otherwise (Content-Type reflects the actual format returned).",
+            "content": {
+              "image/png": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "image/svg+xml": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Auth required"
+          },
+          "403": {
+            "description": "Endpoint disabled"
+          },
+          "422": {
+            "description": "Missing/oversized data parameter, or data does not resolve to this host"
+          }
+        }
+      }
+    },
+    "/api/noticeboard/save": {
+      "post": {
+        "tags": [
+          "Noticeboard"
+        ],
+        "summary": "Replace the current site's poster set (site admins only)",
+        "description": "Site admins only (App::isSiteAdmin()) — CSRF-protected via the X-CSRF-TOKEN header. The client sends the FULL desired poster array in one call; posters upsert by their \"p<posterID>\" id (a foreign or new-looking id inserts a fresh row instead of overwriting another tenant's poster), and any existing poster left out of the array is soft-deleted. The whole batch is validated before any row is written, and rolled back together on failure.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "posters"
+                ],
+                "properties": {
+                  "posters": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/PosterInput"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Saved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "example": "ok"
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "saved": {
+                          "type": "boolean",
+                          "example": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid CSRF token"
+          },
+          "403": {
+            "description": "Admin access required, or endpoint disabled"
+          },
+          "422": {
+            "description": "Malformed payload — missing `posters` array, or a poster's image is a data: URI (upload via the media library instead)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Save failed — the whole batch was rolled back",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
           }
         }
       }
