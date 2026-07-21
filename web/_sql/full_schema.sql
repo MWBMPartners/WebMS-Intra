@@ -13,7 +13,7 @@
 -- present in web/_sql/ are marked as executed in tblMigrations so the
 -- web-based Migrator won't re-run them.
 --
--- Covers migrations: 000-145 (DDL + settings/routes seeds + tblMigrations
+-- Covers migrations: 000-146 (DDL + settings/routes seeds + tblMigrations
 -- marks). When you add a new migration, port its DDL/seeds into the
 -- appropriate section here AND add its filename to the seed block at the
 -- end of this file. CI enforces this via

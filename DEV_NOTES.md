@@ -191,7 +191,7 @@ gh secret set SFTP_PORT      --body '22'
 gh secret set SFTP_PASSWORD                       # prompts (avoids password in shell history)
 ```
 
-**Shared-base note.** The shared `core/`, `vendor/`, `sql/` etc. upload to
+**Shared-base note.** The shared `_core/`, `_vendor/`, `_sql/` etc. upload to
 `dirname()` of whichever per-branch path applies. When all three paths share
 one parent (the default — recommended for the WebMS-Intra single-site setup),
 all branches' shared code lands in the same place. Point them at different
@@ -944,7 +944,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
 ## Translations (i18n)
 
-The portal supports multiple languages via the `I18n` framework (`core/I18n.php`).
+The portal supports multiple languages via the `I18n` framework (`_core/I18n.php`).
 All user-facing text is stored in **language files** under `web/_lang/`, one file
 per locale. English (`en.php`) is the baseline — every other language file only
 needs to include the keys it translates; missing keys fall back to English automatically.
@@ -1026,7 +1026,7 @@ Keys follow the pattern `{section}.{description}` using lowercase and underscore
 4. **Remove keys you haven't translated yet** — they'll fall back to English
    automatically. This is better than leaving English text in a French file.
 
-5. **Check the locale is registered** in `core/I18n.php` in the `$locales` array.
+5. **Check the locale is registered** in `_core/I18n.php` in the `$locales` array.
    All 13 currently supported locales are already registered:
    `en, cy, fr, de, es, pt, ar, he, fa, ur, zh, ja, ko`
 
@@ -1148,7 +1148,7 @@ This keeps translations version-controlled, reviewable, and auditable.
 
 ## New Core Classes (v0.8.1)
 
-### Container (`core/Container.php`)
+### Container (`_core/Container.php`)
 
 Lightweight dependency injection container that works alongside the existing static
 `App` registry. Supports singleton and factory bindings with lazy resolution:
@@ -1162,21 +1162,21 @@ $mailer = $container->get('mailer'); // same instance each time
 Use `Container` for new service wiring; existing `App::db()`, `App::settings()` etc.
 remain unchanged for backward compatibility.
 
-### ApiRouter (`core/ApiRouter.php`)
+### ApiRouter (`_core/ApiRouter.php`)
 
 Dedicated API route dispatcher, extracted from the main `Router` class. Handles
 all `api/{app}/{action}` patterns with JSON content-type enforcement, CORS headers,
 and standardised error envelopes via `ApiResponse`. The main `Router::dispatch()`
 delegates to `ApiRouter` for any path starting with `api/`.
 
-### CsvExporter (`core/CsvExporter.php`)
+### CsvExporter (`_core/CsvExporter.php`)
 
 Generic CSV export helper used across five apps: expenses, attendance, leadership,
 admin users, and activity logs. Accepts a column definition array and a MySQLi result
 set, streams output with proper headers (`Content-Type: text/csv`,
 `Content-Disposition: attachment`), and escapes fields to prevent formula injection.
 
-### Validator (`core/Validator.php`)
+### Validator (`_core/Validator.php`)
 
 Input validation framework using pipe-separated rule syntax:
 
@@ -1335,7 +1335,7 @@ light `:root` and `[data-bs-theme="dark"]` blocks. Without these
 bindings, every plain `<a>` / `.btn-link` / `.alert-link` / `.link-*`
 falls back to the browser-default blue, which clashes hard in dark mode.
 
-`install/index.php` mirrors the same binding in its self-contained
+`_install/index.php` mirrors the same binding in its self-contained
 inline `<style>` block because the installer doesn't load `portal.css`.
 
 Per-site branding still flows through: `--portal-link` resolves to
