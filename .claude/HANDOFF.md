@@ -34,8 +34,9 @@
 
 ## 🔜 Next — Phase B/C (enhancement bundles)
 
-- **Fable roadmap agent is running** (deep review of brief/memory/FEATURES/DEV_NOTES + full open/closed issues). Output → `scratchpad/roadmap-analysis.md`. On completion: pick highest value-to-effort bundles, implement with Sonnet/Haiku, one issue + commit + handoff-update per bundle.
-- All enhancement commits go on `claude/dependabot-alpha-beta-branches-q24zd7` (single-branch rule → single-PR-multi-bundle pattern, matching prior PR #358). A PR for this branch is **not opened yet** (harness rule: no PR unless the user asks) — offer it at a checkpoint.
+- **PR strategy (user decision 2026-07-21):** do NOT create a new PR per bundle. All alpha-destined enhancement work accumulates into **ONE dedicated `alpha` integration PR** — branch **`claude/alpha-enhancements`** → base `alpha`, opened **draft** (auto-merge-alpha guard). #369 stays a clean, separately-mergeable dependency bump. The dependabot infra work stays on `claude/dependabot-alpha-beta-branches-q24zd7` → main (separate concern).
+- **Fable roadmap agent is running** (deep review of brief/memory/FEATURES/DEV_NOTES + full open/closed issues). Output → `scratchpad/roadmap-analysis.md`. On completion: pick highest value-to-effort bundles, implement with Sonnet/Haiku, one issue + commit + handoff-update per bundle, all onto `claude/alpha-enhancements`.
+- Open the alpha integration PR (draft) once the FIRST bundle is committed (GitHub needs ≥1 commit diff).
 
 ## ⚠️ Standing gotchas / safety rails (do not relearn the hard way)
 - **`auto-merge-alpha.yml` squash-auto-merges any *non-draft* PR based on `alpha`** once checks pass → open every alpha-targeted PR as **draft** while "don't merge yet" holds.
