@@ -21,8 +21,9 @@
 Ranked bundles. Legend S/M/L, model.
 
 - **B1 ✅ Truth sweep** (#371) — done. ~27 issues closed w/ evidence; #323 reopened (REST API Phase 2); #338/#339/#322/#128/#40/#234/#248/#225 re-scoped; #194/#183 kept open (fixes incomplete). Docs reconciled in commit `6b8bc76`.
-- **B3 (S, Sonnet)** iCal export completion (#338) — wire `web/_apps/calendar/export.php` onto `Portal\Core\Ical` (TZID/VTIMEZONE/RRULE); keep feed.php/account-feed.php behaviour. **← in flight**
-- **B2 (M, Fable-plan→Sonnet)** full_schema fresh-install parity (#364, #339, #194) — backfill tblSettings/tblRoutes seeds 090-145 + tblMigrations seed block; fix `uq_event_slug`→composite `uq_event_site_slug` in full_schema; add `tools/audit-checks/check_schema_seed_parity.py` + wire CI. **← in flight (analysis)**
+- **B3 ✅ (#338)** iCal export now via `Portal\Core\Ical` (TZID/VTIMEZONE/RRULE) — commit `b73371d`. feed/account-feed untouched. Closes #338 on merge.
+- **🚨 #373 (NEW, high / maybe-critical)** — `Router::dispatch()` never imported `$mysqli`/`$SETTINGS` into controller scope; 177 controllers use bare `$mysqli`, 6 use bare `$SETTINGS`. PHP-scope-proven undefined inside the dispatched `require`. Applied safe 2-word fix `global $mysqli, $SETTINGS;` before the require — commit `effdafa`. **NEEDS USER RUNTIME CONFIRM: load `/attendance` on alpha — renders ⇒ latent; 500s ⇒ live app-wide regression (from #159).**
+- **B2 (M, Sonnet impl in flight)** fresh-install parity (#364/#339/#194) — spec `scratchpad/b2-parity-spec.md`. Bigger than expected: 58 seed-block entries, 37 settings + 102 routes rows, #339 index fix, + **6 migrations (122/123/125/129/135/139) fail on a nonexistent `isEncrypted` column and abort the chain**, + 112 DROP-INDEX guard, + new `check_schema_seed_parity.py` audit checker wired into CI.
 - **B4 (M)** Noticeboard wave — #362 help (Haiku), #365 openapi docs (Haiku), #361 fonts (Sonnet, USER DECISION: restyle to Plus Jakarta Sans vs self-host 3 faces), #363 media upload pipeline (Sonnet).
 - **B5 (M, Sonnet)** run existing `tools/e2e-migrations/` in GitHub Actions (#248) — after B2.
 - **B6 (S)** CI hardening #105/#106/#107 (repo settings = user; deploy `--delete` monitor).
