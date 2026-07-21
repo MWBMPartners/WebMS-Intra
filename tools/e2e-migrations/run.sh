@@ -6,24 +6,32 @@
 # under web/_sql/ in filename order, then runs the SAME set a second time
 # to verify idempotency under the Migrator wrapper.
 #
-# Three phases:
+# Four phases:
 #   1. Fresh install — apply every numbered migration in order. Tracks
 #      tblMigrations rows.
 #   2. Idempotency — re-runs the same loop, asserts no new rows in
 #      tblMigrations and zero net schema change.
 #   3. Stale-DB upgrade — applies the first half of migrations, then
 #      applies the rest. Confirms the catch-up path.
+#   4. full_schema fresh-install — wipes the DB and loads
+#      web/_sql/full_schema.sql directly (the consolidated fresh-install
+#      path). Hard-fails only if the file errors against real MySQL; a
+#      table/column/index/migration-count mismatch vs the migration-chain
+#      (phase 1) is reported as a warning, not a failure — the SQL-level
+#      check_schema_seed_parity.py is the actual gate for seed parity.
+#      Runs even with --skip-stale (independent of phase 3).
 #
 # Exit:
-#   0 — all three phases pass.
-#   non-zero — first failing phase.
+#   0 — all phases pass (a phase-4 count mismatch is a warning, not a
+#       failure, so it does not affect this).
+#   non-zero — first hard-failing phase.
 #
 # Requires: docker + bash 4+. Tested under DreamHost-equivalent MySQL
 # 8.0.36 (the version pinned in docker-compose.yml).
 #
 # Usage:
-#   tools/e2e-migrations/run.sh                # run all three phases
-#   tools/e2e-migrations/run.sh --skip-stale   # skip phase 3
+#   tools/e2e-migrations/run.sh                # run all four phases
+#   tools/e2e-migrations/run.sh --skip-stale   # skip phase 3 (phase 4 still runs)
 #   tools/e2e-migrations/run.sh --keep         # leave the container up afterwards
 # -----------------------------------------------------------------------------
 
@@ -204,6 +212,49 @@ if [[ "${SKIP_STALE}" -eq 0 ]]; then
         exit 1
     fi
     echo "  ✓ stale-DB upgrade catches up to the same final state"
+fi
+
+# -----------------------------------------------------------------------------
+# Phase 4: full_schema fresh-install
+# -----------------------------------------------------------------------------
+# Independent of --skip-stale — always runs. Proves that
+# web/_sql/full_schema.sql (the consolidated fresh-install path, including
+# the ~485-line B2 backfill) applies cleanly against real MySQL 8.0.36.
+# That's the primary value of this phase, so it's the ONLY thing that
+# hard-fails it. A table/column/index/migration-count mismatch against
+# phase 1's migration-chain numbers is printed as a warning — it may be a
+# legitimate, pre-existing structural difference worth a human look, and
+# tools/audit-checks/check_schema_seed_parity.py already gates seed parity
+# at the SQL-source level.
+echo
+echo "═════ Phase 4: full_schema fresh-install ═════"
+echo "  Wiping DB and loading full_schema.sql directly …"
+docker exec -i portal-e2e-mysql mysql -u"${DB_USER}" -p"${DB_PASS}" -e "DROP DATABASE IF EXISTS ${DB_NAME}; CREATE DATABASE ${DB_NAME} CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;"
+
+if ! mysql_file "${SQL_DIR}/full_schema.sql"; then
+    echo "✗ full_schema.sql FAILED to load against MySQL 8.0.36 — see error above" >&2
+    exit 1
+fi
+echo "  ✓ full_schema.sql loaded without error"
+
+P4_TABLES=$(count_tables)
+P4_COLUMNS=$(count_columns)
+P4_INDEXES=$(count_indexes)
+P4_MIGS=$(count_migrations)
+echo "  schema: ${P4_TABLES} tables, ${P4_COLUMNS} columns, ${P4_INDEXES} indexes, ${P4_MIGS} migrations recorded"
+
+# Compare against phase 1's migration-chain numbers. P1_* are still in
+# scope here even though phase 3 (when it ran) dropped/recreated the DB
+# in between — they're plain shell variables captured once in phase 1,
+# not re-derived from the (now full_schema-loaded) database.
+if [[ "${P4_TABLES}" != "${P1_TABLES}" || "${P4_COLUMNS}" != "${P1_COLUMNS}" || "${P4_INDEXES}" != "${P1_INDEXES}" || "${P4_MIGS}" != "${P1_MIGS}" ]]; then
+    echo "⚠ full_schema vs migration-chain parity — MISMATCH (not a hard failure; review manually)" >&2
+    printf '    tables:     full_schema=%s  migration-chain=%s  Δ=%+d\n' "${P4_TABLES}" "${P1_TABLES}" "$((P4_TABLES - P1_TABLES))" >&2
+    printf '    columns:    full_schema=%s  migration-chain=%s  Δ=%+d\n' "${P4_COLUMNS}" "${P1_COLUMNS}" "$((P4_COLUMNS - P1_COLUMNS))" >&2
+    printf '    indexes:    full_schema=%s  migration-chain=%s  Δ=%+d\n' "${P4_INDEXES}" "${P1_INDEXES}" "$((P4_INDEXES - P1_INDEXES))" >&2
+    printf '    migrations: full_schema=%s  migration-chain=%s  Δ=%+d\n' "${P4_MIGS}" "${P1_MIGS}" "$((P4_MIGS - P1_MIGS))" >&2
+else
+    echo "  ✓ full_schema vs migration-chain parity confirmed: identical counts"
 fi
 
 echo

@@ -1,0 +1,64 @@
+# =============================================================================
+# WebMS-Intra — E2E Migrations
+#
+# Copyright (c) 2026 MWBM Partners Ltd. All rights reserved.
+# Proprietary. Unauthorised copying, modification or distribution prohibited.
+#
+# PURPOSE
+# -------
+# Runs tools/e2e-migrations/run.sh — the end-to-end migration test harness
+# (#248) — against a real, disposable MySQL 8.0.36 container (matching
+# DreamHost's minimum-supported version). The harness applies every
+# numbered migration under web/_sql/ in order, re-runs the same set to
+# prove idempotency, replays a stale-DB catch-up, and (phase 4) loads
+# web/_sql/full_schema.sql directly to prove the consolidated
+# fresh-install path applies cleanly against real MySQL. See
+# tools/e2e-migrations/README.md for the full phase breakdown.
+#
+# Only phase 4's load step is a hard gate on full_schema.sql; a
+# table/column/index/tblMigrations count mismatch against the migration
+# chain is printed as a warning, not a failure — check_schema_seed_parity.py
+# (wired into pr-security.yml) is the actual gate for seed parity at the
+# SQL-source level.
+# =============================================================================
+
+name: E2E Migrations
+
+on:
+  push:
+    branches:
+      - main
+      - beta
+      - alpha
+    paths:
+      - 'web/_sql/**'
+      - 'tools/e2e-migrations/**'
+      - '.github/workflows/e2e-migrations.yml'
+  pull_request:
+    paths:
+      - 'web/_sql/**'
+      - 'tools/e2e-migrations/**'
+      - '.github/workflows/e2e-migrations.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e-migrations-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    name: Run migration harness
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      # ubuntu-latest ships Docker + the docker compose plugin pre-installed,
+      # so no separate setup step is needed before running the harness.
+      - name: Run E2E migration harness (all phases, incl. full_schema)
+        run: bash tools/e2e-migrations/run.sh
