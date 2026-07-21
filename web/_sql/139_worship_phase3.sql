@@ -35,7 +35,7 @@ CREATE TABLE IF NOT EXISTS `tblCcliUsage` (
     CONSTRAINT `fk_ccli_user` FOREIGN KEY (`operatorID`) REFERENCES `tblUsers`(`userID`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
-INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isEncrypted`) VALUES
+INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isSensitive`) VALUES
     ('worship.song_verse_separator', '/\\n\\s*\\n/', 0)
 ON DUPLICATE KEY UPDATE `settingKey` = VALUES(`settingKey`);
 

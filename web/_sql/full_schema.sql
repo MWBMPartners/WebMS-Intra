@@ -13,17 +13,17 @@
 -- present in web/_sql/ are marked as executed in tblMigrations so the
 -- web-based Migrator won't re-run them.
 --
--- Covers migrations: 000-145 (DDL/tables). KNOWN GAP: the tblMigrations seed
--- block at the end of this file only records through 089, and some 090-145
--- tblSettings/tblRoutes seeds are not yet backfilled into the sections above
--- — tracked in #364 / #194. When you add a new migration, port its DDL/seeds
--- into the appropriate section here AND add its filename to the seed block.
+-- Covers migrations: 000-145 (DDL + settings/routes seeds + tblMigrations
+-- marks). When you add a new migration, port its DDL/seeds into the
+-- appropriate section here AND add its filename to the seed block at the
+-- end of this file. CI enforces this via
+-- tools/audit-checks/check_schema_seed_parity.py (#364 / #194).
 -- =============================================================================
 -- @package   Portal\Database
 -- @author    MWBM Partners Ltd (t/a MWservices)
 -- @copyright 2025-2026 MWBM Partners Ltd (t/a MWservices)
 -- @license   All Rights Reserved
--- @version   0.9.0
+-- @version   1.2.1
 -- =============================================================================
 
 
@@ -783,13 +783,19 @@ CREATE TABLE IF NOT EXISTS `tblEvents` (
     `registrationOpensAt`   DATETIME     DEFAULT NULL,
     `registrationClosesAt`  DATETIME     DEFAULT NULL,
 
+    -- 🔄 External calendar feed import (#327 — added by migration 129)
+    `externalFeedID`     INT           DEFAULT NULL,
+    `externalUid`        VARCHAR(255)  DEFAULT NULL,
+
     PRIMARY KEY (`eventID`),
-    UNIQUE KEY `uq_event_slug` (`eventSlug`),
+    UNIQUE KEY `uq_event_site_slug` (`siteID`, `eventSlug`),
     KEY `idx_event_series`   (`seriesID`),
     KEY `idx_event_category` (`categoryID`),
     KEY `idx_event_type`     (`typeID`),
     KEY `idx_event_start`    (`startDateTime`),
     KEY `idx_event_status`   (`status`),
+    KEY `idx_event_submission` (`submissionStatus`, `submittedAt`),
+    KEY `idx_event_external` (`externalFeedID`, `externalUid`),
     KEY `idx_event_deleted`  (`isDeleted`),
     KEY `idx_event_public`   (`isPublic`, `status`, `isDeleted`),
     KEY `idx_events_site`    (`siteID`),
@@ -1096,6 +1102,7 @@ CREATE TABLE IF NOT EXISTS `tblDocuments` (
     `documentID`    INT          NOT NULL AUTO_INCREMENT,
     `siteID`        INT          NOT NULL DEFAULT 1,
     `categoryID`    INT          DEFAULT NULL,
+    `eventID`       INT          DEFAULT NULL COMMENT 'Optional FK → tblEvents — scope this document to a single event (#351, migration 113)',
     `title`         VARCHAR(255) NOT NULL,
     `description`   TEXT         DEFAULT NULL,
     `fileName`      VARCHAR(255) NOT NULL COMMENT 'Original upload filename',
@@ -1112,9 +1119,11 @@ CREATE TABLE IF NOT EXISTS `tblDocuments` (
     KEY `idx_doc_site` (`siteID`),
     KEY `idx_doc_category` (`categoryID`),
     KEY `idx_doc_published` (`siteID`, `isPublished`, `isDeleted`),
+    KEY `idx_doc_event_pub` (`eventID`, `isPublished`, `isDeleted`),
     CONSTRAINT `fk_doc_site` FOREIGN KEY (`siteID`) REFERENCES `tblSites` (`siteID`),
     CONSTRAINT `fk_doc_category` FOREIGN KEY (`categoryID`) REFERENCES `tblDocCategories` (`categoryID`) ON DELETE SET NULL,
-    CONSTRAINT `fk_doc_uploader` FOREIGN KEY (`uploadedByID`) REFERENCES `tblUsers` (`userID`) ON DELETE SET NULL
+    CONSTRAINT `fk_doc_uploader` FOREIGN KEY (`uploadedByID`) REFERENCES `tblUsers` (`userID`) ON DELETE SET NULL,
+    CONSTRAINT `fk_doc_event` FOREIGN KEY (`eventID`) REFERENCES `tblEvents` (`eventID`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
 COMMENT='Document library files';
 
@@ -3085,6 +3094,10 @@ CREATE TABLE IF NOT EXISTS `tblPrayerRequests` (
                      COMMENT 'FK → tblSites — the site the request was submitted to',
     `submitterID`    INT          DEFAULT NULL
                      COMMENT 'FK → tblUsers — NULL for anonymous public submissions',
+    `assignedToUserID` INT        DEFAULT NULL
+                     COMMENT 'FK → tblUsers — the prayer partner assigned to this request (#311, migration 110)',
+    `assignedAt`     DATETIME     DEFAULT NULL
+                     COMMENT 'When the request was assigned to its current partner',
     `submitterName`  VARCHAR(100) DEFAULT NULL
                      COMMENT 'Optional display name supplied by an anonymous submitter',
     `submitterEmail` VARCHAR(255) DEFAULT NULL
@@ -3113,11 +3126,14 @@ CREATE TABLE IF NOT EXISTS `tblPrayerRequests` (
     PRIMARY KEY (`requestID`),
     KEY `idx_site_status` (`siteID`, `status`),
     KEY `idx_submitter`   (`submitterID`),
+    KEY `idx_pr_assigned` (`assignedToUserID`, `status`),
     CONSTRAINT `fk_pr_site` FOREIGN KEY (`siteID`)
         REFERENCES `tblSites` (`siteID`) ON DELETE RESTRICT,
     CONSTRAINT `fk_pr_submitter` FOREIGN KEY (`submitterID`)
         REFERENCES `tblUsers` (`userID`) ON DELETE SET NULL,
     CONSTRAINT `fk_pr_moderator` FOREIGN KEY (`moderatorID`)
+        REFERENCES `tblUsers` (`userID`) ON DELETE SET NULL,
+    CONSTRAINT `fk_pr_assigned` FOREIGN KEY (`assignedToUserID`)
         REFERENCES `tblUsers` (`userID`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
 COMMENT='Prayer requests submitted by members or anonymously via the public route.';
@@ -3390,6 +3406,8 @@ CREATE TABLE IF NOT EXISTS `tblServicePlan` (
     `serviceDate`   DATE         NOT NULL,
     `status`        ENUM('draft','published','archived') NOT NULL DEFAULT 'draft',
     `preparedByID`  INT          DEFAULT NULL,
+    `startedAt`     DATETIME     DEFAULT NULL COMMENT 'When the live runtime was started by an operator (#300, migration 110)',
+    `closedAt`      DATETIME     DEFAULT NULL COMMENT 'When the live runtime was closed (the service ended)',
     `createdAt`     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     `updatedAt`     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (`planID`),
@@ -3464,7 +3482,7 @@ CREATE TABLE IF NOT EXISTS `tblLivestreamSchedule` (
 
 INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
     ('live',                'live/index.php',          1),
-    ('admin/livestream',    'admin/livestream/index.php', 1)
+    ('admin/livestream',    'admin/livestream/dashboard.php', 1)
 ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 
 INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
@@ -4442,6 +4460,269 @@ ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 
 
 -- =============================================================================
+-- Legacy seed backfill (#364 audit): rows from migrations 007 / 021 / 022 / 033
+-- that were never ported into this file. Fresh installs only received them via
+-- the installer's migration-replay safety net (#218).
+-- =============================================================================
+
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    -- from 007_admin_routes.sql
+    ('admin',                  'admin/index.php',          1),
+    ('admin/errors',           'admin/errors/index.php',   1),
+    ('admin/activity',         'admin/activity/index.php', 1),
+    ('admin/users',            'admin/users/index.php',    1),
+    ('admin/users/save',       'admin/users/save.php',     1),
+    ('admin/settings',         'settings/index.php',       1),
+    -- from 022_expense_withdrawal.sql
+    ('expenses/withdraw/save', 'expenses/withdraw/save.php', 1),
+    -- from 033_reports.sql
+    ('admin/reports',          'admin/reports/index.php',  1),
+    ('admin/reports/data',     'admin/reports/data.php',   1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
+-- from 021_display_format_settings.sql (#69)
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'display.dateFormat',     'j M Y',     'j M Y',     0),
+    (NULL, 'display.timeFormat',     'H:i',       'H:i',       0),
+    (NULL, 'display.dateTimeFormat', 'j M Y H:i', 'j M Y H:i', 0)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
+-- =============================================================================
+-- Migration 110: Easy-wins bundle (#300 / #301 / #311)
+-- =============================================================================
+
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('account/my-prayer-list',    'account/my-prayer-list.php',    1),
+    ('service-plans/live',        'service-plans/live.php',        1),
+    ('service-plans/confidence',  'service-plans/confidence.php',  1),
+    ('service-plans/live-toggle', 'service-plans/live-toggle.php', 1),
+    ('recordings/notes-edit',     'recordings/notes-edit.php',     1),
+    ('recordings/notes-save',     'recordings/notes-save.php',     1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
+-- =============================================================================
+-- Migration 111: COP easy wins — web push, webhooks, countdown widget
+-- =============================================================================
+
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('widget/countdown.json',              'widget/countdown-json.php',            0),
+    ('widget/countdown',                   'widget/countdown-preview.php',         0),
+    ('api/push/subscribe',                 'api/push/subscribe.php',               0),
+    ('api/push/unsubscribe',               'api/push/unsubscribe.php',             0),
+    ('admin/integrations/webhooks',        'admin/integrations/webhooks/index.php', 1),
+    ('admin/integrations/webhooks/save',   'admin/integrations/webhooks/save.php',  1),
+    ('admin/integrations/webhooks/delete', 'admin/integrations/webhooks/delete.php', 1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'push.vapidPublicKey',  '',      '',      0),
+    (NULL, 'push.vapidPrivateKey', '',      '',      1),
+    (NULL, 'push.contact',         '',      '',      0),
+    (NULL, 'push.enabled',         'false', 'false', 0),
+    (NULL, 'webhooks.enabled',     'true',  'true',  0),
+    (NULL, 'webhooks.timeout',     '10',    '10',    0),
+    (NULL, 'webhooks.maxRetries',  '5',     '5',     0)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
+-- =============================================================================
+-- Migration 112: Events Calendar easy wins (#326 / #331 / #334 / #337 / #339)
+-- =============================================================================
+
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('calendar/submit',           'calendar/submit.php',           0),
+    ('calendar/submit-save',      'calendar/submit-save.php',      0),
+    ('admin/calendar/moderation', 'admin/calendar/moderation.php', 1),
+    ('admin/calendar/moderate',   'admin/calendar/moderate.php',   1),
+    ('calendar/views/photo',      'calendar/views/photo.php',      1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'calendar.publicSubmit.enabled',         'true', 'true', 0),
+    (NULL, 'calendar.publicSubmit.allowAnonymous',  'true', 'true', 0),
+    (NULL, 'calendar.publicSubmit.requireCaptcha',  'true', 'true', 0),
+    (NULL, 'calendar.publicSubmit.notifySubmitter', 'true', 'true', 0)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
+-- =============================================================================
+-- Migrations 114-121: event coordinator / volunteering / attendance grid /
+-- crews / jobs / broadcast / multi-orgs / RSVP tokens — routes only
+-- =============================================================================
+
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    -- 114_event_coordinator_role.sql
+    ('calendar/my-events',                'calendar/my-events.php',                1),
+    ('admin/calendar/coordinators',       'admin/calendar/coordinators.php',      1),
+    ('admin/calendar/coordinators/save',  'admin/calendar/coordinators-save.php', 1),
+    -- 115_volunteer_resource_portal.sql
+    ('account/my-volunteering',           'account/my-volunteering.php',          1),
+    -- 116_multi_day_attendance_grid.sql
+    ('calendar/event/attendance',         'calendar/event-attendance.php',        1),
+    ('calendar/event/attendance/mark',    'calendar/event-attendance-mark.php',   1),
+    -- 117_event_crews.sql
+    ('calendar/event/crews',              'calendar/event-crews.php',             1),
+    ('calendar/event/crews/save',         'calendar/event-crews-save.php',        1),
+    -- 118_event_jobs.sql
+    ('calendar/event/jobs',               'calendar/event-jobs.php',              1),
+    ('calendar/event/jobs/save',          'calendar/event-jobs-save.php',         1),
+    -- 119_event_broadcast.sql
+    ('calendar/event/broadcast',          'calendar/event-broadcast.php',         1),
+    ('calendar/event/broadcast/send',     'calendar/event-broadcast-send.php',    1),
+    -- 120_event_multiple_orgs.sql
+    ('admin/calendar/event-orgs',         'admin/calendar/event-orgs.php',        1),
+    ('admin/calendar/event-orgs/save',    'admin/calendar/event-orgs-save.php',   1),
+    -- 121_event_rsvp_tokens.sql
+    ('calendar/rsvp-by-link',             'calendar/rsvp-by-link.php',            0),
+    ('calendar/event/invites',            'calendar/event-invites.php',           1),
+    ('calendar/event/invites/send',       'calendar/event-invites-send.php',      1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
+-- =============================================================================
+-- Migrations 122-129: reminders / public landing / registrations / DBS /
+-- auto-build / widgets / occurrence overrides / external feeds
+-- =============================================================================
+
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    -- 122_event_reminders.sql (#329)
+    (NULL, 'reminders.enabled',                          '1',  '1',  0),
+    (NULL, 'reminders.cron_token',                       '',   '',   0),
+    -- 123_event_public_landing.sql (#346)
+    (NULL, 'public_landing.show_qr',                     '1',  '1',  0),
+    (NULL, 'public_landing.show_countdown',              '1',  '1',  0),
+    -- 125_dbs_safeguarding.sql
+    (NULL, 'safeguarding.dbs_required_for_coordinators', '0',  '0',  0),
+    (NULL, 'safeguarding.dbs_renewal_warning_days',      '90', '90', 0),
+    -- 129_external_calendar_feeds.sql (#327)
+    (NULL, 'feeds.cron_token',                           '',   '',   0)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    -- 122_event_reminders.sql
+    ('cron/event-reminders',             'cron/event-reminders.php',             0),
+    ('admin/calendar/reminders',         'admin/calendar/reminders.php',         1),
+    -- 124_event_registrations.sql (#347)
+    ('calendar/event/register',          'calendar/event-register.php',          0),
+    ('calendar/event/register/save',     'calendar/event-register-save.php',     0),
+    ('admin/calendar/registrations',     'admin/calendar/registrations.php',     1),
+    ('admin/calendar/registrations/act', 'admin/calendar/registrations-act.php', 1),
+    -- 125_dbs_safeguarding.sql
+    ('admin/safeguarding/dbs',           'admin/safeguarding/dbs.php',           1),
+    ('admin/safeguarding/dbs/save',      'admin/safeguarding/dbs-save.php',      1),
+    ('account/safeguarding',             'account/safeguarding.php',             1),
+    -- 126_event_auto_build.sql
+    ('calendar/event/crews/auto-build',  'calendar/event-crews-auto-build.php',  1),
+    ('calendar/event/jobs/auto-assign',  'calendar/event-jobs-auto-assign.php',  1),
+    -- 127_embeddable_widgets.sql
+    ('widget',                           'calendar/widget.php',                  0),
+    -- 128_event_occurrence_overrides.sql
+    ('calendar/event/overrides',         'calendar/event-overrides.php',         1),
+    ('calendar/event/overrides/save',    'calendar/event-overrides-save.php',    1),
+    -- 129_external_calendar_feeds.sql
+    ('admin/calendar/feeds',             'admin/calendar/feeds.php',             1),
+    ('admin/calendar/feeds/save',        'admin/calendar/feeds-save.php',        1),
+    ('cron/import-feeds',                'cron/import-feeds.php',                0)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
+-- =============================================================================
+-- Migrations 130-136: anonymous attendance / decision moments / salvation
+-- cards / livestream analytics / denominational reports / songs / kids
+-- =============================================================================
+
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    -- 130_anonymous_attendance.sql
+    ('attend',                        'calendar/anon-checkin.php',        0),
+    ('attend/save',                   'calendar/anon-checkin-save.php',   0),
+    -- 131_decision_moments.sql
+    ('calendar/event/decisions',      'calendar/event-decisions.php',     1),
+    ('calendar/event/decisions/bump', 'calendar/event-decisions-bump.php', 1),
+    -- 132_salvation_cards.sql
+    ('decision-card',                 'salvation/card.php',               0),
+    ('decision-card/save',            'salvation/card-save.php',          0),
+    ('admin/decision-cards',          'admin/salvation/cards.php',        1),
+    ('admin/decision-cards/act',      'admin/salvation/cards-act.php',    1),
+    -- 133_livestream_analytics.sql (#318)
+    ('api/livestream/ping',           'api/livestream-ping.php',          0),
+    -- 134_denominational_reports.sql
+    ('admin/reports/denominational',  'admin/reports/denominational.php', 1),
+    -- 135_song_library.sql (#309)
+    ('worship/songs',                 'worship/songs.php',                1),
+    ('worship/song',                  'worship/song.php',                 1),
+    ('worship/songs/save',            'worship/songs-save.php',           1),
+    -- 136_kid_checkin.sql
+    ('kids/profiles',                 'kids/profiles.php',                1),
+    ('kids/profiles/save',            'kids/profiles-save.php',           1),
+    ('kids/checkin',                  'kids/checkin.php',                 1),
+    ('kids/checkin/do',               'kids/checkin-do.php',              1),
+    ('kids/checkout',                 'kids/checkout.php',                1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    -- 135_song_library.sql
+    (NULL, 'worship.ccli_account_number', '', '', 0)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
+-- =============================================================================
+-- Migrations 137-144: worship plans / presenter / phase 3 / host console /
+-- API keys / discipleship / live chat / push prompts
+-- =============================================================================
+
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    -- 137_worship_service_plans.sql
+    ('worship/plans',                          'worship/plans.php',                       1),
+    ('worship/plan',                           'worship/plan.php',                        1),
+    ('worship/plan/save',                      'worship/plan-save.php',                   1),
+    -- 138_worship_present_state.sql (#308)
+    ('worship/present',                        'worship/present.php',                     1),
+    ('worship/display',                        'worship/display.php',                     0),
+    ('api/worship/state',                      'api/worship-state.php',                   0),
+    ('api/worship/advance',                    'api/worship-advance.php',                 1),
+    -- 139_worship_phase3.sql
+    ('worship/plan/reorder',                   'worship/plan-reorder.php',                1),
+    ('admin/reports/ccli',                     'admin/reports/ccli.php',                  1),
+    -- 140_host_console.sql (#317)
+    ('admin/host-console',                     'admin/host-console/index.php',            1),
+    ('admin/host-console/event',               'admin/host-console/event.php',            1),
+    -- 141_api_keys.sql (#323)
+    ('admin/integrations/api-keys',            'admin/integrations/api-keys.php',         1),
+    ('admin/integrations/api-keys/save',       'admin/integrations/api-keys-save.php',    1),
+    ('admin/integrations/api-keys/revoke',     'admin/integrations/api-keys-revoke.php',  1),
+    ('admin/integrations/api-keys/rotate',     'admin/integrations/api-keys-rotate.php',  1),
+    -- 142_discipleship_pathways.sql (#303)
+    ('admin/discipleship/pathways',            'admin/discipleship/pathways.php',         1),
+    ('admin/discipleship/pathways/new',        'admin/discipleship/pathway-form.php',     1),
+    ('admin/discipleship/pathways/edit',       'admin/discipleship/pathway-form.php',     1),
+    ('admin/discipleship/pathways/save',       'admin/discipleship/pathway-save.php',     1),
+    ('admin/discipleship/pathways/delete',     'admin/discipleship/pathway-delete.php',   1),
+    ('admin/discipleship/pathways/step/save',  'admin/discipleship/step-save.php',        1),
+    ('admin/discipleship/pathways/step/delete','admin/discipleship/step-delete.php',      1),
+    -- 143_cop_live_chat.sql (#313)
+    ('admin/live/chat',                        'admin/live/chat.php',                     1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    -- 139_worship_phase3.sql — NOTE: value is a literal regex; the SQL below
+    -- stores the 10 characters  /\n\s*\n/  (backslash-escapes, copy EXACTLY)
+    (NULL, 'worship.song_verse_separator',      '/\\n\\s*\\n/', '/\\n\\s*\\n/', 0),
+    -- 142_discipleship_pathways.sql
+    (NULL, 'discipleship.enabled',              'false', 'false', 0),
+    -- 143_cop_live_chat.sql
+    (NULL, 'chat.enabled',                      'false', 'false', 0),
+    (NULL, 'chat.autoApprove',                  'false', 'false', 0),
+    (NULL, 'chat.maxBodyChars',                 '500',   '500',   0),
+    (NULL, 'chat.maxMsgsPerWindow',             '5',     '5',     0),
+    (NULL, 'chat.windowSeconds',                '60',    '60',    0),
+    (NULL, 'chat.profanityList',                '',      '',      0),
+    (NULL, 'api.livechat.send.enabled',         'true',  'true',  0),
+    (NULL, 'api.livechat.list.enabled',         'true',  'true',  0),
+    (NULL, 'api.livechat.moderate.enabled',     'true',  'true',  0),
+    -- 144_host_push_prompts.sql
+    (NULL, 'api.livechat.prompts.enabled',        'true', 'true', 0),
+    (NULL, 'api.livechat.prompt-publish.enabled', 'true', 'true', 0),
+    (NULL, 'api.livestream.ping.enabled',         'true', 'true', 0),
+    (NULL, 'chat.promptDefaultExpirySecs',        '300',  '300',  0)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
+
+-- =============================================================================
 -- Migration 145: Community Noticeboard — poster wall (#360)
 -- =============================================================================
 
@@ -4957,9 +5238,12 @@ CREATE TABLE IF NOT EXISTS `tblServicePlans` (
     `createdByID`   INT          DEFAULT NULL,
     `createdAt`     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     `updatedAt`     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    `displayToken`  CHAR(64)     DEFAULT NULL
+                    COMMENT '64-char hex token for the projector display URL — minted lazily (migration 138)',
     PRIMARY KEY (`planID`),
     KEY `idx_plan_site_active` (`siteID`, `isActive`, `updatedAt`),
     KEY `idx_plan_event`       (`eventID`),
+    UNIQUE KEY `uq_plan_display_token` (`displayToken`),
     CONSTRAINT `fk_plan_site`    FOREIGN KEY (`siteID`)      REFERENCES `tblSites`(`siteID`) ON DELETE CASCADE,
     CONSTRAINT `fk_plan_event`   FOREIGN KEY (`eventID`)     REFERENCES `tblEvents`(`eventID`) ON DELETE SET NULL,
     CONSTRAINT `fk_plan_creator` FOREIGN KEY (`createdByID`) REFERENCES `tblUsers`(`userID`)  ON DELETE SET NULL
@@ -4987,6 +5271,8 @@ CREATE TABLE IF NOT EXISTS `tblServicePlanItems` (
 CREATE TABLE IF NOT EXISTS `tblServicePlanState` (
     `planID`            INT          NOT NULL,
     `currentItemID`     INT          DEFAULT NULL,
+    `currentSlideIndex` INT          NOT NULL DEFAULT 0
+                        COMMENT 'For multi-verse song items: 0-based verse index within the current item (migration 139)',
     `isBlank`           TINYINT(1)   NOT NULL DEFAULT 0
                         COMMENT 'Logo / brand background instead of slide',
     `isBlack`           TINYINT(1)   NOT NULL DEFAULT 0
@@ -5178,3 +5464,184 @@ CREATE TABLE IF NOT EXISTS `tblNoticeboardPosters` (
     CONSTRAINT `fk_poster_updater` FOREIGN KEY (`updatedByID`) REFERENCES `tblUsers` (`userID`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
 COMMENT='Noticeboard (pinboard) posters';
+
+
+-- #############################################################################
+-- SECTION 7B: MARK MIGRATIONS 082-083 + 090-145 AS EXECUTED (#364 / #194)
+-- (082/083 seed data was already ported above but their filenames were never
+--  added to the SECTION 7 block; 090-145 are the post-0.9.0 migrations.)
+-- #############################################################################
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('082_tour_playback.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('083_settings_subpages.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('090_livestream.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('091_recordings.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('092_zoom.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('093_newsletter.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('094_giving.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('095_sms.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('096_projects.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('097_payments.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('098_transcription.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('099_translation.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('100_ai_assist.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('101_gdpr_erasure.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('102_photos.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('103_offsite_sync.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('104_dr_runbook_route.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('105_error_monitoring.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('106_api_write_crud.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('107_offline_queue.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('108_product_brand_layer.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('109_pr297_deferred_followups.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('110_easy_wins_bundle.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('111_cop_easy_wins.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('112_events_calendar_easy_wins.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('113_per_event_documents.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('114_event_coordinator_role.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('115_volunteer_resource_portal.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('116_multi_day_attendance_grid.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('117_event_crews.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('118_event_jobs.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('119_event_broadcast.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('120_event_multiple_orgs.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('121_event_rsvp_tokens.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('122_event_reminders.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('123_event_public_landing.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('124_event_registrations.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('125_dbs_safeguarding.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('126_event_auto_build.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('127_embeddable_widgets.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('128_event_occurrence_overrides.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('129_external_calendar_feeds.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('130_anonymous_attendance.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('131_decision_moments.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('132_salvation_cards.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('133_livestream_analytics.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('134_denominational_reports.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('135_song_library.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('136_kid_checkin.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('137_worship_service_plans.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('138_worship_present_state.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('139_worship_phase3.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('140_host_console.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('141_api_keys.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('142_discipleship_pathways.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('143_cop_live_chat.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('144_host_push_prompts.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('145_noticeboard.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;

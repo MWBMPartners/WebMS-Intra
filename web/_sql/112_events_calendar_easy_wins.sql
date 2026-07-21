@@ -93,13 +93,20 @@ ALTER TABLE `tblEvents`
 -- #339 — Per-site unique event slug ------------------------------------------
 -- Replace the global uq_event_slug with a per-site composite. We add the new
 -- index first to avoid a window where slugs are non-unique on busy installs.
--- DROP INDEX has no IF EXISTS in MySQL, so we DROP defensively via a
--- procedure block isn't worth it here; a missing index error on re-run is
--- recoverable. The migrator continues on, and re-runs are idempotent because
--- the second CREATE INDEX IF NOT EXISTS is a no-op.
 
 CREATE UNIQUE INDEX IF NOT EXISTS `uq_event_site_slug` ON `tblEvents`(`siteID`, `eventSlug`);
 
--- On a fresh install full_schema.sql still creates the global unique key.
--- Drop it here. If the migration is re-run, the DROP errors out non-fatally.
-ALTER TABLE `tblEvents` DROP INDEX `uq_event_slug`;
+-- On pre-#339 databases the global unique key still exists; drop it only if
+-- present so re-runs (and post-fix fresh installs, where full_schema.sql now
+-- creates uq_event_site_slug directly) are clean no-ops.
+SET @idx_exists := (
+    SELECT COUNT(*) FROM information_schema.STATISTICS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'tblEvents'
+      AND INDEX_NAME = 'uq_event_slug'
+);
+SET @sql := IF(@idx_exists > 0,
+    'ALTER TABLE `tblEvents` DROP INDEX `uq_event_slug`',
+    'SELECT 1'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;

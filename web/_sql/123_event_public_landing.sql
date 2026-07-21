@@ -10,7 +10,7 @@
 -- @link https://github.com/MWBMPartners/WebMS-Intra/issues/346
 -- =============================================================================
 
-INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isEncrypted`) VALUES
+INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isSensitive`) VALUES
     ('public_landing.show_qr',     '1', 0),
     ('public_landing.show_countdown', '1', 0)
 ON DUPLICATE KEY UPDATE `settingKey` = VALUES(`settingKey`);

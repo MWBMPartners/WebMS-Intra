@@ -23,6 +23,7 @@
 #   9. SQL column-name mismatches                  — runtime INSERT col not in CREATE TABLE
 #  10. Route targetFile existence                  — tblRoutes.targetFile resolves to a file
 #  11. Settings key consistency                    — $SETTINGS reads vs tblSettings seed
+#  12. full_schema.sql fresh-install parity        — migration seeds/marks vs full_schema.sql
 #
 # These are HEURISTICS — false positives are expected. Review the findings,
 # don't blindly fail the merge.
@@ -31,6 +32,9 @@
 # missed-bug rounds (#169 → #171 → #198 → #201/202/204/205/206/207 →
 # #213): each was a category of "code references something that doesn't
 # exist in another source" — a class the prior heuristics didn't cover.
+# Check 12 (#364 / #194 / #339) was added after a similar audit found
+# fresh installs missing every seed row from migrations 090-145 because
+# full_schema.sql's tblMigrations seed block only recorded through 089.
 # The scripts live in tools/audit-checks/ and are runnable locally.
 # =============================================================================
 
@@ -252,6 +256,12 @@ jobs:
           if echo "$SETTINGS" | grep -qE '•.*no fallback'; then
             UNGUARDED=$(echo "$SETTINGS" | sed -n '/UNGUARDED/,/###\|^$/p')
             add_section "Unseeded settings reads (UNGUARDED — null on missing key)" "$UNGUARDED"
+          fi
+
+          # 12) full_schema.sql fresh-install parity (#364 / #194 / #339)
+          PARITY=$(python3 tools/audit-checks/check_schema_seed_parity.py 2>&1 | tail -n +6 || true)
+          if echo "$PARITY" | grep -q '•'; then
+            add_section "full_schema.sql parity gaps (migration seeds/marks missing from fresh-install schema)" "$PARITY"
           fi
 
           echo "hits=$HITS" >> "$GITHUB_OUTPUT"

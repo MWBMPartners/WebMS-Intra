@@ -34,7 +34,7 @@ ALTER TABLE `tblEvents`
     ADD COLUMN IF NOT EXISTS `externalUid`    VARCHAR(255) DEFAULT NULL AFTER `externalFeedID`,
     ADD INDEX IF NOT EXISTS `idx_event_external` (`externalFeedID`, `externalUid`);
 
-INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isEncrypted`) VALUES
+INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isSensitive`) VALUES
     ('feeds.cron_token', '', 0)
 ON DUPLICATE KEY UPDATE `settingKey` = VALUES(`settingKey`);
 
