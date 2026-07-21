@@ -7,13 +7,40 @@
 #     declares vendored libraries so Dependabot can report CVEs)
 #   - npm (none yet — placeholder so adding a package.json later auto-picks up)
 #
+# -----------------------------------------------------------------------------
+# THREE-TIER BRANCH COVERAGE (alpha -> beta -> main)   (#370)
+# -----------------------------------------------------------------------------
+# We deploy through three tiers. Dependabot reads THIS file only from the
+# repository's DEFAULT branch (main), but each `updates:` entry may set
+# `target-branch:` to open its PRs against a different branch. Each ecosystem
+# is therefore declared THREE times: once with no target-branch (defaults to
+# main) and once each for `alpha` and `beta`. This keeps every deploy tier
+# patched instead of leaving alpha/beta drifting behind main between
+# promotions.
+#
+# NOTE — version updates vs security updates:
+#   * Dependabot *version updates* (configured here) DO honour `target-branch`,
+#     so alpha/beta receive the same dependency bumps on the weekly schedule.
+#     A bump to a patched release IS the security fix in practice.
+#   * Dependabot *security updates* (auto-raised from Dependabot Alerts) can
+#     ONLY target the default branch (main) — GitHub does not support
+#     retargeting them. Alpha/beta pick those fixes up via the version-update
+#     entries below, or when main is promoted down. This is a GitHub platform
+#     limitation; see DEV_NOTES.md → "Dependabot three-tier coverage".
+#
+# CodeQL, PHP static analysis and the PR security heuristics already run on
+# alpha/beta — see .github/workflows/{codeql,php-static-analysis,pr-security}.yml
+#
 # Docs: https://docs.github.com/en/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
 # =============================================================================
 
 version: 2
 
 updates:
+  # ===========================================================================
   # GitHub Actions — keep workflow versions current
+  # ===========================================================================
+  # --- main (default branch) -------------------------------------------------
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
@@ -34,12 +61,91 @@ updates:
         patterns:
           - "*"
 
+  # --- alpha tier ------------------------------------------------------------
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    target-branch: "alpha"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "Europe/London"
+    open-pull-requests-limit: 5
+    labels:
+      - "type: infrastructure"
+      - "scope: ci"
+    commit-message:
+      prefix: "ci(deps)"
+      include: "scope"
+    groups:
+      gh-actions:
+        patterns:
+          - "*"
+
+  # --- beta tier -------------------------------------------------------------
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    target-branch: "beta"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "Europe/London"
+    open-pull-requests-limit: 5
+    labels:
+      - "type: infrastructure"
+      - "scope: ci"
+    commit-message:
+      prefix: "ci(deps)"
+      include: "scope"
+    groups:
+      gh-actions:
+        patterns:
+          - "*"
+
+  # ===========================================================================
   # Composer (manifest-only — see composer.json + DEV_NOTES "Vendored library
   # CVE watching" for the rationale). DreamHost shared hosting has no CLI
   # so we never run `composer install`; the manifest exists purely so
   # Dependabot opens a PR when a watched library has a published CVE.
+  # ===========================================================================
+  # --- main (default branch) -------------------------------------------------
   - package-ecosystem: "composer"
     directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "Europe/London"
+    open-pull-requests-limit: 5
+    labels:
+      - "type: security"
+      - "priority: medium"
+    commit-message:
+      prefix: "deps(composer)"
+      include: "scope"
+
+  # --- alpha tier ------------------------------------------------------------
+  - package-ecosystem: "composer"
+    directory: "/"
+    target-branch: "alpha"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "Europe/London"
+    open-pull-requests-limit: 5
+    labels:
+      - "type: security"
+      - "priority: medium"
+    commit-message:
+      prefix: "deps(composer)"
+      include: "scope"
+
+  # --- beta tier -------------------------------------------------------------
+  - package-ecosystem: "composer"
+    directory: "/"
+    target-branch: "beta"
     schedule:
       interval: "weekly"
       day: "monday"

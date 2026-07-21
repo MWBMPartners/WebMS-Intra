@@ -1,6 +1,12 @@
 # Changelog
 
 
+## [Unreleased] — CI / Infrastructure
+- ci(deps): Dependabot now targets `alpha` + `beta` as well as `main` — github-actions + composer declared on all three tiers (#370)
+- ci: alpha catch-up twin of the `actions/setup-python` 6→7 bump (#369, copy of #368)
+- docs(dev-notes): document three-tier Dependabot coverage + the security-update default-branch limitation (#370)
+
+
 ## [1.2.0] - 2026-07-07 (alpha)
 - 2 apps + iCal feed + admin polish — 7 issues (#258, #261, #271, #251, #254, #253, #252) (#281)
 - 4 community/pastoral apps: Rota + Praise + Milestones + Care (#256, #260, #259, #257) (#280)

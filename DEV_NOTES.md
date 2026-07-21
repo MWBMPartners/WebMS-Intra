@@ -607,6 +607,53 @@ Delete only if alpha branch usage stays at zero for the next 6 months.
 
 ---
 
+## Dependabot three-tier coverage (#370)
+
+We deploy through three tiers — `alpha` → `beta` → `main`. Dependabot
+reads `.github/dependabot.yml` **only from the default branch (`main`)**,
+but each `updates:` entry may set `target-branch:` to raise its PRs
+against a different branch. Each watched ecosystem (`github-actions`,
+`composer`) is therefore declared **three times**: once with no
+`target-branch` (→ `main`), once `target-branch: alpha`, once
+`target-branch: beta`. This keeps every tier patched instead of letting
+`alpha`/`beta` drift behind `main` between promotions.
+
+### Version updates vs security updates — the one gotcha
+
+- **Version updates** (everything in `dependabot.yml`) honour
+  `target-branch`, so `alpha`/`beta` get the same weekly bumps as `main`.
+  A bump to a patched release *is* the security fix in practice.
+- **Security updates** (auto-raised from Dependabot Alerts) can **only**
+  target the default branch (`main`). GitHub provides no way to retarget
+  them. `alpha`/`beta` receive those fixes via the version-update entries
+  above, or when `main` is promoted down. Do not expect Alert-driven PRs
+  on `alpha`/`beta`.
+
+### Security scanning already covers all three tiers
+
+No change was needed for the scanners — they already fan out across
+`main`/`beta`/`alpha`:
+
+| Workflow | Trigger |
+|---|---|
+| `codeql.yml` | push + PR on main/beta/alpha (+ weekly cron) |
+| `php-static-analysis.yml` | push + PR on main/beta/alpha |
+| `pr-security.yml` | PR on main/beta/alpha |
+| `deploy.yml` | push on main/beta/alpha |
+
+So the only real gap was Dependabot, closed here.
+
+### One-off catch-up PRs
+
+When a Dependabot bump lands on `main` before this tri-branch config is
+live (e.g. #368, `actions/setup-python` 6→7), open a manual twin against
+the lower tier so it doesn't wait for the next weekly run — see #369
+(alpha twin of #368). Open lower-tier twins as **draft** PRs:
+`auto-merge-alpha.yml` squash-auto-merges any *non-draft* PR based on
+`alpha` once checks pass.
+
+---
+
 ## Branch protection & rulesets — gotchas
 
 Two GitHub mechanisms can guard a branch in parallel: classic **branch
