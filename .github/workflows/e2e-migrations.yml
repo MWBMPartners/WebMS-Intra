@@ -25,20 +25,15 @@
 name: E2E Migrations
 
 on:
-  push:
-    branches:
-      - main
-      - beta
-      - alpha
-    paths:
-      - 'web/_sql/**'
-      - 'tools/e2e-migrations/**'
-      - '.github/workflows/e2e-migrations.yml'
-  pull_request:
-    paths:
-      - 'web/_sql/**'
-      - 'tools/e2e-migrations/**'
-      - '.github/workflows/e2e-migrations.yml'
+  # ⏸️ Auto-triggers (push / pull_request) are DISABLED pending #375.
+  #    First CI run revealed the harness targets `mysql:8.0.36` and applies
+  #    migrations to an empty DB, but production is MariaDB and the real
+  #    install flow is full_schema-first-then-migrations (foundational tables
+  #    like tblRoutes live only in full_schema.sql). Until the harness is
+  #    corrected (MariaDB image + full_schema-first — see #375) it fails on the
+  #    engine/flow mismatch, so it is manual-only to avoid red-failing PRs.
+  #    Re-add the push/pull_request blocks (paths: web/_sql/**,
+  #    tools/e2e-migrations/**, this file) once #375 lands.
   workflow_dispatch:
 
 permissions:
