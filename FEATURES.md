@@ -13,7 +13,7 @@
 > [CHANGELOG.md](CHANGELOG.md) for chronological history and to [README.md](README.md)
 > for setup, deployment, and licence info.
 >
-> **Snapshot:** 2026-06-21 · **Version on `main`:** 1.3.0 (1.4.0-dev in flight on PR #358)
+> **Snapshot:** 2026-06-21 · **Version on `main`:** 1.2.1
 >
 > **Phase 1 ships sitting on PR #358 — Discipleship Pathway Tracker (#303) + COP Live Chat (#313).** The latter shipped with structural reworks the adversarial review caught (file relocation to ApiRouter's 3-segment convention; CSRF dropped on public /send replaced with sessionToken-exists guard; first-message-only captcha; rate-limit fail-CLOSED).
 >
@@ -128,7 +128,7 @@ Local + SSO + multi-factor sign-in.
 | Account page (profile, change password, linked accounts, WebAuthn keys, unlink) | ✅ |
 | 2FA TOTP setup / verify / disable | ✅ |
 | **Password policy** — min 12 chars (configurable), independent complexity flags, max length, **client-side strength meter** | ✅ (#132) |
-| Login rate limiting (IP-based currently; #52 wants composite IP+username) | 🟡 |
+| Login rate limiting — composite username+IP (`RateLimiter::isUserOrIpBlocked`) | ✅ (#52) |
 
 **Tables:** `tblUsers`, `tblLocalAccounts`, `tblPasswordResets`, `tblLinkedAccounts`, `tblWebAuthnCredentials`, `tblUserTotp`
 **Settings:** `auth.password.minLength`, `auth.password.maxLength`, `auth.password.requireUppercase`, `auth.password.requireLowercase`, `auth.password.requireNumber`, `auth.password.requireSpecial`, `auth.passwordReset.tokenExpiry`, `auth.ms365.*`, `auth.google.*`, `auth.turnstile.*`, `auth.recaptcha.*`, `auth.hcaptcha.*`, `auth.captcha.priority`
@@ -383,7 +383,7 @@ Self-contained 6-step setup wizard (bootstrap-free).
 | Password policy hardened (min 12, independent complexity, max length, full-flow validation) | ✅ (#132) |
 | Multi-provider Captcha with admin priority | ✅ (#130) |
 | Debug mode refused in production (logged, exception traces don't leak) | ✅ (#54) |
-| Login rate limiting on composite IP+username | 🔜 (#52) |
+| Login rate limiting on composite IP+username | ✅ (#52) |
 | Signed commits enforced | 🔜 (#106) |
 | Prod secrets behind GitHub Environment + reviewer gate | 🔜 (#105) |
 | Privacy / GDPR helpers | 🔜 (#47) |
@@ -406,7 +406,7 @@ Self-contained 6-step setup wizard (bootstrap-free).
 
 - 3-branch SFTP deploy (alpha / beta / main) via `lftp`, SSH-key with password fallback.
 - `--delete` mirror on shared dirs (`core/`, `vendor/`, `sql/`, …) — see [DEV_NOTES.md → Troubleshooting](DEV_NOTES.md#troubleshooting) for survival rules.
-- `dry_run` `workflow_dispatch` input on `deploy.yml` for preview-mode deploys (#107).
+- `dry_run` `workflow_dispatch` input on `deploy.yml` for preview-mode deploys (#107 — mostly done; residual: server-side `--delete` deletion-log/audit monitor).
 - `gitleaks` CLI for secret scanning (free MIT binary, not the licensed action).
 - Repo config audit workflow (#108).
 - `version-bump.yml`, `changelog.yml`, `release.yml`, `auto-merge-alpha.yml`.
@@ -456,13 +456,11 @@ When these merge, the 🛠️ markers above flip to ✅ without further edits to
 | #127 | WordPress Multisite integration — design + phased implementation (3–4 weeks) |
 | #128 | Order of Service planner app + iHymns integration (gated on iHymns permission) |
 | #97–#103 | BookIT calendar-provider abstraction (7-PR series) |
-| #111 | UI refresh umbrella — practically done via PRs #114–#126; can likely be closed |
-| #52 | Login rate-limit composite IP+username |
 | #47 | Privacy & GDPR compliance helpers |
 | #40 | Payment integration prep |
 | #106 | Enforce signed commits |
 | #105 | Prod secrets behind GitHub Environment + reviewer gate |
-| #107 | SFTP `--delete` operational documentation (partially addressed by PR #134) |
+| #107 | SFTP `--delete` operational documentation — mostly done (dry-run + docs shipped via PR #134); residual: server-side deletion-log/audit monitor |
 
 ---
 

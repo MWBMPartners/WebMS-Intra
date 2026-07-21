@@ -4,8 +4,8 @@
 
 Internal portal platform (PHP 8.5, backward-compatible with 8.4, MySQL 8.0, Bootstrap 5.3.3) hosted on DreamHost shared hosting. No CLI, no Composer.
 
-- **Version:** 1.2.0 (on `main`; bump in `web/_core/version.php` — single source of truth)
-- **Brand layer:** runtime product brand picked at install (#296, PR #297). Presets: `WebMS Intra` (generic, default), `ChurchMS` (church). School/charity/community/small-business stubbed. See `web/_core/brand-defaults.php` + `Site::productName()`. PWA manifest is a brand-aware PHP controller (`manifest.php`); `openapi.json` is still static (deferred — see DEV_NOTES "Deferred follow-ups from PR #297").
+- **Version:** 1.2.1 (on `main`; bump in `web/_core/version.php` — single source of truth)
+- **Brand layer:** runtime product brand picked at install (#296, PR #297). Presets: `WebMS Intra` (generic, default), `ChurchMS` (church). School/charity/community/small-business stubbed. See `web/_core/brand-defaults.php` + `Site::productName()`. PWA manifest is a brand-aware PHP controller (`manifest.php`); the OpenAPI spec is likewise served brand-aware via `public_html/openapi.php` + `_core/api-spec.json` (#307).
 - **Licence:** All Rights Reserved — MWBM Partners Ltd (t/a MWservices)
 - **Repo:** github.com/MWBMPartners/WebMS-Intra
 - **Server:** portal.millrdsdacambridge.uk
@@ -24,7 +24,7 @@ web/                <- ALL deployable files (synced to server via SFTP)
                        app's PHP handlers live here; Router resolves
                        tblRoutes.targetFile against PORTAL_APPS = _apps/.
   _vendor/simplejwt/<- Vendored RS256 JWT verifier
-  _sql/             <- Numbered SQL migrations (000-104 + full_schema.sql)
+  _sql/             <- Numbered SQL migrations (000-145 + full_schema.sql)
   _lang/            <- I18n translation files (en.php, cy.php, …)
   _install/         <- Standalone 6-step installation wizard (bootstrap-free)
   public_html/      <- Web root: ONLY the front controller + static assets +
@@ -33,7 +33,7 @@ web/                <- ALL deployable files (synced to server via SFTP)
                        PHP file lives in _apps/. Branch-based deploy mirrors
                        this dir to the server's public_html/ (main),
                        public_html_beta/ (beta) or public_html_dev/ (alpha).
-    index.php, error.php, .htaccess, manifest.json, openapi.json,
+    index.php, error.php, .htaccess, manifest.php, openapi.php,
     robots.txt, sw.js, assets/, api-docs/, offline/
   private_html/, public_html_landing/, public_html_redir/  <- non-app server dirs
   _auth_keys/       <- Credentials + encryption key (gitignored, server-managed)

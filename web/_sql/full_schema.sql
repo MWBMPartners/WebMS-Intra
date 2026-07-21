@@ -13,9 +13,11 @@
 -- present in web/_sql/ are marked as executed in tblMigrations so the
 -- web-based Migrator won't re-run them.
 --
--- Covers migrations: 000-104 (matches the tblMigrations seed block at the
--- end of this file — when you add a new migration, also add its filename
--- to that block and port its DDL/seeds into the appropriate section here).
+-- Covers migrations: 000-145 (DDL/tables). KNOWN GAP: the tblMigrations seed
+-- block at the end of this file only records through 089, and some 090-145
+-- tblSettings/tblRoutes seeds are not yet backfilled into the sections above
+-- — tracked in #364 / #194. When you add a new migration, port its DDL/seeds
+-- into the appropriate section here AND add its filename to the seed block.
 -- =============================================================================
 -- @package   Portal\Database
 -- @author    MWBM Partners Ltd (t/a MWservices)
