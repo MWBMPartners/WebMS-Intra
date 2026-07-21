@@ -78,9 +78,17 @@ mysql_file() {
 }
 
 wait_for_mysql() {
-    echo -n "→ Waiting for MySQL to accept connections "
-    for i in $(seq 1 60); do
-        if docker exec portal-e2e-mysql mysqladmin ping -h localhost -u"${DB_USER}" -p"${DB_PASS}" >/dev/null 2>&1; then
+    echo -n "→ Waiting for MySQL to be ready (authenticated) "
+    # NB: `mysqladmin ping` reports success even when auth is denied (an
+    # "access denied" reply still proves the server is alive), so it goes
+    # green before the MySQL image has finished its first-boot init — the
+    # root password isn't set yet and the first real query then fails with
+    # ERROR 1045. Poll an AUTHENTICATED query over TCP instead: the image's
+    # temporary init server runs with --skip-networking, so a TCP connect
+    # only succeeds once the real, fully-initialised server is up.
+    for i in $(seq 1 90); do
+        if docker exec portal-e2e-mysql mysql -u"${DB_USER}" -p"${DB_PASS}" \
+                -h 127.0.0.1 --protocol=TCP -e "SELECT 1;" >/dev/null 2>&1; then
             echo " ready."
             return 0
         fi
@@ -88,6 +96,8 @@ wait_for_mysql() {
         sleep 1
     done
     echo " timeout!" >&2
+    echo "→ Last 30 lines of container log:" >&2
+    docker logs portal-e2e-mysql 2>&1 | tail -30 >&2 || true
     exit 1
 }
 
