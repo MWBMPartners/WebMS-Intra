@@ -75,6 +75,12 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
      under /assets/vendor/react/ and loaded before the bundle (nonce'd, deferred);
      loadReactUmd() in noeval.js short-circuits when window.React / window.ReactDOM
      pre-exist so no unpkg fetch happens. -->
+<!-- #361 — self-hosted @font-face for the board's four Google-sourced
+     families (hand-maintained CSS, not part of the generated bundle). Must
+     load BEFORE noticeboard.css so the faces exist before anything renders
+     text with them; supersedes the generated CSS's CSP-blocked Google Fonts
+     @import (see fonts-selfhost.css header + DEV_NOTES.md). -->
+<link rel="stylesheet" href="/assets/noticeboard/fonts-selfhost.css">
 <link rel="stylesheet" href="/assets/noticeboard/noticeboard.css">
 <script nonce="<?php echo htmlspecialchars($nonce, ENT_QUOTES, 'UTF-8'); ?>" src="/assets/vendor/react/react-18.3.1.production.min.js" defer></script>
 <script nonce="<?php echo htmlspecialchars($nonce, ENT_QUOTES, 'UTF-8'); ?>" src="/assets/vendor/react/react-dom-18.3.1.production.min.js" defer></script>
