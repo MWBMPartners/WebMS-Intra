@@ -3868,7 +3868,7 @@ CREATE TABLE IF NOT EXISTS `tblUserSmsPreference` (
     `updatedAt`           DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (`preferenceID`),
     UNIQUE KEY `uq_sp_site_user` (`siteID`, `userID`),
-    CONSTRAINT `fk_sp_site` FOREIGN KEY (`siteID`) REFERENCES `tblSites`(`siteID`),
+    CONSTRAINT `fk_usp_site` FOREIGN KEY (`siteID`) REFERENCES `tblSites`(`siteID`),
     CONSTRAINT `fk_sp_user` FOREIGN KEY (`userID`) REFERENCES `tblUsers`(`userID`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
