@@ -13,7 +13,7 @@
 -- present in web/_sql/ are marked as executed in tblMigrations so the
 -- web-based Migrator won't re-run them.
 --
--- Covers migrations: 000-146 (DDL + settings/routes seeds + tblMigrations
+-- Covers migrations: 000-147 (DDL + settings/routes seeds + tblMigrations
 -- marks). When you add a new migration, port its DDL/seeds into the
 -- appropriate section here AND add its filename to the seed block at the
 -- end of this file. CI enforces this via
@@ -1164,6 +1164,8 @@ CREATE TABLE IF NOT EXISTS `tblAuditTrail` (
     `auditID`    INT          NOT NULL AUTO_INCREMENT,
     `siteID`     INT          DEFAULT NULL,
     `userID`     INT          DEFAULT NULL,
+    `apiKeyID`   INT          DEFAULT NULL COMMENT 'tblApiKeys.keyID when the change arrived via bearer API key (#323 Phase 2)',
+    `source`     ENUM('session','apikey') NOT NULL DEFAULT 'session' COMMENT 'Auth channel that made the change (#323 Phase 2)',
     `tableName`  VARCHAR(100) NOT NULL COMMENT 'Affected database table',
     `recordID`   INT          NOT NULL COMMENT 'Primary key of affected record',
     `action`     ENUM('create','update','delete') NOT NULL,
@@ -1178,7 +1180,8 @@ CREATE TABLE IF NOT EXISTS `tblAuditTrail` (
     KEY `idx_audit_user` (`userID`),
     KEY `idx_audit_site` (`siteID`),
     KEY `idx_audit_date` (`createdAt`),
-    KEY `idx_audit_action` (`action`, `tableName`)
+    KEY `idx_audit_action` (`action`, `tableName`),
+    KEY `idx_audit_apikey` (`apiKeyID`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
 COMMENT='Detailed audit trail with before/after change tracking';
 
@@ -4777,6 +4780,29 @@ ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
 
 
 -- =============================================================================
+-- Migration 147: REST API v1 write surface — schema + primitives (#323 Phase 2 B1)
+-- =============================================================================
+
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'api.attendance.create.enabled',    'true',    'true',    0),
+    (NULL, 'api.attendance.update.enabled',    'true',    'true',    0),
+    (NULL, 'api.attendance.delete.enabled',    'true',    'true',    0),
+    (NULL, 'api.documents.create.enabled',     'true',    'true',    0),
+    (NULL, 'api.documents.update.enabled',     'true',    'true',    0),
+    (NULL, 'api.documents.delete.enabled',     'true',    'true',    0),
+    (NULL, 'api.expenses.create.enabled',      'true',    'true',    0),
+    (NULL, 'api.expenses.update.enabled',      'true',    'true',    0),
+    (NULL, 'api.expenses.delete.enabled',      'true',    'true',    0),
+    (NULL, 'api.users.create.enabled',         'false',   'false',   0),
+    (NULL, 'api.users.update.enabled',         'false',   'false',   0),
+    (NULL, 'api.rateLimit.perKey.maxRequests', '300',     '300',     0),
+    (NULL, 'api.rateLimit.perKey.windowMinutes','5',      '5',       0),
+    (NULL, 'api.keys.rotationGraceHours',      '24',      '24',      0),
+    (NULL, 'documents.api.maxUploadBytes',     '10485760','10485760',0)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
+
+-- =============================================================================
 -- Tables added in numbered migrations 105+ — appended for fresh-install parity.
 -- Maintained automatically; do NOT hand-edit duplicates. See the same
 -- definitions in web/_sql/{105..144}_*.sql for the source of truth + comments.
@@ -5356,6 +5382,7 @@ CREATE TABLE IF NOT EXISTS `tblApiKeys` (
     `createdAt`    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     `revokedAt`    DATETIME     DEFAULT NULL,
     `revokedByID`  INT          DEFAULT NULL,
+    `rotatedToID`  INT          DEFAULT NULL COMMENT 'keyID of the replacement key minted by rotate(); old key stays live until expiresAt grace cutoff (#323 Phase 2)',
     PRIMARY KEY (`keyID`),
     UNIQUE KEY `uq_apikey_hash`     (`keyHash`),
     KEY        `idx_apikey_site`    (`siteID`, `isActive`),
@@ -5499,6 +5526,17 @@ CREATE TABLE IF NOT EXISTS `tblNoticeboardPosters` (
     CONSTRAINT `fk_poster_updater` FOREIGN KEY (`updatedByID`) REFERENCES `tblUsers` (`userID`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
 COMMENT='Noticeboard (pinboard) posters';
+
+
+-- ── from 147_api_v1_write_surface.sql ──────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS `tblApiRateLimits` (
+    `hitID`   BIGINT       NOT NULL AUTO_INCREMENT,
+    `bucket`  VARCHAR(120) NOT NULL COMMENT 'Limiter bucket key, e.g. apikey:42',
+    `hitAt`   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`hitID`),
+    KEY `idx_ratelimit_bucket` (`bucket`, `hitAt`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+COMMENT='Sliding-window API hit log — pruned opportunistically by RateLimiter (#323 Phase 2)';
 
 
 -- #############################################################################
@@ -5682,4 +5720,7 @@ INSERT INTO `tblMigrations` (`filename`) VALUES ('145_noticeboard.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
 INSERT INTO `tblMigrations` (`filename`) VALUES ('146_noticeboard_help_route.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('147_api_v1_write_surface.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;
