@@ -22,7 +22,7 @@ use Portal\Core\Site;
 ApiAuth::requireMethod('POST');
 $body = ApiAuth::requireWrite('announcements:write');
 
-$id = (int) ($body['announcementID'] ?? 0);
+$id = (int) ($_GET['id'] ?? $body['announcementID'] ?? 0);
 if ($id <= 0) {
     ApiResponse::error('announcementID is required', 400);
 }

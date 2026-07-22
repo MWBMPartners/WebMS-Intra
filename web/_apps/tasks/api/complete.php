@@ -23,7 +23,7 @@ use Portal\Core\Site;
 ApiAuth::requireMethod('POST');
 $body = ApiAuth::requireWrite('tasks:write', sessionNeedsAdmin: false);
 
-$id = (int) ($body['taskID'] ?? 0);
+$id = (int) ($_GET['id'] ?? $body['taskID'] ?? 0);
 if ($id <= 0) {
     ApiResponse::error('taskID is required', 400);
 }
@@ -44,7 +44,11 @@ $stmt->close();
 if ($task === null) {
     ApiResponse::error('Task not found', 404);
 }
-if ((int) $task['assignedToID'] !== $callerId && $isAdmin === false) {
+// Session mode enforces "assignee or admin"; a bearer key with tasks:write is
+// already site-scoped-authorised, so it may complete any task in its site.
+if (ApiAuth::source() === 'session'
+    && (int) $task['assignedToID'] !== $callerId && $isAdmin === false
+) {
     ApiResponse::error('Only the assignee or an admin can complete this task', 403);
 }
 if ((string) $task['status'] === 'completed') {

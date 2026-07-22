@@ -23,7 +23,7 @@ use Portal\Core\Site;
 ApiAuth::requireMethod('POST');
 $body = ApiAuth::requireWrite('tasks:write', sessionNeedsAdmin: false);
 
-$id = (int) ($body['taskID'] ?? 0);
+$id = (int) ($_GET['id'] ?? $body['taskID'] ?? 0);
 if ($id <= 0) {
     ApiResponse::error('taskID is required', 400);
 }
@@ -43,7 +43,11 @@ $stmt->close();
 if ($task === null) {
     ApiResponse::error('Task not found', 404);
 }
-if ((int) $task['createdByID'] !== $callerId && App::isAdmin() === false) {
+// Session mode enforces "creator or admin"; a bearer key with tasks:write is
+// already site-scoped-authorised, so it may delete any task in its site.
+if (ApiAuth::source() === 'session'
+    && (int) $task['createdByID'] !== $callerId && App::isAdmin() === false
+) {
     ApiResponse::error('Only the creator or an admin can delete this task', 403);
 }
 

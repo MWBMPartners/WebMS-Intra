@@ -447,6 +447,20 @@ class Site
      */
     public static function forceContext(int $siteId): void
     {
+        // 🚧 When multisite is disabled the whole install is siteID=1 by
+        //    invariant (Site::init forces it). A stale API key still carrying a
+        //    non-default siteID must NOT resurrect multi-tenancy — refuse rather
+        //    than re-point (fail closed; #323 Phase 2 review finding 2). A key
+        //    whose site already equals the current (single) site is a no-op.
+        if (self::isMultisiteEnabled() === false) {
+            if ($siteId === self::$currentSiteID) {
+                return;
+            }
+            throw new \RuntimeException(
+                'Site::forceContext: multisite disabled; refusing to switch to site ' . $siteId
+            );
+        }
+
         $db = App::db();
 
         $stmt = $db->prepare(

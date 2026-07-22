@@ -53,6 +53,9 @@ final class ApiAuth
     /** @var bool Whether an auth resolution has completed this request. */
     private static bool $resolved = false;
 
+    /** @var bool Whether the bearer-key lookup has run (caches the null case too). */
+    private static bool $bearerResolved = false;
+
     /** Fallback per-key rate-limit window (overridden by api.rateLimit.perKey.* settings). */
     private const DEFAULT_MAX_REQUESTS  = 300;
     private const DEFAULT_WINDOW_MINUTES = 5;
@@ -80,6 +83,38 @@ final class ApiAuth
         }
         $token = trim(substr($auth, 7));
         return str_starts_with($token, ApiKey::TOKEN_PREFIX);
+    }
+
+    /**
+     * Resolve the bearer API-key row ONCE per request (cached, including the
+     * null outcome). Returns the tblApiKeys row for a valid, unexpired `wbms_`
+     * token, or null when the request is not bearer / the token is invalid or
+     * expired. Does NOT enforce scope or emit 401 — it is a pure lookup so the
+     * router can resolve the key's SITE (for the site-scoped `enabled` gate,
+     * #323 Phase 2 review finding 1) BEFORE the handler runs, and so
+     * resolveBearer() can reuse the same lookup rather than hit the DB twice.
+     *
+     * @return array<string,mixed>|null
+     */
+    public static function bearerKeyRow(): ?array
+    {
+        if (self::$bearerResolved === true) {
+            return self::$keyRow;
+        }
+        self::$bearerResolved = true;
+
+        if (self::isBearer() === false) {
+            return null;
+        }
+        $auth  = (string) (
+            $_SERVER['HTTP_AUTHORIZATION']
+            ?? $_SERVER['REDIRECT_HTTP_AUTHORIZATION']
+            ?? ''
+        );
+        $token = trim(substr($auth, 7));
+        // findByPlaintext returns null for unknown/expired/revoked tokens.
+        self::$keyRow = ApiKey::findByPlaintext($token);
+        return self::$keyRow;
     }
 
     /* ====================================================================== */
@@ -192,19 +227,31 @@ final class ApiAuth
      */
     private static function resolveBearer(string $scope): void
     {
-        // Phase-1 helper: 401 invalid/expired, 403 missing scope (wildcards handled).
-        $row = ApiResponse::requireApiKey([$scope]);
-        self::$keyRow   = $row;
+        // Cached lookup (may already have run for the router's enabled gate).
+        $row = self::bearerKeyRow();
+        if ($row === null) {
+            ApiResponse::error('Invalid or expired API key', 401);
+        }
+        // Scope enforcement (wildcards `*` / `res:*` handled by ApiKey::hasScope).
+        if (ApiKey::hasScope($row, $scope) === false) {
+            ApiResponse::error('API key missing required scope: ' . $scope, 403);
+        }
         self::$source   = 'apikey';
         self::$resolved = true;
 
         // 🏢 Tenant pinning (security-critical): the key's siteID is authoritative.
         //    Without a session, Site::id() is only the host-detected default, so
         //    re-point it to the key's site — this makes every Site::id()-scoped
-        //    query in the handler tenant-correct. Fail CLOSED (never fall back to
-        //    the default site) if the key's site is missing/inactive.
+        //    query in the handler tenant-correct. A key MUST resolve to a
+        //    concrete site: keySite <= 0 fails CLOSED (never proceed under the
+        //    ambient host-detected default), as does a missing/inactive site
+        //    (Site::forceContext throws) — review finding 1/3.
         $keySite = (int) ($row['siteID'] ?? 0);
-        if ($keySite > 0 && $keySite !== Site::id()) {
+        if ($keySite <= 0) {
+            Logger::errorPlatform('API', 'Error', 'API_KEY_NO_SITE', 'API key has no valid siteID', '');
+            ApiResponse::error('API key site is unavailable', 500);
+        }
+        if ($keySite !== Site::id()) {
             try {
                 Site::forceContext($keySite);
             } catch (\Throwable $e) {
@@ -214,10 +261,12 @@ final class ApiAuth
         }
 
         // ⏱️ Per-key sliding-window rate limit (applies to reads AND writes).
+        //    Config is resolved against the PINNED site (settingForSite), not the
+        //    frozen bootstrap snapshot for the host-detected site — review finding 1.
         $keyId  = (int) ($row['keyID'] ?? 0);
         $bucket = 'apikey:' . $keyId;
-        $max    = (int) (App::settings('api.rateLimit.perKey.maxRequests') ?? self::DEFAULT_MAX_REQUESTS);
-        $windowSecs = ((int) (App::settings('api.rateLimit.perKey.windowMinutes') ?? self::DEFAULT_WINDOW_MINUTES)) * 60;
+        $max    = (int) (App::settingForSite('api.rateLimit.perKey.maxRequests', $keySite) ?? self::DEFAULT_MAX_REQUESTS);
+        $windowSecs = ((int) (App::settingForSite('api.rateLimit.perKey.windowMinutes', $keySite) ?? self::DEFAULT_WINDOW_MINUTES)) * 60;
         if ($max > 0 && $windowSecs > 0) {
             if (RateLimiter::tooMany($bucket, $max, $windowSecs) === true) {
                 header('Retry-After: ' . RateLimiter::retryAfter($bucket, $max, $windowSecs));

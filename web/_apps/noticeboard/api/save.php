@@ -26,7 +26,7 @@ $body = ApiAuth::requireWrite('noticeboard:write', sessionNeedsAdmin: false);
 // reads App::user() (session-only), it also fails closed for bearer keys —
 // see #323 Phase 2 B3 report for the follow-up needed to let a scoped bearer
 // key through (e.g. a site-pinned key implicitly counted as site-admin here).
-if (App::isSiteAdmin() === false) {
+if (ApiAuth::source() === 'session' && App::isSiteAdmin() === false) {
     ApiResponse::error('Admin access required', 403);
 }
 

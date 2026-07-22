@@ -24,7 +24,7 @@ use Portal\Core\Site;
 ApiAuth::requireMethod('POST');
 $body = ApiAuth::requireWrite('leadership:write');
 
-$id = (int) ($body['assignmentID'] ?? 0);
+$id = (int) ($_GET['id'] ?? $body['assignmentID'] ?? 0);
 if ($id <= 0) {
     ApiResponse::error('assignmentID is required', 400);
 }

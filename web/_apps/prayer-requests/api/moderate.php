@@ -29,11 +29,16 @@ ApiAuth::requireMethod('POST');
 // scope (no per-role concept for API keys yet).
 $body = ApiAuth::requireWrite('prayer-requests:write', sessionNeedsAdmin: false);
 
-if (App::isAdmin() === false && App::hasRole('prayer_team') === false) {
+// Session mode gates on admin OR the prayer_team role; a bearer key is already
+// authorised by its prayer-requests:write scope + site pin, so skip this
+// session-only role gate for bearer (#323 Phase 2 review — dual-mode).
+if (ApiAuth::source() === 'session'
+    && App::isAdmin() === false && App::hasRole('prayer_team') === false
+) {
     ApiResponse::error('Forbidden — moderation requires admin or prayer_team role', 403);
 }
 
-$id     = (int) ($body['requestID'] ?? 0);
+$id     = (int) ($_GET['id'] ?? $body['requestID'] ?? 0);
 $status = (string) ($body['status'] ?? '');
 if ($id <= 0) {
     ApiResponse::error('requestID is required', 400);

@@ -113,9 +113,13 @@ class ApiRouter
             ApiResponse::error('API endpoint not found', 404);
         }
 
-        // 🔍 Check if the API endpoint is enabled in settings
-        global $SETTINGS;
-        $enabled = self::resolveSetting($SETTINGS, 'api.' . $appName . '.' . $action . '.enabled');
+        // 🔍 Check if the API endpoint is enabled in settings. For a bearer
+        //    request the authoritative site is the KEY's site, not the
+        //    host-detected site the bootstrap $SETTINGS snapshot was frozen for
+        //    — resolve a per-site override against the key's site so a site's
+        //    own kill-switch can't be bypassed via the Host header (#323 Phase 2
+        //    review finding 1). Session/anonymous requests keep the snapshot.
+        $enabled = self::resolveEnabledFlag('api.' . $appName . '.' . $action . '.enabled');
 
         if ($enabled !== 'true') {
             ApiResponse::error('This API endpoint is disabled', 403);
@@ -123,6 +127,27 @@ class ApiRouter
 
         // 🚀 Include the API handler
         require $apiFile;
+    }
+
+    /**
+     * Resolve an `api.*.enabled` flag against the correct tenant: the bearer
+     * key's own site when the request carries a valid `wbms_` token, else the
+     * bootstrap $SETTINGS snapshot (host-detected site). See #323 Phase 2
+     * review finding 1.
+     *
+     * @param string $flagKey Flat setting key (e.g. 'api.events.create.enabled').
+     *
+     * @return string|null The effective value, or null if unset.
+     */
+    private static function resolveEnabledFlag(string $flagKey): ?string
+    {
+        $keyRow = ApiAuth::bearerKeyRow();
+        if ($keyRow !== null) {
+            return App::settingForSite($flagKey, (int) ($keyRow['siteID'] ?? 0));
+        }
+        global $SETTINGS;
+        $resolved = self::resolveSetting($SETTINGS, $flagKey);
+        return $resolved !== null ? (string) $resolved : null;
     }
 
     /**
@@ -188,8 +213,7 @@ class ApiRouter
             ApiResponse::error('API endpoint not found', 404);
         }
 
-        global $SETTINGS;
-        $enabled = self::resolveSetting($SETTINGS, 'api.' . $app . '.' . $action . '.enabled');
+        $enabled = self::resolveEnabledFlag('api.' . $app . '.' . $action . '.enabled');
         if ($enabled !== 'true') {
             ApiResponse::error('This API endpoint is disabled', 403);
         }
