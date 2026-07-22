@@ -1,6 +1,20 @@
 # Changelog
 
 
+## [1.4.0] - 2026-07-22 (alpha)
+- feat(api): REST API v1 write surface (#323 Phase 2, PR #372) — dual-mode `Portal\Core\ApiAuth`
+  (bearer API key OR session, resolved centrally); `/api/v1/{resource}[/{id}]` RESTful facade that
+  maps HTTP verbs onto the SAME `_apps/{app}/api/{action}.php` handlers + `api.{app}.{action}.enabled`
+  flags as the existing `/api/{app}/{action}` routes (no new gating vocabulary); bearer requests are
+  tenant-pinned to the key's own site (`Site::forceContext`) and rate-limited per key; new write
+  endpoints closing the #157 remnant — Attendance + Documents (create/update/delete) and Expenses
+  (create/delete — status-transition update deferred to Phase 3), plus new Users create/update
+  (admin-gated, default-off flags); canonical `ApiKey::SCOPES` vocabulary + rotation grace windows;
+  admin API-keys UI gains a scope checkbox multi-select (validated server-side against `SCOPES`) and
+  a rotation-grace selector; admin audit viewer gains a source (session/apikey) badge + key-prefix;
+  OpenAPI spec documents every `/api/v1/*` path alongside the existing legacy aliases.
+- feat(admin): outbound webhooks admin CRUD UI (#324)
+
 ## [1.2.0] - 2026-07-07 (alpha)
 - 2 apps + iCal feed + admin polish — 7 issues (#258, #261, #271, #251, #254, #253, #252) (#281)
 - 4 community/pastoral apps: Rota + Praise + Milestones + Care (#256, #260, #259, #257) (#280)

@@ -519,9 +519,19 @@ setting seeds.
 | App controllers moved from `public_html/` into `_apps/` outside the webroot | #159 | #288 | ✅ |
 | Nonce-based CSP `script-src` tightening + `App::cspNonce()` | #144 | #289 | ✅ |
 | External error monitor — `Portal\Core\ErrorMonitor` adapter for Sentry / GlitchTip | #143 | #290 | ✅ |
-| REST API write-side CRUD: Announcements / Tasks / Prayer Requests / Leadership (10 new endpoints) | #157 | #291 | 🟡 (Documents / Attendance / Expenses deferred) |
+| REST API write-side CRUD: Announcements / Tasks / Prayer Requests / Leadership (10 new endpoints) | #157 | #291 | ✅ (remaining Documents / Attendance / Expenses CRUD landed via #323 Phase 2, below) |
 | PWA offline write queue + sync-on-reconnect (`Portal.OfflineQueue` IndexedDB module + `/account/offline-queue`) | #233 | #292 | ✅ |
 | Codebase audit sweep — duplicate cookie banner removed; missing `Auth` import fixed; 6 SQL int-concat queries → prepared statements | — | #293 | ✅ |
+
+### REST API v1 write surface (PR #372, 2026-07-22)
+
+| Item | Issue | PR | Status |
+|---|---|---|---|
+| Dual-mode `ApiAuth` (bearer API key OR session) + `/api/v1/{resource}[/{id}]` RESTful facade over the existing `{app}/{action}` handlers; per-key rate limiting; tenant pinning via `Site::forceContext` | #323 Phase 2 | #372 | ✅ |
+| New write endpoints: Attendance + Documents (create/update/delete), Expenses (create/delete), Users (create/update, admin-gated + default-off flags) | #323 Phase 2 (#157 remnant) | #372 | ✅ (Expenses status-transition update deferred to Phase 3) |
+| Canonical `ApiKey::SCOPES` vocabulary + rotation grace windows; admin API-keys UI scope checkbox multi-select (server-validated) + grace selector + "rotated" badge; audit viewer source (session/apikey) badge + key-prefix | #323 Phase 2 | #372 | ✅ |
+| OpenAPI spec (`api-spec.json`) documents every `/api/v1/*` path + `bearerAuth` scheme alongside the existing legacy aliases | #323 Phase 2 | #372 | ✅ |
+| Outbound webhooks admin CRUD UI | #324 | #372 | ✅ |
 
 ---
 

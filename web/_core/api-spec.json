@@ -2,8 +2,8 @@
   "openapi": "3.0.3",
   "info": {
     "title": "WebMS Intra REST API",
-    "description": "Internal portal platform REST API. All endpoints require an authenticated portal session (cookie-based) and a valid CSRF token on write operations (passed via `X-CSRF-TOKEN` header or `csrf_token` body field). Every endpoint can be enabled/disabled per-site via the `api.{module}.{action}.enabled` setting.",
-    "version": "1.0.0",
+    "description": "Internal portal platform REST API. Two mutually-exclusive auth modes are accepted on every endpoint: (1) an authenticated portal session (cookie-based) plus a valid CSRF token on write operations (passed via `X-CSRF-TOKEN` header or `csrf_token` body field), or (2) a site-scoped bearer API key (`Authorization: Bearer wbms_…`, minted at Admin → Integrations → API Keys). Bearer requests need NO CSRF token — CSRF protects cookie-based sessions from cross-site forgery and is meaningless for a bearer token that travels in an explicit Authorization header set by the calling code, never by a browser automatically. Bearer requests are tenant-pinned to the key's own site (regardless of the Host header) and are rate-limited per key (see `/api/v1/*` paths below). Every endpoint can be enabled/disabled per-site via the `api.{module}.{action}.enabled` setting; bearer requests resolve that flag against the KEY's site, not the host-detected default. The `/api/v1/{resource}[/{id}]` paths are a thin RESTful facade: each verb maps onto the SAME handler file and the SAME `api.{app}.{action}.enabled` flag as its documented `/api/{app}/{action}` legacy alias — there are no separate permissions to manage.",
+    "version": "1.1.0",
     "license": {
       "name": "All Rights Reserved",
       "url": "https://github.com/MWBMPartners/WebMS-Intra"
@@ -23,6 +23,9 @@
     {
       "sessionCookie": [],
       "csrfToken": []
+    },
+    {
+      "bearerAuth": []
     }
   ],
   "tags": [
@@ -59,8 +62,16 @@
       "description": "Visual poster wall (Canva embeds, image/video/text posters)"
     },
     {
+      "name": "Expenses",
+      "description": "Expense claims, line items, and (session-only) approval workflow."
+    },
+    {
       "name": "Users",
       "description": "User directory (admin only)"
+    },
+    {
+      "name": "Legacy Alias",
+      "description": "Pre-v1 endpoint path (`/api/{app}/{action}`). Still fully supported and documented — the /api/v1/{resource} path for the same operation is a thin facade over the identical handler file and enablement flag."
     }
   ],
   "components": {
@@ -76,6 +87,12 @@
         "in": "header",
         "name": "X-CSRF-TOKEN",
         "description": "CSRF token. Read from `<meta name=\"csrf-token\">` in the portal HTML or from the session. Required on POST endpoints; ignored on read-only GETs."
+      },
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "wbms_… API key",
+        "description": "Site-scoped API key from Admin → Integrations → API Keys; scopes gate each resource:verb; rate-limited per key; CSRF-exempt."
       }
     },
     "schemas": {
@@ -457,6 +474,355 @@
             "default": false
           }
         }
+      },
+      "V1SuccessEnvelope": {
+        "type": "object",
+        "description": "Standard success envelope returned by every /api/v1/* and legacy /api/{app}/{action} endpoint.",
+        "required": [
+          "status",
+          "data",
+          "meta"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "example": "ok"
+          },
+          "data": {
+            "type": "object",
+            "description": "Endpoint-specific payload — see each operation's response schema."
+          },
+          "meta": {
+            "type": "object",
+            "properties": {
+              "timestamp": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "version": {
+                "type": "string",
+                "example": "1.4.0"
+              }
+            }
+          }
+        }
+      },
+      "V1ErrorEnvelope": {
+        "type": "object",
+        "required": [
+          "status",
+          "message",
+          "meta"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "example": "error"
+          },
+          "message": {
+            "type": "string",
+            "example": "Forbidden"
+          },
+          "detail": {
+            "type": "string",
+            "nullable": true,
+            "description": "Only present when the server is running in debug mode."
+          },
+          "meta": {
+            "type": "object",
+            "properties": {
+              "timestamp": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "version": {
+                "type": "string",
+                "example": "1.4.0"
+              }
+            }
+          }
+        }
+      },
+      "AttendanceCountItem": {
+        "type": "object",
+        "required": [
+          "groupLabel",
+          "headcount"
+        ],
+        "properties": {
+          "groupLabel": {
+            "type": "string",
+            "maxLength": 100,
+            "example": "Adults"
+          },
+          "headcount": {
+            "type": "integer",
+            "minimum": 0,
+            "example": 120
+          },
+          "sortOrder": {
+            "type": "integer",
+            "example": 1
+          }
+        }
+      },
+      "AttendanceCreate": {
+        "type": "object",
+        "required": [
+          "serviceTypeID",
+          "sessionDate"
+        ],
+        "properties": {
+          "serviceTypeID": {
+            "type": "integer",
+            "description": "FK tblAttendanceServiceTypes; must exist for the current site."
+          },
+          "sessionDate": {
+            "type": "string",
+            "format": "date",
+            "example": "2026-07-19"
+          },
+          "sessionTime": {
+            "type": "string",
+            "example": "10:00",
+            "description": "H:i, optional."
+          },
+          "eventID": {
+            "type": "integer",
+            "nullable": true,
+            "description": "FK tblEvents; must exist for the current site."
+          },
+          "notes": {
+            "type": "string",
+            "nullable": true
+          },
+          "counts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AttendanceCountItem"
+            }
+          }
+        }
+      },
+      "AttendanceUpdate": {
+        "type": "object",
+        "description": "PATCH-style — only fields present are touched. When `counts` is present, ALL existing headcount rows for the session are replaced (delete + re-insert).",
+        "properties": {
+          "serviceTypeID": {
+            "type": "integer"
+          },
+          "eventID": {
+            "type": "integer",
+            "nullable": true
+          },
+          "sessionDate": {
+            "type": "string",
+            "format": "date"
+          },
+          "sessionTime": {
+            "type": "string",
+            "nullable": true
+          },
+          "notes": {
+            "type": "string",
+            "nullable": true
+          },
+          "counts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AttendanceCountItem"
+            }
+          }
+        }
+      },
+      "DocumentCreate": {
+        "type": "object",
+        "description": "Accepts EITHER multipart/form-data (file field `file`, session-UI parity) OR application/json with base64 `fileContent` (shown here — the bearer/device mode). The real MIME type is sniffed from the file bytes (finfo) and checked against a server-side allowlist — the client-declared type/extension is never trusted.",
+        "required": [
+          "title",
+          "fileContent"
+        ],
+        "properties": {
+          "title": {
+            "type": "string",
+            "maxLength": 255
+          },
+          "description": {
+            "type": "string",
+            "nullable": true
+          },
+          "categoryID": {
+            "type": "integer",
+            "nullable": true,
+            "description": "FK tblDocCategories; must exist for the current site."
+          },
+          "eventID": {
+            "type": "integer",
+            "nullable": true
+          },
+          "isPublished": {
+            "type": "boolean",
+            "default": true
+          },
+          "fileName": {
+            "type": "string",
+            "description": "Original filename — cosmetic only; the stored filename + extension are server-generated from the sniffed MIME type."
+          },
+          "fileContent": {
+            "type": "string",
+            "format": "byte",
+            "description": "Base64-encoded file bytes. Capped by the `documents.api.maxUploadBytes` setting (default 10485760)."
+          }
+        }
+      },
+      "DocumentUpdate": {
+        "type": "object",
+        "description": "Metadata only — v1 has no file-replacement endpoint (rotate via create + delete).",
+        "properties": {
+          "title": {
+            "type": "string",
+            "maxLength": 255
+          },
+          "description": {
+            "type": "string",
+            "nullable": true
+          },
+          "categoryID": {
+            "type": "integer",
+            "nullable": true
+          },
+          "eventID": {
+            "type": "integer",
+            "nullable": true
+          },
+          "isPublished": {
+            "type": "boolean"
+          }
+        }
+      },
+      "ExpenseItem": {
+        "type": "object",
+        "required": [
+          "itemName",
+          "unitCost",
+          "quantity"
+        ],
+        "properties": {
+          "itemName": {
+            "type": "string",
+            "maxLength": 255
+          },
+          "description": {
+            "type": "string",
+            "nullable": true
+          },
+          "unitCost": {
+            "type": "number",
+            "format": "double",
+            "minimum": 0,
+            "example": 12.5
+          },
+          "quantity": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "purchaseDate": {
+            "type": "string",
+            "format": "date",
+            "nullable": true
+          },
+          "supplier": {
+            "type": "string",
+            "maxLength": 255,
+            "nullable": true
+          }
+        }
+      },
+      "ExpenseCreate": {
+        "type": "object",
+        "description": "`lineTotal` and the claim `totalAmount` are always computed server-side from `unitCost * quantity` — never accepted from the client. New claims always land in 'Pending' status; the approval/status-transition workflow is DEFERRED to Phase 3 (no `PUT /api/v1/expenses/{id}` exists in v1).",
+        "required": [
+          "deptID",
+          "claimTitle",
+          "claimDate",
+          "items"
+        ],
+        "properties": {
+          "deptID": {
+            "type": "integer",
+            "description": "FK tblDepts; must exist for the current site."
+          },
+          "claimTitle": {
+            "type": "string",
+            "maxLength": 255
+          },
+          "claimDate": {
+            "type": "string",
+            "format": "date"
+          },
+          "userID": {
+            "type": "integer",
+            "description": "REQUIRED for bearer (API-key) submissions only — the owning user, who must belong to the key's own site. Ignored/ not required in session mode, where the owner is always the authenticated session user."
+          },
+          "items": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "$ref": "#/components/schemas/ExpenseItem"
+            }
+          }
+        }
+      },
+      "UserCreate": {
+        "type": "object",
+        "description": "Passwords are NEVER accepted here — the new account gets a random, unusable password hash and must go through the existing forgot-password flow to set a real one. `isAdmin` (portal-wide) is honoured in session mode only — a bearer key can never mint a portal admin, even with `users:write`; use `isSiteAdmin` (site-scoped) instead.",
+        "required": [
+          "emailAddress",
+          "fullName"
+        ],
+        "properties": {
+          "emailAddress": {
+            "type": "string",
+            "format": "email"
+          },
+          "fullName": {
+            "type": "string",
+            "maxLength": 255
+          },
+          "isActive": {
+            "type": "boolean",
+            "default": true
+          },
+          "isAdmin": {
+            "type": "boolean",
+            "default": false,
+            "description": "Portal-wide admin flag. Session mode only — silently ignored for bearer callers."
+          },
+          "isSiteAdmin": {
+            "type": "boolean",
+            "default": false
+          }
+        }
+      },
+      "UserUpdate": {
+        "type": "object",
+        "description": "Editable: fullName, isActive, isAdmin (session mode only), isSiteAdmin. Email address and password are excluded from v1 (silently ignored if present). A session caller can never deactivate their OWN account via this endpoint.",
+        "properties": {
+          "fullName": {
+            "type": "string",
+            "maxLength": 255
+          },
+          "isActive": {
+            "type": "boolean"
+          },
+          "isAdmin": {
+            "type": "boolean",
+            "description": "Portal-wide admin flag. Session mode only — silently ignored for bearer callers."
+          },
+          "isSiteAdmin": {
+            "type": "boolean"
+          }
+        }
       }
     }
   },
@@ -464,7 +830,8 @@
     "/api/events/list": {
       "get": {
         "tags": [
-          "Events"
+          "Events",
+          "Legacy Alias"
         ],
         "summary": "List published events for the current site",
         "parameters": [
@@ -518,7 +885,8 @@
     "/api/events/detail": {
       "get": {
         "tags": [
-          "Events"
+          "Events",
+          "Legacy Alias"
         ],
         "summary": "Fetch a single event by ID or slug",
         "parameters": [
@@ -557,7 +925,8 @@
     "/api/events/create": {
       "post": {
         "tags": [
-          "Events"
+          "Events",
+          "Legacy Alias"
         ],
         "summary": "Create a new event (admin only)",
         "requestBody": {
@@ -586,7 +955,8 @@
     "/api/events/update": {
       "post": {
         "tags": [
-          "Events"
+          "Events",
+          "Legacy Alias"
         ],
         "summary": "Update event fields (PATCH-style; only present fields are touched)",
         "parameters": [
@@ -626,7 +996,8 @@
     "/api/events/delete": {
       "post": {
         "tags": [
-          "Events"
+          "Events",
+          "Legacy Alias"
         ],
         "summary": "Soft-delete an event (isDeleted = 1)",
         "parameters": [
@@ -652,7 +1023,8 @@
     "/api/attendance/list": {
       "get": {
         "tags": [
-          "Attendance"
+          "Attendance",
+          "Legacy Alias"
         ],
         "summary": "List attendance sessions for the current site",
         "parameters": [
@@ -683,7 +1055,8 @@
     "/api/announcements/list": {
       "get": {
         "tags": [
-          "Announcements"
+          "Announcements",
+          "Legacy Alias"
         ],
         "summary": "List active announcements for the current site",
         "responses": {
@@ -696,7 +1069,8 @@
     "/api/noticeboard/list": {
       "get": {
         "tags": [
-          "Noticeboard"
+          "Noticeboard",
+          "Legacy Alias"
         ],
         "summary": "List active posters on the current site's noticeboard",
         "description": "Any authenticated user may read. Returns every non-deleted poster for the current site, ordered by manual sort order then event date.",
@@ -733,7 +1107,8 @@
     "/api/noticeboard/qr": {
       "get": {
         "tags": [
-          "Noticeboard"
+          "Noticeboard",
+          "Legacy Alias"
         ],
         "summary": "Render a QR code image for a noticeboard share link",
         "description": "Any authenticated user may read. `data` must be this site's own host if it includes a scheme — the endpoint refuses to act as an open QR redirector for arbitrary third-party URLs.",
@@ -782,7 +1157,8 @@
     "/api/noticeboard/save": {
       "post": {
         "tags": [
-          "Noticeboard"
+          "Noticeboard",
+          "Legacy Alias"
         ],
         "summary": "Replace the current site's poster set (site admins only)",
         "description": "Site admins only (App::isSiteAdmin()) — CSRF-protected via the X-CSRF-TOKEN header. The client sends the FULL desired poster array in one call; posters upsert by their \"p<posterID>\" id (a foreign or new-looking id inserts a fresh row instead of overwriting another tenant's poster), and any existing poster left out of the array is soft-deleted. The whole batch is validated before any row is written, and rolled back together on failure.",
@@ -865,7 +1241,8 @@
     "/api/leadership/list": {
       "get": {
         "tags": [
-          "Leadership"
+          "Leadership",
+          "Legacy Alias"
         ],
         "summary": "List leadership roles and current assignees",
         "parameters": [
@@ -888,7 +1265,8 @@
     "/api/tasks/list": {
       "get": {
         "tags": [
-          "Tasks"
+          "Tasks",
+          "Legacy Alias"
         ],
         "summary": "List tasks (own by default; admins can filter via userID)",
         "parameters": [
@@ -940,7 +1318,8 @@
     "/api/prayer-requests/list": {
       "get": {
         "tags": [
-          "Prayer Requests"
+          "Prayer Requests",
+          "Legacy Alias"
         ],
         "summary": "List prayer requests visible to the current user",
         "description": "Non-admins see their own requests plus congregation-visible ones. Admins see all. Anonymous-flagged requests have `submitterID` nulled for non-admin readers.",
@@ -971,7 +1350,8 @@
     "/api/documents/list": {
       "get": {
         "tags": [
-          "Documents"
+          "Documents",
+          "Legacy Alias"
         ],
         "summary": "List documents for the current site",
         "parameters": [
@@ -1009,7 +1389,8 @@
     "/api/users/list": {
       "get": {
         "tags": [
-          "Users"
+          "Users",
+          "Legacy Alias"
         ],
         "summary": "List users (admin only)",
         "responses": {
@@ -1069,7 +1450,7 @@
             }
           },
           "503": {
-            "description": "Degraded \u2014 DB unreachable"
+            "description": "Degraded — DB unreachable"
           }
         }
       }
@@ -1077,7 +1458,8 @@
     "/api/announcements/create": {
       "post": {
         "tags": [
-          "Announcements"
+          "Announcements",
+          "Legacy Alias"
         ],
         "summary": "Create an announcement (admin)",
         "requestBody": {
@@ -1146,7 +1528,8 @@
     "/api/announcements/update": {
       "post": {
         "tags": [
-          "Announcements"
+          "Announcements",
+          "Legacy Alias"
         ],
         "summary": "Update an announcement partially (admin)",
         "requestBody": {
@@ -1219,7 +1602,8 @@
     "/api/announcements/delete": {
       "post": {
         "tags": [
-          "Announcements"
+          "Announcements",
+          "Legacy Alias"
         ],
         "summary": "Soft-delete an announcement (admin)",
         "requestBody": {
@@ -1262,7 +1646,8 @@
     "/api/tasks/create": {
       "post": {
         "tags": [
-          "Tasks"
+          "Tasks",
+          "Legacy Alias"
         ],
         "summary": "Create a task",
         "requestBody": {
@@ -1324,7 +1709,8 @@
     "/api/tasks/complete": {
       "post": {
         "tags": [
-          "Tasks"
+          "Tasks",
+          "Legacy Alias"
         ],
         "summary": "Mark a task complete (assignee or admin only)",
         "requestBody": {
@@ -1367,7 +1753,8 @@
     "/api/tasks/delete": {
       "post": {
         "tags": [
-          "Tasks"
+          "Tasks",
+          "Legacy Alias"
         ],
         "summary": "Delete a task (creator or admin only)",
         "requestBody": {
@@ -1410,7 +1797,8 @@
     "/api/prayer-requests/create": {
       "post": {
         "tags": [
-          "Prayer Requests"
+          "Prayer Requests",
+          "Legacy Alias"
         ],
         "summary": "Submit a prayer request (logged-in)",
         "requestBody": {
@@ -1467,7 +1855,8 @@
     "/api/prayer-requests/moderate": {
       "post": {
         "tags": [
-          "Prayer Requests"
+          "Prayer Requests",
+          "Legacy Alias"
         ],
         "summary": "Moderate a prayer request (admin or prayer_team role)",
         "requestBody": {
@@ -1522,7 +1911,8 @@
     "/api/leadership/assign": {
       "post": {
         "tags": [
-          "Leadership"
+          "Leadership",
+          "Legacy Alias"
         ],
         "summary": "Assign a leadership role to a user or external person (admin)",
         "requestBody": {
@@ -1586,7 +1976,8 @@
     "/api/leadership/unassign": {
       "post": {
         "tags": [
-          "Leadership"
+          "Leadership",
+          "Legacy Alias"
         ],
         "summary": "End an active leadership assignment (admin)",
         "requestBody": {
@@ -1626,6 +2017,5000 @@
           },
           "404": {
             "description": "Not found"
+          }
+        }
+      }
+    },
+    "/api/v1/events": {
+      "get": {
+        "tags": [
+          "Events"
+        ],
+        "summary": "List published events for the current site (v1)",
+        "description": "Requires scope `events:read` (bearer) or an authenticated session. **Legacy alias:** `GET /api/events/list`.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": [],
+            "csrfToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1SuccessEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required — no valid session and no valid bearer API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — bearer key missing the required scope, session caller failing the role gate, or the endpoint disabled via the api.{app}.{action}.enabled setting (same flag as the legacy alias).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Method not allowed for this resource/shape — see the `Allow` response header for the verbs this resource actually supports.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "headers": {
+              "Allow": {
+                "description": "Comma-separated list of supported HTTP verbs.",
+                "schema": {
+                  "type": "string",
+                  "example": "GET, POST"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded (bearer only) — see the `Retry-After` response header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the oldest in-window hit ages out.",
+                "schema": {
+                  "type": "integer",
+                  "example": 42
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Events"
+        ],
+        "summary": "Create a new event (v1)",
+        "description": "Requires scope `events:write` (bearer) or an admin session. **Legacy alias:** `POST /api/events/create`.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": [],
+            "csrfToken": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EventCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1SuccessEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error — missing/invalid field, or (on an /{id} path) a non-numeric resource id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required — no valid session and no valid bearer API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — bearer key missing the required scope, session caller failing the role gate, or the endpoint disabled via the api.{app}.{action}.enabled setting (same flag as the legacy alias).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Method not allowed for this resource/shape — see the `Allow` response header for the verbs this resource actually supports.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "headers": {
+              "Allow": {
+                "description": "Comma-separated list of supported HTTP verbs.",
+                "schema": {
+                  "type": "string",
+                  "example": "GET, POST"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded (bearer only) — see the `Retry-After` response header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the oldest in-window hit ages out.",
+                "schema": {
+                  "type": "integer",
+                  "example": 42
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/events/{id}": {
+      "get": {
+        "tags": [
+          "Events"
+        ],
+        "summary": "Fetch a single event by id (v1) — the only v1 resource with a detail route",
+        "description": "Requires scope `events:read` (bearer) or an authenticated session. **Legacy alias:** `GET /api/events/detail?id={id}`.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": [],
+            "csrfToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "eventID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1SuccessEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required — no valid session and no valid bearer API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — bearer key missing the required scope, session caller failing the role gate, or the endpoint disabled via the api.{app}.{action}.enabled setting (same flag as the legacy alias).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found — including a cross-site id probe, which 404s rather than 403 so it never confirms another tenant’s row exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Method not allowed for this resource/shape — see the `Allow` response header for the verbs this resource actually supports.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "headers": {
+              "Allow": {
+                "description": "Comma-separated list of supported HTTP verbs.",
+                "schema": {
+                  "type": "string",
+                  "example": "GET, POST"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded (bearer only) — see the `Retry-After` response header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the oldest in-window hit ages out.",
+                "schema": {
+                  "type": "integer",
+                  "example": 42
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Events"
+        ],
+        "summary": "Update event fields (v1; PATCH-style — only present fields are touched)",
+        "description": "Requires scope `events:write` (bearer) or an admin session. **Legacy alias:** `POST /api/events/update?id={id}`.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": [],
+            "csrfToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "eventID"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "description": "Subset of EventCreate fields."
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1SuccessEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error — missing/invalid field, or (on an /{id} path) a non-numeric resource id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required — no valid session and no valid bearer API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — bearer key missing the required scope, session caller failing the role gate, or the endpoint disabled via the api.{app}.{action}.enabled setting (same flag as the legacy alias).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found — including a cross-site id probe, which 404s rather than 403 so it never confirms another tenant’s row exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Method not allowed for this resource/shape — see the `Allow` response header for the verbs this resource actually supports.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "headers": {
+              "Allow": {
+                "description": "Comma-separated list of supported HTTP verbs.",
+                "schema": {
+                  "type": "string",
+                  "example": "GET, POST"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded (bearer only) — see the `Retry-After` response header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the oldest in-window hit ages out.",
+                "schema": {
+                  "type": "integer",
+                  "example": 42
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Events"
+        ],
+        "summary": "Update event fields (v1; PATCH-style — only present fields are touched)",
+        "description": "Requires scope `events:write` (bearer) or an admin session. **Legacy alias:** `POST /api/events/update?id={id}`.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": [],
+            "csrfToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "eventID"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "description": "Subset of EventCreate fields."
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1SuccessEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error — missing/invalid field, or (on an /{id} path) a non-numeric resource id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required — no valid session and no valid bearer API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — bearer key missing the required scope, session caller failing the role gate, or the endpoint disabled via the api.{app}.{action}.enabled setting (same flag as the legacy alias).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found — including a cross-site id probe, which 404s rather than 403 so it never confirms another tenant’s row exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Method not allowed for this resource/shape — see the `Allow` response header for the verbs this resource actually supports.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "headers": {
+              "Allow": {
+                "description": "Comma-separated list of supported HTTP verbs.",
+                "schema": {
+                  "type": "string",
+                  "example": "GET, POST"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded (bearer only) — see the `Retry-After` response header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the oldest in-window hit ages out.",
+                "schema": {
+                  "type": "integer",
+                  "example": 42
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Events"
+        ],
+        "summary": "Soft-delete an event (v1; isDeleted = 1)",
+        "description": "Requires scope `events:write` (bearer) or an admin session. **Legacy alias:** `POST /api/events/delete?id={id}`.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": [],
+            "csrfToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "eventID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1SuccessEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required — no valid session and no valid bearer API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — bearer key missing the required scope, session caller failing the role gate, or the endpoint disabled via the api.{app}.{action}.enabled setting (same flag as the legacy alias).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found — including a cross-site id probe, which 404s rather than 403 so it never confirms another tenant’s row exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Method not allowed for this resource/shape — see the `Allow` response header for the verbs this resource actually supports.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "headers": {
+              "Allow": {
+                "description": "Comma-separated list of supported HTTP verbs.",
+                "schema": {
+                  "type": "string",
+                  "example": "GET, POST"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded (bearer only) — see the `Retry-After` response header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the oldest in-window hit ages out.",
+                "schema": {
+                  "type": "integer",
+                  "example": 42
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/announcements": {
+      "get": {
+        "tags": [
+          "Announcements"
+        ],
+        "summary": "List active announcements for the current site (v1)",
+        "description": "Requires scope `announcements:read` (bearer) or an authenticated session. **Legacy alias:** `GET /api/announcements/list`.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": [],
+            "csrfToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1SuccessEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required — no valid session and no valid bearer API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — bearer key missing the required scope, session caller failing the role gate, or the endpoint disabled via the api.{app}.{action}.enabled setting (same flag as the legacy alias).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Method not allowed for this resource/shape — see the `Allow` response header for the verbs this resource actually supports.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "headers": {
+              "Allow": {
+                "description": "Comma-separated list of supported HTTP verbs.",
+                "schema": {
+                  "type": "string",
+                  "example": "GET, POST"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded (bearer only) — see the `Retry-After` response header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the oldest in-window hit ages out.",
+                "schema": {
+                  "type": "integer",
+                  "example": 42
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Announcements"
+        ],
+        "summary": "Create an announcement (v1)",
+        "description": "Requires scope `announcements:write` (bearer) or an admin session. **Legacy alias:** `POST /api/announcements/create`.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": [],
+            "csrfToken": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "title",
+                  "body"
+                ],
+                "properties": {
+                  "title": {
+                    "type": "string"
+                  },
+                  "body": {
+                    "type": "string"
+                  },
+                  "priority": {
+                    "type": "string",
+                    "enum": [
+                      "normal",
+                      "important",
+                      "urgent"
+                    ]
+                  },
+                  "isPinned": {
+                    "type": "boolean"
+                  },
+                  "isPublished": {
+                    "type": "boolean"
+                  },
+                  "publishAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "expiresAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1SuccessEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error — missing/invalid field, or (on an /{id} path) a non-numeric resource id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required — no valid session and no valid bearer API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — bearer key missing the required scope, session caller failing the role gate, or the endpoint disabled via the api.{app}.{action}.enabled setting (same flag as the legacy alias).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Method not allowed for this resource/shape — see the `Allow` response header for the verbs this resource actually supports.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "headers": {
+              "Allow": {
+                "description": "Comma-separated list of supported HTTP verbs.",
+                "schema": {
+                  "type": "string",
+                  "example": "GET, POST"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded (bearer only) — see the `Retry-After` response header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the oldest in-window hit ages out.",
+                "schema": {
+                  "type": "integer",
+                  "example": 42
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/announcements/{id}": {
+      "put": {
+        "tags": [
+          "Announcements"
+        ],
+        "summary": "Update an announcement (v1; PATCH-style)",
+        "description": "Requires scope `announcements:write` (bearer) or an admin session. **Legacy alias:** `POST /api/announcements/update?id={id}`.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": [],
+            "csrfToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "announcementID"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "description": "PATCH-style — only fields present are touched.",
+                "properties": {
+                  "title": {
+                    "type": "string"
+                  },
+                  "body": {
+                    "type": "string"
+                  },
+                  "priority": {
+                    "type": "string",
+                    "enum": [
+                      "normal",
+                      "important",
+                      "urgent"
+                    ]
+                  },
+                  "isPinned": {
+                    "type": "boolean"
+                  },
+                  "isPublished": {
+                    "type": "boolean"
+                  },
+                  "publishAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "expiresAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1SuccessEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error — missing/invalid field, or (on an /{id} path) a non-numeric resource id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required — no valid session and no valid bearer API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — bearer key missing the required scope, session caller failing the role gate, or the endpoint disabled via the api.{app}.{action}.enabled setting (same flag as the legacy alias).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found — including a cross-site id probe, which 404s rather than 403 so it never confirms another tenant’s row exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Method not allowed for this resource/shape — see the `Allow` response header for the verbs this resource actually supports.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "headers": {
+              "Allow": {
+                "description": "Comma-separated list of supported HTTP verbs.",
+                "schema": {
+                  "type": "string",
+                  "example": "GET, POST"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded (bearer only) — see the `Retry-After` response header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the oldest in-window hit ages out.",
+                "schema": {
+                  "type": "integer",
+                  "example": 42
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Announcements"
+        ],
+        "summary": "Soft-delete an announcement (v1)",
+        "description": "Requires scope `announcements:write` (bearer) or an admin session. **Legacy alias:** `POST /api/announcements/delete?id={id}`.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": [],
+            "csrfToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "announcementID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1SuccessEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required — no valid session and no valid bearer API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — bearer key missing the required scope, session caller failing the role gate, or the endpoint disabled via the api.{app}.{action}.enabled setting (same flag as the legacy alias).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found — including a cross-site id probe, which 404s rather than 403 so it never confirms another tenant’s row exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Method not allowed for this resource/shape — see the `Allow` response header for the verbs this resource actually supports.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "headers": {
+              "Allow": {
+                "description": "Comma-separated list of supported HTTP verbs.",
+                "schema": {
+                  "type": "string",
+                  "example": "GET, POST"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded (bearer only) — see the `Retry-After` response header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the oldest in-window hit ages out.",
+                "schema": {
+                  "type": "integer",
+                  "example": 42
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Announcements"
+        ],
+        "summary": "Update an announcement (v1; PATCH-style)",
+        "description": "Requires scope `announcements:write` (bearer) or an admin session. **Legacy alias:** `POST /api/announcements/update?id={id}`.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": [],
+            "csrfToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "announcementID"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "description": "PATCH-style — only fields present are touched.",
+                "properties": {
+                  "title": {
+                    "type": "string"
+                  },
+                  "body": {
+                    "type": "string"
+                  },
+                  "priority": {
+                    "type": "string",
+                    "enum": [
+                      "normal",
+                      "important",
+                      "urgent"
+                    ]
+                  },
+                  "isPinned": {
+                    "type": "boolean"
+                  },
+                  "isPublished": {
+                    "type": "boolean"
+                  },
+                  "publishAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "expiresAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1SuccessEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error — missing/invalid field, or (on an /{id} path) a non-numeric resource id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required — no valid session and no valid bearer API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — bearer key missing the required scope, session caller failing the role gate, or the endpoint disabled via the api.{app}.{action}.enabled setting (same flag as the legacy alias).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found — including a cross-site id probe, which 404s rather than 403 so it never confirms another tenant’s row exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Method not allowed for this resource/shape — see the `Allow` response header for the verbs this resource actually supports.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "headers": {
+              "Allow": {
+                "description": "Comma-separated list of supported HTTP verbs.",
+                "schema": {
+                  "type": "string",
+                  "example": "GET, POST"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded (bearer only) — see the `Retry-After` response header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the oldest in-window hit ages out.",
+                "schema": {
+                  "type": "integer",
+                  "example": 42
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/attendance": {
+      "get": {
+        "tags": [
+          "Attendance"
+        ],
+        "summary": "List attendance sessions for the current site (v1)",
+        "description": "Requires scope `attendance:read` (bearer) or an authenticated session. **Legacy alias:** `GET /api/attendance/list`.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": [],
+            "csrfToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1SuccessEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required — no valid session and no valid bearer API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — bearer key missing the required scope, session caller failing the role gate, or the endpoint disabled via the api.{app}.{action}.enabled setting (same flag as the legacy alias).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Method not allowed for this resource/shape — see the `Allow` response header for the verbs this resource actually supports.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "headers": {
+              "Allow": {
+                "description": "Comma-separated list of supported HTTP verbs.",
+                "schema": {
+                  "type": "string",
+                  "example": "GET, POST"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded (bearer only) — see the `Retry-After` response header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the oldest in-window hit ages out.",
+                "schema": {
+                  "type": "integer",
+                  "example": 42
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Attendance"
+        ],
+        "summary": "Create an attendance session, optionally with per-group headcounts (v1, #157 remnant)",
+        "description": "Requires scope `attendance:write` (bearer) or an admin session. **Legacy alias:** `POST /api/attendance/create`.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": [],
+            "csrfToken": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AttendanceCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1SuccessEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error — missing/invalid field, or (on an /{id} path) a non-numeric resource id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required — no valid session and no valid bearer API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — bearer key missing the required scope, session caller failing the role gate, or the endpoint disabled via the api.{app}.{action}.enabled setting (same flag as the legacy alias).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Method not allowed for this resource/shape — see the `Allow` response header for the verbs this resource actually supports.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "headers": {
+              "Allow": {
+                "description": "Comma-separated list of supported HTTP verbs.",
+                "schema": {
+                  "type": "string",
+                  "example": "GET, POST"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded (bearer only) — see the `Retry-After` response header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the oldest in-window hit ages out.",
+                "schema": {
+                  "type": "integer",
+                  "example": 42
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/attendance/{id}": {
+      "put": {
+        "tags": [
+          "Attendance"
+        ],
+        "summary": "Update an attendance session (v1; PATCH-style; `counts` present = replace-all)",
+        "description": "Requires scope `attendance:write` (bearer) or an admin session. **Legacy alias:** `POST /api/attendance/update?id={id}`.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": [],
+            "csrfToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "sessionID"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AttendanceUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1SuccessEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error — missing/invalid field, or (on an /{id} path) a non-numeric resource id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required — no valid session and no valid bearer API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — bearer key missing the required scope, session caller failing the role gate, or the endpoint disabled via the api.{app}.{action}.enabled setting (same flag as the legacy alias).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found — including a cross-site id probe, which 404s rather than 403 so it never confirms another tenant’s row exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Method not allowed for this resource/shape — see the `Allow` response header for the verbs this resource actually supports.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "headers": {
+              "Allow": {
+                "description": "Comma-separated list of supported HTTP verbs.",
+                "schema": {
+                  "type": "string",
+                  "example": "GET, POST"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded (bearer only) — see the `Retry-After` response header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the oldest in-window hit ages out.",
+                "schema": {
+                  "type": "integer",
+                  "example": 42
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Attendance"
+        ],
+        "summary": "Soft-delete an attendance session (v1; isDeleted = 1)",
+        "description": "Requires scope `attendance:write` (bearer) or an admin session. **Legacy alias:** `POST /api/attendance/delete?id={id}`.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": [],
+            "csrfToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "sessionID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1SuccessEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required — no valid session and no valid bearer API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — bearer key missing the required scope, session caller failing the role gate, or the endpoint disabled via the api.{app}.{action}.enabled setting (same flag as the legacy alias).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found — including a cross-site id probe, which 404s rather than 403 so it never confirms another tenant’s row exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Method not allowed for this resource/shape — see the `Allow` response header for the verbs this resource actually supports.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "headers": {
+              "Allow": {
+                "description": "Comma-separated list of supported HTTP verbs.",
+                "schema": {
+                  "type": "string",
+                  "example": "GET, POST"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded (bearer only) — see the `Retry-After` response header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the oldest in-window hit ages out.",
+                "schema": {
+                  "type": "integer",
+                  "example": 42
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Attendance"
+        ],
+        "summary": "Update an attendance session (v1; PATCH-style; `counts` present = replace-all)",
+        "description": "Requires scope `attendance:write` (bearer) or an admin session. **Legacy alias:** `POST /api/attendance/update?id={id}`.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": [],
+            "csrfToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "sessionID"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AttendanceUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1SuccessEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error — missing/invalid field, or (on an /{id} path) a non-numeric resource id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required — no valid session and no valid bearer API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — bearer key missing the required scope, session caller failing the role gate, or the endpoint disabled via the api.{app}.{action}.enabled setting (same flag as the legacy alias).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found — including a cross-site id probe, which 404s rather than 403 so it never confirms another tenant’s row exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Method not allowed for this resource/shape — see the `Allow` response header for the verbs this resource actually supports.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "headers": {
+              "Allow": {
+                "description": "Comma-separated list of supported HTTP verbs.",
+                "schema": {
+                  "type": "string",
+                  "example": "GET, POST"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded (bearer only) — see the `Retry-After` response header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the oldest in-window hit ages out.",
+                "schema": {
+                  "type": "integer",
+                  "example": 42
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/prayer-requests": {
+      "get": {
+        "tags": [
+          "Prayer Requests"
+        ],
+        "summary": "List prayer requests visible to the current user (v1)",
+        "description": "Requires scope `prayer-requests:read` (bearer) or an authenticated session. Non-admins see their own requests plus congregation-visible ones. **Legacy alias:** `GET /api/prayer-requests/list`.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": [],
+            "csrfToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1SuccessEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required — no valid session and no valid bearer API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — bearer key missing the required scope, session caller failing the role gate, or the endpoint disabled via the api.{app}.{action}.enabled setting (same flag as the legacy alias).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Method not allowed for this resource/shape — see the `Allow` response header for the verbs this resource actually supports.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "headers": {
+              "Allow": {
+                "description": "Comma-separated list of supported HTTP verbs.",
+                "schema": {
+                  "type": "string",
+                  "example": "GET, POST"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded (bearer only) — see the `Retry-After` response header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the oldest in-window hit ages out.",
+                "schema": {
+                  "type": "integer",
+                  "example": 42
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Prayer Requests"
+        ],
+        "summary": "Submit a prayer request (v1; logged-in)",
+        "description": "Requires scope `prayer-requests:write` (bearer) or an authenticated session. The separate anonymous public-submission flow (captcha-gated) is NOT part of this facade and keeps its own dedicated route. **Legacy alias:** `POST /api/prayer-requests/create`.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": [],
+            "csrfToken": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "subject",
+                  "body"
+                ],
+                "properties": {
+                  "subject": {
+                    "type": "string"
+                  },
+                  "body": {
+                    "type": "string"
+                  },
+                  "visibility": {
+                    "type": "string",
+                    "enum": [
+                      "leadership",
+                      "congregation"
+                    ]
+                  },
+                  "isAnonymous": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1SuccessEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error — missing/invalid field, or (on an /{id} path) a non-numeric resource id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required — no valid session and no valid bearer API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — bearer key missing the required scope, session caller failing the role gate, or the endpoint disabled via the api.{app}.{action}.enabled setting (same flag as the legacy alias).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Method not allowed for this resource/shape — see the `Allow` response header for the verbs this resource actually supports.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "headers": {
+              "Allow": {
+                "description": "Comma-separated list of supported HTTP verbs.",
+                "schema": {
+                  "type": "string",
+                  "example": "GET, POST"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded (bearer only) — see the `Retry-After` response header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the oldest in-window hit ages out.",
+                "schema": {
+                  "type": "integer",
+                  "example": 42
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/prayer-requests/{id}": {
+      "put": {
+        "tags": [
+          "Prayer Requests"
+        ],
+        "summary": "Moderate a prayer request (v1; `PUT` aliases the `moderate` action — there is no generic field update)",
+        "description": "Requires scope `prayer-requests:write` (bearer) or an admin/prayer_team session. v1.0 has no DELETE for this resource. **Legacy alias:** `POST /api/prayer-requests/moderate?id={id}`.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": [],
+            "csrfToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "requestID"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "status"
+                ],
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "active",
+                      "answered",
+                      "archived"
+                    ]
+                  },
+                  "testimony": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1SuccessEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error — missing/invalid field, or (on an /{id} path) a non-numeric resource id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required — no valid session and no valid bearer API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — bearer key missing the required scope, session caller failing the role gate, or the endpoint disabled via the api.{app}.{action}.enabled setting (same flag as the legacy alias).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found — including a cross-site id probe, which 404s rather than 403 so it never confirms another tenant’s row exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Method not allowed for this resource/shape — see the `Allow` response header for the verbs this resource actually supports.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "headers": {
+              "Allow": {
+                "description": "Comma-separated list of supported HTTP verbs.",
+                "schema": {
+                  "type": "string",
+                  "example": "GET, POST"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded (bearer only) — see the `Retry-After` response header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the oldest in-window hit ages out.",
+                "schema": {
+                  "type": "integer",
+                  "example": 42
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Prayer Requests"
+        ],
+        "summary": "Moderate a prayer request (v1; `PUT` aliases the `moderate` action — there is no generic field update)",
+        "description": "Requires scope `prayer-requests:write` (bearer) or an admin/prayer_team session. v1.0 has no DELETE for this resource. **Legacy alias:** `POST /api/prayer-requests/moderate?id={id}`.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": [],
+            "csrfToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "requestID"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "status"
+                ],
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "active",
+                      "answered",
+                      "archived"
+                    ]
+                  },
+                  "testimony": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1SuccessEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error — missing/invalid field, or (on an /{id} path) a non-numeric resource id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required — no valid session and no valid bearer API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — bearer key missing the required scope, session caller failing the role gate, or the endpoint disabled via the api.{app}.{action}.enabled setting (same flag as the legacy alias).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found — including a cross-site id probe, which 404s rather than 403 so it never confirms another tenant’s row exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Method not allowed for this resource/shape — see the `Allow` response header for the verbs this resource actually supports.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "headers": {
+              "Allow": {
+                "description": "Comma-separated list of supported HTTP verbs.",
+                "schema": {
+                  "type": "string",
+                  "example": "GET, POST"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded (bearer only) — see the `Retry-After` response header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the oldest in-window hit ages out.",
+                "schema": {
+                  "type": "integer",
+                  "example": 42
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/documents": {
+      "get": {
+        "tags": [
+          "Documents"
+        ],
+        "summary": "List documents for the current site (v1)",
+        "description": "Requires scope `documents:read` (bearer) or an authenticated session. **Legacy alias:** `GET /api/documents/list`.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": [],
+            "csrfToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "categoryID",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1SuccessEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required — no valid session and no valid bearer API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — bearer key missing the required scope, session caller failing the role gate, or the endpoint disabled via the api.{app}.{action}.enabled setting (same flag as the legacy alias).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Method not allowed for this resource/shape — see the `Allow` response header for the verbs this resource actually supports.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "headers": {
+              "Allow": {
+                "description": "Comma-separated list of supported HTTP verbs.",
+                "schema": {
+                  "type": "string",
+                  "example": "GET, POST"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded (bearer only) — see the `Retry-After` response header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the oldest in-window hit ages out.",
+                "schema": {
+                  "type": "integer",
+                  "example": 42
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Documents"
+        ],
+        "summary": "Upload a document to the library (v1, #157 remnant)",
+        "description": "Requires scope `documents:write` (bearer) or an admin session. Accepts either multipart/form-data (file field `file`) or the JSON base64 `fileContent` shape documented on `DocumentCreate` — see that schema for the finfo MIME-sniffing and size-cap rules. **Legacy alias:** `POST /api/documents/create`.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": [],
+            "csrfToken": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DocumentCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1SuccessEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error — missing/invalid field, or (on an /{id} path) a non-numeric resource id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required — no valid session and no valid bearer API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — bearer key missing the required scope, session caller failing the role gate, or the endpoint disabled via the api.{app}.{action}.enabled setting (same flag as the legacy alias).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Method not allowed for this resource/shape — see the `Allow` response header for the verbs this resource actually supports.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "headers": {
+              "Allow": {
+                "description": "Comma-separated list of supported HTTP verbs.",
+                "schema": {
+                  "type": "string",
+                  "example": "GET, POST"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded (bearer only) — see the `Retry-After` response header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the oldest in-window hit ages out.",
+                "schema": {
+                  "type": "integer",
+                  "example": 42
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/documents/{id}": {
+      "put": {
+        "tags": [
+          "Documents"
+        ],
+        "summary": "Update document metadata (v1; PATCH-style — no file replacement in v1)",
+        "description": "Requires scope `documents:write` (bearer) or an admin session. **Legacy alias:** `POST /api/documents/update?id={id}`.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": [],
+            "csrfToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "documentID"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DocumentUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1SuccessEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error — missing/invalid field, or (on an /{id} path) a non-numeric resource id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required — no valid session and no valid bearer API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — bearer key missing the required scope, session caller failing the role gate, or the endpoint disabled via the api.{app}.{action}.enabled setting (same flag as the legacy alias).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found — including a cross-site id probe, which 404s rather than 403 so it never confirms another tenant’s row exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Method not allowed for this resource/shape — see the `Allow` response header for the verbs this resource actually supports.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "headers": {
+              "Allow": {
+                "description": "Comma-separated list of supported HTTP verbs.",
+                "schema": {
+                  "type": "string",
+                  "example": "GET, POST"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded (bearer only) — see the `Retry-After` response header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the oldest in-window hit ages out.",
+                "schema": {
+                  "type": "integer",
+                  "example": 42
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Documents"
+        ],
+        "summary": "Soft-delete a document (v1; isDeleted = 1 — the file is left on disk)",
+        "description": "Requires scope `documents:write` (bearer) or an admin session. **Legacy alias:** `POST /api/documents/delete?id={id}`.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": [],
+            "csrfToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "documentID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1SuccessEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required — no valid session and no valid bearer API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — bearer key missing the required scope, session caller failing the role gate, or the endpoint disabled via the api.{app}.{action}.enabled setting (same flag as the legacy alias).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found — including a cross-site id probe, which 404s rather than 403 so it never confirms another tenant’s row exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Method not allowed for this resource/shape — see the `Allow` response header for the verbs this resource actually supports.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "headers": {
+              "Allow": {
+                "description": "Comma-separated list of supported HTTP verbs.",
+                "schema": {
+                  "type": "string",
+                  "example": "GET, POST"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded (bearer only) — see the `Retry-After` response header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the oldest in-window hit ages out.",
+                "schema": {
+                  "type": "integer",
+                  "example": 42
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Documents"
+        ],
+        "summary": "Update document metadata (v1; PATCH-style — no file replacement in v1)",
+        "description": "Requires scope `documents:write` (bearer) or an admin session. **Legacy alias:** `POST /api/documents/update?id={id}`.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": [],
+            "csrfToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "documentID"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DocumentUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1SuccessEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error — missing/invalid field, or (on an /{id} path) a non-numeric resource id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required — no valid session and no valid bearer API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — bearer key missing the required scope, session caller failing the role gate, or the endpoint disabled via the api.{app}.{action}.enabled setting (same flag as the legacy alias).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found — including a cross-site id probe, which 404s rather than 403 so it never confirms another tenant’s row exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Method not allowed for this resource/shape — see the `Allow` response header for the verbs this resource actually supports.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "headers": {
+              "Allow": {
+                "description": "Comma-separated list of supported HTTP verbs.",
+                "schema": {
+                  "type": "string",
+                  "example": "GET, POST"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded (bearer only) — see the `Retry-After` response header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the oldest in-window hit ages out.",
+                "schema": {
+                  "type": "integer",
+                  "example": 42
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/expenses": {
+      "get": {
+        "tags": [
+          "Expenses"
+        ],
+        "summary": "List expense claims for the current site (v1)",
+        "description": "Requires scope `expenses:read` (bearer) or an authenticated session. **Legacy alias:** `GET /api/expenses/list`.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": [],
+            "csrfToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1SuccessEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required — no valid session and no valid bearer API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — bearer key missing the required scope, session caller failing the role gate, or the endpoint disabled via the api.{app}.{action}.enabled setting (same flag as the legacy alias).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Method not allowed for this resource/shape — see the `Allow` response header for the verbs this resource actually supports.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "headers": {
+              "Allow": {
+                "description": "Comma-separated list of supported HTTP verbs.",
+                "schema": {
+                  "type": "string",
+                  "example": "GET, POST"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded (bearer only) — see the `Retry-After` response header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the oldest in-window hit ages out.",
+                "schema": {
+                  "type": "integer",
+                  "example": 42
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Expenses"
+        ],
+        "summary": "Submit an expense claim (v1, #157 remnant)",
+        "description": "Requires scope `expenses:write` (bearer) or any authenticated session (submitting is a member action, not admin-only). `lineTotal`/`totalAmount` are always computed server-side. Bearer callers MUST supply `userID` in the body (the owning user, checked against the key's own site) since a bearer request carries no session owner. **Status-transition update (approve/reject/reimburse) is DEFERRED to Phase 3** — there is no `PUT /api/v1/expenses/{id}` in this release. **Legacy alias:** `POST /api/expenses/create`.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": [],
+            "csrfToken": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExpenseCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1SuccessEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error — missing/invalid field, or (on an /{id} path) a non-numeric resource id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required — no valid session and no valid bearer API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — bearer key missing the required scope, session caller failing the role gate, or the endpoint disabled via the api.{app}.{action}.enabled setting (same flag as the legacy alias).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Method not allowed for this resource/shape — see the `Allow` response header for the verbs this resource actually supports.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "headers": {
+              "Allow": {
+                "description": "Comma-separated list of supported HTTP verbs.",
+                "schema": {
+                  "type": "string",
+                  "example": "GET, POST"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded (bearer only) — see the `Retry-After` response header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the oldest in-window hit ages out.",
+                "schema": {
+                  "type": "integer",
+                  "example": 42
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/expenses/{id}": {
+      "delete": {
+        "tags": [
+          "Expenses"
+        ],
+        "summary": "Delete an expense claim (v1; only status = Pending may be deleted)",
+        "description": "Requires scope `expenses:write` (bearer) or an owner-or-admin session. Bearer mode: scope + the key's site-pin is sufficient (no separate ownership check — a key already operates within one site). Returns 409 if the claim has left the 'Pending' status. **Legacy alias:** `POST /api/expenses/delete?id={id}`.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": [],
+            "csrfToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "claimID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1SuccessEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required — no valid session and no valid bearer API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — bearer key missing the required scope, session caller failing the role gate, or the endpoint disabled via the api.{app}.{action}.enabled setting (same flag as the legacy alias).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found — including a cross-site id probe, which 404s rather than 403 so it never confirms another tenant’s row exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Method not allowed for this resource/shape — see the `Allow` response header for the verbs this resource actually supports.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "headers": {
+              "Allow": {
+                "description": "Comma-separated list of supported HTTP verbs.",
+                "schema": {
+                  "type": "string",
+                  "example": "GET, POST"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict — see `message` (e.g. duplicate value, or an illegal state transition).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded (bearer only) — see the `Retry-After` response header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the oldest in-window hit ages out.",
+                "schema": {
+                  "type": "integer",
+                  "example": 42
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/leadership": {
+      "get": {
+        "tags": [
+          "Leadership"
+        ],
+        "summary": "List leadership roles and current assignees (v1)",
+        "description": "Requires scope `leadership:read` (bearer) or an authenticated session. **Legacy alias:** `GET /api/leadership/list`.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": [],
+            "csrfToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "role",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Optional roleID filter"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1SuccessEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required — no valid session and no valid bearer API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — bearer key missing the required scope, session caller failing the role gate, or the endpoint disabled via the api.{app}.{action}.enabled setting (same flag as the legacy alias).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Method not allowed for this resource/shape — see the `Allow` response header for the verbs this resource actually supports.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "headers": {
+              "Allow": {
+                "description": "Comma-separated list of supported HTTP verbs.",
+                "schema": {
+                  "type": "string",
+                  "example": "GET, POST"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded (bearer only) — see the `Retry-After` response header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the oldest in-window hit ages out.",
+                "schema": {
+                  "type": "integer",
+                  "example": 42
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Leadership"
+        ],
+        "summary": "Assign a leadership role to a user or external person (v1; `POST` aliases the `assign` action)",
+        "description": "Requires scope `leadership:write` (bearer) or an admin session. **Legacy alias:** `POST /api/leadership/assign`.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": [],
+            "csrfToken": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "roleID"
+                ],
+                "properties": {
+                  "roleID": {
+                    "type": "integer"
+                  },
+                  "userID": {
+                    "type": "integer",
+                    "nullable": true
+                  },
+                  "personName": {
+                    "type": "string"
+                  },
+                  "personEmail": {
+                    "type": "string"
+                  },
+                  "startDate": {
+                    "type": "string",
+                    "format": "date"
+                  },
+                  "endDate": {
+                    "type": "string",
+                    "format": "date"
+                  },
+                  "notes": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1SuccessEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error — missing/invalid field, or (on an /{id} path) a non-numeric resource id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required — no valid session and no valid bearer API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — bearer key missing the required scope, session caller failing the role gate, or the endpoint disabled via the api.{app}.{action}.enabled setting (same flag as the legacy alias).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Method not allowed for this resource/shape — see the `Allow` response header for the verbs this resource actually supports.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "headers": {
+              "Allow": {
+                "description": "Comma-separated list of supported HTTP verbs.",
+                "schema": {
+                  "type": "string",
+                  "example": "GET, POST"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded (bearer only) — see the `Retry-After` response header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the oldest in-window hit ages out.",
+                "schema": {
+                  "type": "integer",
+                  "example": 42
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/leadership/{id}": {
+      "delete": {
+        "tags": [
+          "Leadership"
+        ],
+        "summary": "End an active leadership assignment (v1; `DELETE` aliases the `unassign` action — v1.0 has no generic update)",
+        "description": "Requires scope `leadership:write` (bearer) or an admin session. The path `{id}` is the assignmentID (not the roleID). **Legacy alias:** `POST /api/leadership/unassign` (assignmentID in body).",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": [],
+            "csrfToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "assignmentID"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "endDate": {
+                    "type": "string",
+                    "format": "date"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1SuccessEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error — missing/invalid field, or (on an /{id} path) a non-numeric resource id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required — no valid session and no valid bearer API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — bearer key missing the required scope, session caller failing the role gate, or the endpoint disabled via the api.{app}.{action}.enabled setting (same flag as the legacy alias).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found — including a cross-site id probe, which 404s rather than 403 so it never confirms another tenant’s row exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Method not allowed for this resource/shape — see the `Allow` response header for the verbs this resource actually supports.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "headers": {
+              "Allow": {
+                "description": "Comma-separated list of supported HTTP verbs.",
+                "schema": {
+                  "type": "string",
+                  "example": "GET, POST"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded (bearer only) — see the `Retry-After` response header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the oldest in-window hit ages out.",
+                "schema": {
+                  "type": "integer",
+                  "example": 42
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/tasks": {
+      "get": {
+        "tags": [
+          "Tasks"
+        ],
+        "summary": "List tasks (v1; own by default, admins can filter via userID)",
+        "description": "Requires scope `tasks:read` (bearer) or an authenticated session. **Legacy alias:** `GET /api/tasks/list`.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": [],
+            "csrfToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "open",
+                "completed",
+                "all"
+              ],
+              "default": "open"
+            }
+          },
+          {
+            "name": "userID",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Admin-only filter"
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1SuccessEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required — no valid session and no valid bearer API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — bearer key missing the required scope, session caller failing the role gate, or the endpoint disabled via the api.{app}.{action}.enabled setting (same flag as the legacy alias).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Method not allowed for this resource/shape — see the `Allow` response header for the verbs this resource actually supports.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "headers": {
+              "Allow": {
+                "description": "Comma-separated list of supported HTTP verbs.",
+                "schema": {
+                  "type": "string",
+                  "example": "GET, POST"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded (bearer only) — see the `Retry-After` response header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the oldest in-window hit ages out.",
+                "schema": {
+                  "type": "integer",
+                  "example": 42
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Tasks"
+        ],
+        "summary": "Create a task (v1)",
+        "description": "Requires scope `tasks:write` (bearer) or an authenticated session. **Legacy alias:** `POST /api/tasks/create`.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": [],
+            "csrfToken": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "title"
+                ],
+                "properties": {
+                  "title": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "assignedToID": {
+                    "type": "integer"
+                  },
+                  "priority": {
+                    "type": "string",
+                    "enum": [
+                      "low",
+                      "normal",
+                      "high",
+                      "urgent"
+                    ]
+                  },
+                  "dueDate": {
+                    "type": "string",
+                    "format": "date"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1SuccessEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error — missing/invalid field, or (on an /{id} path) a non-numeric resource id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required — no valid session and no valid bearer API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — bearer key missing the required scope, session caller failing the role gate, or the endpoint disabled via the api.{app}.{action}.enabled setting (same flag as the legacy alias).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Method not allowed for this resource/shape — see the `Allow` response header for the verbs this resource actually supports.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "headers": {
+              "Allow": {
+                "description": "Comma-separated list of supported HTTP verbs.",
+                "schema": {
+                  "type": "string",
+                  "example": "GET, POST"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded (bearer only) — see the `Retry-After` response header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the oldest in-window hit ages out.",
+                "schema": {
+                  "type": "integer",
+                  "example": 42
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/tasks/{id}": {
+      "put": {
+        "tags": [
+          "Tasks"
+        ],
+        "summary": "Mark a task complete (v1; `PUT`/`PATCH` alias the `complete` action)",
+        "description": "Requires scope `tasks:write` (bearer) or the assignee/admin session. **Legacy alias:** `POST /api/tasks/complete` (taskID in body).",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": [],
+            "csrfToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "taskID"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "description": "No body fields are required — `PUT`/`PATCH` on a task id always aliases the `complete` action (v1.0 has no generic task-field update).",
+                "properties": {}
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1SuccessEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required — no valid session and no valid bearer API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — bearer key missing the required scope, session caller failing the role gate, or the endpoint disabled via the api.{app}.{action}.enabled setting (same flag as the legacy alias).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found — including a cross-site id probe, which 404s rather than 403 so it never confirms another tenant’s row exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Method not allowed for this resource/shape — see the `Allow` response header for the verbs this resource actually supports.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "headers": {
+              "Allow": {
+                "description": "Comma-separated list of supported HTTP verbs.",
+                "schema": {
+                  "type": "string",
+                  "example": "GET, POST"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded (bearer only) — see the `Retry-After` response header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the oldest in-window hit ages out.",
+                "schema": {
+                  "type": "integer",
+                  "example": 42
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Tasks"
+        ],
+        "summary": "Delete a task (v1; creator or admin only)",
+        "description": "Requires scope `tasks:write` (bearer) or the creator/admin session. **Legacy alias:** `POST /api/tasks/delete` (taskID in body).",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": [],
+            "csrfToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "taskID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1SuccessEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required — no valid session and no valid bearer API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — bearer key missing the required scope, session caller failing the role gate, or the endpoint disabled via the api.{app}.{action}.enabled setting (same flag as the legacy alias).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found — including a cross-site id probe, which 404s rather than 403 so it never confirms another tenant’s row exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Method not allowed for this resource/shape — see the `Allow` response header for the verbs this resource actually supports.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "headers": {
+              "Allow": {
+                "description": "Comma-separated list of supported HTTP verbs.",
+                "schema": {
+                  "type": "string",
+                  "example": "GET, POST"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded (bearer only) — see the `Retry-After` response header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the oldest in-window hit ages out.",
+                "schema": {
+                  "type": "integer",
+                  "example": 42
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Tasks"
+        ],
+        "summary": "Mark a task complete (v1; `PUT`/`PATCH` alias the `complete` action)",
+        "description": "Requires scope `tasks:write` (bearer) or the assignee/admin session. **Legacy alias:** `POST /api/tasks/complete` (taskID in body).",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": [],
+            "csrfToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "taskID"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "description": "No body fields are required — `PUT`/`PATCH` on a task id always aliases the `complete` action (v1.0 has no generic task-field update).",
+                "properties": {}
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1SuccessEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required — no valid session and no valid bearer API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — bearer key missing the required scope, session caller failing the role gate, or the endpoint disabled via the api.{app}.{action}.enabled setting (same flag as the legacy alias).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found — including a cross-site id probe, which 404s rather than 403 so it never confirms another tenant’s row exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Method not allowed for this resource/shape — see the `Allow` response header for the verbs this resource actually supports.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "headers": {
+              "Allow": {
+                "description": "Comma-separated list of supported HTTP verbs.",
+                "schema": {
+                  "type": "string",
+                  "example": "GET, POST"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded (bearer only) — see the `Retry-After` response header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the oldest in-window hit ages out.",
+                "schema": {
+                  "type": "integer",
+                  "example": 42
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/noticeboard": {
+      "get": {
+        "tags": [
+          "Noticeboard"
+        ],
+        "summary": "List active posters on the current site’s noticeboard (v1)",
+        "description": "Requires scope `noticeboard:read` (bearer) or an authenticated session. **Legacy alias:** `GET /api/noticeboard/list`.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": [],
+            "csrfToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1SuccessEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required — no valid session and no valid bearer API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — bearer key missing the required scope, session caller failing the role gate, or the endpoint disabled via the api.{app}.{action}.enabled setting (same flag as the legacy alias).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Method not allowed for this resource/shape — see the `Allow` response header for the verbs this resource actually supports.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "headers": {
+              "Allow": {
+                "description": "Comma-separated list of supported HTTP verbs.",
+                "schema": {
+                  "type": "string",
+                  "example": "GET, POST"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded (bearer only) — see the `Retry-After` response header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the oldest in-window hit ages out.",
+                "schema": {
+                  "type": "integer",
+                  "example": 42
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Noticeboard"
+        ],
+        "summary": "Replace the current site’s poster set (v1; `POST` aliases the `save` action)",
+        "description": "Requires scope `noticeboard:write` (bearer) or a site-admin session. There is no per-poster PUT/PATCH/DELETE in v1 — the client always sends the FULL desired board state in one call; posters upsert by their `\"p<posterID>\"` id, and any existing poster left out of the array is soft-deleted. See `PosterInput`. **Legacy alias:** `POST /api/noticeboard/save`.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": [],
+            "csrfToken": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "posters"
+                ],
+                "properties": {
+                  "posters": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/PosterInput"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1SuccessEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error — missing/invalid field, or (on an /{id} path) a non-numeric resource id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required — no valid session and no valid bearer API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — bearer key missing the required scope, session caller failing the role gate, or the endpoint disabled via the api.{app}.{action}.enabled setting (same flag as the legacy alias).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Method not allowed for this resource/shape — see the `Allow` response header for the verbs this resource actually supports.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "headers": {
+              "Allow": {
+                "description": "Comma-separated list of supported HTTP verbs.",
+                "schema": {
+                  "type": "string",
+                  "example": "GET, POST"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Malformed payload — e.g. a noticeboard poster image supplied as a data: URI (upload via the media library and pass its URL instead).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded (bearer only) — see the `Retry-After` response header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the oldest in-window hit ages out.",
+                "schema": {
+                  "type": "integer",
+                  "example": 42
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/users": {
+      "get": {
+        "tags": [
+          "Users"
+        ],
+        "summary": "List users (v1; admin only)",
+        "description": "Admin ALWAYS required in both modes — bearer additionally needs `users:read`. **Legacy alias:** `GET /api/users/list`.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": [],
+            "csrfToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1SuccessEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required — no valid session and no valid bearer API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — bearer key missing the required scope, session caller failing the role gate, or the endpoint disabled via the api.{app}.{action}.enabled setting (same flag as the legacy alias).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Method not allowed for this resource/shape — see the `Allow` response header for the verbs this resource actually supports.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "headers": {
+              "Allow": {
+                "description": "Comma-separated list of supported HTTP verbs.",
+                "schema": {
+                  "type": "string",
+                  "example": "GET, POST"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded (bearer only) — see the `Retry-After` response header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the oldest in-window hit ages out.",
+                "schema": {
+                  "type": "integer",
+                  "example": 42
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Users"
+        ],
+        "summary": "Create a user (v1, deferral item 3 — highest blast-radius surface)",
+        "description": "Admin ALWAYS required in both modes — bearer additionally needs `users:write` **and** the `api.users.create.enabled` flag, seeded `'false'` (default-off; an admin must consciously enable it). Passwords are never accepted — see `UserCreate`. There is no DELETE for this resource in v1. **Legacy alias:** none — this endpoint is new in v1, exposed only at this path.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": [],
+            "csrfToken": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UserCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1SuccessEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error — missing/invalid field, or (on an /{id} path) a non-numeric resource id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required — no valid session and no valid bearer API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — bearer key missing the required scope, session caller failing the role gate, or the endpoint disabled via the api.{app}.{action}.enabled setting (same flag as the legacy alias).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Method not allowed for this resource/shape — see the `Allow` response header for the verbs this resource actually supports.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "headers": {
+              "Allow": {
+                "description": "Comma-separated list of supported HTTP verbs.",
+                "schema": {
+                  "type": "string",
+                  "example": "GET, POST"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict — see `message` (e.g. duplicate value, or an illegal state transition).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded (bearer only) — see the `Retry-After` response header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the oldest in-window hit ages out.",
+                "schema": {
+                  "type": "integer",
+                  "example": 42
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/users/{id}": {
+      "put": {
+        "tags": [
+          "Users"
+        ],
+        "summary": "Update a user (v1; PATCH-style)",
+        "description": "Admin ALWAYS required in both modes — bearer additionally needs `users:write` **and** the `api.users.update.enabled` flag, seeded `'false'`. Email and password are excluded from v1. A session caller can never deactivate their own account through this endpoint. **Legacy alias:** none — new in v1.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": [],
+            "csrfToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "userID"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UserUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1SuccessEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error — missing/invalid field, or (on an /{id} path) a non-numeric resource id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required — no valid session and no valid bearer API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — bearer key missing the required scope, session caller failing the role gate, or the endpoint disabled via the api.{app}.{action}.enabled setting (same flag as the legacy alias).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found — including a cross-site id probe, which 404s rather than 403 so it never confirms another tenant’s row exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Method not allowed for this resource/shape — see the `Allow` response header for the verbs this resource actually supports.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "headers": {
+              "Allow": {
+                "description": "Comma-separated list of supported HTTP verbs.",
+                "schema": {
+                  "type": "string",
+                  "example": "GET, POST"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded (bearer only) — see the `Retry-After` response header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the oldest in-window hit ages out.",
+                "schema": {
+                  "type": "integer",
+                  "example": 42
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Users"
+        ],
+        "summary": "Update a user (v1; PATCH-style)",
+        "description": "Admin ALWAYS required in both modes — bearer additionally needs `users:write` **and** the `api.users.update.enabled` flag, seeded `'false'`. Email and password are excluded from v1. A session caller can never deactivate their own account through this endpoint. **Legacy alias:** none — new in v1.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": [],
+            "csrfToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "userID"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UserUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1SuccessEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error — missing/invalid field, or (on an /{id} path) a non-numeric resource id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required — no valid session and no valid bearer API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — bearer key missing the required scope, session caller failing the role gate, or the endpoint disabled via the api.{app}.{action}.enabled setting (same flag as the legacy alias).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found — including a cross-site id probe, which 404s rather than 403 so it never confirms another tenant’s row exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Method not allowed for this resource/shape — see the `Allow` response header for the verbs this resource actually supports.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "headers": {
+              "Allow": {
+                "description": "Comma-separated list of supported HTTP verbs.",
+                "schema": {
+                  "type": "string",
+                  "example": "GET, POST"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded (bearer only) — see the `Retry-After` response header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the oldest in-window hit ages out.",
+                "schema": {
+                  "type": "integer",
+                  "example": 42
+                }
+              }
+            }
           }
         }
       }

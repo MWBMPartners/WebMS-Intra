@@ -1810,4 +1810,136 @@ As of #361, all four families are **self-hosted** instead of falling back to `sy
 
 ---
 
-Last updated: May 2026
+## REST API v1 (#323 Phase 2)
+
+### Dual-mode contract — bearer OR session, never both
+
+Every `_apps/{app}/api/{action}.php` handler resolves auth through one choke-point,
+`Portal\Core\ApiAuth` (`web/_core/ApiAuth.php`):
+
+- **Bearer** — `Authorization: Bearer wbms_…`. Detected purely by the `wbms_` prefix
+  (`ApiAuth::isBearer()`); any other bearer scheme falls through to the session path
+  untouched, so this never hijacks a future OAuth integration. Verified via
+  `ApiKey::findByPlaintext()` (Phase 1), scope-gated via `ApiKey::hasScope()`
+  (wildcards `*` / `{res}:*` supported), tenant-pinned to the KEY's own site
+  (`Site::forceContext()` — see below), and per-key rate-limited. **No CSRF** — a
+  bearer token travels in an explicit header set by calling code, never by a
+  browser automatically, so CSRF protection is meaningless for it (the
+  OWASP-sanctioned exemption for token auth).
+- **Session** — the existing logged-in portal user. Reproduces the historical
+  per-handler boilerplate verbatim (same order, same rejection strings/codes):
+  `requireAuth` → optional `requireAdmin` → `Auth::ensureSession()` → CSRF via the
+  `X-CSRF-TOKEN` header or `csrf_token` body field on writes.
+
+Handlers call `ApiAuth::requireRead('{resource}:read', $sessionNeedsAdmin)` or
+`ApiAuth::requireWrite('{resource}:write', $sessionNeedsAdmin)` (the latter returns
+the decoded JSON body) instead of hand-rolling the boilerplate. `ApiAuth::source()`
+/ `apiKeyId()` / `actorUserId()` feed `Logger::audit()`'s new `$apiKeyId` /
+`$source` parameters (auto-resolved when omitted — every pre-existing call site
+compiles and behaves unchanged).
+
+### `/api/v1/{resource}[/{id}]` facade
+
+`ApiRouter::dispatchV1()` translates `(HTTP verb, resource, id)` into the identical
+legacy `(app, action)` pair and re-runs the **same** pipeline as
+`/api/{app}/{action}`: same handler file, same `api.{app}.{action}.enabled` flag.
+No new gating vocabulary, no `tblRoutes` rows. See CLAUDE.md's "ApiRouter routing
+trap" section for the one-line summary. Per-resource action aliases (where the
+handler file isn't named `create`/`update`/`delete`):
+
+| Resource | POST → | PUT/PATCH → | DELETE → |
+|---|---|---|---|
+| noticeboard | `save` | — (none) | — (none) |
+| leadership | `assign` | — (none) | `unassign` (id = assignmentID) |
+| prayer-requests | `create` | `moderate` | — (none) |
+| tasks | `create` | `complete` | `delete` |
+| expenses | `create` | — (**deferred to Phase 3**) | `delete` |
+
+`GET /api/v1/{resource}/{id}` (a "detail" route) exists for **events only** — every
+other resource 404s an id-suffixed GET (no `detail.php` handler). Unknown resource
+→ 404; non-numeric id → 400; unsupported verb → 405 with an `Allow` header built
+from which handler files actually exist on disk.
+
+### Scope vocabulary
+
+`Portal\Core\ApiKey::SCOPES` is the single source of truth — twenty `{resource}:read`
+/ `{resource}:write` pairs across the ten v1 resources (events, announcements,
+attendance, prayer-requests, documents, expenses, leadership, tasks, noticeboard,
+users). The admin mint form (`_apps/admin/integrations/api-keys.php`) renders this
+constant as a checkbox grid — never a duplicated hardcoded list — and
+`api-keys-save.php` re-validates every submitted token server-side against
+`SCOPES` ∪ `{'*'}` ∪ `{'{resource}:*'}` for a KNOWN resource, rejecting anything
+else. `ApiKey::hasScope()` honours both wildcard forms at verification time.
+
+### Tenant pinning (`Site::forceContext`)
+
+A bearer request carries no session, so `Site::id()` would otherwise resolve to
+the host-detected default site rather than the key's own. `resolveBearer()` in
+`ApiAuth` re-points the site context to the key's `siteID` via
+`Site::forceContext(int $siteId)` before the handler runs, so every
+`Site::id()`-scoped query in every handler becomes tenant-correct automatically.
+`forceContext()` fails CLOSED: a key with `siteID <= 0`, a missing/inactive site,
+or (when multisite is disabled) any site other than the install's single site, all
+500 rather than silently falling back to the ambient default. `ApiRouter`'s
+`api.{app}.{action}.enabled` gate is ALSO resolved against the pinned site
+(`App::settingForSite`), not the frozen bootstrap `$SETTINGS` snapshot — a site's
+own kill-switch can't be bypassed via the Host header on a bearer request.
+
+### Per-key rate limiting
+
+`RateLimiter::tooMany()` / `recordHit()` / `retryAfter()` implement a generic
+sliding window against a new `tblApiRateLimits` table (bucket = `apikey:{keyID}`),
+separate from the pre-existing login-attempt limiter. Limits default to 300
+requests / 5 minutes, overridable per-site via `api.rateLimit.perKey.maxRequests`
+/ `windowMinutes`. A 429 sets `Retry-After`. Session callers are never rate-limited
+by this mechanism (unchanged — they're protected by login rate limiting instead).
+
+### Rotation grace
+
+`ApiKey::rotate($keyId, $byUserId, ?$graceHours)` mints a replacement key first,
+then either revokes the old key immediately (`$graceHours === 0`) or caps its
+`expiresAt` at `now + $graceHours` and stamps `rotatedToID` (`$graceHours` null
+resolves against the `api.keys.rotationGraceHours` setting, default 24). The old
+key stays `isActive = 1` and dies naturally via the existing `expiresAt` check in
+`findByPlaintext()` once the cutoff passes — zero changes to the verification
+path. The admin UI (`api-keys.php`) offers a grace `<select>` (immediate / 1h /
+24h / 72h, default 24h) on the rotate control, and shows an "Expiring (rotated)"
+badge on any key row where `rotatedToID IS NOT NULL AND isActive = 1`.
+
+### ⚠️ Known limitations (documented, not bugs)
+
+1. **The per-key rate limiter is check-then-record, not atomic.** `tooMany()` and
+   `recordHit()` are two separate statements with no `SELECT ... FOR UPDATE` /
+   advisory lock between them — a genuinely concurrent burst against the same key
+   can slightly exceed `maxRequests` before the limiter catches up. This is
+   approximate limiting by design (house pattern: fail-open on DB error, cheap
+   single-row inserts + a covering index over a distributed lock), not a
+   correctness bug. Revisit only if abuse patterns actually exploit the window.
+2. **The bearer key-row `lastUsedAt`/`lastUsedIP` stamp runs on the PRE-gate
+   lookup.** `ApiRouter::resolveEnabledFlag()` calls `ApiAuth::bearerKeyRow()` to
+   discover the key's site for the `enabled` check BEFORE the handler (and its own
+   `ApiAuth::requireRead/Write()` call) runs — and `ApiKey::findByPlaintext()`
+   stamps `lastUsedAt` as a side effect of that same lookup. `bearerKeyRow()` is
+   cached per-request, so this costs exactly one extra single-row `UPDATE`, not a
+   duplicate DB round-trip — but it means a valid key hammering a DISABLED
+   endpoint still drives one un-throttled `lastUsedAt` write per request (the
+   per-key rate limiter only runs inside `resolveBearer()`, which a disabled
+   endpoint never reaches). Self-contention against the key's own row; no
+   cross-tenant impact; negligible load in practice.
+3. **Expenses status-transition update (approve/reject/reimburse) is DEFERRED to
+   Phase 3.** There is no `PUT /api/v1/expenses/{id}` in this release — v1 ships
+   `create` + `delete` (Pending-only) only. The transition needs to share the
+   existing multi-approver workflow + `ExpenseMailer` side-effects
+   (`_apps/expenses/approve/`) rather than duplicating that logic, which wants its
+   own extraction pass.
+4. **Several write endpoints record creator/updater as NULL for bearer requests.**
+   `ApiAuth::actorUserId()` returns `null` in bearer mode (there is no session
+   user) — handlers use `ApiAuth::actorUserId() ?? 0`, so a bearer-created row's
+   `createdByID`/`updatedByID` is `0`/`NULL` rather than a real user. Attribution
+   for a bearer-made change is via the audit trail instead:
+   `tblAuditTrail.apiKeyID` + `.source = 'apikey'` (see the admin Audit Trail
+   viewer's new source badge + key-prefix column).
+
+---
+
+Last updated: July 2026
