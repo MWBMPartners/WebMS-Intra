@@ -13,7 +13,7 @@
 -- present in web/_sql/ are marked as executed in tblMigrations so the
 -- web-based Migrator won't re-run them.
 --
--- Covers migrations: 000-147 (DDL + settings/routes seeds + tblMigrations
+-- Covers migrations: 000-148 (DDL + settings/routes seeds + tblMigrations
 -- marks). When you add a new migration, port its DDL/seeds into the
 -- appropriate section here AND add its filename to the seed block at the
 -- end of this file. CI enforces this via
@@ -3132,6 +3132,10 @@ CREATE TABLE IF NOT EXISTS `tblPrayerRequests` (
                      COMMENT 'FK → tblUsers — the prayer partner assigned to this request (#311, migration 110)',
     `assignedAt`     DATETIME     DEFAULT NULL
                      COMMENT 'When the request was assigned to its current partner',
+    `partnerNote`    TEXT         DEFAULT NULL
+                     COMMENT 'Private note from/to the assigned prayer partner (#311, migration 148) — ONLY the assignee or an admin may read/write this (enforced in PHP)',
+    `partnerLastPrayedAt` DATETIME DEFAULT NULL
+                     COMMENT 'When the assigned partner last tapped "mark prayed for" on My Prayer List (#311, migration 148)',
     `submitterName`  VARCHAR(100) DEFAULT NULL
                      COMMENT 'Optional display name supplied by an anonymous submitter',
     `submitterEmail` VARCHAR(255) DEFAULT NULL
@@ -4803,6 +4807,28 @@ ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
 
 
 -- =============================================================================
+-- Migration 148: Prayer chain — assignment residuals (#311)
+-- =============================================================================
+-- partnerNote / partnerLastPrayedAt columns are ported inline into the
+-- tblPrayerRequests CREATE TABLE above (SECTION with "matches migration 039").
+
+-- 🛡️ Seed the prayer_team role if not already present (matches migration 148;
+-- App::hasRole() + api/moderate.php both reference this exact roleKey).
+INSERT INTO `tblRoles` (`roleKey`, `roleName`)
+    SELECT 'prayer_team', 'Prayer Team'
+    WHERE NOT EXISTS (SELECT 1 FROM `tblRoles` WHERE `roleKey` = 'prayer_team');
+
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'prayer-requests.autoAssign',     'false', 'false', 0),
+    (NULL, 'prayer-requests.notifyOnAssign', 'true',  'true',  0)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('account/my-prayer-list/save', 'account/my-prayer-list-save.php', 1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
+
+-- =============================================================================
 -- Tables added in numbered migrations 105+ — appended for fresh-install parity.
 -- Maintained automatically; do NOT hand-edit duplicates. See the same
 -- definitions in web/_sql/{105..144}_*.sql for the source of truth + comments.
@@ -5723,4 +5749,7 @@ INSERT INTO `tblMigrations` (`filename`) VALUES ('146_noticeboard_help_route.sql
 ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
 INSERT INTO `tblMigrations` (`filename`) VALUES ('147_api_v1_write_surface.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('148_prayer_chain_residuals.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;

@@ -2,6 +2,14 @@
 
 
 ## [1.4.0] - 2026-07-22 (alpha)
+- feat(prayer-requests): #311 prayer-chain assignment residuals — private
+  partner notes (`partnerNote`/`partnerLastPrayedAt`, ACL: assignee-or-admin
+  only, cleared on reassignment), manual assign dropdowns with an
+  open-assignment load-balancing hint on `manage`/`view` (eligible partner =
+  active site member holding the new `prayer_team` role), opt-in round-robin
+  auto-assign on submission (`prayer-requests.autoAssign`), and email + SMS
+  assignment notifications (`prayer-requests.notifyOnAssign`, respecting the
+  partner's SMS opt-in) — new `Portal\Core\PrayerChain` helper, migration 148.
 - feat(api): REST API v1 write surface (#323 Phase 2, PR #372) — dual-mode `Portal\Core\ApiAuth`
   (bearer API key OR session, resolved centrally); `/api/v1/{resource}[/{id}]` RESTful facade that
   maps HTTP verbs onto the SAME `_apps/{app}/api/{action}.php` handlers + `api.{app}.{action}.enabled`

@@ -171,7 +171,7 @@ Events, series, RSVP, exports, and (in flight) seven view modes.
 
 ---
 
-### 🙏 Prayer Requests — `/prayer-requests/` ✅ (#129)
+### 🙏 Prayer Requests — `/prayer-requests/` ✅ (#129, #311)
 
 Per-site prayer-request submission with moderation and anonymous public submission.
 
@@ -179,11 +179,27 @@ Per-site prayer-request submission with moderation and anonymous public submissi
 - "Display as Anonymous" toggle (moderators still see who submitted).
 - Public anonymous route at `/prayer-requests/anonymous` (no login) — CSRF + CAPTCHA + RateLimiter; always pending, leadership-only.
 - Lifecycle: pending → active → answered (optional praise/testimony note) → archived.
-- Moderation queue at `/prayer-requests/manage`.
+- Moderation queue at `/prayer-requests/manage`, with a per-row prayer-chain
+  partner assign dropdown; full assign UI + private-note admin panel on
+  `/prayer-requests/view`.
+- **Prayer-chain partner assignment (#311, migration 148):** eligible
+  partner = an active site member holding the `prayer_team` role
+  (`Portal\Core\PrayerChain`). Manual assign from `manage`/`view` shows each
+  partner's current OPEN-assignment count as a load-balancing hint. Opt-in
+  round-robin **auto-assign** on submission (`prayer-requests.autoAssign`)
+  picks the least-loaded eligible partner (ties → lowest userID) across
+  `save.php`, `anonymous-save.php`, and `api/create.php`. Assignment
+  (manual or auto) emails + SMS-pings the partner (respecting their
+  verified-number + `prayer_assignment` category opt-in), gated by
+  `prayer-requests.notifyOnAssign`.
+- **`/account/my-prayer-list`:** the assigned partner's own view of their
+  OPEN assignments (pending/active), with a "mark prayed for" action and a
+  **private note** (`partnerNote`) only they (or an admin) can read/write —
+  cleared automatically on reassignment to a different partner.
 - Help page at `/help/prayer-requests`.
 
-**Tables:** `tblPrayerRequests`
-**Settings:** `prayerRequests.enabled`, `prayerRequests.allowAnonymous`, `prayerRequests.allowCongregationFeed`, `prayerRequests.requireModeration`, `prayerRequests.allowTestimony`
+**Tables:** `tblPrayerRequests` (+ `partnerNote`, `partnerLastPrayedAt` — migration 148)
+**Settings:** `prayerRequests.enabled`, `prayerRequests.allowAnonymous`, `prayerRequests.allowCongregationFeed`, `prayerRequests.requireModeration`, `prayerRequests.allowTestimony`, `prayer-requests.autoAssign`, `prayer-requests.notifyOnAssign`
 
 ---
 

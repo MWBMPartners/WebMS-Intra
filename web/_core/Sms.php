@@ -30,6 +30,10 @@ class Sms
         'rota_changes',
         'emergency_comms',
         'newsletter_digest',
+        // 🙏 Prayer-partner assignment pings (#311) — opt-in via /account/sms
+        // like every other category; PrayerChain::notifyAssignment() checks
+        // this via FIND_IN_SET before calling Sms::send().
+        'prayer_assignment',
     ];
 
     /**
