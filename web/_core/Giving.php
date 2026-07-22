@@ -47,6 +47,35 @@ class Giving
     }
 
     /**
+     * Convert a free-form user-entered amount (e.g. "125.50", "£125", "")
+     * into a validated non-negative DECIMAL(10,2) string suitable for
+     * binding to a `DECIMAL` column — used by the offering-count workflow
+     * (#299 sub-feature 1), which stores independent counter totals as
+     * DECIMAL rather than pence. Returns null for blank/invalid/negative
+     * input so the caller can distinguish "not entered yet" from "0.00".
+     *
+     * Deliberately round-trips through float → round → number_format
+     * server-side rather than trusting the client string verbatim, so a
+     * value like "12.999" or "1e2" never reaches SQL unnormalised.
+     */
+    public static function parseDecimal(string $input): ?string
+    {
+        $trimmed = trim($input);
+        if ($trimmed === '') {
+            return null;
+        }
+        $clean = preg_replace('/[^0-9.\-]/', '', $trimmed);
+        if ($clean === '' || $clean === null || is_numeric($clean) === false) {
+            return null;
+        }
+        $f = (float) $clean;
+        if ($f < 0) {
+            return null;
+        }
+        return number_format(round($f, 2), 2, '.', '');
+    }
+
+    /**
      * Format pence as a currency display string. Default GBP — caller
      * passes the currency code from `giving.currency` or per-entry.
      */

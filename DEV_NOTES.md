@@ -1957,4 +1957,110 @@ badge on any key row where `rotatedToID IS NOT NULL AND isActive = 1`.
 
 ---
 
+## Giving — two-person offering count session (#299 sub-feature 1)
+
+Extension to the existing `giving` app (#266, migration 094). #299 ("Giving
+polish") bundles FOUR sub-features — offering counting, pledge campaigns,
+bank reconciliation, account-updater. Only sub-feature 1 is built here; the
+other three are separate, tracked-but-not-started scope.
+
+### Naming: `tblGiftEntries` vs the real `tblGivingEntry`
+
+#299's issue body sketches the write target as `tblGiftEntries`, but the
+giving app actually shipped as `tblGivingEntry` (singular "Entry", amounts in
+PENCE via `amountPence` — see `Portal\Core\Giving`, `web/_sql/full_schema.sql`
+§"Giving / contributions log"). This migration (150) writes to the REAL
+table. New columns introduced here follow `tblGivingEntry`'s own convention
+(`siteID INT NOT NULL DEFAULT 1`, `createdAt DATETIME NOT NULL DEFAULT
+CURRENT_TIMESTAMP`, `fk_<short>_<col>` constraint names) rather than the
+issue body's sketch verbatim.
+
+### Schema
+
+- **`tblCountSessions`** — one row per service date. `counter1ID`/`counter2ID`
+  (nullable, assigned at creation or later) each get their own independent
+  `cashTotal1/chequeTotal1/envelopeTotal1` and `…2` triplet (`DECIMAL(10,2)`,
+  nullable until entered). `cashTotal`/`chequeTotal`/`envelopeTotal` (also
+  nullable `DECIMAL(10,2)`) are the **agreed** totals — set only once the two
+  independent counts match, or an admin resolves a discrepancy — and are what
+  actually gets written to the gift log on close.
+  **`categoryID` (NOT NULL, FK `tblGivingCategory`) is an addition beyond the
+  issue body's column sketch** — it's required because `tblGivingEntry.categoryID`
+  is `NOT NULL`, so every count session needs to know which giving
+  category/fund its gift log posts to. Picked at session-creation time.
+- **`tblCountEnvelopes`** — added per the issue body's own conditional ("if
+  envelope-level named entries are needed to write per-envelope gift entries,
+  add a child table"). Models the numbered/named giving-envelope breakdown of
+  a session's agreed `envelopeTotal` — `giverID` (nullable, matched member) OR
+  `giverName` (free text, mirrors `tblGivingEntry.donorName`'s own
+  matched-vs-free-text pattern), `amount DECIMAL(10,2)`, `method
+  ENUM('cash','cheque')`. Entered ONCE per session (not duplicated per
+  counter) — only the aggregate cash/cheque/envelope totals are independently
+  double-keyed; the named breakdown is collaborative, shared session data.
+
+### State machine (`tblCountSessions.status`)
+
+```
+open ──(counter 1 OR 2 submits)──▶ counting ──(other counter submits, MATCH)──▶ counting (agreed totals set, ready to close)
+                                       │
+                                       └──(other counter submits, MISMATCH)──▶ discrepancy
+                                                                                   │
+                                                              (counter re-enters, now matches) ──▶ counting
+                                                              (admin resolves w/ agreed totals) ──▶ counting
+counting ──(close: agreed totals set AND envelopes reconcile)──▶ closed  [terminal]
+```
+
+`giving.countRequiresTwoCounters` (default `'true'`) — when `'false'`,
+whichever counter slot is completed FIRST is auto-agreed immediately (no
+discrepancy comparison at all), for sites that only run a single-counter
+process.
+
+### Close — writing a *balanced* gift log
+
+The issue body says close writes "`tblGiftEntries` for each named envelope +
+a single 'loose cash' entry". This implementation goes one step further for
+correctness: it ALSO emits a single aggregate **"loose cheque"** row for any
+agreed `chequeTotal` not covered by named cheque envelopes. Rationale: the
+GIRFT requirement is that close "writes a **balanced** gift log" — the sum of
+every `tblGivingEntry` row written for a session must equal `cashTotal +
+chequeTotal + envelopeTotal` exactly, not just cover the cash bucket. All
+three checks below run BEFORE the transaction opens (`_apps/giving/count/close.php`),
+so a rejected close never touches the database:
+
+1. Status must be `'counting'` (not `'open'`, `'discrepancy'`, or already `'closed'`).
+2. Agreed `cashTotal`/`chequeTotal`/`envelopeTotal` must all be set (non-NULL).
+3. `SUM(tblCountEnvelopes.amount)` must equal the agreed `envelopeTotal` EXACTLY
+   (integer-pence comparison, never `==` on floats/DECIMALs).
+
+Then, in one transaction: one `tblGivingEntry` row per named envelope
+(`donorID`/`donorName` from the envelope, `categoryID`/`donatedAt`/`siteID`
+from the session, `reference = 'Count #<id>'`) + a loose-cash row (if the
+agreed cash total exceeds what named cash envelopes cover) + a loose-cheque
+row (same, for cheques) + `UPDATE … SET status='closed' … WHERE status='counting'`
+(the `WHERE status='counting'` guard + checking `affected_rows` catches a
+concurrent close/edit between the pre-checks and the write, aborting the
+transaction rather than double-writing).
+
+### Gate
+
+Every route (`/giving/count`, `/giving/count/session`, `/giving/count/save`,
+`/giving/count/close`) uses `Portal\Core\Giving::canManage()` — the same gate
+`giving`'s existing `manage.php`/`entry-save.php`/`cat-save.php` already use
+(site admin OR the `treasurer` role, migration 017). Resolving a live
+`'discrepancy'` (`action=resolve` in `save.php`) additionally requires
+`App::isAdmin()` — matching the issue body's "an admin resolves" wording;
+plain treasurers can only re-enter counts or close once no discrepancy
+remains.
+
+### New core helper
+
+`Portal\Core\Giving::parseDecimal(string $input): ?string` — validated
+non-negative `DECIMAL(10,2)`-safe amount parsing (round-trips through
+float → round → `number_format`, never trusts the client string into SQL
+verbatim). Sibling to the existing `Giving::parseAmount()` (pence-int, used
+by `tblGivingEntry` writes) — this workflow's independent counter totals are
+DECIMAL columns on `tblCountSessions`/`tblCountEnvelopes`, not pence.
+
+---
+
 Last updated: July 2026

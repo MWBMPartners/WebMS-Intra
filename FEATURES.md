@@ -479,6 +479,7 @@ When these merge, the 🛠️ markers above flip to ✅ without further edits to
 | #106 | Enforce signed commits |
 | #105 | Prod secrets behind GitHub Environment + reviewer gate |
 | #107 | SFTP `--delete` operational documentation — mostly done (dry-run + docs shipped via PR #134); residual: server-side deletion-log/audit monitor |
+| #299 | Giving polish — pledge campaigns, bank statement CSV reconciliation, account-updater webhook for recurring giving (sub-feature 1, two-person offering count, shipped — see "Giving" section above) |
 
 ---
 
@@ -550,6 +551,23 @@ setting seeds.
 | Canonical `ApiKey::SCOPES` vocabulary + rotation grace windows; admin API-keys UI scope checkbox multi-select (server-validated) + grace selector + "rotated" badge; audit viewer source (session/apikey) badge + key-prefix | #323 Phase 2 | #372 | ✅ |
 | OpenAPI spec (`api-spec.json`) documents every `/api/v1/*` path + `bearerAuth` scheme alongside the existing legacy aliases | #323 Phase 2 | #372 | ✅ |
 | Outbound webhooks admin CRUD UI | #324 | #372 | ✅ |
+
+---
+
+### Giving — two-person offering count session (#299 sub-feature 1, 2026-07-22)
+
+Extension to the existing `giving` app (#266). #299 bundles four "Giving polish"
+sub-features (offering counting, pledge campaigns, bank reconciliation,
+account-updater) — only sub-feature 1 is built; the other three remain
+tracked-but-not-started.
+
+| Item | Issue | Migration | Status |
+|---|---|---|---|
+| `tblCountSessions` — per-service-date session; two counters independently key cash/cheque/envelope totals, auto-compared, `status` ENUM('open','counting','discrepancy','closed') | #299 | 150 | ✅ |
+| Discrepancy flagging — any mismatch between the two independent counts blocks close until a counter re-enters matching totals or an admin (`App::isAdmin()`) resolves with agreed totals | #299 | 150 | ✅ |
+| `tblCountEnvelopes` — named/numbered giving-envelope breakdown of the agreed envelope total | #299 | 150 | ✅ |
+| Close (`/giving/count/close`) — validates named envelopes reconcile to the agreed envelope total, then writes the gift log to `tblGivingEntry` in one transaction: one row per named envelope + aggregate "loose cash"/"loose cheque" rows for anything not itemised | #299 | 150 | ✅ |
+| UI: `/giving/count` (list + start), `/giving/count/session` (counter entry, comparison, resolve, envelopes, close) — gated by `Portal\Core\Giving::canManage()` | #299 | 150 | ✅ |
 
 ---
 

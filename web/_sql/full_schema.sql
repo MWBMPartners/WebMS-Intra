@@ -13,7 +13,7 @@
 -- present in web/_sql/ are marked as executed in tblMigrations so the
 -- web-based Migrator won't re-run them.
 --
--- Covers migrations: 000-149 (DDL + settings/routes seeds + tblMigrations
+-- Covers migrations: 000-150 (DDL + settings/routes seeds + tblMigrations
 -- marks). When you add a new migration, port its DDL/seeds into the
 -- appropriate section here AND add its filename to the seed block at the
 -- end of this file. CI enforces this via
@@ -4845,6 +4845,25 @@ ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
 
 
 -- =============================================================================
+-- Migration 150: Giving — two-person offering count session (#299 sub-feature 1)
+-- =============================================================================
+-- tblCountSessions / tblCountEnvelopes CREATEs are ported inline into the
+-- migration-ported table section below (banner
+-- "-- ── from 150_offering_count_sessions.sql ──").
+
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('giving/count',         'giving/count/index.php',   1),
+    ('giving/count/session', 'giving/count/session.php', 1),
+    ('giving/count/save',    'giving/count/save.php',    1),
+    ('giving/count/close',   'giving/count/close.php',   1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'giving.countRequiresTwoCounters', 'true', 'true', 0)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
+
+-- =============================================================================
 -- Tables added in numbered migrations 105+ — appended for fresh-install parity.
 -- Maintained automatically; do NOT hand-edit duplicates. See the same
 -- definitions in web/_sql/{105..144}_*.sql for the source of truth + comments.
@@ -5602,6 +5621,58 @@ CREATE TABLE IF NOT EXISTS `tblNoticeboardUploads` (
 COMMENT='Noticeboard poster media uploads (#363) — orphan-cleanup ledger + media.php token resolver';
 
 
+-- ── from 150_offering_count_sessions.sql ──────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS `tblCountSessions` (
+    `countSessionID` INT            NOT NULL AUTO_INCREMENT,
+    `siteID`         INT            NOT NULL DEFAULT 1,
+    `serviceDate`    DATE           NOT NULL,
+    `categoryID`     INT            NOT NULL COMMENT 'tblGivingCategory this session posts its gift log to on close',
+    `counter1ID`     INT            DEFAULT NULL COMMENT 'tblUsers — first counter (nullable until assigned)',
+    `counter2ID`     INT            DEFAULT NULL COMMENT 'tblUsers — second counter (nullable until assigned)',
+    `cashTotal1`     DECIMAL(10,2)  DEFAULT NULL COMMENT 'Counter 1''s independent cash count',
+    `chequeTotal1`   DECIMAL(10,2)  DEFAULT NULL COMMENT 'Counter 1''s independent cheque count',
+    `envelopeTotal1` DECIMAL(10,2)  DEFAULT NULL COMMENT 'Counter 1''s independent envelope count',
+    `cashTotal2`     DECIMAL(10,2)  DEFAULT NULL COMMENT 'Counter 2''s independent cash count',
+    `chequeTotal2`   DECIMAL(10,2)  DEFAULT NULL COMMENT 'Counter 2''s independent cheque count',
+    `envelopeTotal2` DECIMAL(10,2)  DEFAULT NULL COMMENT 'Counter 2''s independent envelope count',
+    `cashTotal`      DECIMAL(10,2)  DEFAULT NULL COMMENT 'Agreed cash total — set when counts match or an admin resolves; written to the gift log on close',
+    `chequeTotal`    DECIMAL(10,2)  DEFAULT NULL COMMENT 'Agreed cheque total',
+    `envelopeTotal`  DECIMAL(10,2)  DEFAULT NULL COMMENT 'Agreed envelope total — must equal SUM(tblCountEnvelopes.amount) before close',
+    `status`         ENUM('open','counting','discrepancy','closed') NOT NULL DEFAULT 'open',
+    `notes`          TEXT           DEFAULT NULL,
+    `createdByID`    INT            DEFAULT NULL,
+    `createdAt`      DATETIME       NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `closedByID`     INT            DEFAULT NULL,
+    `closedAt`       DATETIME       DEFAULT NULL,
+    PRIMARY KEY (`countSessionID`),
+    KEY `idx_cs_site`      (`siteID`),
+    KEY `idx_cs_site_date` (`siteID`, `serviceDate`),
+    KEY `idx_cs_status`    (`status`),
+    CONSTRAINT `fk_cs_site`      FOREIGN KEY (`siteID`)      REFERENCES `tblSites`(`siteID`),
+    CONSTRAINT `fk_cs_category`  FOREIGN KEY (`categoryID`)  REFERENCES `tblGivingCategory`(`categoryID`),
+    CONSTRAINT `fk_cs_counter1`  FOREIGN KEY (`counter1ID`)  REFERENCES `tblUsers`(`userID`) ON DELETE SET NULL,
+    CONSTRAINT `fk_cs_counter2`  FOREIGN KEY (`counter2ID`)  REFERENCES `tblUsers`(`userID`) ON DELETE SET NULL,
+    CONSTRAINT `fk_cs_creator`   FOREIGN KEY (`createdByID`) REFERENCES `tblUsers`(`userID`) ON DELETE SET NULL,
+    CONSTRAINT `fk_cs_closer`    FOREIGN KEY (`closedByID`)  REFERENCES `tblUsers`(`userID`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+COMMENT='Two-person offering count sessions (#299 sub-feature 1)';
+
+CREATE TABLE IF NOT EXISTS `tblCountEnvelopes` (
+    `envelopeID`     INT            NOT NULL AUTO_INCREMENT,
+    `countSessionID` INT            NOT NULL,
+    `giverID`        INT            DEFAULT NULL COMMENT 'tblUsers — matched member, nullable (unmatched envelopes use giverName)',
+    `giverName`      VARCHAR(255)   DEFAULT NULL COMMENT 'Free-text name when the envelope name doesn''t match a member',
+    `amount`         DECIMAL(10,2)  NOT NULL,
+    `method`         ENUM('cash','cheque') NOT NULL DEFAULT 'cash' COMMENT 'What the named envelope contained',
+    `createdAt`      DATETIME       NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`envelopeID`),
+    KEY `idx_ce_session` (`countSessionID`),
+    CONSTRAINT `fk_ce_session` FOREIGN KEY (`countSessionID`) REFERENCES `tblCountSessions`(`countSessionID`) ON DELETE CASCADE,
+    CONSTRAINT `fk_ce_giver`   FOREIGN KEY (`giverID`)        REFERENCES `tblUsers`(`userID`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+COMMENT='Named giving-envelope breakdown for a count session (#299 sub-feature 1)';
+
+
 -- #############################################################################
 -- SECTION 7B: MARK MIGRATIONS 082-083 + 090-145 AS EXECUTED (#364 / #194)
 -- (082/083 seed data was already ported above but their filenames were never
@@ -5792,4 +5863,7 @@ INSERT INTO `tblMigrations` (`filename`) VALUES ('148_prayer_chain_residuals.sql
 ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
 INSERT INTO `tblMigrations` (`filename`) VALUES ('149_noticeboard_upload.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('150_offering_count_sessions.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;

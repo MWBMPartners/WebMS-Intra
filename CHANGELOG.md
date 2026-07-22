@@ -2,6 +2,29 @@
 
 
 ## [1.4.0] - 2026-07-22 (alpha)
+- feat(giving): #299 two-person offering-count session (sub-feature 1 of the
+  "Giving polish" issue — pledge campaigns/reconciliation/account-updater are
+  separate sub-features, not built here). New `tblCountSessions` (migration
+  150) tracks a service date's count: two counters independently key cash /
+  cheque / envelope totals; once both are in, the system compares them and
+  flags `status='discrepancy'` on any mismatch (blocking close) or
+  auto-agrees when they match. A discrepancy is cleared either by a counter
+  re-entering matching totals or — admin-only — by resolving with agreed
+  totals directly. New `tblCountEnvelopes` child table logs named/numbered
+  giving-envelope amounts against the session's envelope total; closing a
+  session (`/giving/count/close`) validates the named envelopes reconcile to
+  the agreed envelope total, then writes the real gift log in one
+  transaction — one `tblGivingEntry` row per named envelope (attributed to
+  the giver where matched) plus aggregate "loose cash"/"loose cheque" rows
+  for anything not itemised, so the total written always balances to
+  cashTotal + chequeTotal + envelopeTotal. New UI under `/giving/count`
+  (list/start, session detail with counter-entry cards + comparison table +
+  named-envelope log) gated by the same `Portal\Core\Giving::canManage()`
+  (admin or `treasurer` role) as the rest of `giving`; new
+  `Portal\Core\Giving::parseDecimal()` helper for validated
+  DECIMAL(10,2)-safe amount parsing. Note: the issue body names the write
+  target `tblGiftEntries`, but the giving app actually shipped (#266) as
+  `tblGivingEntry` — this migration writes to the real table.
 - feat(noticeboard): #363 real media upload pipeline — replaces the `data:`
   URI rejection in `save.php` with `POST /api/noticeboard/upload`
   (site-admin, CSRF, finfo-sniffed MIME allowlist: png/jpeg/gif/webp +
