@@ -23,16 +23,17 @@
 #   3. Idempotency re-run — replay_all_migrations() runs again over the
 #      phase-2 DB. Hard-fails on any migration error, or ANY net schema /
 #      tblMigrations change (mirrors an installer re-run / upgrade retry).
-#   4. Legacy chain-from-empty — wipe the DB and replay the
-#      tblMigrations-respecting chain from 000 onward via run_all_migrations()
-#      (models Portal\Core\Migrator running against a pre-full_schema DB).
-#      Then, unless --skip-stale, wipes again and replays the first half of
-#      migrations followed by the rest, confirming the catch-up path reaches
-#      the same final tblMigrations count. Migration failures are hard;
-#      table/column/index/tblMigrations count parity vs phase 1 is a warning
-#      only — a legitimate migration-chain vs full_schema structural
-#      difference is better judged by a human (same tolerance the old
-#      phase-4 comparison had, direction inverted).
+#   4. Migrator catch-up over a full_schema base — load full_schema.sql as an
+#      existing install (the base tables tblUsers/tblRoutes/tblSettings/… are
+#      created ONLY by full_schema.sql, never by a numbered migration, so
+#      "chain-from-truly-empty" is a fiction no code path produces). Then,
+#      unless --skip-stale, clear the newest half of tblMigrations marks to
+#      model a behind install and run Portal\Core\Migrator's catch-up
+#      (run_all_migrations). Every pending migration must re-apply as a guarded
+#      idempotent no-op over the installed base (HARD gate on any failure), and
+#      the final schema + tblMigrations must match phase 1 exactly (also a HARD
+#      gate — same base, same guarded migrations, so any drift is a real
+#      idempotency bug).
 #
 # Exit:
 #   0 — all phases pass (the warnings noted above do not affect this).
@@ -44,7 +45,7 @@
 #
 # Usage:
 #   tools/e2e-migrations/run.sh                # run all four phases
-#   tools/e2e-migrations/run.sh --skip-stale   # skip the phase-4 half/half split only
+#   tools/e2e-migrations/run.sh --skip-stale   # skip the phase-4 catch-up simulation
 #   tools/e2e-migrations/run.sh --keep         # leave the container up afterwards
 # -----------------------------------------------------------------------------
 
@@ -333,24 +334,61 @@ fi
 echo "  ✓ idempotency confirmed: zero net change on second replay"
 
 # -----------------------------------------------------------------------------
-# Phase 4: legacy chain-from-empty (+ stale-DB upgrade split, unless --skip-stale)
+# Phase 4: Migrator catch-up over a full_schema base (the real upgrade path)
 # -----------------------------------------------------------------------------
-# Independent of phases 1-3 — always runs. Models Portal\Core\Migrator
-# applying the tblMigrations-respecting chain to a DB that never saw
-# full_schema.sql at all (e.g. an install that predates the consolidated
-# schema, or a Migrator-only environment). Migration failures are a hard
-# gate; a table/column/index/tblMigrations count mismatch against phase 1's
-# full_schema baseline is a warning only — a legitimate structural
-# difference between the migration chain and the consolidated schema is
-# better judged by a human than hard-failed in CI (same tolerance the old
-# harness gave this comparison, direction inverted).
+# Models Portal\Core\Migrator upgrading an EXISTING install. This is the only
+# state in which Migrator ever runs in production: the numbered migrations are
+# incremental-over-base by design — the foundational tables (tblUsers,
+# tblRoutes, tblSettings, tblExpenseClaims, …) are created ONLY by
+# full_schema.sql, never by a numbered migration (verified: no `[0-9]*.sql`
+# file CREATEs them). The installer always loads full_schema.sql first, which
+# also seeds tblMigrations with every filename so a fresh install shows
+# nothing pending (web/_install/index.php:360,399-441,424-427). A
+# "chain-from-truly-empty" run is therefore a fiction that no code path
+# produces, and hard-failing on its missing-base-table errors tested nothing
+# real — so phase 4 now starts from a full_schema base.
+#
+# The scenario exercised: an install that is BEHIND (its tblMigrations only
+# records the older half of the chain), on which Migrator catches up. Every
+# pending migration must re-apply as a guarded idempotent no-op over the
+# installed base — zero failures — and reach the fully-migrated state with the
+# schema byte-for-byte identical to phase 1. Migration failures here are a
+# HARD gate: with the base tables present, the only way a migration can fail
+# is a genuinely broken guard/dependency.
 echo
-echo "═════ Phase 4: legacy chain-from-empty ═════"
-echo "  Wiping DB and replaying the tblMigrations-respecting chain from 000 onward …"
+echo "═════ Phase 4: Migrator catch-up over a full_schema base ═════"
+echo "  Loading full_schema.sql as the installed base (models an existing install) …"
 reset_db
-mysql_file "${SQL_DIR}/000_create_migrations_table.sql"
-mysql_q "INSERT IGNORE INTO tblMigrations (filename) VALUES ('000_create_migrations_table.sql');" >/dev/null
-run_all_migrations
+if ! mysql_file "${SQL_DIR}/full_schema.sql"; then
+    echo "✗ phase 4 base load FAILED — full_schema.sql did not load" >&2
+    exit 1
+fi
+P4BASE_MIGS=$(count_migrations)
+echo "  base loaded: $(count_tables) tables, $(count_columns) columns, $(count_indexes) indexes, ${P4BASE_MIGS} migrations recorded"
+
+if [[ "${SKIP_STALE}" -eq 0 ]]; then
+    echo "  Simulating a behind install: clearing the newest half of tblMigrations marks …"
+    all_files=( $(ls "${SQL_DIR}"/[0-9]*.sql | sort) )
+    total=${#all_files[@]}
+    half=$(( total / 2 ))
+    cleared=0
+    for file in "${all_files[@]:$half}"; do
+        name="$(basename "${file}")"
+        mysql_q "DELETE FROM tblMigrations WHERE filename = '${name}';" >/dev/null 2>&1 || true
+        cleared=$((cleared + 1))
+    done
+    echo "  cleared ${cleared} marks (tblMigrations now at $(count_migrations)); running Migrator catch-up …"
+    set +e
+    run_all_migrations
+    P4_CATCHUP_FAILED=$?
+    set -e
+    if [[ "${P4_CATCHUP_FAILED}" -ne 0 ]]; then
+        echo "✗ Migrator catch-up FAILED — ${P4_CATCHUP_FAILED} migration(s) errored re-applying over the full_schema base" >&2
+        exit 1
+    fi
+else
+    echo "  (stale-DB catch-up simulation skipped: --skip-stale — verifying base only)"
+fi
 
 P4_TABLES=$(count_tables)
 P4_COLUMNS=$(count_columns)
@@ -358,43 +396,19 @@ P4_INDEXES=$(count_indexes)
 P4_MIGS=$(count_migrations)
 echo "  schema: ${P4_TABLES} tables, ${P4_COLUMNS} columns, ${P4_INDEXES} indexes, ${P4_MIGS} migrations recorded"
 
+# After catch-up the schema and tblMigrations must be identical to phase 1's
+# full_schema baseline — this is now a HARD gate (the catch-up re-applies the
+# very same guarded migrations over the very same base, so any drift is a real
+# idempotency bug, not a chain-vs-schema structural difference).
 if [[ "${P4_TABLES}" != "${P1_TABLES}" || "${P4_COLUMNS}" != "${P1_COLUMNS}" || "${P4_INDEXES}" != "${P1_INDEXES}" || "${P4_MIGS}" != "${P1_MIGS}" ]]; then
-    echo "⚠ legacy chain vs full_schema parity — MISMATCH (not a hard failure; review manually)" >&2
-    printf '    tables:     migration-chain=%s  full_schema=%s  Δ=%+d\n' "${P4_TABLES}" "${P1_TABLES}" "$((P4_TABLES - P1_TABLES))" >&2
-    printf '    columns:    migration-chain=%s  full_schema=%s  Δ=%+d\n' "${P4_COLUMNS}" "${P1_COLUMNS}" "$((P4_COLUMNS - P1_COLUMNS))" >&2
-    printf '    indexes:    migration-chain=%s  full_schema=%s  Δ=%+d\n' "${P4_INDEXES}" "${P1_INDEXES}" "$((P4_INDEXES - P1_INDEXES))" >&2
-    printf '    migrations: migration-chain=%s  full_schema=%s  Δ=%+d\n' "${P4_MIGS}" "${P1_MIGS}" "$((P4_MIGS - P1_MIGS))" >&2
-else
-    echo "  ✓ legacy chain vs full_schema parity confirmed: identical counts"
+    echo "✗ Migrator catch-up parity FAILED — schema/tblMigrations drifted vs the full_schema baseline" >&2
+    printf '    tables:     post-catch-up=%s  full_schema=%s  Δ=%+d\n' "${P4_TABLES}" "${P1_TABLES}" "$((P4_TABLES - P1_TABLES))" >&2
+    printf '    columns:    post-catch-up=%s  full_schema=%s  Δ=%+d\n' "${P4_COLUMNS}" "${P1_COLUMNS}" "$((P4_COLUMNS - P1_COLUMNS))" >&2
+    printf '    indexes:    post-catch-up=%s  full_schema=%s  Δ=%+d\n' "${P4_INDEXES}" "${P1_INDEXES}" "$((P4_INDEXES - P1_INDEXES))" >&2
+    printf '    migrations: post-catch-up=%s  full_schema=%s  Δ=%+d\n' "${P4_MIGS}" "${P1_MIGS}" "$((P4_MIGS - P1_MIGS))" >&2
+    exit 1
 fi
-
-if [[ "${SKIP_STALE}" -eq 0 ]]; then
-    echo
-    echo "  ── stale-DB upgrade split ──"
-    echo "  Wiping DB and replaying only the first half of migrations …"
-    reset_db
-    mysql_file "${SQL_DIR}/000_create_migrations_table.sql"
-    mysql_q "INSERT IGNORE INTO tblMigrations (filename) VALUES ('000_create_migrations_table.sql');" >/dev/null
-
-    all_files=( $(ls "${SQL_DIR}"/[0-9]*.sql | sort) )
-    half=$(( ${#all_files[@]} / 2 ))
-    for file in "${all_files[@]:0:$half}"; do
-        apply_migration "${file}" || true
-    done
-    BEFORE_MIGS=$(count_migrations)
-    echo "  applied first ${half} (recorded ${BEFORE_MIGS} migrations)"
-    echo "  applying remaining ${#all_files[@]} − ${half} migrations …"
-    run_all_migrations
-    AFTER_MIGS=$(count_migrations)
-    echo "  total recorded after catch-up: ${AFTER_MIGS}"
-    if [[ "${AFTER_MIGS}" != "${P4_MIGS}" ]]; then
-        echo "✗ stale-upgrade FAILED — catch-up produced ${AFTER_MIGS} migrations vs the legacy chain's ${P4_MIGS}" >&2
-        exit 1
-    fi
-    echo "  ✓ stale-DB upgrade catches up to the same final state"
-else
-    echo "  (stale-DB upgrade split skipped: --skip-stale)"
-fi
+echo "  ✓ Migrator catch-up reaches the full_schema baseline exactly — every migration is a clean no-op over the installed base"
 
 echo
 echo "═════ All phases passed ═════"
