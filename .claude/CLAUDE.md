@@ -141,6 +141,19 @@ When making changes:
 6. COMMIT changes (DO NOT PUSH unless the user explicitly asks for a PR)
 7. Close GitHub Issue with commit / PR reference
 
+### STANDING: monitor & fix GitHub PR Security checks (always applicable)
+
+On EVERY PR you touch, actively monitor GitHub's own automated checks — the
+`pr-security.yml` "PR Security Checks" bot comment (route-target-missing,
+MariaDB-only DDL, migration idempotency, SQL column drift, schema/seed parity,
+etc.), CodeQL, Psalm, static-security, actionlint, and the migration harness —
+and **fix any real issue each surfaces**, not only the hard PHP-lint gate. These
+checks are non-blocking heuristics but a flagged item is treated as actionable:
+resolve it correctly (e.g. a route pointing at a missing handler → build the
+handler or remove the route + add the cleanup migration), or, only if it is a
+genuine false positive, record why in the PR thread. Re-check after each push
+until the security comment is clean. This applies regardless of session.
+
 ## Git Notes
 
 - macOS case-insensitive: use two-step rename for case changes
