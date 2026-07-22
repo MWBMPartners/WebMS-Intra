@@ -428,6 +428,51 @@ class Site
         return true;
     }
 
+    /**
+     * 🔑 Re-point the site context to an API key's site for the remainder of a
+     * bearer-authenticated (sessionless) request (#323 Phase 2). Bearer requests
+     * carry no navbar switcher / session site, so Site::id() would otherwise be
+     * the host-detected default and every Site::id()-scoped query would read the
+     * wrong tenant. Unlike set(), this NEVER writes $_SESSION (there is no
+     * session) and FAILS CLOSED — it throws if the target site is missing or
+     * inactive rather than silently leaving the default context in place (which
+     * would be a cross-tenant read/write). API-only; must run before any output.
+     *
+     * @param int $siteId The authenticated key's siteID (authoritative).
+     *
+     * @return void
+     *
+     * @throws \RuntimeException If the DB handle/prepare fails, or the site does
+     *                           not exist or is inactive.
+     */
+    public static function forceContext(int $siteId): void
+    {
+        $db = App::db();
+
+        $stmt = $db->prepare(
+            'SELECT siteID FROM tblSites WHERE siteID = ? AND isActive = 1 LIMIT 1'
+        );
+        if ($stmt === false) {
+            throw new \RuntimeException(
+                'Site::forceContext prepare failed: ' . $db->error
+            );
+        }
+        $stmt->bind_param('i', $siteId);
+        $stmt->execute();
+        $row = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+
+        if ($row === null) {
+            throw new \RuntimeException(
+                'Site::forceContext: site ' . $siteId . ' not found or inactive'
+            );
+        }
+
+        self::$currentSiteID = $siteId;
+        self::$currentSite   = null;
+        self::loadSiteRow($db);
+    }
+
     /* ====================================================================== */
     /* Site queries                                                            */
     /* ====================================================================== */
