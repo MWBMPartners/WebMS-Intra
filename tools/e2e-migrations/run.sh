@@ -74,6 +74,7 @@ done
 trap teardown EXIT INT TERM
 
 teardown() {
+    [[ -n "${SNAP_DIR:-}" ]] && rm -rf "${SNAP_DIR}" 2>/dev/null || true
     if [[ "${KEEP}" -eq 0 ]]; then
         echo "→ Tearing down container"
         docker compose -f "${COMPOSE_FILE}" down -v --remove-orphans >/dev/null 2>&1 || true
@@ -132,6 +133,24 @@ count_indexes() {
 }
 count_migrations() {
     mysql_q "SELECT COUNT(*) FROM tblMigrations;" 2>/dev/null || echo 0
+}
+
+# Snapshot the full column and index inventory as stable, sortable text so a
+# drift between two phases can be reduced to the exact objects that appeared
+# (or vanished). `table.column` for columns; `table.index.seq.column` for
+# indexes (SEQ_IN_INDEX keeps multi-column keys ordered and distinct).
+SNAP_DIR="$(mktemp -d)"
+dump_columns() {
+    mysql_q "SELECT CONCAT(table_name, '.', column_name)
+             FROM information_schema.columns
+             WHERE table_schema = DATABASE()
+             ORDER BY 1;" 2>/dev/null | sort
+}
+dump_indexes() {
+    mysql_q "SELECT CONCAT(table_name, '.', index_name, '.', seq_in_index, '.', column_name)
+             FROM information_schema.statistics
+             WHERE table_schema = DATABASE()
+             ORDER BY 1;" 2>/dev/null | sort
 }
 
 # -----------------------------------------------------------------------------
@@ -225,6 +244,10 @@ P1_COLUMNS=$(count_columns)
 P1_INDEXES=$(count_indexes)
 P1_MIGS=$(count_migrations)
 echo "  schema: ${P1_TABLES} tables, ${P1_COLUMNS} columns, ${P1_INDEXES} indexes, ${P1_MIGS} migrations recorded"
+# Snapshot the exact object inventory BEFORE replay so a phase-2 drift can be
+# diffed down to the specific columns/indexes the replay introduced.
+dump_columns > "${SNAP_DIR}/p1_columns.txt"
+dump_indexes > "${SNAP_DIR}/p1_indexes.txt"
 
 # -----------------------------------------------------------------------------
 # Phase 2: installer replay
@@ -256,6 +279,21 @@ if [[ "${P2_TABLES}" != "${P1_TABLES}" || "${P2_COLUMNS}" != "${P1_COLUMNS}" || 
     printf '    tables:  full_schema=%s  post-replay=%s  Δ=%+d\n' "${P1_TABLES}" "${P2_TABLES}" "$((P2_TABLES - P1_TABLES))" >&2
     printf '    columns: full_schema=%s  post-replay=%s  Δ=%+d\n' "${P1_COLUMNS}" "${P2_COLUMNS}" "$((P2_COLUMNS - P1_COLUMNS))" >&2
     printf '    indexes: full_schema=%s  post-replay=%s  Δ=%+d\n' "${P1_INDEXES}" "${P2_INDEXES}" "$((P2_INDEXES - P1_INDEXES))" >&2
+    # Diff the object inventories so the fix is precise: anything a migration
+    # ADDS here is an object missing from full_schema.sql (the migration guard
+    # found it absent). Anything it DROPS means full_schema carries an object
+    # no migration produces. Both must be reconciled into full_schema.sql so
+    # every migration is a genuine no-op on a fresh install.
+    dump_columns > "${SNAP_DIR}/p2_columns.txt"
+    dump_indexes > "${SNAP_DIR}/p2_indexes.txt"
+    echo "    ── columns ADDED by replay (missing from full_schema.sql) ──" >&2
+    comm -13 "${SNAP_DIR}/p1_columns.txt" "${SNAP_DIR}/p2_columns.txt" | sed 's/^/      + /' >&2
+    echo "    ── columns REMOVED by replay (in full_schema.sql, no migration adds) ──" >&2
+    comm -23 "${SNAP_DIR}/p1_columns.txt" "${SNAP_DIR}/p2_columns.txt" | sed 's/^/      - /' >&2
+    echo "    ── indexes ADDED by replay (missing from full_schema.sql) ──" >&2
+    comm -13 "${SNAP_DIR}/p1_indexes.txt" "${SNAP_DIR}/p2_indexes.txt" | sed 's/^/      + /' >&2
+    echo "    ── indexes REMOVED by replay (in full_schema.sql, no migration adds) ──" >&2
+    comm -23 "${SNAP_DIR}/p1_indexes.txt" "${SNAP_DIR}/p2_indexes.txt" | sed 's/^/      - /' >&2
     exit 1
 fi
 if [[ "${P2_MIGS}" != "${P1_MIGS}" ]]; then
