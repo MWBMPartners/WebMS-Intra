@@ -14,28 +14,14 @@
 
 declare(strict_types=1);
 
+use Portal\Core\ApiAuth;
 use Portal\Core\ApiResponse;
 use Portal\Core\App;
-use Portal\Core\Auth;
 use Portal\Core\Logger;
 use Portal\Core\Site;
 
-if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    ApiResponse::error('POST required', 405);
-}
-ApiResponse::requireAuth();
-Auth::ensureSession();
-
-$csrfHeader = $_SERVER['HTTP_X_CSRF_TOKEN'] ?? '';
-$rawBody    = (string) file_get_contents('php://input');
-$body       = json_decode($rawBody, true);
-if (is_array($body) === false) {
-    $body = [];
-}
-$csrfBody = (string) ($body['csrf_token'] ?? '');
-if (Auth::verifyCsrf($csrfHeader !== '' ? $csrfHeader : $csrfBody) === false) {
-    ApiResponse::error('CSRF check failed', 403);
-}
+ApiAuth::requireMethod('POST');
+$body = ApiAuth::requireWrite('tasks:write', sessionNeedsAdmin: false);
 
 $id = (int) ($body['taskID'] ?? 0);
 if ($id <= 0) {
@@ -43,7 +29,7 @@ if ($id <= 0) {
 }
 
 $siteId   = Site::id();
-$callerId = (int) ($_SESSION['user_id'] ?? 0);
+$callerId = ApiAuth::actorUserId() ?? 0;
 
 $db = App::db();
 $stmt = $db->prepare('SELECT createdByID FROM tblTasks WHERE taskID = ? AND siteID = ? LIMIT 1');

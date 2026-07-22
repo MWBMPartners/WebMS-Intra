@@ -13,12 +13,13 @@
 
 declare(strict_types=1);
 
+use Portal\Core\ApiAuth;
 use Portal\Core\Auth;
 use Portal\Core\ApiResponse;
 use Portal\Core\Qr;
 
 Auth::ensureSession();
-ApiResponse::requireAuth();
+ApiAuth::requireRead('noticeboard:read');
 ApiResponse::requireEnabled('api.noticeboard.qr.enabled');
 
 $data = (string) ($_GET['data'] ?? '');

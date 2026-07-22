@@ -30,12 +30,13 @@
 
 declare(strict_types=1);
 
+use Portal\Core\ApiAuth;
 use Portal\Core\ApiResponse;
 use Portal\Core\App;
 use Portal\Core\Site;
 
 // 🔐 Require authentication for this API endpoint
-ApiResponse::requireAuth();
+ApiAuth::requireRead('expenses:read');
 
 // 📌 Parse query parameters with defaults and bounds
 $page   = max(1, (int) ($_GET['page'] ?? 1));

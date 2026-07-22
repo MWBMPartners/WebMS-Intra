@@ -11,34 +11,32 @@
 
 declare(strict_types=1);
 
+use Portal\Core\ApiAuth;
 use Portal\Core\App;
-use Portal\Core\Auth;
 use Portal\Core\ApiResponse;
 use Portal\Core\Site;
 
-Auth::ensureSession();
-ApiResponse::requireAuth();
+ApiAuth::requireMethod('POST');
 ApiResponse::requireEnabled('api.noticeboard.save.enabled');
+$body = ApiAuth::requireWrite('noticeboard:write', sessionNeedsAdmin: false);
 
+// 🛡️ Site-admin gate — kept verbatim. This is a distinct, finer-grained check
+// than ApiAuth's sessionNeedsAdmin (isSiteAdmin(), not isAdmin()), so it stays
+// here rather than folding into the ApiAuth call. Because App::isSiteAdmin()
+// reads App::user() (session-only), it also fails closed for bearer keys —
+// see #323 Phase 2 B3 report for the follow-up needed to let a scoped bearer
+// key through (e.g. a site-pinned key implicitly counted as site-admin here).
 if (App::isSiteAdmin() === false) {
     ApiResponse::error('Admin access required', 403);
 }
 
-// 🛡️ CSRF — header sent by the bridge.
-$csrf = (string) ($_SERVER['HTTP_X_CSRF_TOKEN'] ?? '');
-if (Auth::verifyCsrf($csrf) === false) {
-    ApiResponse::error('Invalid CSRF token', 400);
-}
-
-$raw  = file_get_contents('php://input');
-$body = json_decode($raw, true);
-if (is_array($body) === false || isset($body['posters']) === false || is_array($body['posters']) === false) {
+if (isset($body['posters']) === false || is_array($body['posters']) === false) {
     ApiResponse::error('Expected { posters: [...] }', 422);
 }
 
 $db     = App::db();
 $siteId = Site::id();
-$userId = (int) ($_SESSION['user_id'] ?? 0);
+$userId = ApiAuth::actorUserId() ?? 0;
 
 // 🛡️ Scheme allowlist — http(s) absolute or root-relative only. Matches the
 //    LivePrompt ctaUrl precedent (PR #358) — prevents javascript:… hrefs

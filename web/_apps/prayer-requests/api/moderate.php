@@ -16,31 +16,21 @@
 
 declare(strict_types=1);
 
+use Portal\Core\ApiAuth;
 use Portal\Core\ApiResponse;
 use Portal\Core\App;
-use Portal\Core\Auth;
 use Portal\Core\Logger;
 use Portal\Core\Site;
 
-if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    ApiResponse::error('POST required', 405);
-}
-ApiResponse::requireAuth();
-Auth::ensureSession();
+ApiAuth::requireMethod('POST');
+// 🛡️ sessionNeedsAdmin: false — moderation also allows the prayer_team role
+// (not admin-only), so the finer-grained gate below stays in charge for the
+// session path; bearer keys are gated purely on the prayer-requests:write
+// scope (no per-role concept for API keys yet).
+$body = ApiAuth::requireWrite('prayer-requests:write', sessionNeedsAdmin: false);
 
 if (App::isAdmin() === false && App::hasRole('prayer_team') === false) {
     ApiResponse::error('Forbidden — moderation requires admin or prayer_team role', 403);
-}
-
-$csrfHeader = $_SERVER['HTTP_X_CSRF_TOKEN'] ?? '';
-$rawBody    = (string) file_get_contents('php://input');
-$body       = json_decode($rawBody, true);
-if (is_array($body) === false) {
-    $body = [];
-}
-$csrfBody = (string) ($body['csrf_token'] ?? '');
-if (Auth::verifyCsrf($csrfHeader !== '' ? $csrfHeader : $csrfBody) === false) {
-    ApiResponse::error('CSRF check failed', 403);
 }
 
 $id     = (int) ($body['requestID'] ?? 0);
@@ -54,7 +44,7 @@ if (in_array($status, ['active', 'answered', 'archived'], true) === false) {
 $testimony = isset($body['testimony']) === true ? trim((string) $body['testimony']) : '';
 
 $siteId      = Site::id();
-$moderatorId = (int) ($_SESSION['user_id'] ?? 0);
+$moderatorId = ApiAuth::actorUserId() ?? 0;
 
 $db = App::db();
 if ($status === 'answered') {

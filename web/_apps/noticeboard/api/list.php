@@ -10,13 +10,14 @@
 
 declare(strict_types=1);
 
+use Portal\Core\ApiAuth;
 use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\ApiResponse;
 use Portal\Core\Site;
 
 Auth::ensureSession();
-ApiResponse::requireAuth();
+ApiAuth::requireRead('noticeboard:read');
 ApiResponse::requireEnabled('api.noticeboard.list.enabled');
 
 $db     = App::db();
