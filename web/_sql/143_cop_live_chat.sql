@@ -50,8 +50,8 @@ CREATE TABLE IF NOT EXISTS `tblLiveRateLimits` (
 
 -- 🛡️ Seed the stream_moderator role if not already present. App::hasRole
 -- (web/_core/App.php:295) queries tblRoles.roleKey for this exact string.
-INSERT INTO `tblRoles` (`roleKey`, `name`, `description`)
-    SELECT 'stream_moderator', 'Stream Moderator', 'Approves / hides / flags chat messages on the live engagement surface'
+INSERT INTO `tblRoles` (`roleKey`, `roleName`)
+    SELECT 'stream_moderator', 'Stream Moderator'
     WHERE NOT EXISTS (SELECT 1 FROM `tblRoles` WHERE `roleKey` = 'stream_moderator');
 
 -- 🎛️ Feature gates + tunables. ApiRouter gates api/* endpoints on
