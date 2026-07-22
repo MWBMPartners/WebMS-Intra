@@ -20,7 +20,10 @@ use Portal\Core\Qr;
 
 Auth::ensureSession();
 ApiAuth::requireRead('noticeboard:read');
-ApiResponse::requireEnabled('api.noticeboard.qr.enabled');
+// api.noticeboard.qr.enabled is already gated per-site by
+// ApiRouter::resolveEnabledFlag before this handler runs (#323 Phase 2); a
+// second handler-level check via App::settings() would read the frozen
+// host-site snapshot and could wrongly 403 a valid bearer request.
 
 $data = (string) ($_GET['data'] ?? '');
 // 📏 QrEncoder tops out around version-10 byte-mode capacity (~250 chars) with

@@ -17,7 +17,10 @@ use Portal\Core\ApiResponse;
 use Portal\Core\Site;
 
 ApiAuth::requireMethod('POST');
-ApiResponse::requireEnabled('api.noticeboard.save.enabled');
+// api.noticeboard.save.enabled is already gated per-site by
+// ApiRouter::resolveEnabledFlag before this handler runs (#323 Phase 2); a
+// second handler-level check via App::settings() would read the frozen
+// host-site snapshot and could wrongly 403 a valid bearer request.
 $body = ApiAuth::requireWrite('noticeboard:write', sessionNeedsAdmin: false);
 
 // 🛡️ Site-admin gate — kept verbatim. This is a distinct, finer-grained check

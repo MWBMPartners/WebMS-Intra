@@ -18,7 +18,10 @@ use Portal\Core\Site;
 
 Auth::ensureSession();
 ApiAuth::requireRead('noticeboard:read');
-ApiResponse::requireEnabled('api.noticeboard.list.enabled');
+// api.noticeboard.list.enabled is already gated per-site by
+// ApiRouter::resolveEnabledFlag before this handler runs (#323 Phase 2); a
+// second handler-level check via App::settings() would read the frozen
+// host-site snapshot and could wrongly 403 a valid bearer request.
 
 $db     = App::db();
 $siteId = Site::id();

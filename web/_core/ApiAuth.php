@@ -12,9 +12,13 @@
  *      rate-limited per key. CSRF is NOT required (no cookies, no session — the
  *      OWASP-sanctioned exemption for token auth).
  *   2. Session cookie  — the existing logged-in portal user. Reproduces the
- *      current per-handler boilerplate VERBATIM (same order, same error strings
- *      and status codes) so behaviour is provably unchanged: requireAuth →
- *      (optional) requireAdmin → ensureSession → CSRF (writes only).
+ *      current per-handler boilerplate (same order, same rejection outcome:
+ *      requireAuth → optional requireAdmin → ensureSession → CSRF on writes),
+ *      so the security outcome is unchanged. Two cosmetic deltas exist for the
+ *      handlers migrated onto this helper: noticeboard/save's CSRF failure now
+ *      returns 403 'CSRF check failed' (was 400 'Invalid CSRF token'), and
+ *      prayer-requests/moderate's role gate now runs after the CSRF check.
+ *      Neither changes what a request is allowed to do.
  *
  * Which mode is used is decided solely by the presence of a `Bearer wbms_…`
  * Authorization header (isBearer()). A non-`wbms_` bearer token falls through
