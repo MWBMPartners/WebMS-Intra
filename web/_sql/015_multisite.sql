@@ -90,94 +90,241 @@ FROM `tblUsers` u;
 -- =============================================================================
 
 -- 🏢 tblDepts
-ALTER TABLE `tblDepts`
-    ADD COLUMN `siteID` INT NOT NULL DEFAULT 1 AFTER `deptID`,
-    ADD KEY `idx_depts_site` (`siteID`),
-    ADD CONSTRAINT `fk_depts_site` FOREIGN KEY (`siteID`)
-        REFERENCES `tblSites` (`siteID`);
+-- Idempotent: column+key+FK ship atomically, guarded on presence of the
+-- siteID column (portable across MySQL 8.0 + MariaDB 10.x — see DEV_NOTES →
+-- Portable DDL). Same guard block shape repeated per table below.
+SET @col_exists := (
+    SELECT COUNT(*) FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME   = 'tblDepts'
+      AND COLUMN_NAME  = 'siteID'
+);
+SET @sql := IF(@col_exists = 0,
+    'ALTER TABLE `tblDepts`
+        ADD COLUMN `siteID` INT NOT NULL DEFAULT 1 AFTER `deptID`,
+        ADD KEY `idx_depts_site` (`siteID`),
+        ADD CONSTRAINT `fk_depts_site` FOREIGN KEY (`siteID`)
+            REFERENCES `tblSites` (`siteID`)',
+    'SELECT 1'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
 -- 💰 tblExpenseClaims
-ALTER TABLE `tblExpenseClaims`
-    ADD COLUMN `siteID` INT NOT NULL DEFAULT 1 AFTER `claimID`,
-    ADD KEY `idx_claims_site` (`siteID`),
-    ADD CONSTRAINT `fk_claims_site` FOREIGN KEY (`siteID`)
-        REFERENCES `tblSites` (`siteID`);
+SET @col_exists := (
+    SELECT COUNT(*) FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME   = 'tblExpenseClaims'
+      AND COLUMN_NAME  = 'siteID'
+);
+SET @sql := IF(@col_exists = 0,
+    'ALTER TABLE `tblExpenseClaims`
+        ADD COLUMN `siteID` INT NOT NULL DEFAULT 1 AFTER `claimID`,
+        ADD KEY `idx_claims_site` (`siteID`),
+        ADD CONSTRAINT `fk_claims_site` FOREIGN KEY (`siteID`)
+            REFERENCES `tblSites` (`siteID`)',
+    'SELECT 1'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
 -- 📅 tblEvents
-ALTER TABLE `tblEvents`
-    ADD COLUMN `siteID` INT NOT NULL DEFAULT 1 AFTER `eventID`,
-    ADD KEY `idx_events_site` (`siteID`),
-    ADD CONSTRAINT `fk_events_site` FOREIGN KEY (`siteID`)
-        REFERENCES `tblSites` (`siteID`);
+SET @col_exists := (
+    SELECT COUNT(*) FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME   = 'tblEvents'
+      AND COLUMN_NAME  = 'siteID'
+);
+SET @sql := IF(@col_exists = 0,
+    'ALTER TABLE `tblEvents`
+        ADD COLUMN `siteID` INT NOT NULL DEFAULT 1 AFTER `eventID`,
+        ADD KEY `idx_events_site` (`siteID`),
+        ADD CONSTRAINT `fk_events_site` FOREIGN KEY (`siteID`)
+            REFERENCES `tblSites` (`siteID`)',
+    'SELECT 1'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
 -- 📂 tblEventCategories
-ALTER TABLE `tblEventCategories`
-    ADD COLUMN `siteID` INT NOT NULL DEFAULT 1 AFTER `categoryID`,
-    ADD KEY `idx_ecat_site` (`siteID`),
-    ADD CONSTRAINT `fk_ecat_site` FOREIGN KEY (`siteID`)
-        REFERENCES `tblSites` (`siteID`);
+SET @col_exists := (
+    SELECT COUNT(*) FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME   = 'tblEventCategories'
+      AND COLUMN_NAME  = 'siteID'
+);
+SET @sql := IF(@col_exists = 0,
+    'ALTER TABLE `tblEventCategories`
+        ADD COLUMN `siteID` INT NOT NULL DEFAULT 1 AFTER `categoryID`,
+        ADD KEY `idx_ecat_site` (`siteID`),
+        ADD CONSTRAINT `fk_ecat_site` FOREIGN KEY (`siteID`)
+            REFERENCES `tblSites` (`siteID`)',
+    'SELECT 1'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
 -- 🏷️ tblEventTypes
-ALTER TABLE `tblEventTypes`
-    ADD COLUMN `siteID` INT NOT NULL DEFAULT 1 AFTER `typeID`,
-    ADD KEY `idx_etype_site` (`siteID`),
-    ADD CONSTRAINT `fk_etype_site` FOREIGN KEY (`siteID`)
-        REFERENCES `tblSites` (`siteID`);
+SET @col_exists := (
+    SELECT COUNT(*) FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME   = 'tblEventTypes'
+      AND COLUMN_NAME  = 'siteID'
+);
+SET @sql := IF(@col_exists = 0,
+    'ALTER TABLE `tblEventTypes`
+        ADD COLUMN `siteID` INT NOT NULL DEFAULT 1 AFTER `typeID`,
+        ADD KEY `idx_etype_site` (`siteID`),
+        ADD CONSTRAINT `fk_etype_site` FOREIGN KEY (`siteID`)
+            REFERENCES `tblSites` (`siteID`)',
+    'SELECT 1'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
 -- 🎨 tblEventThemes
-ALTER TABLE `tblEventThemes`
-    ADD COLUMN `siteID` INT NOT NULL DEFAULT 1 AFTER `themeID`,
-    ADD KEY `idx_etheme_site` (`siteID`),
-    ADD CONSTRAINT `fk_etheme_site` FOREIGN KEY (`siteID`)
-        REFERENCES `tblSites` (`siteID`);
+SET @col_exists := (
+    SELECT COUNT(*) FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME   = 'tblEventThemes'
+      AND COLUMN_NAME  = 'siteID'
+);
+SET @sql := IF(@col_exists = 0,
+    'ALTER TABLE `tblEventThemes`
+        ADD COLUMN `siteID` INT NOT NULL DEFAULT 1 AFTER `themeID`,
+        ADD KEY `idx_etheme_site` (`siteID`),
+        ADD CONSTRAINT `fk_etheme_site` FOREIGN KEY (`siteID`)
+            REFERENCES `tblSites` (`siteID`)',
+    'SELECT 1'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
 -- 🔄 tblEventSeries
-ALTER TABLE `tblEventSeries`
-    ADD COLUMN `siteID` INT NOT NULL DEFAULT 1 AFTER `seriesID`,
-    ADD KEY `idx_eseries_site` (`siteID`),
-    ADD CONSTRAINT `fk_eseries_site` FOREIGN KEY (`siteID`)
-        REFERENCES `tblSites` (`siteID`);
+SET @col_exists := (
+    SELECT COUNT(*) FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME   = 'tblEventSeries'
+      AND COLUMN_NAME  = 'siteID'
+);
+SET @sql := IF(@col_exists = 0,
+    'ALTER TABLE `tblEventSeries`
+        ADD COLUMN `siteID` INT NOT NULL DEFAULT 1 AFTER `seriesID`,
+        ADD KEY `idx_eseries_site` (`siteID`),
+        ADD CONSTRAINT `fk_eseries_site` FOREIGN KEY (`siteID`)
+            REFERENCES `tblSites` (`siteID`)',
+    'SELECT 1'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
 -- 🏷️ tblAttendanceServiceTypes
-ALTER TABLE `tblAttendanceServiceTypes`
-    ADD COLUMN `siteID` INT NOT NULL DEFAULT 1 AFTER `serviceTypeID`,
-    ADD KEY `idx_ast_site` (`siteID`),
-    ADD CONSTRAINT `fk_ast_site` FOREIGN KEY (`siteID`)
-        REFERENCES `tblSites` (`siteID`);
+SET @col_exists := (
+    SELECT COUNT(*) FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME   = 'tblAttendanceServiceTypes'
+      AND COLUMN_NAME  = 'siteID'
+);
+SET @sql := IF(@col_exists = 0,
+    'ALTER TABLE `tblAttendanceServiceTypes`
+        ADD COLUMN `siteID` INT NOT NULL DEFAULT 1 AFTER `serviceTypeID`,
+        ADD KEY `idx_ast_site` (`siteID`),
+        ADD CONSTRAINT `fk_ast_site` FOREIGN KEY (`siteID`)
+            REFERENCES `tblSites` (`siteID`)',
+    'SELECT 1'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
 -- 📋 tblAttendanceSessions
-ALTER TABLE `tblAttendanceSessions`
-    ADD COLUMN `siteID` INT NOT NULL DEFAULT 1 AFTER `sessionID`,
-    ADD KEY `idx_asess_site` (`siteID`),
-    ADD CONSTRAINT `fk_asess_site` FOREIGN KEY (`siteID`)
-        REFERENCES `tblSites` (`siteID`);
+SET @col_exists := (
+    SELECT COUNT(*) FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME   = 'tblAttendanceSessions'
+      AND COLUMN_NAME  = 'siteID'
+);
+SET @sql := IF(@col_exists = 0,
+    'ALTER TABLE `tblAttendanceSessions`
+        ADD COLUMN `siteID` INT NOT NULL DEFAULT 1 AFTER `sessionID`,
+        ADD KEY `idx_asess_site` (`siteID`),
+        ADD CONSTRAINT `fk_asess_site` FOREIGN KEY (`siteID`)
+            REFERENCES `tblSites` (`siteID`)',
+    'SELECT 1'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
 -- 📝 tblActivityLogs (nullable — pre-bootstrap logs may lack site context)
-ALTER TABLE `tblActivityLogs`
-    ADD COLUMN `siteID` INT DEFAULT NULL AFTER `logID`,
-    ADD KEY `idx_logs_site` (`siteID`),
-    ADD CONSTRAINT `fk_logs_site` FOREIGN KEY (`siteID`)
-        REFERENCES `tblSites` (`siteID`) ON DELETE SET NULL;
+SET @col_exists := (
+    SELECT COUNT(*) FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME   = 'tblActivityLogs'
+      AND COLUMN_NAME  = 'siteID'
+);
+SET @sql := IF(@col_exists = 0,
+    'ALTER TABLE `tblActivityLogs`
+        ADD COLUMN `siteID` INT DEFAULT NULL AFTER `logID`,
+        ADD KEY `idx_logs_site` (`siteID`),
+        ADD CONSTRAINT `fk_logs_site` FOREIGN KEY (`siteID`)
+            REFERENCES `tblSites` (`siteID`) ON DELETE SET NULL',
+    'SELECT 1'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
 -- 🚨 tblErrors (nullable — pre-bootstrap errors may lack site context)
-ALTER TABLE `tblErrors`
-    ADD COLUMN `siteID` INT DEFAULT NULL AFTER `errorID`,
-    ADD KEY `idx_errors_site` (`siteID`),
-    ADD CONSTRAINT `fk_errors_site` FOREIGN KEY (`siteID`)
-        REFERENCES `tblSites` (`siteID`) ON DELETE SET NULL;
+SET @col_exists := (
+    SELECT COUNT(*) FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME   = 'tblErrors'
+      AND COLUMN_NAME  = 'siteID'
+);
+SET @sql := IF(@col_exists = 0,
+    'ALTER TABLE `tblErrors`
+        ADD COLUMN `siteID` INT DEFAULT NULL AFTER `errorID`,
+        ADD KEY `idx_errors_site` (`siteID`),
+        ADD CONSTRAINT `fk_errors_site` FOREIGN KEY (`siteID`)
+            REFERENCES `tblSites` (`siteID`) ON DELETE SET NULL',
+    'SELECT 1'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
 -- ⚙️ tblSettings (nullable — NULL = global default, specific siteID = override)
-ALTER TABLE `tblSettings`
-    ADD COLUMN `siteID` INT DEFAULT NULL AFTER `settingID`,
-    ADD KEY `idx_settings_site` (`siteID`),
-    ADD CONSTRAINT `fk_settings_site` FOREIGN KEY (`siteID`)
-        REFERENCES `tblSites` (`siteID`) ON DELETE CASCADE;
+SET @col_exists := (
+    SELECT COUNT(*) FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME   = 'tblSettings'
+      AND COLUMN_NAME  = 'siteID'
+);
+SET @sql := IF(@col_exists = 0,
+    'ALTER TABLE `tblSettings`
+        ADD COLUMN `siteID` INT DEFAULT NULL AFTER `settingID`,
+        ADD KEY `idx_settings_site` (`siteID`),
+        ADD CONSTRAINT `fk_settings_site` FOREIGN KEY (`siteID`)
+            REFERENCES `tblSites` (`siteID`) ON DELETE CASCADE',
+    'SELECT 1'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
 -- 🔑 Update tblSettings unique key to allow per-site overrides
 -- Must use a workaround: MySQL treats NULL as distinct in UNIQUE keys,
 -- so (settingKey, NULL) and (settingKey, 1) are naturally unique.
-ALTER TABLE `tblSettings` DROP INDEX `settingKey`;
-ALTER TABLE `tblSettings` ADD UNIQUE KEY `uq_setting_key_site` (`settingKey`, `siteID`);
+-- Idempotent: drop the old single-column key only if present, then add the
+-- new composite unique key only if missing (portable across MySQL 8.0 +
+-- MariaDB 10.x — see DEV_NOTES → Portable DDL).
+SET @idx_exists := (
+    SELECT COUNT(*) FROM information_schema.STATISTICS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME   = 'tblSettings'
+      AND INDEX_NAME   = 'settingKey'
+);
+SET @sql := IF(@idx_exists > 0,
+    'ALTER TABLE `tblSettings` DROP INDEX `settingKey`',
+    'SELECT 1'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+SET @idx_exists := (
+    SELECT COUNT(*) FROM information_schema.STATISTICS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME   = 'tblSettings'
+      AND INDEX_NAME   = 'uq_setting_key_site'
+);
+SET @sql := IF(@idx_exists = 0,
+    'ALTER TABLE `tblSettings` ADD UNIQUE KEY `uq_setting_key_site` (`settingKey`, `siteID`)',
+    'SELECT 1'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
 -- 🔄 Backfill existing log/error rows with default siteID=1
 UPDATE `tblActivityLogs` SET `siteID` = 1 WHERE `siteID` IS NULL;

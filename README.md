@@ -12,7 +12,7 @@ A modular internal portal platform for organisations, providing centralised acce
 
 | Layer              | Choice                                                                           | Rationale                                        |
 | ------------------ | -------------------------------------------------------------------------------- | ------------------------------------------------ |
-| **Backend**        | PHP 8.5 (strict types, backward-compatible with 8.4), MySQL 8.0                  | Ubiquitous LAMP stack; DreamHost-friendly        |
+| **Backend**        | PHP 8.5 (strict types, backward-compatible with 8.4), MySQL 8.0 (MariaDB 10.4+ compatible) | Ubiquitous LAMP stack; DreamHost-friendly        |
 | **Routing**        | Front-controller + DB-backed router (tblRoutes)                                  | Clean URLs, app isolation, easy overrides        |
 | **Auth**           | Local accounts, MS365 OAuth, Google OAuth, WebAuthn/PassKeys, account linking    | Multi-provider SSO, passwordless support         |
 | **Multi-Site**     | Umbrella multi-site with subdomain, path-prefix, and session detection modes     | One install serves multiple locations/divisions  |
@@ -130,7 +130,7 @@ Browser -> .htaccess -> index.php -> bootstrap.php -> Router::dispatch()
 ### Prerequisites
 
 - PHP 8.4+ with extensions: `mysqli`, `openssl`, `sodium`, `curl`, `mbstring`
-- MySQL 8.0+
+- MySQL 8.0+ (MariaDB 10.4+ compatible)
 - Apache with `mod_rewrite`
 
 ### Fresh Installation

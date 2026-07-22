@@ -410,7 +410,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         // "Unknown column 'isVerified' in 'field list'".
                         //
                         // Every numbered migration uses idempotent
-                        // constructs (ADD COLUMN IF NOT EXISTS,
+                        // constructs (information_schema-guarded DDL,
                         // INSERT ... ON DUPLICATE KEY UPDATE,
                         // DELETE FROM ... WHERE ...) — so on a true-fresh
                         // install they're harmless no-ops (the CREATE

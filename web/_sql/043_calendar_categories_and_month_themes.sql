@@ -19,13 +19,31 @@
 -- =============================================================================
 
 -- 🎨 Categories: add colour + display style ----------------------------------
-ALTER TABLE `tblEventCategories`
-    ADD COLUMN `color` VARCHAR(9) DEFAULT NULL
-        COMMENT 'Hex colour (#RRGGBB or #RRGGBBAA) used by the year planner / month grid'
-        AFTER `sortOrder`,
-    ADD COLUMN `displayStyle` ENUM('background','text') NOT NULL DEFAULT 'background'
-        COMMENT 'How the colour renders in the year planner: background tint vs. text colour'
-        AFTER `color`;
+-- ➕ tblEventCategories.color — guarded ADD COLUMN (portable: MySQL 8.0 + MariaDB 10.x)
+SET @col_exists := (
+    SELECT COUNT(*) FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME   = 'tblEventCategories'
+      AND COLUMN_NAME  = 'color'
+);
+SET @sql := IF(@col_exists = 0,
+    'ALTER TABLE `tblEventCategories` ADD COLUMN `color` VARCHAR(9) DEFAULT NULL COMMENT ''Hex colour (#RRGGBB or #RRGGBBAA) used by the year planner / month grid'' AFTER `sortOrder`',
+    'SELECT 1'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+-- ➕ tblEventCategories.displayStyle — guarded ADD COLUMN (portable: MySQL 8.0 + MariaDB 10.x)
+SET @col_exists := (
+    SELECT COUNT(*) FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME   = 'tblEventCategories'
+      AND COLUMN_NAME  = 'displayStyle'
+);
+SET @sql := IF(@col_exists = 0,
+    'ALTER TABLE `tblEventCategories` ADD COLUMN `displayStyle` ENUM(''background'',''text'') NOT NULL DEFAULT ''background'' COMMENT ''How the colour renders in the year planner: background tint vs. text colour'' AFTER `color`',
+    'SELECT 1'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
 -- 🗓️ Per-month theme / strap line --------------------------------------------
 CREATE TABLE IF NOT EXISTS `tblCalendarMonthThemes` (

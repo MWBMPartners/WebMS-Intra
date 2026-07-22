@@ -887,6 +887,190 @@ the web-based Migrator (admin-only) and tracked in `tblMigrations`.
 
 ---
 
+## Portable DDL convention (MySQL 8.0 ∩ MariaDB)
+
+**Supported engines:** MySQL 8.0+ (production target, DreamHost) and MariaDB 10.4+
+(compatible). MySQL-wire-compatible managed/cloud databases — AWS RDS MySQL 8,
+Aurora MySQL 3.x, Azure Database for MySQL (Flexible Server 8.0), GCP Cloud SQL for
+MySQL — are covered for free by MySQL-8 compatibility, since they accept the same
+DDL and reject the same MariaDB-only extensions. PostgreSQL, SQL Server, and
+Vitess-based platforms (PlanetScale/TiDB/SingleStore — limited FOREIGN KEY support)
+are explicitly **not supported**; the entire data layer is mysqli (no PDO
+abstraction), so supporting them would be a platform port, not a SQL tweak.
+
+**Rule: never use `IF [NOT] EXISTS` on `ADD`/`DROP COLUMN`, `ADD`/`CREATE`/`DROP
+INDEX`/`KEY`, or `CHANGE`/`MODIFY COLUMN`.** That clause is a MariaDB-only DDL
+extension — MySQL 8.0 (all point releases, plus 8.4/9.x) rejects it with a parse
+error, **ERROR 1064**, which aborts the whole statement/file under
+`mysqli::multi_query` (the installer and Migrator both use it). `CREATE TABLE IF
+NOT EXISTS` and `DROP TABLE IF EXISTS` are standard MySQL and remain fine to use
+as-is.
+
+Instead, guard every DDL object with an `information_schema` existence check and a
+dynamic `PREPARE`/`EXECUTE`. This is the house idiom, already shipped and
+production-proven under `mysqli::multi_query` in `web/_sql/037_site_favicon.sql`
+(ADD COLUMN), `web/_sql/112_events_calendar_easy_wins.sql` (DROP INDEX), and
+`web/_sql/138_worship_present_state.sql` (ADD UNIQUE KEY — its own comment notes
+"some MySQL builds reject IF NOT EXISTS"). Conventions:
+
+- One guard block per DDL object (per column / per index / per FK) — never batch a
+  multi-column ALTER behind a single sentinel guard. `multi_query` aborts mid-file
+  on connection loss, and per-object guards make a re-run self-healing.
+- Keep the literal DDL textually contiguous inside the quoted string (don't split
+  `` ALTER TABLE `tblX` ADD COLUMN `colY` `` across concatenation) —
+  `tools/audit-checks/check_sql_columns.py` builds its column inventory from
+  raw-text regexes that match inside string literals across newlines.
+- Escape single quotes inside the literal by doubling (`''`), as in COMMENT clauses.
+- Use `SELECT 1` as the no-op branch.
+
+### Templates
+
+**ADD COLUMN** — guard on `information_schema.COLUMNS`:
+
+```sql
+-- ➕ tblFoo.barColumn — guarded ADD COLUMN (portable: MySQL 8.0 + MariaDB 10.x)
+SET @col_exists := (
+    SELECT COUNT(*) FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME   = 'tblFoo'
+      AND COLUMN_NAME  = 'barColumn'
+);
+SET @sql := IF(@col_exists = 0,
+    'ALTER TABLE `tblFoo` ADD COLUMN `barColumn` VARCHAR(64) DEFAULT NULL COMMENT ''What it is (#NNN)'' AFTER `bazColumn`',
+    'SELECT 1'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+```
+
+**ADD INDEX / CREATE INDEX** — guard on `information_schema.STATISTICS`:
+
+```sql
+-- 🔍 idx_foo_bar — guarded ADD INDEX
+SET @idx_exists := (
+    SELECT COUNT(*) FROM information_schema.STATISTICS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME   = 'tblFoo'
+      AND INDEX_NAME   = 'idx_foo_bar'
+);
+SET @sql := IF(@idx_exists = 0,
+    'ALTER TABLE `tblFoo` ADD INDEX `idx_foo_bar` (`barColumn`, `bazColumn`)',
+    'SELECT 1'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+```
+
+Composite indexes produce one `STATISTICS` row per column, so `COUNT(*) = 0` / `> 0`
+still works. For a unique index use `ADD UNIQUE KEY \`uq_…\` (…)` in the literal.
+Standardise on `ALTER TABLE … ADD` rather than `CREATE INDEX` for consistency; both
+are prepare-able.
+
+**DROP INDEX** — same `STATISTICS` guard, inverted:
+
+```sql
+SET @idx_exists := (
+    SELECT COUNT(*) FROM information_schema.STATISTICS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME   = 'tblFoo'
+      AND INDEX_NAME   = 'uq_old_index'
+);
+SET @sql := IF(@idx_exists > 0,
+    'ALTER TABLE `tblFoo` DROP INDEX `uq_old_index`',
+    'SELECT 1'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+```
+
+**DROP COLUMN** — `COLUMNS` guard, inverted:
+
+```sql
+SET @col_exists := (
+    SELECT COUNT(*) FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME   = 'tblFoo'
+      AND COLUMN_NAME  = 'obsoleteColumn'
+);
+SET @sql := IF(@col_exists > 0,
+    'ALTER TABLE `tblFoo` DROP COLUMN `obsoleteColumn`',
+    'SELECT 1'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+```
+
+**MODIFY / CHANGE COLUMN:**
+
+- `MODIFY COLUMN` to a fixed target definition is naturally re-runnable (the same
+  MODIFY twice succeeds) — no guard needed unless the migration must be conditional
+  on the *current* type, in which case guard on
+  `information_schema.COLUMNS.COLUMN_TYPE`/`DATA_TYPE`.
+- `CHANGE COLUMN` (rename) is NOT re-runnable — the old name is gone on the second
+  run — so guard on the **old** name:
+
+```sql
+SET @old_exists := (
+    SELECT COUNT(*) FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME   = 'tblFoo'
+      AND COLUMN_NAME  = 'oldName'
+);
+SET @sql := IF(@old_exists > 0,
+    'ALTER TABLE `tblFoo` CHANGE COLUMN `oldName` `newName` VARCHAR(64) NOT NULL',
+    'SELECT 1'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+```
+
+**ADD FOREIGN KEY** — guard on `information_schema.TABLE_CONSTRAINTS`:
+
+```sql
+SET @fk_exists := (
+    SELECT COUNT(*) FROM information_schema.TABLE_CONSTRAINTS
+    WHERE CONSTRAINT_SCHEMA = DATABASE()
+      AND TABLE_NAME        = 'tblFoo'
+      AND CONSTRAINT_NAME   = 'fk_foo_bar'
+      AND CONSTRAINT_TYPE   = 'FOREIGN KEY'
+);
+SET @sql := IF(@fk_exists = 0,
+    'ALTER TABLE `tblFoo` ADD CONSTRAINT `fk_foo_bar` FOREIGN KEY (`barID`) REFERENCES `tblBar`(`barID`) ON DELETE SET NULL',
+    'SELECT 1'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+```
+
+Note: this checks constraint *name* existence only — a same-named FK with a
+different definition is silently accepted (the same tolerance the old
+`IF NOT EXISTS` forms had for columns). Acceptable, but worth knowing.
+
+### PREPARE-ability caveat (MySQL 8.0 manual — "SQL Syntax Permitted in Prepared Statements")
+
+Prepare-able (everything the templates above need): `ALTER TABLE`, `CREATE INDEX`,
+`DROP INDEX`, `CREATE TABLE`, `DROP TABLE`, `RENAME TABLE`, DML, `SET`, `SHOW`.
+
+**NOT prepare-able** — do not try to wrap these in the guard idiom:
+`CREATE`/`DROP TRIGGER`, `CREATE`/`ALTER`/`DROP PROCEDURE`/`FUNCTION`/`EVENT`,
+`ALTER VIEW`, `LOCK TABLES`. If a future migration needs a *conditional*
+trigger/procedure, the condition has to move to PHP (Migrator/installer side) — the
+SQL-file guard idiom cannot express it. MariaDB's prepare-able set is a superset of
+MySQL's, so the intersection constraint is exactly the MySQL list above.
+
+### Replayability rule
+
+`web/_install/index.php` loads `full_schema.sql` and then **replays every numbered
+migration file in order**, deliberately ignoring `tblMigrations` (see the comment
+above the replay loop) — this is how a stale partial install catches up to the
+latest schema. That means **every migration must be a replayable no-op** on an
+up-to-date schema:
+
+- Every DDL statement needs an `information_schema` guard (per the templates
+  above) — a bare `ADD COLUMN`/`ADD INDEX`/`ADD CONSTRAINT`/`DROP INDEX` fails with
+  1060/1061/1826/1091 the moment it re-runs against a schema that already has the
+  object.
+- Every seed `INSERT` (including a migration's own `INSERT INTO tblMigrations
+  (filename) VALUES (...)` self-record — `filename` is `UNIQUE KEY
+  uq_filename`) needs `ON DUPLICATE KEY UPDATE`, `INSERT IGNORE`, or a `WHERE NOT
+  EXISTS` guard, or it fails with ERROR 1062 on replay.
+
+---
+
 ## File Structure Quick Reference
 
 All paths below are relative to `web/` (the deployable root):

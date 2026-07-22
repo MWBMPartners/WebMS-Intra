@@ -1,37 +1,50 @@
 #!/usr/bin/env bash
 # -----------------------------------------------------------------------------
-# End-to-end migration test (#248)
+# End-to-end migration test (#248, restructured per SQL portability fix spec §5)
 # -----------------------------------------------------------------------------
-# Spins up a disposable MySQL 8.0.36 container, applies every migration
-# under web/_sql/ in filename order, then runs the SAME set a second time
-# to verify idempotency under the Migrator wrapper.
+# Spins up a disposable MySQL 8.0.36 container and exercises web/_sql/ the
+# same way the real installer does: full_schema.sql first, THEN every
+# numbered migration replayed on top of it, ignoring tblMigrations
+# (web/_install/index.php:360-466) — not the historical "apply the
+# migration chain to an empty DB first" order.
 #
 # Four phases:
-#   1. Fresh install — apply every numbered migration in order. Tracks
-#      tblMigrations rows.
-#   2. Idempotency — re-runs the same loop, asserts no new rows in
-#      tblMigrations and zero net schema change.
-#   3. Stale-DB upgrade — applies the first half of migrations, then
-#      applies the rest. Confirms the catch-up path.
-#   4. full_schema fresh-install — wipes the DB and loads
-#      web/_sql/full_schema.sql directly (the consolidated fresh-install
-#      path). Hard-fails only if the file errors against real MySQL; a
-#      table/column/index/migration-count mismatch vs the migration-chain
-#      (phase 1) is reported as a warning, not a failure — the SQL-level
-#      check_schema_seed_parity.py is the actual gate for seed parity.
-#      Runs even with --skip-stale (independent of phase 3).
+#   1. full_schema fresh-install — wipe the DB, load web/_sql/full_schema.sql
+#      directly (the consolidated fresh-install path). Any SQL error is a
+#      hard failure.
+#   2. Installer replay — replay_all_migrations() runs every numbered file
+#      under web/_sql/ in order over the phase-1 DB, IGNORING tblMigrations
+#      (mirrors the installer's replay loop at _install/index.php:399-466).
+#      Hard-fails on any migration error, or on a table/column/index count
+#      drift vs phase 1 — every migration must be a no-op on an up-to-date
+#      schema. A tblMigrations row-count drift is a warning only for now —
+#      tools/audit-checks/check_schema_seed_parity.py is the actual gate for
+#      seed-block parity.
+#   3. Idempotency re-run — replay_all_migrations() runs again over the
+#      phase-2 DB. Hard-fails on any migration error, or ANY net schema /
+#      tblMigrations change (mirrors an installer re-run / upgrade retry).
+#   4. Legacy chain-from-empty — wipe the DB and replay the
+#      tblMigrations-respecting chain from 000 onward via run_all_migrations()
+#      (models Portal\Core\Migrator running against a pre-full_schema DB).
+#      Then, unless --skip-stale, wipes again and replays the first half of
+#      migrations followed by the rest, confirming the catch-up path reaches
+#      the same final tblMigrations count. Migration failures are hard;
+#      table/column/index/tblMigrations count parity vs phase 1 is a warning
+#      only — a legitimate migration-chain vs full_schema structural
+#      difference is better judged by a human (same tolerance the old
+#      phase-4 comparison had, direction inverted).
 #
 # Exit:
-#   0 — all phases pass (a phase-4 count mismatch is a warning, not a
-#       failure, so it does not affect this).
+#   0 — all phases pass (the warnings noted above do not affect this).
 #   non-zero — first hard-failing phase.
 #
 # Requires: docker + bash 4+. Tested under DreamHost-equivalent MySQL
-# 8.0.36 (the version pinned in docker-compose.yml).
+# 8.0.36 (the version pinned in docker-compose.yml — production is
+# confirmed MySQL 8; see docker-compose.yml's header comment).
 #
 # Usage:
 #   tools/e2e-migrations/run.sh                # run all four phases
-#   tools/e2e-migrations/run.sh --skip-stale   # skip phase 3 (phase 4 still runs)
+#   tools/e2e-migrations/run.sh --skip-stale   # skip the phase-4 half/half split only
 #   tools/e2e-migrations/run.sh --keep         # leave the container up afterwards
 # -----------------------------------------------------------------------------
 
@@ -77,6 +90,13 @@ mysql_file() {
     docker exec -i portal-e2e-mysql mysql -u"${DB_USER}" -p"${DB_PASS}" -h localhost "${DB_NAME}" < "$1"
 }
 
+# Drops and recreates DB_NAME so each phase that needs a clean slate starts
+# from a genuinely empty database (also self-healing across --keep re-runs).
+reset_db() {
+    docker exec -i portal-e2e-mysql mysql -u"${DB_USER}" -p"${DB_PASS}" -e \
+        "DROP DATABASE IF EXISTS ${DB_NAME}; CREATE DATABASE ${DB_NAME} CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;"
+}
+
 wait_for_mysql() {
     echo -n "→ Waiting for MySQL to be ready (authenticated) "
     # NB: `mysqladmin ping` reports success even when auth is denied (an
@@ -114,6 +134,12 @@ count_migrations() {
     mysql_q "SELECT COUNT(*) FROM tblMigrations;" 2>/dev/null || echo 0
 }
 
+# -----------------------------------------------------------------------------
+# Legacy tblMigrations-respecting chain (phase 4 only) — models
+# Portal\Core\Migrator running against a pre-full_schema DB: each file is
+# applied once and recorded, subsequent runs skip anything already recorded.
+# -----------------------------------------------------------------------------
+
 apply_migration() {
     local file="$1"
     local name; name="$(basename "${file}")"
@@ -129,7 +155,6 @@ apply_migration() {
 }
 
 run_all_migrations() {
-    local before_after_changed=0
     local applied=0
     local skipped=0
     local failed=0
@@ -152,6 +177,29 @@ run_all_migrations() {
 }
 
 # -----------------------------------------------------------------------------
+# Installer-replay chain (phases 2 + 3) — mimics web/_install/index.php's
+# post-full_schema replay loop exactly: every numbered file, in filename
+# order, run unconditionally. tblMigrations is NOT consulted to decide
+# whether to apply a file (the installer ignores it for this exact reason —
+# see index.php:422-430) — only used afterwards as a count to compare.
+# -----------------------------------------------------------------------------
+
+replay_all_migrations() {
+    local applied=0
+    local failed=0
+    for file in $(ls "${SQL_DIR}"/[0-9]*.sql 2>/dev/null | sort); do
+        if mysql_file "${file}"; then
+            applied=$((applied + 1))
+        else
+            failed=$((failed + 1))
+            echo "  ✗ $(basename "${file}") FAILED" >&2
+        fi
+    done
+    echo "  replayed=${applied} failed=${failed}"
+    return "${failed}"
+}
+
+# -----------------------------------------------------------------------------
 # Start
 # -----------------------------------------------------------------------------
 
@@ -160,13 +208,18 @@ docker compose -f "${COMPOSE_FILE}" up -d --remove-orphans
 wait_for_mysql
 
 # -----------------------------------------------------------------------------
-# Phase 1: fresh install
+# Phase 1: full_schema fresh-install
 # -----------------------------------------------------------------------------
 echo
-echo "═════ Phase 1: fresh install ═════"
-mysql_file "${SQL_DIR}/000_create_migrations_table.sql"
-mysql_q "INSERT IGNORE INTO tblMigrations (filename) VALUES ('000_create_migrations_table.sql');" >/dev/null
-run_all_migrations
+echo "═════ Phase 1: full_schema fresh-install ═════"
+echo "  Wiping DB and loading full_schema.sql …"
+reset_db
+if ! mysql_file "${SQL_DIR}/full_schema.sql"; then
+    echo "✗ full_schema.sql FAILED to load against MySQL 8.0.36 — see error above" >&2
+    exit 1
+fi
+echo "  ✓ full_schema.sql loaded without error"
+
 P1_TABLES=$(count_tables)
 P1_COLUMNS=$(count_columns)
 P1_INDEXES=$(count_indexes)
@@ -174,35 +227,114 @@ P1_MIGS=$(count_migrations)
 echo "  schema: ${P1_TABLES} tables, ${P1_COLUMNS} columns, ${P1_INDEXES} indexes, ${P1_MIGS} migrations recorded"
 
 # -----------------------------------------------------------------------------
-# Phase 2: idempotency re-run
+# Phase 2: installer replay
 # -----------------------------------------------------------------------------
+# The real install flow, exactly: full_schema.sql (phase 1) followed by every
+# numbered migration, ignoring tblMigrations. On a correctly-guarded schema
+# this must be a full no-op — full_schema already delivers the final shape,
+# so nothing should be added, changed, or removed.
 echo
-echo "═════ Phase 2: idempotency re-run ═════"
-run_all_migrations
+echo "═════ Phase 2: installer replay ═════"
+echo "  Replaying every numbered migration over the phase-1 DB (installer semantics, web/_install/index.php:399-466) …"
+set +e
+replay_all_migrations
+REPLAY2_FAILED=$?
+set -e
+if [[ "${REPLAY2_FAILED}" -ne 0 ]]; then
+    echo "✗ installer replay FAILED — ${REPLAY2_FAILED} migration(s) errored against the full_schema baseline" >&2
+    exit 1
+fi
+
 P2_TABLES=$(count_tables)
 P2_COLUMNS=$(count_columns)
 P2_INDEXES=$(count_indexes)
 P2_MIGS=$(count_migrations)
 echo "  schema: ${P2_TABLES} tables, ${P2_COLUMNS} columns, ${P2_INDEXES} indexes, ${P2_MIGS} migrations recorded"
 
-if [[ "${P1_TABLES}" != "${P2_TABLES}" || "${P1_COLUMNS}" != "${P2_COLUMNS}" || "${P1_INDEXES}" != "${P2_INDEXES}" ]]; then
-    echo "✗ idempotency FAILED — schema changed on second run" >&2
+if [[ "${P2_TABLES}" != "${P1_TABLES}" || "${P2_COLUMNS}" != "${P1_COLUMNS}" || "${P2_INDEXES}" != "${P1_INDEXES}" ]]; then
+    echo "✗ installer replay FAILED — schema drifted vs the full_schema baseline (every migration must be a no-op on an up-to-date schema)" >&2
+    printf '    tables:  full_schema=%s  post-replay=%s  Δ=%+d\n' "${P1_TABLES}" "${P2_TABLES}" "$((P2_TABLES - P1_TABLES))" >&2
+    printf '    columns: full_schema=%s  post-replay=%s  Δ=%+d\n' "${P1_COLUMNS}" "${P2_COLUMNS}" "$((P2_COLUMNS - P1_COLUMNS))" >&2
+    printf '    indexes: full_schema=%s  post-replay=%s  Δ=%+d\n' "${P1_INDEXES}" "${P2_INDEXES}" "$((P2_INDEXES - P1_INDEXES))" >&2
     exit 1
 fi
-if [[ "${P1_MIGS}" != "${P2_MIGS}" ]]; then
-    echo "✗ idempotency FAILED — tblMigrations row count changed (P1=${P1_MIGS}, P2=${P2_MIGS})" >&2
-    exit 1
+if [[ "${P2_MIGS}" != "${P1_MIGS}" ]]; then
+    echo "⚠ tblMigrations count drift vs the full_schema seed block (full_schema=${P1_MIGS}, post-replay=${P2_MIGS}) — not a hard failure; tools/audit-checks/check_schema_seed_parity.py is the seed-parity gate" >&2
+else
+    echo "  ✓ table/column/index counts identical to the full_schema baseline — every migration is a no-op"
 fi
-echo "  ✓ idempotency confirmed: zero net change on second run"
 
 # -----------------------------------------------------------------------------
-# Phase 3: stale-DB upgrade simulation
+# Phase 3: idempotency re-run
 # -----------------------------------------------------------------------------
+# Re-run the exact same installer-replay chain a second time on top of the
+# phase-2 DB. This mirrors a user re-running the installer (or an upgrade
+# retry) against an already-up-to-date schema: it must be a hard no-op.
+echo
+echo "═════ Phase 3: idempotency re-run ═════"
+echo "  Replaying every numbered migration again over the phase-2 DB …"
+set +e
+replay_all_migrations
+REPLAY3_FAILED=$?
+set -e
+if [[ "${REPLAY3_FAILED}" -ne 0 ]]; then
+    echo "✗ idempotency re-run FAILED — ${REPLAY3_FAILED} migration(s) errored on the second replay" >&2
+    exit 1
+fi
+
+P3_TABLES=$(count_tables)
+P3_COLUMNS=$(count_columns)
+P3_INDEXES=$(count_indexes)
+P3_MIGS=$(count_migrations)
+echo "  schema: ${P3_TABLES} tables, ${P3_COLUMNS} columns, ${P3_INDEXES} indexes, ${P3_MIGS} migrations recorded"
+
+if [[ "${P3_TABLES}" != "${P2_TABLES}" || "${P3_COLUMNS}" != "${P2_COLUMNS}" || "${P3_INDEXES}" != "${P2_INDEXES}" || "${P3_MIGS}" != "${P2_MIGS}" ]]; then
+    echo "✗ idempotency FAILED — schema or tblMigrations changed on the second replay" >&2
+    exit 1
+fi
+echo "  ✓ idempotency confirmed: zero net change on second replay"
+
+# -----------------------------------------------------------------------------
+# Phase 4: legacy chain-from-empty (+ stale-DB upgrade split, unless --skip-stale)
+# -----------------------------------------------------------------------------
+# Independent of phases 1-3 — always runs. Models Portal\Core\Migrator
+# applying the tblMigrations-respecting chain to a DB that never saw
+# full_schema.sql at all (e.g. an install that predates the consolidated
+# schema, or a Migrator-only environment). Migration failures are a hard
+# gate; a table/column/index/tblMigrations count mismatch against phase 1's
+# full_schema baseline is a warning only — a legitimate structural
+# difference between the migration chain and the consolidated schema is
+# better judged by a human than hard-failed in CI (same tolerance the old
+# harness gave this comparison, direction inverted).
+echo
+echo "═════ Phase 4: legacy chain-from-empty ═════"
+echo "  Wiping DB and replaying the tblMigrations-respecting chain from 000 onward …"
+reset_db
+mysql_file "${SQL_DIR}/000_create_migrations_table.sql"
+mysql_q "INSERT IGNORE INTO tblMigrations (filename) VALUES ('000_create_migrations_table.sql');" >/dev/null
+run_all_migrations
+
+P4_TABLES=$(count_tables)
+P4_COLUMNS=$(count_columns)
+P4_INDEXES=$(count_indexes)
+P4_MIGS=$(count_migrations)
+echo "  schema: ${P4_TABLES} tables, ${P4_COLUMNS} columns, ${P4_INDEXES} indexes, ${P4_MIGS} migrations recorded"
+
+if [[ "${P4_TABLES}" != "${P1_TABLES}" || "${P4_COLUMNS}" != "${P1_COLUMNS}" || "${P4_INDEXES}" != "${P1_INDEXES}" || "${P4_MIGS}" != "${P1_MIGS}" ]]; then
+    echo "⚠ legacy chain vs full_schema parity — MISMATCH (not a hard failure; review manually)" >&2
+    printf '    tables:     migration-chain=%s  full_schema=%s  Δ=%+d\n' "${P4_TABLES}" "${P1_TABLES}" "$((P4_TABLES - P1_TABLES))" >&2
+    printf '    columns:    migration-chain=%s  full_schema=%s  Δ=%+d\n' "${P4_COLUMNS}" "${P1_COLUMNS}" "$((P4_COLUMNS - P1_COLUMNS))" >&2
+    printf '    indexes:    migration-chain=%s  full_schema=%s  Δ=%+d\n' "${P4_INDEXES}" "${P1_INDEXES}" "$((P4_INDEXES - P1_INDEXES))" >&2
+    printf '    migrations: migration-chain=%s  full_schema=%s  Δ=%+d\n' "${P4_MIGS}" "${P1_MIGS}" "$((P4_MIGS - P1_MIGS))" >&2
+else
+    echo "  ✓ legacy chain vs full_schema parity confirmed: identical counts"
+fi
+
 if [[ "${SKIP_STALE}" -eq 0 ]]; then
     echo
-    echo "═════ Phase 3: stale-DB upgrade ═════"
+    echo "  ── stale-DB upgrade split ──"
     echo "  Wiping DB and replaying only the first half of migrations …"
-    docker exec -i portal-e2e-mysql mysql -u"${DB_USER}" -p"${DB_PASS}" -e "DROP DATABASE IF EXISTS ${DB_NAME}; CREATE DATABASE ${DB_NAME} CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;"
+    reset_db
     mysql_file "${SQL_DIR}/000_create_migrations_table.sql"
     mysql_q "INSERT IGNORE INTO tblMigrations (filename) VALUES ('000_create_migrations_table.sql');" >/dev/null
 
@@ -217,54 +349,13 @@ if [[ "${SKIP_STALE}" -eq 0 ]]; then
     run_all_migrations
     AFTER_MIGS=$(count_migrations)
     echo "  total recorded after catch-up: ${AFTER_MIGS}"
-    if [[ "${AFTER_MIGS}" != "${P1_MIGS}" ]]; then
-        echo "✗ stale-upgrade FAILED — catch-up produced ${AFTER_MIGS} migrations vs fresh install ${P1_MIGS}" >&2
+    if [[ "${AFTER_MIGS}" != "${P4_MIGS}" ]]; then
+        echo "✗ stale-upgrade FAILED — catch-up produced ${AFTER_MIGS} migrations vs the legacy chain's ${P4_MIGS}" >&2
         exit 1
     fi
     echo "  ✓ stale-DB upgrade catches up to the same final state"
-fi
-
-# -----------------------------------------------------------------------------
-# Phase 4: full_schema fresh-install
-# -----------------------------------------------------------------------------
-# Independent of --skip-stale — always runs. Proves that
-# web/_sql/full_schema.sql (the consolidated fresh-install path, including
-# the ~485-line B2 backfill) applies cleanly against real MySQL 8.0.36.
-# That's the primary value of this phase, so it's the ONLY thing that
-# hard-fails it. A table/column/index/migration-count mismatch against
-# phase 1's migration-chain numbers is printed as a warning — it may be a
-# legitimate, pre-existing structural difference worth a human look, and
-# tools/audit-checks/check_schema_seed_parity.py already gates seed parity
-# at the SQL-source level.
-echo
-echo "═════ Phase 4: full_schema fresh-install ═════"
-echo "  Wiping DB and loading full_schema.sql directly …"
-docker exec -i portal-e2e-mysql mysql -u"${DB_USER}" -p"${DB_PASS}" -e "DROP DATABASE IF EXISTS ${DB_NAME}; CREATE DATABASE ${DB_NAME} CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;"
-
-if ! mysql_file "${SQL_DIR}/full_schema.sql"; then
-    echo "✗ full_schema.sql FAILED to load against MySQL 8.0.36 — see error above" >&2
-    exit 1
-fi
-echo "  ✓ full_schema.sql loaded without error"
-
-P4_TABLES=$(count_tables)
-P4_COLUMNS=$(count_columns)
-P4_INDEXES=$(count_indexes)
-P4_MIGS=$(count_migrations)
-echo "  schema: ${P4_TABLES} tables, ${P4_COLUMNS} columns, ${P4_INDEXES} indexes, ${P4_MIGS} migrations recorded"
-
-# Compare against phase 1's migration-chain numbers. P1_* are still in
-# scope here even though phase 3 (when it ran) dropped/recreated the DB
-# in between — they're plain shell variables captured once in phase 1,
-# not re-derived from the (now full_schema-loaded) database.
-if [[ "${P4_TABLES}" != "${P1_TABLES}" || "${P4_COLUMNS}" != "${P1_COLUMNS}" || "${P4_INDEXES}" != "${P1_INDEXES}" || "${P4_MIGS}" != "${P1_MIGS}" ]]; then
-    echo "⚠ full_schema vs migration-chain parity — MISMATCH (not a hard failure; review manually)" >&2
-    printf '    tables:     full_schema=%s  migration-chain=%s  Δ=%+d\n' "${P4_TABLES}" "${P1_TABLES}" "$((P4_TABLES - P1_TABLES))" >&2
-    printf '    columns:    full_schema=%s  migration-chain=%s  Δ=%+d\n' "${P4_COLUMNS}" "${P1_COLUMNS}" "$((P4_COLUMNS - P1_COLUMNS))" >&2
-    printf '    indexes:    full_schema=%s  migration-chain=%s  Δ=%+d\n' "${P4_INDEXES}" "${P1_INDEXES}" "$((P4_INDEXES - P1_INDEXES))" >&2
-    printf '    migrations: full_schema=%s  migration-chain=%s  Δ=%+d\n' "${P4_MIGS}" "${P1_MIGS}" "$((P4_MIGS - P1_MIGS))" >&2
 else
-    echo "  ✓ full_schema vs migration-chain parity confirmed: identical counts"
+    echo "  (stale-DB upgrade split skipped: --skip-stale)"
 fi
 
 echo

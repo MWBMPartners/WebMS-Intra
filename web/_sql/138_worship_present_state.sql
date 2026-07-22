@@ -12,9 +12,18 @@
 -- @link https://github.com/MWBMPartners/WebMS-Intra/issues/308
 -- =============================================================================
 
-ALTER TABLE `tblServicePlans`
-    ADD COLUMN IF NOT EXISTS `displayToken` CHAR(64) DEFAULT NULL
-        COMMENT '64-char hex token for the projector display URL — minted lazily';
+-- ➕ tblServicePlans.displayToken — guarded ADD COLUMN (portable: MySQL 8.0 + MariaDB 10.x)
+SET @col_exists := (
+    SELECT COUNT(*) FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME   = 'tblServicePlans'
+      AND COLUMN_NAME  = 'displayToken'
+);
+SET @sql := IF(@col_exists = 0,
+    'ALTER TABLE `tblServicePlans` ADD COLUMN `displayToken` CHAR(64) DEFAULT NULL COMMENT ''64-char hex token for the projector display URL — minted lazily''',
+    'SELECT 1'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
 -- Unique index added separately (some MySQL builds reject IF NOT EXISTS on UNIQUE)
 SET @idx_exists := (

@@ -24,6 +24,9 @@
 #  10. Route targetFile existence                  — tblRoutes.targetFile resolves to a file
 #  11. Settings key consistency                    — $SETTINGS reads vs tblSettings seed
 #  12. full_schema.sql fresh-install parity        — migration seeds/marks vs full_schema.sql
+#  13. MariaDB-only DDL syntax                      — IF [NOT] EXISTS on ADD/DROP COLUMN,
+#                                                       ADD/CREATE/DROP INDEX|KEY (MySQL 8
+#                                                       rejects with error 1064)
 #
 # These are HEURISTICS — false positives are expected. Review the findings,
 # don't blindly fail the merge.
@@ -35,6 +38,12 @@
 # Check 12 (#364 / #194 / #339) was added after a similar audit found
 # fresh installs missing every seed row from migrations 090-145 because
 # full_schema.sql's tblMigrations seed block only recorded through 089.
+# Check 13 (#<fix-issue> — SQL portability audit) was added after
+# confirming MariaDB's `IF [NOT] EXISTS` DDL extensions (used throughout
+# web/_sql/) are parse errors (1064) on the confirmed-production MySQL 8.0
+# engine; the fix is the information_schema + PREPARE guard idiom (see
+# DEV_NOTES.md → "Portable DDL convention"; house examples: migrations
+# 037/112/138).
 # The scripts live in tools/audit-checks/ and are runnable locally.
 # =============================================================================
 
@@ -262,6 +271,12 @@ jobs:
           PARITY=$(python3 tools/audit-checks/check_schema_seed_parity.py 2>&1 | tail -n +6 || true)
           if echo "$PARITY" | grep -q '•'; then
             add_section "full_schema.sql parity gaps (migration seeds/marks missing from fresh-install schema)" "$PARITY"
+          fi
+
+          # 13) MariaDB-only DDL syntax (#<fix-issue> — MySQL 8 rejects with error 1064)
+          MARIADB=$(python3 tools/audit-checks/check_mariadb_only_ddl.py 2>&1 | tail -n +3 || true)
+          if echo "$MARIADB" | grep -q '•'; then
+            add_section "MariaDB-only DDL in web/_sql (MySQL 8 error 1064 — use the information_schema guard idiom)" "$MARIADB"
           fi
 
           echo "hits=$HITS" >> "$GITHUB_OUTPUT"

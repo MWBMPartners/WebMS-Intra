@@ -7,33 +7,45 @@
 # PURPOSE
 # -------
 # Runs tools/e2e-migrations/run.sh — the end-to-end migration test harness
-# (#248) — against a real, disposable MySQL 8.0.36 container (matching
-# DreamHost's minimum-supported version). The harness applies every
-# numbered migration under web/_sql/ in order, re-runs the same set to
-# prove idempotency, replays a stale-DB catch-up, and (phase 4) loads
-# web/_sql/full_schema.sql directly to prove the consolidated
-# fresh-install path applies cleanly against real MySQL. See
-# tools/e2e-migrations/README.md for the full phase breakdown.
+# (#248) — against a real, disposable MySQL 8.0.36 container (production's
+# confirmed engine and minimum-supported version). The harness now mirrors
+# the real installer flow: (1) load web/_sql/full_schema.sql fresh, (2)
+# replay every numbered migration over that DB ignoring tblMigrations —
+# exactly like web/_install/index.php:399-466 — asserting it's a clean
+# no-op, (3) replay the same chain again to prove idempotency, then (4)
+# separately replay the tblMigrations-respecting chain from an empty DB
+# (models Portal\Core\Migrator on a pre-full_schema install), including the
+# stale-DB half/half catch-up split. See tools/e2e-migrations/README.md for
+# the full phase breakdown.
 #
-# Only phase 4's load step is a hard gate on full_schema.sql; a
-# table/column/index/tblMigrations count mismatch against the migration
-# chain is printed as a warning, not a failure — check_schema_seed_parity.py
-# (wired into pr-security.yml) is the actual gate for seed parity at the
-# SQL-source level.
+# Phases 1-3 hard-fail on any SQL error or schema drift; phase 4's
+# migration failures are hard, but its count comparison against phase 1 is
+# a warning, not a failure — check_schema_seed_parity.py (wired into
+# pr-security.yml) is the actual gate for seed parity at the SQL-source
+# level.
 # =============================================================================
 
 name: E2E Migrations
 
 on:
-  # ⏸️ Auto-triggers (push / pull_request) are DISABLED pending #375.
-  #    First CI run revealed the harness targets `mysql:8.0.36` and applies
-  #    migrations to an empty DB, but production is MariaDB and the real
-  #    install flow is full_schema-first-then-migrations (foundational tables
-  #    like tblRoutes live only in full_schema.sql). Until the harness is
-  #    corrected (MariaDB image + full_schema-first — see #375) it fails on the
-  #    engine/flow mismatch, so it is manual-only to avoid red-failing PRs.
-  #    Re-add the push/pull_request blocks (paths: web/_sql/**,
-  #    tools/e2e-migrations/**, this file) once #375 lands.
+  # ✅ Auto-triggers RE-ENABLED after the guarded-DDL rewrite (#375). Production
+  #    is confirmed MySQL 8 — the `mysql:8.0.36` image was always correct. The
+  #    MariaDB-only `IF [NOT] EXISTS` DDL and bare non-idempotent statements are
+  #    now portable information_schema + PREPARE/EXECUTE guards, so the installer
+  #    full_schema-then-replay flow this harness exercises (phases 1-3) runs
+  #    clean on MySQL 8. Regressions are caught early by check_mariadb_only_ddl
+  #    + check_migration_idempotency in pr-security.yml.
+  push:
+    branches: [main, beta, alpha]
+    paths:
+      - 'web/_sql/**'
+      - 'tools/e2e-migrations/**'
+      - '.github/workflows/e2e-migrations.yml'
+  pull_request:
+    paths:
+      - 'web/_sql/**'
+      - 'tools/e2e-migrations/**'
+      - '.github/workflows/e2e-migrations.yml'
   workflow_dispatch:
 
 permissions:
@@ -55,5 +67,5 @@ jobs:
 
       # ubuntu-latest ships Docker + the docker compose plugin pre-installed,
       # so no separate setup step is needed before running the harness.
-      - name: Run E2E migration harness (all phases, incl. full_schema)
+      - name: Run E2E migration harness (all four phases)
         run: bash tools/e2e-migrations/run.sh

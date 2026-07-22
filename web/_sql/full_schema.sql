@@ -184,9 +184,11 @@ CREATE TABLE IF NOT EXISTS `tblUsers` (
     `notifyPrefs`  JSON         DEFAULT NULL COMMENT 'User notification preferences (JSON: {emailDigest, expenseUpdates, eventReminders})',
     `totpSecret`   VARCHAR(64)  DEFAULT NULL COMMENT 'Encrypted TOTP shared secret (from migration 032)',
     `totpEnabled`  TINYINT(1)   NOT NULL DEFAULT 0 COMMENT 'TOTP 2FA enabled flag (from migration 032)',
+    `calendarToken` VARCHAR(64) DEFAULT NULL COMMENT 'iCal feed token (from migration 080)',
     `createdAt`    DATETIME     DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (`userID`),
-    UNIQUE KEY `emailAddress` (`emailAddress`)
+    UNIQUE KEY `emailAddress` (`emailAddress`),
+    KEY `idx_user_calendar_token` (`calendarToken`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 
@@ -2682,11 +2684,9 @@ ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
 INSERT INTO `tblMigrations` (`filename`) VALUES ('080_ical_feed.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
-ALTER TABLE `tblUsers`
-    ADD COLUMN IF NOT EXISTS `calendarToken` VARCHAR(64) DEFAULT NULL;
-
-ALTER TABLE `tblUsers`
-    ADD INDEX IF NOT EXISTS `idx_user_calendar_token` (`calendarToken`);
+-- `tblUsers.calendarToken` + `idx_user_calendar_token` (migration 080) are
+-- folded directly into the `tblUsers` CREATE TABLE above — no ALTER needed
+-- for a fresh install; the guarded migration 080 handles a stale replay.
 
 INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
     ('calendar.ics',          'calendar/feed.php',         0),

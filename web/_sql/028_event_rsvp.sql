@@ -18,10 +18,18 @@ CREATE TABLE IF NOT EXISTS `tblEventRSVPs` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
 COMMENT='Event RSVP/registration responses';
 
--- 📋 Add optional capacity column to tblEvents
-ALTER TABLE `tblEvents`
-    ADD COLUMN IF NOT EXISTS `capacity` INT DEFAULT NULL
-    COMMENT 'Max attendees (NULL = unlimited)';
+-- 📋 tblEvents.capacity — guarded ADD COLUMN (portable: MySQL 8.0 + MariaDB 10.x)
+SET @col_exists := (
+    SELECT COUNT(*) FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME   = 'tblEvents'
+      AND COLUMN_NAME  = 'capacity'
+);
+SET @sql := IF(@col_exists = 0,
+    'ALTER TABLE `tblEvents` ADD COLUMN `capacity` INT DEFAULT NULL COMMENT ''Max attendees (NULL = unlimited)''',
+    'SELECT 1'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
 -- 📋 Route for RSVP save handler
 INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`)

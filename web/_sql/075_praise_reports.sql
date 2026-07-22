@@ -6,13 +6,31 @@
 -- counterpart to prayer requests, structurally identical.
 -- =============================================================================
 
-ALTER TABLE `tblPrayerRequests`
-    ADD COLUMN IF NOT EXISTS `kind` ENUM('request','praise','testimony') NOT NULL DEFAULT 'request'
-        COMMENT 'request=prayer ask, praise=answered/gratitude, testimony=longer-form (#260)' AFTER `body`;
+-- ➕ tblPrayerRequests.kind — guarded ADD COLUMN (portable: MySQL 8.0 + MariaDB 10.x)
+SET @col_exists := (
+    SELECT COUNT(*) FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME   = 'tblPrayerRequests'
+      AND COLUMN_NAME  = 'kind'
+);
+SET @sql := IF(@col_exists = 0,
+    'ALTER TABLE `tblPrayerRequests` ADD COLUMN `kind` ENUM(''request'',''praise'',''testimony'') NOT NULL DEFAULT ''request'' COMMENT ''request=prayer ask, praise=answered/gratitude, testimony=longer-form (#260)'' AFTER `body`',
+    'SELECT 1'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
--- Index for the praise listing query.
-ALTER TABLE `tblPrayerRequests`
-    ADD KEY IF NOT EXISTS `idx_pr_kind_site_status` (`siteID`, `kind`, `status`);
+-- 🔍 idx_pr_kind_site_status — guarded ADD KEY (index for the praise listing query)
+SET @idx_exists := (
+    SELECT COUNT(*) FROM information_schema.STATISTICS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME   = 'tblPrayerRequests'
+      AND INDEX_NAME   = 'idx_pr_kind_site_status'
+);
+SET @sql := IF(@idx_exists = 0,
+    'ALTER TABLE `tblPrayerRequests` ADD KEY `idx_pr_kind_site_status` (`siteID`, `kind`, `status`)',
+    'SELECT 1'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
 -- 📋 Routes
 INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
