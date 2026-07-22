@@ -185,6 +185,21 @@ CREATE TABLE IF NOT EXISTS `tblUsers` (
     `totpSecret`   VARCHAR(64)  DEFAULT NULL COMMENT 'Encrypted TOTP shared secret (from migration 032)',
     `totpEnabled`  TINYINT(1)   NOT NULL DEFAULT 0 COMMENT 'TOTP 2FA enabled flag (from migration 032)',
     `calendarToken` VARCHAR(64) DEFAULT NULL COMMENT 'iCal feed token (from migration 080)',
+    -- 🕯️ Sabbath quiet-hours per-user override (from migration 070 / #231)
+    `sabbathHonour` ENUM('inherit','on','off') NOT NULL DEFAULT 'inherit' COMMENT 'Per-user Sabbath quiet-hours preference (#231)',
+    -- 📇 Member Directory profile fields (from migration 079 / #261)
+    `displayBio`     TEXT         DEFAULT NULL COMMENT 'Markdown bio (#261)',
+    `displayPhoto`   VARCHAR(500) DEFAULT NULL COMMENT 'Path under _uploads/ to profile photo',
+    `displayPhone`   VARCHAR(50)  DEFAULT NULL,
+    `displayAddress` VARCHAR(500) DEFAULT NULL,
+    -- 🔒 Per-field directory visibility (from migration 079 / #261)
+    `visibilityName`    ENUM('private','team','members','public') NOT NULL DEFAULT 'members',
+    `visibilityRoles`   ENUM('private','team','members','public') NOT NULL DEFAULT 'members',
+    `visibilityEmail`   ENUM('private','team','members','public') NOT NULL DEFAULT 'private',
+    `visibilityPhone`   ENUM('private','team','members','public') NOT NULL DEFAULT 'private',
+    `visibilityAddress` ENUM('private','team','members','public') NOT NULL DEFAULT 'private',
+    `visibilityBio`     ENUM('private','team','members','public') NOT NULL DEFAULT 'members',
+    `visibilityPhoto`   ENUM('private','team','members','public') NOT NULL DEFAULT 'private',
     `createdAt`    DATETIME     DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (`userID`),
     UNIQUE KEY `emailAddress` (`emailAddress`),
@@ -386,6 +401,9 @@ CREATE TABLE IF NOT EXISTS `tblExpenseClaims` (
     KEY `userID` (`userID`),
     KEY `deptID` (`deptID`),
     KEY `idx_claims_site` (`siteID`),
+    -- Composite indexes for filtered list queries (from migration 020 / #66)
+    KEY `idx_claims_site_status` (`siteID`, `status`),
+    KEY `idx_claims_site_user_created` (`siteID`, `userID`, `createdAt`),
     CONSTRAINT `tblExpenseClaims_ibfk_1` FOREIGN KEY (`userID`)
         REFERENCES `tblUsers` (`userID`),
     CONSTRAINT `tblExpenseClaims_ibfk_2` FOREIGN KEY (`deptID`)
@@ -448,6 +466,8 @@ CREATE TABLE IF NOT EXISTS `tblExpenseClaimApprovals` (
     PRIMARY KEY (`approvalID`),
     KEY `idx_approvals_claim` (`claimID`),
     KEY `idx_approvals_user`  (`userID`),
+    -- Status check per claim (from migration 020 / #66)
+    KEY `idx_approvals_claim_decision` (`claimID`, `decision`),
     CONSTRAINT `fk_approvals_claim` FOREIGN KEY (`claimID`)
         REFERENCES `tblExpenseClaims` (`claimID`) ON DELETE CASCADE,
     CONSTRAINT `fk_approvals_user`  FOREIGN KEY (`userID`)
@@ -495,7 +515,8 @@ CREATE TABLE IF NOT EXISTS `tblAttendanceServiceTypes` (
     `createdAt`     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     `updatedAt`     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (`serviceTypeID`),
-    UNIQUE KEY `uq_att_type_slug` (`typeSlug`),
+    -- typeSlug is unique PER SITE, not globally (from migration 019 / #60)
+    UNIQUE KEY `uq_att_type_slug_site` (`typeSlug`, `siteID`),
     KEY `idx_att_type_parent` (`parentID`),
     CONSTRAINT `fk_att_type_parent` FOREIGN KEY (`parentID`)
         REFERENCES `tblAttendanceServiceTypes` (`serviceTypeID`) ON DELETE SET NULL,
@@ -527,6 +548,8 @@ CREATE TABLE IF NOT EXISTS `tblAttendanceSessions` (
     KEY `idx_att_sess_event`  (`eventID`),
     KEY `idx_att_sess_date`   (`sessionDate`),
     KEY `idx_att_sess_del`    (`isDeleted`),
+    -- Composite for date-range + type queries (from migration 020 / #66)
+    KEY `idx_attsess_site_date_type` (`siteID`, `sessionDate`, `serviceTypeID`),
     CONSTRAINT `fk_att_sess_type` FOREIGN KEY (`serviceTypeID`)
         REFERENCES `tblAttendanceServiceTypes` (`serviceTypeID`) ON DELETE RESTRICT,
     CONSTRAINT `fk_att_sess_creator` FOREIGN KEY (`createdByID`)
@@ -728,6 +751,8 @@ CREATE TABLE IF NOT EXISTS `tblEvents` (
     `startDateTime` DATETIME     NOT NULL COMMENT 'Event start (stored in UTC)',
     `endDateTime`   DATETIME     DEFAULT NULL COMMENT 'Event end (stored in UTC)',
     `timezone`      VARCHAR(50)  NOT NULL DEFAULT 'Europe/London',
+    -- Per-event IANA timezone for display, added separately by migration 070 (#238)
+    `eventTimezone` VARCHAR(64)  NOT NULL DEFAULT 'Europe/London' COMMENT 'IANA timezone for event display (#238)',
     `isAllDay`      TINYINT(1)   NOT NULL DEFAULT 0,
 
     -- 📍 Location fields (can override series location)
@@ -957,6 +982,8 @@ CREATE TABLE IF NOT EXISTS `tblLeadershipAssignments` (
     KEY `idx_la_role` (`roleID`),
     KEY `idx_la_user` (`userID`),
     KEY `idx_la_active` (`isActive`, `endDate`),
+    -- Composite for current-role lookups (from migration 020 / #66)
+    KEY `idx_leadassign_site_active_end` (`siteID`, `isActive`, `endDate`),
     CONSTRAINT `fk_la_site` FOREIGN KEY (`siteID`)
         REFERENCES `tblSites` (`siteID`) ON DELETE CASCADE,
     CONSTRAINT `fk_la_role` FOREIGN KEY (`roleID`)
@@ -3112,6 +3139,8 @@ CREATE TABLE IF NOT EXISTS `tblPrayerRequests` (
                      COMMENT 'Short title for the request',
     `body`           TEXT         NOT NULL
                      COMMENT 'Full text of the prayer request',
+    `kind`           ENUM('request','praise','testimony') NOT NULL DEFAULT 'request'
+                     COMMENT 'request=prayer ask, praise=answered/gratitude, testimony=longer-form (#260)',
     `visibility`     ENUM('leadership','congregation') NOT NULL DEFAULT 'leadership'
                      COMMENT 'Who can see the request once published',
     `status`         ENUM('pending','active','answered','archived') NOT NULL DEFAULT 'pending'
@@ -3131,6 +3160,8 @@ CREATE TABLE IF NOT EXISTS `tblPrayerRequests` (
     KEY `idx_site_status` (`siteID`, `status`),
     KEY `idx_submitter`   (`submitterID`),
     KEY `idx_pr_assigned` (`assignedToUserID`, `status`),
+    -- Praise/testimony listing query (from migration 075 / #260)
+    KEY `idx_pr_kind_site_status` (`siteID`, `kind`, `status`),
     CONSTRAINT `fk_pr_site` FOREIGN KEY (`siteID`)
         REFERENCES `tblSites` (`siteID`) ON DELETE RESTRICT,
     CONSTRAINT `fk_pr_submitter` FOREIGN KEY (`submitterID`)
