@@ -63,6 +63,27 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
       });
     },
 
+    // 📤 Real media upload (#363) — replaces the data: URI fallback the board
+    // uses when this host method is absent. Multipart POST so the CSRF token
+    // MUST travel via the X-CSRF-TOKEN header (the JSON csrf_token body field
+    // only exists for JSON requests — see api/upload.php's docblock). Throws
+    // on any non-2xx response so the bundle's .catch() can surface an error.
+    upload: async function (file) {
+      const fd = new FormData();
+      fd.append('file', file);
+      const r = await fetch('/api/noticeboard/upload', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'X-CSRF-Token': window.NoticeboardHost.csrf },
+        body: fd
+      });
+      const j = await r.json().catch(function () { return null; });
+      if (!r.ok || !j || j.status !== 'ok') {
+        throw new Error((j && j.message) ? j.message : ('Upload failed (' + r.status + ')'));
+      }
+      return j.data.url;
+    },
+
     // QR for the share/deep-link panel — served by Portal\Core\Qr (or CueRCode).
     qrUrl: function (text) {
       return '/api/noticeboard/qr?data=' + encodeURIComponent(text);

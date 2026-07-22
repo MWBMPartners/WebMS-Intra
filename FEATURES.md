@@ -257,7 +257,7 @@ Per-site text announcements (short-form notices with visibility windows). Distin
 
 ---
 
-### 📌 Noticeboard — `/noticeboard/` ✅ (#360)
+### 📌 Noticeboard — `/noticeboard/` ✅ (#360, #363)
 
 Visual poster wall — pinboard of event posters. Distinct from the text-based Announcements app.
 
@@ -267,17 +267,19 @@ Visual poster wall — pinboard of event posters. Distinct from the text-based A
 - Manual sort ordering (drag-and-drop persisted); auto-fallback to chronological
 - QR share panel — links to poster's deep-link URL, server-encoded via `Portal\Core\Qr` and pinned to the current host
 - Site-admin gated writes; any authenticated user can view
+- Real media upload pipeline (#363) — finfo-sniffed, size-capped (`noticeboard.upload.maxBytes`, default 15 MB), server-generated filename; served back publicly (no login) via `/noticeboard/media?f=<token>` so posters keep rendering for an anonymous QR scanner. Orphaned uploads (abandoned in the editor, or whose poster was later soft-deleted) are purged automatically after each save.
 
-**Tables:** `tblNoticeboardPosters`
+**Tables:** `tblNoticeboardPosters`, `tblNoticeboardUploads`
 
 **Routes / API:**
 - `GET  /noticeboard`             — board page (authed)
+- `GET  /noticeboard/media`       — poster media bytes, by token (PUBLIC, no auth — #363)
 - `GET  /api/noticeboard/list`    — poster feed (authed)
 - `POST /api/noticeboard/save`    — bulk upsert (site-admin, CSRF, cross-site guard)
+- `POST /api/noticeboard/upload`  — media upload (site-admin, CSRF, finfo MIME allowlist — #363)
 - `GET  /api/noticeboard/qr`      — QR PNG/SVG (authed, host-pinned)
 
 **Phase 1 limitations:**
-- Media pasted as `data:` URIs is rejected (real upload pipeline follow-up)
 - Whole-set replace on save — last-writer-wins if two admins edit simultaneously
 - Google Fonts blocked by CSP → typography degrades to system-font stack
 

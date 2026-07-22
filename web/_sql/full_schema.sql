@@ -13,7 +13,7 @@
 -- present in web/_sql/ are marked as executed in tblMigrations so the
 -- web-based Migrator won't re-run them.
 --
--- Covers migrations: 000-148 (DDL + settings/routes seeds + tblMigrations
+-- Covers migrations: 000-149 (DDL + settings/routes seeds + tblMigrations
 -- marks). When you add a new migration, port its DDL/seeds into the
 -- appropriate section here AND add its filename to the seed block at the
 -- end of this file. CI enforces this via
@@ -4829,6 +4829,22 @@ ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 
 
 -- =============================================================================
+-- Migration 149: Noticeboard — real media upload pipeline (#363)
+-- =============================================================================
+-- tblNoticeboardUploads CREATE is ported inline into the migration-ported
+-- table section below (banner "-- ── from 149_noticeboard_upload.sql ──").
+
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('noticeboard/media', 'noticeboard/media.php', 0)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'api.noticeboard.upload.enabled', 'true',     'true',     0),
+    (NULL, 'noticeboard.upload.maxBytes',    '15728640', '15728640', 0)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
+
+-- =============================================================================
 -- Tables added in numbered migrations 105+ — appended for fresh-install parity.
 -- Maintained automatically; do NOT hand-edit duplicates. See the same
 -- definitions in web/_sql/{105..144}_*.sql for the source of truth + comments.
@@ -5565,6 +5581,27 @@ CREATE TABLE IF NOT EXISTS `tblApiRateLimits` (
 COMMENT='Sliding-window API hit log — pruned opportunistically by RateLimiter (#323 Phase 2)';
 
 
+-- ── from 149_noticeboard_upload.sql ──────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS `tblNoticeboardUploads` (
+    `uploadID`    INT          NOT NULL AUTO_INCREMENT,
+    `siteID`      INT          NOT NULL,
+    `posterID`    INT          DEFAULT NULL COMMENT 'tblNoticeboardPosters.posterID once this upload is referenced by a saved poster; NULL while still staged in the editor',
+    `storedName`  VARCHAR(40)  NOT NULL COMMENT 'bin2hex(random_bytes(16)).ext — the ONLY value media.php will ever serve; never derived from client input',
+    `mimeType`    VARCHAR(100) NOT NULL COMMENT 'finfo-sniffed MIME type, never client-declared',
+    `fileSize`    INT          NOT NULL DEFAULT 0 COMMENT 'Size in bytes',
+    `createdByID` INT          DEFAULT NULL,
+    `createdAt`   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`uploadID`),
+    UNIQUE KEY `uq_upload_storedname` (`storedName`),
+    KEY `idx_upload_site` (`siteID`),
+    KEY `idx_upload_poster` (`posterID`),
+    CONSTRAINT `fk_upload_site`    FOREIGN KEY (`siteID`)      REFERENCES `tblSites` (`siteID`),
+    CONSTRAINT `fk_upload_poster`  FOREIGN KEY (`posterID`)    REFERENCES `tblNoticeboardPosters` (`posterID`) ON DELETE SET NULL,
+    CONSTRAINT `fk_upload_creator` FOREIGN KEY (`createdByID`) REFERENCES `tblUsers` (`userID`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+COMMENT='Noticeboard poster media uploads (#363) — orphan-cleanup ledger + media.php token resolver';
+
+
 -- #############################################################################
 -- SECTION 7B: MARK MIGRATIONS 082-083 + 090-145 AS EXECUTED (#364 / #194)
 -- (082/083 seed data was already ported above but their filenames were never
@@ -5752,4 +5789,7 @@ INSERT INTO `tblMigrations` (`filename`) VALUES ('147_api_v1_write_surface.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
 INSERT INTO `tblMigrations` (`filename`) VALUES ('148_prayer_chain_residuals.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('149_noticeboard_upload.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;

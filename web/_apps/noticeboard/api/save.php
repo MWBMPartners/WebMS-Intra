@@ -14,6 +14,7 @@ declare(strict_types=1);
 use Portal\Core\ApiAuth;
 use Portal\Core\App;
 use Portal\Core\ApiResponse;
+use Portal\Core\NoticeboardMedia;
 use Portal\Core\Site;
 
 ApiAuth::requireMethod('POST');
@@ -156,7 +157,15 @@ try {
             $order, $userId, $userId
         );
         $up->execute();
-        $keepIds[] = $dbId !== null ? $dbId : (int) $db->insert_id;
+        $savedPosterId = $dbId !== null ? $dbId : (int) $db->insert_id;
+        $keepIds[]     = $savedPosterId;
+
+        // 🔗 #363 — if this poster's media is one of OUR uploads (a
+        //    /noticeboard/media?f=<token> URL), stamp the upload row's
+        //    posterID so the cleanup pass below (and future saves) can tell
+        //    "attached" uploads from abandoned ones. No-op for
+        //    externally-hosted URLs / Canva embeds / text-only posters.
+        NoticeboardMedia::linkToPoster($siteId, $savedPosterId, $mediaUrl);
     }
     $up->close();
 
@@ -183,5 +192,12 @@ try {
     App::rollback();
     ApiResponse::error('Could not save noticeboard', 500, $e->getMessage());
 }
+
+// 🗑️ #363 — purge orphaned uploads (poster soft-deleted above, or an upload
+//    staged in the editor then abandoned without ever being saved). Runs
+//    AFTER commit so we never delete a file for a poster whose soft-delete
+//    could still be rolled back, and is fully best-effort — see
+//    NoticeboardMedia::cleanupOrphans()'s own try/catch.
+NoticeboardMedia::cleanupOrphans($siteId);
 
 ApiResponse::success(['saved' => true]);

@@ -2,6 +2,18 @@
 
 
 ## [1.4.0] - 2026-07-22 (alpha)
+- feat(noticeboard): #363 real media upload pipeline — replaces the `data:`
+  URI rejection in `save.php` with `POST /api/noticeboard/upload`
+  (site-admin, CSRF, finfo-sniffed MIME allowlist: png/jpeg/gif/webp +
+  mp4/webm, hard size cap via `noticeboard.upload.maxBytes` default 15 MB,
+  server-generated random filename). Files land under
+  `_uploads/noticeboard/` (outside the webroot, mirroring
+  `documents/api/create.php`) and are served back with NO auth by the new
+  public `GET /noticeboard/media?f=<token>` route — posters must keep
+  rendering for an anonymous QR scanner. New `tblNoticeboardUploads` ledger
+  (migration 149) + `Portal\Core\NoticeboardMedia` helper links each upload
+  to its saved poster and purges orphans (abandoned in the editor, or whose
+  poster was later soft-deleted) after every save.
 - feat(prayer-requests): #311 prayer-chain assignment residuals — private
   partner notes (`partnerNote`/`partnerLastPrayedAt`, ACL: assignee-or-admin
   only, cleared on reassignment), manual assign dropdowns with an

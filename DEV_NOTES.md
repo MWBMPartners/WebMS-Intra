@@ -1778,6 +1778,21 @@ Two variants exist in the design output:
 - `noticeboard.js` — eval variant (runtime-Babel from unpkg). **Never wire this in.** The portal CSP disallows `unsafe-eval` and does not allowlist unpkg, so it cannot run.
 - `noticeboard.noeval.js` — precompiled variant, wired in `_apps/noticeboard/index.php`.
 
+### Deliberate hand-edit exception (#363 — real upload pipeline)
+
+`noticeboard.noeval.js`'s `handleFile()` already special-cased a host upload
+hook (falling back to a `data:` URI `FileReader` read when absent), but named
+it `host.uploadFile(file)`. #363 wires that hook up to a real backend via
+`window.NoticeboardHost.upload(file)` (the bridge name the rest of the portal
+uses — see `_apps/noticeboard/index.php`), so the **only** hand-edit made to
+the generated bundle is renaming the two `uploadFile` references at
+`handleFile()` to `upload`. Everything else in the function (the `Promise`
+wrapping, `uploading` state, error `alert()`, and the `data:` URI fallback for
+a standalone/local deployment with no host) is untouched.
+**If you regenerate the bundle from the Claude Design source**, either carry
+this rename forward again, or (better) rename the hook to `upload` in the
+source component itself so a regeneration doesn't silently revert it.
+
 ### React hosting
 
 React 18.3.1 UMD is **self-hosted** at `web/public_html/assets/vendor/react/`:
