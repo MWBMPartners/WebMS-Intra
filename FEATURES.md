@@ -479,7 +479,7 @@ When these merge, the 🛠️ markers above flip to ✅ without further edits to
 | #106 | Enforce signed commits |
 | #105 | Prod secrets behind GitHub Environment + reviewer gate |
 | #107 | SFTP `--delete` operational documentation — mostly done (dry-run + docs shipped via PR #134); residual: server-side deletion-log/audit monitor |
-| #299 | Giving polish — pledge campaigns, bank statement CSV reconciliation, account-updater webhook for recurring giving (sub-feature 1, two-person offering count, shipped — see "Giving" section above) |
+| #299 | Giving polish — bank statement CSV reconciliation, account-updater webhook for recurring giving (sub-feature 1, two-person offering count, and sub-feature 2, pledge campaigns, both shipped — see "Giving" section above) |
 
 ---
 
@@ -568,6 +568,23 @@ tracked-but-not-started.
 | `tblCountEnvelopes` — named/numbered giving-envelope breakdown of the agreed envelope total | #299 | 150 | ✅ |
 | Close (`/giving/count/close`) — validates named envelopes reconcile to the agreed envelope total, then writes the gift log to `tblGivingEntry` in one transaction: one row per named envelope + aggregate "loose cash"/"loose cheque" rows for anything not itemised | #299 | 150 | ✅ |
 | UI: `/giving/count` (list + start), `/giving/count/session` (counter entry, comparison, resolve, envelopes, close) — gated by `Portal\Core\Giving::canManage()` | #299 | 150 | ✅ |
+
+---
+
+### Giving — pledge campaigns (#299 sub-feature 2, 2026-07-22)
+
+Extension to the existing `giving` app (#266). Bank reconciliation and the
+account-updater webhook remain the two not-started #299 sub-features.
+
+| Item | Issue | Migration | Status |
+|---|---|---|---|
+| `tblPledgeCampaigns` — goal amount, currency, date window, active flag | #299 | 151 | ✅ |
+| `tblPledges` — one row per member per campaign, `UNIQUE (campaignID, userID)` upsert (re-pledging, including after cancellation, updates the same row) | #299 | 151 | ✅ |
+| Auto-attribution — `tblGivingEntry.campaignID`/`pledgeID` (nullable, `ON DELETE SET NULL`) instead of a link table; `Portal\Core\Giving::attributeGift()` is the sole code path that sets them: explicit treasurer choice (honoured even outside the campaign window), or "Auto" only when the donor holds exactly ONE open pledge to a currently active, in-window campaign (2+ matches is left unattributed — never guessed) | #299 | 151 | ✅ |
+| Hooked into both manual `tblGivingEntry` writers: `giving/entry-save.php` (new Campaign selector — Auto/None/explicit) and the offering-count close path (named-envelope rows only) | #299 | 151 | ✅ |
+| `Giving::pledgeExpectedToDate()` — on-schedule progress math; one-off owes in full immediately, weekly/monthly owe their first instalment from the pledge's start, monthly uses calendar-month arithmetic | #299 | 151 | ✅ |
+| UI: `/giving/campaigns` (card grid + thermometers + canManage new-campaign form), `/giving/campaign` (detail: thermometer, stats, member pledge/cancel form, canManage pledger list + attributed gifts + edit form) | #299 | 151 | ✅ |
+| `Projects.php`/`Payments.php` online/project-pledge giving deliberately NOT auto-attributed (rows leave the columns NULL) — documented follow-up | #299 | 151 | 🔜 (follow-up) |
 
 ---
 

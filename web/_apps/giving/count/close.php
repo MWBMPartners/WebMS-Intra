@@ -165,29 +165,41 @@ $categoryId = (int) $session['categoryID'];
 $serviceDate = (string) $session['serviceDate'];
 $reference  = 'Count #' . $countSessionId;
 
+// 🎯 Loose (null-donor) rows never have a real donor to match a pledge
+// against — attributeGift() would just return nulls anyway for a null
+// donorId, so we skip the query entirely and bind literal NULLs. Assigned
+// once, by-reference bind_param needs a real variable, not a literal.
+$noCamp   = null;
+$noPledge = null;
+
 $db->begin_transaction();
 try {
     $insertStmt = $db->prepare(
         'INSERT INTO tblGivingEntry '
-        . '(siteID, donorID, donorName, categoryID, amountPence, currency, donatedAt, method, reference, notes, recordedByID) '
-        . 'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        . '(siteID, donorID, donorName, categoryID, amountPence, currency, donatedAt, method, reference, notes, recordedByID, campaignID, pledgeID) '
+        . 'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
     );
     if ($insertStmt === false) {
         throw new \RuntimeException('Failed to prepare gift entry insert: ' . $db->error);
     }
 
     // ✉️ One row per named envelope, attributed to the giver where known —
-    // this is the envelope bucket's itemised portion.
+    // this is the envelope bucket's itemised portion. Named envelopes are
+    // the only rows written here with a real donor, so this is the only
+    // loop that calls Giving::attributeGift() (#299 sub-feature 2, Auto).
     foreach ($envelopes as $env) {
         $donorId    = $env['giverID'] !== null ? (int) $env['giverID'] : null;
         $donorName  = $donorId === null ? $env['giverName'] : null;
         $amountPence = $toPence((string) $env['amount']);
         $method      = (string) $env['method'];
         $notes       = 'Offering count — named envelope';
+        $attr        = Giving::attributeGift($siteId, $donorId, $serviceDate, 0);
+        $campBind    = $attr['campaignID'];
+        $pledgeBind  = $attr['pledgeID'];
         $insertStmt->bind_param(
-            'iisiisssssi',
+            'iisiisssssiii',
             $siteId, $donorId, $donorName, $categoryId, $amountPence, $currency,
-            $serviceDate, $method, $reference, $notes, $userId
+            $serviceDate, $method, $reference, $notes, $userId, $campBind, $pledgeBind
         );
         $insertStmt->execute();
     }
@@ -205,9 +217,9 @@ try {
         $method    = 'other';
         $notes     = 'Offering count — loose envelope';
         $insertStmt->bind_param(
-            'iisiisssssi',
+            'iisiisssssiii',
             $siteId, $donorId, $donorName, $categoryId, $looseEnvelopePence, $currency,
-            $serviceDate, $method, $reference, $notes, $userId
+            $serviceDate, $method, $reference, $notes, $userId, $noCamp, $noPledge
         );
         $insertStmt->execute();
     }
@@ -220,9 +232,9 @@ try {
         $method    = 'cash';
         $notes     = 'Offering count — loose cash';
         $insertStmt->bind_param(
-            'iisiisssssi',
+            'iisiisssssiii',
             $siteId, $donorId, $donorName, $categoryId, $agreedCashPence, $currency,
-            $serviceDate, $method, $reference, $notes, $userId
+            $serviceDate, $method, $reference, $notes, $userId, $noCamp, $noPledge
         );
         $insertStmt->execute();
     }
@@ -234,9 +246,9 @@ try {
         $method    = 'cheque';
         $notes     = 'Offering count — loose cheque';
         $insertStmt->bind_param(
-            'iisiisssssi',
+            'iisiisssssiii',
             $siteId, $donorId, $donorName, $categoryId, $agreedChequePence, $currency,
-            $serviceDate, $method, $reference, $notes, $userId
+            $serviceDate, $method, $reference, $notes, $userId, $noCamp, $noPledge
         );
         $insertStmt->execute();
     }

@@ -2,6 +2,37 @@
 
 
 ## [1.4.0] - 2026-07-22 (alpha)
+- feat(giving): #299 pledge campaigns (sub-feature 2 of the "Giving polish"
+  issue — offering counting shipped as sub-feature 1, above; bank
+  reconciliation and account-updater remain not started). New
+  `tblPledgeCampaigns` (goal amount, currency, date window, active flag) and
+  `tblPledges` (migration 151) — one row per member per campaign, `UNIQUE
+  (campaignID, userID)` upsert so re-pledging (including after a
+  cancellation) updates the same row rather than duplicating it. Two nullable
+  columns added to the existing `tblGivingEntry` (`campaignID`, `pledgeID`,
+  both `ON DELETE SET NULL`) carry auto-attribution instead of a link table —
+  every gift that can be tied to a campaign/pledge keeps the thermometer and
+  progress math a single indexed `SUM`. New `Portal\Core\Giving::attributeGift()`
+  is the ONLY code path allowed to produce that pair: an explicit treasurer
+  campaign choice is honoured (even outside the campaign's window — a
+  deliberate override); "Auto" attributes only when the donor holds exactly
+  one open pledge to a currently-active, in-window campaign — two-or-more
+  open pledges is a genuine tie and is left unattributed rather than guessed.
+  New `Giving::pledgeExpectedToDate()` computes on-schedule expectation
+  (one-off pledges owe their full amount immediately; weekly/monthly owe
+  their first instalment from the pledge's start; monthly uses calendar-month
+  arithmetic, never `/30`). Hooked into BOTH manual `tblGivingEntry` writers:
+  `giving/entry-save.php` (new Campaign selector: Auto / None / explicit) and
+  the sub-feature-1 offering-count close path (named-envelope rows only, the
+  only ones with a real donor). `Projects.php`/`Payments.php` online/project
+  giving are deliberately NOT hooked — those rows simply leave the new
+  columns NULL; auto-attributing them is a documented follow-up, not an
+  oversight. New UI: `/giving/campaigns` (card grid + thermometers +
+  member's own pledge chip + canManage "new campaign" form), `/giving/campaign`
+  (detail: thermometer, stats strip, pledge/cancel form, and — canManage —
+  pledger list with on-schedule badges, attributed-gifts log, edit-campaign
+  form). No hard-delete route for campaigns — `isActive=0` retires one,
+  keeping pledge/gift history intact.
 - feat(giving): #299 two-person offering-count session (sub-feature 1 of the
   "Giving polish" issue — pledge campaigns/reconciliation/account-updater are
   separate sub-features, not built here). New `tblCountSessions` (migration

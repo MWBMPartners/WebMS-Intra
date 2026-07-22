@@ -277,4 +277,160 @@ class Giving
         $stmt->close();
         return $ok;
     }
+
+    // 🎯 -------------------------------------------------------------------
+    // Pledge campaigns (#299 sub-feature 2)
+    // -------------------------------------------------------------------
+
+    /**
+     * Resolve which campaign (and, more specifically, which pledge) a gift
+     * should be attributed to. This is the ONLY code path allowed to produce
+     * a `[campaignID, pledgeID]` pair — every writer of `tblGivingEntry` that
+     * wants auto-attribution must call this and bind its result, never
+     * derive the pair itself. Pure lookup, no writes.
+     *
+     * `$campaignSel` carries the treasurer's (or count-close's) choice:
+     *   -1  → explicit "None" — never attribute this gift to any campaign.
+     *    0  → "Auto" — attribute only if the donor holds exactly one open
+     *         pledge to a campaign that is currently active and within its
+     *         date window; two-or-more matches is a genuine tie, and money
+     *         is never guessed into a bucket, so it resolves to no
+     *         attribution (the treasurer must pick explicitly instead).
+     *   >0  → an explicit campaign choice. Honoured even if the campaign is
+     *         inactive or outside its date window (a deliberate treasurer
+     *         override — e.g. a late cheque for a campaign that has since
+     *         ended) PROVIDED the campaign belongs to this site; an invalid
+     *         (wrong-site or non-existent) selection is treated as Auto.
+     *
+     * Anonymous gifts (`$donorId === null`) never auto-attribute (rule 0
+     * needs a donor to look up pledges for) but CAN still receive an
+     * explicit `campaignID` (with `pledgeID` left NULL — there is no member
+     * pledge to credit).
+     *
+     * @return array{campaignID: ?int, pledgeID: ?int}
+     */
+    public static function attributeGift(int $siteId, ?int $donorId, string $donatedAt, int $campaignSel = 0): array
+    {
+        if ($campaignSel === -1) {
+            return ['campaignID' => null, 'pledgeID' => null];
+        }
+
+        $db = App::db();
+
+        // 🖊️ Explicit treasurer choice — validate it belongs to this site.
+        if ($campaignSel > 0) {
+            $explicitCampaignId = null;
+            $stmt = $db->prepare('SELECT campaignID FROM tblPledgeCampaigns WHERE campaignID = ? AND siteID = ? LIMIT 1');
+            if ($stmt !== false) {
+                $stmt->bind_param('ii', $campaignSel, $siteId);
+                $stmt->execute();
+                $row = $stmt->get_result()->fetch_assoc();
+                $stmt->close();
+                if ($row !== null) {
+                    $explicitCampaignId = (int) $row['campaignID'];
+                }
+            }
+
+            if ($explicitCampaignId !== null) {
+                $pledgeId = null;
+                if ($donorId !== null) {
+                    $stmt = $db->prepare(
+                        'SELECT pledgeID FROM tblPledges '
+                        . 'WHERE siteID = ? AND userID = ? AND campaignID = ? AND status = \'open\' LIMIT 1'
+                    );
+                    if ($stmt !== false) {
+                        $stmt->bind_param('iii', $siteId, $donorId, $explicitCampaignId);
+                        $stmt->execute();
+                        $prow = $stmt->get_result()->fetch_assoc();
+                        $stmt->close();
+                        if ($prow !== null) {
+                            $pledgeId = (int) $prow['pledgeID'];
+                        }
+                    }
+                }
+                return ['campaignID' => $explicitCampaignId, 'pledgeID' => $pledgeId];
+            }
+            // Invalid (wrong-site or non-existent) explicit selection — fall
+            // through to Auto below rather than silently discard the gift's
+            // attribution.
+        }
+
+        // 🤖 Auto — only ever fires for a known donor.
+        if ($donorId === null) {
+            return ['campaignID' => null, 'pledgeID' => null];
+        }
+
+        $matches = [];
+        $stmt = $db->prepare(
+            'SELECT p.pledgeID, p.campaignID '
+            . 'FROM tblPledges p '
+            . 'INNER JOIN tblPledgeCampaigns c ON c.campaignID = p.campaignID '
+            . 'WHERE p.siteID = ? AND p.userID = ? AND p.status = \'open\' '
+            . '  AND c.isActive = 1 AND c.startDate <= ? '
+            . '  AND (c.endDate IS NULL OR c.endDate >= ?)'
+        );
+        if ($stmt !== false) {
+            $stmt->bind_param('iiss', $siteId, $donorId, $donatedAt, $donatedAt);
+            $stmt->execute();
+            $rs = $stmt->get_result();
+            while ($r = $rs->fetch_assoc()) {
+                $matches[] = $r;
+            }
+            $stmt->close();
+        }
+
+        if (count($matches) === 1) {
+            return [
+                'campaignID' => (int) $matches[0]['campaignID'],
+                'pledgeID'   => (int) $matches[0]['pledgeID'],
+            ];
+        }
+
+        // Zero matches (nothing open right now) or 2+ matches (an
+        // unresolvable tie between multiple open pledges) both decline —
+        // never guess where the money goes.
+        return ['campaignID' => null, 'pledgeID' => null];
+    }
+
+    /**
+     * How much a pledge is expected to have raised by `$asOf`, in integer
+     * pence, given its per-instalment `$amountPence` and `$schedule`.
+     *
+     * Semantics (deliberate, see #299 build notes):
+     *   - A one-off pledge owes its FULL amount from day one of its window
+     *     (`periodsElapsed = 1`) — it counts as "behind" until paid in full.
+     *   - A weekly/monthly pledge owes its first instalment as soon as its
+     *     window opens (the `+ 1`), not after a full period has elapsed.
+     *   - Monthly uses calendar-month arithmetic (`Y*12 + n` difference),
+     *     never `daysElapsed / 30` — that would drift against real month
+     *     boundaries (28-31 days).
+     *
+     * `$pledgeStart` = max(campaign.startDate, DATE(pledge.createdAt)) and
+     * `$asOf` = min(today, campaign.endDate ?? today) — both computed by the
+     * caller (they need the campaign row, which this helper deliberately
+     * does not fetch, keeping it a pure date/amount function).
+     */
+    public static function pledgeExpectedToDate(int $amountPence, string $schedule, string $pledgeStart, string $asOf): int
+    {
+        $startTs = strtotime($pledgeStart);
+        $asOfTs  = strtotime($asOf);
+        if ($startTs === false || $asOfTs === false || $asOfTs < $startTs) {
+            // Not started yet (or unparseable dates) — nothing owed yet.
+            return 0;
+        }
+
+        $daysElapsed = max(0, intdiv($asOfTs - $startTs, 86400));
+
+        $periodsElapsed = match ($schedule) {
+            'one-off' => 1,
+            'weekly'  => intdiv($daysElapsed, 7) + 1,
+            'monthly' => (
+                ((int) date('Y', $asOfTs) * 12 + (int) date('n', $asOfTs))
+                - ((int) date('Y', $startTs) * 12 + (int) date('n', $startTs))
+            ) + 1,
+            default => 1,
+        };
+
+        return $amountPence * $periodsElapsed;
+    }
 }

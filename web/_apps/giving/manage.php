@@ -33,10 +33,12 @@ $catId = (int)    ($_GET['cat']  ?? 0);
 $donorQ = trim((string) ($_GET['donor'] ?? ''));
 
 $sql = 'SELECT e.entryID, e.donatedAt, e.amountPence, e.currency, e.method, e.reference, '
-    . '       e.donorID, e.donorName, c.name AS categoryName, u.fullName AS donorFullName '
+    . '       e.donorID, e.donorName, c.name AS categoryName, u.fullName AS donorFullName, '
+    . '       pc.name AS campaignName '
     . 'FROM tblGivingEntry e '
     . 'INNER JOIN tblGivingCategory c ON c.categoryID = e.categoryID '
     . 'LEFT JOIN tblUsers u ON u.userID = e.donorID '
+    . 'LEFT JOIN tblPledgeCampaigns pc ON pc.campaignID = e.campaignID '
     . 'WHERE e.siteID = ? AND e.donatedAt BETWEEN ? AND ?';
 $types  = 'iss';
 $params = [$siteId, $from, $to];
@@ -78,6 +80,20 @@ if ($stmt !== false) {
     $stmt->close();
 }
 
+// 🎯 Active pledge campaigns (#299 sub-feature 2) — for the "Record an
+// entry" form's Campaign selector (Auto / None / explicit choice).
+$activeCampaigns = [];
+$stmt = $db->prepare('SELECT campaignID, name FROM tblPledgeCampaigns WHERE siteID = ? AND isActive = 1 ORDER BY name');
+if ($stmt !== false) {
+    $stmt->bind_param('i', $siteId);
+    $stmt->execute();
+    $rs = $stmt->get_result();
+    while ($r = $rs->fetch_assoc()) {
+        $activeCampaigns[] = $r;
+    }
+    $stmt->close();
+}
+
 $total = array_sum(array_map(static fn (array $e): int => (int) $e['amountPence'], $entries));
 
 $flashMsg  = $_SESSION['flash_msg']  ?? '';
@@ -98,6 +114,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h1 class="mb-0"><i class="fa-solid fa-hand-holding-dollar me-2"></i>Manage Giving</h1>
     <div class="d-flex gap-2">
+        <a href="/giving/campaigns" class="btn btn-outline-secondary btn-sm">Campaigns</a>
         <a href="/giving/categories" class="btn btn-outline-secondary btn-sm">Categories</a>
         <a href="/giving/reports" class="btn btn-outline-secondary btn-sm">Reports</a>
         <a href="/giving/hmrc-export?from=<?php echo urlencode($from); ?>&to=<?php echo urlencode($to); ?>" class="btn btn-outline-warning btn-sm"><i class="fa-solid fa-file-csv me-1"></i>HMRC CSV</a>
@@ -149,6 +166,16 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     <option value="card">Card</option>
                     <option value="standing-order">Standing order</option>
                     <option value="other">Other</option>
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label small">Campaign</label>
+                <select class="form-select form-select-sm" name="campaignID">
+                    <option value="0">Auto (donor's open pledge)</option>
+                    <option value="-1">None</option>
+                    <?php foreach ($activeCampaigns as $ac): ?>
+                        <option value="<?php echo (int) $ac['campaignID']; ?>"><?php echo htmlspecialchars((string) $ac['name'], ENT_QUOTES, 'UTF-8'); ?></option>
+                    <?php endforeach; ?>
                 </select>
             </div>
             <div class="col-md-1">
@@ -210,7 +237,12 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 <div class="row py-1 border-bottom small">
                     <div class="col-md-1"><?php echo htmlspecialchars(date('d/m', (int) strtotime((string) $e['donatedAt'])), ENT_QUOTES, 'UTF-8'); ?></div>
                     <div class="col-md-3"><?php echo htmlspecialchars($donor, ENT_QUOTES, 'UTF-8'); ?></div>
-                    <div class="col-md-2"><?php echo htmlspecialchars((string) $e['categoryName'], ENT_QUOTES, 'UTF-8'); ?></div>
+                    <div class="col-md-2">
+                        <?php echo htmlspecialchars((string) $e['categoryName'], ENT_QUOTES, 'UTF-8'); ?>
+                        <?php if ((string) ($e['campaignName'] ?? '') !== ''): ?>
+                            <span class="badge text-bg-info"><?php echo htmlspecialchars((string) $e['campaignName'], ENT_QUOTES, 'UTF-8'); ?></span>
+                        <?php endif; ?>
+                    </div>
                     <div class="col-md-2 text-muted"><?php echo htmlspecialchars((string) $e['method'], ENT_QUOTES, 'UTF-8'); ?></div>
                     <div class="col-md-2 text-muted"><?php echo htmlspecialchars((string) ($e['reference'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></div>
                     <div class="col-md-1 text-end"><strong><?php echo htmlspecialchars(Giving::formatAmount((int) $e['amountPence'], (string) ($e['currency'] ?? $currency)), ENT_QUOTES, 'UTF-8'); ?></strong></div>

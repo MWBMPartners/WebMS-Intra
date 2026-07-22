@@ -13,7 +13,7 @@
 -- present in web/_sql/ are marked as executed in tblMigrations so the
 -- web-based Migrator won't re-run them.
 --
--- Covers migrations: 000-150 (DDL + settings/routes seeds + tblMigrations
+-- Covers migrations: 000-151 (DDL + settings/routes seeds + tblMigrations
 -- marks). When you add a new migration, port its DDL/seeds into the
 -- appropriate section here AND add its filename to the seed block at the
 -- end of this file. CI enforces this via
@@ -3800,6 +3800,52 @@ CREATE TABLE IF NOT EXISTS `tblGivingCategory` (
     CONSTRAINT `fk_gc_site` FOREIGN KEY (`siteID`) REFERENCES `tblSites`(`siteID`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
+-- ── from 151_giving_pledge_campaigns.sql (#299) — placed BEFORE tblGivingEntry
+-- so fk_ge_campaign / fk_ge_pledge (added inline on tblGivingEntry below)
+-- resolve top-down against these two tables. full_schema.sql runs its CREATEs
+-- via multi_query in file order, so a forward FK reference would fail on a
+-- fresh install — don't move these back down into the "migrations 105+"
+-- appended section further below.
+CREATE TABLE IF NOT EXISTS `tblPledgeCampaigns` (
+    `campaignID`      INT          NOT NULL AUTO_INCREMENT,
+    `siteID`          INT          NOT NULL DEFAULT 1,
+    `name`            VARCHAR(255) NOT NULL,
+    `description`     TEXT         DEFAULT NULL,
+    `goalAmountPence` INT          NOT NULL COMMENT 'Integer minor units — house pence convention (#266)',
+    `currency`        CHAR(3)      NOT NULL DEFAULT 'GBP',
+    `startDate`       DATE         NOT NULL,
+    `endDate`         DATE         DEFAULT NULL COMMENT 'NULL = open-ended',
+    `isActive`        TINYINT(1)   NOT NULL DEFAULT 1,
+    `createdByID`     INT          DEFAULT NULL,
+    `createdAt`       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updatedAt`       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`campaignID`),
+    KEY `idx_plc_site_active` (`siteID`, `isActive`),
+    CONSTRAINT `fk_plc_site`    FOREIGN KEY (`siteID`)      REFERENCES `tblSites`(`siteID`),
+    CONSTRAINT `fk_plc_creator` FOREIGN KEY (`createdByID`) REFERENCES `tblUsers`(`userID`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+COMMENT='Giving pledge campaigns (#299) — goal thermometer + pledge tracking';
+
+CREATE TABLE IF NOT EXISTS `tblPledges` (
+    `pledgeID`        INT        NOT NULL AUTO_INCREMENT,
+    `siteID`          INT        NOT NULL DEFAULT 1,
+    `campaignID`      INT        NOT NULL,
+    `userID`          INT        NOT NULL COMMENT 'The pledger — always a logged-in member',
+    `amountPence`     INT        NOT NULL COMMENT 'Per-instalment amount (weekly/monthly); total amount for one-off',
+    `paymentSchedule` ENUM('one-off','weekly','monthly') NOT NULL DEFAULT 'monthly',
+    `status`          ENUM('open','completed','cancelled') NOT NULL DEFAULT 'open',
+    `createdAt`       DATETIME   NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updatedAt`       DATETIME   NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`pledgeID`),
+    UNIQUE KEY `uq_pl_campaign_user` (`campaignID`, `userID`),
+    KEY `idx_pl_site` (`siteID`),
+    KEY `idx_pl_user_status` (`userID`, `status`),
+    CONSTRAINT `fk_pl_site`     FOREIGN KEY (`siteID`)     REFERENCES `tblSites`(`siteID`),
+    CONSTRAINT `fk_pl_campaign` FOREIGN KEY (`campaignID`) REFERENCES `tblPledgeCampaigns`(`campaignID`) ON DELETE CASCADE,
+    CONSTRAINT `fk_pl_user`     FOREIGN KEY (`userID`)     REFERENCES `tblUsers`(`userID`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+COMMENT='Member pledges to campaigns (#299) — one row per member per campaign (UNIQUE upsert)';
+
 CREATE TABLE IF NOT EXISTS `tblGivingEntry` (
     `entryID`      INT          NOT NULL AUTO_INCREMENT,
     `siteID`       INT          NOT NULL DEFAULT 1,
@@ -3813,16 +3859,22 @@ CREATE TABLE IF NOT EXISTS `tblGivingEntry` (
     `reference`    VARCHAR(100) DEFAULT NULL,
     `notes`        TEXT         DEFAULT NULL,
     `recordedByID` INT          DEFAULT NULL,
+    `campaignID`   INT          DEFAULT NULL COMMENT 'Pledge campaign this gift counts toward -- 151 (#299)',
+    `pledgeID`     INT          DEFAULT NULL COMMENT 'Specific pledge this gift fulfils; implies campaignID -- 151 (#299)',
     `createdAt`    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     `updatedAt`    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (`entryID`),
-    KEY `idx_ge_site_date`     (`siteID`, `donatedAt`),
-    KEY `idx_ge_donor_date`    (`donorID`, `donatedAt`),
-    KEY `idx_ge_category_date` (`categoryID`, `donatedAt`),
+    KEY `idx_ge_site_date`      (`siteID`, `donatedAt`),
+    KEY `idx_ge_donor_date`     (`donorID`, `donatedAt`),
+    KEY `idx_ge_category_date`  (`categoryID`, `donatedAt`),
+    KEY `idx_ge_campaign_date`  (`campaignID`, `donatedAt`),
+    KEY `idx_ge_pledge`         (`pledgeID`),
     CONSTRAINT `fk_ge_site`     FOREIGN KEY (`siteID`)       REFERENCES `tblSites`(`siteID`),
     CONSTRAINT `fk_ge_donor`    FOREIGN KEY (`donorID`)      REFERENCES `tblUsers`(`userID`)         ON DELETE SET NULL,
     CONSTRAINT `fk_ge_category` FOREIGN KEY (`categoryID`)   REFERENCES `tblGivingCategory`(`categoryID`),
-    CONSTRAINT `fk_ge_recorder` FOREIGN KEY (`recordedByID`) REFERENCES `tblUsers`(`userID`)         ON DELETE SET NULL
+    CONSTRAINT `fk_ge_recorder` FOREIGN KEY (`recordedByID`) REFERENCES `tblUsers`(`userID`)         ON DELETE SET NULL,
+    CONSTRAINT `fk_ge_campaign` FOREIGN KEY (`campaignID`)   REFERENCES `tblPledgeCampaigns`(`campaignID`) ON DELETE SET NULL,
+    CONSTRAINT `fk_ge_pledge`   FOREIGN KEY (`pledgeID`)     REFERENCES `tblPledges`(`pledgeID`)     ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 CREATE TABLE IF NOT EXISTS `tblGiftAidDeclaration` (
@@ -4864,6 +4916,22 @@ ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
 
 
 -- =============================================================================
+-- Migration 151: Giving — pledge campaigns (#299 sub-feature 2)
+-- =============================================================================
+-- tblPledgeCampaigns / tblPledges CREATEs, plus the campaignID/pledgeID
+-- columns + keys + FKs inline on tblGivingEntry, are ported into the
+-- tblGivingEntry section above (banner "-- ── from 151_giving_pledge_campaigns.sql
+-- (#299) ──").
+
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('giving/campaigns',     'giving/campaigns.php',     1),
+    ('giving/campaign',      'giving/campaign.php',      1),
+    ('giving/campaign-save', 'giving/campaign-save.php', 1),
+    ('giving/pledge-save',   'giving/pledge-save.php',   1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
+
+-- =============================================================================
 -- Tables added in numbered migrations 105+ — appended for fresh-install parity.
 -- Maintained automatically; do NOT hand-edit duplicates. See the same
 -- definitions in web/_sql/{105..144}_*.sql for the source of truth + comments.
@@ -5866,4 +5934,7 @@ INSERT INTO `tblMigrations` (`filename`) VALUES ('149_noticeboard_upload.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
 INSERT INTO `tblMigrations` (`filename`) VALUES ('150_offering_count_sessions.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('151_giving_pledge_campaigns.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;
