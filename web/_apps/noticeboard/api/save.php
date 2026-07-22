@@ -39,7 +39,7 @@ if (isset($body['posters']) === false || is_array($body['posters']) === false) {
 
 $db     = App::db();
 $siteId = Site::id();
-$userId = ApiAuth::actorUserId() ?? 0;
+$userId = ApiAuth::actorUserId();
 
 // 🛡️ Scheme allowlist — http(s) absolute or root-relative only. Matches the
 //    LivePrompt ctaUrl precedent (PR #358) — prevents javascript:… hrefs

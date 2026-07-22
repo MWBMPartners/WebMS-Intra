@@ -39,7 +39,7 @@ if (isset($body['endDate']) === true && trim((string) $body['endDate']) !== '') 
 }
 
 $siteId    = Site::id();
-$updaterId = ApiAuth::actorUserId() ?? 0;
+$updaterId = ApiAuth::actorUserId();
 
 $db = App::db();
 $stmt = $db->prepare(

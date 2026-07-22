@@ -38,7 +38,7 @@ if ($sessionId <= 0) {
 
 $db     = App::db();
 $siteId = Site::id();
-$actorId = ApiAuth::actorUserId() ?? 0;
+$actorId = ApiAuth::actorUserId();
 
 // 🔍 Fetch the row first so the audit trail retains full oldData
 $fetch = $db->prepare(

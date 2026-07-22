@@ -61,7 +61,7 @@ if (isset($body['endDate']) === true && trim((string) $body['endDate']) !== '') 
 $notes = (string) ($body['notes'] ?? '');
 
 $siteId    = Site::id();
-$creatorId = ApiAuth::actorUserId() ?? 0;
+$creatorId = ApiAuth::actorUserId();
 
 $db = App::db();
 $stmt = $db->prepare(

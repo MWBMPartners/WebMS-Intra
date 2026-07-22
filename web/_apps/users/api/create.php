@@ -83,7 +83,14 @@ if ($exists === true) {
 // 📥 Optional fields — role/site-membership flags only, no password
 // -----------------------------------------------------------------------------
 $isActive    = array_key_exists('isActive', $body) === false || (bool) $body['isActive'] === true ? 1 : 0;
-$isAdmin     = array_key_exists('isAdmin', $body) === true && (bool) $body['isAdmin'] === true ? 1 : 0;
+// 🛡️ tblUsers.isAdmin is the PORTAL-WIDE ("Legacy Admin") flag — App::isAdmin()
+//    returns true from it regardless of site. Granting it from an otherwise
+//    tenant-pinned, site-scoped endpoint would let a site-scoped bearer key mint
+//    a portal admin (#323 Phase 2 review). So honour isAdmin ONLY in session mode
+//    (the caller is already a global admin via sessionNeedsAdmin), never for a
+//    bearer key — which gets the SITE-scoped isSiteAdmin only.
+$isAdmin     = ApiAuth::source() === 'session'
+    && array_key_exists('isAdmin', $body) === true && (bool) $body['isAdmin'] === true ? 1 : 0;
 $isSiteAdmin = array_key_exists('isSiteAdmin', $body) === true && (bool) $body['isSiteAdmin'] === true ? 1 : 0;
 
 // -----------------------------------------------------------------------------

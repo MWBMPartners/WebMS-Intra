@@ -179,7 +179,7 @@ if (count($set) === 0 && $hasCounts === false) {
     ApiResponse::error('No updatable fields in request body', 400);
 }
 
-$actorId = ApiAuth::actorUserId() ?? 0;
+$actorId = ApiAuth::actorUserId();
 
 // -----------------------------------------------------------------------------
 // 💾 Transaction: scalar update + optional counts replace-all

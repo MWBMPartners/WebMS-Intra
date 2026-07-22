@@ -75,7 +75,7 @@ $body = ApiAuth::requireWrite('documents:write', sessionNeedsAdmin: true);
 
 $db      = App::db();
 $siteId  = Site::id();
-$actorId = ApiAuth::actorUserId() ?? 0;
+$actorId = ApiAuth::actorUserId();
 
 // -----------------------------------------------------------------------------
 // 📥 Resolve body shape: multipart file field, else JSON base64 fileContent
@@ -107,6 +107,16 @@ if ($isMultipart === true) {
     if ($fileContentB64 === '') {
         ApiResponse::error('file (multipart) or fileContent (base64) is required', 400);
     }
+    // 🛡️ Reject on the DECLARED base64 length before allocating the decoded
+    //    bytes (base64 inflates ~4/3) — prevents a transient memory spike from a
+    //    huge blob (review LOW). The post-decode cap below is the exact check.
+    $maxDeclared = (int) App::settings('documents.api.maxUploadBytes');
+    if ($maxDeclared <= 0) {
+        $maxDeclared = 10485760;
+    }
+    if (strlen($fileContentB64) > (int) ceil($maxDeclared * 4 / 3) + 4) {
+        ApiResponse::error('File exceeds maximum size of ' . $maxDeclared . ' bytes', 400);
+    }
     $binary = base64_decode($fileContentB64, true);
     if ($binary === false) {
         ApiResponse::error('fileContent is not valid base64', 400);
@@ -122,9 +132,13 @@ if ($fileSize <= 0) {
     ApiResponse::error('Uploaded file is empty', 400);
 }
 
-// 🛡️ Hard size cap (seeded 10485760 bytes / 10 MB — migration 147)
+// 🛡️ Hard size cap — default to 10 MB when the setting is unset/non-positive
+//    so a misconfiguration can never DISABLE the cap (review INFO).
 $maxBytes = (int) App::settings('documents.api.maxUploadBytes');
-if ($maxBytes > 0 && $fileSize > $maxBytes) {
+if ($maxBytes <= 0) {
+    $maxBytes = 10485760;
+}
+if ($fileSize > $maxBytes) {
     ApiResponse::error('File exceeds maximum size of ' . $maxBytes . ' bytes', 400);
 }
 

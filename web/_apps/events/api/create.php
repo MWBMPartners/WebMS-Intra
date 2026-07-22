@@ -84,7 +84,7 @@ $slug = substr($slug !== '' ? $slug : 'event-' . bin2hex(random_bytes(4)), 0, 10
 $siteId    = Site::id();
 $startSql  = date('Y-m-d H:i:s', $start);
 $endSql    = $endTs !== null ? date('Y-m-d H:i:s', $endTs) : null;
-$creatorId = ApiAuth::actorUserId() ?? 0;
+$creatorId = ApiAuth::actorUserId();
 
 $db = App::db();
 $stmt = $db->prepare(

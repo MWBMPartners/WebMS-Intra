@@ -139,7 +139,7 @@ if (isset($body['counts']) === true && is_array($body['counts']) === true) {
     }
 }
 
-$creatorId = ApiAuth::actorUserId() ?? 0;
+$creatorId = ApiAuth::actorUserId();
 
 // -----------------------------------------------------------------------------
 // 💾 Transaction: session header + count rows

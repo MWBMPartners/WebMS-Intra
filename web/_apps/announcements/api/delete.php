@@ -28,7 +28,7 @@ if ($id <= 0) {
 }
 
 $siteId    = Site::id();
-$updaterId = ApiAuth::actorUserId() ?? 0;
+$updaterId = ApiAuth::actorUserId();
 
 $db = App::db();
 $stmt = $db->prepare('UPDATE tblAnnouncements SET isDeleted = 1, isPublished = 0, updatedByID = ? WHERE announcementID = ? AND siteID = ?');

@@ -63,7 +63,7 @@ $slug = strtolower(trim(preg_replace('/[^a-zA-Z0-9]+/', '-', $title), '-'));
 $slug = substr($slug !== '' ? $slug : 'announcement-' . bin2hex(random_bytes(4)), 0, 200);
 
 $siteId    = Site::id();
-$creatorId = ApiAuth::actorUserId() ?? 0;
+$creatorId = ApiAuth::actorUserId();
 
 $db = App::db();
 $stmt = $db->prepare(

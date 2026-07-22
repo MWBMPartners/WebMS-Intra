@@ -49,7 +49,7 @@ if (in_array($status, ['active', 'answered', 'archived'], true) === false) {
 $testimony = isset($body['testimony']) === true ? trim((string) $body['testimony']) : '';
 
 $siteId      = Site::id();
-$moderatorId = ApiAuth::actorUserId() ?? 0;
+$moderatorId = ApiAuth::actorUserId();
 
 $db = App::db();
 if ($status === 'answered') {

@@ -105,7 +105,11 @@ if (array_key_exists('isActive', $body) === true) {
     $new['isActive'] = $isActive;
 }
 
-if (array_key_exists('isAdmin', $body) === true) {
+// 🛡️ isAdmin is the PORTAL-WIDE admin flag — only a session admin (already a
+//    global admin via sessionNeedsAdmin) may change it; a site-scoped bearer key
+//    must not promote a member to portal admin (#323 Phase 2 review). isSiteAdmin
+//    (site-scoped, below) remains available to bearer keys.
+if (ApiAuth::source() === 'session' && array_key_exists('isAdmin', $body) === true) {
     $isAdmin = (bool) $body['isAdmin'] === true ? 1 : 0;
     $userSet[]    = 'isAdmin = ?';
     $userTypes   .= 'i';

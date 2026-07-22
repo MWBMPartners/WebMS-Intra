@@ -39,7 +39,7 @@ if (in_array($priority, ['low', 'normal', 'high', 'urgent'], true) === false) {
     $priority = 'normal';
 }
 
-$callerId    = ApiAuth::actorUserId() ?? 0;
+$callerId    = ApiAuth::actorUserId();
 $assignedTo  = isset($body['assignedToID']) === true && (int) $body['assignedToID'] > 0
     ? (int) $body['assignedToID']
     : $callerId;

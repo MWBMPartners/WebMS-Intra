@@ -37,7 +37,7 @@ if ($id <= 0) {
 }
 
 $siteId    = Site::id();
-$updaterId = ApiAuth::actorUserId() ?? 0;
+$updaterId = ApiAuth::actorUserId();
 
 $db = App::db();
 $stmt = $db->prepare('SELECT * FROM tblAnnouncements WHERE announcementID = ? AND siteID = ? AND isDeleted = 0 LIMIT 1');
