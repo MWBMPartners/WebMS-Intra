@@ -5,14 +5,17 @@
  * Service Plans — Confidence Monitor (Speaker View) ⏱️ (#300)
  * -----------------------------------------------------------------------------
  * Full-screen, dark-themed companion to /service-plans/live. Designed for a
- * tablet in the speaker's eyeline. v1 ships clock-only; operator-to-confidence
- * message channel deferred to v2.
+ * tablet in the speaker's eyeline. Polls /service-plans/message-poll every
+ * 4s (#300 v2) for an operator-sent message and shows it as a banner —
+ * `textContent` only, NEVER innerHTML, since the message body is operator
+ * free text delivered over JSON (client-side XSS defence to match the
+ * server-side `htmlspecialchars()` escaping used on live.php).
  *
  * @package   Portal\ServicePlans
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.0.0
+ * @version   1.4.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/300
  * -----------------------------------------------------------------------------
  */
@@ -69,6 +72,14 @@ $nonce     = htmlspecialchars(App::cspNonce(), ENT_QUOTES, 'UTF-8');
                         border-radius: 4px; font-size: 0.8rem; letter-spacing: 0.1em; margin-bottom: 0.5em; }
         @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
         @media (prefers-reduced-motion: reduce) { .badge-live { animation: none; } }
+        /* 💬 Confidence-monitor message channel (#300 v2) */
+        .message { font-size: 8vw; font-weight: 700; line-height: 1.15; text-align: center;
+                    color: #ffd54f; background: #1a1a1a; border-radius: 12px;
+                    padding: 0.4em 0.7em; margin-top: 0.8em; max-width: 90vw;
+                    animation: msgPulse 1.2s ease-in-out 1; }
+        .message[hidden] { display: none; }
+        @keyframes msgPulse { 0% { transform: scale(0.96); } 60% { transform: scale(1.02); } 100% { transform: scale(1); } }
+        @media (prefers-reduced-motion: reduce) { .message { animation: none; } }
     </style>
 </head>
 <body>
@@ -89,6 +100,8 @@ $nonce     = htmlspecialchars(App::cspNonce(), ENT_QUOTES, 'UTF-8');
     </div>
 
     <div class="clock" id="clock">--:--</div>
+
+    <div class="message" id="msgBanner" data-plan-id="<?php echo $planId; ?>" hidden></div>
 
     <script nonce="<?php echo $nonce; ?>">
     (function () {
@@ -111,6 +124,52 @@ $nonce     = htmlspecialchars(App::cspNonce(), ENT_QUOTES, 'UTF-8');
         }
         tick();
         setInterval(tick, 1000);
+    })();
+    </script>
+
+    <?php
+    // 💬 Confidence-monitor message channel (#300 v2) — 4s poll, matching
+    // the livechat-widget.js house cadence. Vanilla fetch, sinceID/lastID
+    // dedup, silent try/catch that keeps polling (so a session-expiry
+    // redirect-to-login HTML response — which fails r.json() — doesn't
+    // break the polling loop; it just recovers once re-authed).
+    ?>
+    <script nonce="<?php echo $nonce; ?>">
+    (function () {
+        const banner = document.getElementById('msgBanner');
+        const planId = parseInt(banner.dataset.planId, 10);
+        let lastId = 0;
+
+        async function pollMsg() {
+            try {
+                const r = await fetch(
+                    '/service-plans/message-poll?id=' + planId + '&sinceID=' + lastId,
+                    { cache: 'no-store' }
+                );
+                if (!r.ok) return;
+                const payload = await r.json();
+                const data = payload.data;
+                if (!data || data.changed !== true) return;
+                if (data.message === null) {
+                    banner.hidden = true;
+                    banner.textContent = '';
+                    lastId = 0;
+                } else {
+                    // 🔒 textContent — NEVER innerHTML. The server never renders
+                    // the operator's message body into this page's HTML either;
+                    // this is the client-side line of XSS defence.
+                    banner.textContent = data.message.body;
+                    banner.hidden = false;
+                    lastId = data.message.messageID;
+                }
+            } catch (e) {
+                // Silent — network blip or a login-redirect HTML response.
+                // Keep polling; it recovers on the next tick.
+            }
+        }
+
+        pollMsg();
+        setInterval(pollMsg, 4000);
     })();
     </script>
 </body>

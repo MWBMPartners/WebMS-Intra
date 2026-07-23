@@ -31,9 +31,14 @@ class Ical
      *
      * @param array<int, array{
      *     uid:string, summary:string, description?:string, location?:string,
-     *     startsAt:string, endsAt?:string, allDay?:bool,
-     *     sequence?:int, lastModified?:string, url?:string
+     *     startsAt:string, endsAt?:string, allDay?:bool, timezone?:string,
+     *     sequence?:int, lastModified?:string, url?:string, rrule?:string,
+     *     geo?:array{lat:float|string, lng:float|string}, status?:string
      * }> $events
+     *
+     * geo/status (#338 residual — calendar/export.php) are optional and
+     * additive: callers that don't set them (feed.php, account-feed.php)
+     * see byte-identical output to before these keys existed.
      */
     public static function emit(string $calendarName, array $events, string $timezone = 'Europe/London'): string
     {
@@ -81,13 +86,26 @@ class Ical
             if (isset($e['location']) === true && $e['location'] !== null && $e['location'] !== '') {
                 $lines[] = 'LOCATION:' . self::escapeText((string) $e['location']);
             }
+            // 🌐 GEO (#338 residual — calendar/export.php) — optional lat/lng
+            //     pair, RFC 5545 §3.8.1.6. Not exercised by feed.php.
+            if (isset($e['geo']) === true && is_array($e['geo']) === true
+                && isset($e['geo']['lat']) === true && isset($e['geo']['lng']) === true) {
+                $lines[] = 'GEO:' . (string) $e['geo']['lat'] . ';' . (string) $e['geo']['lng'];
+            }
             if (isset($e['url']) === true && $e['url'] !== null && $e['url'] !== '') {
                 $lines[] = 'URL:' . (string) $e['url'];
             }
+            // 🚦 STATUS (#338 residual — calendar/export.php) — CONFIRMED /
+            //     CANCELLED / TENTATIVE, RFC 5545 §3.8.1.11. Not exercised
+            //     by feed.php.
+            if (isset($e['status']) === true && $e['status'] !== null && $e['status'] !== '') {
+                $lines[] = 'STATUS:' . self::escapeText((string) $e['status']);
+            }
             // 🔁 RRULE emission (#338) — when the caller provides recurrence
-            //     metadata (mapped from tblEventRecurrence), emit a real RRULE
-            //     instead of expanding occurrences upstream. Mirrors RFC 5545
-            //     §3.8.5.3 patterns: FREQ + (INTERVAL) + (BYDAY) + (UNTIL|COUNT).
+            //     metadata (mapped from tblRecurrenceRules by the caller —
+            //     see calendar/export.php), emit a real RRULE instead of
+            //     expanding occurrences upstream. Mirrors RFC 5545 §3.8.5.3
+            //     patterns: FREQ + (INTERVAL) + (BYDAY) + (UNTIL|COUNT).
             if (isset($e['rrule']) === true && $e['rrule'] !== null && $e['rrule'] !== '') {
                 $lines[] = 'RRULE:' . (string) $e['rrule'];
             }

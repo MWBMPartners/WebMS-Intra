@@ -5,9 +5,31 @@
 -- =============================================================================
 
 -- 📋 Add TOTP columns to tblUsers
-ALTER TABLE `tblUsers`
-    ADD COLUMN IF NOT EXISTS `totpSecret`  VARCHAR(64) DEFAULT NULL COMMENT 'Encrypted TOTP shared secret',
-    ADD COLUMN IF NOT EXISTS `totpEnabled` TINYINT(1)  NOT NULL DEFAULT 0 COMMENT 'TOTP 2FA enabled flag';
+-- ➕ tblUsers.totpSecret — guarded ADD COLUMN (portable: MySQL 8.0 + MariaDB 10.x)
+SET @col_exists := (
+    SELECT COUNT(*) FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME   = 'tblUsers'
+      AND COLUMN_NAME  = 'totpSecret'
+);
+SET @sql := IF(@col_exists = 0,
+    'ALTER TABLE `tblUsers` ADD COLUMN `totpSecret` VARCHAR(64) DEFAULT NULL COMMENT ''Encrypted TOTP shared secret''',
+    'SELECT 1'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+-- ➕ tblUsers.totpEnabled — guarded ADD COLUMN (portable: MySQL 8.0 + MariaDB 10.x)
+SET @col_exists := (
+    SELECT COUNT(*) FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME   = 'tblUsers'
+      AND COLUMN_NAME  = 'totpEnabled'
+);
+SET @sql := IF(@col_exists = 0,
+    'ALTER TABLE `tblUsers` ADD COLUMN `totpEnabled` TINYINT(1) NOT NULL DEFAULT 0 COMMENT ''TOTP 2FA enabled flag''',
+    'SELECT 1'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
 -- 📋 Backup codes table
 CREATE TABLE IF NOT EXISTS `tblTotpBackupCodes` (

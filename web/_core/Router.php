@@ -116,10 +116,16 @@ class Router
             return;
         }
 
-        // 🚀 Include the target app file
-        // The app file has access to $db (as $mysqli via global), $SETTINGS, and all
-        // core classes via the autoloader. The template engine (header.php / footer.php)
-        // is used by the app file to render consistent page chrome.
+        // 🚀 Include the target app file.
+        //    This require runs inside dispatch()'s METHOD scope, so the included
+        //    controller inherits only these locals — NOT global scope. Legacy
+        //    controllers (pre-#159) reference the DB handle as a bare $mysqli and
+        //    settings as a bare $SETTINGS; both are bootstrap globals, so without
+        //    importing them here they would be undefined inside the handler (PHP
+        //    include scope = the enclosing function's locals). Import them so the
+        //    documented contract actually holds — no-op if already provided, so it
+        //    can't regress anything. New code should prefer App::db()/App::settings().
+        global $mysqli, $SETTINGS; // #373 — expose bootstrap globals to controllers
         require $targetFile;
     }
 

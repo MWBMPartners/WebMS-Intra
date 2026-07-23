@@ -16,11 +16,12 @@
 
 declare(strict_types=1);
 
+use Portal\Core\ApiAuth;
 use Portal\Core\ApiResponse;
 use Portal\Core\App;
 use Portal\Core\Site;
 
-ApiResponse::requireAuth();
+ApiAuth::requireRead('leadership:read');
 
 $db     = App::db();
 $siteId = Site::id();

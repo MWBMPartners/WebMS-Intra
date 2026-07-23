@@ -78,7 +78,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST'
             $db->begin_transaction();
             $db->query('DELETE FROM tblAnnouncements WHERE createdByID >= 9000');
             $db->query('DELETE FROM tblEvents WHERE createdByID >= 9000');
-            $db->query('DELETE FROM tblExpenses WHERE submittedByID >= 9000');
+            $db->query('DELETE FROM tblExpenseClaims WHERE userID >= 9000');
             $db->query('DELETE FROM tblTasks WHERE assignedToID >= 9000');
             $db->query('DELETE FROM tblUsers WHERE userID >= 9000');
             $db->commit();

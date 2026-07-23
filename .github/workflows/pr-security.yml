@@ -23,6 +23,12 @@
 #   9. SQL column-name mismatches                  — runtime INSERT col not in CREATE TABLE
 #  10. Route targetFile existence                  — tblRoutes.targetFile resolves to a file
 #  11. Settings key consistency                    — $SETTINGS reads vs tblSettings seed
+#  12. full_schema.sql fresh-install parity        — migration seeds/marks vs full_schema.sql
+#  13. MariaDB-only DDL syntax                      — IF [NOT] EXISTS on ADD/DROP COLUMN,
+#                                                       ADD/CREATE/DROP INDEX|KEY (MySQL 8
+#                                                       rejects with error 1064)
+#  14. PHP table-reference existence                 — tblX referenced in PHP resolves to a
+#                                                       CREATE TABLE in full_schema.sql
 #
 # These are HEURISTICS — false positives are expected. Review the findings,
 # don't blindly fail the merge.
@@ -31,6 +37,19 @@
 # missed-bug rounds (#169 → #171 → #198 → #201/202/204/205/206/207 →
 # #213): each was a category of "code references something that doesn't
 # exist in another source" — a class the prior heuristics didn't cover.
+# Check 12 (#364 / #194 / #339) was added after a similar audit found
+# fresh installs missing every seed row from migrations 090-145 because
+# full_schema.sql's tblMigrations seed block only recorded through 089.
+# Check 13 (#<fix-issue> — SQL portability audit) was added after
+# confirming MariaDB's `IF [NOT] EXISTS` DDL extensions (used throughout
+# web/_sql/) are parse errors (1064) on the confirmed-production MySQL 8.0
+# engine; the fix is the information_schema + PREPARE guard idiom (see
+# DEV_NOTES.md → "Portable DDL convention"; house examples: migrations
+# 037/112/138).
+# Check 14 was added because check_sql_columns.py only ever parsed .sql
+# files — a wrong table name hard-coded straight into a PHP query string
+# was invisible to every prior check, and that exact gap let the GDPR
+# eraser silently skip a real table.
 # The scripts live in tools/audit-checks/ and are runnable locally.
 # =============================================================================
 
@@ -252,6 +271,26 @@ jobs:
           if echo "$SETTINGS" | grep -qE '•.*no fallback'; then
             UNGUARDED=$(echo "$SETTINGS" | sed -n '/UNGUARDED/,/###\|^$/p')
             add_section "Unseeded settings reads (UNGUARDED — null on missing key)" "$UNGUARDED"
+          fi
+
+          # 12) full_schema.sql fresh-install parity (#364 / #194 / #339)
+          PARITY=$(python3 tools/audit-checks/check_schema_seed_parity.py 2>&1 | tail -n +6 || true)
+          if echo "$PARITY" | grep -q '•'; then
+            add_section "full_schema.sql parity gaps (migration seeds/marks missing from fresh-install schema)" "$PARITY"
+          fi
+
+          # 13) MariaDB-only DDL syntax (#<fix-issue> — MySQL 8 rejects with error 1064)
+          MARIADB=$(python3 tools/audit-checks/check_mariadb_only_ddl.py 2>&1 | tail -n +3 || true)
+          if echo "$MARIADB" | grep -q '•'; then
+            add_section "MariaDB-only DDL in web/_sql (MySQL 8 error 1064 — use the information_schema guard idiom)" "$MARIADB"
+          fi
+
+          # 14) PHP table-reference existence (tblX in PHP resolves to a
+          #     CREATE TABLE in full_schema.sql — catches the class of bug
+          #     that let the GDPR eraser silently skip a real table)
+          PHP_TABLE_REFS=$(python3 tools/audit-checks/check_php_table_refs.py 2>&1 | tail -n +3 || true)
+          if echo "$PHP_TABLE_REFS" | grep -q '•'; then
+            add_section "PHP references to tables not in full_schema.sql" "$PHP_TABLE_REFS"
           fi
 
           echo "hits=$HITS" >> "$GITHUB_OUTPUT"

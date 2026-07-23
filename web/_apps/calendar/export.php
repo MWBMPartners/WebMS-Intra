@@ -1,33 +1,62 @@
 <?php
-// Path: public_html/calendar/export.php
+// Path: _apps/calendar/export.php
 /**
  * -----------------------------------------------------------------------------
  * Calendar — iCal Export 📤
  * -----------------------------------------------------------------------------
- * Generates .ics (iCalendar) file for a single event or all upcoming events.
- * Supports:
+ * Generates .ics (iCalendar) file for a single event, a whole series, or all
+ * upcoming public events. Supports:
  *   - Single event: /calendar/export?id=123
  *   - All upcoming: /calendar/export?all=1
  *   - Series:       /calendar/export?series=5
+ *
+ * #338 residual (Bundle 3) — this endpoint used to hand-build "floating
+ * time" iCal (no TZID/VTIMEZONE) and expand recurring series into one
+ * VEVENT per generated tblEvents row. It now goes through the shared
+ * Portal\Core\Ical builder (same one feed.php / account-feed.php already
+ * use — see #271), which:
+ *   - emits DTSTART/DTEND with TZID + a VTIMEZONE block instead of a bare
+ *     "Z" (UTC) floating timestamp, and
+ *   - collapses a recurring series into ONE VEVENT + RRULE (mapped from
+ *     tblRecurrenceRules) instead of N separate VEVENTs, when a resolvable
+ *     recurrence rule exists for that series.
+ * Series with no tblRecurrenceRules row (the common case today — nothing
+ * in the app currently writes to that table) or a 'custom' frequency (which
+ * has no clean RRULE mapping) fall back to the previous per-row VEVENT
+ * behaviour automatically. A single `id=` export is never collapsed to an
+ * RRULE even if that event belongs to a recurring series — the caller asked
+ * for one occurrence, not a subscription to the whole series.
  *
  * @see       https://datatracker.ietf.org/doc/html/rfc5545
  * @package   Portal\Calendar
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   0.3.0
+ * @version   0.4.0
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/338
  * -----------------------------------------------------------------------------
  */
 
 declare(strict_types=1);
 
 use Portal\Core\App;
+use Portal\Core\Ical;
 use Portal\Core\Router;
 use Portal\Core\Site;
 
-// 🔍 Determine what to export
-$eventId  = (int) ($_GET['id'] ?? 0);
-$seriesId = (int) ($_GET['series'] ?? 0);
+// 🔌 Database handle — App::db(), not a bare $mysqli global. This controller
+//    is require()'d from inside Router::dispatch()'s method body, and PHP
+//    variable scope for require/include follows the ENCLOSING FUNCTION's
+//    local scope, not the caller's — a bare $mysqli reference here would be
+//    undefined (dispatch()'s own local variable is named $db, and nothing
+//    in the call chain declares `global $mysqli;`). App::db() is scope-safe
+//    from anywhere. See _core/App.php and _core/Router.php::dispatch().
+$db = App::db();
+
+// 🔍 Determine what to export (selection logic unchanged from the
+//     hand-built version — only the VEVENT construction below changed).
+$eventId   = (int) ($_GET['id'] ?? 0);
+$seriesId  = (int) ($_GET['series'] ?? 0);
 $exportAll = ($_GET['all'] ?? '') === '1';
 
 // 🌐 Multi-site scope
@@ -37,7 +66,7 @@ $events = [];
 
 if ($eventId > 0) {
     // 📅 Single event
-    $stmt = $mysqli->prepare(
+    $stmt = $db->prepare(
         'SELECT * FROM tblEvents WHERE eventID = ? AND isDeleted = 0 AND siteID = ? LIMIT 1'
     );
     if ($stmt !== false) {
@@ -51,7 +80,7 @@ if ($eventId > 0) {
     }
 } elseif ($seriesId > 0) {
     // 🔄 All events in a series
-    $stmt = $mysqli->prepare(
+    $stmt = $db->prepare(
         'SELECT * FROM tblEvents WHERE seriesID = ? AND isDeleted = 0 AND status = \'published\' AND siteID = ? ORDER BY startDateTime'
     );
     if ($stmt !== false) {
@@ -65,7 +94,7 @@ if ($eventId > 0) {
     }
 } elseif ($exportAll === true) {
     // 📅 All upcoming public events
-    $stmt = $mysqli->prepare(
+    $stmt = $db->prepare(
         'SELECT * FROM tblEvents WHERE isDeleted = 0 AND status = \'published\' '
         . 'AND isPublic = 1 AND startDateTime >= NOW() AND siteID = ? ORDER BY startDateTime LIMIT 200'
     );
@@ -85,7 +114,7 @@ if (count($events) === 0) {
     return;
 }
 
-// 📤 Generate iCal output
+// 📤 Calendar name / filename basis (unchanged from the hand-built version)
 $siteName = App::settings('site.name') ?? 'Portal';
 $siteUrl  = 'https://' . ($_SERVER['HTTP_HOST'] ?? 'portal.millrdsdacambridge.uk');
 
@@ -94,89 +123,222 @@ if ($eventId > 0) {
     $calName = $events[0]['eventName'];
 }
 
-// 🔤 Helper to escape iCal text values
-$icalEscape = function (string $text): string {
-    $text = str_replace('\\', '\\\\', $text);
-    $text = str_replace("\n", '\\n', $text);
-    $text = str_replace(',', '\\,', $text);
-    $text = str_replace(';', '\\;', $text);
-    return $text;
+// 🔁 #338 residual — map a tblRecurrenceRules row to an RFC 5545 RRULE
+//     value. Returns null when the pattern can't be cleanly expressed
+//     (currently only frequency='custom'), so the caller falls back to
+//     per-occurrence VEVENTs for that series exactly as before.
+$buildRrule = function (array $rule, bool $allDay): ?string {
+    static $dayCodes = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'];
+
+    // RFC 5545 §3.3.10 has no native "fortnightly"/"quarterly" FREQ value —
+    // both fold into the nearest native frequency with a baked-in multiplier.
+    $freqMap = [
+        'weekly'      => 'WEEKLY',
+        'fortnightly' => 'WEEKLY',
+        'monthly'     => 'MONTHLY',
+        'quarterly'   => 'MONTHLY',
+        'yearly'      => 'YEARLY',
+    ];
+    $frequency = (string) ($rule['frequency'] ?? '');
+    if (isset($freqMap[$frequency]) === false) {
+        // 'custom' (or anything unrecognised) — no generic mapping.
+        return null;
+    }
+
+    $parts = ['FREQ=' . $freqMap[$frequency]];
+
+    // ⏱️ INTERVAL — fortnightly/quarterly bake their own multiplier on top
+    //     of whatever intervalVal the row carries (e.g. "every 2 fortnights"
+    //     is intervalVal=2 on a 'fortnightly' row → INTERVAL=4).
+    $interval = max(1, (int) ($rule['intervalVal'] ?? 1));
+    if ($frequency === 'fortnightly') {
+        $interval *= 2;
+    } elseif ($frequency === 'quarterly') {
+        $interval *= 3;
+    }
+    if ($interval > 1) {
+        $parts[] = 'INTERVAL=' . $interval;
+    }
+
+    // 📅 BYDAY — CSV of 0=Sun..6=Sat from tblRecurrenceRules.dayOfWeek,
+    //     optionally with an ordinal prefix (weekOfMonth) for "nth weekday
+    //     of the month" monthly/quarterly/yearly patterns (e.g. "-1SU" =
+    //     last Sunday, "2MO" = second Monday). weekOfMonth is meaningless
+    //     for weekly/fortnightly, so no prefix is applied there.
+    $dayOfWeekCsv = trim((string) ($rule['dayOfWeek'] ?? ''));
+    $weekOfMonth  = $rule['weekOfMonth'] ?? null;
+    $ordinalFreqs = ['monthly', 'quarterly', 'yearly'];
+    if ($dayOfWeekCsv !== '') {
+        $byDay = [];
+        foreach (explode(',', $dayOfWeekCsv) as $d) {
+            $d = trim($d);
+            if ($d === '') {
+                continue;
+            }
+            $idx = (int) $d;
+            if ($idx < 0 || $idx > 6) {
+                continue;
+            }
+            $prefix = '';
+            if (in_array($frequency, $ordinalFreqs, true) === true && $weekOfMonth !== null) {
+                $prefix = (string) (int) $weekOfMonth;
+            }
+            $byDay[] = $prefix . $dayCodes[$idx];
+        }
+        if (count($byDay) > 0) {
+            $parts[] = 'BYDAY=' . implode(',', $byDay);
+        }
+    } elseif (in_array($frequency, $ordinalFreqs, true) === true && $rule['dayOfMonth'] !== null) {
+        // 📆 No weekday pattern — fixed day-of-month (e.g. "the 15th").
+        $parts[] = 'BYMONTHDAY=' . (int) $rule['dayOfMonth'];
+    }
+
+    // 🗓️ BYMONTH — yearly patterns pin a calendar month.
+    if ($frequency === 'yearly' && $rule['monthOfYear'] !== null) {
+        $parts[] = 'BYMONTH=' . (int) $rule['monthOfYear'];
+    }
+
+    // 🛑 UNTIL / COUNT are mutually exclusive per RFC 5545 §3.3.10; prefer
+    //     the explicit end date when both are present. UNTIL's value type
+    //     MUST match DTSTART's: a plain DATE for all-day series, or a UTC
+    //     ("Z") date-time when DTSTART carries a TZID (never the event's
+    //     own local TZID — RFC 5545 is explicit that UNTIL is always UTC
+    //     for date-time recurrences).
+    $endDate = $rule['endDate'] ?? null;
+    if ($endDate !== null && $endDate !== '') {
+        if ($allDay === true) {
+            // 🛡️ Anchor explicitly to UTC rather than relying on PHP's
+            //     ambient default timezone (bootstrap.php switches it to
+            //     the site's configured zone). Without this, parsing a
+            //     bare date during BST (UTC+1) would resolve local midnight
+            //     to 23:00 UTC the PREVIOUS day, shifting UNTIL back a day.
+            $ts = strtotime((string) $endDate . ' UTC');
+            if ($ts !== false) {
+                $parts[] = 'UNTIL=' . gmdate('Ymd', $ts);
+            }
+        } else {
+            $ts = strtotime((string) $endDate . ' 23:59:59 UTC');
+            if ($ts !== false) {
+                $parts[] = 'UNTIL=' . gmdate('Ymd\THis\Z', $ts);
+            }
+        }
+    } elseif (isset($rule['maxOccurrences']) === true && $rule['maxOccurrences'] !== null) {
+        $count = (int) $rule['maxOccurrences'];
+        if ($count > 0) {
+            $parts[] = 'COUNT=' . $count;
+        }
+    }
+
+    return implode(';', $parts);
 };
 
-// 🔤 Helper to format datetime for iCal (UTC)
-$icalDate = function (string $datetime): string {
-    $dt = new DateTime($datetime);
-    $dt->setTimezone(new DateTimeZone('UTC'));
-    return $dt->format('Ymd\THis\Z');
+// 🔎 Lazily load (and cache) the recurrence rule for a series. Returns null
+//     if the series has no tblRecurrenceRules row — the common case today.
+$loadRecurrenceRule = function (int $seriesId) use ($db): ?array {
+    $stmt = $db->prepare(
+        'SELECT frequency, intervalVal, dayOfWeek, dayOfMonth, weekOfMonth, monthOfYear, endDate, maxOccurrences '
+        . 'FROM tblRecurrenceRules WHERE seriesID = ? ORDER BY ruleID LIMIT 1'
+    );
+    if ($stmt === false) {
+        return null;
+    }
+    $stmt->bind_param('i', $seriesId);
+    $stmt->execute();
+    $rule = $stmt->get_result()->fetch_assoc();
+    $stmt->close();
+    return $rule; // null when no rule row exists for this series
 };
 
-// 📤 Set headers
-header('Content-Type: text/calendar; charset=utf-8');
-header('Content-Disposition: attachment; filename="' . preg_replace('/[^a-zA-Z0-9_-]/', '_', $calName) . '.ics"');
-
-// 📝 Build iCal content
-$lines = [];
-$lines[] = 'BEGIN:VCALENDAR';
-$lines[] = 'VERSION:2.0';
-$lines[] = 'PRODID:-//' . $icalEscape($siteName) . '//Calendar//EN';
-$lines[] = 'CALSCALE:GREGORIAN';
-$lines[] = 'METHOD:PUBLISH';
-$lines[] = 'X-WR-CALNAME:' . $icalEscape($calName);
+// 🧩 Build the Ical::emit() event list. A series whose recurrence rule
+//     resolves to an RRULE collapses to a single master VEVENT (RFC 5545
+//     §3.8.5.3); everything else — standalone events, and series we can't
+//     cleanly map to an RRULE — keeps one VEVENT per row, same as before.
+//     Recurrence collapsing never applies to a single `id=` export: the
+//     caller asked for one occurrence, not the whole series.
+$ruleCache        = [];
+$seenSeriesIds    = [];
+$icalEvents       = [];
 
 foreach ($events as $ev) {
-    $lines[] = 'BEGIN:VEVENT';
-    $lines[] = 'UID:event-' . $ev['eventID'] . '@' . ($_SERVER['HTTP_HOST'] ?? 'portal');
-    $lines[] = 'DTSTAMP:' . $icalDate($ev['createdAt']);
+    $sid      = (int) ($ev['seriesID'] ?? 0);
+    $isAllDay = ((int) $ev['isAllDay']) === 1;
 
-    if ($ev['isAllDay'] === '1' || (int) $ev['isAllDay'] === 1) {
-        // 📅 All-day event uses DATE format (no time)
-        $startDt = new DateTime($ev['startDateTime']);
-        $lines[] = 'DTSTART;VALUE=DATE:' . $startDt->format('Ymd');
-        if ($ev['endDateTime'] !== null) {
-            $endDt = new DateTime($ev['endDateTime']);
-            $endDt->modify('+1 day'); // iCal all-day end is exclusive
-            $lines[] = 'DTEND;VALUE=DATE:' . $endDt->format('Ymd');
+    $rrule = null;
+    if ($eventId <= 0 && $sid > 0) {
+        if (isset($seenSeriesIds[$sid]) === true) {
+            // Already emitted this series' master VEVENT from its earliest
+            // row (rows are fetched ORDER BY startDateTime) — the rest of
+            // this series' rows fold into that VEVENT's RRULE.
+            continue;
         }
-    } else {
-        $lines[] = 'DTSTART:' . $icalDate($ev['startDateTime']);
-        if ($ev['endDateTime'] !== null) {
-            $lines[] = 'DTEND:' . $icalDate($ev['endDateTime']);
+        if (array_key_exists($sid, $ruleCache) === false) {
+            $ruleCache[$sid] = $loadRecurrenceRule($sid);
+        }
+        $rule = $ruleCache[$sid];
+        if ($rule !== null) {
+            $rrule = $buildRrule($rule, $isAllDay);
+        }
+        if ($rrule !== null) {
+            $seenSeriesIds[$sid] = true;
         }
     }
 
-    $lines[] = 'SUMMARY:' . $icalEscape($ev['eventName']);
-
-    if ($ev['description'] !== null && $ev['description'] !== '') {
-        $lines[] = 'DESCRIPTION:' . $icalEscape($ev['description']);
+    // 📍 Location — combine name + address exactly as the hand-built
+    //     version did (address newlines flattened to comma-separated).
+    $location = trim((string) ($ev['locationName'] ?? ''));
+    $address  = (string) ($ev['locationAddress'] ?? '');
+    if ($address !== '') {
+        $address  = str_replace("\n", ', ', $address);
+        $location = $location !== '' ? $location . ', ' . $address : $address;
     }
 
-    if ($ev['locationName'] !== null && $ev['locationName'] !== '') {
-        $location = $ev['locationName'];
-        if ($ev['locationAddress'] !== null && $ev['locationAddress'] !== '') {
-            $location .= ', ' . str_replace("\n", ', ', $ev['locationAddress']);
-        }
-        $lines[] = 'LOCATION:' . $icalEscape($location);
-    }
-
-    if ($ev['locationGeoLat'] !== null && $ev['locationGeoLng'] !== null) {
-        $lines[] = 'GEO:' . $ev['locationGeoLat'] . ';' . $ev['locationGeoLng'];
-    }
-
-    $lines[] = 'URL:' . $siteUrl . '/calendar/event?slug=' . urlencode($ev['eventSlug']);
-    $lines[] = 'STATUS:' . match ($ev['status']) {
+    // 🚦 STATUS mapping — identical to the hand-built version.
+    $status = match ((string) $ev['status']) {
         'cancelled' => 'CANCELLED',
         'postponed' => 'TENTATIVE',
         default     => 'CONFIRMED',
     };
 
+    /** @var array{
+     *   uid:string, summary:string, description:string, location:?string,
+     *   startsAt:string, endsAt:string, allDay:bool, timezone:string,
+     *   url:string, status:string, lastModified?:string, rrule?:string,
+     *   geo?:array{lat:mixed,lng:mixed}
+     * } $entry
+     */
+    $entry = [
+        'uid'         => 'event-' . $ev['eventID'] . '@' . ($_SERVER['HTTP_HOST'] ?? 'portal'),
+        'summary'     => (string) $ev['eventName'],
+        'description' => (string) ($ev['description'] ?? ''),
+        'location'    => $location !== '' ? $location : null,
+        'startsAt'    => (string) $ev['startDateTime'],
+        'endsAt'      => (string) ($ev['endDateTime'] ?? ''),
+        'allDay'      => $isAllDay,
+        'timezone'    => (string) ($ev['timezone'] ?? 'Europe/London'),
+        'url'         => $siteUrl . '/calendar/event?slug=' . urlencode((string) $ev['eventSlug']),
+        'status'      => $status,
+    ];
+
     if ($ev['updatedAt'] !== null) {
-        $lines[] = 'LAST-MODIFIED:' . $icalDate($ev['updatedAt']);
+        $entry['lastModified'] = (string) $ev['updatedAt'];
     }
 
-    $lines[] = 'END:VEVENT';
+    if ($ev['locationGeoLat'] !== null && $ev['locationGeoLng'] !== null) {
+        $entry['geo'] = ['lat' => $ev['locationGeoLat'], 'lng' => $ev['locationGeoLng']];
+    }
+
+    if ($rrule !== null) {
+        $entry['rrule'] = $rrule;
+    }
+
+    $icalEvents[] = $entry;
 }
 
-$lines[] = 'END:VCALENDAR';
+// 📤 Set headers (unchanged from the hand-built version)
+header('Content-Type: text/calendar; charset=utf-8');
+header('Content-Disposition: attachment; filename="' . preg_replace('/[^a-zA-Z0-9_-]/', '_', $calName) . '.ics"');
 
-echo implode("\r\n", $lines) . "\r\n";
+// 📝 Build iCal content via the shared builder (adds VTIMEZONE + TZID
+//     automatically — see _core/Ical.php).
+echo Ical::emit($calName, $icalEvents);
 exit();

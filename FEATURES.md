@@ -13,9 +13,9 @@
 > [CHANGELOG.md](CHANGELOG.md) for chronological history and to [README.md](README.md)
 > for setup, deployment, and licence info.
 >
-> **Snapshot:** 2026-06-21 · **Version on `main`:** 1.3.0 (1.4.0-dev in flight on PR #358)
+> **Snapshot:** 2026-06-21 · **Version on `main`:** 1.2.1
 >
-> **Phase 1 ships sitting on PR #358 — Discipleship Pathway Tracker (#303) + COP Live Chat (#313).** The latter shipped with structural reworks the adversarial review caught (file relocation to ApiRouter's 3-segment convention; CSRF dropped on public /send replaced with sessionToken-exists guard; first-message-only captcha; rate-limit fail-CLOSED).
+> **Phase 1 ships sitting on PR #358 — Discipleship Pathway Tracker (#303) + COP Live Chat (#313).** The latter shipped with structural reworks the adversarial review caught (file relocation to ApiRouter's 3-segment convention; CSRF dropped on public /send replaced with sessionToken-exists guard; first-message-only captcha; rate-limit fail-CLOSED). **Discipleship Phase 2 (per-user progress + auto-completion, migration 153) has since landed** — see the dedicated section near the end of this document.
 >
 > **Already merged to main since the prior snapshot:** PR #355 worship engine (#308 full v1: schema + CRUD + live operator + projector + state polling + SortableJS drag-reorder + song verse auto-split + CCLI usage log + brand asset folder move to /brandkit/assets/). PR #356 Plus Jakarta Sans modular embed (self-hosted, single-source-of-truth via Asset::brandFontsCss + --portal-font-family — one-line swap for future brand-font changes). PR #357 #317 Virtual Host Console Phase 1 + #323 API key infrastructure Phase 1 (`Portal\Core\HostConsole` + `Portal\Core\ApiKey` + `ApiResponse::requireApiKey($scopes)`).
 >
@@ -128,7 +128,7 @@ Local + SSO + multi-factor sign-in.
 | Account page (profile, change password, linked accounts, WebAuthn keys, unlink) | ✅ |
 | 2FA TOTP setup / verify / disable | ✅ |
 | **Password policy** — min 12 chars (configurable), independent complexity flags, max length, **client-side strength meter** | ✅ (#132) |
-| Login rate limiting (IP-based currently; #52 wants composite IP+username) | 🟡 |
+| Login rate limiting — composite username+IP (`RateLimiter::isUserOrIpBlocked`) | ✅ (#52) |
 
 **Tables:** `tblUsers`, `tblLocalAccounts`, `tblPasswordResets`, `tblLinkedAccounts`, `tblWebAuthnCredentials`, `tblUserTotp`
 **Settings:** `auth.password.minLength`, `auth.password.maxLength`, `auth.password.requireUppercase`, `auth.password.requireLowercase`, `auth.password.requireNumber`, `auth.password.requireSpecial`, `auth.passwordReset.tokenExpiry`, `auth.ms365.*`, `auth.google.*`, `auth.turnstile.*`, `auth.recaptcha.*`, `auth.hcaptcha.*`, `auth.captcha.priority`
@@ -171,7 +171,7 @@ Events, series, RSVP, exports, and (in flight) seven view modes.
 
 ---
 
-### 🙏 Prayer Requests — `/prayer-requests/` ✅ (#129)
+### 🙏 Prayer Requests — `/prayer-requests/` ✅ (#129, #311)
 
 Per-site prayer-request submission with moderation and anonymous public submission.
 
@@ -179,11 +179,27 @@ Per-site prayer-request submission with moderation and anonymous public submissi
 - "Display as Anonymous" toggle (moderators still see who submitted).
 - Public anonymous route at `/prayer-requests/anonymous` (no login) — CSRF + CAPTCHA + RateLimiter; always pending, leadership-only.
 - Lifecycle: pending → active → answered (optional praise/testimony note) → archived.
-- Moderation queue at `/prayer-requests/manage`.
+- Moderation queue at `/prayer-requests/manage`, with a per-row prayer-chain
+  partner assign dropdown; full assign UI + private-note admin panel on
+  `/prayer-requests/view`.
+- **Prayer-chain partner assignment (#311, migration 148):** eligible
+  partner = an active site member holding the `prayer_team` role
+  (`Portal\Core\PrayerChain`). Manual assign from `manage`/`view` shows each
+  partner's current OPEN-assignment count as a load-balancing hint. Opt-in
+  round-robin **auto-assign** on submission (`prayer-requests.autoAssign`)
+  picks the least-loaded eligible partner (ties → lowest userID) across
+  `save.php`, `anonymous-save.php`, and `api/create.php`. Assignment
+  (manual or auto) emails + SMS-pings the partner (respecting their
+  verified-number + `prayer_assignment` category opt-in), gated by
+  `prayer-requests.notifyOnAssign`.
+- **`/account/my-prayer-list`:** the assigned partner's own view of their
+  OPEN assignments (pending/active), with a "mark prayed for" action and a
+  **private note** (`partnerNote`) only they (or an admin) can read/write —
+  cleared automatically on reassignment to a different partner.
 - Help page at `/help/prayer-requests`.
 
-**Tables:** `tblPrayerRequests`
-**Settings:** `prayerRequests.enabled`, `prayerRequests.allowAnonymous`, `prayerRequests.allowCongregationFeed`, `prayerRequests.requireModeration`, `prayerRequests.allowTestimony`
+**Tables:** `tblPrayerRequests` (+ `partnerNote`, `partnerLastPrayedAt` — migration 148)
+**Settings:** `prayerRequests.enabled`, `prayerRequests.allowAnonymous`, `prayerRequests.allowCongregationFeed`, `prayerRequests.requireModeration`, `prayerRequests.allowTestimony`, `prayer-requests.autoAssign`, `prayer-requests.notifyOnAssign`
 
 ---
 
@@ -241,7 +257,7 @@ Per-site text announcements (short-form notices with visibility windows). Distin
 
 ---
 
-### 📌 Noticeboard — `/noticeboard/` ✅ (#360)
+### 📌 Noticeboard — `/noticeboard/` ✅ (#360, #363)
 
 Visual poster wall — pinboard of event posters. Distinct from the text-based Announcements app.
 
@@ -251,17 +267,19 @@ Visual poster wall — pinboard of event posters. Distinct from the text-based A
 - Manual sort ordering (drag-and-drop persisted); auto-fallback to chronological
 - QR share panel — links to poster's deep-link URL, server-encoded via `Portal\Core\Qr` and pinned to the current host
 - Site-admin gated writes; any authenticated user can view
+- Real media upload pipeline (#363) — finfo-sniffed, size-capped (`noticeboard.upload.maxBytes`, default 15 MB), server-generated filename; served back publicly (no login) via `/noticeboard/media?f=<token>` so posters keep rendering for an anonymous QR scanner. Orphaned uploads (abandoned in the editor, or whose poster was later soft-deleted) are purged automatically after each save.
 
-**Tables:** `tblNoticeboardPosters`
+**Tables:** `tblNoticeboardPosters`, `tblNoticeboardUploads`
 
 **Routes / API:**
 - `GET  /noticeboard`             — board page (authed)
+- `GET  /noticeboard/media`       — poster media bytes, by token (PUBLIC, no auth — #363)
 - `GET  /api/noticeboard/list`    — poster feed (authed)
 - `POST /api/noticeboard/save`    — bulk upsert (site-admin, CSRF, cross-site guard)
+- `POST /api/noticeboard/upload`  — media upload (site-admin, CSRF, finfo MIME allowlist — #363)
 - `GET  /api/noticeboard/qr`      — QR PNG/SVG (authed, host-pinned)
 
 **Phase 1 limitations:**
-- Media pasted as `data:` URIs is rejected (real upload pipeline follow-up)
 - Whole-set replace on save — last-writer-wins if two admins edit simultaneously
 - Google Fonts blocked by CSP → typography degrades to system-font stack
 
@@ -383,7 +401,7 @@ Self-contained 6-step setup wizard (bootstrap-free).
 | Password policy hardened (min 12, independent complexity, max length, full-flow validation) | ✅ (#132) |
 | Multi-provider Captcha with admin priority | ✅ (#130) |
 | Debug mode refused in production (logged, exception traces don't leak) | ✅ (#54) |
-| Login rate limiting on composite IP+username | 🔜 (#52) |
+| Login rate limiting on composite IP+username | ✅ (#52) |
 | Signed commits enforced | 🔜 (#106) |
 | Prod secrets behind GitHub Environment + reviewer gate | 🔜 (#105) |
 | Privacy / GDPR helpers | 🔜 (#47) |
@@ -406,7 +424,7 @@ Self-contained 6-step setup wizard (bootstrap-free).
 
 - 3-branch SFTP deploy (alpha / beta / main) via `lftp`, SSH-key with password fallback.
 - `--delete` mirror on shared dirs (`core/`, `vendor/`, `sql/`, …) — see [DEV_NOTES.md → Troubleshooting](DEV_NOTES.md#troubleshooting) for survival rules.
-- `dry_run` `workflow_dispatch` input on `deploy.yml` for preview-mode deploys (#107).
+- `dry_run` `workflow_dispatch` input on `deploy.yml` for preview-mode deploys (#107 — mostly done; residual: server-side `--delete` deletion-log/audit monitor).
 - `gitleaks` CLI for secret scanning (free MIT binary, not the licensed action).
 - Repo config audit workflow (#108).
 - `version-bump.yml`, `changelog.yml`, `release.yml`, `auto-merge-alpha.yml`.
@@ -456,13 +474,12 @@ When these merge, the 🛠️ markers above flip to ✅ without further edits to
 | #127 | WordPress Multisite integration — design + phased implementation (3–4 weeks) |
 | #128 | Order of Service planner app + iHymns integration (gated on iHymns permission) |
 | #97–#103 | BookIT calendar-provider abstraction (7-PR series) |
-| #111 | UI refresh umbrella — practically done via PRs #114–#126; can likely be closed |
-| #52 | Login rate-limit composite IP+username |
 | #47 | Privacy & GDPR compliance helpers |
 | #40 | Payment integration prep |
 | #106 | Enforce signed commits |
 | #105 | Prod secrets behind GitHub Environment + reviewer gate |
-| #107 | SFTP `--delete` operational documentation (partially addressed by PR #134) |
+| #107 | SFTP `--delete` operational documentation — mostly done (dry-run + docs shipped via PR #134); residual: server-side deletion-log/audit monitor |
+| #299 | Giving polish — account-updater webhook for recurring giving (sub-features 1-3 — two-person offering count, pledge campaigns, bank reconciliation — all shipped, see "Giving" section above) |
 
 ---
 
@@ -487,7 +504,7 @@ setting seeds.
 | App | Issue | Migration | Status |
 |---|---|---|---|
 | Resources (room/asset booking with overlap conflict detection) | #263 | 088 | ✅ |
-| Service Plans (run-sheet builder, printable) | #262 | 089 | ✅ |
+| Service Plans (run-sheet builder, printable; live runtime + confidence monitor + operator→monitor messaging, #300) | #262 | 089 | ✅ |
 | Livestream (YouTube/Vimeo/Twitch/Facebook embed + countdown) | #273 | 090 | ✅ |
 | Recordings (RSS podcast feed + HTTP Range streaming + FULLTEXT search) | #264 | 091 | ✅ |
 | Zoom (OAuth, meeting creation from calendar, webhook HMAC) | #274 | 092 | ✅ |
@@ -521,9 +538,101 @@ setting seeds.
 | App controllers moved from `public_html/` into `_apps/` outside the webroot | #159 | #288 | ✅ |
 | Nonce-based CSP `script-src` tightening + `App::cspNonce()` | #144 | #289 | ✅ |
 | External error monitor — `Portal\Core\ErrorMonitor` adapter for Sentry / GlitchTip | #143 | #290 | ✅ |
-| REST API write-side CRUD: Announcements / Tasks / Prayer Requests / Leadership (10 new endpoints) | #157 | #291 | 🟡 (Documents / Attendance / Expenses deferred) |
+| REST API write-side CRUD: Announcements / Tasks / Prayer Requests / Leadership (10 new endpoints) | #157 | #291 | ✅ (remaining Documents / Attendance / Expenses CRUD landed via #323 Phase 2, below) |
 | PWA offline write queue + sync-on-reconnect (`Portal.OfflineQueue` IndexedDB module + `/account/offline-queue`) | #233 | #292 | ✅ |
 | Codebase audit sweep — duplicate cookie banner removed; missing `Auth` import fixed; 6 SQL int-concat queries → prepared statements | — | #293 | ✅ |
+
+### REST API v1 write surface (PR #372, 2026-07-22)
+
+| Item | Issue | PR | Status |
+|---|---|---|---|
+| Dual-mode `ApiAuth` (bearer API key OR session) + `/api/v1/{resource}[/{id}]` RESTful facade over the existing `{app}/{action}` handlers; per-key rate limiting; tenant pinning via `Site::forceContext` | #323 Phase 2 | #372 | ✅ |
+| New write endpoints: Attendance + Documents (create/update/delete), Expenses (create/delete), Users (create/update, admin-gated + default-off flags) | #323 Phase 2 (#157 remnant) | #372 | ✅ (Expenses status-transition update deferred to Phase 3) |
+| Canonical `ApiKey::SCOPES` vocabulary + rotation grace windows; admin API-keys UI scope checkbox multi-select (server-validated) + grace selector + "rotated" badge; audit viewer source (session/apikey) badge + key-prefix | #323 Phase 2 | #372 | ✅ |
+| OpenAPI spec (`api-spec.json`) documents every `/api/v1/*` path + `bearerAuth` scheme alongside the existing legacy aliases | #323 Phase 2 | #372 | ✅ |
+| Outbound webhooks admin CRUD UI | #324 | #372 | ✅ |
+
+---
+
+### Giving — two-person offering count session (#299 sub-feature 1, 2026-07-22)
+
+Extension to the existing `giving` app (#266). #299 bundles four "Giving polish"
+sub-features (offering counting, pledge campaigns, bank reconciliation,
+account-updater) — only sub-feature 1 is built; the other three remain
+tracked-but-not-started.
+
+| Item | Issue | Migration | Status |
+|---|---|---|---|
+| `tblCountSessions` — per-service-date session; two counters independently key cash/cheque/envelope totals, auto-compared, `status` ENUM('open','counting','discrepancy','closed') | #299 | 150 | ✅ |
+| Discrepancy flagging — any mismatch between the two independent counts blocks close until a counter re-enters matching totals or an admin (`App::isAdmin()`) resolves with agreed totals | #299 | 150 | ✅ |
+| `tblCountEnvelopes` — named/numbered giving-envelope breakdown of the agreed envelope total | #299 | 150 | ✅ |
+| Close (`/giving/count/close`) — validates named envelopes reconcile to the agreed envelope total, then writes the gift log to `tblGivingEntry` in one transaction: one row per named envelope + aggregate "loose cash"/"loose cheque" rows for anything not itemised | #299 | 150 | ✅ |
+| UI: `/giving/count` (list + start), `/giving/count/session` (counter entry, comparison, resolve, envelopes, close) — gated by `Portal\Core\Giving::canManage()` | #299 | 150 | ✅ |
+
+---
+
+### Giving — pledge campaigns (#299 sub-feature 2, 2026-07-22)
+
+Extension to the existing `giving` app (#266). Bank reconciliation and the
+account-updater webhook remain the two not-started #299 sub-features.
+
+| Item | Issue | Migration | Status |
+|---|---|---|---|
+| `tblPledgeCampaigns` — goal amount, currency, date window, active flag | #299 | 151 | ✅ |
+| `tblPledges` — one row per member per campaign, `UNIQUE (campaignID, userID)` upsert (re-pledging, including after cancellation, updates the same row) | #299 | 151 | ✅ |
+| Auto-attribution — `tblGivingEntry.campaignID`/`pledgeID` (nullable, `ON DELETE SET NULL`) instead of a link table; `Portal\Core\Giving::attributeGift()` is the sole code path that sets them: explicit treasurer choice (honoured even outside the campaign window), or "Auto" only when the donor holds exactly ONE open pledge to a currently active, in-window campaign (2+ matches is left unattributed — never guessed) | #299 | 151 | ✅ |
+| Hooked into both manual `tblGivingEntry` writers: `giving/entry-save.php` (new Campaign selector — Auto/None/explicit) and the offering-count close path (named-envelope rows only) | #299 | 151 | ✅ |
+| `Giving::pledgeExpectedToDate()` — on-schedule progress math; one-off owes in full immediately, weekly/monthly owe their first instalment from the pledge's start, monthly uses calendar-month arithmetic | #299 | 151 | ✅ |
+| UI: `/giving/campaigns` (card grid + thermometers + canManage new-campaign form), `/giving/campaign` (detail: thermometer, stats, member pledge/cancel form, canManage pledger list + attributed gifts + edit form) | #299 | 151 | ✅ |
+| `Projects.php`/`Payments.php` online/project-pledge giving now also auto-attributed — `Giving::attributeGift()` (Auto) called before each automatic `tblGivingEntry` INSERT, using the same siteID + gift date the row is stamped with; anonymous/no-user donor (`<= 0`) passed as `null`, never `0` | #299 follow-up | 151 | ✅ |
+
+---
+
+### Giving — bank reconciliation (#299 sub-feature 3, 2026-07-22)
+
+Extension to the existing `giving` app (#266). Only the account-updater
+webhook for recurring giving remains a not-started #299 sub-feature.
+
+| Item | Issue | Migration | Status |
+|---|---|---|---|
+| `tblBankImports` + `tblBankTxns` — one row per uploaded statement CSV batch, one row per imported CREDIT line (debits never stored); `matchedCount` deliberately not a stored column (derived via aggregate join) | #299 | 152 | ✅ |
+| CSV import (`/giving/reconcile/import`) — header-NAME column mapping (never positional) against a UK-bank alias table, with a manual mapping screen when auto-detection can't resolve every required column; SHA-256 `fileHash` + `UNIQUE(siteID, fileHash)` blocks duplicate imports; a non-empty credit that fails amount/date parsing fails the WHOLE upload (no partial imports) | #299 | 152 | ✅ |
+| Matching — exact-amount, window-based (`giving.reconcile.toleranceDays`, default 5 days) with two nullable FKs on `tblBankTxns`: `matchedEntryID` (1:1 gift match) or `matchedCountSessionID` (whole offering-count deposit); 2+ equal-amount in-window candidates is always left unmatched, never guessed; count-close's gift-log rows (`reference LIKE 'Count #%'`) excluded from entry-matching to avoid double-counting against their deposit | #299 | 152 | ✅ |
+| UI: `/giving/reconcile` (imports dashboard + site-wide unmatched summary), `/giving/reconcile/view` (matched/unmatched/ignored lists, inline match-suggestion mini-forms, two-way "gift log not in this statement" gap panel with in-transit-vs-missing badges), `/giving/reconcile/match` (manual match/unmatch/ignore/rematch/delete-import) — gated by `Portal\Core\Giving::canManage()`; "Count"/"Reconcile" nav buttons added to `giving/manage.php` | #299 | 152 | ✅ |
+
+---
+
+### Discipleship Pathway Tracker Phase 2 — per-user progress + auto-completion (#303 Phase 2, 2026-07-22)
+
+Extension to Phase 1 (migration 142, admin CRUD only, app OFF by default via `discipleship.enabled`). Adopted the three recommended resolutions from issue #303's blocker comment: (1) auto-complete ONLY from per-user evidence tables — `tblSalvationCards`/`tblDecisionMoments` structurally excluded; (2) pastor surface stays a flat roster list, never a members×steps `<table>` matrix; (3) mentor relationships deferred to a later phase.
+
+| Item | Issue | Migration | Status |
+|---|---|---|---|
+| `tblPathwayEnrolments` — who is assigned to which pathway (`status` active/completed/withdrawn); an explicit table rather than inferred from progress rows, so a member with ZERO completed steps still shows up | #303 Phase 2 | 153 | ✅ |
+| `tblPathwayProgress` — one row per (step, member); `UNIQUE(stepID, userID)`; unmark = `revokedAt` set, NEVER a DELETE (a deleted row would let the auto-sweep resurrect a step a coordinator deliberately unmarked) | #303 Phase 2 | 153 | ✅ |
+| `tblPathwaySteps.autoRule`/`autoRefID` (guarded ADD COLUMN) — optional per-step rule: `attended_event`, `attended_category`, or `rsvpd_event` (an RSVP only counts once the event has started) | #303 Phase 2 | 153 | ✅ |
+| `Portal\Core\Discipleship::autoSweep()` — three set-based `INSERT IGNORE … SELECT` statements (one per rule), idempotent via the unique key, then `refreshEnrolmentStatuses()` flips `active ⇄ completed` from the current progress state; lazily invoked on every discipleship page view (no scheduler dependency), plus an optional `cron/discipleship-sweep.php` (token-gated like `reminders.cron_token`) for freshness without page views | #303 Phase 2 | 153 | ✅ |
+| Member routes fixing the Phase 1 dead dashboard link: `/discipleship` ("My pathways" + progress bars) and `/discipleship/view` (step list, auto/manual badges) — every query scoped to `Site::id()` AND `$_SESSION['user_id']`; parameter-tampered `?id=` 404s rather than leaking another member's progress | #303 Phase 2 | 153 | ✅ |
+| Admin/pastor routes: `/admin/discipleship/progress` (pathway list + enrolment counts), `/admin/discipleship/progress/pathway` (roster list + enrol/withdraw), `/admin/discipleship/progress/member` (per-member mark-complete/unmark + notes, auto-evidence, revocation state) | #303 Phase 2 | 153 | ✅ |
+| `pathway-form.php`/`step-save.php` extended with the `autoRule` select + site-scoped event/category ref picker; `step-save.php` validates the ref resolves at THIS site before saving; a stale ref (event/category later deleted — deliberately no FK) renders a "(missing)" warning | #303 Phase 2 | 153 | ✅ |
+| `GdprEraser` catalogue registration for both new per-user tables (hard delete; `markedByID`/`enrolledByID`/`revokedByID` attributions self-heal via `ON DELETE SET NULL`) | #303 Phase 2 | 153 | ✅ |
+| Mentor relationships — deferred (no `tblPathwayMentor` schema, no UI) | #303 | — | 🔜 (Phase 3) |
+
+---
+
+### Service Plans — operator → confidence-monitor messaging (#300 v2, 2026-07-23)
+
+Closes the last open piece of #300. v1 (migration 110) shipped `/service-plans/live` (operator clock + start/close) and `/service-plans/confidence` (full-screen speaker-facing clock) with the message channel deferred. Issue #300 explicitly blessed a polling fallback ("fall back to polling if it doesn't play nice with DreamHost") — v2 uses plain JSON polling, no SSE, no new dependencies.
+
+| Item | Issue | Migration | Status |
+|---|---|---|---|
+| `tblServicePlanMessages` — one row per operator message; `isCleared`/`clearedAt` rather than DELETE, so the live view stays the full audit record of how the service ran; indexed `(planID, isCleared, messageID)` for an O(1) poll | #300 v2 | 154 | ✅ |
+| `/service-plans/live-message` — admin-only POST (CSRF-checked), `action=send` (rejected once the plan is closed) / `action=clear` (allowed even after close); plain form + 303 redirect back to `/service-plans/live`, matching the app's only existing submit idiom (`live-toggle.php`) | #300 v2 | 154 | ✅ |
+| `/service-plans/message-poll` — GET-only JSON poll, any logged-in user (same gate as `confidence.php`), `Cache-Control: no-store`, `ApiResponse::success()` envelope; `sinceID`/`lastID` dedup short-circuits to `changed:false` so an unchanged poll re-sends no payload | #300 v2 | 154 | ✅ |
+| `live.php` operator panel — current active message + "Clear from monitor" form + send form (`maxlength=255`, `mb_substr` server-side cap); send form hidden once the plan is closed | #300 v2 | 154 | ✅ |
+| `confidence.php` banner — polled every 4s (matching the `livechat-widget.js` house cadence), high-contrast themed banner with a reduced-motion-guarded pulse; message body injected via `textContent` only, NEVER `innerHTML` — the client-side XSS line of defence alongside the server's `htmlspecialchars()` escaping on `live.php` | #300 v2 | 154 | ✅ |
+| Every query siteID-scoped (`Site::id()`); a plan at another site polling the same `planID` gets `message: null`, never another site's data | #300 v2 | 154 | ✅ |
+| No new `tblSettings` — plain `service-plans/*` page routes (not under `api/*`), inheriting the existing `service_plans.enabled` app gate | #300 v2 | 154 | ✅ |
 
 ---
 

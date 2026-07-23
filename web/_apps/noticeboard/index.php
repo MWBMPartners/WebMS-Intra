@@ -63,6 +63,27 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
       });
     },
 
+    // 📤 Real media upload (#363) — replaces the data: URI fallback the board
+    // uses when this host method is absent. Multipart POST so the CSRF token
+    // MUST travel via the X-CSRF-TOKEN header (the JSON csrf_token body field
+    // only exists for JSON requests — see api/upload.php's docblock). Throws
+    // on any non-2xx response so the bundle's .catch() can surface an error.
+    upload: async function (file) {
+      const fd = new FormData();
+      fd.append('file', file);
+      const r = await fetch('/api/noticeboard/upload', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'X-CSRF-Token': window.NoticeboardHost.csrf },
+        body: fd
+      });
+      const j = await r.json().catch(function () { return null; });
+      if (!r.ok || !j || j.status !== 'ok') {
+        throw new Error((j && j.message) ? j.message : ('Upload failed (' + r.status + ')'));
+      }
+      return j.data.url;
+    },
+
     // QR for the share/deep-link panel — served by Portal\Core\Qr (or CueRCode).
     qrUrl: function (text) {
       return '/api/noticeboard/qr?data=' + encodeURIComponent(text);
@@ -75,6 +96,12 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
      under /assets/vendor/react/ and loaded before the bundle (nonce'd, deferred);
      loadReactUmd() in noeval.js short-circuits when window.React / window.ReactDOM
      pre-exist so no unpkg fetch happens. -->
+<!-- #361 — self-hosted @font-face for the board's four Google-sourced
+     families (hand-maintained CSS, not part of the generated bundle). Must
+     load BEFORE noticeboard.css so the faces exist before anything renders
+     text with them; supersedes the generated CSS's CSP-blocked Google Fonts
+     @import (see fonts-selfhost.css header + DEV_NOTES.md). -->
+<link rel="stylesheet" href="/assets/noticeboard/fonts-selfhost.css">
 <link rel="stylesheet" href="/assets/noticeboard/noticeboard.css">
 <script nonce="<?php echo htmlspecialchars($nonce, ENT_QUOTES, 'UTF-8'); ?>" src="/assets/vendor/react/react-18.3.1.production.min.js" defer></script>
 <script nonce="<?php echo htmlspecialchars($nonce, ENT_QUOTES, 'UTF-8'); ?>" src="/assets/vendor/react/react-dom-18.3.1.production.min.js" defer></script>

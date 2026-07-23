@@ -7,11 +7,16 @@
  * Admin-only moderation view. Lists pending, active, answered, and archived
  * requests with quick-action buttons that POST to moderate.php.
  *
+ * Also carries a per-row prayer-chain partner assign dropdown (#311,
+ * migration 148) — eligible partner = active site member holding the
+ * `prayer_team` role, annotated with their open-assignment count as a
+ * load-balancing hint. See Portal\Core\PrayerChain::eligiblePartners().
+ *
  * @package   Portal\PrayerRequests
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   0.10.0
+ * @version   1.4.0
  * -----------------------------------------------------------------------------
  */
 
@@ -19,6 +24,7 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\PrayerChain;
 use Portal\Core\Site;
 
 // 📌 Page metadata
@@ -89,6 +95,10 @@ if ($stmt !== false) {
     }
     $stmt->close();
 }
+
+// 🙏 Prayer chain (#311) — eligible partners + open-assignment counts for
+//    the per-row assign dropdown below (fetched once, not per-row).
+$eligiblePartners = PrayerChain::eligiblePartners($siteId);
 
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 
@@ -247,6 +257,36 @@ $csrf = Auth::csrfToken();
                         <?php endif; ?>
                     </div>
                 </div>
+
+                <?php if ($req['status'] !== 'archived' && count($eligiblePartners) > 0):
+                    $rowAssigneeId = $req['assignedToUserID'] !== null ? (int) $req['assignedToUserID'] : 0;
+                ?>
+                    <!-- 🙏 Prayer chain (#311) — compact per-row assign control.
+                         Open-count is the load-balancing hint. -->
+                    <div class="col-12 mt-2">
+                        <form method="post" action="/prayer-requests/moderate" class="d-flex gap-2 align-items-center">
+                            <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
+                            <input type="hidden" name="requestID" value="<?php echo (int) $req['requestID']; ?>">
+                            <input type="hidden" name="action" value="assign">
+                            <input type="hidden" name="redirect" value="manage">
+                            <input type="hidden" name="status_filter" value="<?php echo htmlspecialchars($filterStatus, ENT_QUOTES, 'UTF-8'); ?>">
+                            <label class="small text-muted mb-0"><i class="fa-solid fa-people-arrows me-1"></i>Partner:</label>
+                            <select name="assignedToUserID" class="form-select form-select-sm w-auto">
+                                <option value="0" <?php echo $rowAssigneeId === 0 ? 'selected' : ''; ?>>— Unassigned —</option>
+                                <?php foreach ($eligiblePartners as $partner): ?>
+                                    <option value="<?php echo (int) $partner['userID']; ?>"
+                                        <?php echo $rowAssigneeId === (int) $partner['userID'] ? 'selected' : ''; ?>>
+                                        <?php echo htmlspecialchars($partner['fullName'], ENT_QUOTES, 'UTF-8'); ?>
+                                        (<?php echo (int) $partner['openCount']; ?> open)
+                                    </option>
+                                <?php endforeach; ?>
+                            </select>
+                            <button type="submit" class="btn btn-sm btn-outline-primary">
+                                <i class="fa-solid fa-user-check"></i>
+                            </button>
+                        </form>
+                    </div>
+                <?php endif; ?>
             </div>
         <?php endforeach; ?>
     </div>

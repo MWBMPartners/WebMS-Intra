@@ -26,7 +26,7 @@ CREATE TABLE IF NOT EXISTS `tblEventReminderLog` (
     CONSTRAINT `fk_reminder_event` FOREIGN KEY (`eventID`) REFERENCES `tblEvents`(`eventID`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
-INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isEncrypted`) VALUES
+INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isSensitive`) VALUES
     ('reminders.enabled',    '1', 0),
     ('reminders.cron_token', '', 0)
 ON DUPLICATE KEY UPDATE `settingKey` = VALUES(`settingKey`);

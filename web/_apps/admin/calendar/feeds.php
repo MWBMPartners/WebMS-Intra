@@ -64,7 +64,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
                         <input type="hidden" name="feedID" value="<?php echo (int) $f['feedID']; ?>">
                         <input type="hidden" name="action" value="remove">
-                        <button class="btn btn-sm btn-outline-danger" onclick="return confirm('Delete feed and ALL its imported events?');"><i class="fa-solid fa-xmark"></i></button>
+                        <button class="btn btn-sm btn-outline-danger" data-confirm="Delete feed and ALL its imported events?" data-confirm-destructive="true"><i class="fa-solid fa-xmark"></i></button>
                     </form>
                 </div>
             </div>

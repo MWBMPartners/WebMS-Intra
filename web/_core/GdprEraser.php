@@ -46,8 +46,15 @@ class GdprEraser
     {
         return [
             // Direct user-row anonymisation last; do dependents first.
-            ['table' => 'tblAttendanceCheckIns', 'userCol' => 'userID',      'action' => 'anonymise', 'nullCols' => [], 'reason' => 'aggregate attendance stats retained — userID nulled'],
-            ['table' => 'tblExpenseClaim',      'userCol' => 'submittedByID', 'action' => 'anonymise', 'nullCols' => [], 'reason' => 'UK HMRC requires 6-year retention of expense records'],
+            // NOTE: per-user event check-ins live in `tblEventAttendance`
+            // (migration 116, multi-day attendance grid) — there is no
+            // `tblAttendanceCheckIns` table. `tblAttendanceSessions` /
+            // `tblAttendanceCounts` are aggregate headcounts by service
+            // type with no per-user column, so nothing to catalogue there.
+            ['table' => 'tblEventAttendance',  'userCol' => 'userID',       'action' => 'anonymise', 'nullCols' => [], 'reason' => 'aggregate attendance stats retained — userID nulled'],
+            // Expense claims live in `tblExpenseClaims`.`userID` — there is
+            // no `tblExpenseClaim` (singular) table or `submittedByID` column.
+            ['table' => 'tblExpenseClaims',    'userCol' => 'userID',       'action' => 'anonymise', 'nullCols' => [], 'reason' => 'UK HMRC requires 6-year retention of expense records'],
             ['table' => 'tblGivingEntry',       'userCol' => 'donorID',      'action' => 'anonymise', 'nullCols' => [], 'reason' => 'UK HMRC requires 6-year retention of financial records'],
             ['table' => 'tblPayment',           'userCol' => 'userID',       'action' => 'anonymise', 'nullCols' => [], 'reason' => 'Payment processor reconciliation requires retention'],
             ['table' => 'tblPrayerRequests',    'userCol' => 'submitterID',  'action' => 'anonymise', 'nullCols' => ['submitterName','submitterEmail','submitterIP'], 'reason' => 'request body preserved for congregational continuity; PII blanked'],
@@ -56,9 +63,24 @@ class GdprEraser
             ['table' => 'tblRecording',        'userCol' => 'uploadedByID', 'action' => 'anonymise', 'nullCols' => [], 'reason' => 'authorship attribution detached'],
 
             // Sessions / tokens / personal devices — hard delete.
-            ['table' => 'tblSessions',         'userCol' => 'userID', 'action' => 'delete'],
+            // NOTE: PHP's own session store is file-based, not a DB table
+            // (there never was a `tblSessions` row to erase).
             ['table' => 'tblTotpBackupCodes',  'userCol' => 'userID', 'action' => 'delete'],
-            ['table' => 'tblWebauthnCredentials','userCol' => 'userID', 'action' => 'delete'],
+            // Correct case: `tblWebAuthnCredentials` (capital A) — MySQL on
+            // Linux is case-sensitive for table names, so the previous
+            // `tblWebauthnCredentials` spelling never matched and passkeys
+            // were never deleted.
+            ['table' => 'tblWebAuthnCredentials','userCol' => 'userID', 'action' => 'delete'],
+            // Auth-residue tables (verified against data-export.php's export
+            // list, which already used the correct names). `tblUsers` is
+            // anonymised in place, never deleted, so no FK CASCADE ever
+            // sweeps these up — without an explicit entry each survives its
+            // "erased" owner's credentials/SSO links/trusted devices/reset
+            // tokens indefinitely.
+            ['table' => 'tblLocalAccounts',    'userCol' => 'userID', 'action' => 'delete'],
+            ['table' => 'tblLinkedAccounts',   'userCol' => 'userID', 'action' => 'delete'],
+            ['table' => 'tblTrustedDevices',   'userCol' => 'userID', 'action' => 'delete'],
+            ['table' => 'tblPasswordResets',   'userCol' => 'userID', 'action' => 'delete'],
             ['table' => 'tblUserSites',        'userCol' => 'userID', 'action' => 'delete'],
             ['table' => 'tblUserRoles',        'userCol' => 'userID', 'action' => 'delete'],
             ['table' => 'tblUserSmsPreference','userCol' => 'userID', 'action' => 'delete'],
@@ -67,12 +89,31 @@ class GdprEraser
             ['table' => 'tblGiftAidDeclaration','userCol' => 'donorID', 'action' => 'delete'],
             ['table' => 'tblZoomAccount',      'userCol' => 'userID', 'action' => 'delete'],
             ['table' => 'tblUserTranslationPref','userCol' => 'userID', 'action' => 'delete'],
+            // #303 Phase 2 — discipleship per-user tables. markedByID /
+            // enrolledByID / revokedByID attributions self-heal via
+            // ON DELETE SET NULL on the FKs, so a hard delete here is safe.
+            ['table' => 'tblPathwayEnrolments','userCol' => 'userID', 'action' => 'delete'],
+            ['table' => 'tblPathwayProgress',  'userCol' => 'userID', 'action' => 'delete'],
+            // Kids ministry — a child profile links to exactly ONE parent
+            // (`parentUserID`; no multi-guardian junction table exists), so
+            // erasing the parent erases the child's profile (name,
+            // allergies, medical notes, pickup names). `tblKidCheckins` has
+            // `ON DELETE CASCADE` from `tblKidProfiles`.`childID`, so
+            // deleting the profile here also sweeps its check-in history —
+            // no separate catalogue entry is needed for `tblKidCheckins`.
+            ['table' => 'tblKidProfiles',      'userCol' => 'parentUserID', 'action' => 'delete'],
 
             // Final step — anonymise the user row itself rather than delete,
             // so foreign keys with ON DELETE SET NULL don't cascade-blow
             // historical attributions we wanted to keep.
+            // NOTE: `address`, `passwordHash`, `msAccountID` and
+            // `googleAccountID` are NOT columns on tblUsers (the real
+            // address field is `displayAddress`; credentials live in
+            // tblLocalAccounts; SSO links live in tblLinkedAccounts — both
+            // now hard-deleted above), so referencing them here made the
+            // whole UPDATE fail to prepare and this final step never ran.
             ['table' => 'tblUsers', 'userCol' => 'userID', 'action' => 'anonymise',
-             'nullCols' => ['emailAddress','phoneNumber','address','locale','passwordHash','totpSecret','msAccountID','googleAccountID'],
+             'nullCols' => ['emailAddress','phoneNumber','displayAddress','locale','totpSecret'],
              'overrides' => ['fullName' => self::TOMBSTONE_NAME, 'isActive' => 0],
              'reason' => 'user row retained for historical FK integrity; PII removed'],
         ];
@@ -180,6 +221,11 @@ class GdprEraser
         try {
             $stmt = $db->prepare('SELECT 1 FROM `' . $table . '` WHERE `' . $col . '` = ? LIMIT 100');
             if ($stmt === false) {
+                // Table/column genuinely missing (or a real schema-drift
+                // typo) — record it instead of vanishing silently, so the
+                // next drift is visible in the audit trail rather than
+                // masquerading as a completed erasure.
+                self::logAudit($db, $requestId, 'skip', $table, null, 'table-or-column-missing: ' . $db->error);
                 return false;
             }
             $stmt->bind_param('i', $userId);

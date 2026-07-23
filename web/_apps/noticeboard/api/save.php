@@ -11,34 +11,36 @@
 
 declare(strict_types=1);
 
+use Portal\Core\ApiAuth;
 use Portal\Core\App;
-use Portal\Core\Auth;
 use Portal\Core\ApiResponse;
+use Portal\Core\NoticeboardMedia;
 use Portal\Core\Site;
 
-Auth::ensureSession();
-ApiResponse::requireAuth();
-ApiResponse::requireEnabled('api.noticeboard.save.enabled');
+ApiAuth::requireMethod('POST');
+// api.noticeboard.save.enabled is already gated per-site by
+// ApiRouter::resolveEnabledFlag before this handler runs (#323 Phase 2); a
+// second handler-level check via App::settings() would read the frozen
+// host-site snapshot and could wrongly 403 a valid bearer request.
+$body = ApiAuth::requireWrite('noticeboard:write', sessionNeedsAdmin: false);
 
-if (App::isSiteAdmin() === false) {
+// 🛡️ Site-admin gate — kept verbatim. This is a distinct, finer-grained check
+// than ApiAuth's sessionNeedsAdmin (isSiteAdmin(), not isAdmin()), so it stays
+// here rather than folding into the ApiAuth call. Because App::isSiteAdmin()
+// reads App::user() (session-only), it also fails closed for bearer keys —
+// see #323 Phase 2 B3 report for the follow-up needed to let a scoped bearer
+// key through (e.g. a site-pinned key implicitly counted as site-admin here).
+if (ApiAuth::source() === 'session' && App::isSiteAdmin() === false) {
     ApiResponse::error('Admin access required', 403);
 }
 
-// 🛡️ CSRF — header sent by the bridge.
-$csrf = (string) ($_SERVER['HTTP_X_CSRF_TOKEN'] ?? '');
-if (Auth::verifyCsrf($csrf) === false) {
-    ApiResponse::error('Invalid CSRF token', 400);
-}
-
-$raw  = file_get_contents('php://input');
-$body = json_decode($raw, true);
-if (is_array($body) === false || isset($body['posters']) === false || is_array($body['posters']) === false) {
+if (isset($body['posters']) === false || is_array($body['posters']) === false) {
     ApiResponse::error('Expected { posters: [...] }', 422);
 }
 
 $db     = App::db();
 $siteId = Site::id();
-$userId = (int) ($_SESSION['user_id'] ?? 0);
+$userId = ApiAuth::actorUserId();
 
 // 🛡️ Scheme allowlist — http(s) absolute or root-relative only. Matches the
 //    LivePrompt ctaUrl precedent (PR #358) — prevents javascript:… hrefs
@@ -155,7 +157,15 @@ try {
             $order, $userId, $userId
         );
         $up->execute();
-        $keepIds[] = $dbId !== null ? $dbId : (int) $db->insert_id;
+        $savedPosterId = $dbId !== null ? $dbId : (int) $db->insert_id;
+        $keepIds[]     = $savedPosterId;
+
+        // 🔗 #363 — if this poster's media is one of OUR uploads (a
+        //    /noticeboard/media?f=<token> URL), stamp the upload row's
+        //    posterID so the cleanup pass below (and future saves) can tell
+        //    "attached" uploads from abandoned ones. No-op for
+        //    externally-hosted URLs / Canva embeds / text-only posters.
+        NoticeboardMedia::linkToPoster($siteId, $savedPosterId, $mediaUrl);
     }
     $up->close();
 
@@ -182,5 +192,12 @@ try {
     App::rollback();
     ApiResponse::error('Could not save noticeboard', 500, $e->getMessage());
 }
+
+// 🗑️ #363 — purge orphaned uploads (poster soft-deleted above, or an upload
+//    staged in the editor then abandoned without ever being saved). Runs
+//    AFTER commit so we never delete a file for a poster whose soft-delete
+//    could still be rolled back, and is fully best-effort — see
+//    NoticeboardMedia::cleanupOrphans()'s own try/catch.
+NoticeboardMedia::cleanupOrphans($siteId);
 
 ApiResponse::success(['saved' => true]);

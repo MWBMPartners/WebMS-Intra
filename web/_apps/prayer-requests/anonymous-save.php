@@ -12,12 +12,13 @@
  *   • RateLimiter::isBlocked() — same IP-based limiter used by login
  *   • Always pending + leadership + isAnonymous=1 (no congregation broadcast)
  *   • Always redirects to a generic success page (no enumeration / abuse signal)
+ *   • Opt-in round-robin auto-assign to a prayer partner (#311, migration 148)
  *
  * @package   Portal\PrayerRequests
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   0.10.0
+ * @version   1.4.0
  * -----------------------------------------------------------------------------
  */
 
@@ -29,6 +30,7 @@ use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Captcha;
 use Portal\Core\Logger;
+use Portal\Core\PrayerChain;
 use Portal\Core\RateLimiter;
 use Portal\Core\Site;
 
@@ -145,6 +147,10 @@ if ($ok === false) {
     Logger::errorPlatform('MySQL', 'Error', 'PR_ANON_INSERT_FAIL', $mysqli->error, '');
 } else {
     Logger::activity('PrayerRequestAnonSubmitted', 'Anonymous request #' . $newId . ' submitted from IP ' . $ip);
+
+    // 🙏 Opt-in round-robin auto-assign (#311, migration 148) — no-op unless
+    // prayer-requests.autoAssign = 'true'; swallows its own failures.
+    PrayerChain::maybeAutoAssign($siteId, $newId);
 }
 
 // ✅ Always show success — even on failure, prevent fingerprinting

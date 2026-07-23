@@ -32,6 +32,7 @@ use Portal\Core\Logger;
 use Portal\Core\Mailer;
 use Portal\Core\MailerGoogle;
 use Portal\Core\Router;
+use Portal\Core\Site;
 
 // 📌 Page metadata
 $pageTitle   = 'Integration Diagnostics';
@@ -222,6 +223,18 @@ $keyFileName   = App::settings('mail.google.serviceAccountKeyFile') ?? '';
 if ($keyFileName !== '') {
     $keyFilePath = PORTAL_ROOT . DIRECTORY_SEPARATOR . '_auth_keys' . DIRECTORY_SEPARATOR . $keyFileName;
     $keyFileExists = is_readable($keyFilePath);
+}
+
+// -- Webhooks (#324) — count configured for the Webhooks card badge --
+$webhookCount = 0;
+$webhookSiteId = Site::id();
+$stmt = $mysqli->prepare('SELECT COUNT(*) AS webhookTotal FROM tblWebhooks WHERE siteID = ?');
+if ($stmt !== false) {
+    $stmt->bind_param('i', $webhookSiteId);
+    $stmt->execute();
+    $webhookRow = $stmt->get_result()->fetch_assoc();
+    $webhookCount = (int) ($webhookRow['webhookTotal'] ?? 0);
+    $stmt->close();
 }
 
 // 📄 Include header
@@ -542,6 +555,30 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 </div>
             </form>
         <?php endif; ?>
+    </div>
+</div>
+
+<!-- ====================================================================== -->
+<!-- 6️⃣ Webhooks — Outbound Event Notifications (#324)                      -->
+<!-- ====================================================================== -->
+<div class="card mb-4">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <h5 class="mb-0"><i class="fa-solid fa-tower-broadcast me-2" aria-hidden="true"></i>Webhooks</h5>
+        <?php if ($webhookCount > 0): ?>
+            <span class="badge bg-success"><i class="fa-solid fa-circle-check me-1" aria-hidden="true"></i><?php echo (int) $webhookCount; ?> configured</span>
+        <?php else: ?>
+            <span class="badge bg-secondary"><i class="fa-solid fa-circle-minus me-1" aria-hidden="true"></i>None configured</span>
+        <?php endif; ?>
+    </div>
+    <div class="card-body">
+        <p class="text-secondary small mb-3">
+            POST a signed JSON payload to an external URL whenever a subscribed portal event fires
+            (e.g. <code>prayer-requests.created</code>, <code>expenses.approved</code>, or <code>all</code>).
+            Create, pause, and delete webhooks — the signing secret is shown once at creation.
+        </p>
+        <a href="/admin/integrations/webhooks" class="btn btn-outline-primary btn-sm">
+            <i class="fa-solid fa-arrow-right me-1" aria-hidden="true"></i>Manage Webhooks
+        </a>
     </div>
 </div>
 

@@ -5,13 +5,16 @@
  * Admin — Audit Trail Viewer
  * -----------------------------------------------------------------------------
  * Displays before/after change history for database records. Admin only.
+ * Gained a `source` (session/apikey) badge + bearer key-prefix lookup in
+ * #323 Phase 2 — LEFT JOINs tblApiKeys on tblAuditTrail.apiKeyID.
  *
  * @package   Portal\Admin
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   0.8.2
+ * @version   0.9.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/91
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/323
  * -----------------------------------------------------------------------------
  */
 
@@ -76,10 +79,16 @@ if ($cntStmt !== false) {
 }
 $totalPages = max(1, (int) ceil($totalItems / $perPage));
 
-// 📋 Fetch audit entries
+// 📋 Fetch audit entries — LEFT JOIN tblApiKeys so a bearer-authenticated row
+//    (a.apiKeyID IS NOT NULL) can show the key's visible prefix (#323 Phase 2).
+//    Deliberately NOT filtered by siteID (keys are never hard-deleted, but a
+//    key can outlive/precede the audit row's own site scoping); the join is
+//    purely cosmetic display, the audit row's own siteID gate is unchanged.
 $entries = [];
-$sql = 'SELECT a.*, u.fullName AS userName FROM tblAuditTrail a '
+$sql = 'SELECT a.*, u.fullName AS userName, k.keyPrefix AS apiKeyPrefix '
+    . 'FROM tblAuditTrail a '
     . 'LEFT JOIN tblUsers u ON u.userID = a.userID '
+    . 'LEFT JOIN tblApiKeys k ON k.keyID = a.apiKeyID '
     . $where . ' ORDER BY a.createdAt DESC LIMIT ? OFFSET ?';
 $allParams = $params;
 $allParams[] = $perPage;
@@ -162,12 +171,18 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <div class="col-2">User</div>
             <div class="col-2">Table</div>
             <div class="col-1">Action</div>
-            <div class="col-5">Changes</div>
+            <div class="col-1">Source</div>
+            <div class="col-4">Changes</div>
         </div>
         <?php foreach ($entries as $entry): ?>
             <?php
             $actionColors = ['create' => 'success', 'update' => 'warning', 'delete' => 'danger'];
             $aColor = $actionColors[$entry['action']] ?? 'secondary';
+            // 🔐 #323 Phase 2 — auth channel the change arrived through. Older
+            //    rows predate the column and fall back to the 'session' default
+            //    baked into tblAuditTrail.source (migration 147).
+            $entrySource = (string) ($entry['source'] ?? 'session');
+            $isApiKey    = $entrySource === 'apikey';
             ?>
             <div class="portal-data-row">
                 <div class="col-2 small">
@@ -185,7 +200,17 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         <?php echo htmlspecialchars(ucfirst($entry['action']), ENT_QUOTES, 'UTF-8'); ?>
                     </span>
                 </div>
-                <div class="col-5 small">
+                <div class="col-1 small">
+                    <?php if ($isApiKey === true): ?>
+                        <span class="badge bg-info text-dark" title="Change made via a bearer API key"><i class="fa-solid fa-key me-1"></i>API key</span>
+                        <?php if (!empty($entry['apiKeyPrefix'])): ?>
+                            <div class="text-muted"><code><?php echo htmlspecialchars((string) $entry['apiKeyPrefix'], ENT_QUOTES, 'UTF-8'); ?>…</code></div>
+                        <?php endif; ?>
+                    <?php else: ?>
+                        <span class="badge bg-secondary" title="Change made via an authenticated portal session"><i class="fa-solid fa-user me-1"></i>Session</span>
+                    <?php endif; ?>
+                </div>
+                <div class="col-4 small">
                     <?php if ($entry['changeSet'] !== null): ?>
                         <?php
                         $changes = json_decode($entry['changeSet'], true);

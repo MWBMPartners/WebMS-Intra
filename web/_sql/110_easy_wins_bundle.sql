@@ -33,19 +33,58 @@
 
 -- 1️⃣ Prayer chain partner assignment ---------------------------------------
 
-ALTER TABLE `tblPrayerRequests`
-    ADD COLUMN IF NOT EXISTS `assignedToUserID` INT DEFAULT NULL
-        COMMENT 'FK → tblUsers — the prayer partner assigned to this request (#311)' AFTER `submitterID`,
-    ADD COLUMN IF NOT EXISTS `assignedAt` DATETIME DEFAULT NULL
-        COMMENT 'When the request was assigned to its current partner' AFTER `assignedToUserID`;
+-- ➕ tblPrayerRequests.assignedToUserID — guarded ADD COLUMN (portable: MySQL 8.0 + MariaDB 10.x)
+SET @col_exists := (
+    SELECT COUNT(*) FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME   = 'tblPrayerRequests'
+      AND COLUMN_NAME  = 'assignedToUserID'
+);
+SET @sql := IF(@col_exists = 0,
+    'ALTER TABLE `tblPrayerRequests` ADD COLUMN `assignedToUserID` INT DEFAULT NULL COMMENT ''FK → tblUsers — the prayer partner assigned to this request (#311)'' AFTER `submitterID`',
+    'SELECT 1'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
-ALTER TABLE `tblPrayerRequests`
-    ADD CONSTRAINT `fk_pr_assigned`
-        FOREIGN KEY (`assignedToUserID`) REFERENCES `tblUsers`(`userID`)
-        ON DELETE SET NULL;
+-- ➕ tblPrayerRequests.assignedAt — guarded ADD COLUMN
+SET @col_exists := (
+    SELECT COUNT(*) FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME   = 'tblPrayerRequests'
+      AND COLUMN_NAME  = 'assignedAt'
+);
+SET @sql := IF(@col_exists = 0,
+    'ALTER TABLE `tblPrayerRequests` ADD COLUMN `assignedAt` DATETIME DEFAULT NULL COMMENT ''When the request was assigned to its current partner'' AFTER `assignedToUserID`',
+    'SELECT 1'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
-CREATE INDEX IF NOT EXISTS `idx_pr_assigned`
-    ON `tblPrayerRequests`(`assignedToUserID`, `status`);
+-- 🔗 fk_pr_assigned — guarded ADD CONSTRAINT (was bare; broke installer full_schema-then-replay on both engines)
+SET @fk_exists := (
+    SELECT COUNT(*) FROM information_schema.TABLE_CONSTRAINTS
+    WHERE CONSTRAINT_SCHEMA = DATABASE()
+      AND TABLE_NAME        = 'tblPrayerRequests'
+      AND CONSTRAINT_NAME   = 'fk_pr_assigned'
+      AND CONSTRAINT_TYPE   = 'FOREIGN KEY'
+);
+SET @sql := IF(@fk_exists = 0,
+    'ALTER TABLE `tblPrayerRequests` ADD CONSTRAINT `fk_pr_assigned` FOREIGN KEY (`assignedToUserID`) REFERENCES `tblUsers`(`userID`) ON DELETE SET NULL',
+    'SELECT 1'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+-- 🔍 idx_pr_assigned — guarded ADD INDEX
+SET @idx_exists := (
+    SELECT COUNT(*) FROM information_schema.STATISTICS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME   = 'tblPrayerRequests'
+      AND INDEX_NAME   = 'idx_pr_assigned'
+);
+SET @sql := IF(@idx_exists = 0,
+    'ALTER TABLE `tblPrayerRequests` ADD INDEX `idx_pr_assigned` (`assignedToUserID`, `status`)',
+    'SELECT 1'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
 INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
     ('account/my-prayer-list', 'account/my-prayer-list.php', 1)
@@ -53,11 +92,31 @@ ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 
 -- 2️⃣ Service-flow live timer -----------------------------------------------
 
-ALTER TABLE `tblServicePlan`
-    ADD COLUMN IF NOT EXISTS `startedAt` DATETIME DEFAULT NULL
-        COMMENT 'When the live runtime was started by an operator (#300)' AFTER `preparedByID`,
-    ADD COLUMN IF NOT EXISTS `closedAt` DATETIME DEFAULT NULL
-        COMMENT 'When the live runtime was closed (the service ended)' AFTER `startedAt`;
+-- ➕ tblServicePlan.startedAt — guarded ADD COLUMN
+SET @col_exists := (
+    SELECT COUNT(*) FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME   = 'tblServicePlan'
+      AND COLUMN_NAME  = 'startedAt'
+);
+SET @sql := IF(@col_exists = 0,
+    'ALTER TABLE `tblServicePlan` ADD COLUMN `startedAt` DATETIME DEFAULT NULL COMMENT ''When the live runtime was started by an operator (#300)'' AFTER `preparedByID`',
+    'SELECT 1'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+-- ➕ tblServicePlan.closedAt — guarded ADD COLUMN
+SET @col_exists := (
+    SELECT COUNT(*) FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME   = 'tblServicePlan'
+      AND COLUMN_NAME  = 'closedAt'
+);
+SET @sql := IF(@col_exists = 0,
+    'ALTER TABLE `tblServicePlan` ADD COLUMN `closedAt` DATETIME DEFAULT NULL COMMENT ''When the live runtime was closed (the service ended)'' AFTER `startedAt`',
+    'SELECT 1'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
 INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
     ('service-plans/live',        'service-plans/live.php',        1),

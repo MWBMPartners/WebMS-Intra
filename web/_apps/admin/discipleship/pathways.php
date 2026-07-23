@@ -152,7 +152,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         <form method="post"
                               action="/admin/discipleship/pathways/delete"
                               class="d-inline"
-                              onsubmit="return confirm('Delete this pathway and ALL its steps? This cannot be undone.');">
+                              data-confirm="Delete this pathway and ALL its steps? This cannot be undone."
+                              data-confirm-destructive="true">
                             <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
                             <input type="hidden" name="pathwayID" value="<?php echo (int) $p['pathwayID']; ?>">
                             <button class="btn btn-sm btn-outline-danger" title="Delete">

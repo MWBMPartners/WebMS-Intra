@@ -17,11 +17,12 @@
 
 declare(strict_types=1);
 
+use Portal\Core\ApiAuth;
 use Portal\Core\ApiResponse;
 use Portal\Core\App;
 use Portal\Core\Site;
 
-ApiResponse::requireAuth();
+ApiAuth::requireRead('documents:read');
 
 $db     = App::db();
 $siteId = Site::id();
@@ -43,7 +44,7 @@ $sql = 'SELECT d.documentID, d.title, d.description, d.filename, d.fileSize, '
      . 'd.mimeType, d.createdAt, d.uploadedByID, '
      . 'c.categoryName, u.fullName AS uploaderName '
      . 'FROM tblDocuments d '
-     . 'LEFT JOIN tblDocumentCategories c ON c.categoryID = d.categoryID '
+     . 'LEFT JOIN tblDocCategories c ON c.categoryID = d.categoryID '
      . 'LEFT JOIN tblUsers u ON u.userID = d.uploadedByID '
      . 'WHERE ' . implode(' AND ', $conditions) . ' '
      . 'ORDER BY d.createdAt DESC LIMIT ? OFFSET ?';

@@ -22,24 +22,122 @@
 
 -- #326 — Public "Submit an Event" submission tracking columns ------------------
 
-ALTER TABLE `tblEvents`
-    ADD COLUMN IF NOT EXISTS `submissionStatus` ENUM('pending','approved','rejected') DEFAULT NULL
-        COMMENT 'NULL = admin-created (legacy); non-NULL = went through public submission moderation (#326)' AFTER `isFeatured`,
-    ADD COLUMN IF NOT EXISTS `submittedByID`   INT          DEFAULT NULL
-        COMMENT 'FK → tblUsers when submitter logged in; NULL for anonymous submissions' AFTER `submissionStatus`,
-    ADD COLUMN IF NOT EXISTS `submitterName`   VARCHAR(120) DEFAULT NULL
-        COMMENT 'Anonymous submitter''s display name' AFTER `submittedByID`,
-    ADD COLUMN IF NOT EXISTS `submitterEmail`  VARCHAR(255) DEFAULT NULL
-        COMMENT 'Anonymous submitter''s contact email (for moderation response)' AFTER `submitterName`,
-    ADD COLUMN IF NOT EXISTS `submittedAt`     DATETIME     DEFAULT NULL
-        COMMENT 'When the submission was created' AFTER `submitterEmail`,
-    ADD COLUMN IF NOT EXISTS `moderatedByID`   INT          DEFAULT NULL
-        COMMENT 'FK → tblUsers — who approved/rejected the submission' AFTER `submittedAt`,
-    ADD COLUMN IF NOT EXISTS `moderatedAt`     DATETIME     DEFAULT NULL AFTER `moderatedByID`,
-    ADD COLUMN IF NOT EXISTS `moderationNote`  TEXT         DEFAULT NULL
-        COMMENT 'Internal note recorded at moderation time' AFTER `moderatedAt`;
+-- ➕ tblEvents.submissionStatus — guarded ADD COLUMN (portable: MySQL 8.0 + MariaDB 10.x)
+SET @col_exists := (
+    SELECT COUNT(*) FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME   = 'tblEvents'
+      AND COLUMN_NAME  = 'submissionStatus'
+);
+SET @sql := IF(@col_exists = 0,
+    'ALTER TABLE `tblEvents` ADD COLUMN `submissionStatus` ENUM(''pending'',''approved'',''rejected'') DEFAULT NULL COMMENT ''NULL = admin-created (legacy); non-NULL = went through public submission moderation (#326)'' AFTER `isFeatured`',
+    'SELECT 1'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
-CREATE INDEX IF NOT EXISTS `idx_event_submission` ON `tblEvents`(`submissionStatus`, `submittedAt`);
+-- ➕ tblEvents.submittedByID — guarded ADD COLUMN
+SET @col_exists := (
+    SELECT COUNT(*) FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME   = 'tblEvents'
+      AND COLUMN_NAME  = 'submittedByID'
+);
+SET @sql := IF(@col_exists = 0,
+    'ALTER TABLE `tblEvents` ADD COLUMN `submittedByID` INT DEFAULT NULL COMMENT ''FK → tblUsers when submitter logged in; NULL for anonymous submissions'' AFTER `submissionStatus`',
+    'SELECT 1'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+-- ➕ tblEvents.submitterName — guarded ADD COLUMN
+SET @col_exists := (
+    SELECT COUNT(*) FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME   = 'tblEvents'
+      AND COLUMN_NAME  = 'submitterName'
+);
+SET @sql := IF(@col_exists = 0,
+    'ALTER TABLE `tblEvents` ADD COLUMN `submitterName` VARCHAR(120) DEFAULT NULL COMMENT ''Anonymous submitter''''s display name'' AFTER `submittedByID`',
+    'SELECT 1'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+-- ➕ tblEvents.submitterEmail — guarded ADD COLUMN
+SET @col_exists := (
+    SELECT COUNT(*) FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME   = 'tblEvents'
+      AND COLUMN_NAME  = 'submitterEmail'
+);
+SET @sql := IF(@col_exists = 0,
+    'ALTER TABLE `tblEvents` ADD COLUMN `submitterEmail` VARCHAR(255) DEFAULT NULL COMMENT ''Anonymous submitter''''s contact email (for moderation response)'' AFTER `submitterName`',
+    'SELECT 1'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+-- ➕ tblEvents.submittedAt — guarded ADD COLUMN
+SET @col_exists := (
+    SELECT COUNT(*) FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME   = 'tblEvents'
+      AND COLUMN_NAME  = 'submittedAt'
+);
+SET @sql := IF(@col_exists = 0,
+    'ALTER TABLE `tblEvents` ADD COLUMN `submittedAt` DATETIME DEFAULT NULL COMMENT ''When the submission was created'' AFTER `submitterEmail`',
+    'SELECT 1'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+-- ➕ tblEvents.moderatedByID — guarded ADD COLUMN
+SET @col_exists := (
+    SELECT COUNT(*) FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME   = 'tblEvents'
+      AND COLUMN_NAME  = 'moderatedByID'
+);
+SET @sql := IF(@col_exists = 0,
+    'ALTER TABLE `tblEvents` ADD COLUMN `moderatedByID` INT DEFAULT NULL COMMENT ''FK → tblUsers — who approved/rejected the submission'' AFTER `submittedAt`',
+    'SELECT 1'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+-- ➕ tblEvents.moderatedAt — guarded ADD COLUMN
+SET @col_exists := (
+    SELECT COUNT(*) FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME   = 'tblEvents'
+      AND COLUMN_NAME  = 'moderatedAt'
+);
+SET @sql := IF(@col_exists = 0,
+    'ALTER TABLE `tblEvents` ADD COLUMN `moderatedAt` DATETIME DEFAULT NULL AFTER `moderatedByID`',
+    'SELECT 1'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+-- ➕ tblEvents.moderationNote — guarded ADD COLUMN
+SET @col_exists := (
+    SELECT COUNT(*) FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME   = 'tblEvents'
+      AND COLUMN_NAME  = 'moderationNote'
+);
+SET @sql := IF(@col_exists = 0,
+    'ALTER TABLE `tblEvents` ADD COLUMN `moderationNote` TEXT DEFAULT NULL COMMENT ''Internal note recorded at moderation time'' AFTER `moderatedAt`',
+    'SELECT 1'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+-- 🔍 idx_event_submission — guarded ADD INDEX
+SET @idx_exists := (
+    SELECT COUNT(*) FROM information_schema.STATISTICS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME   = 'tblEvents'
+      AND INDEX_NAME   = 'idx_event_submission'
+);
+SET @sql := IF(@idx_exists = 0,
+    'ALTER TABLE `tblEvents` ADD INDEX `idx_event_submission` (`submissionStatus`, `submittedAt`)',
+    'SELECT 1'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
 INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
     ('calendar/submit',                  'calendar/submit.php',           0),
@@ -69,37 +167,128 @@ ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 
 -- #334 — Guest +N + waitlist on RSVPs ----------------------------------------
 
-ALTER TABLE `tblEventRSVPs`
-    ADD COLUMN IF NOT EXISTS `guestCount` INT NOT NULL DEFAULT 0
-        COMMENT 'Number of +N guests in addition to the responder (#334)' AFTER `response`,
-    ADD COLUMN IF NOT EXISTS `status` ENUM('confirmed','waitlist','cancelled') NOT NULL DEFAULT 'confirmed'
-        COMMENT '#334 waitlist support — confirmed = within capacity; waitlist = beyond capacity' AFTER `guestCount`,
-    ADD COLUMN IF NOT EXISTS `waitlistedAt` DATETIME DEFAULT NULL
-        COMMENT 'Stamped when moved to waitlist (auto-promote chronological)' AFTER `status`;
+-- ➕ tblEventRSVPs.guestCount — guarded ADD COLUMN
+SET @col_exists := (
+    SELECT COUNT(*) FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME   = 'tblEventRSVPs'
+      AND COLUMN_NAME  = 'guestCount'
+);
+SET @sql := IF(@col_exists = 0,
+    'ALTER TABLE `tblEventRSVPs` ADD COLUMN `guestCount` INT NOT NULL DEFAULT 0 COMMENT ''Number of +N guests in addition to the responder (#334)'' AFTER `response`',
+    'SELECT 1'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
-CREATE INDEX IF NOT EXISTS `idx_event_rsvp_status` ON `tblEventRSVPs`(`eventID`, `status`, `createdAt`);
+-- ➕ tblEventRSVPs.status — guarded ADD COLUMN
+SET @col_exists := (
+    SELECT COUNT(*) FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME   = 'tblEventRSVPs'
+      AND COLUMN_NAME  = 'status'
+);
+SET @sql := IF(@col_exists = 0,
+    'ALTER TABLE `tblEventRSVPs` ADD COLUMN `status` ENUM(''confirmed'',''waitlist'',''cancelled'') NOT NULL DEFAULT ''confirmed'' COMMENT ''#334 waitlist support — confirmed = within capacity; waitlist = beyond capacity'' AFTER `guestCount`',
+    'SELECT 1'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+-- ➕ tblEventRSVPs.waitlistedAt — guarded ADD COLUMN
+SET @col_exists := (
+    SELECT COUNT(*) FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME   = 'tblEventRSVPs'
+      AND COLUMN_NAME  = 'waitlistedAt'
+);
+SET @sql := IF(@col_exists = 0,
+    'ALTER TABLE `tblEventRSVPs` ADD COLUMN `waitlistedAt` DATETIME DEFAULT NULL COMMENT ''Stamped when moved to waitlist (auto-promote chronological)'' AFTER `status`',
+    'SELECT 1'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+-- 🔍 idx_event_rsvp_status — guarded ADD INDEX
+SET @idx_exists := (
+    SELECT COUNT(*) FROM information_schema.STATISTICS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME   = 'tblEventRSVPs'
+      AND INDEX_NAME   = 'idx_event_rsvp_status'
+);
+SET @sql := IF(@idx_exists = 0,
+    'ALTER TABLE `tblEventRSVPs` ADD INDEX `idx_event_rsvp_status` (`eventID`, `status`, `createdAt`)',
+    'SELECT 1'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
 -- #337 — Cancellation/postponement audit columns ------------------------------
 -- (status ENUM already has 'cancelled' and 'postponed' values — see migration 008.)
 
-ALTER TABLE `tblEvents`
-    ADD COLUMN IF NOT EXISTS `cancelReason`   TEXT     DEFAULT NULL
-        COMMENT 'Reason shown on the cancellation banner (#337)' AFTER `isFeatured`,
-    ADD COLUMN IF NOT EXISTS `statusChangedByID` INT  DEFAULT NULL
-        COMMENT 'FK → tblUsers — who last flipped status' AFTER `cancelReason`,
-    ADD COLUMN IF NOT EXISTS `statusChangedAt`   DATETIME DEFAULT NULL
-        COMMENT 'When the current status was set' AFTER `statusChangedByID`;
+-- ➕ tblEvents.cancelReason — guarded ADD COLUMN
+SET @col_exists := (
+    SELECT COUNT(*) FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME   = 'tblEvents'
+      AND COLUMN_NAME  = 'cancelReason'
+);
+SET @sql := IF(@col_exists = 0,
+    'ALTER TABLE `tblEvents` ADD COLUMN `cancelReason` TEXT DEFAULT NULL COMMENT ''Reason shown on the cancellation banner (#337)'' AFTER `isFeatured`',
+    'SELECT 1'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+-- ➕ tblEvents.statusChangedByID — guarded ADD COLUMN
+SET @col_exists := (
+    SELECT COUNT(*) FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME   = 'tblEvents'
+      AND COLUMN_NAME  = 'statusChangedByID'
+);
+SET @sql := IF(@col_exists = 0,
+    'ALTER TABLE `tblEvents` ADD COLUMN `statusChangedByID` INT DEFAULT NULL COMMENT ''FK → tblUsers — who last flipped status'' AFTER `cancelReason`',
+    'SELECT 1'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+-- ➕ tblEvents.statusChangedAt — guarded ADD COLUMN
+SET @col_exists := (
+    SELECT COUNT(*) FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME   = 'tblEvents'
+      AND COLUMN_NAME  = 'statusChangedAt'
+);
+SET @sql := IF(@col_exists = 0,
+    'ALTER TABLE `tblEvents` ADD COLUMN `statusChangedAt` DATETIME DEFAULT NULL COMMENT ''When the current status was set'' AFTER `statusChangedByID`',
+    'SELECT 1'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
 -- #339 — Per-site unique event slug ------------------------------------------
 -- Replace the global uq_event_slug with a per-site composite. We add the new
 -- index first to avoid a window where slugs are non-unique on busy installs.
--- DROP INDEX has no IF EXISTS in MySQL, so we DROP defensively via a
--- procedure block isn't worth it here; a missing index error on re-run is
--- recoverable. The migrator continues on, and re-runs are idempotent because
--- the second CREATE INDEX IF NOT EXISTS is a no-op.
 
-CREATE UNIQUE INDEX IF NOT EXISTS `uq_event_site_slug` ON `tblEvents`(`siteID`, `eventSlug`);
+-- 🔍 uq_event_site_slug — guarded ADD UNIQUE KEY
+SET @idx_exists := (
+    SELECT COUNT(*) FROM information_schema.STATISTICS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME   = 'tblEvents'
+      AND INDEX_NAME   = 'uq_event_site_slug'
+);
+SET @sql := IF(@idx_exists = 0,
+    'ALTER TABLE `tblEvents` ADD UNIQUE KEY `uq_event_site_slug` (`siteID`, `eventSlug`)',
+    'SELECT 1'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
--- On a fresh install full_schema.sql still creates the global unique key.
--- Drop it here. If the migration is re-run, the DROP errors out non-fatally.
-ALTER TABLE `tblEvents` DROP INDEX `uq_event_slug`;
+-- On pre-#339 databases the global unique key still exists; drop it only if
+-- present so re-runs (and post-fix fresh installs, where full_schema.sql now
+-- creates uq_event_site_slug directly) are clean no-ops.
+SET @idx_exists := (
+    SELECT COUNT(*) FROM information_schema.STATISTICS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'tblEvents'
+      AND INDEX_NAME = 'uq_event_slug'
+);
+SET @sql := IF(@idx_exists > 0,
+    'ALTER TABLE `tblEvents` DROP INDEX `uq_event_slug`',
+    'SELECT 1'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;

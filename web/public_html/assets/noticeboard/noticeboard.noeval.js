@@ -2047,9 +2047,9 @@ class Component extends DCLogic {
     e.target.value = '';
     const host = this.host();
     // Shared deployment: push the file to the server, store only its URL.
-    if (host && typeof host.uploadFile === 'function') {
+    if (host && typeof host.upload === 'function') {
       this.setState(s => ({ form:{ ...s.form, uploading:true } }));
-      Promise.resolve(host.uploadFile(f)).then((url) => {
+      Promise.resolve(host.upload(f)).then((url) => {
         this.setState(s => ({ form:{ ...s.form, image:url, mediaType: isVid ? 'video' : 'image', uploaded:true, uploading:false } }));
       }).catch((err) => {
         this.setState(s => ({ form:{ ...s.form, uploading:false } }));
