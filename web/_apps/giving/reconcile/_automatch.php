@@ -191,7 +191,13 @@ function giving_reconcile_automatch(\mysqli $db, int $siteId, int $importId, int
         // unmatched (does NOT fall through to the entry pass).
         $sessCandidates = [];
         foreach (($sessByAmount[$amountPence] ?? []) as $idx => $s) {
-            if (isset($consumedSessions[$idx]) === true) {
+            // 🔑 The consumed-set is keyed by the globally-unique
+            //    countSessionID, NOT the per-amount bucket index $idx — $idx
+            //    restarts at 0 in every amount bucket, so keying on it would
+            //    let one consumed session cross-block a DIFFERENT session that
+            //    happens to share its bucket position under another amount
+            //    (spurious false-negative matches).
+            if (isset($consumedSessions[(int) $s['countSessionID']]) === true) {
                 continue;
             }
             if ($s['serviceDate'] >= $windowFrom && $s['serviceDate'] <= $txnDate) {
@@ -200,8 +206,8 @@ function giving_reconcile_automatch(\mysqli $db, int $siteId, int $importId, int
         }
         if (count($sessCandidates) === 1) {
             $idx = $sessCandidates[0];
-            $consumedSessions[$idx] = true;
-            $countSessionId = $sessByAmount[$amountPence][$idx]['countSessionID'];
+            $countSessionId = (int) $sessByAmount[$amountPence][$idx]['countSessionID'];
+            $consumedSessions[$countSessionId] = true;
             $nullEntry = null;
             $matchStmt->bind_param('iiiii', $countSessionId, $nullEntry, $userId, $txnId, $siteId);
             $matchStmt->execute();
@@ -219,7 +225,9 @@ function giving_reconcile_automatch(\mysqli $db, int $siteId, int $importId, int
         // entry matches; 0 or 2+ leaves the txn unmatched.
         $entCandidates = [];
         foreach (($entByAmount[$amountPence] ?? []) as $idx => $e) {
-            if (isset($consumedEntries[$idx]) === true) {
+            // 🔑 Keyed by the globally-unique entryID, not the per-amount
+            //    bucket index $idx (same cross-block hazard as sessions above).
+            if (isset($consumedEntries[(int) $e['entryID']]) === true) {
                 continue;
             }
             if ($e['donatedAt'] >= $windowFrom && $e['donatedAt'] <= $txnDate) {
@@ -228,8 +236,8 @@ function giving_reconcile_automatch(\mysqli $db, int $siteId, int $importId, int
         }
         if (count($entCandidates) === 1) {
             $idx = $entCandidates[0];
-            $consumedEntries[$idx] = true;
-            $entryId = $entByAmount[$amountPence][$idx]['entryID'];
+            $entryId = (int) $entByAmount[$amountPence][$idx]['entryID'];
+            $consumedEntries[$entryId] = true;
             $nullSession = null;
             $matchStmt->bind_param('iiiii', $nullSession, $entryId, $userId, $txnId, $siteId);
             $matchStmt->execute();
