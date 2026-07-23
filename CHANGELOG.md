@@ -2,6 +2,38 @@
 
 
 ## [1.4.0] - 2026-07-22 (alpha)
+- feat(giving): #299 bank reconciliation (sub-feature 3 of the "Giving
+  polish" issue — offering counting and pledge campaigns shipped as
+  sub-features 1/2, above; account-updater for recurring giving remains not
+  started). New `tblBankImports` (one row per uploaded statement CSV batch)
+  and `tblBankTxns` (one row per imported CREDIT line + its match state,
+  migration 152) — debits are never stored, and `matchedCount` is
+  deliberately NOT a stored column (it mutates on every match/unmatch and is
+  derived with one aggregate join). CSV import (`/giving/reconcile/import`)
+  parses bank statement columns by HEADER NAME, never position, against a
+  UK-bank alias table (Lloyds/HSBC/Barclays/Monzo/Starling-style headers);
+  when auto-mapping can't resolve every required column a manual mapping
+  screen lets the treasurer pick columns explicitly before previewing.
+  SHA-256 file-hash + `UNIQUE(siteID, fileHash)` blocks re-importing the same
+  statement twice. A non-empty credit that fails amount/date parsing fails
+  the WHOLE upload (nothing partial is ever stored) — only genuine
+  debit/zero/blank lines are silently skipped. Matching is exact-amount and
+  window-based (a gift can appear in the bank on or after its date, within
+  `giving.reconcile.toleranceDays`, default 5) with a dual candidate universe:
+  `matchedEntryID` for a 1:1 match to a single `tblGivingEntry` row, or
+  `matchedCountSessionID` for a whole offering-count deposit (which
+  `giving/count/close.php` writes as multiple gift-log rows sharing a
+  `Count #<id>` reference — excluded from entry-matching to avoid double-
+  counting against its deposit). Two or more equal-amount in-window
+  candidates is always left unmatched — the matcher never guesses. New
+  `/giving/reconcile` (imports dashboard), `/giving/reconcile/view` (per-
+  statement matched/unmatched/ignored lists with inline match-suggestion
+  mini-forms, plus a two-way "gift log not in this statement" gap panel with
+  in-transit-vs-missing badges), and `/giving/reconcile/match` (manual
+  match/unmatch/ignore/rematch/delete-import actions) — all gated by
+  `Portal\Core\Giving::canManage()`. "Count"/"Reconcile" nav buttons added to
+  `giving/manage.php` (the offering-count feature, shipped as sub-feature 1,
+  previously had no page linking to it anywhere).
 - feat(giving): #299 pledge campaigns (sub-feature 2 of the "Giving polish"
   issue — offering counting shipped as sub-feature 1, above; bank
   reconciliation and account-updater remain not started). New

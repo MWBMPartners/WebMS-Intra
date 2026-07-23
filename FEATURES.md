@@ -479,7 +479,7 @@ When these merge, the 🛠️ markers above flip to ✅ without further edits to
 | #106 | Enforce signed commits |
 | #105 | Prod secrets behind GitHub Environment + reviewer gate |
 | #107 | SFTP `--delete` operational documentation — mostly done (dry-run + docs shipped via PR #134); residual: server-side deletion-log/audit monitor |
-| #299 | Giving polish — bank statement CSV reconciliation, account-updater webhook for recurring giving (sub-feature 1, two-person offering count, and sub-feature 2, pledge campaigns, both shipped — see "Giving" section above) |
+| #299 | Giving polish — account-updater webhook for recurring giving (sub-features 1-3 — two-person offering count, pledge campaigns, bank reconciliation — all shipped, see "Giving" section above) |
 
 ---
 
@@ -585,6 +585,20 @@ account-updater webhook remain the two not-started #299 sub-features.
 | `Giving::pledgeExpectedToDate()` — on-schedule progress math; one-off owes in full immediately, weekly/monthly owe their first instalment from the pledge's start, monthly uses calendar-month arithmetic | #299 | 151 | ✅ |
 | UI: `/giving/campaigns` (card grid + thermometers + canManage new-campaign form), `/giving/campaign` (detail: thermometer, stats, member pledge/cancel form, canManage pledger list + attributed gifts + edit form) | #299 | 151 | ✅ |
 | `Projects.php`/`Payments.php` online/project-pledge giving deliberately NOT auto-attributed (rows leave the columns NULL) — documented follow-up | #299 | 151 | 🔜 (follow-up) |
+
+---
+
+### Giving — bank reconciliation (#299 sub-feature 3, 2026-07-22)
+
+Extension to the existing `giving` app (#266). Only the account-updater
+webhook for recurring giving remains a not-started #299 sub-feature.
+
+| Item | Issue | Migration | Status |
+|---|---|---|---|
+| `tblBankImports` + `tblBankTxns` — one row per uploaded statement CSV batch, one row per imported CREDIT line (debits never stored); `matchedCount` deliberately not a stored column (derived via aggregate join) | #299 | 152 | ✅ |
+| CSV import (`/giving/reconcile/import`) — header-NAME column mapping (never positional) against a UK-bank alias table, with a manual mapping screen when auto-detection can't resolve every required column; SHA-256 `fileHash` + `UNIQUE(siteID, fileHash)` blocks duplicate imports; a non-empty credit that fails amount/date parsing fails the WHOLE upload (no partial imports) | #299 | 152 | ✅ |
+| Matching — exact-amount, window-based (`giving.reconcile.toleranceDays`, default 5 days) with two nullable FKs on `tblBankTxns`: `matchedEntryID` (1:1 gift match) or `matchedCountSessionID` (whole offering-count deposit); 2+ equal-amount in-window candidates is always left unmatched, never guessed; count-close's gift-log rows (`reference LIKE 'Count #%'`) excluded from entry-matching to avoid double-counting against their deposit | #299 | 152 | ✅ |
+| UI: `/giving/reconcile` (imports dashboard + site-wide unmatched summary), `/giving/reconcile/view` (matched/unmatched/ignored lists, inline match-suggestion mini-forms, two-way "gift log not in this statement" gap panel with in-transit-vs-missing badges), `/giving/reconcile/match` (manual match/unmatch/ignore/rematch/delete-import) — gated by `Portal\Core\Giving::canManage()`; "Count"/"Reconcile" nav buttons added to `giving/manage.php` | #299 | 152 | ✅ |
 
 ---
 

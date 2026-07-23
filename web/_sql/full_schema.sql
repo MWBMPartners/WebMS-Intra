@@ -13,7 +13,7 @@
 -- present in web/_sql/ are marked as executed in tblMigrations so the
 -- web-based Migrator won't re-run them.
 --
--- Covers migrations: 000-151 (DDL + settings/routes seeds + tblMigrations
+-- Covers migrations: 000-152 (DDL + settings/routes seeds + tblMigrations
 -- marks). When you add a new migration, port its DDL/seeds into the
 -- appropriate section here AND add its filename to the seed block at the
 -- end of this file. CI enforces this via
@@ -4932,6 +4932,24 @@ ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 
 
 -- =============================================================================
+-- Migration 152: Giving — bank reconciliation (#299 sub-feature 3)
+-- =============================================================================
+-- tblBankImports / tblBankTxns CREATEs are ported inline above (banner
+-- "-- ── from 152_bank_reconciliation.sql (#299 sub-feature 3) ──").
+
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('giving/reconcile',        'giving/reconcile/index.php',  1),
+    ('giving/reconcile/import', 'giving/reconcile/import.php', 1),
+    ('giving/reconcile/view',   'giving/reconcile/view.php',   1),
+    ('giving/reconcile/match',  'giving/reconcile/match.php',  1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'giving.reconcile.toleranceDays', '5', '5', 0)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
+
+-- =============================================================================
 -- Tables added in numbered migrations 105+ — appended for fresh-install parity.
 -- Maintained automatically; do NOT hand-edit duplicates. See the same
 -- definitions in web/_sql/{105..144}_*.sql for the source of truth + comments.
@@ -5740,6 +5758,60 @@ CREATE TABLE IF NOT EXISTS `tblCountEnvelopes` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
 COMMENT='Named giving-envelope breakdown for a count session (#299 sub-feature 1)';
 
+-- ── from 152_bank_reconciliation.sql (#299 sub-feature 3) ──────────────────
+-- Bank statement CSV import + credit-line reconciliation. Placed here (after
+-- tblGivingEntry ~L3849 and tblCountSessions above) because tblBankTxns'
+-- FKs target both of them, and full_schema.sql executes top-down via
+-- multi_query — a forward FK reference would break a fresh install.
+
+CREATE TABLE IF NOT EXISTS `tblBankImports` (
+    `importID`     INT          NOT NULL AUTO_INCREMENT,
+    `siteID`       INT          NOT NULL DEFAULT 1,
+    `filename`     VARCHAR(255) NOT NULL COMMENT 'Original client filename (basename only, display)',
+    `bankKey`      VARCHAR(20)  NOT NULL DEFAULT 'generic' COMMENT 'Detected/chosen preset: lloyds|hsbc|barclays|monzo|starling|generic',
+    `currency`     CHAR(3)      NOT NULL DEFAULT 'GBP' COMMENT 'From giving.currency at import time; matching is currency-scoped',
+    `fileHash`     CHAR(64)     NOT NULL COMMENT 'SHA-256 of raw upload bytes — duplicate-import guard',
+    `rowCount`     INT          NOT NULL DEFAULT 0 COMMENT 'Credit lines imported (immutable parse snapshot)',
+    `skippedCount` INT          NOT NULL DEFAULT 0 COMMENT 'Debit/zero/blank lines skipped (immutable parse snapshot)',
+    `importedByID` INT          DEFAULT NULL,
+    `importedAt`   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`importID`),
+    UNIQUE KEY `uq_bi_site_hash` (`siteID`, `fileHash`),
+    KEY `idx_bi_site` (`siteID`),
+    CONSTRAINT `fk_bi_site`     FOREIGN KEY (`siteID`)       REFERENCES `tblSites`(`siteID`),
+    CONSTRAINT `fk_bi_importer` FOREIGN KEY (`importedByID`) REFERENCES `tblUsers`(`userID`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+COMMENT='Bank statement CSV import batches (#299 sub-feature 3)';
+
+CREATE TABLE IF NOT EXISTS `tblBankTxns` (
+    `txnID`                 INT          NOT NULL AUTO_INCREMENT,
+    `importID`              INT          NOT NULL,
+    `siteID`                INT          NOT NULL DEFAULT 1,
+    `txnDate`               DATE         NOT NULL,
+    `amountPence`           INT          NOT NULL COMMENT 'Integer minor units, always > 0 (credits only) — house pence convention (#266)',
+    `description`           VARCHAR(255) NOT NULL DEFAULT '',
+    `reference`             VARCHAR(100) DEFAULT NULL,
+    `matchStatus`           ENUM('unmatched','matched','ignored') NOT NULL DEFAULT 'unmatched',
+    `matchedEntryID`        INT          DEFAULT NULL COMMENT '1:1 match to a single tblGivingEntry row; mutually exclusive with matchedCountSessionID',
+    `matchedCountSessionID` INT          DEFAULT NULL COMMENT 'Deposit match — this credit is a closed offering-count deposit (multiple gift rows)',
+    `matchNote`             VARCHAR(255) DEFAULT NULL COMMENT 'Treasurer note, mainly for ignored lines',
+    `matchedByID`           INT          DEFAULT NULL,
+    `matchedAt`             DATETIME     DEFAULT NULL,
+    `createdAt`             DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`txnID`),
+    KEY `idx_bt_import`      (`importID`),
+    KEY `idx_bt_site_status` (`siteID`, `matchStatus`),
+    KEY `idx_bt_site_date`   (`siteID`, `txnDate`),
+    KEY `idx_bt_entry`       (`matchedEntryID`),
+    KEY `idx_bt_csession`    (`matchedCountSessionID`),
+    CONSTRAINT `fk_bt_import`   FOREIGN KEY (`importID`)              REFERENCES `tblBankImports`(`importID`)     ON DELETE CASCADE,
+    CONSTRAINT `fk_bt_site`     FOREIGN KEY (`siteID`)                REFERENCES `tblSites`(`siteID`),
+    CONSTRAINT `fk_bt_entry`    FOREIGN KEY (`matchedEntryID`)        REFERENCES `tblGivingEntry`(`entryID`)      ON DELETE SET NULL,
+    CONSTRAINT `fk_bt_csession` FOREIGN KEY (`matchedCountSessionID`) REFERENCES `tblCountSessions`(`countSessionID`) ON DELETE SET NULL,
+    CONSTRAINT `fk_bt_matcher`  FOREIGN KEY (`matchedByID`)           REFERENCES `tblUsers`(`userID`)             ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+COMMENT='Imported bank statement credit lines + match state (#299 sub-feature 3)';
+
 
 -- #############################################################################
 -- SECTION 7B: MARK MIGRATIONS 082-083 + 090-145 AS EXECUTED (#364 / #194)
@@ -5937,4 +6009,7 @@ INSERT INTO `tblMigrations` (`filename`) VALUES ('150_offering_count_sessions.sq
 ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
 INSERT INTO `tblMigrations` (`filename`) VALUES ('151_giving_pledge_campaigns.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('152_bank_reconciliation.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;

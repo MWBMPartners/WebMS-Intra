@@ -115,6 +115,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <h1 class="mb-0"><i class="fa-solid fa-hand-holding-dollar me-2"></i>Manage Giving</h1>
     <div class="d-flex gap-2">
         <a href="/giving/campaigns" class="btn btn-outline-secondary btn-sm">Campaigns</a>
+        <a href="/giving/count" class="btn btn-outline-secondary btn-sm">Count</a>
+        <a href="/giving/reconcile" class="btn btn-outline-secondary btn-sm">Reconcile</a>
         <a href="/giving/categories" class="btn btn-outline-secondary btn-sm">Categories</a>
         <a href="/giving/reports" class="btn btn-outline-secondary btn-sm">Reports</a>
         <a href="/giving/hmrc-export?from=<?php echo urlencode($from); ?>&to=<?php echo urlencode($to); ?>" class="btn btn-outline-warning btn-sm"><i class="fa-solid fa-file-csv me-1"></i>HMRC CSV</a>
