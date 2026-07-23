@@ -2063,4 +2063,101 @@ DECIMAL columns on `tblCountSessions`/`tblCountEnvelopes`, not pence.
 
 ---
 
+## Discipleship Pathway Tracker Phase 2 (#303 Phase 2)
+
+Extension to Phase 1 (migration 142 — `tblPathways`/`tblPathwaySteps`,
+admin CRUD only, app hidden behind `discipleship.enabled = 'false'`).
+Phase 2 adds per-user enrolment/progress, auto-completion, member-facing
+routes, and a pastor roster. New core helper: `Portal\Core\Discipleship`.
+
+### Adopted scoping decisions (issue #303 blocker comment, 2026-06-21)
+
+1. **Auto-completion sources — option (a), per-user tables only.**
+   `tblEventAttendance` (rows with `userID IS NOT NULL` — walk-ins are
+   excluded automatically by the sweep's `ea.userID = e.userID` join) and
+   `tblEventRSVPs`. `tblSalvationCards` has no `userID` and
+   `tblDecisionMoments` is an aggregate counter with no per-user rows —
+   both are structurally incompatible with a per-user completion model,
+   not merely deprioritised; revisit if/when either table grows a
+   per-user identity column.
+2. **Pastor surface stays a flat roster list.** One `portal-data-list` row
+   per enrolled member (progress bar, n/m required steps, last
+   completion), with drill-down to a per-member step list. A
+   members×steps matrix was explicitly rejected — it's the house
+   `<table>` ban plus the issue's own recorded decision.
+3. **Mentor relationships deferred.** No `tblPathwayMentor` schema, no UI,
+   in this phase.
+
+### The revoke-vs-delete unmark semantic
+
+`tblPathwayProgress` has `UNIQUE(stepID, userID)` — at most one progress
+row can ever exist per (step, member) pair, for the lifetime of that step.
+Unmarking a step (admin action, or a member's own auto-completed step
+being corrected) sets `revokedAt`/`revokedByID` on that SAME row; it is
+**never** `DELETE`d. "Complete" everywhere in the app — `progressFor()`,
+`rosterStats()`, `refreshEnrolmentStatuses()`, the member/admin views —
+means `revokedAt IS NULL`.
+
+This is deliberate, not an oversight: `Discipleship::autoSweep()` writes
+via `INSERT IGNORE`, relying on the unique key to make repeat sweeps a
+no-op. If unmarking deleted the row, the very next sweep (lazy, on the
+next page view) would see no conflicting key, re-insert the row from the
+still-existing attendance/RSVP evidence, and silently resurrect a step a
+coordinator deliberately corrected. Keeping the (now-revoked) row means
+its unique key permanently blocks that re-insertion — the only way to
+"undo an unmark" is the admin explicitly re-marking it complete again
+(`progress-mark.php`'s `complete` action, which clears `revokedAt`/
+`revokedByID` on the SAME row rather than inserting a new one).
+
+One consequence worth knowing: a step revoked once can only ever be
+un-revoked by a human action (manual re-mark). It will never silently
+flip back to complete on its own, even if the auto-evidence that
+originally satisfied it still exists — this is the intended trade-off
+(coordinator correction wins over automation), documented here so it
+isn't mistaken for a bug during support triage.
+
+### Lazy-sweep design (no scheduler dependency)
+
+`Discipleship::autoSweep(int $siteId, ?int $pathwayId = null)` is pure
+set-based SQL (three `INSERT IGNORE … SELECT` statements, one per
+`autoRule` value, each joining active pathways × active enrolments × the
+matching evidence table) — cheap enough to run synchronously on every
+page load rather than needing a background job. It is invoked at the top
+of:
+
+- `discipleship/index.php` (member "My pathways") — scoped to the site.
+- `discipleship/view.php` (member pathway detail) — scoped to the pathway.
+- `admin/discipleship/progress-pathway.php` (pastor roster) — scoped to
+  the pathway.
+
+Because every rule's `INSERT IGNORE` is idempotent via
+`UNIQUE(stepID, userID)`, calling `autoSweep()` on every page view never
+duplicates work — a repeat call over already-swept data inserts zero new
+rows. `cron/discipleship-sweep.php` exists purely so a site with low
+member traffic on discipleship pages still gets fresh auto-completions
+(e.g. overnight) — it is a convenience, never a correctness dependency.
+
+### Cron token setup
+
+Same pattern as `reminders.cron_token` (migration 122): the endpoint reads
+`?key=<value>`, compares it to `Settings::get('discipleship.cron_token', '')`
+via `hash_equals()`, and 403s whenever the stored token is the empty
+string — so the cron endpoint is inert until an admin explicitly sets a
+non-empty `discipleship.cron_token` value (via `/admin/settings`; the
+setting is seeded `isSensitive = 1`, so it's encrypted at rest like other
+secrets). Point an external scheduler (e.g. DreamHost's cron, or a
+third-party uptime-ping-style scheduler) at:
+
+```
+https://<your-portal-host>/cron/discipleship-sweep?key=<your-token>
+```
+
+The route (`cron/discipleship-sweep`, migration 153) is seeded
+`isProtected = 0` — it is public but token-gated, exactly like
+`cron/event-reminders`. It loops every distinct `siteID` that owns at
+least one active pathway and runs one site-wide `autoSweep()` per site,
+returning a plain-text `OK {"sitesSwept":N,"inserted":{...}}` summary.
+
+---
+
 Last updated: July 2026

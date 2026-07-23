@@ -2,6 +2,46 @@
 
 
 ## [1.4.0] - 2026-07-22 (alpha)
+- feat(discipleship): #303 Phase 2 — per-user progress + auto-completion.
+  Two new tables (migration 153): `tblPathwayEnrolments` (who is assigned to
+  which pathway; `status` active/completed/withdrawn) and
+  `tblPathwayProgress` (one row per step per member; UNIQUE(stepID, userID)
+  — unmarking a step sets `revokedAt` rather than deleting the row, so the
+  auto-sweep never resurrects a step a coordinator deliberately unmarked).
+  Two guarded new columns on the existing `tblPathwaySteps`
+  (`autoRule`/`autoRefID`) let a step opt into auto-completion from
+  per-user evidence only (adopted issue #303 blocker decision, option (a)):
+  attended a specific event, attended any event in a category, or RSVP'd
+  "going" to an event that has since started — `tblSalvationCards` (no
+  userID) and `tblDecisionMoments` (aggregate counter) are structurally
+  excluded, revisit later. New `Portal\Core\Discipleship` helper —
+  `autoSweep()` runs three set-based `INSERT IGNORE … SELECT` statements
+  (idempotent via the unique key) then calls `refreshEnrolmentStatuses()`,
+  which flips an enrolment to `completed` once every non-optional step has
+  an unrevoked progress row (and reverts it to `active` if one is later
+  revoked). No scheduler dependency — the sweep runs lazily at the top of
+  every discipleship page view; an optional `cron/discipleship-sweep.php`
+  endpoint (token-gated like `reminders.cron_token`) adds freshness without
+  page views. New member-facing routes fix the Phase 1 dead dashboard link
+  (`discipleship.enabled` had no `discipleship` route seeded): `/discipleship`
+  ("My pathways" with progress bars) and `/discipleship/view` (step list,
+  auto/manual source badges) — every query scoped to `Site::id()` AND
+  `$_SESSION['user_id']`, so a member can never see another member's
+  progress even via a tampered `?id=`. New admin/pastor surface:
+  `/admin/discipleship/progress` (pathway list with enrolment counts),
+  `/admin/discipleship/progress/pathway` (roster — a flat `portal-data-list`
+  of enrolled members with progress bars, never a members×steps `<table>`
+  matrix, per the house `<table>` ban and issue #303's own decision 2;
+  includes the enrol form and withdraw button), `/admin/discipleship/progress/member`
+  (per-member step list with mark-complete/unmark + notes, showing
+  auto-evidence and revocation state). Existing `pathway-form.php` /
+  `step-save.php` extended with the `autoRule` select + a site-scoped
+  event/category ref picker; `step-save.php` validates the ref resolves at
+  THIS site before saving, and a stale ref (event/category later deleted —
+  deliberately no FK on `autoRefID`) renders a "(missing)" warning.
+  Registered the two new per-user tables in `GdprEraser`'s hard-delete
+  catalogue. Mentor relationships remain deferred to a later phase (issue
+  #303's third blocker decision).
 - feat(giving): #299 bank reconciliation (sub-feature 3 of the "Giving
   polish" issue — offering counting and pledge campaigns shipped as
   sub-features 1/2, above; account-updater for recurring giving remains not

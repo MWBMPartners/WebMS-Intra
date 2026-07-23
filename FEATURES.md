@@ -15,7 +15,7 @@
 >
 > **Snapshot:** 2026-06-21 · **Version on `main`:** 1.2.1
 >
-> **Phase 1 ships sitting on PR #358 — Discipleship Pathway Tracker (#303) + COP Live Chat (#313).** The latter shipped with structural reworks the adversarial review caught (file relocation to ApiRouter's 3-segment convention; CSRF dropped on public /send replaced with sessionToken-exists guard; first-message-only captcha; rate-limit fail-CLOSED).
+> **Phase 1 ships sitting on PR #358 — Discipleship Pathway Tracker (#303) + COP Live Chat (#313).** The latter shipped with structural reworks the adversarial review caught (file relocation to ApiRouter's 3-segment convention; CSRF dropped on public /send replaced with sessionToken-exists guard; first-message-only captcha; rate-limit fail-CLOSED). **Discipleship Phase 2 (per-user progress + auto-completion, migration 153) has since landed** — see the dedicated section near the end of this document.
 >
 > **Already merged to main since the prior snapshot:** PR #355 worship engine (#308 full v1: schema + CRUD + live operator + projector + state polling + SortableJS drag-reorder + song verse auto-split + CCLI usage log + brand asset folder move to /brandkit/assets/). PR #356 Plus Jakarta Sans modular embed (self-hosted, single-source-of-truth via Asset::brandFontsCss + --portal-font-family — one-line swap for future brand-font changes). PR #357 #317 Virtual Host Console Phase 1 + #323 API key infrastructure Phase 1 (`Portal\Core\HostConsole` + `Portal\Core\ApiKey` + `ApiResponse::requireApiKey($scopes)`).
 >
@@ -599,6 +599,24 @@ webhook for recurring giving remains a not-started #299 sub-feature.
 | CSV import (`/giving/reconcile/import`) — header-NAME column mapping (never positional) against a UK-bank alias table, with a manual mapping screen when auto-detection can't resolve every required column; SHA-256 `fileHash` + `UNIQUE(siteID, fileHash)` blocks duplicate imports; a non-empty credit that fails amount/date parsing fails the WHOLE upload (no partial imports) | #299 | 152 | ✅ |
 | Matching — exact-amount, window-based (`giving.reconcile.toleranceDays`, default 5 days) with two nullable FKs on `tblBankTxns`: `matchedEntryID` (1:1 gift match) or `matchedCountSessionID` (whole offering-count deposit); 2+ equal-amount in-window candidates is always left unmatched, never guessed; count-close's gift-log rows (`reference LIKE 'Count #%'`) excluded from entry-matching to avoid double-counting against their deposit | #299 | 152 | ✅ |
 | UI: `/giving/reconcile` (imports dashboard + site-wide unmatched summary), `/giving/reconcile/view` (matched/unmatched/ignored lists, inline match-suggestion mini-forms, two-way "gift log not in this statement" gap panel with in-transit-vs-missing badges), `/giving/reconcile/match` (manual match/unmatch/ignore/rematch/delete-import) — gated by `Portal\Core\Giving::canManage()`; "Count"/"Reconcile" nav buttons added to `giving/manage.php` | #299 | 152 | ✅ |
+
+---
+
+### Discipleship Pathway Tracker Phase 2 — per-user progress + auto-completion (#303 Phase 2, 2026-07-22)
+
+Extension to Phase 1 (migration 142, admin CRUD only, app OFF by default via `discipleship.enabled`). Adopted the three recommended resolutions from issue #303's blocker comment: (1) auto-complete ONLY from per-user evidence tables — `tblSalvationCards`/`tblDecisionMoments` structurally excluded; (2) pastor surface stays a flat roster list, never a members×steps `<table>` matrix; (3) mentor relationships deferred to a later phase.
+
+| Item | Issue | Migration | Status |
+|---|---|---|---|
+| `tblPathwayEnrolments` — who is assigned to which pathway (`status` active/completed/withdrawn); an explicit table rather than inferred from progress rows, so a member with ZERO completed steps still shows up | #303 Phase 2 | 153 | ✅ |
+| `tblPathwayProgress` — one row per (step, member); `UNIQUE(stepID, userID)`; unmark = `revokedAt` set, NEVER a DELETE (a deleted row would let the auto-sweep resurrect a step a coordinator deliberately unmarked) | #303 Phase 2 | 153 | ✅ |
+| `tblPathwaySteps.autoRule`/`autoRefID` (guarded ADD COLUMN) — optional per-step rule: `attended_event`, `attended_category`, or `rsvpd_event` (an RSVP only counts once the event has started) | #303 Phase 2 | 153 | ✅ |
+| `Portal\Core\Discipleship::autoSweep()` — three set-based `INSERT IGNORE … SELECT` statements (one per rule), idempotent via the unique key, then `refreshEnrolmentStatuses()` flips `active ⇄ completed` from the current progress state; lazily invoked on every discipleship page view (no scheduler dependency), plus an optional `cron/discipleship-sweep.php` (token-gated like `reminders.cron_token`) for freshness without page views | #303 Phase 2 | 153 | ✅ |
+| Member routes fixing the Phase 1 dead dashboard link: `/discipleship` ("My pathways" + progress bars) and `/discipleship/view` (step list, auto/manual badges) — every query scoped to `Site::id()` AND `$_SESSION['user_id']`; parameter-tampered `?id=` 404s rather than leaking another member's progress | #303 Phase 2 | 153 | ✅ |
+| Admin/pastor routes: `/admin/discipleship/progress` (pathway list + enrolment counts), `/admin/discipleship/progress/pathway` (roster list + enrol/withdraw), `/admin/discipleship/progress/member` (per-member mark-complete/unmark + notes, auto-evidence, revocation state) | #303 Phase 2 | 153 | ✅ |
+| `pathway-form.php`/`step-save.php` extended with the `autoRule` select + site-scoped event/category ref picker; `step-save.php` validates the ref resolves at THIS site before saving; a stale ref (event/category later deleted — deliberately no FK) renders a "(missing)" warning | #303 Phase 2 | 153 | ✅ |
+| `GdprEraser` catalogue registration for both new per-user tables (hard delete; `markedByID`/`enrolledByID`/`revokedByID` attributions self-heal via `ON DELETE SET NULL`) | #303 Phase 2 | 153 | ✅ |
+| Mentor relationships — deferred (no `tblPathwayMentor` schema, no UI) | #303 | — | 🔜 (Phase 3) |
 
 ---
 

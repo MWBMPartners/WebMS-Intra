@@ -13,7 +13,7 @@
 -- present in web/_sql/ are marked as executed in tblMigrations so the
 -- web-based Migrator won't re-run them.
 --
--- Covers migrations: 000-152 (DDL + settings/routes seeds + tblMigrations
+-- Covers migrations: 000-153 (DDL + settings/routes seeds + tblMigrations
 -- marks). When you add a new migration, port its DDL/seeds into the
 -- appropriate section here AND add its filename to the seed block at the
 -- end of this file. CI enforces this via
@@ -4950,6 +4950,34 @@ ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
 
 
 -- =============================================================================
+-- Migration 153: Discipleship — per-user progress + auto-completion (#303 Phase 2)
+-- =============================================================================
+-- tblPathwayEnrolments / tblPathwayProgress CREATEs are ported inline above
+-- (banner "-- ── from 153_discipleship_progress.sql (#303 Phase 2) ──"); the
+-- autoRule / autoRefID columns are folded directly into the tblPathwaySteps
+-- CREATE TABLE above (from migration 142) rather than kept as a separate
+-- ALTER block, per house convention for schema/seed parity.
+
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('discipleship',                          'discipleship/index.php',                 1),
+    ('discipleship/view',                     'discipleship/view.php',                  1),
+    ('admin/discipleship/progress',           'admin/discipleship/progress.php',        1),
+    ('admin/discipleship/progress/pathway',   'admin/discipleship/progress-pathway.php',1),
+    ('admin/discipleship/progress/member',    'admin/discipleship/progress-member.php', 1),
+    ('admin/discipleship/enrol',              'admin/discipleship/enrol-save.php',      1),
+    ('admin/discipleship/progress/mark',      'admin/discipleship/progress-mark.php',   1),
+    ('cron/discipleship-sweep',               'cron/discipleship-sweep.php',             0)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'discipleship.displayName', 'Discipleship',      'Discipleship',      0),
+    (NULL, 'discipleship.displayIcon', 'fa-solid fa-route', 'fa-solid fa-route', 0),
+    (NULL, 'discipleship.brandColor',  '#a855f7',           '#a855f7',           0),
+    (NULL, 'discipleship.cron_token',  '',                  '',                  1)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
+
+-- =============================================================================
 -- Tables added in numbered migrations 105+ — appended for fresh-install parity.
 -- Maintained automatically; do NOT hand-edit duplicates. See the same
 -- definitions in web/_sql/{105..144}_*.sql for the source of truth + comments.
@@ -5571,6 +5599,10 @@ CREATE TABLE IF NOT EXISTS `tblPathwaySteps` (
                                     COMMENT 'How a coordinator should mark this complete (e.g. "Tick when baptised")',
     `isOptional`      TINYINT(1)    NOT NULL DEFAULT 0
                                     COMMENT 'If 1, completion does not block pathway completion in Phase 2',
+    `autoRule`        ENUM('none','attended_event','attended_category','rsvpd_event') NOT NULL DEFAULT 'none'
+                                    COMMENT 'Auto-completion rule (added by migration 153)',
+    `autoRefID`       INT           DEFAULT NULL
+                                    COMMENT 'eventID (attended_event/rsvpd_event) or categoryID (attended_category); polymorphic — validated in PHP, deliberately no FK (added by migration 153)',
     `createdAt`       DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
     `updatedAt`       DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (`stepID`),
@@ -5812,6 +5844,56 @@ CREATE TABLE IF NOT EXISTS `tblBankTxns` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
 COMMENT='Imported bank statement credit lines + match state (#299 sub-feature 3)';
 
+-- ── from 153_discipleship_progress.sql (#303 Phase 2) ──────────────────────
+-- One row per (pathway, member) the pathway has been assigned to.
+CREATE TABLE IF NOT EXISTS `tblPathwayEnrolments` (
+    `enrolmentID`   INT      NOT NULL AUTO_INCREMENT,
+    `siteID`        INT      NOT NULL,
+    `pathwayID`     INT      NOT NULL,
+    `userID`        INT      NOT NULL,
+    `status`        ENUM('active','completed','withdrawn') NOT NULL DEFAULT 'active',
+    `enrolledByID`  INT      DEFAULT NULL,
+    `enrolledAt`    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `completedAt`   DATETIME DEFAULT NULL,
+    `updatedAt`     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`enrolmentID`),
+    UNIQUE KEY `uq_enrolment_pathway_user` (`pathwayID`, `userID`),
+    KEY `idx_enrolment_site_status` (`siteID`, `status`),
+    KEY `idx_enrolment_user_status` (`userID`, `status`),
+    CONSTRAINT `fk_enrolment_site`     FOREIGN KEY (`siteID`)       REFERENCES `tblSites`(`siteID`) ON DELETE CASCADE,
+    CONSTRAINT `fk_enrolment_pathway`  FOREIGN KEY (`pathwayID`)    REFERENCES `tblPathways`(`pathwayID`) ON DELETE CASCADE,
+    CONSTRAINT `fk_enrolment_user`     FOREIGN KEY (`userID`)       REFERENCES `tblUsers`(`userID`) ON DELETE CASCADE,
+    CONSTRAINT `fk_enrolment_enroller` FOREIGN KEY (`enrolledByID`) REFERENCES `tblUsers`(`userID`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+COMMENT='Member enrolment on a discipleship pathway (#303 Phase 2)';
+
+-- ── from 153_discipleship_progress.sql (#303 Phase 2) ──────────────────────
+-- One row per (step, member) completion — manual or auto-swept. Unmark =
+-- revoke (revokedAt set), never DELETE (see migration 153 header comment).
+CREATE TABLE IF NOT EXISTS `tblPathwayProgress` (
+    `progressID`   INT          NOT NULL AUTO_INCREMENT,
+    `siteID`       INT          NOT NULL,
+    `stepID`       INT          NOT NULL,
+    `userID`       INT          NOT NULL,
+    `source`       ENUM('auto','manual') NOT NULL DEFAULT 'manual',
+    `markedByID`   INT          DEFAULT NULL COMMENT 'Coordinator who clicked complete; NULL for auto rows',
+    `autoRef`      VARCHAR(100) DEFAULT NULL COMMENT 'Evidence reference, e.g. event:123 / category:7',
+    `notes`        VARCHAR(500) DEFAULT NULL,
+    `completedAt`  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'Evidence timestamp for auto rows',
+    `revokedAt`    DATETIME     DEFAULT NULL COMMENT 'Set when a coordinator unmarks — row is kept, never deleted',
+    `revokedByID`  INT          DEFAULT NULL,
+    PRIMARY KEY (`progressID`),
+    UNIQUE KEY `uq_progress_step_user` (`stepID`, `userID`),
+    KEY `idx_progress_user` (`userID`),
+    KEY `idx_progress_site` (`siteID`),
+    CONSTRAINT `fk_progress_site`    FOREIGN KEY (`siteID`)      REFERENCES `tblSites`(`siteID`) ON DELETE CASCADE,
+    CONSTRAINT `fk_progress_step`    FOREIGN KEY (`stepID`)      REFERENCES `tblPathwaySteps`(`stepID`) ON DELETE CASCADE,
+    CONSTRAINT `fk_progress_user`    FOREIGN KEY (`userID`)      REFERENCES `tblUsers`(`userID`) ON DELETE CASCADE,
+    CONSTRAINT `fk_progress_marker`  FOREIGN KEY (`markedByID`)  REFERENCES `tblUsers`(`userID`) ON DELETE SET NULL,
+    CONSTRAINT `fk_progress_revoker` FOREIGN KEY (`revokedByID`) REFERENCES `tblUsers`(`userID`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+COMMENT='Per-member step completion — revoke, never delete (#303 Phase 2)';
+
 
 -- #############################################################################
 -- SECTION 7B: MARK MIGRATIONS 082-083 + 090-145 AS EXECUTED (#364 / #194)
@@ -6012,4 +6094,7 @@ INSERT INTO `tblMigrations` (`filename`) VALUES ('151_giving_pledge_campaigns.sq
 ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
 INSERT INTO `tblMigrations` (`filename`) VALUES ('152_bank_reconciliation.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('153_discipleship_progress.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;

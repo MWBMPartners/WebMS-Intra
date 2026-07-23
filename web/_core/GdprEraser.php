@@ -67,6 +67,11 @@ class GdprEraser
             ['table' => 'tblGiftAidDeclaration','userCol' => 'donorID', 'action' => 'delete'],
             ['table' => 'tblZoomAccount',      'userCol' => 'userID', 'action' => 'delete'],
             ['table' => 'tblUserTranslationPref','userCol' => 'userID', 'action' => 'delete'],
+            // #303 Phase 2 — discipleship per-user tables. markedByID /
+            // enrolledByID / revokedByID attributions self-heal via
+            // ON DELETE SET NULL on the FKs, so a hard delete here is safe.
+            ['table' => 'tblPathwayEnrolments','userCol' => 'userID', 'action' => 'delete'],
+            ['table' => 'tblPathwayProgress',  'userCol' => 'userID', 'action' => 'delete'],
 
             // Final step — anonymise the user row itself rather than delete,
             // so foreign keys with ON DELETE SET NULL don't cascade-blow
