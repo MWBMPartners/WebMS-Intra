@@ -13,7 +13,7 @@
 -- present in web/_sql/ are marked as executed in tblMigrations so the
 -- web-based Migrator won't re-run them.
 --
--- Covers migrations: 000-153 (DDL + settings/routes seeds + tblMigrations
+-- Covers migrations: 000-154 (DDL + settings/routes seeds + tblMigrations
 -- marks). When you add a new migration, port its DDL/seeds into the
 -- appropriate section here AND add its filename to the seed block at the
 -- end of this file. CI enforces this via
@@ -4978,6 +4978,21 @@ ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
 
 
 -- =============================================================================
+-- Migration 154: Service-plan confidence-monitor messages (#300 v2)
+-- =============================================================================
+-- tblServicePlanMessages CREATE is ported inline in the "Tables added in
+-- numbered migrations 105+" section below (banner "-- ── from
+-- 154_service_plan_messages.sql (#300 v2) ──"). Plain `service-plans/*`
+-- page routes — NOT under `api/*` — so no `api.*.enabled` seed; the
+-- feature inherits the existing `service_plans.enabled` app gate.
+
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('service-plans/live-message', 'service-plans/live-message.php', 1),
+    ('service-plans/message-poll', 'service-plans/message-poll.php', 1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
+
+-- =============================================================================
 -- Tables added in numbered migrations 105+ — appended for fresh-install parity.
 -- Maintained automatically; do NOT hand-edit duplicates. See the same
 -- definitions in web/_sql/{105..144}_*.sql for the source of truth + comments.
@@ -5894,6 +5909,29 @@ CREATE TABLE IF NOT EXISTS `tblPathwayProgress` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
 COMMENT='Per-member step completion — revoke, never delete (#303 Phase 2)';
 
+-- ── from 154_service_plan_messages.sql (#300 v2) ────────────────────────────
+-- Operator → confidence-monitor message channel. FKs target tblServicePlan
+-- (~L3443), tblSites, tblUsers — all created far earlier, so this is
+-- FK-safe here despite the out-of-numeric-order placement (same convention
+-- as the 152/153 blocks immediately above).
+CREATE TABLE IF NOT EXISTS `tblServicePlanMessages` (
+    `messageID`   INT          NOT NULL AUTO_INCREMENT,
+    `planID`      INT          NOT NULL,
+    `siteID`      INT          NOT NULL DEFAULT 1,
+    `body`        VARCHAR(255) NOT NULL COMMENT 'Operator message shown on the confidence monitor',
+    `isCleared`   TINYINT(1)   NOT NULL DEFAULT 0 COMMENT '1 = dismissed by operator; monitor shows latest row with 0',
+    `clearedAt`   DATETIME     DEFAULT NULL,
+    `createdByID` INT          DEFAULT NULL,
+    `createdAt`   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`messageID`),
+    KEY `idx_spm_poll` (`planID`, `isCleared`, `messageID`),
+    KEY `idx_spm_site` (`siteID`),
+    CONSTRAINT `fk_spm_plan` FOREIGN KEY (`planID`)      REFERENCES `tblServicePlan`(`planID`) ON DELETE CASCADE,
+    CONSTRAINT `fk_spm_site` FOREIGN KEY (`siteID`)      REFERENCES `tblSites`(`siteID`),
+    CONSTRAINT `fk_spm_user` FOREIGN KEY (`createdByID`) REFERENCES `tblUsers`(`userID`)       ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+COMMENT='Operator → confidence-monitor message channel (#300 v2)';
+
 
 -- #############################################################################
 -- SECTION 7B: MARK MIGRATIONS 082-083 + 090-145 AS EXECUTED (#364 / #194)
@@ -6097,4 +6135,7 @@ INSERT INTO `tblMigrations` (`filename`) VALUES ('152_bank_reconciliation.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
 INSERT INTO `tblMigrations` (`filename`) VALUES ('153_discipleship_progress.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('154_service_plan_messages.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;

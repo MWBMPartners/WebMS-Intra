@@ -504,7 +504,7 @@ setting seeds.
 | App | Issue | Migration | Status |
 |---|---|---|---|
 | Resources (room/asset booking with overlap conflict detection) | #263 | 088 | ✅ |
-| Service Plans (run-sheet builder, printable) | #262 | 089 | ✅ |
+| Service Plans (run-sheet builder, printable; live runtime + confidence monitor + operator→monitor messaging, #300) | #262 | 089 | ✅ |
 | Livestream (YouTube/Vimeo/Twitch/Facebook embed + countdown) | #273 | 090 | ✅ |
 | Recordings (RSS podcast feed + HTTP Range streaming + FULLTEXT search) | #264 | 091 | ✅ |
 | Zoom (OAuth, meeting creation from calendar, webhook HMAC) | #274 | 092 | ✅ |
@@ -617,6 +617,22 @@ Extension to Phase 1 (migration 142, admin CRUD only, app OFF by default via `di
 | `pathway-form.php`/`step-save.php` extended with the `autoRule` select + site-scoped event/category ref picker; `step-save.php` validates the ref resolves at THIS site before saving; a stale ref (event/category later deleted — deliberately no FK) renders a "(missing)" warning | #303 Phase 2 | 153 | ✅ |
 | `GdprEraser` catalogue registration for both new per-user tables (hard delete; `markedByID`/`enrolledByID`/`revokedByID` attributions self-heal via `ON DELETE SET NULL`) | #303 Phase 2 | 153 | ✅ |
 | Mentor relationships — deferred (no `tblPathwayMentor` schema, no UI) | #303 | — | 🔜 (Phase 3) |
+
+---
+
+### Service Plans — operator → confidence-monitor messaging (#300 v2, 2026-07-23)
+
+Closes the last open piece of #300. v1 (migration 110) shipped `/service-plans/live` (operator clock + start/close) and `/service-plans/confidence` (full-screen speaker-facing clock) with the message channel deferred. Issue #300 explicitly blessed a polling fallback ("fall back to polling if it doesn't play nice with DreamHost") — v2 uses plain JSON polling, no SSE, no new dependencies.
+
+| Item | Issue | Migration | Status |
+|---|---|---|---|
+| `tblServicePlanMessages` — one row per operator message; `isCleared`/`clearedAt` rather than DELETE, so the live view stays the full audit record of how the service ran; indexed `(planID, isCleared, messageID)` for an O(1) poll | #300 v2 | 154 | ✅ |
+| `/service-plans/live-message` — admin-only POST (CSRF-checked), `action=send` (rejected once the plan is closed) / `action=clear` (allowed even after close); plain form + 303 redirect back to `/service-plans/live`, matching the app's only existing submit idiom (`live-toggle.php`) | #300 v2 | 154 | ✅ |
+| `/service-plans/message-poll` — GET-only JSON poll, any logged-in user (same gate as `confidence.php`), `Cache-Control: no-store`, `ApiResponse::success()` envelope; `sinceID`/`lastID` dedup short-circuits to `changed:false` so an unchanged poll re-sends no payload | #300 v2 | 154 | ✅ |
+| `live.php` operator panel — current active message + "Clear from monitor" form + send form (`maxlength=255`, `mb_substr` server-side cap); send form hidden once the plan is closed | #300 v2 | 154 | ✅ |
+| `confidence.php` banner — polled every 4s (matching the `livechat-widget.js` house cadence), high-contrast themed banner with a reduced-motion-guarded pulse; message body injected via `textContent` only, NEVER `innerHTML` — the client-side XSS line of defence alongside the server's `htmlspecialchars()` escaping on `live.php` | #300 v2 | 154 | ✅ |
+| Every query siteID-scoped (`Site::id()`); a plan at another site polling the same `planID` gets `message: null`, never another site's data | #300 v2 | 154 | ✅ |
+| No new `tblSettings` — plain `service-plans/*` page routes (not under `api/*`), inheriting the existing `service_plans.enabled` app gate | #300 v2 | 154 | ✅ |
 
 ---
 

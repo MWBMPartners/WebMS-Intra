@@ -2,6 +2,24 @@
 
 
 ## [1.4.0] - 2026-07-22 (alpha)
+- feat(service-plans): #300 v2 — operator → confidence-monitor message channel.
+  Closes the last open piece of #300 (v1 shipped clock-only in migration 110).
+  New `tblServicePlanMessages` (migration 154) — `isCleared`/`clearedAt` rather
+  than DELETE, so cleared messages remain as part of the service's audit
+  record; indexed `(planID, isCleared, messageID)` for an O(1) poll. Two new
+  plain `service-plans/*` page routes (NOT under `api/*` — the ApiRouter
+  routing trap doesn't apply): `live-message.php` (admin-only POST, CSRF-
+  checked, send/clear, 303 redirect back to `/service-plans/live`, matching
+  the app's only existing submit idiom) and `message-poll.php` (GET-only JSON
+  poll, any logged-in user, `Cache-Control: no-store`, `ApiResponse::success()`
+  envelope, `sinceID`/`lastID` dedup short-circuiting to `changed:false`).
+  `live.php` gained an operator panel (current message + clear form + send
+  form, hidden once the plan is closed); `confidence.php` gained a themed
+  banner polled every 4s (matching the `livechat-widget.js` house cadence) —
+  injected via `textContent` only, NEVER `innerHTML`, as the client-side XSS
+  line of defence alongside the server's `htmlspecialchars()` escaping on
+  `live.php`. No new `tblSettings` — inherits the existing
+  `service_plans.enabled` app gate. All 10 `tools/audit-checks/` scripts clean.
 - fix(giving): #299 follow-up — auto-attribute the two remaining automatic
   `tblGivingEntry` writers that were deliberately left unhooked when pledge
   campaigns shipped (migration 151): online card giving
