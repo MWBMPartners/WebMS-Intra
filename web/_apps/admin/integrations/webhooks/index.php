@@ -185,7 +185,7 @@ if (isset($_SESSION['webhook_secret_minted']) === true) {
                     </div>
                 </div>
                 <div class="portal-data-row-aside">
-                    <form method="post" action="/admin/integrations/webhooks/save" class="d-inline" onsubmit="return confirm(<?php echo $isActive === true ? "'Pause this webhook?'" : "'Reactivate this webhook?'"; ?>);">
+                    <form method="post" action="/admin/integrations/webhooks/save" class="d-inline" data-confirm="<?php echo $isActive === true ? 'Pause this webhook?' : 'Reactivate this webhook?'; ?>">
                         <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
                         <input type="hidden" name="webhookID" value="<?php echo (int) $w['webhookID']; ?>">
                         <input type="hidden" name="isActive" value="<?php echo $isActive === true ? '0' : '1'; ?>">
@@ -195,7 +195,7 @@ if (isset($_SESSION['webhook_secret_minted']) === true) {
                             <button class="btn btn-sm btn-outline-success" title="Reactivate"><i class="fa-solid fa-play"></i></button>
                         <?php endif; ?>
                     </form>
-                    <form method="post" action="/admin/integrations/webhooks/delete" class="d-inline" onsubmit="return confirm('Delete this webhook? Cannot be undone.');">
+                    <form method="post" action="/admin/integrations/webhooks/delete" class="d-inline" data-confirm="Delete this webhook? Cannot be undone." data-confirm-destructive="true">
                         <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
                         <input type="hidden" name="webhookID" value="<?php echo (int) $w['webhookID']; ?>">
                         <button class="btn btn-sm btn-outline-danger" title="Delete"><i class="fa-solid fa-trash"></i></button>

@@ -84,7 +84,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <p class="text-muted small">Forms-only v1. Drag-and-drop is a v1.1 polish layer.</p>
 
     <form method="post" action="/calendar/event/crews/auto-build" class="d-inline-block mb-3"
-          onsubmit="return confirm('Distribute all approved registrations across these crews, balancing by grade?');">
+          data-confirm="Distribute all approved registrations across these crews, balancing by grade?">
         <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
         <input type="hidden" name="eventID" value="<?php echo $eventId; ?>">
         <button type="submit" class="btn btn-sm btn-success"><i class="fa-solid fa-shuffle me-1"></i>Auto-build from registrations</button>

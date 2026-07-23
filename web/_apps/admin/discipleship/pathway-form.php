@@ -366,7 +366,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                             <form method="post"
                                   action="/admin/discipleship/pathways/step/delete"
                                   class="d-inline"
-                                  onsubmit="return confirm('Delete this step?');">
+                                  data-confirm="Delete this step?"
+                                  data-confirm-destructive="true">
                                 <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
                                 <input type="hidden" name="pathwayID" value="<?php echo (int) $pathwayId; ?>">
                                 <input type="hidden" name="stepID" value="<?php echo (int) $s['stepID']; ?>">

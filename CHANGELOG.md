@@ -2,6 +2,30 @@
 
 
 ## [1.4.0] - 2026-07-22 (alpha)
+- chore(ci): new `tools/audit-checks/check_php_table_refs.py` audit check — closes the gap
+  that let the GDPR eraser table-name bug (below) slip past review: `check_sql_columns.py`
+  only ever parsed `.sql` files, so a wrong table name hard-coded straight into a PHP query
+  string (or comment) was invisible to CI. The new check builds the authoritative table set
+  from every `CREATE TABLE [IF NOT EXISTS] \`tblX\`` in `web/_sql/full_schema.sql` (155
+  tables, migrations 000-153 folded in) and flags any `tblXxx`-shaped identifier referenced
+  under `web/_apps/`, `web/_core/`, `web/_install/`, `web/public_html/` that isn't in it. PHP
+  comments (`//`, `#`, `/* … */`) are stripped before scanning so comment-only mentions of a
+  deliberately-nonexistent table name (e.g. the explanatory comments left behind by the GDPR
+  fix itself, in `GdprEraser.php`/`Livestream.php`/`discipleship.php`/`data-export.php`/
+  `denominational.php`) don't false-positive — 0 unknown tables on the current tree.
+  Non-blocking (`--strict` opt-in), matching the `check_route_targets.py` /
+  `check_sql_columns.py` convention; wired into `.github/workflows/pr-security.yml` as
+  check 14, alongside the other `check_*.py` invocations.
+- fix(ui): replaced the last 11 native `onsubmit="return confirm(...)"` /
+  `onclick="return confirm(...)"` call sites (flagged by `check_no_native_confirm.py`) with
+  the house `data-confirm="message"` (+ `data-confirm-destructive="true"` on delete/revoke/
+  archive/remove actions) pattern from `web/public_html/assets/js/portal-confirm.js` —
+  `web/_apps/admin/discipleship/pathways.php`, `pathway-form.php`,
+  `web/_apps/admin/integrations/api-keys.php` (rotate + revoke),
+  `web/_apps/admin/integrations/webhooks/index.php` (pause/reactivate + delete),
+  `web/_apps/admin/calendar/feeds.php`, `web/_apps/worship/song.php`, `worship/plan.php`,
+  `web/_apps/calendar/event-jobs.php`, `calendar/event-crews.php`. Confirmation message text
+  and form/button behaviour unchanged; `check_no_native_confirm.py` now reports 0 findings.
 - fix(core): GDPR eraser table-name corrections + auth-residue coverage — data-protection
   correctness fix, no issue yet. `Portal\Core\GdprEraser::catalogue()` referenced four
   non-existent or mis-cased tables (`tblAttendanceCheckIns`, `tblExpenseClaim`/`submittedByID`,

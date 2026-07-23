@@ -193,7 +193,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                 <input type="hidden" name="planID" value="<?php echo (int) $plan['planID']; ?>">
                                 <input type="hidden" name="action" value="remove-item">
                                 <input type="hidden" name="itemID" value="<?php echo (int) $i['itemID']; ?>">
-                                <button class="btn btn-sm btn-outline-danger" title="Remove" onclick="return confirm('Remove this slide?');"><i class="fa-solid fa-xmark"></i></button>
+                                <button class="btn btn-sm btn-outline-danger" title="Remove" data-confirm="Remove this slide?" data-confirm-destructive="true"><i class="fa-solid fa-xmark"></i></button>
                             </form>
                         </div>
                     <?php endif; ?>

@@ -27,6 +27,8 @@
 #  13. MariaDB-only DDL syntax                      — IF [NOT] EXISTS on ADD/DROP COLUMN,
 #                                                       ADD/CREATE/DROP INDEX|KEY (MySQL 8
 #                                                       rejects with error 1064)
+#  14. PHP table-reference existence                 — tblX referenced in PHP resolves to a
+#                                                       CREATE TABLE in full_schema.sql
 #
 # These are HEURISTICS — false positives are expected. Review the findings,
 # don't blindly fail the merge.
@@ -44,6 +46,10 @@
 # engine; the fix is the information_schema + PREPARE guard idiom (see
 # DEV_NOTES.md → "Portable DDL convention"; house examples: migrations
 # 037/112/138).
+# Check 14 was added because check_sql_columns.py only ever parsed .sql
+# files — a wrong table name hard-coded straight into a PHP query string
+# was invisible to every prior check, and that exact gap let the GDPR
+# eraser silently skip a real table.
 # The scripts live in tools/audit-checks/ and are runnable locally.
 # =============================================================================
 
@@ -277,6 +283,14 @@ jobs:
           MARIADB=$(python3 tools/audit-checks/check_mariadb_only_ddl.py 2>&1 | tail -n +3 || true)
           if echo "$MARIADB" | grep -q '•'; then
             add_section "MariaDB-only DDL in web/_sql (MySQL 8 error 1064 — use the information_schema guard idiom)" "$MARIADB"
+          fi
+
+          # 14) PHP table-reference existence (tblX in PHP resolves to a
+          #     CREATE TABLE in full_schema.sql — catches the class of bug
+          #     that let the GDPR eraser silently skip a real table)
+          PHP_TABLE_REFS=$(python3 tools/audit-checks/check_php_table_refs.py 2>&1 | tail -n +3 || true)
+          if echo "$PHP_TABLE_REFS" | grep -q '•'; then
+            add_section "PHP references to tables not in full_schema.sql" "$PHP_TABLE_REFS"
           fi
 
           echo "hits=$HITS" >> "$GITHUB_OUTPUT"
