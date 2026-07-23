@@ -2,6 +2,34 @@
 
 
 ## [1.4.0] - 2026-07-22 (alpha)
+- fix(core): GDPR eraser table-name corrections + auth-residue coverage — data-protection
+  correctness fix, no issue yet. `Portal\Core\GdprEraser::catalogue()` referenced four
+  non-existent or mis-cased tables (`tblAttendanceCheckIns`, `tblExpenseClaim`/`submittedByID`,
+  `tblSessions`, `tblWebauthnCredentials`) that made `prepare()` fail on every one — because
+  `processEntry()` skips (rather than aborts) on a prepare failure, by design, to tolerate
+  not-installed apps, `execute()` reported a completed erasure while leaving that PII behind.
+  Corrected to `tblEventAttendance`.`userID`, `tblExpenseClaims`.`userID`, removed the
+  non-existent `tblSessions` entry (PHP sessions are file-based, never DB-backed), and fixed
+  the case on `tblWebAuthnCredentials` (MySQL on Linux is case-sensitive for table names).
+  Added the auth-residue tables that a GDPR erasure previously missed entirely: since
+  `tblUsers` is anonymised in place rather than deleted, no FK `ON DELETE CASCADE` ever
+  swept up `tblLocalAccounts`, `tblLinkedAccounts`, `tblTrustedDevices` or `tblPasswordResets`
+  — all four are now hard-deleted (table/column names cross-checked against the already-correct
+  export list in `_apps/auth/account/data-export.php`). Added `tblKidProfiles` (a child profile
+  links to exactly one parent via `parentUserID` — no multi-guardian junction table exists —
+  so erasing the parent now erases the child's profile; `tblKidCheckins` already
+  `ON DELETE CASCADE`s from it, so no separate entry was needed there). Also fixed the
+  `tblUsers` anonymise entry itself: its `nullCols` referenced four columns that don't exist
+  on that table (`address`, `passwordHash`, `msAccountID`, `googleAccountID` — the address
+  field is actually `displayAddress`, and the credential/SSO columns live on the tables above,
+  not on `tblUsers`), which meant the single most important step — anonymising the user's own
+  row — silently failed to prepare and never ran. Hardening: `processEntry()` now writes a
+  `skip` entry to the same `tblErasureAudit` HMAC chain when a catalogued table/column can't
+  be prepared, instead of returning `false` with no trace, so the next schema drift is visible
+  rather than hidden.
+- fix(admin): demo-data wipe (#242) referenced `tblExpenses`/`submittedByID`, neither of which
+  exist (real: `tblExpenseClaims`/`userID`), so that statement threw inside the wipe
+  transaction and rolled back the entire wipe on every run — corrected the table/column names.
 - feat(discipleship): #303 Phase 2 — per-user progress + auto-completion.
   Two new tables (migration 153): `tblPathwayEnrolments` (who is assigned to
   which pathway; `status` active/completed/withdrawn) and
