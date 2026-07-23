@@ -44,25 +44,80 @@ web/                <- ALL deployable files (synced to server via SFTP)
 
 ## Apps (shipped on `main`)
 
+`web/_apps/` holds ~47 top-level entries; `web/_core/apps/*.php` is the
+AppRegistry — the single source of truth for **installable marketplace
+apps** (toggleable per-site at `/admin/apps`), 37 of them. The table below
+is every user-facing app, whether or not it's AppRegistry-registered (see
+note below the table for the 4 that aren't, and for dirs that are
+infrastructure rather than apps).
+
 | Slug | Route | What it does |
 | --- | --- | --- |
-| dashboard | `/dashboard` | Portal home with app cards |
-| admin | `/admin` | Users, errors, activity, audit, migrations, integrations, sites, workflows, reports, **captcha config** |
-| auth | `/auth/*` | Local + MS365 + Google + WebAuthn + 2FA TOTP; password policy + strength meter |
-| calendar | `/calendar` | Events, series, RSVP, exports; **seven view modes in flight via #137/#138** |
-| prayer-requests | `/prayer-requests` | Logged-in + anonymous public submission, moderation, lifecycle |
+| admin | `/admin` | Users, roles, settings, sites, errors, activity, audit, migrations, integrations, workflows, reports, **captcha config** |
+| ai-assist | `/admin/ai-assist` | LLM-assisted drafting for announcements, prayer requests, newsletter (Anthropic / OpenAI / local ollama) |
+| announcements | `/announcements` | Per-site text announcements, pinned + scheduled posts |
 | attendance | `/attendance` | Sessions, headcount by service type, reports, CSV |
-| expenses | `/expenses` | Submit, approve, treasury, withdraw, multi-approver, PDF, CSV |
-| leadership | `/leadership` | Roles + assignments + history + CSV |
-| announcements | `/announcements` | Per-site text announcements |
-| noticeboard | `/noticeboard` | Visual poster wall (Canva embeds, image/video/text posters, weekday recurrence, QR share) |
+| auth | `/auth/*` | Local + MS365 + Google + WebAuthn + 2FA TOTP; password policy + strength meter; self-service "my account" pages live at `/account/*` |
+| calendar | `/calendar` | Events, series, RSVP, exports; seven view modes shipped via #137/#138 |
+| care | `/care` | Confidential pastoral / wellbeing register with visit log; role-restricted, encrypted notes |
+| cop-live-chat | `/admin/live/chat` | Moderate viewer chat on livestream events (#313); viewer-facing chat widget served alongside the `/live` embed |
+| dashboard | `/dashboard` | Portal home with app cards and pinned announcements |
+| directory | `/directory` | Searchable member directory with opt-in per-field visibility |
+| discipleship | `/discipleship` | Ordered formation pathways with per-member progress tracking, auto-completion from attendance/RSVPs, pastor roster (#303) |
 | documents | `/documents` | File library with categories |
-| tasks | `/tasks` | Reminders / task list |
-| api | `/api/*`, `/api/v1/*` | JSON REST API — read + write across events/announcements/attendance/prayer-requests/documents/expenses/leadership/tasks/noticeboard/users; dual-mode auth (session or bearer API key, #323 Phase 2) |
-| settings | `/settings` | Generic dot-notation settings editor |
+| expenses | `/expenses` | Submit, approve, treasury, withdraw, multi-approver, PDF, CSV |
+| giving | `/giving` | Contributions log, Gift Aid capture, HMRC export, year-end statements; two-person offering count, pledge campaigns, bank reconciliation (#299) |
 | help | `/help/*` | In-app guides (getting-started, expenses, calendar, prayer-requests, admin, faq, …) |
+| invites | `/invites` | Single-use invite links so new members self-register with role pre-assigned |
+| kids | `/kids/*` | Children's ministry check-in / check-out with 6-digit safeguarding badge codes (#298) — **not** AppRegistry-registered, see note |
+| leadership | `/leadership` | Roles + assignments + history + CSV |
+| livestream | `/live` | Embed YouTube / Vimeo / Twitch / Facebook livestreams with countdown + session analytics |
+| milestones | `/milestones` | Birthdays, anniversaries, joining dates with daily digest for designated roles |
+| newsletter | `/newsletter` | Compose, schedule, send branded HTML newsletters (internal sender; MailerMatt adapter slot reserved) |
+| noticeboard | `/noticeboard` | Visual poster wall (Canva embeds, image/video/text posters, weekday recurrence, QR share) (#360, #363) — **not** AppRegistry-registered, see note |
+| offboarding | `/offboarding` | One-click revocation when a volunteer/staff member leaves: sessions, credentials, roles, leadership |
+| payments | `/payments` | Pluggable payment processor (Stripe live; PayPal/GoCardless adapters reserved), feeds Giving + Projects |
+| photos | `/photos` | Photo gallery, moderation queue, tiered role-based visibility, EXIF-aware serving |
+| praise | `/praise` | Share gratitude / answered prayers / celebrations — counterpart to Prayer Requests |
+| prayer-requests | `/prayer-requests` | Logged-in + anonymous public submission, moderation, lifecycle, prayer-chain assignment (#311) |
+| projects | `/projects` | Project fundraising pages with pledge thermometer, updates feed, public sharing |
+| reading-plans | `/reading-plans` | Daily reading plans with streak tracking and per-day check-off |
+| recordings | `/recordings` | Searchable audio/video library with podcast RSS feed, HTML5 playback |
+| resources | `/resources` | Bookable resources (rooms, equipment, vehicles) with conflict detection + approval workflow |
+| rota | `/rota` | Recurring duty / shift assignments with swap requests and reminders |
+| salvation | `/decision-card` | Public decision-card / salvation tracker form + admin follow-up workflow (#316) — **not** AppRegistry-registered, see note |
+| service-plans | `/service-plans` | Programme run-sheet builder (preacher, scripture, hymns, AV, welcome team); operator → confidence-monitor messaging (#300) |
+| settings | `/settings` | Generic dot-notation settings editor |
 | site | `/site` | Multi-site switcher handler |
+| sms | `/admin/sms` | SMS notifications for critical alerts via Twilio / MessageBird / AWS SNS |
+| tasks | `/tasks` | Reminders / task list |
+| transcription | `/admin/transcription` | Auto-transcribe Recordings via Whisper / AssemblyAI / local whisper.cpp; full-text search |
+| translation | `/admin/translation` | Auto-translate user content via Anthropic / OpenAI / Google / DeepL / LibreTranslate, cached after first translate |
+| visitors | `/visitors` | First-time visitor capture with follow-up cadence + kanban workflow |
+| worship | `/worship/*` | Live presentation layer for Service Plans — operator console, public projector display, song library + CCLI usage log (#308) — **not** AppRegistry-registered, see note |
+| zoom | `/admin/integrations/zoom` | OAuth Zoom integration: create meetings from calendar events, auto-link recordings via webhook |
+| api | `/api/*`, `/api/v1/*` | JSON REST API — read + write across events/announcements/attendance/prayer-requests/documents/expenses/leadership/tasks/noticeboard/users; dual-mode auth (session or bearer API key, #323 Phase 2) |
 | offline | `/offline` | PWA offline fallback |
+
+**AppRegistry gap:** `noticeboard`, `worship`, `salvation`, `kids` have working
+routes/tables/handlers but no `_core/apps/{slug}.php` file, so they don't
+surface in the `/admin/apps` marketplace toggle. `noticeboard` does check its
+own `noticeboard.enabled` setting directly; `worship`/`salvation`/`kids` have
+no enable flag at all and are always-on once their migration has run. Worth a
+follow-up issue if unintentional.
+
+**Infrastructure, not apps:** several `web/_apps/` dirs back the apps above or
+the framework rather than being standalone apps — `account/` (self-service
+"my account" pages spanning several apps above: GDPR export/erasure, payment
+methods, recurring giving, notifications, safeguarding, sms/translation
+prefs), `cron/` (token-gated scheduled-job endpoints: event reminders, feed
+import, discipleship sweep — no UI), `events/api/` + `users/api/` (REST
+handlers backing the `api` app's events/users resources), `live/` +
+`livechat/` (the public `/live` viewer page + its chat API — implementation
+of `livestream`/`cop-live-chat` above), `privacy/` (GDPR consent banner +
+policy pages, public, tied to Auth), `widget/` (public embeddable
+countdown/calendar widgets for external sites), `qr.php` (shared QR-code
+generator utility used by Noticeboard/Visitors/etc).
 
 Calendar/Events/Preaching Plan is ONE app ("Events") — `/calendar` covers viewing/listing/subscribing; the manage UI handles preaching-plan/worship event types and series.
 
@@ -104,6 +159,23 @@ Calendar/Events/Preaching Plan is ONE app ("Events") — `/calendar` covers view
 
 ## Recent ships (chronological)
 
+- **PR #372** (accumulating, draft, `claude/alpha-enhancements` → `alpha`) — this
+  session's additions on top of the #323 Phase 2 base below: #299 "Giving
+  polish" sub-features — two-person offering-count session (sub-1, migration
+  150), pledge campaigns (sub-2, migration 151), bank reconciliation (sub-3,
+  migration 152), plus the online/project-gift auto-attribution follow-up
+  wiring `Giving::attributeGift()` into `Payments::markPaymentSucceeded()` and
+  `Projects::fulfilPledge()`; #303 Phase 2 Discipleship — per-user progress +
+  auto-completion (migration 153); #300 v2 Service Plans — operator →
+  confidence-monitor message channel (migration 154); a data-protection fix to
+  `Portal\Core\GdprEraser::catalogue()` (wrong/mis-cased table names silently
+  skipping erasure; added auth-residue tables `tblLocalAccounts` /
+  `tblLinkedAccounts` / `tblTrustedDevices` / `tblPasswordResets` /
+  `tblKidProfiles`) plus a demo-data-wipe table-name fix; a new
+  `tools/audit-checks/check_php_table_refs.py` CI check (flags `tblXxx`
+  identifiers hard-coded in PHP that aren't real tables) and a native
+  `confirm()` → `data-confirm` cleanup sweep. All CI-green through migration
+  154; see `.claude/HANDOFF.md` for the full remaining/next breakdown.
 - **PR #372** — #323 Phase 2: REST API v1 write surface — dual-mode `ApiAuth` (bearer API key OR session), `/api/v1/{resource}[/{id}]` RESTful facade, new write endpoints (Attendance/Documents/Expenses create+delete/Users), canonical `ApiKey::SCOPES` + rotation grace, per-key rate limiting, `Site::forceContext` tenant pinning, admin scope-checkbox + audit source-badge UI, OpenAPI v1 paths + `bearerAuth` scheme (v1.4.0). Plus #324 outbound webhooks admin CRUD UI.
 - **PR #358** (in flight) — #303 Discipleship Pathway Tracker Phase 1 + #313 COP Live Chat Phase 1 + Phase 2 (push prompts + viewer widget) + #317 Virtual Host Console Phase 2 (overlap on `tblLivePrompts`) + #360 Community Noticeboard Phase 1 (poster wall, self-hosted React, page-scoped CSP extension). Includes a Phase 1 hotfix (`::ok`→`::success`) and multiple security-check-clean bug fixes.
 - **PR #357** — #317 Phase 1 + #323 API key infrastructure Phase 1.

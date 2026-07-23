@@ -2,6 +2,19 @@
 
 
 ## [1.4.0] - 2026-07-22 (alpha)
+- docs: refresh `.claude/CLAUDE.md` apps table — was ~17 rows, now covers all
+  37 AppRegistry apps (`_core/apps/*.php`) plus `noticeboard`/`worship`/
+  `salvation`/`kids` (working, shipped, but not yet AppRegistry-registered)
+  and a note distinguishing user-facing apps from infrastructure dirs
+  (`account/`, `cron/`, `events/api`, `users/api`, `live/`, `livechat/`,
+  `privacy/`, `widget/`, `qr.php`). Prepended this session's PR #372 ships
+  (migrations 150-154) to "Recent ships". Rewrote `.claude/HANDOFF.md` from a
+  stale, superseded roadmap snapshot to the current PR #372 state (draft,
+  CI-green through migration 154) with an accurate Bucket-B / autonomous-item
+  breakdown. Fixed #183 — stale bare `core/`/`vendor/`/`sql/` path references
+  in `DEV_NOTES.md`'s "file disappeared from the server" code block (should
+  read `_core/`/`_vendor/`/`_sql/`, matching the actual repo layout); the rest
+  of #183's original findings were already fixed by PR #286.
 - feat(service-plans): #300 v2 — operator → confidence-monitor message channel.
   Closes the last open piece of #300 (v1 shipped clock-only in migration 110).
   New `tblServicePlanMessages` (migration 154) — `isCleared`/`clearedAt` rather

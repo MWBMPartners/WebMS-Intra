@@ -1,57 +1,116 @@
-# Handoff — Roadmap execution (Dependabot tri-branch + alpha enhancement bundles)
+# Handoff — alpha enhancement bundle (draft PR #372)
 
-**Updated:** 2026-07-21 (live — refreshed after every task)
-**Session goal:** (1) copy #368 → alpha ✅; (2) Dependabot + security on alpha/beta ✅; (3) don't merge those yet; (4) full brief/memory/issue review → implement next steps + enhancements, looping; (5) per task: issue + commit + HANDOFF; (6) bundle for efficiency.
+**Updated:** 2026-07-23 (session close — docs hygiene pass, #183)
+**Branch:** `claude/alpha-enhancements` → **draft PR #372** → `alpha`
+**HEAD:** `527e801` — working tree clean.
+**CI:** all green — Psalm, CodeQL, static-security, PHP-lint, actionlint, JS
+checks, and the `e2e-migrations` harness all pass through migration 154.
+PR Security Checks bot comment clean (see standing instruction in
+`.claude/CLAUDE.md`).
 
-**Model policy:** analysis/deep-planning → **Fable 5 sequential**; implementation → **Sonnet/Haiku** (Opus only if necessary). GIRFT.
-
-**PR strategy (user decision):** enhancement work does NOT spawn new PRs — it accumulates into ONE **draft** alpha integration PR: **#372** (branch `claude/alpha-enhancements` → `alpha`). Draft so `auto-merge-alpha.yml` can't merge it. Dependabot infra is separate on `claude/dependabot-alpha-beta-branches-q24zd7` → main.
+Draft status is deliberate: `auto-merge-alpha.yml` only auto-merges
+non-draft PRs, so #372 stays draft until the user says merge. Enhancement
+work accumulates into this ONE PR rather than spawning new ones (user
+decision, still in force).
 
 ---
 
-## Branches / PRs in flight (nothing merged — user merges later)
-| PR | Branch → base | What | State |
-|---|---|---|---|
-| #369 | `chore/setup-python-v7-alpha` → alpha | setup-python 6→7 (alpha twin of #368) | draft, CI green |
-| #372 | `claude/alpha-enhancements` → alpha | **roadmap enhancement bundles** (accumulating) | draft |
-| (no PR) | `claude/dependabot-alpha-beta-branches-q24zd7` → main | Dependabot tri-branch (#370) + docs | pushed, no PR opened (harness rule) |
-| #368 | dependabot → main | setup-python 6→7 (upstream Dependabot) | leave as-is |
+## What shipped this session (folded into #372)
 
-## Roadmap (Fable) → `scratchpad/roadmap-analysis.md` (full detail)
-Ranked bundles. Legend S/M/L, model.
+- **#299 "Giving polish"** — two-person offering-count session (sub-1,
+  migration 150), pledge campaigns (sub-2, migration 151), bank
+  reconciliation (sub-3, migration 152), plus the online/project-gift
+  auto-attribution follow-up (`Giving::attributeGift()` wired into
+  `Payments::markPaymentSucceeded()` and `Projects::fulfilPledge()`).
+  Sub-4 (recurring-giving account updater) needs Stripe Billing — not
+  started, kept deferred (see below).
+- **#303 Phase 2** — Discipleship per-user progress + auto-completion
+  (migration 153): enrolments, per-step progress, auto-sweep from
+  attendance/RSVP evidence, member "my pathways" view, pastor roster.
+- **#300 v2** — Service Plans operator → confidence-monitor message channel
+  (migration 154), closing the last open piece of #300.
+- **GDPR eraser fix** — `Portal\Core\GdprEraser::catalogue()` had wrong/
+  mis-cased table names that silently skipped erasure; corrected, and added
+  previously-missed auth-residue tables (`tblLocalAccounts`,
+  `tblLinkedAccounts`, `tblTrustedDevices`, `tblPasswordResets`,
+  `tblKidProfiles`). Plus an unrelated demo-data-wipe table-name fix.
+- **New CI check** — `tools/audit-checks/check_php_table_refs.py` flags
+  `tblXxx`-shaped identifiers hard-coded in PHP that don't exist in
+  `full_schema.sql` (closes the gap that let the GDPR bug above slip past
+  review). Wired into `pr-security.yml` as check 14.
+- **native `confirm()` cleanup** — last 11 call sites converted to the house
+  `data-confirm` pattern; `check_no_native_confirm.py` now reports 0.
+- Base of #372 (already landed pre-session): #323 Phase 2 REST API v1
+  write surface (dual-mode `ApiAuth`, `/api/v1/{resource}` facade, new
+  write endpoints, `ApiKey::SCOPES` + rotation, per-key rate limiting,
+  `Site::forceContext`) + #324 outbound webhooks admin CRUD.
 
-- **B1 ✅ Truth sweep** (#371) — done. ~27 issues closed w/ evidence; #323 reopened (REST API Phase 2); #338/#339/#322/#128/#40/#234/#248/#225 re-scoped; #194/#183 kept open (fixes incomplete). Docs reconciled in commit `6b8bc76`.
-- **B3 ✅ (#338)** iCal export now via `Portal\Core\Ical` (TZID/VTIMEZONE/RRULE) — commit `b73371d`. feed/account-feed untouched. Closes #338 on merge.
-- **🚨 #373 (NEW, high / maybe-critical)** — `Router::dispatch()` never imported `$mysqli`/`$SETTINGS` into controller scope; 177 controllers use bare `$mysqli`, 6 use bare `$SETTINGS`. PHP-scope-proven undefined inside the dispatched `require`. Applied safe 2-word fix `global $mysqli, $SETTINGS;` before the require — commit `effdafa`. **NEEDS USER RUNTIME CONFIRM: load `/attendance` on alpha — renders ⇒ latent; 500s ⇒ live app-wide regression (from #159).**
-- **B2 (M, Sonnet impl in flight)** fresh-install parity (#364/#339/#194) — spec `scratchpad/b2-parity-spec.md`. Bigger than expected: 58 seed-block entries, 37 settings + 102 routes rows, #339 index fix, + **6 migrations (122/123/125/129/135/139) fail on a nonexistent `isEncrypted` column and abort the chain**, + 112 DROP-INDEX guard, + new `check_schema_seed_parity.py` audit checker wired into CI.
-- **B4 (M)** Noticeboard wave — #362 help (Haiku), #365 openapi docs (Haiku), #361 fonts (Sonnet, USER DECISION: restyle to Plus Jakarta Sans vs self-host 3 faces), #363 media upload pipeline (Sonnet).
-- **B5 (M, Sonnet)** run existing `tools/e2e-migrations/` in GitHub Actions (#248) — after B2.
-- **B6 (S)** CI hardening #105/#106/#107 (repo settings = user; deploy `--delete` monitor).
-- **B7 (S+M, Sonnet)** prayer-requests #312 (settings kebab-case rename) + #311 (assignment workflow).
-- **B8 (M, Sonnet/Opus for VAPID)** push delivery #322 + install prompt #141 — USER DECISION: VAPID keygen.
-- **B9 (S-M)** GDPR gap audit #47 → close umbrella + narrow successors.
-- **B10 (L, Opus, SOLE-FOCUS)** REST API v1 Phase 2 (reopened #323, absorbs #157/#95).
-- **B11 (M)** MS365 delegated mail #234. **B12/B13** church-vertical + platform — USER prioritization.
+Full prose detail for all of the above: top of `CHANGELOG.md` under
+`[1.4.0] - 2026-07-22 (alpha)`. Apps inventory: `.claude/CLAUDE.md` →
+"Apps (shipped on `main`)".
 
-## Reopen candidates (from roadmap §2)
-- #323 ✅ reopened. #31 SIGNula → **surface to user** (brief requires SIGNula support but issue closed "not applicable"). #95/#157 → leave closed (folded into #323).
+---
 
-## Pending USER decisions (surface when reached, don't guess)
-1. #361 noticeboard fonts: restyle to Plus Jakarta Sans (recommended) vs self-host 3 faces.
-2. #322/#141 push: generate VAPID keypair (admin UI can, no CLI).
-3. #31 SIGNula: reopen-as-icebox vs amend brief.
-4. B12/B13 church-vertical + platform sequencing.
+## Remaining / next
 
-## Follow-ups still open / not yet done
-- **#183** DEV_NOTES stale `core/`/`vendor/` paths (~lines 194,511,947,957,1029,1151-1179,1338,1465-1467) — dedicated verify-then-fix doc pass.
-- **#194** folded into B2.
-- Close #371 + the B1-closed issues stay closed; close #372-tracked issues when #372 merges.
+### Awaiting user decision (Bucket B)
 
-## ⚠️ Safety rails
-- `auto-merge-alpha.yml` squash-auto-merges any **non-draft** PR based on `alpha` → keep alpha PRs **draft** until user says merge.
-- Dependabot reads `dependabot.yml` only from default branch (main); security-updates only target default branch.
-- `changelog.yml` runs on push to alpha/beta from `web/**` commits only → auto-generates CHANGELOG on merge; don't hand-add alpha CHANGELOG entries. `version-bump.yml` auto-bumps on alpha/beta pushes (not feature-branch/PR pushes).
-- Version source of truth = `web/_core/version.php` = **1.2.1** (don't hand-edit; automation owns it).
-- Code style: strict_types, full-IF `=== true`, MySQLi prepared stmts, `htmlspecialchars(…,ENT_QUOTES,'UTF-8')`, no `<table>` (portal-data-list), PORTAL_* consts. ApiRouter: handler at `_apps/{app}/api/{action}.php` + seed `api.{app}.{action}.enabled='true'`; `ApiResponse::success()` not `::ok()`.
+- **#234** — Azure Mail.Send delegated-permission grant (high value; needs
+  tenant admin consent, can't self-serve).
+- **#322 / #141** — Web push: VAPID keypair generation/approval (admin UI
+  can generate it, but a human should approve enabling push).
+- **#373** — 1-minute live-confirm check: verify `/attendance` (and other
+  dispatched routes) actually render on alpha post the `global $mysqli,
+  $SETTINGS;` scope fix — needs a live runtime check, not just code review.
+- **#105 / #106** — GitHub repo settings changes — owner-only, can't
+  self-serve.
+- **#370** — Dependabot tri-branch PR — pushed to
+  `claude/dependabot-alpha-beta-branches-q24zd7` → main, no PR opened yet
+  (harness rule); needs user to open/merge.
+- **#304** — In-app messaging — offer polling Phase 1 vs keep deferred;
+  needs a product-scope call before starting.
+- **Product sequencing** — #153 / #150 / #156 / #155 — order of upcoming
+  work, needs user prioritisation.
+- **Confirm-keep-deferred** (no action unless user says otherwise):
+  - **#302** — special-category data encryption risk (safeguarding/health
+    fields) — flagged as a real risk, deferred pending scope decision.
+  - **#299 sub-4** — recurring-giving account updater — needs Stripe
+    Billing, not started.
+  - **#320 / #321** — adversarial-review sign-off items — deferred pending
+    user review.
+- **New this session — policy item:** `tblSalvationCards` retention. The
+  table is name-keyed (no `userID`), so it's structurally unreachable by the
+  user-keyed GDPR erasure engine (`GdprEraser` already documents this
+  exclusion deliberately — see `#303 Phase 2` catalogue notes). Needs a
+  retention/redaction policy decision from the user — not a code bug, a
+  data-protection scope question.
 
-## Task IDs (harness): 1-4 ✅ · 6 ✅ B1 · 7 B2 · 8 B3 · 9 B4
+### Safe autonomous items still open
+
+- **A7** — `site.url` setting seeding: needs an installer-vs-derive-at-
+  runtime decision before implementing; low value. Verify current state
+  before picking a direction.
+- **A9** — Issue-tracker hygiene: close ~12 issues that are verified-shipped
+  per this session's and prior sessions' work but still open on GitHub.
+  Best done once #372 actually merges (so "closes #NNN" commit references
+  resolve against the merged history, not a draft branch).
+
+---
+
+## Notes for the next session
+
+- Don't hand-edit `web/_core/version.php` — automation owns version bumps
+  on alpha/beta pushes (`version-bump.yml`); this session did not touch it
+  per instruction.
+- Don't hand-add alpha CHANGELOG entries on merge — `changelog.yml` handles
+  that; this session's CHANGELOG entries were added directly per explicit
+  instruction to this docs-only pass; verify no duplicate/conflicting entry
+  appears when #372 merges.
+- `_core/apps/*.php` (AppRegistry) is missing entries for `noticeboard`,
+  `worship`, `salvation`, `kids` — real, working, shipped apps that simply
+  don't appear in `/admin/apps`. Flagged in `.claude/CLAUDE.md`'s apps table
+  note; not fixed here (docs-only pass) — worth a follow-up issue if
+  unintentional.
+- #183 (DEV_NOTES stale `core/`/`vendor/` path refs) — fixed this session,
+  see CHANGELOG. Verify no other stale bare-path instances have crept back
+  in before closing the issue for good.

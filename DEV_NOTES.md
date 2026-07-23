@@ -1646,9 +1646,9 @@ push.
 Affected (mirrored) trees on the server:
 
 ```text
-<base>/core/
-<base>/vendor/
-<base>/sql/
+<base>/_core/
+<base>/_vendor/
+<base>/_sql/
 <base>/_includes/
 <base>/_functions/
 <base>/_libraries/
