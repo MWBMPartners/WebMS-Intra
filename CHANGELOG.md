@@ -2,6 +2,23 @@
 
 
 ## [1.4.0] - 2026-07-22 (alpha)
+- fix(giving): #299 follow-up — auto-attribute the two remaining automatic
+  `tblGivingEntry` writers that were deliberately left unhooked when pledge
+  campaigns shipped (migration 151): online card giving
+  (`Payments::markPaymentSucceeded()`, purpose `'giving'`) and project-pledge
+  fulfilment (`Projects::fulfilPledge()`). Both now call
+  `Giving::attributeGift($siteId, $donorId, $donatedAt, 0)` (Auto — neither
+  flow has an explicit campaign selector) immediately before their existing
+  `tblGivingEntry` INSERT, using the same `$siteId` and gift date the row
+  itself is stamped with, and append the resolved `campaignID`/`pledgeID` to
+  the INSERT's column list/binds. A `0`/unknown donor (no signed-in user, no
+  member on the pledge) is passed to `attributeGift()` as `null` rather than
+  `0` so it is never mistaken for a real donor row — matching
+  `attributeGift()`'s own anonymous-gift contract. No amount, currency,
+  category, donor, method, reference, or date logic touched; no schema
+  change (the columns already exist). All three `tblGivingEntry` writers
+  (manual entry, offering-count close, and now these two automatic paths)
+  are consistently attributed.
 - chore(ci): new `tools/audit-checks/check_php_table_refs.py` audit check — closes the gap
   that let the GDPR eraser table-name bug (below) slip past review: `check_sql_columns.py`
   only ever parsed `.sql` files, so a wrong table name hard-coded straight into a PHP query
@@ -149,9 +166,10 @@
   `giving/entry-save.php` (new Campaign selector: Auto / None / explicit) and
   the sub-feature-1 offering-count close path (named-envelope rows only, the
   only ones with a real donor). `Projects.php`/`Payments.php` online/project
-  giving are deliberately NOT hooked — those rows simply leave the new
-  columns NULL; auto-attributing them is a documented follow-up, not an
-  oversight. New UI: `/giving/campaigns` (card grid + thermometers +
+  giving were deliberately NOT hooked in this PR — those rows were left with
+  the new columns NULL; auto-attributing them was a documented follow-up
+  (now completed — see the #299 follow-up entry above), not an oversight.
+  New UI: `/giving/campaigns` (card grid + thermometers +
   member's own pledge chip + canManage "new campaign" form), `/giving/campaign`
   (detail: thermometer, stats strip, pledge/cancel form, and — canManage —
   pledger list with on-schedule badges, attributed-gifts log, edit-campaign

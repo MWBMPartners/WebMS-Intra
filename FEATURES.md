@@ -584,7 +584,7 @@ account-updater webhook remain the two not-started #299 sub-features.
 | Hooked into both manual `tblGivingEntry` writers: `giving/entry-save.php` (new Campaign selector — Auto/None/explicit) and the offering-count close path (named-envelope rows only) | #299 | 151 | ✅ |
 | `Giving::pledgeExpectedToDate()` — on-schedule progress math; one-off owes in full immediately, weekly/monthly owe their first instalment from the pledge's start, monthly uses calendar-month arithmetic | #299 | 151 | ✅ |
 | UI: `/giving/campaigns` (card grid + thermometers + canManage new-campaign form), `/giving/campaign` (detail: thermometer, stats, member pledge/cancel form, canManage pledger list + attributed gifts + edit form) | #299 | 151 | ✅ |
-| `Projects.php`/`Payments.php` online/project-pledge giving deliberately NOT auto-attributed (rows leave the columns NULL) — documented follow-up | #299 | 151 | 🔜 (follow-up) |
+| `Projects.php`/`Payments.php` online/project-pledge giving now also auto-attributed — `Giving::attributeGift()` (Auto) called before each automatic `tblGivingEntry` INSERT, using the same siteID + gift date the row is stamped with; anonymous/no-user donor (`<= 0`) passed as `null`, never `0` | #299 follow-up | 151 | ✅ |
 
 ---
 

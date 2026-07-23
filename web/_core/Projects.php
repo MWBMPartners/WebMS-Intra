@@ -141,14 +141,25 @@ class Projects
                 $notes     = 'Pledge fulfilled — ' . (string) $row['title'];
                 $today     = date('Y-m-d');
                 $method    = 'card';
+
+                // 🎯 Auto-attribution (#299 follow-up) — project-pledge
+                // fulfilment has no explicit campaign selector, so Auto (0)
+                // is the only mode here; see Giving::attributeGift() for the
+                // full rule. $donorId is already guaranteed non-null by the
+                // outer if, but 0/unknown still maps to null defensively.
+                $donorForAttr = $donorId > 0 ? $donorId : null;
+                $attr         = Giving::attributeGift($siteId, $donorForAttr, $today, 0);
+                $campBind     = $attr['campaignID'];
+                $pledgeBind   = $attr['pledgeID'];
+
                 $ins = $db->prepare(
-                    'INSERT INTO tblGivingEntry (siteID, donorID, categoryID, amountPence, currency, donatedAt, method, reference, notes, recordedByID) '
-                    . 'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                    'INSERT INTO tblGivingEntry (siteID, donorID, categoryID, amountPence, currency, donatedAt, method, reference, notes, recordedByID, campaignID, pledgeID) '
+                    . 'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
                 );
                 if ($ins !== false) {
                     $ins->bind_param(
-                        'iiiisssssi',
-                        $siteId, $donorId, $givingCategoryId, $amount, $currency, $today, $method, $reference, $notes, $treasurerId
+                        'iiiisssssiii',
+                        $siteId, $donorId, $givingCategoryId, $amount, $currency, $today, $method, $reference, $notes, $treasurerId, $campBind, $pledgeBind
                     );
                     if ($ins->execute() === true) {
                         $givingEntryId = (int) $ins->insert_id;
