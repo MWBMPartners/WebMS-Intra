@@ -32,7 +32,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
 
       - name: Setup PHP 8.4
         uses: shivammathur/setup-php@v2
@@ -108,7 +108,7 @@ jobs:
 
       - name: Upload SARIF to GitHub Security
         if: always() && hashFiles('psalm.sarif') != ''
-        uses: github/codeql-action/upload-sarif@v4
+        uses: github/codeql-action/upload-sarif@v4.37.4
         with:
           sarif_file: psalm.sarif
           category: psalm
@@ -117,7 +117,7 @@ jobs:
     name: PHP -l lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
       - uses: shivammathur/setup-php@v2
         with:
           php-version: '8.4'
