@@ -10,14 +10,18 @@
 
 declare(strict_types=1);
 
+use Portal\Core\ApiAuth;
 use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\ApiResponse;
 use Portal\Core\Site;
 
 Auth::ensureSession();
-ApiResponse::requireAuth();
-ApiResponse::requireEnabled('api.noticeboard.list.enabled');
+ApiAuth::requireRead('noticeboard:read');
+// api.noticeboard.list.enabled is already gated per-site by
+// ApiRouter::resolveEnabledFlag before this handler runs (#323 Phase 2); a
+// second handler-level check via App::settings() would read the frozen
+// host-site snapshot and could wrongly 403 a valid bearer request.
 
 $db     = App::db();
 $siteId = Site::id();

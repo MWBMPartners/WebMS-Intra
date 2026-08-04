@@ -13,8 +13,13 @@
  *     "isAnonymous": false                                      (optional)
  *   }
  *
+ * Auto-assigns to a prayer partner round-robin when
+ * prayer-requests.autoAssign = 'true' (#311, migration 148) — see
+ * Portal\Core\PrayerChain::maybeAutoAssign().
+ *
  * @package   Portal\API\PrayerRequests
  * @link      https://github.com/MWBMPartners/webMS-Intra/issues/157
+ * @link      https://github.com/MWBMPartners/webMS-Intra/issues/311
  */
 
 declare(strict_types=1);
@@ -23,6 +28,7 @@ use Portal\Core\ApiResponse;
 use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Logger;
+use Portal\Core\PrayerChain;
 use Portal\Core\Site;
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
@@ -77,5 +83,9 @@ if ($ok === false) {
 }
 
 Logger::activity('ApiPrayerRequestCreate', 'API: created prayer request #' . $newId);
+
+// 🙏 Opt-in round-robin auto-assign (#311, migration 148) — no-op unless
+// prayer-requests.autoAssign = 'true'; swallows its own failures.
+PrayerChain::maybeAutoAssign($siteId, $newId);
 
 ApiResponse::success(['requestID' => $newId, 'status' => 'pending'], 201);

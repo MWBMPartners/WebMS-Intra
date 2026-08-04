@@ -17,11 +17,12 @@
 
 declare(strict_types=1);
 
+use Portal\Core\ApiAuth;
 use Portal\Core\ApiResponse;
 use Portal\Core\App;
 use Portal\Core\Site;
 
-ApiResponse::requireAuth();
+ApiAuth::requireRead('attendance:read');
 
 $db     = App::db();
 $siteId = Site::id();
@@ -44,7 +45,7 @@ $totalPages = max(1, (int) ceil($totalItems / $limit));
 $sessions = [];
 $stmt = $db->prepare(
     'SELECT s.*, t.typeName FROM tblAttendanceSessions s '
-    . 'LEFT JOIN tblAttendanceServiceTypes t ON t.typeID = s.typeID '
+    . 'LEFT JOIN tblAttendanceServiceTypes t ON t.serviceTypeID = s.serviceTypeID '
     . 'WHERE s.siteID = ? ORDER BY s.sessionDate DESC LIMIT ? OFFSET ?'
 );
 if ($stmt !== false) {

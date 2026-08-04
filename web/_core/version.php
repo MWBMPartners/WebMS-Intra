@@ -29,11 +29,11 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.2.0
+ * @version   1.4.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra
  * -----------------------------------------------------------------------------
  */
 
 declare(strict_types=1);
 
-return '1.2.1';
+return '1.4.0';

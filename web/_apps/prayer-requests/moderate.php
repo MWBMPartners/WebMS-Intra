@@ -10,12 +10,18 @@
  *   • answer                  — active → answered (optional testimony)
  *   • visibility-leadership   — flip visibility to leadership
  *   • visibility-congregation — flip visibility to congregation
+ *   • assign                  — set/clear the prayer-chain partner (#311)
+ *   • save-note               — admin edit of the private partner note (#311,
+ *                               migration 148). Admin-only by construction —
+ *                               this whole handler already requires
+ *                               App::isAdmin() below, so no extra ACL check
+ *                               is needed for this one action.
  *
  * @package   Portal\PrayerRequests
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   0.10.0
+ * @version   1.4.0
  * -----------------------------------------------------------------------------
  */
 
@@ -24,6 +30,7 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Logger;
+use Portal\Core\PrayerChain;
 use Portal\Core\Site;
 
 // 🛡️ POST only
@@ -64,7 +71,7 @@ if ($requestId <= 0 || $action === '') {
 
 // 🔍 Load the row (siteID-scoped — prevents cross-site tampering)
 $stmt = $mysqli->prepare(
-    'SELECT requestID, status, visibility FROM tblPrayerRequests '
+    'SELECT requestID, status, visibility, assignedToUserID FROM tblPrayerRequests '
     . 'WHERE siteID = ? AND requestID = ? LIMIT 1'
 );
 $row = null;
@@ -80,6 +87,12 @@ if ($row === null) {
     exit();
 }
 
+// 🙏 Previous assignee (#311) — used to (a) decide whether a reassignment
+//    actually changed anything (skip duplicate notifications) and (b)
+//    clear the private partner note when the assignee CHANGES, so a note
+//    written for one partner never leaks to their successor.
+$previousAssignee = $row['assignedToUserID'] !== null ? (int) $row['assignedToUserID'] : null;
+
 // 🛠️ Decide the SQL update
 $newStatus     = null;
 $newVisibility = null;
@@ -88,6 +101,13 @@ $setTestimony  = null;
 // 🙏 Prayer chain partner assignment (#311). NULL = no change; 0 = unassign;
 //    >0 = assign to that user.
 $assignToUserId = null;
+// 🔒 Private partner note (#311, migration 148). Admin-only action — this
+//    whole handler already requires App::isAdmin() above, so no further
+//    ACL gate is needed here. $updatePartnerNote distinguishes "no change
+//    requested" from "explicitly clear the note" (both leave the *value*
+//    null, so a plain null check on the value alone isn't enough).
+$updatePartnerNote = false;
+$partnerNoteToSet   = null;
 
 switch ($action) {
     case 'approve':
@@ -125,6 +145,14 @@ switch ($action) {
             $assignToUserId = 0;
         }
         break;
+    case 'save-note':
+        // 🔒 Admin edit of the private partner note (#311, migration 148).
+        $updatePartnerNote = true;
+        $partnerNoteToSet  = mb_substr(trim((string) ($_POST['partnerNote'] ?? '')), 0, 4000);
+        if ($partnerNoteToSet === '') {
+            $partnerNoteToSet = null;
+        }
+        break;
     default:
         header('Location: /prayer-requests/manage', true, 302);
         exit();
@@ -155,7 +183,9 @@ if ($setTestimony !== null) {
 }
 // 🙏 Prayer chain assignment (#311). 0 means "unassign"; >0 means set the
 //    specified userID + stamp assignedAt to NOW.
+$reassigned = false;
 if ($assignToUserId !== null) {
+    $reassigned = $assignToUserId !== ($previousAssignee ?? 0);
     if ($assignToUserId === 0) {
         $set[] = 'assignedToUserID = NULL';
         $set[] = 'assignedAt = NULL';
@@ -165,6 +195,20 @@ if ($assignToUserId !== null) {
         $params[] = $assignToUserId;
         $set[]    = 'assignedAt = NOW()';
     }
+    // 🔒 The assignee changed (including to/from "unassigned") — clear the
+    //    private note + prayed-for stamp so they never carry over to
+    //    whoever holds the assignment next (#311 ACL: a note is only ever
+    //    visible to the partner it was written for, or an admin).
+    if ($reassigned === true) {
+        $set[] = 'partnerNote = NULL';
+        $set[] = 'partnerLastPrayedAt = NULL';
+    }
+}
+// 🔒 Admin edit of the private partner note (#311, migration 148).
+if ($updatePartnerNote === true) {
+    $set[]    = 'partnerNote = ?';
+    $types   .= 's';
+    $params[] = $partnerNoteToSet;
 }
 
 $sql = 'UPDATE tblPrayerRequests SET ' . implode(', ', $set)
@@ -190,6 +234,15 @@ if ($ok === false) {
         'PrayerRequestModerated',
         'Request #' . $requestId . ' action=' . $action
     );
+
+    // 📣 Notify the newly-assigned partner (#311). Only when the assignee
+    //    actually changed (skip a no-op resubmit of the same partner) and
+    //    only when we assigned TO someone (not an unassign). notifyAssignment()
+    //    swallows its own failures — this call can never abort the request
+    //    above, which has already committed.
+    if ($action === 'assign' && $assignToUserId !== null && $assignToUserId > 0 && $reassigned === true) {
+        PrayerChain::notifyAssignment($siteId, $requestId, $assignToUserId);
+    }
 }
 
 // 🔀 Redirect back to the right place

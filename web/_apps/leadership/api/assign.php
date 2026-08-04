@@ -20,29 +20,14 @@
 
 declare(strict_types=1);
 
+use Portal\Core\ApiAuth;
 use Portal\Core\ApiResponse;
 use Portal\Core\App;
-use Portal\Core\Auth;
 use Portal\Core\Logger;
 use Portal\Core\Site;
 
-if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    ApiResponse::error('POST required', 405);
-}
-ApiResponse::requireAuth();
-ApiResponse::requireAdmin();
-Auth::ensureSession();
-
-$csrfHeader = $_SERVER['HTTP_X_CSRF_TOKEN'] ?? '';
-$rawBody    = (string) file_get_contents('php://input');
-$body       = json_decode($rawBody, true);
-if (is_array($body) === false) {
-    $body = [];
-}
-$csrfBody = (string) ($body['csrf_token'] ?? '');
-if (Auth::verifyCsrf($csrfHeader !== '' ? $csrfHeader : $csrfBody) === false) {
-    ApiResponse::error('CSRF check failed', 403);
-}
+ApiAuth::requireMethod('POST');
+$body = ApiAuth::requireWrite('leadership:write');
 
 $roleId = (int) ($body['roleID'] ?? 0);
 if ($roleId <= 0) {
@@ -76,7 +61,7 @@ if (isset($body['endDate']) === true && trim((string) $body['endDate']) !== '') 
 $notes = (string) ($body['notes'] ?? '');
 
 $siteId    = Site::id();
-$creatorId = (int) ($_SESSION['user_id'] ?? 0);
+$creatorId = ApiAuth::actorUserId();
 
 $db = App::db();
 $stmt = $db->prepare(

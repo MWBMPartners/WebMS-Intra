@@ -33,13 +33,17 @@ $userId    = (int) ($_SESSION['user_id'] ?? 0);
 $settings  = App::settings()['giving'] ?? [];
 $currency  = (string) ($settings['currency'] ?? 'GBP');
 
-$donorName  = trim((string) ($_POST['donorName'] ?? ''));
-$categoryId = (int) ($_POST['categoryID'] ?? 0);
-$amount     = Giving::parseAmount((string) ($_POST['amount'] ?? ''));
-$date       = (string) ($_POST['donatedAt'] ?? '');
-$method     = (string) ($_POST['method'] ?? 'cash');
-$reference  = trim((string) ($_POST['reference'] ?? ''));
-$notes      = trim((string) ($_POST['notes'] ?? ''));
+$donorName   = trim((string) ($_POST['donorName'] ?? ''));
+$categoryId  = (int) ($_POST['categoryID'] ?? 0);
+$amount      = Giving::parseAmount((string) ($_POST['amount'] ?? ''));
+$date        = (string) ($_POST['donatedAt'] ?? '');
+$method      = (string) ($_POST['method'] ?? 'cash');
+$reference   = trim((string) ($_POST['reference'] ?? ''));
+$notes       = trim((string) ($_POST['notes'] ?? ''));
+// 🎯 Campaign selector (#299 sub-feature 2): 0 = Auto, -1 = None, >0 = explicit
+// campaign choice. Never a pledgeID — that is resolved server-side only, in
+// Giving::attributeGift().
+$campaignSel = (int) ($_POST['campaignID'] ?? 0);
 
 if (in_array($method, ['cash','cheque','bank-transfer','card','standing-order','other'], true) === false) {
     $method = 'cash';
@@ -67,16 +71,22 @@ if ($donorName !== '') {
 }
 $freeTextName = $donorId === null && $donorName !== '' ? $donorName : null;
 
+// 🎯 Auto-attribution (#299 sub-feature 2) — the ONLY place this pair is
+// ever derived; see Giving::attributeGift() for the full rule.
+$attr        = Giving::attributeGift($siteId, $donorId, $date, $campaignSel);
+$campaignBind = $attr['campaignID'];
+$pledgeBind   = $attr['pledgeID'];
+
 $stmt = $db->prepare(
     'INSERT INTO tblGivingEntry '
-    . '(siteID, donorID, donorName, categoryID, amountPence, currency, donatedAt, method, reference, notes, recordedByID) '
-    . 'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+    . '(siteID, donorID, donorName, categoryID, amountPence, currency, donatedAt, method, reference, notes, recordedByID, campaignID, pledgeID) '
+    . 'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
 );
 if ($stmt !== false) {
     $stmt->bind_param(
-        'iisiisssssi',
+        'iisiisssssiii',
         $siteId, $donorId, $freeTextName, $categoryId, $amount, $currency,
-        $date, $method, $reference, $notes, $userId
+        $date, $method, $reference, $notes, $userId, $campaignBind, $pledgeBind
     );
     $stmt->execute();
     $stmt->close();

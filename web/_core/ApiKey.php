@@ -20,7 +20,7 @@
  *   ApiKey::findByPlaintext(plaintext)                           → ?array (full row + side-effect update)
  *   ApiKey::hasScope(keyRow, required)                           → bool
  *   ApiKey::revoke(keyID, byUserID)                              → bool
- *   ApiKey::rotate(keyID, byUserID)                              → ['plaintext'=>, 'keyID'=>, 'prefix'=>]
+ *   ApiKey::rotate(keyID, byUserID, graceHours=null)              → ['plaintext'=>, 'keyID'=>, 'prefix'=>]
  *
  * @package   Portal\Core
  * @author    MWBM Partners Ltd (t/a MWservices)
@@ -42,6 +42,25 @@ class ApiKey
 
     /** @var int Random bytes for the token body — 32 bytes → 64 hex chars → 256 bits entropy */
     public const TOKEN_BYTES = 16; // 16 bytes → 32 hex chars → 128 bits — sufficient post-hashing
+
+    /**
+     * @var array<int, string> Scope strings recognised by the v1 write
+     *      surface (#323 Phase 2). Each app exposes `{app}:read` and/or
+     *      `{app}:write` — ApiKey::hasScope() also honours a trailing
+     *      wildcard (e.g. `events:*`) against any of these.
+     */
+    public const SCOPES = [
+        'events:read', 'events:write',
+        'announcements:read', 'announcements:write',
+        'attendance:read', 'attendance:write',
+        'prayer-requests:read', 'prayer-requests:write',
+        'documents:read', 'documents:write',
+        'expenses:read', 'expenses:write',
+        'leadership:read', 'leadership:write',
+        'tasks:read', 'tasks:write',
+        'noticeboard:read', 'noticeboard:write',
+        'users:read', 'users:write',
+    ];
 
     /**
      * Mint a new API key. Returns the plaintext EXACTLY ONCE — caller MUST
@@ -207,12 +226,25 @@ class ApiKey
     }
 
     /**
-     * Rotate: revoke the existing key and mint a replacement with the same
-     * siteID / name / scopes / expiresAt. Returns the new plaintext.
+     * Rotate: mint a replacement key with the same siteID / name / scopes /
+     * expiresAt, then retire the existing key.
+     *
+     * Retirement mode depends on the grace window (#323 Phase 2):
+     *   • $graceHours === null → read `api.keys.rotationGraceHours` from
+     *     settings (default 24 when unset).
+     *   • grace > 0  → the OLD key is NOT revoked immediately. Its
+     *     `expiresAt` is capped at now + grace hours (never extended past an
+     *     existing sooner expiry) and `rotatedToID` is stamped with the new
+     *     key's ID. The old key stays `isActive = 1` and dies naturally via
+     *     the existing expiresAt check in findByPlaintext() once the cutoff
+     *     passes — giving in-flight callers a window to switch to the new
+     *     token before the old one stops working.
+     *   • grace === 0 → preserves the original, backward-compatible
+     *     behaviour: the old key is revoked immediately via revoke().
      *
      * @return array{plaintext: string, keyID: int, prefix: string}
      */
-    public static function rotate(int $keyId, int $byUserId): array
+    public static function rotate(int $keyId, int $byUserId, ?int $graceHours = null): array
     {
         $db = App::db();
         $stmt = $db->prepare(
@@ -229,18 +261,49 @@ class ApiKey
             throw new \RuntimeException('Key not found or not active');
         }
 
-        self::revoke($keyId, $byUserId);
+        $grace = $graceHours ?? (int) (App::settings('api.keys.rotationGraceHours') ?? 24);
 
         $scopes  = array_map('trim', explode(',', (string) ($row['scopes'] ?? '')));
         $scopes  = array_values(array_filter($scopes, static fn($s) => $s !== ''));
         $expires = $row['expiresAt'] !== null ? new \DateTimeImmutable((string) $row['expiresAt']) : null;
 
-        return self::mint(
+        if ($grace <= 0) {
+            // 🔒 Backward-compatible immediate-revoke path (grace disabled).
+            self::revoke($keyId, $byUserId);
+
+            return self::mint(
+                (int) $row['siteID'],
+                (string) $row['name'],
+                $scopes,
+                $expires,
+                $byUserId
+            );
+        }
+
+        // 🕐 Grace-window rotation — mint the replacement FIRST so the
+        //    caller always gets a fresh key even if the follow-up UPDATE
+        //    below fails for any reason.
+        $minted = self::mint(
             (int) $row['siteID'],
             (string) $row['name'],
             $scopes,
             $expires,
             $byUserId
         );
+
+        $cutoff = (new \DateTimeImmutable('+' . $grace . ' hours'))->format('Y-m-d H:i:s');
+        $newId  = $minted['keyID'];
+        $updateStmt = $db->prepare(
+            'UPDATE tblApiKeys SET expiresAt = LEAST(COALESCE(expiresAt, ?), ?), rotatedToID = ? WHERE keyID = ?'
+        );
+        if ($updateStmt !== false) {
+            $updateStmt->bind_param('ssii', $cutoff, $cutoff, $newId, $keyId);
+            $updateStmt->execute();
+            $updateStmt->close();
+        }
+
+        Logger::activity('ApiKeyRotated', 'Key #' . $keyId . ' → #' . $newId . ' (grace ' . $grace . 'h)');
+
+        return $minted;
     }
 }

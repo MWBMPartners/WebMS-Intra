@@ -1,6 +1,267 @@
 # Changelog
 
 
+## [1.4.0] - 2026-07-22 (alpha)
+- docs: refresh `.claude/CLAUDE.md` apps table — was ~17 rows, now covers all
+  37 AppRegistry apps (`_core/apps/*.php`) plus `noticeboard`/`worship`/
+  `salvation`/`kids` (working, shipped, but not yet AppRegistry-registered)
+  and a note distinguishing user-facing apps from infrastructure dirs
+  (`account/`, `cron/`, `events/api`, `users/api`, `live/`, `livechat/`,
+  `privacy/`, `widget/`, `qr.php`). Prepended this session's PR #372 ships
+  (migrations 150-154) to "Recent ships". Rewrote `.claude/HANDOFF.md` from a
+  stale, superseded roadmap snapshot to the current PR #372 state (draft,
+  CI-green through migration 154) with an accurate Bucket-B / autonomous-item
+  breakdown. Fixed #183 — stale bare `core/`/`vendor/`/`sql/` path references
+  in `DEV_NOTES.md`'s "file disappeared from the server" code block (should
+  read `_core/`/`_vendor/`/`_sql/`, matching the actual repo layout); the rest
+  of #183's original findings were already fixed by PR #286.
+- feat(service-plans): #300 v2 — operator → confidence-monitor message channel.
+  Closes the last open piece of #300 (v1 shipped clock-only in migration 110).
+  New `tblServicePlanMessages` (migration 154) — `isCleared`/`clearedAt` rather
+  than DELETE, so cleared messages remain as part of the service's audit
+  record; indexed `(planID, isCleared, messageID)` for an O(1) poll. Two new
+  plain `service-plans/*` page routes (NOT under `api/*` — the ApiRouter
+  routing trap doesn't apply): `live-message.php` (admin-only POST, CSRF-
+  checked, send/clear, 303 redirect back to `/service-plans/live`, matching
+  the app's only existing submit idiom) and `message-poll.php` (GET-only JSON
+  poll, any logged-in user, `Cache-Control: no-store`, `ApiResponse::success()`
+  envelope, `sinceID`/`lastID` dedup short-circuiting to `changed:false`).
+  `live.php` gained an operator panel (current message + clear form + send
+  form, hidden once the plan is closed); `confidence.php` gained a themed
+  banner polled every 4s (matching the `livechat-widget.js` house cadence) —
+  injected via `textContent` only, NEVER `innerHTML`, as the client-side XSS
+  line of defence alongside the server's `htmlspecialchars()` escaping on
+  `live.php`. No new `tblSettings` — inherits the existing
+  `service_plans.enabled` app gate. All 10 `tools/audit-checks/` scripts clean.
+- fix(giving): #299 follow-up — auto-attribute the two remaining automatic
+  `tblGivingEntry` writers that were deliberately left unhooked when pledge
+  campaigns shipped (migration 151): online card giving
+  (`Payments::markPaymentSucceeded()`, purpose `'giving'`) and project-pledge
+  fulfilment (`Projects::fulfilPledge()`). Both now call
+  `Giving::attributeGift($siteId, $donorId, $donatedAt, 0)` (Auto — neither
+  flow has an explicit campaign selector) immediately before their existing
+  `tblGivingEntry` INSERT, using the same `$siteId` and gift date the row
+  itself is stamped with, and append the resolved `campaignID`/`pledgeID` to
+  the INSERT's column list/binds. A `0`/unknown donor (no signed-in user, no
+  member on the pledge) is passed to `attributeGift()` as `null` rather than
+  `0` so it is never mistaken for a real donor row — matching
+  `attributeGift()`'s own anonymous-gift contract. No amount, currency,
+  category, donor, method, reference, or date logic touched; no schema
+  change (the columns already exist). All three `tblGivingEntry` writers
+  (manual entry, offering-count close, and now these two automatic paths)
+  are consistently attributed.
+- chore(ci): new `tools/audit-checks/check_php_table_refs.py` audit check — closes the gap
+  that let the GDPR eraser table-name bug (below) slip past review: `check_sql_columns.py`
+  only ever parsed `.sql` files, so a wrong table name hard-coded straight into a PHP query
+  string (or comment) was invisible to CI. The new check builds the authoritative table set
+  from every `CREATE TABLE [IF NOT EXISTS] \`tblX\`` in `web/_sql/full_schema.sql` (155
+  tables, migrations 000-153 folded in) and flags any `tblXxx`-shaped identifier referenced
+  under `web/_apps/`, `web/_core/`, `web/_install/`, `web/public_html/` that isn't in it. PHP
+  comments (`//`, `#`, `/* … */`) are stripped before scanning so comment-only mentions of a
+  deliberately-nonexistent table name (e.g. the explanatory comments left behind by the GDPR
+  fix itself, in `GdprEraser.php`/`Livestream.php`/`discipleship.php`/`data-export.php`/
+  `denominational.php`) don't false-positive — 0 unknown tables on the current tree.
+  Non-blocking (`--strict` opt-in), matching the `check_route_targets.py` /
+  `check_sql_columns.py` convention; wired into `.github/workflows/pr-security.yml` as
+  check 14, alongside the other `check_*.py` invocations.
+- fix(ui): replaced the last 11 native `onsubmit="return confirm(...)"` /
+  `onclick="return confirm(...)"` call sites (flagged by `check_no_native_confirm.py`) with
+  the house `data-confirm="message"` (+ `data-confirm-destructive="true"` on delete/revoke/
+  archive/remove actions) pattern from `web/public_html/assets/js/portal-confirm.js` —
+  `web/_apps/admin/discipleship/pathways.php`, `pathway-form.php`,
+  `web/_apps/admin/integrations/api-keys.php` (rotate + revoke),
+  `web/_apps/admin/integrations/webhooks/index.php` (pause/reactivate + delete),
+  `web/_apps/admin/calendar/feeds.php`, `web/_apps/worship/song.php`, `worship/plan.php`,
+  `web/_apps/calendar/event-jobs.php`, `calendar/event-crews.php`. Confirmation message text
+  and form/button behaviour unchanged; `check_no_native_confirm.py` now reports 0 findings.
+- fix(core): GDPR eraser table-name corrections + auth-residue coverage — data-protection
+  correctness fix, no issue yet. `Portal\Core\GdprEraser::catalogue()` referenced four
+  non-existent or mis-cased tables (`tblAttendanceCheckIns`, `tblExpenseClaim`/`submittedByID`,
+  `tblSessions`, `tblWebauthnCredentials`) that made `prepare()` fail on every one — because
+  `processEntry()` skips (rather than aborts) on a prepare failure, by design, to tolerate
+  not-installed apps, `execute()` reported a completed erasure while leaving that PII behind.
+  Corrected to `tblEventAttendance`.`userID`, `tblExpenseClaims`.`userID`, removed the
+  non-existent `tblSessions` entry (PHP sessions are file-based, never DB-backed), and fixed
+  the case on `tblWebAuthnCredentials` (MySQL on Linux is case-sensitive for table names).
+  Added the auth-residue tables that a GDPR erasure previously missed entirely: since
+  `tblUsers` is anonymised in place rather than deleted, no FK `ON DELETE CASCADE` ever
+  swept up `tblLocalAccounts`, `tblLinkedAccounts`, `tblTrustedDevices` or `tblPasswordResets`
+  — all four are now hard-deleted (table/column names cross-checked against the already-correct
+  export list in `_apps/auth/account/data-export.php`). Added `tblKidProfiles` (a child profile
+  links to exactly one parent via `parentUserID` — no multi-guardian junction table exists —
+  so erasing the parent now erases the child's profile; `tblKidCheckins` already
+  `ON DELETE CASCADE`s from it, so no separate entry was needed there). Also fixed the
+  `tblUsers` anonymise entry itself: its `nullCols` referenced four columns that don't exist
+  on that table (`address`, `passwordHash`, `msAccountID`, `googleAccountID` — the address
+  field is actually `displayAddress`, and the credential/SSO columns live on the tables above,
+  not on `tblUsers`), which meant the single most important step — anonymising the user's own
+  row — silently failed to prepare and never ran. Hardening: `processEntry()` now writes a
+  `skip` entry to the same `tblErasureAudit` HMAC chain when a catalogued table/column can't
+  be prepared, instead of returning `false` with no trace, so the next schema drift is visible
+  rather than hidden.
+- fix(admin): demo-data wipe (#242) referenced `tblExpenses`/`submittedByID`, neither of which
+  exist (real: `tblExpenseClaims`/`userID`), so that statement threw inside the wipe
+  transaction and rolled back the entire wipe on every run — corrected the table/column names.
+- feat(discipleship): #303 Phase 2 — per-user progress + auto-completion.
+  Two new tables (migration 153): `tblPathwayEnrolments` (who is assigned to
+  which pathway; `status` active/completed/withdrawn) and
+  `tblPathwayProgress` (one row per step per member; UNIQUE(stepID, userID)
+  — unmarking a step sets `revokedAt` rather than deleting the row, so the
+  auto-sweep never resurrects a step a coordinator deliberately unmarked).
+  Two guarded new columns on the existing `tblPathwaySteps`
+  (`autoRule`/`autoRefID`) let a step opt into auto-completion from
+  per-user evidence only (adopted issue #303 blocker decision, option (a)):
+  attended a specific event, attended any event in a category, or RSVP'd
+  "going" to an event that has since started — `tblSalvationCards` (no
+  userID) and `tblDecisionMoments` (aggregate counter) are structurally
+  excluded, revisit later. New `Portal\Core\Discipleship` helper —
+  `autoSweep()` runs three set-based `INSERT IGNORE … SELECT` statements
+  (idempotent via the unique key) then calls `refreshEnrolmentStatuses()`,
+  which flips an enrolment to `completed` once every non-optional step has
+  an unrevoked progress row (and reverts it to `active` if one is later
+  revoked). No scheduler dependency — the sweep runs lazily at the top of
+  every discipleship page view; an optional `cron/discipleship-sweep.php`
+  endpoint (token-gated like `reminders.cron_token`) adds freshness without
+  page views. New member-facing routes fix the Phase 1 dead dashboard link
+  (`discipleship.enabled` had no `discipleship` route seeded): `/discipleship`
+  ("My pathways" with progress bars) and `/discipleship/view` (step list,
+  auto/manual source badges) — every query scoped to `Site::id()` AND
+  `$_SESSION['user_id']`, so a member can never see another member's
+  progress even via a tampered `?id=`. New admin/pastor surface:
+  `/admin/discipleship/progress` (pathway list with enrolment counts),
+  `/admin/discipleship/progress/pathway` (roster — a flat `portal-data-list`
+  of enrolled members with progress bars, never a members×steps `<table>`
+  matrix, per the house `<table>` ban and issue #303's own decision 2;
+  includes the enrol form and withdraw button), `/admin/discipleship/progress/member`
+  (per-member step list with mark-complete/unmark + notes, showing
+  auto-evidence and revocation state). Existing `pathway-form.php` /
+  `step-save.php` extended with the `autoRule` select + a site-scoped
+  event/category ref picker; `step-save.php` validates the ref resolves at
+  THIS site before saving, and a stale ref (event/category later deleted —
+  deliberately no FK on `autoRefID`) renders a "(missing)" warning.
+  Registered the two new per-user tables in `GdprEraser`'s hard-delete
+  catalogue. Mentor relationships remain deferred to a later phase (issue
+  #303's third blocker decision).
+- feat(giving): #299 bank reconciliation (sub-feature 3 of the "Giving
+  polish" issue — offering counting and pledge campaigns shipped as
+  sub-features 1/2, above; account-updater for recurring giving remains not
+  started). New `tblBankImports` (one row per uploaded statement CSV batch)
+  and `tblBankTxns` (one row per imported CREDIT line + its match state,
+  migration 152) — debits are never stored, and `matchedCount` is
+  deliberately NOT a stored column (it mutates on every match/unmatch and is
+  derived with one aggregate join). CSV import (`/giving/reconcile/import`)
+  parses bank statement columns by HEADER NAME, never position, against a
+  UK-bank alias table (Lloyds/HSBC/Barclays/Monzo/Starling-style headers);
+  when auto-mapping can't resolve every required column a manual mapping
+  screen lets the treasurer pick columns explicitly before previewing.
+  SHA-256 file-hash + `UNIQUE(siteID, fileHash)` blocks re-importing the same
+  statement twice. A non-empty credit that fails amount/date parsing fails
+  the WHOLE upload (nothing partial is ever stored) — only genuine
+  debit/zero/blank lines are silently skipped. Matching is exact-amount and
+  window-based (a gift can appear in the bank on or after its date, within
+  `giving.reconcile.toleranceDays`, default 5) with a dual candidate universe:
+  `matchedEntryID` for a 1:1 match to a single `tblGivingEntry` row, or
+  `matchedCountSessionID` for a whole offering-count deposit (which
+  `giving/count/close.php` writes as multiple gift-log rows sharing a
+  `Count #<id>` reference — excluded from entry-matching to avoid double-
+  counting against its deposit). Two or more equal-amount in-window
+  candidates is always left unmatched — the matcher never guesses. New
+  `/giving/reconcile` (imports dashboard), `/giving/reconcile/view` (per-
+  statement matched/unmatched/ignored lists with inline match-suggestion
+  mini-forms, plus a two-way "gift log not in this statement" gap panel with
+  in-transit-vs-missing badges), and `/giving/reconcile/match` (manual
+  match/unmatch/ignore/rematch/delete-import actions) — all gated by
+  `Portal\Core\Giving::canManage()`. "Count"/"Reconcile" nav buttons added to
+  `giving/manage.php` (the offering-count feature, shipped as sub-feature 1,
+  previously had no page linking to it anywhere).
+- feat(giving): #299 pledge campaigns (sub-feature 2 of the "Giving polish"
+  issue — offering counting shipped as sub-feature 1, above; bank
+  reconciliation and account-updater remain not started). New
+  `tblPledgeCampaigns` (goal amount, currency, date window, active flag) and
+  `tblPledges` (migration 151) — one row per member per campaign, `UNIQUE
+  (campaignID, userID)` upsert so re-pledging (including after a
+  cancellation) updates the same row rather than duplicating it. Two nullable
+  columns added to the existing `tblGivingEntry` (`campaignID`, `pledgeID`,
+  both `ON DELETE SET NULL`) carry auto-attribution instead of a link table —
+  every gift that can be tied to a campaign/pledge keeps the thermometer and
+  progress math a single indexed `SUM`. New `Portal\Core\Giving::attributeGift()`
+  is the ONLY code path allowed to produce that pair: an explicit treasurer
+  campaign choice is honoured (even outside the campaign's window — a
+  deliberate override); "Auto" attributes only when the donor holds exactly
+  one open pledge to a currently-active, in-window campaign — two-or-more
+  open pledges is a genuine tie and is left unattributed rather than guessed.
+  New `Giving::pledgeExpectedToDate()` computes on-schedule expectation
+  (one-off pledges owe their full amount immediately; weekly/monthly owe
+  their first instalment from the pledge's start; monthly uses calendar-month
+  arithmetic, never `/30`). Hooked into BOTH manual `tblGivingEntry` writers:
+  `giving/entry-save.php` (new Campaign selector: Auto / None / explicit) and
+  the sub-feature-1 offering-count close path (named-envelope rows only, the
+  only ones with a real donor). `Projects.php`/`Payments.php` online/project
+  giving were deliberately NOT hooked in this PR — those rows were left with
+  the new columns NULL; auto-attributing them was a documented follow-up
+  (now completed — see the #299 follow-up entry above), not an oversight.
+  New UI: `/giving/campaigns` (card grid + thermometers +
+  member's own pledge chip + canManage "new campaign" form), `/giving/campaign`
+  (detail: thermometer, stats strip, pledge/cancel form, and — canManage —
+  pledger list with on-schedule badges, attributed-gifts log, edit-campaign
+  form). No hard-delete route for campaigns — `isActive=0` retires one,
+  keeping pledge/gift history intact.
+- feat(giving): #299 two-person offering-count session (sub-feature 1 of the
+  "Giving polish" issue — pledge campaigns/reconciliation/account-updater are
+  separate sub-features, not built here). New `tblCountSessions` (migration
+  150) tracks a service date's count: two counters independently key cash /
+  cheque / envelope totals; once both are in, the system compares them and
+  flags `status='discrepancy'` on any mismatch (blocking close) or
+  auto-agrees when they match. A discrepancy is cleared either by a counter
+  re-entering matching totals or — admin-only — by resolving with agreed
+  totals directly. New `tblCountEnvelopes` child table logs named/numbered
+  giving-envelope amounts against the session's envelope total; closing a
+  session (`/giving/count/close`) validates the named envelopes reconcile to
+  the agreed envelope total, then writes the real gift log in one
+  transaction — one `tblGivingEntry` row per named envelope (attributed to
+  the giver where matched) plus aggregate "loose cash"/"loose cheque" rows
+  for anything not itemised, so the total written always balances to
+  cashTotal + chequeTotal + envelopeTotal. New UI under `/giving/count`
+  (list/start, session detail with counter-entry cards + comparison table +
+  named-envelope log) gated by the same `Portal\Core\Giving::canManage()`
+  (admin or `treasurer` role) as the rest of `giving`; new
+  `Portal\Core\Giving::parseDecimal()` helper for validated
+  DECIMAL(10,2)-safe amount parsing. Note: the issue body names the write
+  target `tblGiftEntries`, but the giving app actually shipped (#266) as
+  `tblGivingEntry` — this migration writes to the real table.
+- feat(noticeboard): #363 real media upload pipeline — replaces the `data:`
+  URI rejection in `save.php` with `POST /api/noticeboard/upload`
+  (site-admin, CSRF, finfo-sniffed MIME allowlist: png/jpeg/gif/webp +
+  mp4/webm, hard size cap via `noticeboard.upload.maxBytes` default 15 MB,
+  server-generated random filename). Files land under
+  `_uploads/noticeboard/` (outside the webroot, mirroring
+  `documents/api/create.php`) and are served back with NO auth by the new
+  public `GET /noticeboard/media?f=<token>` route — posters must keep
+  rendering for an anonymous QR scanner. New `tblNoticeboardUploads` ledger
+  (migration 149) + `Portal\Core\NoticeboardMedia` helper links each upload
+  to its saved poster and purges orphans (abandoned in the editor, or whose
+  poster was later soft-deleted) after every save.
+- feat(prayer-requests): #311 prayer-chain assignment residuals — private
+  partner notes (`partnerNote`/`partnerLastPrayedAt`, ACL: assignee-or-admin
+  only, cleared on reassignment), manual assign dropdowns with an
+  open-assignment load-balancing hint on `manage`/`view` (eligible partner =
+  active site member holding the new `prayer_team` role), opt-in round-robin
+  auto-assign on submission (`prayer-requests.autoAssign`), and email + SMS
+  assignment notifications (`prayer-requests.notifyOnAssign`, respecting the
+  partner's SMS opt-in) — new `Portal\Core\PrayerChain` helper, migration 148.
+- feat(api): REST API v1 write surface (#323 Phase 2, PR #372) — dual-mode `Portal\Core\ApiAuth`
+  (bearer API key OR session, resolved centrally); `/api/v1/{resource}[/{id}]` RESTful facade that
+  maps HTTP verbs onto the SAME `_apps/{app}/api/{action}.php` handlers + `api.{app}.{action}.enabled`
+  flags as the existing `/api/{app}/{action}` routes (no new gating vocabulary); bearer requests are
+  tenant-pinned to the key's own site (`Site::forceContext`) and rate-limited per key; new write
+  endpoints closing the #157 remnant — Attendance + Documents (create/update/delete) and Expenses
+  (create/delete — status-transition update deferred to Phase 3), plus new Users create/update
+  (admin-gated, default-off flags); canonical `ApiKey::SCOPES` vocabulary + rotation grace windows;
+  admin API-keys UI gains a scope checkbox multi-select (validated server-side against `SCOPES`) and
+  a rotation-grace selector; admin audit viewer gains a source (session/apikey) badge + key-prefix;
+  OpenAPI spec documents every `/api/v1/*` path alongside the existing legacy aliases.
+- feat(admin): outbound webhooks admin CRUD UI (#324)
+
 ## [1.2.0] - 2026-07-07 (alpha)
 - 2 apps + iCal feed + admin polish — 7 issues (#258, #261, #271, #251, #254, #253, #252) (#281)
 - 4 community/pastoral apps: Rota + Praise + Milestones + Care (#256, #260, #259, #257) (#280)

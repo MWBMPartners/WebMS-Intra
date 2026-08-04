@@ -191,7 +191,7 @@ gh secret set SFTP_PORT      --body '22'
 gh secret set SFTP_PASSWORD                       # prompts (avoids password in shell history)
 ```
 
-**Shared-base note.** The shared `core/`, `vendor/`, `sql/` etc. upload to
+**Shared-base note.** The shared `_core/`, `_vendor/`, `_sql/` etc. upload to
 `dirname()` of whichever per-branch path applies. When all three paths share
 one parent (the default — recommended for the WebMS-Intra single-site setup),
 all branches' shared code lands in the same place. Point them at different
@@ -887,6 +887,190 @@ the web-based Migrator (admin-only) and tracked in `tblMigrations`.
 
 ---
 
+## Portable DDL convention (MySQL 8.0 ∩ MariaDB)
+
+**Supported engines:** MySQL 8.0+ (production target, DreamHost) and MariaDB 10.4+
+(compatible). MySQL-wire-compatible managed/cloud databases — AWS RDS MySQL 8,
+Aurora MySQL 3.x, Azure Database for MySQL (Flexible Server 8.0), GCP Cloud SQL for
+MySQL — are covered for free by MySQL-8 compatibility, since they accept the same
+DDL and reject the same MariaDB-only extensions. PostgreSQL, SQL Server, and
+Vitess-based platforms (PlanetScale/TiDB/SingleStore — limited FOREIGN KEY support)
+are explicitly **not supported**; the entire data layer is mysqli (no PDO
+abstraction), so supporting them would be a platform port, not a SQL tweak.
+
+**Rule: never use `IF [NOT] EXISTS` on `ADD`/`DROP COLUMN`, `ADD`/`CREATE`/`DROP
+INDEX`/`KEY`, or `CHANGE`/`MODIFY COLUMN`.** That clause is a MariaDB-only DDL
+extension — MySQL 8.0 (all point releases, plus 8.4/9.x) rejects it with a parse
+error, **ERROR 1064**, which aborts the whole statement/file under
+`mysqli::multi_query` (the installer and Migrator both use it). `CREATE TABLE IF
+NOT EXISTS` and `DROP TABLE IF EXISTS` are standard MySQL and remain fine to use
+as-is.
+
+Instead, guard every DDL object with an `information_schema` existence check and a
+dynamic `PREPARE`/`EXECUTE`. This is the house idiom, already shipped and
+production-proven under `mysqli::multi_query` in `web/_sql/037_site_favicon.sql`
+(ADD COLUMN), `web/_sql/112_events_calendar_easy_wins.sql` (DROP INDEX), and
+`web/_sql/138_worship_present_state.sql` (ADD UNIQUE KEY — its own comment notes
+"some MySQL builds reject IF NOT EXISTS"). Conventions:
+
+- One guard block per DDL object (per column / per index / per FK) — never batch a
+  multi-column ALTER behind a single sentinel guard. `multi_query` aborts mid-file
+  on connection loss, and per-object guards make a re-run self-healing.
+- Keep the literal DDL textually contiguous inside the quoted string (don't split
+  `` ALTER TABLE `tblX` ADD COLUMN `colY` `` across concatenation) —
+  `tools/audit-checks/check_sql_columns.py` builds its column inventory from
+  raw-text regexes that match inside string literals across newlines.
+- Escape single quotes inside the literal by doubling (`''`), as in COMMENT clauses.
+- Use `SELECT 1` as the no-op branch.
+
+### Templates
+
+**ADD COLUMN** — guard on `information_schema.COLUMNS`:
+
+```sql
+-- ➕ tblFoo.barColumn — guarded ADD COLUMN (portable: MySQL 8.0 + MariaDB 10.x)
+SET @col_exists := (
+    SELECT COUNT(*) FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME   = 'tblFoo'
+      AND COLUMN_NAME  = 'barColumn'
+);
+SET @sql := IF(@col_exists = 0,
+    'ALTER TABLE `tblFoo` ADD COLUMN `barColumn` VARCHAR(64) DEFAULT NULL COMMENT ''What it is (#NNN)'' AFTER `bazColumn`',
+    'SELECT 1'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+```
+
+**ADD INDEX / CREATE INDEX** — guard on `information_schema.STATISTICS`:
+
+```sql
+-- 🔍 idx_foo_bar — guarded ADD INDEX
+SET @idx_exists := (
+    SELECT COUNT(*) FROM information_schema.STATISTICS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME   = 'tblFoo'
+      AND INDEX_NAME   = 'idx_foo_bar'
+);
+SET @sql := IF(@idx_exists = 0,
+    'ALTER TABLE `tblFoo` ADD INDEX `idx_foo_bar` (`barColumn`, `bazColumn`)',
+    'SELECT 1'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+```
+
+Composite indexes produce one `STATISTICS` row per column, so `COUNT(*) = 0` / `> 0`
+still works. For a unique index use `ADD UNIQUE KEY \`uq_…\` (…)` in the literal.
+Standardise on `ALTER TABLE … ADD` rather than `CREATE INDEX` for consistency; both
+are prepare-able.
+
+**DROP INDEX** — same `STATISTICS` guard, inverted:
+
+```sql
+SET @idx_exists := (
+    SELECT COUNT(*) FROM information_schema.STATISTICS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME   = 'tblFoo'
+      AND INDEX_NAME   = 'uq_old_index'
+);
+SET @sql := IF(@idx_exists > 0,
+    'ALTER TABLE `tblFoo` DROP INDEX `uq_old_index`',
+    'SELECT 1'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+```
+
+**DROP COLUMN** — `COLUMNS` guard, inverted:
+
+```sql
+SET @col_exists := (
+    SELECT COUNT(*) FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME   = 'tblFoo'
+      AND COLUMN_NAME  = 'obsoleteColumn'
+);
+SET @sql := IF(@col_exists > 0,
+    'ALTER TABLE `tblFoo` DROP COLUMN `obsoleteColumn`',
+    'SELECT 1'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+```
+
+**MODIFY / CHANGE COLUMN:**
+
+- `MODIFY COLUMN` to a fixed target definition is naturally re-runnable (the same
+  MODIFY twice succeeds) — no guard needed unless the migration must be conditional
+  on the *current* type, in which case guard on
+  `information_schema.COLUMNS.COLUMN_TYPE`/`DATA_TYPE`.
+- `CHANGE COLUMN` (rename) is NOT re-runnable — the old name is gone on the second
+  run — so guard on the **old** name:
+
+```sql
+SET @old_exists := (
+    SELECT COUNT(*) FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME   = 'tblFoo'
+      AND COLUMN_NAME  = 'oldName'
+);
+SET @sql := IF(@old_exists > 0,
+    'ALTER TABLE `tblFoo` CHANGE COLUMN `oldName` `newName` VARCHAR(64) NOT NULL',
+    'SELECT 1'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+```
+
+**ADD FOREIGN KEY** — guard on `information_schema.TABLE_CONSTRAINTS`:
+
+```sql
+SET @fk_exists := (
+    SELECT COUNT(*) FROM information_schema.TABLE_CONSTRAINTS
+    WHERE CONSTRAINT_SCHEMA = DATABASE()
+      AND TABLE_NAME        = 'tblFoo'
+      AND CONSTRAINT_NAME   = 'fk_foo_bar'
+      AND CONSTRAINT_TYPE   = 'FOREIGN KEY'
+);
+SET @sql := IF(@fk_exists = 0,
+    'ALTER TABLE `tblFoo` ADD CONSTRAINT `fk_foo_bar` FOREIGN KEY (`barID`) REFERENCES `tblBar`(`barID`) ON DELETE SET NULL',
+    'SELECT 1'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+```
+
+Note: this checks constraint *name* existence only — a same-named FK with a
+different definition is silently accepted (the same tolerance the old
+`IF NOT EXISTS` forms had for columns). Acceptable, but worth knowing.
+
+### PREPARE-ability caveat (MySQL 8.0 manual — "SQL Syntax Permitted in Prepared Statements")
+
+Prepare-able (everything the templates above need): `ALTER TABLE`, `CREATE INDEX`,
+`DROP INDEX`, `CREATE TABLE`, `DROP TABLE`, `RENAME TABLE`, DML, `SET`, `SHOW`.
+
+**NOT prepare-able** — do not try to wrap these in the guard idiom:
+`CREATE`/`DROP TRIGGER`, `CREATE`/`ALTER`/`DROP PROCEDURE`/`FUNCTION`/`EVENT`,
+`ALTER VIEW`, `LOCK TABLES`. If a future migration needs a *conditional*
+trigger/procedure, the condition has to move to PHP (Migrator/installer side) — the
+SQL-file guard idiom cannot express it. MariaDB's prepare-able set is a superset of
+MySQL's, so the intersection constraint is exactly the MySQL list above.
+
+### Replayability rule
+
+`web/_install/index.php` loads `full_schema.sql` and then **replays every numbered
+migration file in order**, deliberately ignoring `tblMigrations` (see the comment
+above the replay loop) — this is how a stale partial install catches up to the
+latest schema. That means **every migration must be a replayable no-op** on an
+up-to-date schema:
+
+- Every DDL statement needs an `information_schema` guard (per the templates
+  above) — a bare `ADD COLUMN`/`ADD INDEX`/`ADD CONSTRAINT`/`DROP INDEX` fails with
+  1060/1061/1826/1091 the moment it re-runs against a schema that already has the
+  object.
+- Every seed `INSERT` (including a migration's own `INSERT INTO tblMigrations
+  (filename) VALUES (...)` self-record — `filename` is `UNIQUE KEY
+  uq_filename`) needs `ON DUPLICATE KEY UPDATE`, `INSERT IGNORE`, or a `WHERE NOT
+  EXISTS` guard, or it fails with ERROR 1062 on replay.
+
+---
+
 ## File Structure Quick Reference
 
 All paths below are relative to `web/` (the deployable root):
@@ -944,7 +1128,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
 ## Translations (i18n)
 
-The portal supports multiple languages via the `I18n` framework (`core/I18n.php`).
+The portal supports multiple languages via the `I18n` framework (`_core/I18n.php`).
 All user-facing text is stored in **language files** under `web/_lang/`, one file
 per locale. English (`en.php`) is the baseline — every other language file only
 needs to include the keys it translates; missing keys fall back to English automatically.
@@ -1026,7 +1210,7 @@ Keys follow the pattern `{section}.{description}` using lowercase and underscore
 4. **Remove keys you haven't translated yet** — they'll fall back to English
    automatically. This is better than leaving English text in a French file.
 
-5. **Check the locale is registered** in `core/I18n.php` in the `$locales` array.
+5. **Check the locale is registered** in `_core/I18n.php` in the `$locales` array.
    All 13 currently supported locales are already registered:
    `en, cy, fr, de, es, pt, ar, he, fa, ur, zh, ja, ko`
 
@@ -1148,7 +1332,7 @@ This keeps translations version-controlled, reviewable, and auditable.
 
 ## New Core Classes (v0.8.1)
 
-### Container (`core/Container.php`)
+### Container (`_core/Container.php`)
 
 Lightweight dependency injection container that works alongside the existing static
 `App` registry. Supports singleton and factory bindings with lazy resolution:
@@ -1162,21 +1346,21 @@ $mailer = $container->get('mailer'); // same instance each time
 Use `Container` for new service wiring; existing `App::db()`, `App::settings()` etc.
 remain unchanged for backward compatibility.
 
-### ApiRouter (`core/ApiRouter.php`)
+### ApiRouter (`_core/ApiRouter.php`)
 
 Dedicated API route dispatcher, extracted from the main `Router` class. Handles
 all `api/{app}/{action}` patterns with JSON content-type enforcement, CORS headers,
 and standardised error envelopes via `ApiResponse`. The main `Router::dispatch()`
 delegates to `ApiRouter` for any path starting with `api/`.
 
-### CsvExporter (`core/CsvExporter.php`)
+### CsvExporter (`_core/CsvExporter.php`)
 
 Generic CSV export helper used across five apps: expenses, attendance, leadership,
 admin users, and activity logs. Accepts a column definition array and a MySQLi result
 set, streams output with proper headers (`Content-Type: text/csv`,
 `Content-Disposition: attachment`), and escapes fields to prevent formula injection.
 
-### Validator (`core/Validator.php`)
+### Validator (`_core/Validator.php`)
 
 Input validation framework using pipe-separated rule syntax:
 
@@ -1335,7 +1519,7 @@ light `:root` and `[data-bs-theme="dark"]` blocks. Without these
 bindings, every plain `<a>` / `.btn-link` / `.alert-link` / `.link-*`
 falls back to the browser-default blue, which clashes hard in dark mode.
 
-`install/index.php` mirrors the same binding in its self-contained
+`_install/index.php` mirrors the same binding in its self-contained
 inline `<style>` block because the installer doesn't load `portal.css`.
 
 Per-site branding still flows through: `--portal-link` resolves to
@@ -1462,9 +1646,9 @@ push.
 Affected (mirrored) trees on the server:
 
 ```text
-<base>/core/
-<base>/vendor/
-<base>/sql/
+<base>/_core/
+<base>/_vendor/
+<base>/_sql/
 <base>/_includes/
 <base>/_functions/
 <base>/_libraries/
@@ -1594,6 +1778,21 @@ Two variants exist in the design output:
 - `noticeboard.js` — eval variant (runtime-Babel from unpkg). **Never wire this in.** The portal CSP disallows `unsafe-eval` and does not allowlist unpkg, so it cannot run.
 - `noticeboard.noeval.js` — precompiled variant, wired in `_apps/noticeboard/index.php`.
 
+### Deliberate hand-edit exception (#363 — real upload pipeline)
+
+`noticeboard.noeval.js`'s `handleFile()` already special-cased a host upload
+hook (falling back to a `data:` URI `FileReader` read when absent), but named
+it `host.uploadFile(file)`. #363 wires that hook up to a real backend via
+`window.NoticeboardHost.upload(file)` (the bridge name the rest of the portal
+uses — see `_apps/noticeboard/index.php`), so the **only** hand-edit made to
+the generated bundle is renaming the two `uploadFile` references at
+`handleFile()` to `upload`. Everything else in the function (the `Promise`
+wrapping, `uploading` state, error `alert()`, and the `data:` URI fallback for
+a standalone/local deployment with no host) is untouched.
+**If you regenerate the bundle from the Claude Design source**, either carry
+this rename forward again, or (better) rename the hook to `upload` in the
+source component itself so a regeneration doesn't silently revert it.
+
 ### React hosting
 
 React 18.3.1 UMD is **self-hosted** at `web/public_html/assets/vendor/react/`:
@@ -1612,10 +1811,353 @@ The bundle's `loadReactUmd()` short-circuits when `window.React` / `window.React
 
 Extensions are per-page — the underlying `default-src / img-src / frame-src` remain unchanged for every other page. `_apps/noticeboard/index.php` sets `https:` on img/media and `https://www.canva.com` on frame.
 
-### Typography
+### Typography (#361 — self-hosted)
 
-The bundle template injects a `fonts.googleapis.com` stylesheet (Bricolage Grotesque / Instrument Serif / IBM Plex). The portal CSP does not allowlist Google Fonts (self-hosting stance, PR #356), so the board degrades gracefully to `system-ui` stacks. Follow-up issue tracks self-hosting these faces (or restyling to Plus Jakarta Sans).
+The generated bundle template still injects a `fonts.googleapis.com` stylesheet (Bricolage Grotesque / Instrument Serif / IBM Plex Mono / IBM Plex Sans) and the generated `noticeboard.css` still carries the matching `@import url(https://fonts.googleapis.com/...)`. The portal CSP does not allowlist Google Fonts (self-hosting stance, PR #356), so both of those remain **dead under CSP** — every request they'd make is blocked. They're left in place rather than hand-edited, per the "generated — do not edit" rule above; harmless once the fonts are self-hosted (below), since a broken/blocked `@import` just does nothing.
+
+As of #361, all four families are **self-hosted** instead of falling back to `system-ui`:
+
+- `web/public_html/assets/noticeboard/fonts-selfhost.css` — hand-maintained (NOT generated), `@font-face` rules for the four families/weights the bundle actually references (verified by grepping `noticeboard.noeval.js` / `noticeboard.css`): Bricolage Grotesque (variable, wght 400–800), Instrument Serif (400 upright + italic), IBM Plex Mono (400/500), IBM Plex Sans (400/500/600). `latin` + `latin-ext` subsets (the latter for Welsh diacritics — see `_lang/cy.php`); cyrillic/greek/vietnamese subsets skipped.
+- `web/public_html/assets/noticeboard/fonts/*.woff2` — the actual font files, sourced from `@fontsource`/`@fontsource-variable` v5.3.0 (SIL OFL-1.1), ~360 KB total. `OFL-*.txt` license texts for each family are redistributed alongside them.
+- Wired via a `<link rel="stylesheet" href="/assets/noticeboard/fonts-selfhost.css">` in `_apps/noticeboard/index.php`, placed immediately **before** the generated `noticeboard.css` `<link>` so the `@font-face` rules exist before the board renders any text.
+- Fallback chain: `#noticeboard-root { font-family: 'IBM Plex Sans', 'Plus Jakarta Sans', system-ui, sans-serif; }` — if a self-hosted face were ever unavailable, the board falls back to the portal's own self-hosted Plus Jakarta Sans (PR #356) before system fonts. Per-poster inline `font-family` values are set by the generated bundle itself and can't route through that fallback without editing generated code — moot in practice since the `@font-face` rules make all four families resolve directly.
+- CSP: no changes needed. `style-src`/`font-src` both include `'self'` at `_core/templates/header.php`, and the fonts are same-origin — `_apps/noticeboard/index.php` only widens `img-src`/`media-src`/`frame-src` (unchanged).
 
 ---
 
-Last updated: May 2026
+## REST API v1 (#323 Phase 2)
+
+### Dual-mode contract — bearer OR session, never both
+
+Every `_apps/{app}/api/{action}.php` handler resolves auth through one choke-point,
+`Portal\Core\ApiAuth` (`web/_core/ApiAuth.php`):
+
+- **Bearer** — `Authorization: Bearer wbms_…`. Detected purely by the `wbms_` prefix
+  (`ApiAuth::isBearer()`); any other bearer scheme falls through to the session path
+  untouched, so this never hijacks a future OAuth integration. Verified via
+  `ApiKey::findByPlaintext()` (Phase 1), scope-gated via `ApiKey::hasScope()`
+  (wildcards `*` / `{res}:*` supported), tenant-pinned to the KEY's own site
+  (`Site::forceContext()` — see below), and per-key rate-limited. **No CSRF** — a
+  bearer token travels in an explicit header set by calling code, never by a
+  browser automatically, so CSRF protection is meaningless for it (the
+  OWASP-sanctioned exemption for token auth).
+- **Session** — the existing logged-in portal user. Reproduces the historical
+  per-handler boilerplate verbatim (same order, same rejection strings/codes):
+  `requireAuth` → optional `requireAdmin` → `Auth::ensureSession()` → CSRF via the
+  `X-CSRF-TOKEN` header or `csrf_token` body field on writes.
+
+Handlers call `ApiAuth::requireRead('{resource}:read', $sessionNeedsAdmin)` or
+`ApiAuth::requireWrite('{resource}:write', $sessionNeedsAdmin)` (the latter returns
+the decoded JSON body) instead of hand-rolling the boilerplate. `ApiAuth::source()`
+/ `apiKeyId()` / `actorUserId()` feed `Logger::audit()`'s new `$apiKeyId` /
+`$source` parameters (auto-resolved when omitted — every pre-existing call site
+compiles and behaves unchanged).
+
+### `/api/v1/{resource}[/{id}]` facade
+
+`ApiRouter::dispatchV1()` translates `(HTTP verb, resource, id)` into the identical
+legacy `(app, action)` pair and re-runs the **same** pipeline as
+`/api/{app}/{action}`: same handler file, same `api.{app}.{action}.enabled` flag.
+No new gating vocabulary, no `tblRoutes` rows. See CLAUDE.md's "ApiRouter routing
+trap" section for the one-line summary. Per-resource action aliases (where the
+handler file isn't named `create`/`update`/`delete`):
+
+| Resource | POST → | PUT/PATCH → | DELETE → |
+|---|---|---|---|
+| noticeboard | `save` | — (none) | — (none) |
+| leadership | `assign` | — (none) | `unassign` (id = assignmentID) |
+| prayer-requests | `create` | `moderate` | — (none) |
+| tasks | `create` | `complete` | `delete` |
+| expenses | `create` | — (**deferred to Phase 3**) | `delete` |
+
+`GET /api/v1/{resource}/{id}` (a "detail" route) exists for **events only** — every
+other resource 404s an id-suffixed GET (no `detail.php` handler). Unknown resource
+→ 404; non-numeric id → 400; unsupported verb → 405 with an `Allow` header built
+from which handler files actually exist on disk.
+
+### Scope vocabulary
+
+`Portal\Core\ApiKey::SCOPES` is the single source of truth — twenty `{resource}:read`
+/ `{resource}:write` pairs across the ten v1 resources (events, announcements,
+attendance, prayer-requests, documents, expenses, leadership, tasks, noticeboard,
+users). The admin mint form (`_apps/admin/integrations/api-keys.php`) renders this
+constant as a checkbox grid — never a duplicated hardcoded list — and
+`api-keys-save.php` re-validates every submitted token server-side against
+`SCOPES` ∪ `{'*'}` ∪ `{'{resource}:*'}` for a KNOWN resource, rejecting anything
+else. `ApiKey::hasScope()` honours both wildcard forms at verification time.
+
+### Tenant pinning (`Site::forceContext`)
+
+A bearer request carries no session, so `Site::id()` would otherwise resolve to
+the host-detected default site rather than the key's own. `resolveBearer()` in
+`ApiAuth` re-points the site context to the key's `siteID` via
+`Site::forceContext(int $siteId)` before the handler runs, so every
+`Site::id()`-scoped query in every handler becomes tenant-correct automatically.
+`forceContext()` fails CLOSED: a key with `siteID <= 0`, a missing/inactive site,
+or (when multisite is disabled) any site other than the install's single site, all
+500 rather than silently falling back to the ambient default. `ApiRouter`'s
+`api.{app}.{action}.enabled` gate is ALSO resolved against the pinned site
+(`App::settingForSite`), not the frozen bootstrap `$SETTINGS` snapshot — a site's
+own kill-switch can't be bypassed via the Host header on a bearer request.
+
+### Per-key rate limiting
+
+`RateLimiter::tooMany()` / `recordHit()` / `retryAfter()` implement a generic
+sliding window against a new `tblApiRateLimits` table (bucket = `apikey:{keyID}`),
+separate from the pre-existing login-attempt limiter. Limits default to 300
+requests / 5 minutes, overridable per-site via `api.rateLimit.perKey.maxRequests`
+/ `windowMinutes`. A 429 sets `Retry-After`. Session callers are never rate-limited
+by this mechanism (unchanged — they're protected by login rate limiting instead).
+
+### Rotation grace
+
+`ApiKey::rotate($keyId, $byUserId, ?$graceHours)` mints a replacement key first,
+then either revokes the old key immediately (`$graceHours === 0`) or caps its
+`expiresAt` at `now + $graceHours` and stamps `rotatedToID` (`$graceHours` null
+resolves against the `api.keys.rotationGraceHours` setting, default 24). The old
+key stays `isActive = 1` and dies naturally via the existing `expiresAt` check in
+`findByPlaintext()` once the cutoff passes — zero changes to the verification
+path. The admin UI (`api-keys.php`) offers a grace `<select>` (immediate / 1h /
+24h / 72h, default 24h) on the rotate control, and shows an "Expiring (rotated)"
+badge on any key row where `rotatedToID IS NOT NULL AND isActive = 1`.
+
+### ⚠️ Known limitations (documented, not bugs)
+
+1. **The per-key rate limiter is check-then-record, not atomic.** `tooMany()` and
+   `recordHit()` are two separate statements with no `SELECT ... FOR UPDATE` /
+   advisory lock between them — a genuinely concurrent burst against the same key
+   can slightly exceed `maxRequests` before the limiter catches up. This is
+   approximate limiting by design (house pattern: fail-open on DB error, cheap
+   single-row inserts + a covering index over a distributed lock), not a
+   correctness bug. Revisit only if abuse patterns actually exploit the window.
+2. **The bearer key-row `lastUsedAt`/`lastUsedIP` stamp runs on the PRE-gate
+   lookup.** `ApiRouter::resolveEnabledFlag()` calls `ApiAuth::bearerKeyRow()` to
+   discover the key's site for the `enabled` check BEFORE the handler (and its own
+   `ApiAuth::requireRead/Write()` call) runs — and `ApiKey::findByPlaintext()`
+   stamps `lastUsedAt` as a side effect of that same lookup. `bearerKeyRow()` is
+   cached per-request, so this costs exactly one extra single-row `UPDATE`, not a
+   duplicate DB round-trip — but it means a valid key hammering a DISABLED
+   endpoint still drives one un-throttled `lastUsedAt` write per request (the
+   per-key rate limiter only runs inside `resolveBearer()`, which a disabled
+   endpoint never reaches). Self-contention against the key's own row; no
+   cross-tenant impact; negligible load in practice.
+3. **Expenses status-transition update (approve/reject/reimburse) is DEFERRED to
+   Phase 3.** There is no `PUT /api/v1/expenses/{id}` in this release — v1 ships
+   `create` + `delete` (Pending-only) only. The transition needs to share the
+   existing multi-approver workflow + `ExpenseMailer` side-effects
+   (`_apps/expenses/approve/`) rather than duplicating that logic, which wants its
+   own extraction pass.
+4. **Several write endpoints record creator/updater as NULL for bearer requests.**
+   `ApiAuth::actorUserId()` returns `null` in bearer mode (there is no session
+   user) — handlers use `ApiAuth::actorUserId() ?? 0`, so a bearer-created row's
+   `createdByID`/`updatedByID` is `0`/`NULL` rather than a real user. Attribution
+   for a bearer-made change is via the audit trail instead:
+   `tblAuditTrail.apiKeyID` + `.source = 'apikey'` (see the admin Audit Trail
+   viewer's new source badge + key-prefix column).
+
+---
+
+## Giving — two-person offering count session (#299 sub-feature 1)
+
+Extension to the existing `giving` app (#266, migration 094). #299 ("Giving
+polish") bundles FOUR sub-features — offering counting, pledge campaigns,
+bank reconciliation, account-updater. Only sub-feature 1 is built here; the
+other three are separate, tracked-but-not-started scope.
+
+### Naming: `tblGiftEntries` vs the real `tblGivingEntry`
+
+#299's issue body sketches the write target as `tblGiftEntries`, but the
+giving app actually shipped as `tblGivingEntry` (singular "Entry", amounts in
+PENCE via `amountPence` — see `Portal\Core\Giving`, `web/_sql/full_schema.sql`
+§"Giving / contributions log"). This migration (150) writes to the REAL
+table. New columns introduced here follow `tblGivingEntry`'s own convention
+(`siteID INT NOT NULL DEFAULT 1`, `createdAt DATETIME NOT NULL DEFAULT
+CURRENT_TIMESTAMP`, `fk_<short>_<col>` constraint names) rather than the
+issue body's sketch verbatim.
+
+### Schema
+
+- **`tblCountSessions`** — one row per service date. `counter1ID`/`counter2ID`
+  (nullable, assigned at creation or later) each get their own independent
+  `cashTotal1/chequeTotal1/envelopeTotal1` and `…2` triplet (`DECIMAL(10,2)`,
+  nullable until entered). `cashTotal`/`chequeTotal`/`envelopeTotal` (also
+  nullable `DECIMAL(10,2)`) are the **agreed** totals — set only once the two
+  independent counts match, or an admin resolves a discrepancy — and are what
+  actually gets written to the gift log on close.
+  **`categoryID` (NOT NULL, FK `tblGivingCategory`) is an addition beyond the
+  issue body's column sketch** — it's required because `tblGivingEntry.categoryID`
+  is `NOT NULL`, so every count session needs to know which giving
+  category/fund its gift log posts to. Picked at session-creation time.
+- **`tblCountEnvelopes`** — added per the issue body's own conditional ("if
+  envelope-level named entries are needed to write per-envelope gift entries,
+  add a child table"). Models the numbered/named giving-envelope breakdown of
+  a session's agreed `envelopeTotal` — `giverID` (nullable, matched member) OR
+  `giverName` (free text, mirrors `tblGivingEntry.donorName`'s own
+  matched-vs-free-text pattern), `amount DECIMAL(10,2)`, `method
+  ENUM('cash','cheque')`. Entered ONCE per session (not duplicated per
+  counter) — only the aggregate cash/cheque/envelope totals are independently
+  double-keyed; the named breakdown is collaborative, shared session data.
+
+### State machine (`tblCountSessions.status`)
+
+```
+open ──(counter 1 OR 2 submits)──▶ counting ──(other counter submits, MATCH)──▶ counting (agreed totals set, ready to close)
+                                       │
+                                       └──(other counter submits, MISMATCH)──▶ discrepancy
+                                                                                   │
+                                                              (counter re-enters, now matches) ──▶ counting
+                                                              (admin resolves w/ agreed totals) ──▶ counting
+counting ──(close: agreed totals set AND envelopes reconcile)──▶ closed  [terminal]
+```
+
+`giving.countRequiresTwoCounters` (default `'true'`) — when `'false'`,
+whichever counter slot is completed FIRST is auto-agreed immediately (no
+discrepancy comparison at all), for sites that only run a single-counter
+process.
+
+### Close — writing a *balanced* gift log
+
+The issue body says close writes "`tblGiftEntries` for each named envelope +
+a single 'loose cash' entry". This implementation goes one step further for
+correctness: it ALSO emits a single aggregate **"loose cheque"** row for any
+agreed `chequeTotal` not covered by named cheque envelopes. Rationale: the
+GIRFT requirement is that close "writes a **balanced** gift log" — the sum of
+every `tblGivingEntry` row written for a session must equal `cashTotal +
+chequeTotal + envelopeTotal` exactly, not just cover the cash bucket. All
+three checks below run BEFORE the transaction opens (`_apps/giving/count/close.php`),
+so a rejected close never touches the database:
+
+1. Status must be `'counting'` (not `'open'`, `'discrepancy'`, or already `'closed'`).
+2. Agreed `cashTotal`/`chequeTotal`/`envelopeTotal` must all be set (non-NULL).
+3. `SUM(tblCountEnvelopes.amount)` must equal the agreed `envelopeTotal` EXACTLY
+   (integer-pence comparison, never `==` on floats/DECIMALs).
+
+Then, in one transaction: one `tblGivingEntry` row per named envelope
+(`donorID`/`donorName` from the envelope, `categoryID`/`donatedAt`/`siteID`
+from the session, `reference = 'Count #<id>'`) + a loose-cash row (if the
+agreed cash total exceeds what named cash envelopes cover) + a loose-cheque
+row (same, for cheques) + `UPDATE … SET status='closed' … WHERE status='counting'`
+(the `WHERE status='counting'` guard + checking `affected_rows` catches a
+concurrent close/edit between the pre-checks and the write, aborting the
+transaction rather than double-writing).
+
+### Gate
+
+Every route (`/giving/count`, `/giving/count/session`, `/giving/count/save`,
+`/giving/count/close`) uses `Portal\Core\Giving::canManage()` — the same gate
+`giving`'s existing `manage.php`/`entry-save.php`/`cat-save.php` already use
+(site admin OR the `treasurer` role, migration 017). Resolving a live
+`'discrepancy'` (`action=resolve` in `save.php`) additionally requires
+`App::isAdmin()` — matching the issue body's "an admin resolves" wording;
+plain treasurers can only re-enter counts or close once no discrepancy
+remains.
+
+### New core helper
+
+`Portal\Core\Giving::parseDecimal(string $input): ?string` — validated
+non-negative `DECIMAL(10,2)`-safe amount parsing (round-trips through
+float → round → `number_format`, never trusts the client string into SQL
+verbatim). Sibling to the existing `Giving::parseAmount()` (pence-int, used
+by `tblGivingEntry` writes) — this workflow's independent counter totals are
+DECIMAL columns on `tblCountSessions`/`tblCountEnvelopes`, not pence.
+
+---
+
+## Discipleship Pathway Tracker Phase 2 (#303 Phase 2)
+
+Extension to Phase 1 (migration 142 — `tblPathways`/`tblPathwaySteps`,
+admin CRUD only, app hidden behind `discipleship.enabled = 'false'`).
+Phase 2 adds per-user enrolment/progress, auto-completion, member-facing
+routes, and a pastor roster. New core helper: `Portal\Core\Discipleship`.
+
+### Adopted scoping decisions (issue #303 blocker comment, 2026-06-21)
+
+1. **Auto-completion sources — option (a), per-user tables only.**
+   `tblEventAttendance` (rows with `userID IS NOT NULL` — walk-ins are
+   excluded automatically by the sweep's `ea.userID = e.userID` join) and
+   `tblEventRSVPs`. `tblSalvationCards` has no `userID` and
+   `tblDecisionMoments` is an aggregate counter with no per-user rows —
+   both are structurally incompatible with a per-user completion model,
+   not merely deprioritised; revisit if/when either table grows a
+   per-user identity column.
+2. **Pastor surface stays a flat roster list.** One `portal-data-list` row
+   per enrolled member (progress bar, n/m required steps, last
+   completion), with drill-down to a per-member step list. A
+   members×steps matrix was explicitly rejected — it's the house
+   `<table>` ban plus the issue's own recorded decision.
+3. **Mentor relationships deferred.** No `tblPathwayMentor` schema, no UI,
+   in this phase.
+
+### The revoke-vs-delete unmark semantic
+
+`tblPathwayProgress` has `UNIQUE(stepID, userID)` — at most one progress
+row can ever exist per (step, member) pair, for the lifetime of that step.
+Unmarking a step (admin action, or a member's own auto-completed step
+being corrected) sets `revokedAt`/`revokedByID` on that SAME row; it is
+**never** `DELETE`d. "Complete" everywhere in the app — `progressFor()`,
+`rosterStats()`, `refreshEnrolmentStatuses()`, the member/admin views —
+means `revokedAt IS NULL`.
+
+This is deliberate, not an oversight: `Discipleship::autoSweep()` writes
+via `INSERT IGNORE`, relying on the unique key to make repeat sweeps a
+no-op. If unmarking deleted the row, the very next sweep (lazy, on the
+next page view) would see no conflicting key, re-insert the row from the
+still-existing attendance/RSVP evidence, and silently resurrect a step a
+coordinator deliberately corrected. Keeping the (now-revoked) row means
+its unique key permanently blocks that re-insertion — the only way to
+"undo an unmark" is the admin explicitly re-marking it complete again
+(`progress-mark.php`'s `complete` action, which clears `revokedAt`/
+`revokedByID` on the SAME row rather than inserting a new one).
+
+One consequence worth knowing: a step revoked once can only ever be
+un-revoked by a human action (manual re-mark). It will never silently
+flip back to complete on its own, even if the auto-evidence that
+originally satisfied it still exists — this is the intended trade-off
+(coordinator correction wins over automation), documented here so it
+isn't mistaken for a bug during support triage.
+
+### Lazy-sweep design (no scheduler dependency)
+
+`Discipleship::autoSweep(int $siteId, ?int $pathwayId = null)` is pure
+set-based SQL (three `INSERT IGNORE … SELECT` statements, one per
+`autoRule` value, each joining active pathways × active enrolments × the
+matching evidence table) — cheap enough to run synchronously on every
+page load rather than needing a background job. It is invoked at the top
+of:
+
+- `discipleship/index.php` (member "My pathways") — scoped to the site.
+- `discipleship/view.php` (member pathway detail) — scoped to the pathway.
+- `admin/discipleship/progress-pathway.php` (pastor roster) — scoped to
+  the pathway.
+
+Because every rule's `INSERT IGNORE` is idempotent via
+`UNIQUE(stepID, userID)`, calling `autoSweep()` on every page view never
+duplicates work — a repeat call over already-swept data inserts zero new
+rows. `cron/discipleship-sweep.php` exists purely so a site with low
+member traffic on discipleship pages still gets fresh auto-completions
+(e.g. overnight) — it is a convenience, never a correctness dependency.
+
+### Cron token setup
+
+Same pattern as `reminders.cron_token` (migration 122): the endpoint reads
+`?key=<value>`, compares it to `Settings::get('discipleship.cron_token', '')`
+via `hash_equals()`, and 403s whenever the stored token is the empty
+string — so the cron endpoint is inert until an admin explicitly sets a
+non-empty `discipleship.cron_token` value (via `/admin/settings`; the
+setting is seeded `isSensitive = 1`, so it's encrypted at rest like other
+secrets). Point an external scheduler (e.g. DreamHost's cron, or a
+third-party uptime-ping-style scheduler) at:
+
+```
+https://<your-portal-host>/cron/discipleship-sweep?key=<your-token>
+```
+
+The route (`cron/discipleship-sweep`, migration 153) is seeded
+`isProtected = 0` — it is public but token-gated, exactly like
+`cron/event-reminders`. It loops every distinct `siteID` that owns at
+least one active pathway and runs one site-wide `autoSweep()` per site,
+returning a plain-text `OK {"sitesSwept":N,"inserted":{...}}` summary.
+
+---
+
+Last updated: July 2026

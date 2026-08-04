@@ -13,9 +13,18 @@
 -- @link https://github.com/MWBMPartners/WebMS-Intra/issues/308
 -- =============================================================================
 
-ALTER TABLE `tblServicePlanState`
-    ADD COLUMN IF NOT EXISTS `currentSlideIndex` INT NOT NULL DEFAULT 0
-        COMMENT 'For multi-verse song items: 0-based verse index within the current item';
+-- ➕ tblServicePlanState.currentSlideIndex — guarded ADD COLUMN (portable: MySQL 8.0 + MariaDB 10.x)
+SET @col_exists := (
+    SELECT COUNT(*) FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME   = 'tblServicePlanState'
+      AND COLUMN_NAME  = 'currentSlideIndex'
+);
+SET @sql := IF(@col_exists = 0,
+    'ALTER TABLE `tblServicePlanState` ADD COLUMN `currentSlideIndex` INT NOT NULL DEFAULT 0 COMMENT ''For multi-verse song items: 0-based verse index within the current item''',
+    'SELECT 1'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
 CREATE TABLE IF NOT EXISTS `tblCcliUsage` (
     `usageID`     INT NOT NULL AUTO_INCREMENT,
@@ -35,7 +44,7 @@ CREATE TABLE IF NOT EXISTS `tblCcliUsage` (
     CONSTRAINT `fk_ccli_user` FOREIGN KEY (`operatorID`) REFERENCES `tblUsers`(`userID`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
-INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isEncrypted`) VALUES
+INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isSensitive`) VALUES
     ('worship.song_verse_separator', '/\\n\\s*\\n/', 0)
 ON DUPLICATE KEY UPDATE `settingKey` = VALUES(`settingKey`);
 

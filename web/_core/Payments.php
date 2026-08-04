@@ -388,13 +388,25 @@ class Payments
             $categoryId = (int) $ref;
             if ($categoryId > 0) {
                 try {
+                    // 🎯 Auto-attribution (#299 follow-up) — online card giving
+                    // has no explicit campaign selector, so Auto (0) is the
+                    // only mode here; see Giving::attributeGift() for the
+                    // full rule. $userId is the paying donor; 0/unknown maps
+                    // to null so attributeGift never mistakes it for a real
+                    // donor row.
+                    $donorForAttr = $userId > 0 ? $userId : null;
+                    $giftDate     = date('Y-m-d');
+                    $attr         = Giving::attributeGift($siteId, $donorForAttr, $giftDate, 0);
+                    $campBind     = $attr['campaignID'];
+                    $pledgeBind   = $attr['pledgeID'];
+
                     $ins = $db->prepare(
-                        'INSERT INTO tblGivingEntry (siteID, donorID, categoryID, amountPence, currency, donatedAt, method, reference, recordedByID) '
-                        . 'VALUES (?, ?, ?, ?, ?, CURDATE(), "card", ?, ?)'
+                        'INSERT INTO tblGivingEntry (siteID, donorID, categoryID, amountPence, currency, donatedAt, method, reference, recordedByID, campaignID, pledgeID) '
+                        . 'VALUES (?, ?, ?, ?, ?, CURDATE(), "card", ?, ?, ?, ?)'
                     );
                     if ($ins !== false) {
                         $reference = 'payment:' . $paymentId;
-                        $ins->bind_param('iiiissi', $siteId, $userId, $categoryId, $amount, $currency, $reference, $userId);
+                        $ins->bind_param('iiiissiii', $siteId, $userId, $categoryId, $amount, $currency, $reference, $userId, $campBind, $pledgeBind);
                         $ins->execute();
                         $ins->close();
                     }

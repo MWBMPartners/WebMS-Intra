@@ -10,11 +10,18 @@
  *   • Other logged-in members can view if status IN (active|answered)
  *     AND visibility = 'congregation'
  *
+ * Moderator-only sections (#311, migration 148): assign a prayer partner
+ * (dropdown of eligible partners + their open-assignment count) and view/
+ * edit the private partner note. Both post to prayer-requests/moderate.php,
+ * which is admin-gated at the top of that file — a non-admin never reaches
+ * either action, and the note markup here is never rendered for anyone but
+ * $isMod (App::isAdmin()).
+ *
  * @package   Portal\PrayerRequests
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   0.10.0
+ * @version   1.4.0
  * -----------------------------------------------------------------------------
  */
 
@@ -22,6 +29,7 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\PrayerChain;
 use Portal\Core\Site;
 
 // 📌 Page metadata (subject filled in once row is loaded)
@@ -107,6 +115,14 @@ $submitterDisplay = (int) $req['isAnonymous'] === 1
 $modSubmitterDisplay = $isMod === true && (int) $req['isAnonymous'] === 1
     ? (string) ($req['submitterFullName'] ?? '(unknown)')
     : '';
+
+// 🙏 Prayer chain assignment (#311) — eligible partners + current assignee,
+//    moderator-only (feeds the "Assign a partner" card below).
+$eligiblePartners  = [];
+$currentAssigneeId = $req['assignedToUserID'] !== null ? (int) $req['assignedToUserID'] : 0;
+if ($isMod === true) {
+    $eligiblePartners = PrayerChain::eligiblePartners($siteId);
+}
 
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 
@@ -245,6 +261,85 @@ $badge = $statusBadges[$req['status']] ?? ['secondary', 'fa-circle', ucfirst((st
                     <?php echo htmlspecialchars(date('Y-m-d H:i', strtotime((string) $req['moderatedAt'])), ENT_QUOTES, 'UTF-8'); ?>
                 </p>
             <?php endif; ?>
+        </div>
+    </div>
+
+    <!-- 🙏 Prayer chain — assign a partner (#311). Eligible partner = a
+         user holding the 'prayer_team' role and an active member of this
+         site (see PrayerChain::eligiblePartners). Open-assignment counts
+         are shown as a load-balancing hint. -->
+    <div class="card shadow-sm mb-4">
+        <div class="card-body">
+            <h2 class="h6 mb-3"><i class="fa-solid fa-people-arrows me-1"></i>Prayer chain assignment</h2>
+            <?php if (count($eligiblePartners) === 0): ?>
+                <p class="text-muted small mb-0">
+                    No eligible prayer partners yet — grant the
+                    <strong>Prayer Team</strong> role to active site members at
+                    <a href="/admin/users">Admin &rarr; Users</a>.
+                </p>
+            <?php else: ?>
+                <form method="post" action="/prayer-requests/moderate" class="row g-2 align-items-end">
+                    <input type="hidden" name="csrf_token"
+                           value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
+                    <input type="hidden" name="requestID" value="<?php echo (int) $req['requestID']; ?>">
+                    <input type="hidden" name="action"    value="assign">
+                    <input type="hidden" name="redirect"  value="view">
+
+                    <div class="col-md-8">
+                        <label for="assignedToUserID" class="form-label small mb-1">Assign to partner</label>
+                        <select name="assignedToUserID" id="assignedToUserID" class="form-select form-select-sm">
+                            <option value="0" <?php echo $currentAssigneeId === 0 ? 'selected' : ''; ?>>
+                                — Unassigned —
+                            </option>
+                            <?php foreach ($eligiblePartners as $partner): ?>
+                                <option value="<?php echo (int) $partner['userID']; ?>"
+                                    <?php echo $currentAssigneeId === (int) $partner['userID'] ? 'selected' : ''; ?>>
+                                    <?php echo htmlspecialchars($partner['fullName'], ENT_QUOTES, 'UTF-8'); ?>
+                                    (<?php echo (int) $partner['openCount']; ?> open)
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    <div class="col-md-4">
+                        <button type="submit" class="btn btn-sm btn-primary w-100">
+                            <i class="fa-solid fa-user-check me-1"></i> Save assignment
+                        </button>
+                    </div>
+                </form>
+            <?php endif; ?>
+        </div>
+    </div>
+
+    <!-- 🔒 Admin view of the private partner note (#311). ACL: this card
+         is only rendered when $isMod === true (App::isAdmin()); the write
+         path is the 'save-note' action on moderate.php, which itself
+         requires App::isAdmin() before it does anything. A non-assignee,
+         non-admin never reaches this markup at all. -->
+    <div class="card shadow-sm mb-4">
+        <div class="card-body">
+            <h2 class="h6 mb-3"><i class="fa-solid fa-lock me-1"></i>Private partner note</h2>
+            <p class="text-muted small">
+                Only the currently-assigned partner and admins can see this
+                note. It clears automatically whenever the assignment above
+                changes to a different partner.
+            </p>
+            <form method="post" action="/prayer-requests/moderate">
+                <input type="hidden" name="csrf_token"
+                       value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
+                <input type="hidden" name="requestID" value="<?php echo (int) $req['requestID']; ?>">
+                <input type="hidden" name="action"    value="save-note">
+                <input type="hidden" name="redirect"  value="view">
+                <textarea name="partnerNote" class="form-control form-control-sm" rows="3" maxlength="4000"
+                    <?php echo $currentAssigneeId === 0 ? 'disabled' : ''; ?>
+                ><?php echo htmlspecialchars((string) ($req['partnerNote'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></textarea>
+                <button type="submit" class="btn btn-sm btn-outline-secondary mt-2"
+                    <?php echo $currentAssigneeId === 0 ? 'disabled' : ''; ?>>
+                    <i class="fa-solid fa-floppy-disk me-1"></i> Save note
+                </button>
+                <?php if ($currentAssigneeId === 0): ?>
+                    <span class="text-muted small ms-2">Assign a partner above first.</span>
+                <?php endif; ?>
+            </form>
         </div>
     </div>
 <?php endif; ?>
