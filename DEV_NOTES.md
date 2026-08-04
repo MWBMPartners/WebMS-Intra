@@ -607,6 +607,94 @@ Delete only if alpha branch usage stays at zero for the next 6 months.
 
 ---
 
+## Dependabot four-tier coverage (#370, #376)
+
+We deploy through four tiers — `alpha` → `beta` → `release-candidate` →
+`main`. Dependabot reads `.github/dependabot.yml` **only from the default
+branch (`main`)**, but each `updates:` entry may set `target-branch:` to
+raise its PRs against a different branch. Each watched ecosystem
+(`github-actions`, `composer`) is therefore declared **four times**: once
+with no `target-branch` (→ `main`), once each for `alpha`, `beta` and
+`release-candidate`. This keeps every tier patched instead of letting the
+lower tiers drift behind `main` between promotions.
+
+### Version updates vs security updates — the one gotcha
+
+- **Version updates** (everything in `dependabot.yml`) honour
+  `target-branch`, so the lower tiers get the same weekly bumps as `main`.
+  A bump to a patched release *is* the security fix in practice.
+- **Security updates** (auto-raised from Dependabot Alerts) can **only**
+  target the default branch (`main`). GitHub provides no way to retarget
+  them. Do not expect Alert-driven PRs on the lower tiers — they receive
+  those fixes three ways: the version-update entries above, the
+  `security-backport.yml` fan-out below, or a `main` promotion.
+
+### Security scanning covers all four tiers
+
+| Workflow | Trigger |
+|---|---|
+| `codeql.yml` | push + PR on main/beta/alpha/release-candidate (+ weekly cron) |
+| `php-static-analysis.yml` | push + PR on main/beta/alpha/release-candidate |
+| `pr-security.yml` | PR on main/beta/alpha/release-candidate |
+| `deploy.yml` | push on main/beta/alpha — **release-candidate does NOT deploy** (owner decision pending, see below) |
+
+`release-candidate` was added to the first three in #376. `deploy.yml` is
+deliberately untouched: each branch maps to a distinct DreamHost web-root
+(`public_html` / `public_html_beta` / `public_html_dev`) via a per-branch
+secret, and `_core/bootstrap.php` auto-detects `PORTAL_ENV` from the
+directory name — note its detection order means a dir named
+`public_html_rc` would currently be classified as **prod** (generic
+`public_html` substring match). A release-candidate deploy therefore needs
+a provisioned web-root, a new SFTP path secret, AND a bootstrap
+env-detection decision before deploy.yml can learn the branch.
+
+### Security-update fan-out — `security-backport.yml` (#376)
+
+Closes the Alert-driven gap above. When a PR authored by `dependabot[bot]`
+(or labelled `security` / `dependencies` / `type: security`) **merges into
+`main`**, the workflow cherry-picks the squash-merge commit onto each of
+`alpha` / `beta` / `release-candidate` (branch
+`deps-backport/<tier>/pr-<num>`) and opens a PR per tier:
+
+- **Clean pick** → normal PR, labels applied per-label with graceful
+  fallback (`type: security` exists; generic `dependencies`/`security`
+  are applied only if someone creates them).
+- **Conflict** → **draft** PR with the conflict markers committed and a
+  "manual conflict resolution required" warning — the fix is never
+  silently dropped, and draft status keeps `auto-merge-alpha.yml` away.
+- **Already applied / tier branch missing / PR already open** →
+  idempotent skip with a job-summary note.
+
+**`GITHUB_TOKEN` caveat:** PRs created by the default `GITHUB_TOKEN` do
+not trigger other workflows (GitHub anti-recursion), so pr-security /
+CodeQL / Psalm will NOT auto-run on the backport PRs. Two options:
+
+1. **Default (no setup):** the PR body tells the reviewer to push an
+   empty commit or close/reopen the PR to trigger checks.
+2. **Recommended:** add a fine-grained PAT secret **`BACKPORT_PAT`**
+   (this repo only; Contents + Pull requests → read/write). The workflow
+   automatically prefers it (`secrets.BACKPORT_PAT || github.token`) and
+   downstream CI then fires normally on backport PRs.
+
+**Manual runs** (older security merges, re-runs, or a tier subset):
+
+```bash
+gh workflow run security-backport.yml -f pr_number=123
+gh workflow run security-backport.yml -f pr_number=123 -f targets=beta,release-candidate
+gh workflow run security-backport.yml -f pr_number=123 -f sha=<commit>   # SHA override
+```
+
+### One-off catch-up PRs
+
+When a Dependabot bump lands on `main` before this four-tier config is
+live (e.g. #368, `actions/setup-python` 6→7), open a manual twin against
+the lower tier so it doesn't wait for the next weekly run — see #369
+(alpha twin of #368). Open lower-tier twins as **draft** PRs:
+`auto-merge-alpha.yml` squash-auto-merges any *non-draft* PR based on
+`alpha` once checks pass.
+
+---
+
 ## Branch protection & rulesets — gotchas
 
 Two GitHub mechanisms can guard a branch in parallel: classic **branch

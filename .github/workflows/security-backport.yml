@@ -1,0 +1,321 @@
+# =============================================================================
+# WebMS-Intra — Security Backport (fan-out of merged main security fixes)
+#
+# Copyright (c) 2026 MWBM Partners Ltd. All rights reserved.
+# Proprietary. Unauthorised copying, modification or distribution prohibited.
+#
+# PURPOSE
+# -------
+# Dependabot SECURITY updates (auto-raised from Dependabot Alerts) can ONLY
+# open PRs against the repository's default branch (main) — GitHub provides
+# no way to retarget them (see DEV_NOTES.md → "Dependabot four-tier
+# coverage"). This workflow closes the gap for the lower deploy tiers:
+#
+#   When a Dependabot / security-labelled PR is MERGED into main, the merged
+#   commit is cherry-picked onto each of alpha / beta / release-candidate
+#   and a backport PR is opened per tier.
+#
+# Clean cherry-pick   -> normal PR  (deps-backport/<tier>/pr-<num> -> <tier>)
+# Conflicted pick     -> DRAFT PR with the conflict markers committed and a
+#                        "manual conflict resolution required" warning body —
+#                        the fix is never silently dropped, and draft status
+#                        keeps auto-merge-alpha.yml from touching it.
+# Tier branch missing -> that matrix leg exits 0 with a summary note.
+# Already backported  -> idempotent skip (existing PR or branch detected).
+#
+# SECURITY MODEL (pull_request_target — read before editing!)
+# -----------------------------------------------------------
+# pull_request_target runs in the BASE branch context with repo secrets, so
+# this workflow must never be turned into a PR-code execution vector:
+#   * permissions are the minimum for the job: contents + pull-requests write;
+#   * it checks out `main` ONLY — never github.event.pull_request.head.*;
+#   * it never installs dependencies or executes anything from the PR — the
+#     only operations are git plumbing + the preinstalled gh CLI;
+#   * it only acts AFTER merge (types: [closed] + merged == true), i.e. on a
+#     commit that main's review/branch-protection process already accepted;
+#   * untrusted text (PR title) is only ever passed as quoted argv/env — it
+#     is never interpolated into shell source via ${{ }}.
+#
+# TOKEN / DOWNSTREAM-CI CAVEAT
+# ----------------------------
+# PRs created with the default GITHUB_TOKEN do NOT trigger other workflows
+# (GitHub anti-recursion), so pr-security / CodeQL / Psalm will not auto-run
+# on the backport PRs. If the optional fine-grained PAT secret BACKPORT_PAT
+# (this repo only; Contents + Pull requests read/write) exists, it is used
+# instead and downstream CI fires normally. Without it the PR body tells the
+# reviewer to push an empty commit or close/reopen to trigger checks.
+#
+# LIMITS
+# ------
+# * Assumes squash-merge (repo convention): merge_commit_sha is the single
+#   squashed commit. A multi-commit rebase-merge would only backport the
+#   final commit — use workflow_dispatch with an explicit `sha` per commit.
+# * Matrix tiers are hard-coded — extend BOTH .github/dependabot.yml and the
+#   matrix below if a fifth tier is ever added.
+#
+# MANUAL RUN
+# ----------
+#   gh workflow run security-backport.yml -f pr_number=123
+#   gh workflow run security-backport.yml -f pr_number=123 -f targets=beta
+# =============================================================================
+
+name: Security Backport
+
+on:
+  pull_request_target:
+    types: [closed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: "Number of a PR already MERGED into main to backport"
+        required: true
+        type: string
+      sha:
+        description: "Optional commit SHA override (defaults to the PR's merge commit)"
+        required: false
+        type: string
+        default: ""
+      targets:
+        description: "Comma-separated subset of tiers to backport to"
+        required: false
+        type: string
+        default: "alpha,beta,release-candidate"
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: security-backport-${{ github.event.pull_request.number || inputs.pr_number }}
+  cancel-in-progress: false
+
+jobs:
+  # ===========================================================================
+  # 🔎 Resolve which merged commit to backport (guards the whole workflow)
+  # ===========================================================================
+  resolve:
+    name: Resolve merged commit
+    runs-on: ubuntu-latest
+    # Auto path: only merged-into-main PRs authored by Dependabot or labelled
+    # as security/dependency work. NOTE: contains() is an exact-match on
+    # label names, so both the generic names and this repo's "type: security"
+    # scheme are listed.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.pull_request.merged == true &&
+       github.event.pull_request.base.ref == 'main' &&
+       (github.event.pull_request.user.login == 'dependabot[bot]' ||
+        contains(github.event.pull_request.labels.*.name, 'security') ||
+        contains(github.event.pull_request.labels.*.name, 'dependencies') ||
+        contains(github.event.pull_request.labels.*.name, 'type: security')))
+    outputs:
+      pr_number: ${{ steps.meta.outputs.pr_number }}
+      sha: ${{ steps.meta.outputs.sha }}
+      targets: ${{ steps.meta.outputs.targets }}
+    steps:
+      - name: Resolve PR number + merged commit SHA
+        id: meta
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_PR_NUMBER: ${{ github.event.pull_request.number }}
+          EVENT_MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+          INPUT_PR_NUMBER: ${{ inputs.pr_number }}
+          INPUT_SHA: ${{ inputs.sha }}
+          INPUT_TARGETS: ${{ inputs.targets }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            # 🛡️ Validate dispatch inputs before they touch anything.
+            if ! [[ "$INPUT_PR_NUMBER" =~ ^[0-9]+$ ]]; then
+              echo "::error::pr_number must be numeric, got: $INPUT_PR_NUMBER"
+              exit 1
+            fi
+            pr="$INPUT_PR_NUMBER"
+            merged_at="$(gh pr view "$pr" --repo "$REPO" --json mergedAt --jq '.mergedAt // empty')"
+            base_ref="$(gh pr view "$pr" --repo "$REPO" --json baseRefName --jq '.baseRefName')"
+            if [ -z "$merged_at" ]; then
+              echo "::error::PR #$pr is not merged — only merged fixes are backported."
+              exit 1
+            fi
+            if [ "$base_ref" != "main" ]; then
+              echo "::error::PR #$pr merged into '$base_ref', not main — backports flow down from main only."
+              exit 1
+            fi
+            if [ -n "$INPUT_SHA" ]; then
+              if ! [[ "$INPUT_SHA" =~ ^[0-9a-fA-F]{7,40}$ ]]; then
+                echo "::error::sha override does not look like a commit SHA."
+                exit 1
+              fi
+              sha="$INPUT_SHA"
+            else
+              sha="$(gh pr view "$pr" --repo "$REPO" --json mergeCommit --jq '.mergeCommit.oid')"
+            fi
+            targets="$INPUT_TARGETS"
+          else
+            pr="$EVENT_PR_NUMBER"
+            sha="$EVENT_MERGE_SHA"
+            targets="alpha,beta,release-candidate"
+          fi
+          if [ -z "$sha" ]; then
+            echo "::error::Could not resolve a merge commit SHA for PR #$pr."
+            exit 1
+          fi
+          {
+            echo "pr_number=$pr"
+            echo "sha=$sha"
+            echo "targets=$targets"
+          } >> "$GITHUB_OUTPUT"
+
+  # ===========================================================================
+  # 🍒 Cherry-pick the merged commit onto each lower tier
+  # ===========================================================================
+  backport:
+    name: Backport to ${{ matrix.target }}
+    needs: resolve
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [alpha, beta, release-candidate]
+    steps:
+      - name: Gate on requested targets
+        id: gate
+        env:
+          TARGETS: ${{ needs.resolve.outputs.targets }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          if printf '%s' ",$TARGETS," | tr -d ' ' | grep -q ",$TARGET,"; then
+            echo "go=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "go=false" >> "$GITHUB_OUTPUT"
+            echo "Skipped \`$TARGET\`: not in requested target set (\`$TARGETS\`)." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      # 🛡️ Base branch ONLY. Never checkout/execute the PR head — see the
+      # SECURITY MODEL header block. fetch-depth: 0 pulls all branches so the
+      # tier branches and the merged commit are both available locally.
+      - name: Checkout main (base branch only)
+        if: steps.gate.outputs.go == 'true'
+        uses: actions/checkout@v7
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.BACKPORT_PAT || github.token }}
+
+      - name: Cherry-pick and raise backport PR
+        if: steps.gate.outputs.go == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.BACKPORT_PAT || github.token }}
+          HAS_PAT: ${{ secrets.BACKPORT_PAT != '' }}
+          TARGET: ${{ matrix.target }}
+          PR_NUMBER: ${{ needs.resolve.outputs.pr_number }}
+          MERGE_SHA: ${{ needs.resolve.outputs.sha }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          branch="deps-backport/${TARGET}/pr-${PR_NUMBER}"
+
+          # --- 🌿 Tier branch must exist (skip quietly if not) ---------------
+          if ! git ls-remote --exit-code --heads origin "$TARGET" > /dev/null; then
+            echo "Skipped \`$TARGET\`: branch does not exist on origin." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          # --- ♻️ Idempotency: PR already raised for this (tier, PR)? --------
+          existing_pr="$(gh pr list --repo "$REPO" --head "$branch" --base "$TARGET" \
+                           --state all --json number --jq '.[0].number // empty')"
+          if [ -n "$existing_pr" ]; then
+            echo "Skipped \`$TARGET\`: backport PR #${existing_pr} already exists (branch \`$branch\`)." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          conflict=false
+          recovered=false
+
+          if git ls-remote --exit-code --heads origin "$branch" > /dev/null; then
+            # --- ♻️ Branch left over from an earlier partial run: reuse ------
+            recovered=true
+            git switch -c "$branch" "origin/$branch"
+          else
+            git switch -c "$branch" "origin/$TARGET"
+
+            # Merge commits (non-squash merges) need mainline parent 1.
+            pick_args=(-x)
+            if [ "$(git show -s --format=%P "$MERGE_SHA" | wc -w)" -gt 1 ]; then
+              pick_args+=(-m 1)
+            fi
+
+            if git cherry-pick "${pick_args[@]}" "$MERGE_SHA"; then
+              : # clean pick
+            elif git diff --name-only --diff-filter=U | grep -q .; then
+              # --- ⚠️ Conflict: commit the markers so the fix stays surfaced
+              #     as a draft PR instead of being silently dropped. ----------
+              conflict=true
+              git add -A
+              git -c core.editor=true cherry-pick --continue \
+                || git commit --no-verify -m "Conflicted backport of #${PR_NUMBER} — resolve markers before merge"
+            else
+              # --- Pick applies empty: fix already present on this tier -----
+              git cherry-pick --abort || true
+              echo "Skipped \`$TARGET\`: commit ${MERGE_SHA} is already applied (empty cherry-pick)." >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+
+            git push origin "HEAD:refs/heads/$branch"
+          fi
+
+          # --- 📬 Raise the PR ----------------------------------------------
+          # Untrusted PR title: fetched into a shell var and only ever used as
+          # a single quoted argv — never interpolated into shell source.
+          src_title="$(gh pr view "$PR_NUMBER" --repo "$REPO" --json title --jq '.title')"
+          pr_title="[backport ${TARGET}] ${src_title} (#${PR_NUMBER})"
+
+          body_file="$(mktemp)"
+          {
+            printf "Automated security backport of #%s from \`main\` to \`%s\`.\n\n" "$PR_NUMBER" "$TARGET"
+            printf -- "- Source commit on \`main\`: %s\n" "$MERGE_SHA"
+            printf -- "- Backport branch: \`%s\`\n\n" "$branch"
+            if [ "$conflict" = "true" ]; then
+              printf '> [!WARNING]\n'
+              printf '> ⚠️ Manual conflict resolution required. The cherry-pick conflicted and the\n'
+              printf '> conflict markers are committed on this branch. Check it out, resolve the\n'
+              printf '> markers, commit, push, then mark this PR ready for review.\n\n'
+            fi
+            if [ "$recovered" = "true" ]; then
+              printf '> [!WARNING]\n'
+              printf '> Branch recovered from an earlier partial run — verify its contents match\n'
+              printf '> the source commit before marking ready.\n\n'
+            fi
+            if [ "$HAS_PAT" != "true" ]; then
+              printf '> [!NOTE]\n'
+              printf "> Opened with the default \`GITHUB_TOKEN\`, so CI did **not** auto-run here\n"
+              printf '> (GitHub anti-recursion). Push an empty commit or close/reopen this PR to\n'
+              printf '> trigger pr-security / CodeQL / Psalm.\n'
+            fi
+          } > "$body_file"
+
+          create_args=(--repo "$REPO" --base "$TARGET" --head "$branch"
+                       --title "$pr_title" --body-file "$body_file")
+          if [ "$conflict" = "true" ] || [ "$recovered" = "true" ]; then
+            create_args+=(--draft)
+          fi
+          pr_url="$(gh pr create "${create_args[@]}")"
+
+          # Labels applied one-by-one so a missing label never fails the run.
+          for label in "dependencies" "security" "type: security"; do
+            gh pr edit "$pr_url" --add-label "$label" \
+              || echo "::warning::Label '$label' does not exist in $REPO — not applied to $pr_url"
+          done
+
+          if [ "$conflict" = "true" ]; then
+            echo "Conflict on \`$TARGET\`: draft PR opened for manual resolution — $pr_url" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Backported to \`$TARGET\`: $pr_url" >> "$GITHUB_STEP_SUMMARY"
+          fi

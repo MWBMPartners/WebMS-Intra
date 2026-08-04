@@ -19,9 +19,9 @@ name: "CodeQL"
 
 on:
   push:
-    branches: [main, beta, alpha]
+    branches: [main, beta, alpha, release-candidate]
   pull_request:
-    branches: [main, beta, alpha]
+    branches: [main, beta, alpha, release-candidate]
   schedule:
     # Weekly Monday 09:00 UTC re-scan to catch new advisories that match
     # already-shipped code.

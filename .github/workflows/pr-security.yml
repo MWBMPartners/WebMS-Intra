@@ -7,9 +7,9 @@
 # PURPOSE
 # -------
 # Defence-in-depth security gate that runs on every PR targeting alpha,
-# beta, or main. Each step is non-blocking (continues on failure) EXCEPT
-# the PHP lint step which is a hard gate. A summary comment is posted on
-# the PR with any findings.
+# beta, release-candidate, or main. Each step is non-blocking (continues
+# on failure) EXCEPT the PHP lint step which is a hard gate. A summary
+# comment is posted on the PR with any findings.
 #
 # Checks performed:
 #   1. PHP lint (hard gate)                       — syntax error blocks merge
@@ -42,6 +42,7 @@ on:
       - main
       - beta
       - alpha
+      - release-candidate
 
 permissions:
   contents: read
