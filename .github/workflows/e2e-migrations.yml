@@ -63,7 +63,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
 
       # ubuntu-latest ships Docker + the docker compose plugin pre-installed,
       # so no separate setup step is needed before running the harness.
