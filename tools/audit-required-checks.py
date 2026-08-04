@@ -114,7 +114,7 @@ def collect_required_checks(repo: str) -> tuple[dict[str, list[str]], list[str]]
                         required.setdefault(ctx, []).append(f"ruleset:{detail['name']}")
 
     # --- Branch protection ---
-    for branch in ("main", "beta", "alpha"):
+    for branch in ("main", "beta", "release-candidate", "alpha"):
         try:
             prot = gh([f"repos/{repo}/branches/{branch}/protection"])
         except GhPermissionError as e:

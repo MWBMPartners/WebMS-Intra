@@ -9,6 +9,13 @@ Automated sections are appended by `.github/workflows/changelog.yml` per push
 to `alpha`, `beta`, and `main` using the heading format
 `## [VERSION] - YYYY-MM-DD (branch)`.
 
+## [Unreleased] — CI / Infrastructure
+
+- ci(deps): Dependabot now targets all four deploy tiers — `github-actions` + `composer` declared on `main`, `alpha`, `beta` **and `release-candidate`** (#370, #376)
+- ci(security): `codeql.yml`, `php-static-analysis.yml` and `pr-security.yml` now also trigger on `release-candidate` (#376)
+- ci(security): NEW `security-backport.yml` — when a Dependabot/security PR merges into `main`, its commit is cherry-picked onto `alpha`/`beta`/`release-candidate` and a backport PR opened per tier; conflicts surface as draft PRs with committed markers, never dropped (#376)
+- docs(dev-notes): four-tier Dependabot coverage, the security-update default-branch limitation, and the backport workflow's `GITHUB_TOKEN`/`BACKPORT_PAT` caveat (#376)
+
 ## [1.4.0-dev] - Unreleased
 
 Post-1.3.0 Phase-1 ships. Brand font + worship engine landed first; the rest is foundational primitives for the COP / engagement / discipleship surfaces.

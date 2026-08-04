@@ -16,9 +16,9 @@ name: "PHP Static Analysis"
 
 on:
   push:
-    branches: [main, beta, alpha]
+    branches: [main, beta, alpha, release-candidate]
   pull_request:
-    branches: [main, beta, alpha]
+    branches: [main, beta, alpha, release-candidate]
 
 permissions:
   contents: read
