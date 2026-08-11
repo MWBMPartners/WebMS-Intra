@@ -2160,4 +2160,152 @@ returning a plain-text `OK {"sitesSwept":N,"inserted":{...}}` summary.
 
 ---
 
-Last updated: July 2026
+## Event Team Hub Phase 1 (#386)
+
+### Architecture: extends the calendar app, not a new app
+
+`/calendar/event/hub` lives in `_apps/calendar/` (`event-hub.php` +
+`event-hub-save.php`), not a new top-level app — CLAUDE.md is explicit
+that Calendar/Events/Preaching Plan is ONE app, and every input the hub
+composes (event, coordinators, crews, jobs, people) already lives in the
+calendar app's tables, keyed by `eventID`. The two genuinely reusable
+pieces — provider detection, embed URLs, CF signed tokens, CSP frame-src
+lists — live in `_core/VideoEmbed.php` so `/live`, noticeboard, or
+recordings can adopt the same helper later without dragging in the
+calendar app.
+
+### Access control: `canView` vs `canManage`
+
+Two distinct gates, deliberately different in breadth:
+
+- `canView` = `Auth::isEventTeamMember($eventId)` — coordinator OR crew
+  leader/participant OR job assignee OR a `tblEventPeople` row (host/
+  speaker/organiser/…). Grants read access to the hub page only.
+- `canManage` = `App::isAdmin() || Auth::isCoordinatorOf($eventId)` — the
+  existing house idiom, unchanged, used by every other event sub-tool
+  (crews/jobs/attendance/broadcast). Grants the inline add/edit/remove/
+  reorder forms and the tool-strip links.
+
+`isEventTeamMember()` mirrors `isCoordinatorOf()`'s shape exactly (same
+`self::check()` + `$eventId <= 0` guards, same `$db->prepare()` /
+`bind_param()` / `fetch_assoc()` / `close()` rhythm) so the two methods
+stay trivially comparable during review. All four membership tables
+(`tblEventCoordinators`, `tblEventCrewMembers`, `tblEventJobAssignments`,
+`tblEventPeople`) cascade-delete with their event, so hub access can never
+outlive the event it's scoped to.
+
+### Video providers: allowlist detection, never a raw embed
+
+`VideoEmbed::parse()` is the single place a pasted string becomes a
+`{provider, ref}` pair — YouTube (`watch?v=`, `youtu.be/`, `/shorts/`,
+`/live/`, `/embed/`), Vimeo (`vimeo.com/<id>`,
+`player.vimeo.com/video/<id>`), or Cloudflare Stream (UID embedded in
+`customer-*.cloudflarestream.com`, `watch.cloudflarestream.com`, or
+`iframe.videodelivery.net`, or a bare 32-hex UID). Anything else returns
+`null` — `event-hub-save.php`'s `addVideo` action flashes an error and
+stores nothing. Every `embedUrl()` call re-validates the ref's character
+class immediately before string-interpolating it into an iframe `src`
+(the same discipline as `Livestream::embedUrl()`'s ID sanitiser), so even
+a corrupted/tampered database row can't produce an XSS-bearing iframe.
+
+### Cloudflare Stream signed-URL playback (no vendored JWT encoder)
+
+`_vendor/simplejwt/JWT.php` is **verify-only** (built for MS365/Google ID
+tokens) — it has no encode/sign capability, and it is deliberately not
+extended for this, since it's scoped as an IdP-token verifier. Signing is
+new code in `VideoEmbed::signedToken()`:
+
+1. Build the compact JWT segments by hand: `header = {"alg":"RS256",
+   "kid":<keyID>}`, `payload = {"sub":<uid>, "kid":<keyID>,
+   "exp":now+ttl, "downloadable":false}`, both base64url-encoded (RFC
+   4648 §5, no padding).
+2. `openssl_sign($header.'.'.$payload, $signature, $pem,
+   OPENSSL_ALGO_SHA256)` — the same primitive `simplejwt` uses for
+   verification, just run in the opposite direction.
+3. Token = `header.payload.` + base64url(`$signature`).
+
+The PEM (`cfstream.signingKeyPem`, `isSensitive = 1`, libsodium-encrypted
+via `encrypt_setting()`/`decrypt_setting()`) and the key ID never leave
+the server — only the short-lived JWT reaches the browser, inside an
+iframe `src` that itself is never logged. A missing/invalid key makes
+`signedToken()` return `null` (logged via `Logger::errorPlatform()`,
+**never** logging the PEM or signature) — the hub page renders an
+"unavailable — check Stream settings" tile rather than a broken iframe.
+Tokens are cached in `$_SESSION['cfstream_tokens'][$uid]` plus a
+per-request static memo, reused while more than 1/10th of
+`cfstream.tokenTtlSeconds` (default 21600s / 6h) remains — RSA-2048
+signing is ~1ms, so this is belt-and-braces, not load-bearing.
+
+### Cloudflare Stream credential-setup runbook
+
+Two **separate** credentials — see the two-credential explainer on
+`/admin/integrations/cloudflare-stream` itself:
+
+1. **Pick the Cloudflare account** that owns (or will own) the Stream
+   subscription. This portal's Cloudflare MCP connection exposes D1/KV/
+   R2/Workers only, **not Stream** — the portal cannot see or create
+   either credential below; an admin must do both in the Cloudflare
+   dashboard/API directly.
+2. **Create the Stream:Edit API token** (Phase 1.5 — captured now for
+   forward-compatibility, unused by anything shipped in this release):
+   Cloudflare dashboard → **My Profile → API Tokens → Create Token →
+   Custom Token** → permission **Account → Cloudflare Stream → Edit**,
+   scoped to the one account from step 1 (not "all accounts"), no zone
+   permissions. Optionally pin it to the DreamHost server's outbound IP
+   under "Client IP Address Filtering". Paste the token into **API
+   token** on the admin page — it's `isSensitive`-encrypted and never
+   re-displayed once saved.
+3. **Create the signing key** (used TODAY for signed-URL playback): the
+   Cloudflare dashboard has **no UI** for this — it must be created via
+   the API:
+   ```
+   curl -X POST "https://api.cloudflare.com/client/v4/accounts/<accountID>/stream/keys" \
+        -H "Authorization: Bearer <a token with Stream:Edit>"
+   ```
+   The response contains `result.id` (→ **Signing key ID**) and
+   `result.pem` (→ **Signing key PEM**, base64-encoded in the API
+   response — paste the decoded PEM, including the
+   `-----BEGIN PRIVATE KEY-----`/`-----END-----` lines, into the
+   textarea). **This is a one-time, non-retrievable secret** — Cloudflare
+   does not let you fetch the private key again after creation, so paste
+   it into the admin page (or a password manager) immediately.
+4. Fill in **Account ID** (32-hex, from the Cloudflare dashboard URL or
+   `GET /accounts`) and **Customer code** (the `customer-<code>` segment
+   your account's Stream playback URLs already use — visible on any
+   existing video's embed code, or `GET /accounts/{id}/stream` → any
+   video's `preview`/`playback.hls` URL).
+5. Tick **Enable Cloudflare Stream video embeds** and save. Existing
+   Cloudflare Stream videos on the hub whose `requiresSignedUrl` is
+   unticked will start rendering immediately (playback needs only the
+   customer code); signed videos need the signing key from step 3.
+
+### Phase 1 vs Phase 1.5 scope
+
+Phase 1 (this build) is **external references only** — a coordinator
+pastes a YouTube/Vimeo URL or a Cloudflare Stream UID/URL;
+`tblEventHubVideos.uploadStatus` is always `'external'`. Deliberately OUT
+of scope, tracked as Phase 1.5 against the same issue (#386):
+
+- `Portal\Core\CloudflareStream` — the Cloudflare *management* API client
+  (mint/poll/edit/delete direct-creator-uploads), modelled on `Zoom.php`.
+- The direct-upload JSON endpoints (`calendar/event/hub/video/upload-url`,
+  `calendar/event/hub/video/status`) and the vanilla-XHR upload widget
+  (progress bar, no `tus` in the first build — CSP forbids CDN JS, and
+  `tus-js-client` would have to be vendored).
+- `$cspConnectExtra` — a new page-scoped CSP extension point mirroring
+  the existing `$cspImgExtra`/`$cspMediaExtra`/`$cspFrameExtra` trio in
+  `header.php`, needed so the browser can POST straight to Cloudflare's
+  upload URL without touching DreamHost's PHP upload limits.
+
+`tblEventHubVideos` already carries every Phase 1.5 column
+(`uploadStatus`, `errorDetail`, `uploadedAt`, `lastCheckedAt`,
+`allowedOrigins`) and the admin page already carries every Phase 1.5
+setting (`cfstream.apiToken`, `cfstream.maxUploadDurationSeconds`,
+`cfstream.uploadMintPerHour`, `cfstream.defaultRequireSignedUrls`,
+`cfstream.allowedOrigins`) — Phase 1.5 should need zero schema/settings/
+admin-page changes, only new POST handlers gated behind
+`CloudflareStream::isConfigured()`.
+
+---
+
+Last updated: August 2026

@@ -2,6 +2,50 @@
 
 
 ## [1.4.0] - 2026-07-22 (alpha)
+- feat(calendar): #386 Phase 1 — Event Team Hub. Per-event staff/volunteer/
+  organiser landing page (`/calendar/event/hub?eventID=N`) extending the
+  calendar app (Calendar/Events/Preaching Plan stays ONE app). New tables
+  `tblEventHubResources` (links/notes grouped by a free-text section,
+  notes rendered via `Portal\Core\Markdown::render()`) and
+  `tblEventHubVideos` — the latter ships its FINAL shape from day one
+  (`uploadStatus` default `'external'` plus the Phase 1.5 upload-lifecycle
+  columns: `errorDetail`, `uploadedAt`, `lastCheckedAt`, `allowedOrigins`)
+  so the Cloudflare direct-upload follow-up never needs an ALTER. New
+  `Portal\Core\VideoEmbed` core helper: allowlist `parse()` detects
+  YouTube/Vimeo/Cloudflare Stream from a pasted URL or bare ID (never
+  stores/embeds an arbitrary raw URL), `embedUrl()` builds the safe iframe
+  src (re-validating the ref's character class immediately before
+  interpolation), `frameSrcOrigins()` computes the page-scoped
+  `$cspFrameExtra` list, and `signedToken()` hand-signs an RS256 JWT via
+  `openssl_sign()` for Cloudflare Stream's signed-URL playback (the
+  vendored `simplejwt` library is verify-only, so this is new signing
+  code, not an extension of it) — never throws, logs via `Logger` and
+  returns null on a missing/invalid signing key so the page renders an
+  "unavailable — check Stream settings" tile instead of a broken iframe.
+  New `Auth::isEventTeamMember()` (coordinator OR crew leader/participant
+  OR job assignee OR a `tblEventPeople` row) gates VIEW access; the
+  existing `isCoordinatorOf() || isAdmin()` idiom still gates MANAGE
+  (inline add/edit/remove/reorder forms for resources + videos, plus a
+  tool strip linking the previously-unlinked
+  `/calendar/event/{crews,jobs,attendance,broadcast}` +
+  `/admin/calendar/registrations` pages). New admin page
+  `/admin/integrations/cloudflare-stream` ships the FULL `cfstream.*`
+  field list — including `apiToken`, which nothing in this release uses —
+  so the Phase 1.5 direct-upload build needs no follow-up migration or
+  admin-page change, only new POST handlers gated behind
+  `CloudflareStream::isConfigured()`; secrets (`apiToken`,
+  `signingKeyPem`) are `isSensitive`-encrypted, never re-displayed, and a
+  blank submit preserves the existing value (mirrors
+  `admin/integrations/zoom/save.php`). "Team Hub" entry-point links added
+  to `my-events.php` rows and the event detail page for any viewer
+  passing `Auth::isEventTeamMember()`. Migration 155 seeds only the four
+  routes whose handler files ship in this PR (the Phase 1.5 upload-url/
+  status JSON endpoints are deliberately NOT seeded yet) plus the full
+  `cfstream.*` settings defaults, all off/blank. Explicitly OUT of scope
+  (Phase 1.5): the Cloudflare *management* API (`CloudflareStream` class),
+  direct-upload endpoints, upload JS, and the `$cspConnectExtra` core
+  change. All 10 `tools/audit-checks/` scripts clean; `full_schema.sql`
+  parity maintained (header bumped to "Covers migrations: 000-155").
 - docs: refresh `.claude/CLAUDE.md` apps table — was ~17 rows, now covers all
   37 AppRegistry apps (`_core/apps/*.php`) plus `noticeboard`/`worship`/
   `salvation`/`kids` (working, shipped, but not yet AppRegistry-registered)

@@ -147,6 +147,8 @@ Events, series, RSVP, exports, and (in flight) seven view modes.
 - RSVP system (#88) — capacity, waitlist, confirmation emails.
 - iCal export (`/calendar/export`).
 - Public + admin-managed views.
+- Crews (#343), volunteer job board (#344), multi-day attendance grid (#345), segment broadcast (#119), registrations (#347) — per-event coordinator tools at `/calendar/event/{crews,jobs,attendance,broadcast}` + `/admin/calendar/registrations`.
+- **Event Team Hub (#386 Phase 1)** — per-event staff/volunteer/organiser landing page at `/calendar/event/hub`, gathering the above tools plus a Resources list and a YouTube/Vimeo/Cloudflare Stream video grid. See the dedicated section below.
 
 **🛠️ In flight (PR #137 — closes #136):**
 - Seven view modes — `/calendar?view=day|week|weekdays|weekend|month|year|list`.
@@ -633,6 +635,27 @@ Closes the last open piece of #300. v1 (migration 110) shipped `/service-plans/l
 | `confidence.php` banner — polled every 4s (matching the `livechat-widget.js` house cadence), high-contrast themed banner with a reduced-motion-guarded pulse; message body injected via `textContent` only, NEVER `innerHTML` — the client-side XSS line of defence alongside the server's `htmlspecialchars()` escaping on `live.php` | #300 v2 | 154 | ✅ |
 | Every query siteID-scoped (`Site::id()`); a plan at another site polling the same `planID` gets `message: null`, never another site's data | #300 v2 | 154 | ✅ |
 | No new `tblSettings` — plain `service-plans/*` page routes (not under `api/*`), inheriting the existing `service_plans.enabled` app gate | #300 v2 | 154 | ✅ |
+
+---
+
+### Event Team Hub Phase 1 — per-event staff/volunteer/organiser portal (#386, 2026-08-11)
+
+Extends the calendar app (Calendar/Events/Preaching Plan is ONE app per `.claude/CLAUDE.md`) — not a new top-level app — with a "Team Hub" landing page at `/calendar/event/hub?eventID=N` that gathers a Resources list, a video grid, the viewer's own crew/job/role roster context, and (for coordinators/admins) a tool strip linking the previously-unlinked crews/jobs/attendance/broadcast/registrations pages. Phase 1 video handling is external references only (paste a YouTube/Vimeo URL or a Cloudflare Stream UID) with signed-URL playback; the Cloudflare *management* API (direct uploads, `CloudflareStream` class) is a Phase 1.5 follow-up — `tblEventHubVideos` already ships its final shape so no future ALTER is needed.
+
+| Item | Issue | Migration | Status |
+|---|---|---|---|
+| `tblEventHubResources` — links/notes grouped by a free-text `section`; notes rendered via `Portal\Core\Markdown::render()` (escaped-first) | #386 | 155 | ✅ |
+| `tblEventHubVideos` — final shape from day one, incl. Phase-1.5 upload-lifecycle columns (`uploadStatus` default `'external'`, `errorDetail`, `uploadedAt`, `lastCheckedAt`, `allowedOrigins`) so Phase 1.5 needs no ALTER | #386 | 155 | ✅ |
+| `Portal\Core\VideoEmbed` — allowlist `parse()` (YouTube/Vimeo/Cloudflare URL or bare ID → provider+ref, never an arbitrary raw URL), `embedUrl()`, `frameSrcOrigins()` for the page-scoped `$cspFrameExtra`, and `signedToken()` — hand-built RS256 JWT via `openssl_sign()` (the vendored `simplejwt` is verify-only) for Cloudflare Stream signed-URL playback | #386 | — | ✅ |
+| `Auth::isEventTeamMember()` — coordinator OR crew leader/participant OR job assignee OR `tblEventPeople` row; broader than `isCoordinatorOf()` (view vs. manage) | #386 | — | ✅ |
+| `/calendar/event/hub` (view, any team member) + `/calendar/event/hub/save` (POST, coordinator/admin only — `addResource`/`editResource`/`removeResource`/`addVideo`/`removeVideo`/`reorder`) | #386 | 155 | ✅ |
+| Admin `admin/integrations/cloudflare-stream` — full `cfstream.*` field list (incl. `apiToken`, reserved for Phase 1.5) seeded now so the Phase 1.5 upload build needs no follow-up migration; two-credential model (signing key vs. API token) explained on the page; secrets never re-displayed, blank input preserves the existing value | #386 | 155 | ✅ |
+| Entry points: "Team Hub" button on `my-events.php` rows and on the event page (`event.php`) for any viewer passing `canView` | #386 | — | ✅ |
+| CF videos whose signing key is unconfigured render an "unavailable — check Stream settings" tile, never a broken iframe | #386 | — | ✅ |
+| Cloudflare *management* API (`CloudflareStream` class, direct-upload endpoints, upload JS, `$cspConnectExtra`) — deferred | #386 | — | 🔜 (Phase 1.5) |
+
+**Tables:** `tblEventHubResources`, `tblEventHubVideos`
+**Settings:** `cfstream.enabled`, `cfstream.accountID`, `cfstream.customerCode`, `cfstream.apiToken`, `cfstream.signingKeyID`, `cfstream.signingKeyPem`, `cfstream.tokenTtlSeconds`, `cfstream.maxUploadDurationSeconds`, `cfstream.uploadMintPerHour`, `cfstream.defaultRequireSignedUrls`, `cfstream.allowedOrigins`
 
 ---
 

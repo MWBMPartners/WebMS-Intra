@@ -13,7 +13,7 @@
 -- present in web/_sql/ are marked as executed in tblMigrations so the
 -- web-based Migrator won't re-run them.
 --
--- Covers migrations: 000-154 (DDL + settings/routes seeds + tblMigrations
+-- Covers migrations: 000-155 (DDL + settings/routes seeds + tblMigrations
 -- marks). When you add a new migration, port its DDL/seeds into the
 -- appropriate section here AND add its filename to the seed block at the
 -- end of this file. CI enforces this via
@@ -4993,6 +4993,41 @@ ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 
 
 -- =============================================================================
+-- Migration 155: Event Team Hub — Phase 1 (#386)
+-- =============================================================================
+-- tblEventHubResources / tblEventHubVideos CREATEs are ported inline into
+-- the migration-ported table section below (banner "-- ── from
+-- 155_event_team_hub.sql (#386) ──"). Video handling in Phase 1 is
+-- external references only (paste a YouTube/Vimeo URL or a Cloudflare
+-- Stream UID) with signed-URL playback via `Portal\Core\VideoEmbed`; the
+-- Cloudflare management API, direct-upload endpoints, upload JS, and
+-- `$cspConnectExtra` are out of scope (Phase 1.5 follow-up). Only the
+-- routes whose handler files ship in this migration are seeded — no
+-- `api.*` flags needed (plain `tblRoutes` page routes, not `api/*`).
+
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('calendar/event/hub',                        'calendar/event-hub.php',                          1),
+    ('calendar/event/hub/save',                    'calendar/event-hub-save.php',                     1),
+    ('admin/integrations/cloudflare-stream',       'admin/integrations/cloudflare-stream/index.php',  1),
+    ('admin/integrations/cloudflare-stream/save',  'admin/integrations/cloudflare-stream/save.php',   1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
+INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isSensitive`, `defaultValue`) VALUES
+    ('cfstream.enabled',                  'false', 0, 'false'),
+    ('cfstream.accountID',                '',      0, ''),
+    ('cfstream.customerCode',             '',      0, ''),
+    ('cfstream.apiToken',                 '',      1, ''),
+    ('cfstream.signingKeyID',             '',      0, ''),
+    ('cfstream.signingKeyPem',            '',      1, ''),
+    ('cfstream.tokenTtlSeconds',          '21600', 0, '21600'),
+    ('cfstream.maxUploadDurationSeconds', '3600',  0, '3600'),
+    ('cfstream.uploadMintPerHour',        '20',    0, '20'),
+    ('cfstream.defaultRequireSignedUrls', 'true',  0, 'true'),
+    ('cfstream.allowedOrigins',           '',      0, '')
+ON DUPLICATE KEY UPDATE `settingKey` = `settingKey`;
+
+
+-- =============================================================================
 -- Tables added in numbered migrations 105+ — appended for fresh-install parity.
 -- Maintained automatically; do NOT hand-edit duplicates. See the same
 -- definitions in web/_sql/{105..144}_*.sql for the source of truth + comments.
@@ -5932,6 +5967,61 @@ CREATE TABLE IF NOT EXISTS `tblServicePlanMessages` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
 COMMENT='Operator → confidence-monitor message channel (#300 v2)';
 
+-- ── from 155_event_team_hub.sql (#386) ──────────────────────────────────────
+-- Event Team Hub — Phase 1. tblEventHubVideos ships its FINAL shape
+-- (Phase 1.5 upload-lifecycle columns folded in now) so no ALTER is ever
+-- needed; Phase 1 code only ever writes uploadStatus = 'external' (the
+-- column DEFAULT). FKs target tblEvents (~L742) and tblUsers, both
+-- created far earlier, so this is FK-safe here despite the
+-- out-of-numeric-order placement (same convention as the 152/153/154
+-- blocks immediately above).
+CREATE TABLE IF NOT EXISTS `tblEventHubResources` (
+    `resourceID`   INT           NOT NULL AUTO_INCREMENT,
+    `eventID`      INT           NOT NULL,
+    `section`      VARCHAR(80)   NOT NULL DEFAULT 'General'
+                   COMMENT 'Free-text grouping: Before the event / On the day / …',
+    `resourceType` ENUM('link','note') NOT NULL DEFAULT 'link',
+    `title`        VARCHAR(255)  NOT NULL,
+    `url`          VARCHAR(2048) DEFAULT NULL COMMENT 'resourceType=link',
+    `body`         TEXT          DEFAULT NULL COMMENT 'resourceType=note (rendered via Portal\\Core\\Markdown)',
+    `sortOrder`    INT           NOT NULL DEFAULT 0,
+    `createdByID`  INT           DEFAULT NULL,
+    `createdAt`    DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updatedAt`    DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`resourceID`),
+    KEY `idx_hubres_event_sort` (`eventID`, `section`, `sortOrder`),
+    CONSTRAINT `fk_hubres_event`   FOREIGN KEY (`eventID`)     REFERENCES `tblEvents`(`eventID`) ON DELETE CASCADE,
+    CONSTRAINT `fk_hubres_creator` FOREIGN KEY (`createdByID`) REFERENCES `tblUsers`(`userID`)   ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+COMMENT='Event Team Hub — links + notes, grouped into free-text sections (#386 Phase 1)';
+
+CREATE TABLE IF NOT EXISTS `tblEventHubVideos` (
+    `videoID`           INT           NOT NULL AUTO_INCREMENT,
+    `eventID`           INT           NOT NULL,
+    `provider`          ENUM('youtube','vimeo','cloudflare') NOT NULL,
+    `videoRef`          VARCHAR(255)  NOT NULL
+                        COMMENT 'YouTube 11-char ID / Vimeo numeric ID / CF Stream 32-hex UID',
+    `sourceUrl`         VARCHAR(1024) DEFAULT NULL COMMENT 'URL as pasted (external refs only)',
+    `title`             VARCHAR(255)  NOT NULL,
+    `requiresSignedUrl` TINYINT(1)    NOT NULL DEFAULT 0 COMMENT 'cloudflare only — mirror of CF requireSignedURLs',
+    `allowedOrigins`    VARCHAR(1024) DEFAULT NULL COMMENT 'cloudflare only — comma-joined mirror of CF allowedOrigins (Phase 1.5)',
+    `uploadStatus`      ENUM('external','pending','processing','ready','error')
+                        NOT NULL DEFAULT 'external'
+                        COMMENT 'external = pasted reference (Phase 1, no upload lifecycle); pending/processing/ready/error = Phase 1.5 direct-upload lifecycle',
+    `errorDetail`       VARCHAR(255)  DEFAULT NULL COMMENT 'CF status.errorReasonText when uploadStatus = error (Phase 1.5)',
+    `uploadedAt`        DATETIME      DEFAULT NULL COMMENT 'first observed past pendingupload (Phase 1.5)',
+    `lastCheckedAt`      DATETIME      DEFAULT NULL COMMENT 'poll throttle timestamp (Phase 1.5)',
+    `sortOrder`         INT           NOT NULL DEFAULT 0,
+    `createdByID`       INT           DEFAULT NULL,
+    `createdAt`         DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`videoID`),
+    KEY `idx_hubvid_event_sort` (`eventID`, `sortOrder`),
+    KEY `idx_hubvid_status` (`uploadStatus`),
+    CONSTRAINT `fk_hubvid_event`   FOREIGN KEY (`eventID`)     REFERENCES `tblEvents`(`eventID`) ON DELETE CASCADE,
+    CONSTRAINT `fk_hubvid_creator` FOREIGN KEY (`createdByID`) REFERENCES `tblUsers`(`userID`)   ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+COMMENT='Event Team Hub — video grid, external refs in Phase 1 (#386)';
+
 
 -- #############################################################################
 -- SECTION 7B: MARK MIGRATIONS 082-083 + 090-145 AS EXECUTED (#364 / #194)
@@ -6138,4 +6228,7 @@ INSERT INTO `tblMigrations` (`filename`) VALUES ('153_discipleship_progress.sql'
 ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
 INSERT INTO `tblMigrations` (`filename`) VALUES ('154_service_plan_messages.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('155_event_team_hub.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;
