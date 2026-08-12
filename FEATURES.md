@@ -652,7 +652,9 @@ Extends the calendar app (Calendar/Events/Preaching Plan is ONE app per `.claude
 | Admin `admin/integrations/cloudflare-stream` — full `cfstream.*` field list (incl. `apiToken`, reserved for Phase 1.5) seeded now so the Phase 1.5 upload build needs no follow-up migration; two-credential model (signing key vs. API token) explained on the page; secrets never re-displayed, blank input preserves the existing value | #386 | 155 | ✅ |
 | Entry points: "Team Hub" button on `my-events.php` rows and on the event page (`event.php`) for any viewer passing `canView` | #386 | — | ✅ |
 | CF videos whose signing key is unconfigured render an "unavailable — check Stream settings" tile, never a broken iframe | #386 | — | ✅ |
-| Cloudflare *management* API (`CloudflareStream` class, direct-upload endpoints, upload JS, `$cspConnectExtra`) — deferred | #386 | — | 🔜 (Phase 1.5) |
+| `Portal\Core\CloudflareStream` — management-API client (`createDirectUpload`/`getVideo`/`updateVideo`/`deleteVideo`); Bearer `cfstream.apiToken`, TLS at cURL defaults, token never logged | #386 | 156 | ✅ (Phase 1.5) |
+| Direct browser→Cloudflare upload — `calendar/event/hub/upload-url` mints a one-time URL (per-user hourly rate limit via `tblActivityLogs`), `/video-status` polls readiness, `/video-settings` edits Require-Signed-URLs/Allowed-Origins **CF-first**; basic ≤200 MB (tus deferred), file never touches the server; `event-hub-upload.js` enforces the size cap + host allowlist + CSRF-rotation tracking | #386 | 156 | ✅ (Phase 1.5) |
+| Core `$cspConnectExtra` — page-scoped `connect-src` widening (identical pattern to `$cspFrameExtra`); the hub adds Cloudflare's upload hosts only for a manager on a configured install, every other page byte-identical | #386 | — | ✅ (Phase 1.5) |
 
 **Tables:** `tblEventHubResources`, `tblEventHubVideos`
 **Settings:** `cfstream.enabled`, `cfstream.accountID`, `cfstream.customerCode`, `cfstream.apiToken`, `cfstream.signingKeyID`, `cfstream.signingKeyPem`, `cfstream.tokenTtlSeconds`, `cfstream.maxUploadDurationSeconds`, `cfstream.uploadMintPerHour`, `cfstream.defaultRequireSignedUrls`, `cfstream.allowedOrigins`

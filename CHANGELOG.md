@@ -2,6 +2,22 @@
 
 
 ## [1.4.0] - 2026-07-22 (alpha)
+- feat(calendar): #386 Phase 1.5 — Event Team Hub direct Cloudflare Stream
+  upload. New `Portal\Core\CloudflareStream` management-API client (Bearer
+  `cfstream.apiToken`, TLS at cURL defaults, token never logged;
+  `createDirectUpload`/`getVideo`/`updateVideo`/`deleteVideo`). Three
+  page-route JSON/form handlers (`calendar/event/hub/upload-url`,
+  `/video-status`, `/video-settings`; migration 156, routes only — 155
+  already shipped every column + setting) let a coordinator/admin mint a
+  one-time direct-upload URL and push a file straight from the browser to
+  Cloudflare (basic ≤200 MB; file never touches the server), poll
+  readiness, and edit Require-Signed-URLs / Allowed-Origins CF-first.
+  Per-user hourly mint rate limit via `tblActivityLogs`; new core
+  `$cspConnectExtra` widens `connect-src` to Cloudflare's upload hosts only
+  for a manager on a configured install; `event-hub-upload.js` enforces the
+  size cap + a host allowlist and tracks CSRF-token rotation across the
+  poll loop. `removeVideo` best-effort-deletes a portal-uploaded video from
+  Cloudflare first (logged, never blocks the local removal).
 - feat(calendar): #386 Phase 1 — Event Team Hub. Per-event staff/volunteer/
   organiser landing page (`/calendar/event/hub?eventID=N`) extending the
   calendar app (Calendar/Events/Preaching Plan stays ONE app). New tables

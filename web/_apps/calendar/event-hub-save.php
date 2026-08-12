@@ -10,7 +10,16 @@
  * action=addVideo       : VideoEmbed::parse() the pasted input, INSERT the
  *                          resulting provider+ref as uploadStatus='external'
  *                          (Phase 1 is external references only)
- * action=removeVideo    : DELETE a video row
+ * action=removeVideo    : DELETE a video row. For a portal-uploaded
+ *                          Cloudflare video (provider='cloudflare' AND
+ *                          uploadStatus != 'external') with Cloudflare
+ *                          configured, best-effort deletes it from
+ *                          Cloudflare Stream FIRST via
+ *                          CloudflareStream::deleteVideo() (#386 Phase
+ *                          1.5) — a CF failure is logged but never blocks
+ *                          the local delete. Pasted external references
+ *                          (uploadStatus='external') are NEVER deleted
+ *                          from Cloudflare — the portal didn't create them.
  * action=reorder         : swap sortOrder with the adjacent resource/video
  *                          (Phase 1 has no drag-and-drop JS — up/down
  *                          buttons, mirroring the forms-only v1 pattern
@@ -33,6 +42,7 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\CloudflareStream;
 use Portal\Core\Logger;
 use Portal\Core\Site;
 use Portal\Core\VideoEmbed;
@@ -211,6 +221,39 @@ if ($action === 'addResource' || $action === 'editResource') {
 } elseif ($action === 'removeVideo') {
     $videoId = (int) ($_POST['videoID'] ?? 0);
     if ($videoId > 0) {
+        // ☁️ Best-effort Cloudflare delete for PORTAL-UPLOADED videos ONLY
+        //    (provider='cloudflare' AND uploadStatus != 'external') — a
+        //    pasted external reference was never created by the portal, so
+        //    it is NEVER deleted from Cloudflare here (#386 Phase 1.5).
+        $stmt = $mysqli->prepare('SELECT provider, videoRef, uploadStatus FROM tblEventHubVideos WHERE videoID = ? AND eventID = ?');
+        $stmt->bind_param('ii', $videoId, $eventId);
+        $stmt->execute();
+        $existingVideo = $stmt->get_result()->fetch_assoc() ?: null;
+        $stmt->close();
+
+        if (
+            $existingVideo !== null
+            && (string) $existingVideo['provider'] === 'cloudflare'
+            && (string) $existingVideo['uploadStatus'] !== 'external'
+            && CloudflareStream::isConfigured() === true
+        ) {
+            $cfDeleted = CloudflareStream::deleteVideo((string) $existingVideo['videoRef']);
+            if ($cfDeleted === false) {
+                // ⚠️ Best-effort — fall through to the local delete anyway
+                //    (a coordinator who asked to remove a video must not
+                //    get stuck with it still showing because Cloudflare
+                //    hiccuped); the resulting CF-side orphan is logged for
+                //    manual/administrative cleanup, never silently lost.
+                Logger::errorPlatform(
+                    'CloudflareStream',
+                    'Warning',
+                    'CFSTREAM_DELETE_FAIL',
+                    'Cloudflare Stream video delete failed — local row removed anyway',
+                    'eventID=' . $eventId . ' videoID=' . $videoId . ' uid=' . (string) $existingVideo['videoRef']
+                );
+            }
+        }
+
         $stmt = $mysqli->prepare('DELETE FROM tblEventHubVideos WHERE videoID = ? AND eventID = ?');
         $stmt->bind_param('ii', $videoId, $eventId);
         $stmt->execute();

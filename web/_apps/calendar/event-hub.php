@@ -36,7 +36,9 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\CloudflareStream;
 use Portal\Core\Markdown;
+use Portal\Core\Settings;
 use Portal\Core\Site;
 use Portal\Core\VideoEmbed;
 
@@ -143,7 +145,8 @@ if ($stmt !== false) {
 // 🎥 Videos + their resolved (or unavailable) embed src.
 $videos = [];
 $stmt = $mysqli->prepare(
-    'SELECT videoID, provider, videoRef, sourceUrl, title, requiresSignedUrl, sortOrder '
+    'SELECT videoID, provider, videoRef, sourceUrl, title, requiresSignedUrl, allowedOrigins, '
+    . '       uploadStatus, errorDetail, sortOrder '
     . 'FROM tblEventHubVideos WHERE eventID = ? ORDER BY sortOrder ASC, videoID ASC'
 );
 if ($stmt !== false) {
@@ -159,29 +162,50 @@ if ($stmt !== false) {
 foreach ($videos as &$video) {
     $provider = (string) $video['provider'];
     $ref      = (string) $video['videoRef'];
+    $status   = (string) $video['uploadStatus'];
     $embedSrc = null;
 
-    if ($provider === 'cloudflare') {
-        if ((int) $video['requiresSignedUrl'] === 1) {
-            $token = VideoEmbed::signedToken($ref);
-            if ($token !== null) {
-                $embedSrc = VideoEmbed::embedUrl('cloudflare', $ref, $token);
+    // 🎬 Only resolve a playable embed for refs that are actually playable
+    //    — a pasted 'external' reference (Phase 1 behaviour, unchanged), or
+    //    a Cloudflare upload that has reached 'ready' (#386 Phase 1.5).
+    //    'pending'/'processing'/'error' uploads render a status tile
+    //    instead, below — never a half-baked iframe.
+    if ($status === 'external' || $status === 'ready') {
+        if ($provider === 'cloudflare') {
+            if ((int) $video['requiresSignedUrl'] === 1) {
+                $token = VideoEmbed::signedToken($ref);
+                if ($token !== null) {
+                    $embedSrc = VideoEmbed::embedUrl('cloudflare', $ref, $token);
+                }
+            } else {
+                $embedSrc = VideoEmbed::embedUrl('cloudflare', $ref);
             }
         } else {
-            $embedSrc = VideoEmbed::embedUrl('cloudflare', $ref);
+            $embedSrc = VideoEmbed::embedUrl($provider, $ref);
         }
-    } else {
-        $embedSrc = VideoEmbed::embedUrl($provider, $ref);
     }
 
     $video['embedSrc'] = $embedSrc;
 }
 unset($video);
 
+// ☁️ Phase 1.5 — is direct upload usable on this page render?
+$cfConfigured = CloudflareStream::isConfigured();
+
 // 🔐 Page-scoped CSP extension — MUST be set before header.php is required.
 //    Base policy untouched; only the origins this page's videos actually
 //    need are added to frame-src.
 $cspFrameExtra = VideoEmbed::frameSrcOrigins($videos);
+
+// 🔐 Phase 1.5 (#386) — widen connect-src ONLY for a manager viewing a
+//    configured install, so the browser can XHR the picked file straight
+//    to Cloudflare's direct-upload host. Status polling is same-origin —
+//    already covered by connect-src 'self', no extension needed for that.
+//    Both known Cloudflare upload hosts are allowed; the upload JS itself
+//    also refuses any uploadURL outside this pair (defence-in-depth).
+if ($canManage === true && $cfConfigured === true) {
+    $cspConnectExtra = 'https://upload.videodelivery.net https://upload.cloudflarestream.com';
+}
 
 $flashMsg  = $_SESSION['flash_msg']  ?? '';
 $flashType = $_SESSION['flash_type'] ?? '';
@@ -415,6 +439,10 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <?php else: ?>
                 <div class="row g-3 mb-3">
                     <?php foreach ($videos as $video): ?>
+                        <?php
+                        $vStatus = (string) $video['uploadStatus'];
+                        $vIsCf   = (string) $video['provider'] === 'cloudflare';
+                        ?>
                         <div class="col-12">
                             <div class="card">
                                 <?php if ($video['embedSrc'] !== null): ?>
@@ -424,6 +452,29 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                                 allow="autoplay; encrypted-media; picture-in-picture"
                                                 allowfullscreen
                                                 title="<?php echo htmlspecialchars((string) $video['title'], ENT_QUOTES, 'UTF-8'); ?>"></iframe>
+                                    </div>
+                                <?php elseif ($vStatus === 'pending' || $vStatus === 'processing'): ?>
+                                    <!-- ☁️ #386 Phase 1.5 — upload in flight; event-hub-upload.js resumes
+                                         polling this tile on page load via the data- attributes below. -->
+                                    <div class="ratio ratio-16x9 bg-body-tertiary d-flex align-items-center justify-content-center text-center p-3"
+                                         data-hub-video-pending data-event-id="<?php echo $eventId; ?>" data-video-id="<?php echo (int) $video['videoID']; ?>">
+                                        <div>
+                                            <div class="spinner-border spinner-border-sm text-primary mb-2" role="status">
+                                                <span class="visually-hidden">Loading…</span>
+                                            </div>
+                                            <div class="small text-muted">
+                                                <?php echo $vStatus === 'pending' ? 'Waiting for upload…' : 'Processing on Cloudflare…'; ?>
+                                            </div>
+                                        </div>
+                                    </div>
+                                <?php elseif ($vStatus === 'error'): ?>
+                                    <div class="ratio ratio-16x9 bg-body-tertiary d-flex align-items-center justify-content-center text-center p-3">
+                                        <div>
+                                            <i class="fa-solid fa-circle-exclamation text-danger fa-lg mb-2"></i>
+                                            <div class="small text-danger">
+                                                <?php echo htmlspecialchars((string) ($video['errorDetail'] ?? 'Upload failed.'), ENT_QUOTES, 'UTF-8'); ?>
+                                            </div>
+                                        </div>
                                     </div>
                                 <?php else: ?>
                                     <div class="ratio ratio-16x9 bg-body-tertiary d-flex align-items-center justify-content-center text-center p-3">
@@ -456,6 +507,33 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                         </div>
                                     <?php endif; ?>
                                 </div>
+                                <?php if ($canManage === true && $vIsCf === true): ?>
+                                    <div class="card-body py-1 border-top">
+                                        <details>
+                                            <summary class="small text-decoration-underline" style="cursor:pointer;">Stream settings</summary>
+                                            <form method="post" action="/calendar/event/hub/video-settings" class="row g-2 mt-1 p-2 bg-body-tertiary rounded">
+                                                <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
+                                                <input type="hidden" name="eventID" value="<?php echo $eventId; ?>">
+                                                <input type="hidden" name="videoID" value="<?php echo (int) $video['videoID']; ?>">
+                                                <div class="col-12">
+                                                    <div class="form-check">
+                                                        <input type="checkbox" class="form-check-input" id="hubVideoSigned<?php echo (int) $video['videoID']; ?>"
+                                                               name="requiresSignedUrl" value="1" <?php echo (int) $video['requiresSignedUrl'] === 1 ? 'checked' : ''; ?>>
+                                                        <label class="form-check-label small" for="hubVideoSigned<?php echo (int) $video['videoID']; ?>">Requires signed URL</label>
+                                                    </div>
+                                                </div>
+                                                <div class="col-12">
+                                                    <label class="form-label small">Allowed origins (comma-separated hostnames, blank = any)</label>
+                                                    <input type="text" name="allowedOrigins" maxlength="1024" class="form-control form-control-sm"
+                                                           value="<?php echo htmlspecialchars((string) ($video['allowedOrigins'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>">
+                                                </div>
+                                                <div class="col-12">
+                                                    <button type="submit" class="btn btn-sm btn-outline-primary">Save Stream settings</button>
+                                                </div>
+                                            </form>
+                                        </details>
+                                    </div>
+                                <?php endif; ?>
                             </div>
                         </div>
                     <?php endforeach; ?>
@@ -491,8 +569,55 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 </details>
                 <p class="text-muted small">"Requires signed URL" applies to Cloudflare Stream videos only — it must mirror the video's <code>requireSignedURLs</code> flag on the Cloudflare side.</p>
             <?php endif; ?>
+
+            <!-- ☁️ #386 Phase 1.5 — direct browser-to-Cloudflare upload. Only
+                 rendered for a manager on an install with Cloudflare Stream
+                 configured; event-hub-upload.js no-ops if #hubUploadForm
+                 isn't on the page, so nothing loads/executes otherwise. -->
+            <?php if ($canManage === true && $cfConfigured === true): ?>
+                <details class="mb-4" open>
+                    <summary class="btn btn-sm btn-outline-success"><i class="fa-solid fa-cloud-arrow-up me-1"></i>Upload to Cloudflare</summary>
+                    <form id="hubUploadForm" class="row g-2 mt-2 p-2 bg-body-tertiary rounded" data-event-id="<?php echo $eventId; ?>">
+                        <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
+                        <div class="col-12">
+                            <label class="form-label small">Video file (max 200MB)</label>
+                            <input type="file" id="hubUploadFile" accept="video/*" class="form-control form-control-sm" required>
+                        </div>
+                        <div class="col-md-8">
+                            <label class="form-label small">Title</label>
+                            <input type="text" id="hubUploadTitle" maxlength="255" class="form-control form-control-sm" required>
+                        </div>
+                        <div class="col-md-4 d-flex align-items-end">
+                            <div class="form-check">
+                                <input type="checkbox" class="form-check-input" id="hubUploadSigned"
+                                       <?php echo ((string) Settings::get('cfstream.defaultRequireSignedUrls', 'true') === 'true') ? 'checked' : ''; ?>>
+                                <label class="form-check-label small" for="hubUploadSigned">Requires signed URL</label>
+                            </div>
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label small">Allowed origins (optional, comma-separated hostnames)</label>
+                            <input type="text" id="hubUploadOrigins" class="form-control form-control-sm" placeholder="Leave blank for the site default">
+                        </div>
+                        <div class="col-12">
+                            <div class="progress d-none" id="hubUploadProgressWrap" role="progressbar" aria-label="Upload progress" style="height:1.25rem;">
+                                <div class="progress-bar" id="hubUploadProgressBar" style="width:0%">0%</div>
+                            </div>
+                            <div class="small mt-1" id="hubUploadStatusLine"></div>
+                        </div>
+                        <div class="col-12">
+                            <button type="submit" class="btn btn-success btn-sm" id="hubUploadSubmit">
+                                <i class="fa-solid fa-cloud-arrow-up me-1"></i>Upload
+                            </button>
+                        </div>
+                    </form>
+                </details>
+                <p class="text-muted small">Uploads go straight from your browser to Cloudflare — files up to 200MB. Larger files aren't supported yet.</p>
+            <?php endif; ?>
         </div>
     </div>
 </div>
 
 <?php require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'footer.php'; ?>
+<?php if ($canManage === true && $cfConfigured === true): ?>
+<script src="/assets/js/event-hub-upload.js" defer></script>
+<?php endif; ?>

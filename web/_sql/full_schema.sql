@@ -13,7 +13,7 @@
 -- present in web/_sql/ are marked as executed in tblMigrations so the
 -- web-based Migrator won't re-run them.
 --
--- Covers migrations: 000-155 (DDL + settings/routes seeds + tblMigrations
+-- Covers migrations: 000-156 (DDL + settings/routes seeds + tblMigrations
 -- marks). When you add a new migration, port its DDL/seeds into the
 -- appropriate section here AND add its filename to the seed block at the
 -- end of this file. CI enforces this via
@@ -5012,6 +5012,17 @@ INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
     ('admin/integrations/cloudflare-stream/save',  'admin/integrations/cloudflare-stream/save.php',   1)
 ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 
+-- ── from 156_event_team_hub_upload.sql (#386 Phase 1.5) ──────────────────────
+-- Direct-upload mint / status-poll / per-video Stream-settings page routes.
+-- Routes-only migration: the tblEventHubVideos upload-lifecycle columns and
+-- every cfstream.* setting already shipped in 155 above; 156 only adds the 3
+-- routes whose handler files ship alongside it.
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('calendar/event/hub/upload-url',     'calendar/event-hub-upload-url.php',     1),
+    ('calendar/event/hub/video-status',   'calendar/event-hub-video-status.php',   1),
+    ('calendar/event/hub/video-settings', 'calendar/event-hub-video-settings.php', 1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
 INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isSensitive`, `defaultValue`) VALUES
     ('cfstream.enabled',                  'false', 0, 'false'),
     ('cfstream.accountID',                '',      0, ''),
@@ -6231,4 +6242,7 @@ INSERT INTO `tblMigrations` (`filename`) VALUES ('154_service_plan_messages.sql'
 ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
 INSERT INTO `tblMigrations` (`filename`) VALUES ('155_event_team_hub.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('156_event_team_hub_upload.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;

@@ -140,16 +140,22 @@ $cspExtSanitise = static function ($raw): string {
     }
     return ' ' . $s;
 };
-$cspImgExtra   = $cspExtSanitise($cspImgExtra   ?? null);
-$cspMediaExtra = $cspExtSanitise($cspMediaExtra ?? null);
-$cspFrameExtra = $cspExtSanitise($cspFrameExtra ?? null);
+//    ADDITION (#386 Phase 1.5): $cspConnectExtra follows the IDENTICAL
+//    pattern — the Event Team Hub's direct-to-Cloudflare upload widget
+//    needs the browser to XHR straight to Cloudflare's upload host, which
+//    the hard-coded `connect-src 'self'` below never allowed for. Unset
+//    (every existing page) ⇒ empty string ⇒ byte-identical header.
+$cspImgExtra     = $cspExtSanitise($cspImgExtra     ?? null);
+$cspMediaExtra   = $cspExtSanitise($cspMediaExtra   ?? null);
+$cspFrameExtra   = $cspExtSanitise($cspFrameExtra   ?? null);
+$cspConnectExtra = $cspExtSanitise($cspConnectExtra ?? null);
 $mediaSrcDirective = $cspMediaExtra !== '' ? "media-src 'self'{$cspMediaExtra}; " : '';
 header("Content-Security-Policy: default-src 'self'; "
     . "script-src 'self' 'nonce-{$csp_nonce}' 'unsafe-inline' https://cdn.jsdelivr.net https://challenges.cloudflare.com; "
     . "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; "
     . "font-src 'self' https://cdnjs.cloudflare.com; "
     . "img-src 'self' data:{$cspImgExtra}; "
-    . "connect-src 'self'; "
+    . "connect-src 'self'{$cspConnectExtra}; "
     . $mediaSrcDirective
     . "frame-src https://challenges.cloudflare.com{$cspFrameExtra}; "
     . "base-uri 'self'; "

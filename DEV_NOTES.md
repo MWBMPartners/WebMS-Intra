@@ -2306,6 +2306,51 @@ setting (`cfstream.apiToken`, `cfstream.maxUploadDurationSeconds`,
 admin-page changes, only new POST handlers gated behind
 `CloudflareStream::isConfigured()`.
 
+#### Phase 1.5 — SHIPPED (migration 156, routes only)
+
+As predicted, Phase 1.5 needed no schema/settings/admin-page change — just
+`Portal\Core\CloudflareStream` and three page-route handlers seeded by
+migration 156 (routes only):
+
+- `calendar/event/hub/upload-url` (POST, JSON) — mints a one-time
+  direct-upload URL via `CloudflareStream::createDirectUpload()` and inserts
+  an `uploadStatus='pending'` row. Gated in order: session → CSRF →
+  admin/coordinator → cross-site → `isConfigured()` → per-user hourly rate
+  limit (counts `tblActivityLogs` `CfStreamUploadMinted` rows in the last 60
+  min — no separate table) → input/origins validation → CF call. Returns the
+  rotated CSRF token so the no-reload poll loop keeps working.
+- `calendar/event/hub/video-status` (POST, JSON) — polled ~4 s; terminal
+  (`external`/`ready`/`error`) + non-CF rows return the stored state with no
+  CF call; `pending`/`processing` throttled to one CF GET per ~5 s;
+  reconciles the `requiresSignedUrl`/`allowedOrigins` mirrors from every
+  live GET; a transient CF failure only stamps `lastCheckedAt`, never flips
+  a video to `error`.
+- `calendar/event/hub/video-settings` (POST, form + redirect/flash) —
+  **CF-first**: `CloudflareStream::updateVideo()` runs first, the local
+  mirror updates only on confirmed success.
+
+Client: `web/public_html/assets/js/event-hub-upload.js` — basic ≤200 MB
+upload (tus deferred, still not vendored), enforces the size cap **and** a
+host allowlist (`upload.videodelivery.net` / `upload.cloudflarestream.com`)
+on the returned `uploadURL`, and writes each response's rotated CSRF token
+back into `<meta name="csrf-token">` and every `input[name=csrf_token]`.
+`$cspConnectExtra` was added to `header.php` (identical pattern to
+`$cspFrameExtra`); the hub sets it to the two upload hosts only for a
+manager on a configured install. `event-hub-save.php`'s `removeVideo`
+best-effort-deletes a portal-uploaded CF video first (a CF failure is logged
+but never blocks the local delete — a coordinator must never get stuck with
+an undeleteable row, e.g. when CF already 404s the asset).
+
+**Runbook — the second credential (API token).** Distinct from the signing
+key (step 3 above): Cloudflare dashboard → **My Profile → API Tokens →
+Create Custom Token** → permission **Account → Cloudflare Stream → Edit**,
+scoped to the Stream-owning account only → paste into
+`admin/integrations/cloudflare-stream` (`cfstream.apiToken`). With it set
+plus `cfstream.accountID`, the "Upload to Cloudflare" panel appears on the
+hub for coordinators/admins. Until it is set, `CloudflareStream::
+isConfigured()` is false and the whole upload path is inert — the hub is
+exactly the Phase-1 paste-a-link experience.
+
 ---
 
 Last updated: August 2026
