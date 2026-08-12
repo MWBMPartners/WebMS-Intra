@@ -317,6 +317,7 @@ Read-only JSON list endpoints over `Portal\Core\ApiRouter`.
 - `/api/announcements/list`
 - `/api/users/list`
 - `/api/events/list`, `/api/events/detail`
+- `/api/calendar/hub-resources`, `/api/calendar/hub-videos` — Event Team Hub read endpoints, scope `eventhub:read` (#387)
 
 **Gaps:** #95 was closed as "REST API expansion — CRUD for all modules" but only list endpoints exist. Full CRUD would still be additional work.
 
@@ -658,6 +659,21 @@ Extends the calendar app (Calendar/Events/Preaching Plan is ONE app per `.claude
 
 **Tables:** `tblEventHubResources`, `tblEventHubVideos`
 **Settings:** `cfstream.enabled`, `cfstream.accountID`, `cfstream.customerCode`, `cfstream.apiToken`, `cfstream.signingKeyID`, `cfstream.signingKeyPem`, `cfstream.tokenTtlSeconds`, `cfstream.maxUploadDurationSeconds`, `cfstream.uploadMintPerHour`, `cfstream.defaultRequireSignedUrls`, `cfstream.allowedOrigins`
+
+---
+
+### Event Team Hub REST API read endpoints — projectBookIT Phase 3 integration (#387, 2026-08-12)
+
+Exposes the Event Team Hub tables shipped in #386 (migration 155) to external integrations, built for the projectBookIT Event Team Hub Phase 3 consumer (projectbookit#347). Read-only; no schema changes.
+
+| Item | Issue | Migration | Status |
+|---|---|---|---|
+| `_apps/calendar/api/hub-resources.php` — `GET /api/calendar/hub-resources?eventID=`, returns that event's `tblEventHubResources` rows (`resourceID, section, resourceType, title, url, body, sortOrder`), ordered `section, sortOrder, resourceID` | #387 | 157 | ✅ |
+| `_apps/calendar/api/hub-videos.php` — `GET /api/calendar/hub-videos?eventID=`, returns that event's `tblEventHubVideos` rows (`videoID, provider, videoRef, title, requiresSignedUrl, allowedOrigins, uploadStatus, sortOrder`), ordered `sortOrder, videoID`. Never emits a signing key, playback token, or any `cfstream.*` credential — `videoRef` is the public provider ID/UID a player embeds against | #387 | 157 | ✅ |
+| Both mirror the `events/list.php`/`detail.php` dual-mode-auth pattern (`ApiAuth::requireRead('eventhub:read')`) with an explicit tenant guard — the requested event must belong to `Site::id()` or the endpoint 404s, never leaking another tenant's event | #387 | — | ✅ |
+| New bearer scope `eventhub:read` added to `ApiKey::SCOPES` — mintable immediately, surfaces in the Admin → Integrations → API Keys checkbox grid with no other UI changes needed | #387 | — | ✅ |
+| Settings-only migration — `api.calendar.hub-resources.enabled` / `api.calendar.hub-videos.enabled` seeded `'true'`; NO `tblRoutes` rows (`api/*` paths are dispatched directly by `ApiRouter`, never via `tblRoutes` — see .claude/CLAUDE.md → "ApiRouter routing trap") | #387 | 157 | ✅ |
+| OpenAPI — new `Event Team Hub` tag, `EventHubResource`/`EventHubVideo` schemas, both `GET /api/calendar/hub-*` paths documented in `_core/api-spec.json` | #387 | — | ✅ |
 
 ---
 

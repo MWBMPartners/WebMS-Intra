@@ -2,6 +2,27 @@
 
 
 ## [1.4.0] - 2026-07-22 (alpha)
+- feat(api): #387 Event Team Hub REST API read endpoints — projectBookIT
+  Event Team Hub Phase 3 integration (projectbookit#347). Two new
+  `_apps/calendar/api/{action}.php` handlers, `hub-resources.php` and
+  `hub-videos.php`, mirroring the `events/list.php`/`detail.php`
+  dual-mode-auth pattern: `ApiAuth::requireRead('eventhub:read')`, a
+  tenant guard confirming the requested `eventID` belongs to `Site::id()`
+  (404s rather than leaking another tenant's event), then a prepared-
+  statement read of that event's `tblEventHubResources` /
+  `tblEventHubVideos` rows (#386). The video endpoint never emits a
+  signing key, playback token, or any `cfstream.*` credential — only
+  `videoRef` (the public YouTube/Vimeo ID or Cloudflare Stream UID a
+  player embeds against) plus playback-policy metadata. New bearer-key
+  scope `eventhub:read` added to `ApiKey::SCOPES` (surfaces automatically
+  in the Admin → Integrations → API Keys mint-form checkbox grid).
+  Migration 157 seeds `api.calendar.hub-resources.enabled` /
+  `api.calendar.hub-videos.enabled` in `tblSettings` — settings-only, no
+  schema, no `tblRoutes` rows (`api/*` paths are dispatched directly by
+  `ApiRouter`, which never consults `tblRoutes` — see .claude/CLAUDE.md →
+  "ApiRouter routing trap"). OpenAPI: new `Event Team Hub` tag +
+  `EventHubResource`/`EventHubVideo` schemas + the two `GET
+  /api/calendar/hub-*` paths in `_core/api-spec.json`.
 - feat(calendar): #386 Phase 1.5 — Event Team Hub direct Cloudflare Stream
   upload. New `Portal\Core\CloudflareStream` management-API client (Bearer
   `cfstream.apiToken`, TLS at cURL defaults, token never logged;

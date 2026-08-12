@@ -13,7 +13,7 @@
 -- present in web/_sql/ are marked as executed in tblMigrations so the
 -- web-based Migrator won't re-run them.
 --
--- Covers migrations: 000-156 (DDL + settings/routes seeds + tblMigrations
+-- Covers migrations: 000-157 (DDL + settings/routes seeds + tblMigrations
 -- marks). When you add a new migration, port its DDL/seeds into the
 -- appropriate section here AND add its filename to the seed block at the
 -- end of this file. CI enforces this via
@@ -5037,6 +5037,17 @@ INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isSensitive`, `default
     ('cfstream.allowedOrigins',           '',      0, '')
 ON DUPLICATE KEY UPDATE `settingKey` = `settingKey`;
 
+-- ── from 157_eventhub_api.sql (#387) ──────────────────────────────────────────
+-- Enable flags for the two new Event Team Hub REST API read endpoints
+-- (`_apps/calendar/api/hub-resources.php` / `hub-videos.php`, projectBookIT
+-- Phase 3 integration). Settings-only — no schema, no tblRoutes (`api/*`
+-- paths never consult tblRoutes, see .claude/CLAUDE.md → "ApiRouter routing
+-- trap").
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'api.calendar.hub-resources.enabled', 'true', 'true', 0),
+    (NULL, 'api.calendar.hub-videos.enabled',    'true', 'true', 0)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
 
 -- =============================================================================
 -- Tables added in numbered migrations 105+ — appended for fresh-install parity.
@@ -6245,4 +6256,7 @@ INSERT INTO `tblMigrations` (`filename`) VALUES ('155_event_team_hub.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
 INSERT INTO `tblMigrations` (`filename`) VALUES ('156_event_team_hub_upload.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('157_eventhub_api.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;

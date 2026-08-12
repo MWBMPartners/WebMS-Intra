@@ -2353,4 +2353,84 @@ exactly the Phase-1 paste-a-link experience.
 
 ---
 
+## Event Team Hub REST API read endpoints (#387)
+
+### Why: projectBookIT Event Team Hub Phase 3 integration
+
+`_apps/calendar/api/hub-resources.php` and `hub-videos.php` expose the two
+tables from Event Team Hub Phase 1 (#386, migration 155) over the public
+REST API so an external system — projectBookIT's Event Team Hub Phase 3
+(projectbookit#347) — can pull a given event's resources/videos with a
+site-scoped bearer key, without any session/cookie access to this portal.
+
+### Convention path, ApiRouter routing trap applies exactly as usual
+
+Both handlers live at `_apps/calendar/api/{action}.php` — the standard
+convention path `ApiRouter::dispatch()` resolves directly from the URL
+(`api/calendar/hub-resources` → `_apps/calendar/api/hub-resources.php`).
+**Neither is registered in `tblRoutes`** — `api/*` paths never reach
+`tblRoutes` at all (`Router::handleSpecialRoutes` hands them straight to
+`ApiRouter::dispatch` first) — see CLAUDE.md's "ApiRouter routing trap".
+The only gate is `api.calendar.hub-resources.enabled` /
+`api.calendar.hub-videos.enabled` in `tblSettings`, seeded `'true'` by
+migration 157 (settings-only migration — no schema, no routes).
+
+Note `calendar` was **not** added to `ApiRouter::V1_RESOURCES` — these two
+endpoints are legacy-convention-path only, reachable at
+`/api/calendar/hub-resources` / `/api/calendar/hub-videos`, with no
+`/api/v1/calendar/...` facade alias. Adding one is a reasonable future
+follow-up but was out of scope for #387 (the projectBookIT consumer only
+needs the legacy shape).
+
+### Auth: same dual-mode pattern as `events/list.php`/`detail.php`
+
+Both handlers open with `ApiAuth::requireRead('eventhub:read')` — the
+identical one-line dual-mode (bearer OR session) + scope-check idiom used
+by every other read endpoint. `eventhub:read` is a **read-only** scope
+(no `eventhub:write` counterpart exists yet — the Team Hub's own
+add/edit/remove/reorder actions stay on `event-hub-save.php`'s session-only
+CSRF-protected form POST; the REST surface here is consumption-only for
+Phase 3). The admin API-keys mint form's `scopeGroups` grouping
+(`_apps/admin/integrations/api-keys.php`) already tolerates a
+read-without-write resource — it renders only the checkboxes present in
+`ApiKey::SCOPES` for that resource prefix, so `eventhub` shows a single
+"Read" checkbox with no empty "Write" slot.
+
+### Tenant guard: explicit 404, not a WHERE-clause-only filter
+
+`tblEventHubResources`/`tblEventHubVideos` are child tables of `tblEvents`
+with **no own `siteID` column** (matches the `tblEventCrews`/`tblEventJobs`
+precedent from migrations 117/118 — see the migration 155 header). Both
+handlers therefore run an explicit tenant-guard query BEFORE touching
+either hub table:
+
+```php
+SELECT eventID FROM tblEvents WHERE eventID = ? AND siteID = ? AND isDeleted = 0 LIMIT 1
+```
+
+A miss (wrong site OR event doesn't exist OR soft-deleted) returns the
+identical `ApiResponse::error('Event not found', 404)` in every case —
+there is no separate "event exists but wrong tenant" response shape, so a
+scan across `eventID` values from another tenant's API key can't be used
+to enumerate which IDs exist elsewhere.
+
+### No-secret-leak discipline on the video endpoint
+
+`hub-videos.php` SELECTs an explicit column list — `videoID, provider,
+videoRef, title, requiresSignedUrl, allowedOrigins, uploadStatus,
+sortOrder` — never `SELECT *`, so a future `tblEventHubVideos` ALTER
+(e.g. a Phase 2 column) can't silently widen the API response. `videoRef`
+is intentionally included: it's the public YouTube/Vimeo ID or Cloudflare
+Stream UID a player embeds against, not a secret. What's deliberately
+EXCLUDED: any Cloudflare signing key, any signed playback token (minted
+per-viewer by `VideoEmbed::signedToken()` on the portal's own hub page,
+never handed to an API consumer), and every `cfstream.*` setting value —
+none of those columns/settings are read by either handler at all.
+`requiresSignedUrl`/`allowedOrigins` are playback-*policy* metadata (would
+a token be required, from which origins), not the token/key material
+itself, so returning them is safe and useful to a consumer deciding how to
+embed the video.
+
+---
+
 Last updated: August 2026
