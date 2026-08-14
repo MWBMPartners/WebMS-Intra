@@ -1,5 +1,597 @@
 # Changelog
 
+
+## [1.4.0] - 2026-08-14 (beta)
+- 2 apps + iCal feed + admin polish — 7 issues (#258, #261, #271, #251, #254, #253, #252) (#281)
+- 4 community/pastoral apps: Rota + Praise + Milestones + Care (#256, #260, #259, #257) (#280)
+- Alpha integration — roadmap enhancement bundles (v1.4.0) (#372)
+- Apps wave 3: Reading Plans + QR + Invite onboarding + Offboarding (#265, #275, #239, #240) (#283)
+- Apps wave 4: 10 apps — Resources, Service Plans, Livestream, Recordings, Zoom, Newsletter, Giving, SMS, Projects, Payments (#284)
+- Apps wave 5: Transcription, Translation, AI Assist, GDPR, Photos + 5 infra/security items (#285)
+- Audit fixes: bootstrap try/catch + schema drift port + admin gates + CI paths + cleanup (#173-#194) (#197)
+- Event Team Hub — multi-provider video (Cloudflare Stream signed URLs + direct upload) + core fixes (#386/#387/#373/#339) (#388)
+- Foundation: App Registry + Markdown + X-Robots-Tag + CHANGELOG (#246, #247, #255, #270) (#279)
+- Pre-rollout omnibus: 19 issues, 13 migrations, 1.1.1 → 1.2.0 (#245)
+- chore(noticeboard): remove unusable eval-variant bundle (#360)
+- chore+feat: post-merge cleanups + installer brand-aware favicons (#354)
+- chore: v1.0.0 follow-ups — installer path fix + X-Powered-By branding (#165)
+- ci: add cross-source consistency checks to pr-security.yml (#213) (#214)
+- docs: sweep stale rename-aftermath references (#189, #182, #183, #194) (#286)
+- feat(api): API key infrastructure — mint/revoke/rotate + requireApiKey helper (#323 Phase 1)
+- feat(api): write-side CRUD for Announcements, Tasks, Prayer Requests, Leadership (#157) (#291)
+- feat(auth): authorised-use notice on the login screen (1.1.1) (#221)
+- feat(brand): embed Plus Jakarta Sans across the portal — self-hosted, modular
+- feat(brand): product brand layer — runtime ChurchMS / SchoolMS sub-brands (#296)
+- feat(brand): wire in Claude Design brand kit — six-asset structure per brand
+- feat(brand+easywins): 5 follow-ups bundled — 2 deferred from #297 + 3 church-vertical easy wins
+- feat(cop): trio of Church Online Platform easy wins — countdown widget + push + webhooks
+- feat(core): page-scoped CSP extension variables in header template (#360)
+- feat(discipleship): Phase 1 — pathway + step schema + admin CRUD (#303)
+- feat(events): anonymous email-link RSVP — no portal account needed (#335)
+- feat(events): anonymous self check-in for events (#314)
+- feat(events): auto-build crews + auto-assign jobs (#349)
+- feat(events): bundle 7 Events Calendar easy wins from competitive audit
+- feat(events): decision moments tracker — tap-to-count per service (#315)
+- feat(events): embeddable event widgets — iframe + JS drop-in (#336)
+- feat(events): event broadcast / bulk-email by crew/job/segment (#350)
+- feat(events): event coordinator role — delegate single-event management (#341)
+- feat(events): event crew / group builder (forms-only v1) (#343)
+- feat(events): event lifecycle email reminders — 24h + 1h + day-of (#329)
+- feat(events): event volunteer job board with capacity indicators (#344)
+- feat(events): external calendar feed aggregator — ICS importer (#327)
+- feat(events): faceted filter bar — location + search + date range (#330)
+- feat(events): multi-day attendance grid + walk-in enrol (#345)
+- feat(events): multiple primary organisers per event (#332)
+- feat(events): per-event document library link on public event page (#351)
+- feat(events): per-event public landing page at /e/<slug> (#346)
+- feat(events): per-event registration with VBS-relevant fields (#347)
+- feat(events): per-occurrence overrides on recurring series (#333)
+- feat(events): public registration — captcha + email confirmation (#348)
+- feat(events): surface auto-build / auto-assign buttons on crews + jobs UIs (#349)
+- feat(events): volunteer resource portal — /my-volunteering composite read (#342)
+- feat(host-console): read-only host cockpit composing COP primitives (#317 Phase 1)
+- feat(host-console+live-chat): push prompts + viewer chat widget + ping route fix (#317 Phase 2 + #313 Phase 2)
+- feat(install/upgrade): migration runner + state detection + maintenance mode + JSON backups (1.0.1 → 1.1.0) (#220)
+- feat(kids): children's ministry check-in / out with badge code (#298)
+- feat(live-chat): viewer chat + admin moderation (#313 Phase 1)
+- feat(livestream): livestream session analytics (#318)
+- feat(noticeboard): self-host React 18.3.1 UMD + wire board under nonce CSP (#360)
+- feat(noticeboard): static assets (frontend bundle)
+- feat(ops): external error monitor (Sentry / GlitchTip) (#143) (#290)
+- feat(pwa): offline write queue + sync-on-reconnect (#233) (#292)
+- feat(reports): denominational reporting templates (#305)
+- feat(safeguarding): DBS tracking + Auth::isCoordinatorOf gate (#310)
+- feat(salvation): decision card tracker (#316)
+- feat(worship): SortableJS drag-reorder + song verse split + CCLI usage log (#308 Phase 3)
+- feat(worship): live operator + projector display + state polling (#308 Phase 2)
+- feat(worship): service plans — schema + CRUD (#308 Phase 1)
+- feat(worship): song library + CCLI tracking (#309)
+- fix(audit): codebase sweep — duplicate cookie banner + missing Auth import + SQL concat cleanups (#293)
+- fix(core): add Portal\Core\Settings wrapper class
+- fix(events): wire /e/<slug> prefix into Router::handleSpecialRoutes (#346)
+- fix(installer): catch mysqli_sql_exception in steps 3 + 4 (#169) (#170)
+- fix(live-chat): ApiResponse::ok→success + drop private setJsonHeaders call (#313 Phase 1 hotfix)
+- fix(noticeboard): qr.php — use Qr::generate, strict host pinning, encoder-safe length cap (#360)
+- fix(noticeboard): save.php — bind_param arity, cross-site poster guard, URL scheme allowlist (#360)
+- fix(schema): backfill full_schema.sql with 35 tables from migrations 105+
+- fix(security): post-#281 schema-drift + CSRF findings (#282)
+- fix(security-check): inline ALTER columns into CREATE TABLE blocks + CSRF on rsvp-by-link form
+- fix(security-check): real bugs + schema backfill + noticeboard app (PR #358)
+- fix(security-check): rename \$publish → \$shouldPublish to dodge heuristic false-positive
+- fix(security-check): static SQL in notes-save + openapi.json route → openapi.php
+- fix(sql): migration 145 header + full_schema noticeboard terminator and seed parity (#360)
+- fix(sql): seed default tblSites row in full_schema.sql (#171) (#172)
+- fix(ui): installer link colours + portal alert link/code polish (#167) (#168)
+- fix(ui): mobile-readiness sweep — 29 → 0 findings (#225) (#295)
+- fix: SQL column-name mismatches across installer + import + GDPR export (#198) (#199)
+- fix: cross-source consistency audit follow-up #3 (#201 #202 #204 #205 #206 #207) (#212)
+- i18n: partial-coverage badge in the language switcher (#210) (#217)
+- i18n: remove 24 truly-dead translation keys from en.php (#211) (#216)
+- i18n: wrap user-facing hardcoded strings with t() (#209) (#215)
+- ops(security): SRI audit — fill missing integrity hashes (#161)
+- refactor(brand): /assets/images/brands/ → /assets/images/brandkit/assets/
+- refactor(security): move app controllers from public_html/ into _apps/ (#159) (#288)
+- refactor(version): single source of truth in _core/version.php (#166)
+- release: v1.0.0 launch sprint — 16 commits, 17 deferred issues, full security audit (#158)
+- security(csp): nonce-based script-src tightening (#144) (#289)
+
+
+## [1.4.0] - 2026-07-22 (alpha)
+- fix(api): #373 (ApiRouter half) — `ApiRouter::dispatch()` and
+  `dispatchV1()` included handler files in static-method scope with no
+  `global $mysqli, $SETTINGS;` import, so any legacy handler reading the
+  bootstrap DB handle as a bare `$mysqli` fatally errored (`null->
+  prepare()`) on first hit. `Router::dispatch()` got this fix for #373
+  already (commit `58871ca`); `ApiRouter` never did. Six live handlers were
+  affected and are unbroken by this fix: `livechat/api/{send,list,moderate,
+  prompts,prompt-publish}.php` (viewer chat + admin moderation, #313) and
+  `livestream/api/ping.php` (viewer session analytics, #317/#318). No-op
+  for handlers already using `App::db()`.
+- fix(calendar): #339 residual — `calendar/manage/save.php`'s create-flow
+  slug-uniqueness probe (`SELECT eventID FROM tblEvents WHERE eventSlug =
+  ?`) had no `siteID` filter, so a slug already taken on one site needlessly
+  suffixed `-2` on another and leaked a cross-tenant existence oracle. Now
+  scoped `AND siteID = ?`. Completes #339 (the schema half — the
+  `uq_event_site_slug` composite unique key — shipped in migration 112).
+- fix(worship): #308 live-sync unreachable — the operator console
+  (`worship/present.php`) and public projector display
+  (`worship/display.php`) poll `/api/worship/state` + POST
+  `/api/worship/advance` every 500ms-1s, but the handlers sat at the
+  unreachable legacy path `_apps/api/worship-{state,advance}.php` (dead
+  `tblRoutes` rows — `api/*` paths are dispatched by `ApiRouter` directly
+  and never consult `tblRoutes`) with no `api.worship.*.enabled` flags —
+  both calls 404'd and the operator↔display sync could never work.
+  Relocated verbatim to the ApiRouter convention path
+  `_apps/worship/api/{state,advance}.php` (precedent: migration 144's
+  `api/livestream/ping` relocation); migration 158 seeds the two
+  `api.worship.*.enabled` flags. Depends on the #373 ApiRouter fix above
+  (both handlers read bare `$mysqli`).
+- feat(admin): #255 — added AppRegistry entries `_core/apps/{noticeboard,
+  worship,salvation,kids}.php` so all four surface in the `/admin/apps`
+  marketplace toggle (37 → 41 registered apps). `AppRegistry::isEnabled()`
+  returns false when an app's settingKey is missing and `Router::dispatch()`
+  403s a registered-but-disabled app's routes, so migration 158 also seeds
+  `worship.enabled` / `salvation.enabled` / `kids.enabled` = `'true'` —
+  these three had no enable flag before (always-on by virtue of not being
+  registered) and would otherwise have gone dark the moment they were
+  registered. `noticeboard.enabled` was already seeded (migration 145).
+- fix(core): dead `api/*` `tblRoutes` cleanup — 19 rows across migrations
+  035(→056)/082/099/100/106/111/133/138 that `Router::handleSpecialRoutes`
+  guarantees can never match (`api/*` paths go straight to `ApiRouter`,
+  which resolves by URL segment, not by a `tblRoutes` lookup — see
+  .claude/CLAUDE.md → "ApiRouter routing trap"). Migration 158 deletes
+  them (`DELETE ... WHERE routeKey IN (...)`, idempotent — precedent:
+  migration 056 did the same for an earlier batch of 5); the matching 19
+  `INSERT` rows are pruned from `full_schema.sql`'s seed blocks too. No
+  `api.*.enabled` SETTINGS rows were touched. The orphaned handler files at
+  `_apps/api/{tours,push,translate,ai-improve}.php` are left in place,
+  parked (no live caller for any of them today).
+- feat(admin): #386 fold-in — `Portal\Core\CloudflareStream::testConnection()`
+  (a minimal `GET /accounts/{acct}/stream?per_page=1`, machine-safe
+  success/message only, never Cloudflare's raw error text) plus a "Test
+  connection" button on `/admin/integrations/cloudflare-stream` (new
+  admin+CSRF-gated `test.php` handler, migration 158 route) — parity with
+  the BookIT Phase 2 affordance, and the cheapest legitimate way to confirm
+  the account ID + API token are valid together ahead of the first real
+  upload.
+- docs: `.claude/CLAUDE.md` — migration coverage note bumped 000-145 →
+  000-158; apps table's "not AppRegistry-registered" markers removed for
+  noticeboard/worship/salvation/kids (now registered, see above) and the
+  app count corrected 37 → 41; refreshed the "Recent ships" entry for this
+  fold-in batch.
+- feat(api): #387 Event Team Hub REST API read endpoints — projectBookIT
+  Event Team Hub Phase 3 integration (projectbookit#347). Two new
+  `_apps/calendar/api/{action}.php` handlers, `hub-resources.php` and
+  `hub-videos.php`, mirroring the `events/list.php`/`detail.php`
+  dual-mode-auth pattern: `ApiAuth::requireRead('eventhub:read')`, a
+  tenant guard confirming the requested `eventID` belongs to `Site::id()`
+  (404s rather than leaking another tenant's event), then a prepared-
+  statement read of that event's `tblEventHubResources` /
+  `tblEventHubVideos` rows (#386). The video endpoint never emits a
+  signing key, playback token, or any `cfstream.*` credential — only
+  `videoRef` (the public YouTube/Vimeo ID or Cloudflare Stream UID a
+  player embeds against) plus playback-policy metadata. New bearer-key
+  scope `eventhub:read` added to `ApiKey::SCOPES` (surfaces automatically
+  in the Admin → Integrations → API Keys mint-form checkbox grid).
+  Migration 157 seeds `api.calendar.hub-resources.enabled` /
+  `api.calendar.hub-videos.enabled` in `tblSettings` — settings-only, no
+  schema, no `tblRoutes` rows (`api/*` paths are dispatched directly by
+  `ApiRouter`, which never consults `tblRoutes` — see .claude/CLAUDE.md →
+  "ApiRouter routing trap"). OpenAPI: new `Event Team Hub` tag +
+  `EventHubResource`/`EventHubVideo` schemas + the two `GET
+  /api/calendar/hub-*` paths in `_core/api-spec.json`.
+- feat(calendar): #386 Phase 1.5 — Event Team Hub direct Cloudflare Stream
+  upload. New `Portal\Core\CloudflareStream` management-API client (Bearer
+  `cfstream.apiToken`, TLS at cURL defaults, token never logged;
+  `createDirectUpload`/`getVideo`/`updateVideo`/`deleteVideo`). Three
+  page-route JSON/form handlers (`calendar/event/hub/upload-url`,
+  `/video-status`, `/video-settings`; migration 156, routes only — 155
+  already shipped every column + setting) let a coordinator/admin mint a
+  one-time direct-upload URL and push a file straight from the browser to
+  Cloudflare (basic ≤200 MB; file never touches the server), poll
+  readiness, and edit Require-Signed-URLs / Allowed-Origins CF-first.
+  Per-user hourly mint rate limit via `tblActivityLogs`; new core
+  `$cspConnectExtra` widens `connect-src` to Cloudflare's upload hosts only
+  for a manager on a configured install; `event-hub-upload.js` enforces the
+  size cap + a host allowlist and tracks CSRF-token rotation across the
+  poll loop. `removeVideo` best-effort-deletes a portal-uploaded video from
+  Cloudflare first (logged, never blocks the local removal).
+- feat(calendar): #386 Phase 1 — Event Team Hub. Per-event staff/volunteer/
+  organiser landing page (`/calendar/event/hub?eventID=N`) extending the
+  calendar app (Calendar/Events/Preaching Plan stays ONE app). New tables
+  `tblEventHubResources` (links/notes grouped by a free-text section,
+  notes rendered via `Portal\Core\Markdown::render()`) and
+  `tblEventHubVideos` — the latter ships its FINAL shape from day one
+  (`uploadStatus` default `'external'` plus the Phase 1.5 upload-lifecycle
+  columns: `errorDetail`, `uploadedAt`, `lastCheckedAt`, `allowedOrigins`)
+  so the Cloudflare direct-upload follow-up never needs an ALTER. New
+  `Portal\Core\VideoEmbed` core helper: allowlist `parse()` detects
+  YouTube/Vimeo/Cloudflare Stream from a pasted URL or bare ID (never
+  stores/embeds an arbitrary raw URL), `embedUrl()` builds the safe iframe
+  src (re-validating the ref's character class immediately before
+  interpolation), `frameSrcOrigins()` computes the page-scoped
+  `$cspFrameExtra` list, and `signedToken()` hand-signs an RS256 JWT via
+  `openssl_sign()` for Cloudflare Stream's signed-URL playback (the
+  vendored `simplejwt` library is verify-only, so this is new signing
+  code, not an extension of it) — never throws, logs via `Logger` and
+  returns null on a missing/invalid signing key so the page renders an
+  "unavailable — check Stream settings" tile instead of a broken iframe.
+  New `Auth::isEventTeamMember()` (coordinator OR crew leader/participant
+  OR job assignee OR a `tblEventPeople` row) gates VIEW access; the
+  existing `isCoordinatorOf() || isAdmin()` idiom still gates MANAGE
+  (inline add/edit/remove/reorder forms for resources + videos, plus a
+  tool strip linking the previously-unlinked
+  `/calendar/event/{crews,jobs,attendance,broadcast}` +
+  `/admin/calendar/registrations` pages). New admin page
+  `/admin/integrations/cloudflare-stream` ships the FULL `cfstream.*`
+  field list — including `apiToken`, which nothing in this release uses —
+  so the Phase 1.5 direct-upload build needs no follow-up migration or
+  admin-page change, only new POST handlers gated behind
+  `CloudflareStream::isConfigured()`; secrets (`apiToken`,
+  `signingKeyPem`) are `isSensitive`-encrypted, never re-displayed, and a
+  blank submit preserves the existing value (mirrors
+  `admin/integrations/zoom/save.php`). "Team Hub" entry-point links added
+  to `my-events.php` rows and the event detail page for any viewer
+  passing `Auth::isEventTeamMember()`. Migration 155 seeds only the four
+  routes whose handler files ship in this PR (the Phase 1.5 upload-url/
+  status JSON endpoints are deliberately NOT seeded yet) plus the full
+  `cfstream.*` settings defaults, all off/blank. Explicitly OUT of scope
+  (Phase 1.5): the Cloudflare *management* API (`CloudflareStream` class),
+  direct-upload endpoints, upload JS, and the `$cspConnectExtra` core
+  change. All 10 `tools/audit-checks/` scripts clean; `full_schema.sql`
+  parity maintained (header bumped to "Covers migrations: 000-155").
+- docs: refresh `.claude/CLAUDE.md` apps table — was ~17 rows, now covers all
+  37 AppRegistry apps (`_core/apps/*.php`) plus `noticeboard`/`worship`/
+  `salvation`/`kids` (working, shipped, but not yet AppRegistry-registered)
+  and a note distinguishing user-facing apps from infrastructure dirs
+  (`account/`, `cron/`, `events/api`, `users/api`, `live/`, `livechat/`,
+  `privacy/`, `widget/`, `qr.php`). Prepended this session's PR #372 ships
+  (migrations 150-154) to "Recent ships". Rewrote `.claude/HANDOFF.md` from a
+  stale, superseded roadmap snapshot to the current PR #372 state (draft,
+  CI-green through migration 154) with an accurate Bucket-B / autonomous-item
+  breakdown. Fixed #183 — stale bare `core/`/`vendor/`/`sql/` path references
+  in `DEV_NOTES.md`'s "file disappeared from the server" code block (should
+  read `_core/`/`_vendor/`/`_sql/`, matching the actual repo layout); the rest
+  of #183's original findings were already fixed by PR #286.
+- feat(service-plans): #300 v2 — operator → confidence-monitor message channel.
+  Closes the last open piece of #300 (v1 shipped clock-only in migration 110).
+  New `tblServicePlanMessages` (migration 154) — `isCleared`/`clearedAt` rather
+  than DELETE, so cleared messages remain as part of the service's audit
+  record; indexed `(planID, isCleared, messageID)` for an O(1) poll. Two new
+  plain `service-plans/*` page routes (NOT under `api/*` — the ApiRouter
+  routing trap doesn't apply): `live-message.php` (admin-only POST, CSRF-
+  checked, send/clear, 303 redirect back to `/service-plans/live`, matching
+  the app's only existing submit idiom) and `message-poll.php` (GET-only JSON
+  poll, any logged-in user, `Cache-Control: no-store`, `ApiResponse::success()`
+  envelope, `sinceID`/`lastID` dedup short-circuiting to `changed:false`).
+  `live.php` gained an operator panel (current message + clear form + send
+  form, hidden once the plan is closed); `confidence.php` gained a themed
+  banner polled every 4s (matching the `livechat-widget.js` house cadence) —
+  injected via `textContent` only, NEVER `innerHTML`, as the client-side XSS
+  line of defence alongside the server's `htmlspecialchars()` escaping on
+  `live.php`. No new `tblSettings` — inherits the existing
+  `service_plans.enabled` app gate. All 10 `tools/audit-checks/` scripts clean.
+- fix(giving): #299 follow-up — auto-attribute the two remaining automatic
+  `tblGivingEntry` writers that were deliberately left unhooked when pledge
+  campaigns shipped (migration 151): online card giving
+  (`Payments::markPaymentSucceeded()`, purpose `'giving'`) and project-pledge
+  fulfilment (`Projects::fulfilPledge()`). Both now call
+  `Giving::attributeGift($siteId, $donorId, $donatedAt, 0)` (Auto — neither
+  flow has an explicit campaign selector) immediately before their existing
+  `tblGivingEntry` INSERT, using the same `$siteId` and gift date the row
+  itself is stamped with, and append the resolved `campaignID`/`pledgeID` to
+  the INSERT's column list/binds. A `0`/unknown donor (no signed-in user, no
+  member on the pledge) is passed to `attributeGift()` as `null` rather than
+  `0` so it is never mistaken for a real donor row — matching
+  `attributeGift()`'s own anonymous-gift contract. No amount, currency,
+  category, donor, method, reference, or date logic touched; no schema
+  change (the columns already exist). All three `tblGivingEntry` writers
+  (manual entry, offering-count close, and now these two automatic paths)
+  are consistently attributed.
+- chore(ci): new `tools/audit-checks/check_php_table_refs.py` audit check — closes the gap
+  that let the GDPR eraser table-name bug (below) slip past review: `check_sql_columns.py`
+  only ever parsed `.sql` files, so a wrong table name hard-coded straight into a PHP query
+  string (or comment) was invisible to CI. The new check builds the authoritative table set
+  from every `CREATE TABLE [IF NOT EXISTS] \`tblX\`` in `web/_sql/full_schema.sql` (155
+  tables, migrations 000-153 folded in) and flags any `tblXxx`-shaped identifier referenced
+  under `web/_apps/`, `web/_core/`, `web/_install/`, `web/public_html/` that isn't in it. PHP
+  comments (`//`, `#`, `/* … */`) are stripped before scanning so comment-only mentions of a
+  deliberately-nonexistent table name (e.g. the explanatory comments left behind by the GDPR
+  fix itself, in `GdprEraser.php`/`Livestream.php`/`discipleship.php`/`data-export.php`/
+  `denominational.php`) don't false-positive — 0 unknown tables on the current tree.
+  Non-blocking (`--strict` opt-in), matching the `check_route_targets.py` /
+  `check_sql_columns.py` convention; wired into `.github/workflows/pr-security.yml` as
+  check 14, alongside the other `check_*.py` invocations.
+- fix(ui): replaced the last 11 native `onsubmit="return confirm(...)"` /
+  `onclick="return confirm(...)"` call sites (flagged by `check_no_native_confirm.py`) with
+  the house `data-confirm="message"` (+ `data-confirm-destructive="true"` on delete/revoke/
+  archive/remove actions) pattern from `web/public_html/assets/js/portal-confirm.js` —
+  `web/_apps/admin/discipleship/pathways.php`, `pathway-form.php`,
+  `web/_apps/admin/integrations/api-keys.php` (rotate + revoke),
+  `web/_apps/admin/integrations/webhooks/index.php` (pause/reactivate + delete),
+  `web/_apps/admin/calendar/feeds.php`, `web/_apps/worship/song.php`, `worship/plan.php`,
+  `web/_apps/calendar/event-jobs.php`, `calendar/event-crews.php`. Confirmation message text
+  and form/button behaviour unchanged; `check_no_native_confirm.py` now reports 0 findings.
+- fix(core): GDPR eraser table-name corrections + auth-residue coverage — data-protection
+  correctness fix, no issue yet. `Portal\Core\GdprEraser::catalogue()` referenced four
+  non-existent or mis-cased tables (`tblAttendanceCheckIns`, `tblExpenseClaim`/`submittedByID`,
+  `tblSessions`, `tblWebauthnCredentials`) that made `prepare()` fail on every one — because
+  `processEntry()` skips (rather than aborts) on a prepare failure, by design, to tolerate
+  not-installed apps, `execute()` reported a completed erasure while leaving that PII behind.
+  Corrected to `tblEventAttendance`.`userID`, `tblExpenseClaims`.`userID`, removed the
+  non-existent `tblSessions` entry (PHP sessions are file-based, never DB-backed), and fixed
+  the case on `tblWebAuthnCredentials` (MySQL on Linux is case-sensitive for table names).
+  Added the auth-residue tables that a GDPR erasure previously missed entirely: since
+  `tblUsers` is anonymised in place rather than deleted, no FK `ON DELETE CASCADE` ever
+  swept up `tblLocalAccounts`, `tblLinkedAccounts`, `tblTrustedDevices` or `tblPasswordResets`
+  — all four are now hard-deleted (table/column names cross-checked against the already-correct
+  export list in `_apps/auth/account/data-export.php`). Added `tblKidProfiles` (a child profile
+  links to exactly one parent via `parentUserID` — no multi-guardian junction table exists —
+  so erasing the parent now erases the child's profile; `tblKidCheckins` already
+  `ON DELETE CASCADE`s from it, so no separate entry was needed there). Also fixed the
+  `tblUsers` anonymise entry itself: its `nullCols` referenced four columns that don't exist
+  on that table (`address`, `passwordHash`, `msAccountID`, `googleAccountID` — the address
+  field is actually `displayAddress`, and the credential/SSO columns live on the tables above,
+  not on `tblUsers`), which meant the single most important step — anonymising the user's own
+  row — silently failed to prepare and never ran. Hardening: `processEntry()` now writes a
+  `skip` entry to the same `tblErasureAudit` HMAC chain when a catalogued table/column can't
+  be prepared, instead of returning `false` with no trace, so the next schema drift is visible
+  rather than hidden.
+- fix(admin): demo-data wipe (#242) referenced `tblExpenses`/`submittedByID`, neither of which
+  exist (real: `tblExpenseClaims`/`userID`), so that statement threw inside the wipe
+  transaction and rolled back the entire wipe on every run — corrected the table/column names.
+- feat(discipleship): #303 Phase 2 — per-user progress + auto-completion.
+  Two new tables (migration 153): `tblPathwayEnrolments` (who is assigned to
+  which pathway; `status` active/completed/withdrawn) and
+  `tblPathwayProgress` (one row per step per member; UNIQUE(stepID, userID)
+  — unmarking a step sets `revokedAt` rather than deleting the row, so the
+  auto-sweep never resurrects a step a coordinator deliberately unmarked).
+  Two guarded new columns on the existing `tblPathwaySteps`
+  (`autoRule`/`autoRefID`) let a step opt into auto-completion from
+  per-user evidence only (adopted issue #303 blocker decision, option (a)):
+  attended a specific event, attended any event in a category, or RSVP'd
+  "going" to an event that has since started — `tblSalvationCards` (no
+  userID) and `tblDecisionMoments` (aggregate counter) are structurally
+  excluded, revisit later. New `Portal\Core\Discipleship` helper —
+  `autoSweep()` runs three set-based `INSERT IGNORE … SELECT` statements
+  (idempotent via the unique key) then calls `refreshEnrolmentStatuses()`,
+  which flips an enrolment to `completed` once every non-optional step has
+  an unrevoked progress row (and reverts it to `active` if one is later
+  revoked). No scheduler dependency — the sweep runs lazily at the top of
+  every discipleship page view; an optional `cron/discipleship-sweep.php`
+  endpoint (token-gated like `reminders.cron_token`) adds freshness without
+  page views. New member-facing routes fix the Phase 1 dead dashboard link
+  (`discipleship.enabled` had no `discipleship` route seeded): `/discipleship`
+  ("My pathways" with progress bars) and `/discipleship/view` (step list,
+  auto/manual source badges) — every query scoped to `Site::id()` AND
+  `$_SESSION['user_id']`, so a member can never see another member's
+  progress even via a tampered `?id=`. New admin/pastor surface:
+  `/admin/discipleship/progress` (pathway list with enrolment counts),
+  `/admin/discipleship/progress/pathway` (roster — a flat `portal-data-list`
+  of enrolled members with progress bars, never a members×steps `<table>`
+  matrix, per the house `<table>` ban and issue #303's own decision 2;
+  includes the enrol form and withdraw button), `/admin/discipleship/progress/member`
+  (per-member step list with mark-complete/unmark + notes, showing
+  auto-evidence and revocation state). Existing `pathway-form.php` /
+  `step-save.php` extended with the `autoRule` select + a site-scoped
+  event/category ref picker; `step-save.php` validates the ref resolves at
+  THIS site before saving, and a stale ref (event/category later deleted —
+  deliberately no FK on `autoRefID`) renders a "(missing)" warning.
+  Registered the two new per-user tables in `GdprEraser`'s hard-delete
+  catalogue. Mentor relationships remain deferred to a later phase (issue
+  #303's third blocker decision).
+- feat(giving): #299 bank reconciliation (sub-feature 3 of the "Giving
+  polish" issue — offering counting and pledge campaigns shipped as
+  sub-features 1/2, above; account-updater for recurring giving remains not
+  started). New `tblBankImports` (one row per uploaded statement CSV batch)
+  and `tblBankTxns` (one row per imported CREDIT line + its match state,
+  migration 152) — debits are never stored, and `matchedCount` is
+  deliberately NOT a stored column (it mutates on every match/unmatch and is
+  derived with one aggregate join). CSV import (`/giving/reconcile/import`)
+  parses bank statement columns by HEADER NAME, never position, against a
+  UK-bank alias table (Lloyds/HSBC/Barclays/Monzo/Starling-style headers);
+  when auto-mapping can't resolve every required column a manual mapping
+  screen lets the treasurer pick columns explicitly before previewing.
+  SHA-256 file-hash + `UNIQUE(siteID, fileHash)` blocks re-importing the same
+  statement twice. A non-empty credit that fails amount/date parsing fails
+  the WHOLE upload (nothing partial is ever stored) — only genuine
+  debit/zero/blank lines are silently skipped. Matching is exact-amount and
+  window-based (a gift can appear in the bank on or after its date, within
+  `giving.reconcile.toleranceDays`, default 5) with a dual candidate universe:
+  `matchedEntryID` for a 1:1 match to a single `tblGivingEntry` row, or
+  `matchedCountSessionID` for a whole offering-count deposit (which
+  `giving/count/close.php` writes as multiple gift-log rows sharing a
+  `Count #<id>` reference — excluded from entry-matching to avoid double-
+  counting against its deposit). Two or more equal-amount in-window
+  candidates is always left unmatched — the matcher never guesses. New
+  `/giving/reconcile` (imports dashboard), `/giving/reconcile/view` (per-
+  statement matched/unmatched/ignored lists with inline match-suggestion
+  mini-forms, plus a two-way "gift log not in this statement" gap panel with
+  in-transit-vs-missing badges), and `/giving/reconcile/match` (manual
+  match/unmatch/ignore/rematch/delete-import actions) — all gated by
+  `Portal\Core\Giving::canManage()`. "Count"/"Reconcile" nav buttons added to
+  `giving/manage.php` (the offering-count feature, shipped as sub-feature 1,
+  previously had no page linking to it anywhere).
+- feat(giving): #299 pledge campaigns (sub-feature 2 of the "Giving polish"
+  issue — offering counting shipped as sub-feature 1, above; bank
+  reconciliation and account-updater remain not started). New
+  `tblPledgeCampaigns` (goal amount, currency, date window, active flag) and
+  `tblPledges` (migration 151) — one row per member per campaign, `UNIQUE
+  (campaignID, userID)` upsert so re-pledging (including after a
+  cancellation) updates the same row rather than duplicating it. Two nullable
+  columns added to the existing `tblGivingEntry` (`campaignID`, `pledgeID`,
+  both `ON DELETE SET NULL`) carry auto-attribution instead of a link table —
+  every gift that can be tied to a campaign/pledge keeps the thermometer and
+  progress math a single indexed `SUM`. New `Portal\Core\Giving::attributeGift()`
+  is the ONLY code path allowed to produce that pair: an explicit treasurer
+  campaign choice is honoured (even outside the campaign's window — a
+  deliberate override); "Auto" attributes only when the donor holds exactly
+  one open pledge to a currently-active, in-window campaign — two-or-more
+  open pledges is a genuine tie and is left unattributed rather than guessed.
+  New `Giving::pledgeExpectedToDate()` computes on-schedule expectation
+  (one-off pledges owe their full amount immediately; weekly/monthly owe
+  their first instalment from the pledge's start; monthly uses calendar-month
+  arithmetic, never `/30`). Hooked into BOTH manual `tblGivingEntry` writers:
+  `giving/entry-save.php` (new Campaign selector: Auto / None / explicit) and
+  the sub-feature-1 offering-count close path (named-envelope rows only, the
+  only ones with a real donor). `Projects.php`/`Payments.php` online/project
+  giving were deliberately NOT hooked in this PR — those rows were left with
+  the new columns NULL; auto-attributing them was a documented follow-up
+  (now completed — see the #299 follow-up entry above), not an oversight.
+  New UI: `/giving/campaigns` (card grid + thermometers +
+  member's own pledge chip + canManage "new campaign" form), `/giving/campaign`
+  (detail: thermometer, stats strip, pledge/cancel form, and — canManage —
+  pledger list with on-schedule badges, attributed-gifts log, edit-campaign
+  form). No hard-delete route for campaigns — `isActive=0` retires one,
+  keeping pledge/gift history intact.
+- feat(giving): #299 two-person offering-count session (sub-feature 1 of the
+  "Giving polish" issue — pledge campaigns/reconciliation/account-updater are
+  separate sub-features, not built here). New `tblCountSessions` (migration
+  150) tracks a service date's count: two counters independently key cash /
+  cheque / envelope totals; once both are in, the system compares them and
+  flags `status='discrepancy'` on any mismatch (blocking close) or
+  auto-agrees when they match. A discrepancy is cleared either by a counter
+  re-entering matching totals or — admin-only — by resolving with agreed
+  totals directly. New `tblCountEnvelopes` child table logs named/numbered
+  giving-envelope amounts against the session's envelope total; closing a
+  session (`/giving/count/close`) validates the named envelopes reconcile to
+  the agreed envelope total, then writes the real gift log in one
+  transaction — one `tblGivingEntry` row per named envelope (attributed to
+  the giver where matched) plus aggregate "loose cash"/"loose cheque" rows
+  for anything not itemised, so the total written always balances to
+  cashTotal + chequeTotal + envelopeTotal. New UI under `/giving/count`
+  (list/start, session detail with counter-entry cards + comparison table +
+  named-envelope log) gated by the same `Portal\Core\Giving::canManage()`
+  (admin or `treasurer` role) as the rest of `giving`; new
+  `Portal\Core\Giving::parseDecimal()` helper for validated
+  DECIMAL(10,2)-safe amount parsing. Note: the issue body names the write
+  target `tblGiftEntries`, but the giving app actually shipped (#266) as
+  `tblGivingEntry` — this migration writes to the real table.
+- feat(noticeboard): #363 real media upload pipeline — replaces the `data:`
+  URI rejection in `save.php` with `POST /api/noticeboard/upload`
+  (site-admin, CSRF, finfo-sniffed MIME allowlist: png/jpeg/gif/webp +
+  mp4/webm, hard size cap via `noticeboard.upload.maxBytes` default 15 MB,
+  server-generated random filename). Files land under
+  `_uploads/noticeboard/` (outside the webroot, mirroring
+  `documents/api/create.php`) and are served back with NO auth by the new
+  public `GET /noticeboard/media?f=<token>` route — posters must keep
+  rendering for an anonymous QR scanner. New `tblNoticeboardUploads` ledger
+  (migration 149) + `Portal\Core\NoticeboardMedia` helper links each upload
+  to its saved poster and purges orphans (abandoned in the editor, or whose
+  poster was later soft-deleted) after every save.
+- feat(prayer-requests): #311 prayer-chain assignment residuals — private
+  partner notes (`partnerNote`/`partnerLastPrayedAt`, ACL: assignee-or-admin
+  only, cleared on reassignment), manual assign dropdowns with an
+  open-assignment load-balancing hint on `manage`/`view` (eligible partner =
+  active site member holding the new `prayer_team` role), opt-in round-robin
+  auto-assign on submission (`prayer-requests.autoAssign`), and email + SMS
+  assignment notifications (`prayer-requests.notifyOnAssign`, respecting the
+  partner's SMS opt-in) — new `Portal\Core\PrayerChain` helper, migration 148.
+- feat(api): REST API v1 write surface (#323 Phase 2, PR #372) — dual-mode `Portal\Core\ApiAuth`
+  (bearer API key OR session, resolved centrally); `/api/v1/{resource}[/{id}]` RESTful facade that
+  maps HTTP verbs onto the SAME `_apps/{app}/api/{action}.php` handlers + `api.{app}.{action}.enabled`
+  flags as the existing `/api/{app}/{action}` routes (no new gating vocabulary); bearer requests are
+  tenant-pinned to the key's own site (`Site::forceContext`) and rate-limited per key; new write
+  endpoints closing the #157 remnant — Attendance + Documents (create/update/delete) and Expenses
+  (create/delete — status-transition update deferred to Phase 3), plus new Users create/update
+  (admin-gated, default-off flags); canonical `ApiKey::SCOPES` vocabulary + rotation grace windows;
+  admin API-keys UI gains a scope checkbox multi-select (validated server-side against `SCOPES`) and
+  a rotation-grace selector; admin audit viewer gains a source (session/apikey) badge + key-prefix;
+  OpenAPI spec documents every `/api/v1/*` path alongside the existing legacy aliases.
+- feat(admin): outbound webhooks admin CRUD UI (#324)
+
+## [1.2.0] - 2026-07-07 (alpha)
+- 2 apps + iCal feed + admin polish — 7 issues (#258, #261, #271, #251, #254, #253, #252) (#281)
+- 4 community/pastoral apps: Rota + Praise + Milestones + Care (#256, #260, #259, #257) (#280)
+- Apps wave 3: Reading Plans + QR + Invite onboarding + Offboarding (#265, #275, #239, #240) (#283)
+- Apps wave 4: 10 apps — Resources, Service Plans, Livestream, Recordings, Zoom, Newsletter, Giving, SMS, Projects, Payments (#284)
+- Apps wave 5: Transcription, Translation, AI Assist, GDPR, Photos + 5 infra/security items (#285)
+- Audit fixes: bootstrap try/catch + schema drift port + admin gates + CI paths + cleanup (#173-#194) (#197)
+- Foundation: App Registry + Markdown + X-Robots-Tag + CHANGELOG (#246, #247, #255, #270) (#279)
+- Pre-rollout omnibus: 19 issues, 13 migrations, 1.1.1 → 1.2.0 (#245)
+- chore(noticeboard): remove unusable eval-variant bundle (#360)
+- chore+feat: post-merge cleanups + installer brand-aware favicons (#354)
+- chore: v1.0.0 follow-ups — installer path fix + X-Powered-By branding (#165)
+- ci: add cross-source consistency checks to pr-security.yml (#213) (#214)
+- docs: sweep stale rename-aftermath references (#189, #182, #183, #194) (#286)
+- feat(api): API key infrastructure — mint/revoke/rotate + requireApiKey helper (#323 Phase 1)
+- feat(api): write-side CRUD for Announcements, Tasks, Prayer Requests, Leadership (#157) (#291)
+- feat(auth): authorised-use notice on the login screen (1.1.1) (#221)
+- feat(brand): embed Plus Jakarta Sans across the portal — self-hosted, modular
+- feat(brand): product brand layer — runtime ChurchMS / SchoolMS sub-brands (#296)
+- feat(brand): wire in Claude Design brand kit — six-asset structure per brand
+- feat(brand+easywins): 5 follow-ups bundled — 2 deferred from #297 + 3 church-vertical easy wins
+- feat(cop): trio of Church Online Platform easy wins — countdown widget + push + webhooks
+- feat(core): page-scoped CSP extension variables in header template (#360)
+- feat(discipleship): Phase 1 — pathway + step schema + admin CRUD (#303)
+- feat(events): anonymous email-link RSVP — no portal account needed (#335)
+- feat(events): anonymous self check-in for events (#314)
+- feat(events): auto-build crews + auto-assign jobs (#349)
+- feat(events): bundle 7 Events Calendar easy wins from competitive audit
+- feat(events): decision moments tracker — tap-to-count per service (#315)
+- feat(events): embeddable event widgets — iframe + JS drop-in (#336)
+- feat(events): event broadcast / bulk-email by crew/job/segment (#350)
+- feat(events): event coordinator role — delegate single-event management (#341)
+- feat(events): event crew / group builder (forms-only v1) (#343)
+- feat(events): event lifecycle email reminders — 24h + 1h + day-of (#329)
+- feat(events): event volunteer job board with capacity indicators (#344)
+- feat(events): external calendar feed aggregator — ICS importer (#327)
+- feat(events): faceted filter bar — location + search + date range (#330)
+- feat(events): multi-day attendance grid + walk-in enrol (#345)
+- feat(events): multiple primary organisers per event (#332)
+- feat(events): per-event document library link on public event page (#351)
+- feat(events): per-event public landing page at /e/<slug> (#346)
+- feat(events): per-event registration with VBS-relevant fields (#347)
+- feat(events): per-occurrence overrides on recurring series (#333)
+- feat(events): public registration — captcha + email confirmation (#348)
+- feat(events): surface auto-build / auto-assign buttons on crews + jobs UIs (#349)
+- feat(events): volunteer resource portal — /my-volunteering composite read (#342)
+- feat(host-console): read-only host cockpit composing COP primitives (#317 Phase 1)
+- feat(host-console+live-chat): push prompts + viewer chat widget + ping route fix (#317 Phase 2 + #313 Phase 2)
+- feat(install/upgrade): migration runner + state detection + maintenance mode + JSON backups (1.0.1 → 1.1.0) (#220)
+- feat(kids): children's ministry check-in / out with badge code (#298)
+- feat(live-chat): viewer chat + admin moderation (#313 Phase 1)
+- feat(livestream): livestream session analytics (#318)
+- feat(noticeboard): self-host React 18.3.1 UMD + wire board under nonce CSP (#360)
+- feat(noticeboard): static assets (frontend bundle)
+- feat(ops): external error monitor (Sentry / GlitchTip) (#143) (#290)
+- feat(pwa): offline write queue + sync-on-reconnect (#233) (#292)
+- feat(reports): denominational reporting templates (#305)
+- feat(safeguarding): DBS tracking + Auth::isCoordinatorOf gate (#310)
+- feat(salvation): decision card tracker (#316)
+- feat(worship): SortableJS drag-reorder + song verse split + CCLI usage log (#308 Phase 3)
+- feat(worship): live operator + projector display + state polling (#308 Phase 2)
+- feat(worship): service plans — schema + CRUD (#308 Phase 1)
+- feat(worship): song library + CCLI tracking (#309)
+- fix(audit): codebase sweep — duplicate cookie banner + missing Auth import + SQL concat cleanups (#293)
+- fix(core): add Portal\Core\Settings wrapper class
+- fix(events): wire /e/<slug> prefix into Router::handleSpecialRoutes (#346)
+- fix(installer): catch mysqli_sql_exception in steps 3 + 4 (#169) (#170)
+- fix(live-chat): ApiResponse::ok→success + drop private setJsonHeaders call (#313 Phase 1 hotfix)
+- fix(noticeboard): qr.php — use Qr::generate, strict host pinning, encoder-safe length cap (#360)
+- fix(noticeboard): save.php — bind_param arity, cross-site poster guard, URL scheme allowlist (#360)
+- fix(schema): backfill full_schema.sql with 35 tables from migrations 105+
+- fix(security): post-#281 schema-drift + CSRF findings (#282)
+- fix(security-check): inline ALTER columns into CREATE TABLE blocks + CSRF on rsvp-by-link form
+- fix(security-check): real bugs + schema backfill + noticeboard app (PR #358)
+- fix(security-check): rename \$publish → \$shouldPublish to dodge heuristic false-positive
+- fix(security-check): static SQL in notes-save + openapi.json route → openapi.php
+- fix(sql): migration 145 header + full_schema noticeboard terminator and seed parity (#360)
+- fix(sql): seed default tblSites row in full_schema.sql (#171) (#172)
+- fix(ui): installer link colours + portal alert link/code polish (#167) (#168)
+- fix(ui): mobile-readiness sweep — 29 → 0 findings (#225) (#295)
+- fix: SQL column-name mismatches across installer + import + GDPR export (#198) (#199)
+- fix: cross-source consistency audit follow-up #3 (#201 #202 #204 #205 #206 #207) (#212)
+- i18n: partial-coverage badge in the language switcher (#210) (#217)
+- i18n: remove 24 truly-dead translation keys from en.php (#211) (#216)
+- i18n: wrap user-facing hardcoded strings with t() (#209) (#215)
+- ops(security): SRI audit — fill missing integrity hashes (#161)
+- refactor(brand): /assets/images/brands/ → /assets/images/brandkit/assets/
+- refactor(security): move app controllers from public_html/ into _apps/ (#159) (#288)
+- refactor(version): single source of truth in _core/version.php (#166)
+- release: v1.0.0 launch sprint — 16 commits, 17 deferred issues, full security audit (#158)
+- security(csp): nonce-based script-src tightening (#144) (#289)
+
 All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),

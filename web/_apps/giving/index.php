@@ -62,6 +62,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <p class="text-secondary mb-0">Your contribution history. <?php echo (int) $year; ?> total: <strong><?php echo htmlspecialchars(Giving::formatAmount($ytdTotal, $currency), ENT_QUOTES, 'UTF-8'); ?></strong></p>
     </div>
     <div class="d-flex gap-2">
+        <a href="/giving/campaigns" class="btn btn-outline-secondary btn-sm"><i class="fa-solid fa-bullseye me-1"></i>Campaigns</a>
         <a href="/giving/my-statement" class="btn btn-outline-secondary btn-sm"><i class="fa-solid fa-file-pdf me-1"></i>Year-end statement</a>
         <a href="/giving/gift-aid" class="btn btn-outline-<?php echo $hasDeclaration === true ? 'success' : 'warning'; ?> btn-sm">
             <i class="fa-solid fa-file-signature me-1"></i>Gift Aid

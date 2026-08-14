@@ -42,48 +42,48 @@ INSERT INTO `tblEmailTemplates`
     (NULL, 'auth.passwordReset',
      'Password Reset Request – {{siteName}}',
      '<h2 style="color:#5e6ad2;">Password Reset Request</h2>'
-     . '<p>Hi {{userName}},</p>'
-     . '<p>We received a request to reset your password for your {{siteName}} account.</p>'
-     . '<p style="margin:24px 0;">'
-     . '<a href="{{resetLink}}" style="background:#198754;color:#fff;padding:12px 24px;text-decoration:none;border-radius:6px;display:inline-block;">Reset My Password</a>'
-     . '</p>'
-     . '<p>Or copy and paste this link into your browser:</p>'
-     . '<p style="word-break:break-all;color:#6c757d;font-size:0.875rem;">{{resetLink}}</p>'
-     . '<p style="color:#6c757d;font-size:0.875rem;">This link expires in {{expiryMinutes}} minutes. If you did not request this, you can safely ignore this email.</p>'
-     . '<hr style="border:none;border-top:1px solid #dee2e6;margin:24px 0;">'
-     . '<p style="color:#999;font-size:0.75rem;">{{siteName}}</p>',
+     '<p>Hi {{userName}},</p>'
+     '<p>We received a request to reset your password for your {{siteName}} account.</p>'
+     '<p style="margin:24px 0;">'
+     '<a href="{{resetLink}}" style="background:#198754;color:#fff;padding:12px 24px;text-decoration:none;border-radius:6px;display:inline-block;">Reset My Password</a>'
+     '</p>'
+     '<p>Or copy and paste this link into your browser:</p>'
+     '<p style="word-break:break-all;color:#6c757d;font-size:0.875rem;">{{resetLink}}</p>'
+     '<p style="color:#6c757d;font-size:0.875rem;">This link expires in {{expiryMinutes}} minutes. If you did not request this, you can safely ignore this email.</p>'
+     '<hr style="border:none;border-top:1px solid #dee2e6;margin:24px 0;">'
+     '<p style="color:#999;font-size:0.75rem;">{{siteName}}</p>',
      'Sent when a user clicks "Forgot password" and the reset token is generated.',
      'siteName, userName, resetLink, expiryMinutes'),
 
     (NULL, 'expenses.statusUpdate',
      'Expense claim {{claimRef}} — {{statusLabel}}',
      '<h2 style="color:#5e6ad2;">Expense claim update</h2>'
-     . '<p>Hi {{userName}},</p>'
-     . '<p>Your expense claim <strong>{{claimRef}}</strong> ({{claimDescription}}) has been <strong>{{statusLabel}}</strong>.</p>'
-     . '<p>{{decisionNote}}</p>'
-     . '<p style="margin:24px 0;">'
-     . '<a href="{{claimLink}}" style="background:#5e6ad2;color:#fff;padding:12px 24px;text-decoration:none;border-radius:6px;display:inline-block;">View claim</a>'
-     . '</p>'
-     . '<hr style="border:none;border-top:1px solid #dee2e6;margin:24px 0;">'
-     . '<p style="color:#999;font-size:0.75rem;">{{siteName}}</p>',
+     '<p>Hi {{userName}},</p>'
+     '<p>Your expense claim <strong>{{claimRef}}</strong> ({{claimDescription}}) has been <strong>{{statusLabel}}</strong>.</p>'
+     '<p>{{decisionNote}}</p>'
+     '<p style="margin:24px 0;">'
+     '<a href="{{claimLink}}" style="background:#5e6ad2;color:#fff;padding:12px 24px;text-decoration:none;border-radius:6px;display:inline-block;">View claim</a>'
+     '</p>'
+     '<hr style="border:none;border-top:1px solid #dee2e6;margin:24px 0;">'
+     '<p style="color:#999;font-size:0.75rem;">{{siteName}}</p>',
      'Sent to the claim submitter when an approver or treasury changes the status.',
      'siteName, userName, claimRef, claimDescription, statusLabel, decisionNote, claimLink'),
 
     (NULL, 'expenses.approverNudge',
      'Expense claim {{claimRef}} awaiting your approval',
      '<h2 style="color:#5e6ad2;">A claim is awaiting your approval</h2>'
-     . '<p>Hi {{approverName}},</p>'
-     . '<p>{{submitterName}} has submitted an expense claim that needs your sign-off:</p>'
-     . '<ul>'
-     . '<li><strong>Reference:</strong> {{claimRef}}</li>'
-     . '<li><strong>Description:</strong> {{claimDescription}}</li>'
-     . '<li><strong>Amount:</strong> {{claimAmount}}</li>'
-     . '</ul>'
-     . '<p style="margin:24px 0;">'
-     . '<a href="{{claimLink}}" style="background:#5e6ad2;color:#fff;padding:12px 24px;text-decoration:none;border-radius:6px;display:inline-block;">Review claim</a>'
-     . '</p>'
-     . '<hr style="border:none;border-top:1px solid #dee2e6;margin:24px 0;">'
-     . '<p style="color:#999;font-size:0.75rem;">{{siteName}}</p>',
+     '<p>Hi {{approverName}},</p>'
+     '<p>{{submitterName}} has submitted an expense claim that needs your sign-off:</p>'
+     '<ul>'
+     '<li><strong>Reference:</strong> {{claimRef}}</li>'
+     '<li><strong>Description:</strong> {{claimDescription}}</li>'
+     '<li><strong>Amount:</strong> {{claimAmount}}</li>'
+     '</ul>'
+     '<p style="margin:24px 0;">'
+     '<a href="{{claimLink}}" style="background:#5e6ad2;color:#fff;padding:12px 24px;text-decoration:none;border-radius:6px;display:inline-block;">Review claim</a>'
+     '</p>'
+     '<hr style="border:none;border-top:1px solid #dee2e6;margin:24px 0;">'
+     '<p style="color:#999;font-size:0.75rem;">{{siteName}}</p>',
      'Sent to an approver when a claim is routed to them.',
      'siteName, approverName, submitterName, claimRef, claimDescription, claimAmount, claimLink')
 ON DUPLICATE KEY UPDATE `bodyHtml` = `bodyHtml`;

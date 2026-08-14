@@ -1,6 +1,6 @@
 # WebMS Intra
 
-> **Version:** 1.0.0 | **PHP** 8.5 (backward-compatible with 8.4) | **MySQL** 8.0+ | **DreamHost** shared hosting
+> **Version:** 1.2.1 | **PHP** 8.5 (backward-compatible with 8.4) | **MySQL** 8.0+ | **DreamHost** shared hosting
 
 A modular internal portal platform for organisations, providing centralised access to internal tools, calendar / events, attendance, expenses, leadership directory, prayer requests, announcements, document library, tasks/reminders, multi-site support, and more.
 
@@ -12,7 +12,7 @@ A modular internal portal platform for organisations, providing centralised acce
 
 | Layer              | Choice                                                                           | Rationale                                        |
 | ------------------ | -------------------------------------------------------------------------------- | ------------------------------------------------ |
-| **Backend**        | PHP 8.5 (strict types, backward-compatible with 8.4), MySQL 8.0                  | Ubiquitous LAMP stack; DreamHost-friendly        |
+| **Backend**        | PHP 8.5 (strict types, backward-compatible with 8.4), MySQL 8.0 (MariaDB 10.4+ compatible) | Ubiquitous LAMP stack; DreamHost-friendly        |
 | **Routing**        | Front-controller + DB-backed router (tblRoutes)                                  | Clean URLs, app isolation, easy overrides        |
 | **Auth**           | Local accounts, MS365 OAuth, Google OAuth, WebAuthn/PassKeys, account linking    | Multi-provider SSO, passwordless support         |
 | **Multi-Site**     | Umbrella multi-site with subdomain, path-prefix, and session detection modes     | One install serves multiple locations/divisions  |
@@ -102,8 +102,8 @@ WebMS-Intra/                         # Git repository root (NOT deployed)
     │   ├── assets/                  # CSS, JS, images, webfonts
     │   ├── api-docs/                # Swagger UI (DirectoryIndex)
     │   ├── offline/                 # PWA offline fallback page
-    │   ├── manifest.json
-    │   ├── openapi.json
+    │   ├── manifest.php             # Brand-aware PWA manifest controller
+    │   ├── openapi.php              # Brand-aware OpenAPI spec controller
     │   ├── robots.txt
     │   └── sw.js                    # Service worker
     ├── private_html/                # Private / non-live files
@@ -130,7 +130,7 @@ Browser -> .htaccess -> index.php -> bootstrap.php -> Router::dispatch()
 ### Prerequisites
 
 - PHP 8.4+ with extensions: `mysqli`, `openssl`, `sodium`, `curl`, `mbstring`
-- MySQL 8.0+
+- MySQL 8.0+ (MariaDB 10.4+ compatible)
 - Apache with `mod_rewrite`
 
 ### Fresh Installation
@@ -243,12 +243,12 @@ Phase-level milestones (granular per-feature state lives in [FEATURES.md](FEATUR
 | 12    | Prayer Requests app (incl. anonymous public route — #129)                       | Done             |
 | 13    | Multi-provider Captcha (Turnstile + reCAPTCHA v2/v3 + hCaptcha — #130)          | Done             |
 
-**Currently in flight (open PRs):**
+**Shipped since Phase 13:**
 
-- **#137** — Calendar seven view modes (Day, Week, Weekdays, Weekend, Month, Year planner, List).
-- **#138** — Calendar per-month strap-lines + category `displayStyle` toggle (background-band vs text-only) — stacked on #137.
+- **#137** — Calendar seven view modes (Day, Week, Weekdays, Weekend, Month, Year planner, List). Merged (PR #137).
+- **#138** — Calendar per-month strap-lines + category `displayStyle` toggle (background-band vs text-only) — stacked on #137. Merged (PR #138).
 
-**Tracked but not started:** WordPress Multisite integration (#127), Order of Service planner with iHymns (#128), BookIT integration cluster (#97–#103), composite IP+username login rate-limit (#52), Privacy / GDPR helpers (#47), Payment integration prep (#40). See [FEATURES.md](FEATURES.md#tracked-but-not-started) for the full backlog with scope notes.
+**Tracked but not started:** WordPress Multisite integration (#127), Order of Service planner with iHymns (#128), BookIT integration cluster (#97–#103), Privacy / GDPR helpers (#47), Payment integration prep (#40). See [FEATURES.md](FEATURES.md#tracked-but-not-started) for the full backlog with scope notes.
 
 ---
 

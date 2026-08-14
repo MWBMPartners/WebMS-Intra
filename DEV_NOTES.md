@@ -191,7 +191,7 @@ gh secret set SFTP_PORT      --body '22'
 gh secret set SFTP_PASSWORD                       # prompts (avoids password in shell history)
 ```
 
-**Shared-base note.** The shared `core/`, `vendor/`, `sql/` etc. upload to
+**Shared-base note.** The shared `_core/`, `_vendor/`, `_sql/` etc. upload to
 `dirname()` of whichever per-branch path applies. When all three paths share
 one parent (the default — recommended for the WebMS-Intra single-site setup),
 all branches' shared code lands in the same place. Point them at different
@@ -975,6 +975,190 @@ the web-based Migrator (admin-only) and tracked in `tblMigrations`.
 
 ---
 
+## Portable DDL convention (MySQL 8.0 ∩ MariaDB)
+
+**Supported engines:** MySQL 8.0+ (production target, DreamHost) and MariaDB 10.4+
+(compatible). MySQL-wire-compatible managed/cloud databases — AWS RDS MySQL 8,
+Aurora MySQL 3.x, Azure Database for MySQL (Flexible Server 8.0), GCP Cloud SQL for
+MySQL — are covered for free by MySQL-8 compatibility, since they accept the same
+DDL and reject the same MariaDB-only extensions. PostgreSQL, SQL Server, and
+Vitess-based platforms (PlanetScale/TiDB/SingleStore — limited FOREIGN KEY support)
+are explicitly **not supported**; the entire data layer is mysqli (no PDO
+abstraction), so supporting them would be a platform port, not a SQL tweak.
+
+**Rule: never use `IF [NOT] EXISTS` on `ADD`/`DROP COLUMN`, `ADD`/`CREATE`/`DROP
+INDEX`/`KEY`, or `CHANGE`/`MODIFY COLUMN`.** That clause is a MariaDB-only DDL
+extension — MySQL 8.0 (all point releases, plus 8.4/9.x) rejects it with a parse
+error, **ERROR 1064**, which aborts the whole statement/file under
+`mysqli::multi_query` (the installer and Migrator both use it). `CREATE TABLE IF
+NOT EXISTS` and `DROP TABLE IF EXISTS` are standard MySQL and remain fine to use
+as-is.
+
+Instead, guard every DDL object with an `information_schema` existence check and a
+dynamic `PREPARE`/`EXECUTE`. This is the house idiom, already shipped and
+production-proven under `mysqli::multi_query` in `web/_sql/037_site_favicon.sql`
+(ADD COLUMN), `web/_sql/112_events_calendar_easy_wins.sql` (DROP INDEX), and
+`web/_sql/138_worship_present_state.sql` (ADD UNIQUE KEY — its own comment notes
+"some MySQL builds reject IF NOT EXISTS"). Conventions:
+
+- One guard block per DDL object (per column / per index / per FK) — never batch a
+  multi-column ALTER behind a single sentinel guard. `multi_query` aborts mid-file
+  on connection loss, and per-object guards make a re-run self-healing.
+- Keep the literal DDL textually contiguous inside the quoted string (don't split
+  `` ALTER TABLE `tblX` ADD COLUMN `colY` `` across concatenation) —
+  `tools/audit-checks/check_sql_columns.py` builds its column inventory from
+  raw-text regexes that match inside string literals across newlines.
+- Escape single quotes inside the literal by doubling (`''`), as in COMMENT clauses.
+- Use `SELECT 1` as the no-op branch.
+
+### Templates
+
+**ADD COLUMN** — guard on `information_schema.COLUMNS`:
+
+```sql
+-- ➕ tblFoo.barColumn — guarded ADD COLUMN (portable: MySQL 8.0 + MariaDB 10.x)
+SET @col_exists := (
+    SELECT COUNT(*) FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME   = 'tblFoo'
+      AND COLUMN_NAME  = 'barColumn'
+);
+SET @sql := IF(@col_exists = 0,
+    'ALTER TABLE `tblFoo` ADD COLUMN `barColumn` VARCHAR(64) DEFAULT NULL COMMENT ''What it is (#NNN)'' AFTER `bazColumn`',
+    'SELECT 1'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+```
+
+**ADD INDEX / CREATE INDEX** — guard on `information_schema.STATISTICS`:
+
+```sql
+-- 🔍 idx_foo_bar — guarded ADD INDEX
+SET @idx_exists := (
+    SELECT COUNT(*) FROM information_schema.STATISTICS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME   = 'tblFoo'
+      AND INDEX_NAME   = 'idx_foo_bar'
+);
+SET @sql := IF(@idx_exists = 0,
+    'ALTER TABLE `tblFoo` ADD INDEX `idx_foo_bar` (`barColumn`, `bazColumn`)',
+    'SELECT 1'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+```
+
+Composite indexes produce one `STATISTICS` row per column, so `COUNT(*) = 0` / `> 0`
+still works. For a unique index use `ADD UNIQUE KEY \`uq_…\` (…)` in the literal.
+Standardise on `ALTER TABLE … ADD` rather than `CREATE INDEX` for consistency; both
+are prepare-able.
+
+**DROP INDEX** — same `STATISTICS` guard, inverted:
+
+```sql
+SET @idx_exists := (
+    SELECT COUNT(*) FROM information_schema.STATISTICS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME   = 'tblFoo'
+      AND INDEX_NAME   = 'uq_old_index'
+);
+SET @sql := IF(@idx_exists > 0,
+    'ALTER TABLE `tblFoo` DROP INDEX `uq_old_index`',
+    'SELECT 1'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+```
+
+**DROP COLUMN** — `COLUMNS` guard, inverted:
+
+```sql
+SET @col_exists := (
+    SELECT COUNT(*) FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME   = 'tblFoo'
+      AND COLUMN_NAME  = 'obsoleteColumn'
+);
+SET @sql := IF(@col_exists > 0,
+    'ALTER TABLE `tblFoo` DROP COLUMN `obsoleteColumn`',
+    'SELECT 1'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+```
+
+**MODIFY / CHANGE COLUMN:**
+
+- `MODIFY COLUMN` to a fixed target definition is naturally re-runnable (the same
+  MODIFY twice succeeds) — no guard needed unless the migration must be conditional
+  on the *current* type, in which case guard on
+  `information_schema.COLUMNS.COLUMN_TYPE`/`DATA_TYPE`.
+- `CHANGE COLUMN` (rename) is NOT re-runnable — the old name is gone on the second
+  run — so guard on the **old** name:
+
+```sql
+SET @old_exists := (
+    SELECT COUNT(*) FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME   = 'tblFoo'
+      AND COLUMN_NAME  = 'oldName'
+);
+SET @sql := IF(@old_exists > 0,
+    'ALTER TABLE `tblFoo` CHANGE COLUMN `oldName` `newName` VARCHAR(64) NOT NULL',
+    'SELECT 1'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+```
+
+**ADD FOREIGN KEY** — guard on `information_schema.TABLE_CONSTRAINTS`:
+
+```sql
+SET @fk_exists := (
+    SELECT COUNT(*) FROM information_schema.TABLE_CONSTRAINTS
+    WHERE CONSTRAINT_SCHEMA = DATABASE()
+      AND TABLE_NAME        = 'tblFoo'
+      AND CONSTRAINT_NAME   = 'fk_foo_bar'
+      AND CONSTRAINT_TYPE   = 'FOREIGN KEY'
+);
+SET @sql := IF(@fk_exists = 0,
+    'ALTER TABLE `tblFoo` ADD CONSTRAINT `fk_foo_bar` FOREIGN KEY (`barID`) REFERENCES `tblBar`(`barID`) ON DELETE SET NULL',
+    'SELECT 1'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+```
+
+Note: this checks constraint *name* existence only — a same-named FK with a
+different definition is silently accepted (the same tolerance the old
+`IF NOT EXISTS` forms had for columns). Acceptable, but worth knowing.
+
+### PREPARE-ability caveat (MySQL 8.0 manual — "SQL Syntax Permitted in Prepared Statements")
+
+Prepare-able (everything the templates above need): `ALTER TABLE`, `CREATE INDEX`,
+`DROP INDEX`, `CREATE TABLE`, `DROP TABLE`, `RENAME TABLE`, DML, `SET`, `SHOW`.
+
+**NOT prepare-able** — do not try to wrap these in the guard idiom:
+`CREATE`/`DROP TRIGGER`, `CREATE`/`ALTER`/`DROP PROCEDURE`/`FUNCTION`/`EVENT`,
+`ALTER VIEW`, `LOCK TABLES`. If a future migration needs a *conditional*
+trigger/procedure, the condition has to move to PHP (Migrator/installer side) — the
+SQL-file guard idiom cannot express it. MariaDB's prepare-able set is a superset of
+MySQL's, so the intersection constraint is exactly the MySQL list above.
+
+### Replayability rule
+
+`web/_install/index.php` loads `full_schema.sql` and then **replays every numbered
+migration file in order**, deliberately ignoring `tblMigrations` (see the comment
+above the replay loop) — this is how a stale partial install catches up to the
+latest schema. That means **every migration must be a replayable no-op** on an
+up-to-date schema:
+
+- Every DDL statement needs an `information_schema` guard (per the templates
+  above) — a bare `ADD COLUMN`/`ADD INDEX`/`ADD CONSTRAINT`/`DROP INDEX` fails with
+  1060/1061/1826/1091 the moment it re-runs against a schema that already has the
+  object.
+- Every seed `INSERT` (including a migration's own `INSERT INTO tblMigrations
+  (filename) VALUES (...)` self-record — `filename` is `UNIQUE KEY
+  uq_filename`) needs `ON DUPLICATE KEY UPDATE`, `INSERT IGNORE`, or a `WHERE NOT
+  EXISTS` guard, or it fails with ERROR 1062 on replay.
+
+---
+
 ## File Structure Quick Reference
 
 All paths below are relative to `web/` (the deployable root):
@@ -1032,7 +1216,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
 ## Translations (i18n)
 
-The portal supports multiple languages via the `I18n` framework (`core/I18n.php`).
+The portal supports multiple languages via the `I18n` framework (`_core/I18n.php`).
 All user-facing text is stored in **language files** under `web/_lang/`, one file
 per locale. English (`en.php`) is the baseline — every other language file only
 needs to include the keys it translates; missing keys fall back to English automatically.
@@ -1114,7 +1298,7 @@ Keys follow the pattern `{section}.{description}` using lowercase and underscore
 4. **Remove keys you haven't translated yet** — they'll fall back to English
    automatically. This is better than leaving English text in a French file.
 
-5. **Check the locale is registered** in `core/I18n.php` in the `$locales` array.
+5. **Check the locale is registered** in `_core/I18n.php` in the `$locales` array.
    All 13 currently supported locales are already registered:
    `en, cy, fr, de, es, pt, ar, he, fa, ur, zh, ja, ko`
 
@@ -1236,7 +1420,7 @@ This keeps translations version-controlled, reviewable, and auditable.
 
 ## New Core Classes (v0.8.1)
 
-### Container (`core/Container.php`)
+### Container (`_core/Container.php`)
 
 Lightweight dependency injection container that works alongside the existing static
 `App` registry. Supports singleton and factory bindings with lazy resolution:
@@ -1250,21 +1434,21 @@ $mailer = $container->get('mailer'); // same instance each time
 Use `Container` for new service wiring; existing `App::db()`, `App::settings()` etc.
 remain unchanged for backward compatibility.
 
-### ApiRouter (`core/ApiRouter.php`)
+### ApiRouter (`_core/ApiRouter.php`)
 
 Dedicated API route dispatcher, extracted from the main `Router` class. Handles
 all `api/{app}/{action}` patterns with JSON content-type enforcement, CORS headers,
 and standardised error envelopes via `ApiResponse`. The main `Router::dispatch()`
 delegates to `ApiRouter` for any path starting with `api/`.
 
-### CsvExporter (`core/CsvExporter.php`)
+### CsvExporter (`_core/CsvExporter.php`)
 
 Generic CSV export helper used across five apps: expenses, attendance, leadership,
 admin users, and activity logs. Accepts a column definition array and a MySQLi result
 set, streams output with proper headers (`Content-Type: text/csv`,
 `Content-Disposition: attachment`), and escapes fields to prevent formula injection.
 
-### Validator (`core/Validator.php`)
+### Validator (`_core/Validator.php`)
 
 Input validation framework using pipe-separated rule syntax:
 
@@ -1423,7 +1607,7 @@ light `:root` and `[data-bs-theme="dark"]` blocks. Without these
 bindings, every plain `<a>` / `.btn-link` / `.alert-link` / `.link-*`
 falls back to the browser-default blue, which clashes hard in dark mode.
 
-`install/index.php` mirrors the same binding in its self-contained
+`_install/index.php` mirrors the same binding in its self-contained
 inline `<style>` block because the installer doesn't load `portal.css`.
 
 Per-site branding still flows through: `--portal-link` resolves to
@@ -1550,9 +1734,9 @@ push.
 Affected (mirrored) trees on the server:
 
 ```text
-<base>/core/
-<base>/vendor/
-<base>/sql/
+<base>/_core/
+<base>/_vendor/
+<base>/_sql/
 <base>/_includes/
 <base>/_functions/
 <base>/_libraries/
@@ -1682,6 +1866,21 @@ Two variants exist in the design output:
 - `noticeboard.js` — eval variant (runtime-Babel from unpkg). **Never wire this in.** The portal CSP disallows `unsafe-eval` and does not allowlist unpkg, so it cannot run.
 - `noticeboard.noeval.js` — precompiled variant, wired in `_apps/noticeboard/index.php`.
 
+### Deliberate hand-edit exception (#363 — real upload pipeline)
+
+`noticeboard.noeval.js`'s `handleFile()` already special-cased a host upload
+hook (falling back to a `data:` URI `FileReader` read when absent), but named
+it `host.uploadFile(file)`. #363 wires that hook up to a real backend via
+`window.NoticeboardHost.upload(file)` (the bridge name the rest of the portal
+uses — see `_apps/noticeboard/index.php`), so the **only** hand-edit made to
+the generated bundle is renaming the two `uploadFile` references at
+`handleFile()` to `upload`. Everything else in the function (the `Promise`
+wrapping, `uploading` state, error `alert()`, and the `data:` URI fallback for
+a standalone/local deployment with no host) is untouched.
+**If you regenerate the bundle from the Claude Design source**, either carry
+this rename forward again, or (better) rename the hook to `upload` in the
+source component itself so a regeneration doesn't silently revert it.
+
 ### React hosting
 
 React 18.3.1 UMD is **self-hosted** at `web/public_html/assets/vendor/react/`:
@@ -1700,10 +1899,713 @@ The bundle's `loadReactUmd()` short-circuits when `window.React` / `window.React
 
 Extensions are per-page — the underlying `default-src / img-src / frame-src` remain unchanged for every other page. `_apps/noticeboard/index.php` sets `https:` on img/media and `https://www.canva.com` on frame.
 
-### Typography
+### Typography (#361 — self-hosted)
 
-The bundle template injects a `fonts.googleapis.com` stylesheet (Bricolage Grotesque / Instrument Serif / IBM Plex). The portal CSP does not allowlist Google Fonts (self-hosting stance, PR #356), so the board degrades gracefully to `system-ui` stacks. Follow-up issue tracks self-hosting these faces (or restyling to Plus Jakarta Sans).
+The generated bundle template still injects a `fonts.googleapis.com` stylesheet (Bricolage Grotesque / Instrument Serif / IBM Plex Mono / IBM Plex Sans) and the generated `noticeboard.css` still carries the matching `@import url(https://fonts.googleapis.com/...)`. The portal CSP does not allowlist Google Fonts (self-hosting stance, PR #356), so both of those remain **dead under CSP** — every request they'd make is blocked. They're left in place rather than hand-edited, per the "generated — do not edit" rule above; harmless once the fonts are self-hosted (below), since a broken/blocked `@import` just does nothing.
+
+As of #361, all four families are **self-hosted** instead of falling back to `system-ui`:
+
+- `web/public_html/assets/noticeboard/fonts-selfhost.css` — hand-maintained (NOT generated), `@font-face` rules for the four families/weights the bundle actually references (verified by grepping `noticeboard.noeval.js` / `noticeboard.css`): Bricolage Grotesque (variable, wght 400–800), Instrument Serif (400 upright + italic), IBM Plex Mono (400/500), IBM Plex Sans (400/500/600). `latin` + `latin-ext` subsets (the latter for Welsh diacritics — see `_lang/cy.php`); cyrillic/greek/vietnamese subsets skipped.
+- `web/public_html/assets/noticeboard/fonts/*.woff2` — the actual font files, sourced from `@fontsource`/`@fontsource-variable` v5.3.0 (SIL OFL-1.1), ~360 KB total. `OFL-*.txt` license texts for each family are redistributed alongside them.
+- Wired via a `<link rel="stylesheet" href="/assets/noticeboard/fonts-selfhost.css">` in `_apps/noticeboard/index.php`, placed immediately **before** the generated `noticeboard.css` `<link>` so the `@font-face` rules exist before the board renders any text.
+- Fallback chain: `#noticeboard-root { font-family: 'IBM Plex Sans', 'Plus Jakarta Sans', system-ui, sans-serif; }` — if a self-hosted face were ever unavailable, the board falls back to the portal's own self-hosted Plus Jakarta Sans (PR #356) before system fonts. Per-poster inline `font-family` values are set by the generated bundle itself and can't route through that fallback without editing generated code — moot in practice since the `@font-face` rules make all four families resolve directly.
+- CSP: no changes needed. `style-src`/`font-src` both include `'self'` at `_core/templates/header.php`, and the fonts are same-origin — `_apps/noticeboard/index.php` only widens `img-src`/`media-src`/`frame-src` (unchanged).
 
 ---
 
-Last updated: May 2026
+## REST API v1 (#323 Phase 2)
+
+### Dual-mode contract — bearer OR session, never both
+
+Every `_apps/{app}/api/{action}.php` handler resolves auth through one choke-point,
+`Portal\Core\ApiAuth` (`web/_core/ApiAuth.php`):
+
+- **Bearer** — `Authorization: Bearer wbms_…`. Detected purely by the `wbms_` prefix
+  (`ApiAuth::isBearer()`); any other bearer scheme falls through to the session path
+  untouched, so this never hijacks a future OAuth integration. Verified via
+  `ApiKey::findByPlaintext()` (Phase 1), scope-gated via `ApiKey::hasScope()`
+  (wildcards `*` / `{res}:*` supported), tenant-pinned to the KEY's own site
+  (`Site::forceContext()` — see below), and per-key rate-limited. **No CSRF** — a
+  bearer token travels in an explicit header set by calling code, never by a
+  browser automatically, so CSRF protection is meaningless for it (the
+  OWASP-sanctioned exemption for token auth).
+- **Session** — the existing logged-in portal user. Reproduces the historical
+  per-handler boilerplate verbatim (same order, same rejection strings/codes):
+  `requireAuth` → optional `requireAdmin` → `Auth::ensureSession()` → CSRF via the
+  `X-CSRF-TOKEN` header or `csrf_token` body field on writes.
+
+Handlers call `ApiAuth::requireRead('{resource}:read', $sessionNeedsAdmin)` or
+`ApiAuth::requireWrite('{resource}:write', $sessionNeedsAdmin)` (the latter returns
+the decoded JSON body) instead of hand-rolling the boilerplate. `ApiAuth::source()`
+/ `apiKeyId()` / `actorUserId()` feed `Logger::audit()`'s new `$apiKeyId` /
+`$source` parameters (auto-resolved when omitted — every pre-existing call site
+compiles and behaves unchanged).
+
+### `/api/v1/{resource}[/{id}]` facade
+
+`ApiRouter::dispatchV1()` translates `(HTTP verb, resource, id)` into the identical
+legacy `(app, action)` pair and re-runs the **same** pipeline as
+`/api/{app}/{action}`: same handler file, same `api.{app}.{action}.enabled` flag.
+No new gating vocabulary, no `tblRoutes` rows. See CLAUDE.md's "ApiRouter routing
+trap" section for the one-line summary. Per-resource action aliases (where the
+handler file isn't named `create`/`update`/`delete`):
+
+| Resource | POST → | PUT/PATCH → | DELETE → |
+|---|---|---|---|
+| noticeboard | `save` | — (none) | — (none) |
+| leadership | `assign` | — (none) | `unassign` (id = assignmentID) |
+| prayer-requests | `create` | `moderate` | — (none) |
+| tasks | `create` | `complete` | `delete` |
+| expenses | `create` | — (**deferred to Phase 3**) | `delete` |
+
+`GET /api/v1/{resource}/{id}` (a "detail" route) exists for **events only** — every
+other resource 404s an id-suffixed GET (no `detail.php` handler). Unknown resource
+→ 404; non-numeric id → 400; unsupported verb → 405 with an `Allow` header built
+from which handler files actually exist on disk.
+
+### Scope vocabulary
+
+`Portal\Core\ApiKey::SCOPES` is the single source of truth — twenty `{resource}:read`
+/ `{resource}:write` pairs across the ten v1 resources (events, announcements,
+attendance, prayer-requests, documents, expenses, leadership, tasks, noticeboard,
+users). The admin mint form (`_apps/admin/integrations/api-keys.php`) renders this
+constant as a checkbox grid — never a duplicated hardcoded list — and
+`api-keys-save.php` re-validates every submitted token server-side against
+`SCOPES` ∪ `{'*'}` ∪ `{'{resource}:*'}` for a KNOWN resource, rejecting anything
+else. `ApiKey::hasScope()` honours both wildcard forms at verification time.
+
+### Tenant pinning (`Site::forceContext`)
+
+A bearer request carries no session, so `Site::id()` would otherwise resolve to
+the host-detected default site rather than the key's own. `resolveBearer()` in
+`ApiAuth` re-points the site context to the key's `siteID` via
+`Site::forceContext(int $siteId)` before the handler runs, so every
+`Site::id()`-scoped query in every handler becomes tenant-correct automatically.
+`forceContext()` fails CLOSED: a key with `siteID <= 0`, a missing/inactive site,
+or (when multisite is disabled) any site other than the install's single site, all
+500 rather than silently falling back to the ambient default. `ApiRouter`'s
+`api.{app}.{action}.enabled` gate is ALSO resolved against the pinned site
+(`App::settingForSite`), not the frozen bootstrap `$SETTINGS` snapshot — a site's
+own kill-switch can't be bypassed via the Host header on a bearer request.
+
+### Per-key rate limiting
+
+`RateLimiter::tooMany()` / `recordHit()` / `retryAfter()` implement a generic
+sliding window against a new `tblApiRateLimits` table (bucket = `apikey:{keyID}`),
+separate from the pre-existing login-attempt limiter. Limits default to 300
+requests / 5 minutes, overridable per-site via `api.rateLimit.perKey.maxRequests`
+/ `windowMinutes`. A 429 sets `Retry-After`. Session callers are never rate-limited
+by this mechanism (unchanged — they're protected by login rate limiting instead).
+
+### Rotation grace
+
+`ApiKey::rotate($keyId, $byUserId, ?$graceHours)` mints a replacement key first,
+then either revokes the old key immediately (`$graceHours === 0`) or caps its
+`expiresAt` at `now + $graceHours` and stamps `rotatedToID` (`$graceHours` null
+resolves against the `api.keys.rotationGraceHours` setting, default 24). The old
+key stays `isActive = 1` and dies naturally via the existing `expiresAt` check in
+`findByPlaintext()` once the cutoff passes — zero changes to the verification
+path. The admin UI (`api-keys.php`) offers a grace `<select>` (immediate / 1h /
+24h / 72h, default 24h) on the rotate control, and shows an "Expiring (rotated)"
+badge on any key row where `rotatedToID IS NOT NULL AND isActive = 1`.
+
+### ⚠️ Known limitations (documented, not bugs)
+
+1. **The per-key rate limiter is check-then-record, not atomic.** `tooMany()` and
+   `recordHit()` are two separate statements with no `SELECT ... FOR UPDATE` /
+   advisory lock between them — a genuinely concurrent burst against the same key
+   can slightly exceed `maxRequests` before the limiter catches up. This is
+   approximate limiting by design (house pattern: fail-open on DB error, cheap
+   single-row inserts + a covering index over a distributed lock), not a
+   correctness bug. Revisit only if abuse patterns actually exploit the window.
+2. **The bearer key-row `lastUsedAt`/`lastUsedIP` stamp runs on the PRE-gate
+   lookup.** `ApiRouter::resolveEnabledFlag()` calls `ApiAuth::bearerKeyRow()` to
+   discover the key's site for the `enabled` check BEFORE the handler (and its own
+   `ApiAuth::requireRead/Write()` call) runs — and `ApiKey::findByPlaintext()`
+   stamps `lastUsedAt` as a side effect of that same lookup. `bearerKeyRow()` is
+   cached per-request, so this costs exactly one extra single-row `UPDATE`, not a
+   duplicate DB round-trip — but it means a valid key hammering a DISABLED
+   endpoint still drives one un-throttled `lastUsedAt` write per request (the
+   per-key rate limiter only runs inside `resolveBearer()`, which a disabled
+   endpoint never reaches). Self-contention against the key's own row; no
+   cross-tenant impact; negligible load in practice.
+3. **Expenses status-transition update (approve/reject/reimburse) is DEFERRED to
+   Phase 3.** There is no `PUT /api/v1/expenses/{id}` in this release — v1 ships
+   `create` + `delete` (Pending-only) only. The transition needs to share the
+   existing multi-approver workflow + `ExpenseMailer` side-effects
+   (`_apps/expenses/approve/`) rather than duplicating that logic, which wants its
+   own extraction pass.
+4. **Several write endpoints record creator/updater as NULL for bearer requests.**
+   `ApiAuth::actorUserId()` returns `null` in bearer mode (there is no session
+   user) — handlers use `ApiAuth::actorUserId() ?? 0`, so a bearer-created row's
+   `createdByID`/`updatedByID` is `0`/`NULL` rather than a real user. Attribution
+   for a bearer-made change is via the audit trail instead:
+   `tblAuditTrail.apiKeyID` + `.source = 'apikey'` (see the admin Audit Trail
+   viewer's new source badge + key-prefix column).
+
+---
+
+## Giving — two-person offering count session (#299 sub-feature 1)
+
+Extension to the existing `giving` app (#266, migration 094). #299 ("Giving
+polish") bundles FOUR sub-features — offering counting, pledge campaigns,
+bank reconciliation, account-updater. Only sub-feature 1 is built here; the
+other three are separate, tracked-but-not-started scope.
+
+### Naming: `tblGiftEntries` vs the real `tblGivingEntry`
+
+#299's issue body sketches the write target as `tblGiftEntries`, but the
+giving app actually shipped as `tblGivingEntry` (singular "Entry", amounts in
+PENCE via `amountPence` — see `Portal\Core\Giving`, `web/_sql/full_schema.sql`
+§"Giving / contributions log"). This migration (150) writes to the REAL
+table. New columns introduced here follow `tblGivingEntry`'s own convention
+(`siteID INT NOT NULL DEFAULT 1`, `createdAt DATETIME NOT NULL DEFAULT
+CURRENT_TIMESTAMP`, `fk_<short>_<col>` constraint names) rather than the
+issue body's sketch verbatim.
+
+### Schema
+
+- **`tblCountSessions`** — one row per service date. `counter1ID`/`counter2ID`
+  (nullable, assigned at creation or later) each get their own independent
+  `cashTotal1/chequeTotal1/envelopeTotal1` and `…2` triplet (`DECIMAL(10,2)`,
+  nullable until entered). `cashTotal`/`chequeTotal`/`envelopeTotal` (also
+  nullable `DECIMAL(10,2)`) are the **agreed** totals — set only once the two
+  independent counts match, or an admin resolves a discrepancy — and are what
+  actually gets written to the gift log on close.
+  **`categoryID` (NOT NULL, FK `tblGivingCategory`) is an addition beyond the
+  issue body's column sketch** — it's required because `tblGivingEntry.categoryID`
+  is `NOT NULL`, so every count session needs to know which giving
+  category/fund its gift log posts to. Picked at session-creation time.
+- **`tblCountEnvelopes`** — added per the issue body's own conditional ("if
+  envelope-level named entries are needed to write per-envelope gift entries,
+  add a child table"). Models the numbered/named giving-envelope breakdown of
+  a session's agreed `envelopeTotal` — `giverID` (nullable, matched member) OR
+  `giverName` (free text, mirrors `tblGivingEntry.donorName`'s own
+  matched-vs-free-text pattern), `amount DECIMAL(10,2)`, `method
+  ENUM('cash','cheque')`. Entered ONCE per session (not duplicated per
+  counter) — only the aggregate cash/cheque/envelope totals are independently
+  double-keyed; the named breakdown is collaborative, shared session data.
+
+### State machine (`tblCountSessions.status`)
+
+```
+open ──(counter 1 OR 2 submits)──▶ counting ──(other counter submits, MATCH)──▶ counting (agreed totals set, ready to close)
+                                       │
+                                       └──(other counter submits, MISMATCH)──▶ discrepancy
+                                                                                   │
+                                                              (counter re-enters, now matches) ──▶ counting
+                                                              (admin resolves w/ agreed totals) ──▶ counting
+counting ──(close: agreed totals set AND envelopes reconcile)──▶ closed  [terminal]
+```
+
+`giving.countRequiresTwoCounters` (default `'true'`) — when `'false'`,
+whichever counter slot is completed FIRST is auto-agreed immediately (no
+discrepancy comparison at all), for sites that only run a single-counter
+process.
+
+### Close — writing a *balanced* gift log
+
+The issue body says close writes "`tblGiftEntries` for each named envelope +
+a single 'loose cash' entry". This implementation goes one step further for
+correctness: it ALSO emits a single aggregate **"loose cheque"** row for any
+agreed `chequeTotal` not covered by named cheque envelopes. Rationale: the
+GIRFT requirement is that close "writes a **balanced** gift log" — the sum of
+every `tblGivingEntry` row written for a session must equal `cashTotal +
+chequeTotal + envelopeTotal` exactly, not just cover the cash bucket. All
+three checks below run BEFORE the transaction opens (`_apps/giving/count/close.php`),
+so a rejected close never touches the database:
+
+1. Status must be `'counting'` (not `'open'`, `'discrepancy'`, or already `'closed'`).
+2. Agreed `cashTotal`/`chequeTotal`/`envelopeTotal` must all be set (non-NULL).
+3. `SUM(tblCountEnvelopes.amount)` must equal the agreed `envelopeTotal` EXACTLY
+   (integer-pence comparison, never `==` on floats/DECIMALs).
+
+Then, in one transaction: one `tblGivingEntry` row per named envelope
+(`donorID`/`donorName` from the envelope, `categoryID`/`donatedAt`/`siteID`
+from the session, `reference = 'Count #<id>'`) + a loose-cash row (if the
+agreed cash total exceeds what named cash envelopes cover) + a loose-cheque
+row (same, for cheques) + `UPDATE … SET status='closed' … WHERE status='counting'`
+(the `WHERE status='counting'` guard + checking `affected_rows` catches a
+concurrent close/edit between the pre-checks and the write, aborting the
+transaction rather than double-writing).
+
+### Gate
+
+Every route (`/giving/count`, `/giving/count/session`, `/giving/count/save`,
+`/giving/count/close`) uses `Portal\Core\Giving::canManage()` — the same gate
+`giving`'s existing `manage.php`/`entry-save.php`/`cat-save.php` already use
+(site admin OR the `treasurer` role, migration 017). Resolving a live
+`'discrepancy'` (`action=resolve` in `save.php`) additionally requires
+`App::isAdmin()` — matching the issue body's "an admin resolves" wording;
+plain treasurers can only re-enter counts or close once no discrepancy
+remains.
+
+### New core helper
+
+`Portal\Core\Giving::parseDecimal(string $input): ?string` — validated
+non-negative `DECIMAL(10,2)`-safe amount parsing (round-trips through
+float → round → `number_format`, never trusts the client string into SQL
+verbatim). Sibling to the existing `Giving::parseAmount()` (pence-int, used
+by `tblGivingEntry` writes) — this workflow's independent counter totals are
+DECIMAL columns on `tblCountSessions`/`tblCountEnvelopes`, not pence.
+
+---
+
+## Discipleship Pathway Tracker Phase 2 (#303 Phase 2)
+
+Extension to Phase 1 (migration 142 — `tblPathways`/`tblPathwaySteps`,
+admin CRUD only, app hidden behind `discipleship.enabled = 'false'`).
+Phase 2 adds per-user enrolment/progress, auto-completion, member-facing
+routes, and a pastor roster. New core helper: `Portal\Core\Discipleship`.
+
+### Adopted scoping decisions (issue #303 blocker comment, 2026-06-21)
+
+1. **Auto-completion sources — option (a), per-user tables only.**
+   `tblEventAttendance` (rows with `userID IS NOT NULL` — walk-ins are
+   excluded automatically by the sweep's `ea.userID = e.userID` join) and
+   `tblEventRSVPs`. `tblSalvationCards` has no `userID` and
+   `tblDecisionMoments` is an aggregate counter with no per-user rows —
+   both are structurally incompatible with a per-user completion model,
+   not merely deprioritised; revisit if/when either table grows a
+   per-user identity column.
+2. **Pastor surface stays a flat roster list.** One `portal-data-list` row
+   per enrolled member (progress bar, n/m required steps, last
+   completion), with drill-down to a per-member step list. A
+   members×steps matrix was explicitly rejected — it's the house
+   `<table>` ban plus the issue's own recorded decision.
+3. **Mentor relationships deferred.** No `tblPathwayMentor` schema, no UI,
+   in this phase.
+
+### The revoke-vs-delete unmark semantic
+
+`tblPathwayProgress` has `UNIQUE(stepID, userID)` — at most one progress
+row can ever exist per (step, member) pair, for the lifetime of that step.
+Unmarking a step (admin action, or a member's own auto-completed step
+being corrected) sets `revokedAt`/`revokedByID` on that SAME row; it is
+**never** `DELETE`d. "Complete" everywhere in the app — `progressFor()`,
+`rosterStats()`, `refreshEnrolmentStatuses()`, the member/admin views —
+means `revokedAt IS NULL`.
+
+This is deliberate, not an oversight: `Discipleship::autoSweep()` writes
+via `INSERT IGNORE`, relying on the unique key to make repeat sweeps a
+no-op. If unmarking deleted the row, the very next sweep (lazy, on the
+next page view) would see no conflicting key, re-insert the row from the
+still-existing attendance/RSVP evidence, and silently resurrect a step a
+coordinator deliberately corrected. Keeping the (now-revoked) row means
+its unique key permanently blocks that re-insertion — the only way to
+"undo an unmark" is the admin explicitly re-marking it complete again
+(`progress-mark.php`'s `complete` action, which clears `revokedAt`/
+`revokedByID` on the SAME row rather than inserting a new one).
+
+One consequence worth knowing: a step revoked once can only ever be
+un-revoked by a human action (manual re-mark). It will never silently
+flip back to complete on its own, even if the auto-evidence that
+originally satisfied it still exists — this is the intended trade-off
+(coordinator correction wins over automation), documented here so it
+isn't mistaken for a bug during support triage.
+
+### Lazy-sweep design (no scheduler dependency)
+
+`Discipleship::autoSweep(int $siteId, ?int $pathwayId = null)` is pure
+set-based SQL (three `INSERT IGNORE … SELECT` statements, one per
+`autoRule` value, each joining active pathways × active enrolments × the
+matching evidence table) — cheap enough to run synchronously on every
+page load rather than needing a background job. It is invoked at the top
+of:
+
+- `discipleship/index.php` (member "My pathways") — scoped to the site.
+- `discipleship/view.php` (member pathway detail) — scoped to the pathway.
+- `admin/discipleship/progress-pathway.php` (pastor roster) — scoped to
+  the pathway.
+
+Because every rule's `INSERT IGNORE` is idempotent via
+`UNIQUE(stepID, userID)`, calling `autoSweep()` on every page view never
+duplicates work — a repeat call over already-swept data inserts zero new
+rows. `cron/discipleship-sweep.php` exists purely so a site with low
+member traffic on discipleship pages still gets fresh auto-completions
+(e.g. overnight) — it is a convenience, never a correctness dependency.
+
+### Cron token setup
+
+Same pattern as `reminders.cron_token` (migration 122): the endpoint reads
+`?key=<value>`, compares it to `Settings::get('discipleship.cron_token', '')`
+via `hash_equals()`, and 403s whenever the stored token is the empty
+string — so the cron endpoint is inert until an admin explicitly sets a
+non-empty `discipleship.cron_token` value (via `/admin/settings`; the
+setting is seeded `isSensitive = 1`, so it's encrypted at rest like other
+secrets). Point an external scheduler (e.g. DreamHost's cron, or a
+third-party uptime-ping-style scheduler) at:
+
+```
+https://<your-portal-host>/cron/discipleship-sweep?key=<your-token>
+```
+
+The route (`cron/discipleship-sweep`, migration 153) is seeded
+`isProtected = 0` — it is public but token-gated, exactly like
+`cron/event-reminders`. It loops every distinct `siteID` that owns at
+least one active pathway and runs one site-wide `autoSweep()` per site,
+returning a plain-text `OK {"sitesSwept":N,"inserted":{...}}` summary.
+
+---
+
+## Event Team Hub Phase 1 (#386)
+
+### Architecture: extends the calendar app, not a new app
+
+`/calendar/event/hub` lives in `_apps/calendar/` (`event-hub.php` +
+`event-hub-save.php`), not a new top-level app — CLAUDE.md is explicit
+that Calendar/Events/Preaching Plan is ONE app, and every input the hub
+composes (event, coordinators, crews, jobs, people) already lives in the
+calendar app's tables, keyed by `eventID`. The two genuinely reusable
+pieces — provider detection, embed URLs, CF signed tokens, CSP frame-src
+lists — live in `_core/VideoEmbed.php` so `/live`, noticeboard, or
+recordings can adopt the same helper later without dragging in the
+calendar app.
+
+### Access control: `canView` vs `canManage`
+
+Two distinct gates, deliberately different in breadth:
+
+- `canView` = `Auth::isEventTeamMember($eventId)` — coordinator OR crew
+  leader/participant OR job assignee OR a `tblEventPeople` row (host/
+  speaker/organiser/…). Grants read access to the hub page only.
+- `canManage` = `App::isAdmin() || Auth::isCoordinatorOf($eventId)` — the
+  existing house idiom, unchanged, used by every other event sub-tool
+  (crews/jobs/attendance/broadcast). Grants the inline add/edit/remove/
+  reorder forms and the tool-strip links.
+
+`isEventTeamMember()` mirrors `isCoordinatorOf()`'s shape exactly (same
+`self::check()` + `$eventId <= 0` guards, same `$db->prepare()` /
+`bind_param()` / `fetch_assoc()` / `close()` rhythm) so the two methods
+stay trivially comparable during review. All four membership tables
+(`tblEventCoordinators`, `tblEventCrewMembers`, `tblEventJobAssignments`,
+`tblEventPeople`) cascade-delete with their event, so hub access can never
+outlive the event it's scoped to.
+
+### Video providers: allowlist detection, never a raw embed
+
+`VideoEmbed::parse()` is the single place a pasted string becomes a
+`{provider, ref}` pair — YouTube (`watch?v=`, `youtu.be/`, `/shorts/`,
+`/live/`, `/embed/`), Vimeo (`vimeo.com/<id>`,
+`player.vimeo.com/video/<id>`), or Cloudflare Stream (UID embedded in
+`customer-*.cloudflarestream.com`, `watch.cloudflarestream.com`, or
+`iframe.videodelivery.net`, or a bare 32-hex UID). Anything else returns
+`null` — `event-hub-save.php`'s `addVideo` action flashes an error and
+stores nothing. Every `embedUrl()` call re-validates the ref's character
+class immediately before string-interpolating it into an iframe `src`
+(the same discipline as `Livestream::embedUrl()`'s ID sanitiser), so even
+a corrupted/tampered database row can't produce an XSS-bearing iframe.
+
+### Cloudflare Stream signed-URL playback (no vendored JWT encoder)
+
+`_vendor/simplejwt/JWT.php` is **verify-only** (built for MS365/Google ID
+tokens) — it has no encode/sign capability, and it is deliberately not
+extended for this, since it's scoped as an IdP-token verifier. Signing is
+new code in `VideoEmbed::signedToken()`:
+
+1. Build the compact JWT segments by hand: `header = {"alg":"RS256",
+   "kid":<keyID>}`, `payload = {"sub":<uid>, "kid":<keyID>,
+   "exp":now+ttl, "downloadable":false}`, both base64url-encoded (RFC
+   4648 §5, no padding).
+2. `openssl_sign($header.'.'.$payload, $signature, $pem,
+   OPENSSL_ALGO_SHA256)` — the same primitive `simplejwt` uses for
+   verification, just run in the opposite direction.
+3. Token = `header.payload.` + base64url(`$signature`).
+
+The PEM (`cfstream.signingKeyPem`, `isSensitive = 1`, libsodium-encrypted
+via `encrypt_setting()`/`decrypt_setting()`) and the key ID never leave
+the server — only the short-lived JWT reaches the browser, inside an
+iframe `src` that itself is never logged. A missing/invalid key makes
+`signedToken()` return `null` (logged via `Logger::errorPlatform()`,
+**never** logging the PEM or signature) — the hub page renders an
+"unavailable — check Stream settings" tile rather than a broken iframe.
+Tokens are cached in `$_SESSION['cfstream_tokens'][$uid]` plus a
+per-request static memo, reused while more than 1/10th of
+`cfstream.tokenTtlSeconds` (default 21600s / 6h) remains — RSA-2048
+signing is ~1ms, so this is belt-and-braces, not load-bearing.
+
+### Cloudflare Stream credential-setup runbook
+
+Two **separate** credentials — see the two-credential explainer on
+`/admin/integrations/cloudflare-stream` itself:
+
+1. **Pick the Cloudflare account** that owns (or will own) the Stream
+   subscription. This portal's Cloudflare MCP connection exposes D1/KV/
+   R2/Workers only, **not Stream** — the portal cannot see or create
+   either credential below; an admin must do both in the Cloudflare
+   dashboard/API directly.
+2. **Create the Stream:Edit API token** (Phase 1.5 — captured now for
+   forward-compatibility, unused by anything shipped in this release):
+   Cloudflare dashboard → **My Profile → API Tokens → Create Token →
+   Custom Token** → permission **Account → Cloudflare Stream → Edit**,
+   scoped to the one account from step 1 (not "all accounts"), no zone
+   permissions. Optionally pin it to the DreamHost server's outbound IP
+   under "Client IP Address Filtering". Paste the token into **API
+   token** on the admin page — it's `isSensitive`-encrypted and never
+   re-displayed once saved.
+3. **Create the signing key** (used TODAY for signed-URL playback): the
+   Cloudflare dashboard has **no UI** for this — it must be created via
+   the API:
+   ```
+   curl -X POST "https://api.cloudflare.com/client/v4/accounts/<accountID>/stream/keys" \
+        -H "Authorization: Bearer <a token with Stream:Edit>"
+   ```
+   The response contains `result.id` (→ **Signing key ID**) and
+   `result.pem` (→ **Signing key PEM**, base64-encoded in the API
+   response — paste the decoded PEM, including the
+   `-----BEGIN PRIVATE KEY-----`/`-----END-----` lines, into the
+   textarea). **This is a one-time, non-retrievable secret** — Cloudflare
+   does not let you fetch the private key again after creation, so paste
+   it into the admin page (or a password manager) immediately.
+4. Fill in **Account ID** (32-hex, from the Cloudflare dashboard URL or
+   `GET /accounts`) and **Customer code** (the `customer-<code>` segment
+   your account's Stream playback URLs already use — visible on any
+   existing video's embed code, or `GET /accounts/{id}/stream` → any
+   video's `preview`/`playback.hls` URL).
+5. Tick **Enable Cloudflare Stream video embeds** and save. Existing
+   Cloudflare Stream videos on the hub whose `requiresSignedUrl` is
+   unticked will start rendering immediately (playback needs only the
+   customer code); signed videos need the signing key from step 3.
+
+### Phase 1 vs Phase 1.5 scope
+
+Phase 1 (this build) is **external references only** — a coordinator
+pastes a YouTube/Vimeo URL or a Cloudflare Stream UID/URL;
+`tblEventHubVideos.uploadStatus` is always `'external'`. Deliberately OUT
+of scope, tracked as Phase 1.5 against the same issue (#386):
+
+- `Portal\Core\CloudflareStream` — the Cloudflare *management* API client
+  (mint/poll/edit/delete direct-creator-uploads), modelled on `Zoom.php`.
+- The direct-upload JSON endpoints (`calendar/event/hub/video/upload-url`,
+  `calendar/event/hub/video/status`) and the vanilla-XHR upload widget
+  (progress bar, no `tus` in the first build — CSP forbids CDN JS, and
+  `tus-js-client` would have to be vendored).
+- `$cspConnectExtra` — a new page-scoped CSP extension point mirroring
+  the existing `$cspImgExtra`/`$cspMediaExtra`/`$cspFrameExtra` trio in
+  `header.php`, needed so the browser can POST straight to Cloudflare's
+  upload URL without touching DreamHost's PHP upload limits.
+
+`tblEventHubVideos` already carries every Phase 1.5 column
+(`uploadStatus`, `errorDetail`, `uploadedAt`, `lastCheckedAt`,
+`allowedOrigins`) and the admin page already carries every Phase 1.5
+setting (`cfstream.apiToken`, `cfstream.maxUploadDurationSeconds`,
+`cfstream.uploadMintPerHour`, `cfstream.defaultRequireSignedUrls`,
+`cfstream.allowedOrigins`) — Phase 1.5 should need zero schema/settings/
+admin-page changes, only new POST handlers gated behind
+`CloudflareStream::isConfigured()`.
+
+#### Phase 1.5 — SHIPPED (migration 156, routes only)
+
+As predicted, Phase 1.5 needed no schema/settings/admin-page change — just
+`Portal\Core\CloudflareStream` and three page-route handlers seeded by
+migration 156 (routes only):
+
+- `calendar/event/hub/upload-url` (POST, JSON) — mints a one-time
+  direct-upload URL via `CloudflareStream::createDirectUpload()` and inserts
+  an `uploadStatus='pending'` row. Gated in order: session → CSRF →
+  admin/coordinator → cross-site → `isConfigured()` → per-user hourly rate
+  limit (counts `tblActivityLogs` `CfStreamUploadMinted` rows in the last 60
+  min — no separate table) → input/origins validation → CF call. Returns the
+  rotated CSRF token so the no-reload poll loop keeps working.
+- `calendar/event/hub/video-status` (POST, JSON) — polled ~4 s; terminal
+  (`external`/`ready`/`error`) + non-CF rows return the stored state with no
+  CF call; `pending`/`processing` throttled to one CF GET per ~5 s;
+  reconciles the `requiresSignedUrl`/`allowedOrigins` mirrors from every
+  live GET; a transient CF failure only stamps `lastCheckedAt`, never flips
+  a video to `error`.
+- `calendar/event/hub/video-settings` (POST, form + redirect/flash) —
+  **CF-first**: `CloudflareStream::updateVideo()` runs first, the local
+  mirror updates only on confirmed success.
+
+Client: `web/public_html/assets/js/event-hub-upload.js` — basic ≤200 MB
+upload (tus deferred, still not vendored), enforces the size cap **and** a
+host allowlist (`upload.videodelivery.net` / `upload.cloudflarestream.com`)
+on the returned `uploadURL`, and writes each response's rotated CSRF token
+back into `<meta name="csrf-token">` and every `input[name=csrf_token]`.
+`$cspConnectExtra` was added to `header.php` (identical pattern to
+`$cspFrameExtra`); the hub sets it to the two upload hosts only for a
+manager on a configured install. `event-hub-save.php`'s `removeVideo`
+best-effort-deletes a portal-uploaded CF video first (a CF failure is logged
+but never blocks the local delete — a coordinator must never get stuck with
+an undeleteable row, e.g. when CF already 404s the asset).
+
+**Runbook — the second credential (API token).** Distinct from the signing
+key (step 3 above): Cloudflare dashboard → **My Profile → API Tokens →
+Create Custom Token** → permission **Account → Cloudflare Stream → Edit**,
+scoped to the Stream-owning account only → paste into
+`admin/integrations/cloudflare-stream` (`cfstream.apiToken`). With it set
+plus `cfstream.accountID`, the "Upload to Cloudflare" panel appears on the
+hub for coordinators/admins. Until it is set, `CloudflareStream::
+isConfigured()` is false and the whole upload path is inert — the hub is
+exactly the Phase-1 paste-a-link experience.
+
+---
+
+## Event Team Hub REST API read endpoints (#387)
+
+### Why: projectBookIT Event Team Hub Phase 3 integration
+
+`_apps/calendar/api/hub-resources.php` and `hub-videos.php` expose the two
+tables from Event Team Hub Phase 1 (#386, migration 155) over the public
+REST API so an external system — projectBookIT's Event Team Hub Phase 3
+(projectbookit#347) — can pull a given event's resources/videos with a
+site-scoped bearer key, without any session/cookie access to this portal.
+
+### Convention path, ApiRouter routing trap applies exactly as usual
+
+Both handlers live at `_apps/calendar/api/{action}.php` — the standard
+convention path `ApiRouter::dispatch()` resolves directly from the URL
+(`api/calendar/hub-resources` → `_apps/calendar/api/hub-resources.php`).
+**Neither is registered in `tblRoutes`** — `api/*` paths never reach
+`tblRoutes` at all (`Router::handleSpecialRoutes` hands them straight to
+`ApiRouter::dispatch` first) — see CLAUDE.md's "ApiRouter routing trap".
+The only gate is `api.calendar.hub-resources.enabled` /
+`api.calendar.hub-videos.enabled` in `tblSettings`, seeded `'true'` by
+migration 157 (settings-only migration — no schema, no routes).
+
+Note `calendar` was **not** added to `ApiRouter::V1_RESOURCES` — these two
+endpoints are legacy-convention-path only, reachable at
+`/api/calendar/hub-resources` / `/api/calendar/hub-videos`, with no
+`/api/v1/calendar/...` facade alias. Adding one is a reasonable future
+follow-up but was out of scope for #387 (the projectBookIT consumer only
+needs the legacy shape).
+
+### Auth: same dual-mode pattern as `events/list.php`/`detail.php`
+
+Both handlers open with `ApiAuth::requireRead('eventhub:read')` — the
+identical one-line dual-mode (bearer OR session) + scope-check idiom used
+by every other read endpoint. `eventhub:read` is a **read-only** scope
+(no `eventhub:write` counterpart exists yet — the Team Hub's own
+add/edit/remove/reorder actions stay on `event-hub-save.php`'s session-only
+CSRF-protected form POST; the REST surface here is consumption-only for
+Phase 3). The admin API-keys mint form's `scopeGroups` grouping
+(`_apps/admin/integrations/api-keys.php`) already tolerates a
+read-without-write resource — it renders only the checkboxes present in
+`ApiKey::SCOPES` for that resource prefix, so `eventhub` shows a single
+"Read" checkbox with no empty "Write" slot.
+
+### Tenant guard: explicit 404, not a WHERE-clause-only filter
+
+`tblEventHubResources`/`tblEventHubVideos` are child tables of `tblEvents`
+with **no own `siteID` column** (matches the `tblEventCrews`/`tblEventJobs`
+precedent from migrations 117/118 — see the migration 155 header). Both
+handlers therefore run an explicit tenant-guard query BEFORE touching
+either hub table:
+
+```php
+SELECT eventID FROM tblEvents WHERE eventID = ? AND siteID = ? AND isDeleted = 0 LIMIT 1
+```
+
+A miss (wrong site OR event doesn't exist OR soft-deleted) returns the
+identical `ApiResponse::error('Event not found', 404)` in every case —
+there is no separate "event exists but wrong tenant" response shape, so a
+scan across `eventID` values from another tenant's API key can't be used
+to enumerate which IDs exist elsewhere.
+
+### No-secret-leak discipline on the video endpoint
+
+`hub-videos.php` SELECTs an explicit column list — `videoID, provider,
+videoRef, title, requiresSignedUrl, allowedOrigins, uploadStatus,
+sortOrder` — never `SELECT *`, so a future `tblEventHubVideos` ALTER
+(e.g. a Phase 2 column) can't silently widen the API response. `videoRef`
+is intentionally included: it's the public YouTube/Vimeo ID or Cloudflare
+Stream UID a player embeds against, not a secret. What's deliberately
+EXCLUDED: any Cloudflare signing key, any signed playback token (minted
+per-viewer by `VideoEmbed::signedToken()` on the portal's own hub page,
+never handed to an API consumer), and every `cfstream.*` setting value —
+none of those columns/settings are read by either handler at all.
+`requiresSignedUrl`/`allowedOrigins` are playback-*policy* metadata (would
+a token be required, from which origins), not the token/key material
+itself, so returning them is safe and useful to a consumer deciding how to
+embed the video.
+
+---
+
+## Discovery-pass fold-in batch (#373 ApiRouter half, #339, #308, #255, migration 158)
+
+### ApiRouter never got the Router.php #373 fix
+
+`Router::dispatch()` was fixed for #373 by importing `global $mysqli,
+$SETTINGS;` immediately before `require $targetFile;` (commit `58871ca`) —
+PHP include scope is the enclosing function's locals, so a legacy controller
+reading the bootstrap DB handle as a bare `$mysqli` needs that global
+imported into `dispatch()`'s scope or it resolves to `null`.
+`ApiRouter::dispatch()`/`dispatchV1()` include handlers the identical way
+(`require $apiFile;` inside a static method) but never got the same
+import — six live handlers (`livechat/api/*`, `livestream/api/ping.php`)
+read bare `$mysqli` and fatally errored (`Fatal error: Call to a member
+function prepare() on null`) on every request. Fixed by mirroring
+`Router.php:128` at both `ApiRouter.php` call sites. No-op for handlers
+already using `App::db()` (the preferred pattern for new code).
+
+### Worship live-sync relocation — same shape as migration 144
+
+`worship/present.php` (operator console) and `worship/display.php` (public
+projector display) poll `/api/worship/state` + POST `/api/worship/advance`.
+The real handlers pre-existed at `_apps/api/worship-{state,advance}.php`
+— a location `ApiRouter::dispatch()` can never resolve to, because it
+builds the include path directly from the URL segments
+(`_apps/{appName}/api/{action}.php`) and never queries `tblRoutes`. Moved
+both files **verbatim** (same SQL, same auth checks, same CCLI logging) to
+`_apps/worship/api/{state,advance}.php` — the only change is the file
+location and the docblock. Precedent: migration 144 did the identical
+relocation for `api/livestream/ping` → `_apps/livestream/api/ping.php`.
+Migration 158 seeds `api.worship.state.enabled` / `api.worship.advance.
+enabled` = `'true'`; ApiRouter 403s a convention-path handler with no
+enabled flag exactly like a missing one, so the relocation alone isn't
+enough.
+
+### AppRegistry trap — registering an always-on app needs its enable seed IN THE SAME migration
+
+`AppRegistry::isEnabled()` returns `false` when an app's `settingKey` is
+absent from `$SETTINGS` (`AppRegistry.php:95-116`), and
+`Router::dispatch()` renders a 403 "app disabled" page for any registered-
+but-disabled app's routes (`Router.php:113-117`). Before this batch,
+`noticeboard`/`worship`/`salvation`/`kids` had working routes/tables/
+handlers but no `_core/apps/{slug}.php` file — `AppRegistry::appForRoute()`
+never matched them, so `Router::dispatch()`'s gate check (`$owningApp !==
+null && isEnabled(...) === false`) short-circuited on `$owningApp === null`
+and every request passed through ungated. The moment a `_core/apps/{slug}
+.php` file is added, that app becomes gate-eligible — if its `enabled`
+setting isn't ALSO seeded `true` in the same change, the app goes dark
+immediately (silent 403 on every route). `noticeboard.enabled` was already
+seeded (migration 145) since it self-checks the setting directly in its own
+code; `worship`/`salvation`/`kids` had no enable flag anywhere, so migration
+158 seeds all three `= 'true'` in the same migration that ships their
+`_core/apps/*.php` files — never split across two migrations/PRs.
+
+### Dead `api/*` tblRoutes rows — the check_*.py DELETE-tombstone parser only understands `= '...'` / `IN (...)`
+
+`check_route_targets.py` and `check_schema_seed_parity.py` both model
+`DELETE FROM tblRoutes WHERE routeKey = '...'` and `... WHERE routeKey IN
+(...)` structurally (see each script's `delete_re`/`DELETE_RE`) so they can
+compute the "final state" after every migration replays and confirm
+`full_schema.sql` stays in parity. A `LIKE 'api/%'` pattern is NOT
+recognised by either regex — using it would have left the 19 removed rows
+looking "still expected" in `full_schema.sql`, breaking parity. Migration
+158 therefore spells out all 19 `routeKey` values explicitly in a `DELETE
+... WHERE routeKey IN (...)` — functionally identical to a `LIKE` sweep
+(nothing else currently starts with `api/`) but readable by the audit
+tooling. Precedent: migration 056 did the same explicit-list `DELETE` for
+an earlier batch of 5 dead `api/*` rows.
+
+### Cloudflare Stream "Test connection" — machine-safe response only
+
+`CloudflareStream::testConnection()` calls the cheapest Stream endpoint
+that validates BOTH `cfstream.accountID` and `cfstream.apiToken` together —
+`GET /accounts/{acct}/stream?per_page=1` — succeeds on a brand-new account
+with zero videos, no uid needed. Returns `{success, message}` with a small
+fixed set of generic messages (not-configured / 401-403 / 404 / generic
+transport failure) — Cloudflare's own error text is deliberately never
+echoed back to the browser (only logged server-side via the shared
+`request()` path, same as every other `CloudflareStream` call), so a
+copy-pasted screenshot of the admin page can't leak anything
+token-adjacent. This is also the best low-risk way to firm up the
+**[CF-kc]**-flagged endpoint set (see `CloudflareStream.php`'s class
+docblock) before the first real upload — a wrong endpoint shape now
+surfaces as a clear "could not reach Cloudflare Stream" on the settings
+page instead of a silent failure discovered mid-upload.
+
+---
+
+Last updated: August 2026

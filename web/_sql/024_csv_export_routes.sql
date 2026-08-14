@@ -22,4 +22,5 @@ VALUES ('admin/users/export', 'admin/users/export.php', 1)
 ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 
 -- 📋 Track migration
-INSERT INTO `tblMigrations` (`filename`) VALUES ('024_csv_export_routes.sql');
+INSERT INTO `tblMigrations` (`filename`) VALUES ('024_csv_export_routes.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;

@@ -160,6 +160,21 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         </a>
     </div>
 
+    <!-- Noticeboard -->
+    <div class="col-12 col-sm-6 col-lg-4">
+        <a href="/help/noticeboard" class="text-decoration-none text-reset">
+            <div class="portal-card portal-card-branded h-100 p-4">
+                <div class="d-flex align-items-center gap-3 mb-3">
+                    <span class="d-inline-flex align-items-center justify-content-center rounded-3 bg-info bg-opacity-10 text-info" style="width:48px;height:48px;">
+                        <i class="fa-solid fa-thumbtack fa-lg"></i>
+                    </span>
+                    <h5 class="mb-0">Noticeboard</h5>
+                </div>
+                <p class="text-secondary mb-0 small">The visual poster wall — Canva, image, video and text posters, weekday scheduling, styling, and QR sharing.</p>
+            </div>
+        </a>
+    </div>
+
     <!-- Translations & Languages -->
     <div class="col-12 col-sm-6 col-lg-4">
         <a href="/help/translations" class="text-decoration-none text-reset">

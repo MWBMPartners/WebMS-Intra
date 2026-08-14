@@ -288,6 +288,131 @@ class RateLimiter
         return self::DEFAULT_WINDOW_MINUTES;
     }
 
+    /* ---------------------------------------------------------------------- */
+    /* Generic sliding-window limiter — tblApiRateLimits (#323 Phase 2)        */
+    /* ---------------------------------------------------------------------- */
+
+    /**
+     * Generic sliding-window rate-limit check against tblApiRateLimits.
+     * Does NOT record a hit itself — call recordHit() separately once the
+     * caller decides to let the request through (mirrors the check-then-act
+     * pattern used by isBlocked() above). Fails OPEN on any DB error so a
+     * database hiccup never locks every API caller out.
+     *
+     * @param string $bucket        Limiter bucket key, e.g. 'apikey:42'
+     * @param int    $maxHits       Maximum hits allowed within the window
+     * @param int    $windowSeconds Sliding window size, in seconds
+     *
+     * @return bool True if the bucket is currently over the limit
+     */
+    public static function tooMany(string $bucket, int $maxHits, int $windowSeconds): bool
+    {
+        $db = App::db();
+
+        $stmt = $db->prepare(
+            'SELECT COUNT(*) AS hitCount '
+            . 'FROM tblApiRateLimits '
+            . 'WHERE bucket = ? '
+            . 'AND hitAt >= NOW() - INTERVAL ? SECOND'
+        );
+        if ($stmt === false) {
+            // 🛡️ Fail open on DB error — never lock out every API caller
+            // because of a transient database issue.
+            return false;
+        }
+        $stmt->bind_param('si', $bucket, $windowSeconds);
+        $stmt->execute();
+        $row = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+
+        $hitCount = (int) ($row['hitCount'] ?? 0);
+
+        return $hitCount >= $maxHits;
+    }
+
+    /**
+     * Record one hit for the given bucket. Roughly 1-in-64 calls also prunes
+     * rows older than 2× the window for this bucket, keeping the table small
+     * without needing a separate cron/cleanup job.
+     *
+     * @param string $bucket        Limiter bucket key, e.g. 'apikey:42'
+     * @param int    $windowSeconds Sliding window size, in seconds — used to
+     *                              size the opportunistic prune horizon
+     */
+    public static function recordHit(string $bucket, int $windowSeconds): void
+    {
+        $db = App::db();
+
+        $stmt = $db->prepare('INSERT INTO tblApiRateLimits (bucket) VALUES (?)');
+        if ($stmt === false) {
+            // 🛡️ Fail open — a logging failure must never block the request.
+            return;
+        }
+        $stmt->bind_param('s', $bucket);
+        $stmt->execute();
+        $stmt->close();
+
+        // 🧹 Opportunistic prune — ~1-in-64 requests, capped at 500 rows per
+        //    call so a single unlucky request never pays for a huge sweep.
+        if (random_int(1, 64) === 1) {
+            $pruneSeconds = $windowSeconds * 2;
+            $pruneStmt = $db->prepare(
+                'DELETE FROM tblApiRateLimits '
+                . 'WHERE bucket = ? '
+                . 'AND hitAt < NOW() - INTERVAL ? SECOND '
+                . 'LIMIT 500'
+            );
+            if ($pruneStmt !== false) {
+                $pruneStmt->bind_param('si', $bucket, $pruneSeconds);
+                @$pruneStmt->execute();
+                $pruneStmt->close();
+            }
+        }
+    }
+
+    /**
+     * Seconds remaining until the oldest in-window hit ages out — used to
+     * populate a Retry-After response header. Returns 0 if the bucket is
+     * not currently over the limit.
+     *
+     * @param string $bucket        Limiter bucket key, e.g. 'apikey:42'
+     * @param int    $maxHits       Maximum hits allowed within the window
+     * @param int    $windowSeconds Sliding window size, in seconds
+     *
+     * @return int Seconds until the oldest hit falls out of the window
+     */
+    public static function retryAfter(string $bucket, int $maxHits, int $windowSeconds): int
+    {
+        if (self::tooMany($bucket, $maxHits, $windowSeconds) === false) {
+            return 0;
+        }
+
+        $db = App::db();
+        $stmt = $db->prepare(
+            'SELECT MIN(hitAt) AS earliest '
+            . 'FROM tblApiRateLimits '
+            . 'WHERE bucket = ? '
+            . 'AND hitAt >= NOW() - INTERVAL ? SECOND'
+        );
+        if ($stmt === false) {
+            return $windowSeconds; // Assume the full window on DB error
+        }
+        $stmt->bind_param('si', $bucket, $windowSeconds);
+        $stmt->execute();
+        $row = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+
+        if ($row === null || $row['earliest'] === null) {
+            return 0;
+        }
+
+        $earliestTime = strtotime((string) $row['earliest']);
+        $expiryTime   = $earliestTime + $windowSeconds;
+        $remaining    = $expiryTime - time();
+
+        return max(0, $remaining);
+    }
+
     /**
      * Get the client's IP address, respecting proxy headers.
      * Priority: CF-Connecting-IP > X-Forwarded-For > REMOTE_ADDR

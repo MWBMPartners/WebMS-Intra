@@ -13,4 +13,5 @@ VALUES ('expenses/withdraw/save', 'expenses/withdraw/save.php', 1)
 ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 
 -- 📋 Track migration
-INSERT INTO `tblMigrations` (`filename`) VALUES ('022_expense_withdrawal.sql');
+INSERT INTO `tblMigrations` (`filename`) VALUES ('022_expense_withdrawal.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;

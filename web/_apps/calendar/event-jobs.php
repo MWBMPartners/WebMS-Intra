@@ -73,7 +73,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <p class="text-muted small">Forms-only v1. Drag-and-drop in v1.1.</p>
 
     <form method="post" action="/calendar/event/jobs/auto-assign" class="d-inline-block mb-3"
-          onsubmit="return confirm('Auto-assign unassigned crew leaders to under-capacity jobs?');">
+          data-confirm="Auto-assign unassigned crew leaders to under-capacity jobs?">
         <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
         <input type="hidden" name="eventID" value="<?php echo $eventId; ?>">
         <button type="submit" class="btn btn-sm btn-success"><i class="fa-solid fa-shuffle me-1"></i>Auto-assign volunteers</button>

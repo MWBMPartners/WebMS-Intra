@@ -14,18 +14,35 @@
 --    Defaults to 0 so existing-row backfill matches the historical "pending"
 --    state for accounts created before the columns existed; the runtime sets
 --    it to 1 on admin-created and installer-created accounts.
-ALTER TABLE `tblLocalAccounts`
-    ADD COLUMN IF NOT EXISTS `isVerified` TINYINT(1) NOT NULL DEFAULT 0
-        COMMENT 'Whether the email was verified before activation'
-        AFTER `passwordHash`;
+-- ➕ tblLocalAccounts.isVerified — guarded ADD COLUMN (portable: MySQL 8.0 + MariaDB 10.x)
+SET @col_exists := (
+    SELECT COUNT(*) FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME   = 'tblLocalAccounts'
+      AND COLUMN_NAME  = 'isVerified'
+);
+SET @sql := IF(@col_exists = 0,
+    'ALTER TABLE `tblLocalAccounts` ADD COLUMN `isVerified` TINYINT(1) NOT NULL DEFAULT 0 COMMENT ''Whether the email was verified before activation'' AFTER `passwordHash`',
+    'SELECT 1'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
 -- 📅 Local-account creation timestamp.
 --    Defaults to CURRENT_TIMESTAMP for new inserts; for backfilling existing
 --    rows we use the most recent `lastLogin` if present, else NOW(). This is
 --    an approximation — the original creation time wasn't recorded.
-ALTER TABLE `tblLocalAccounts`
-    ADD COLUMN IF NOT EXISTS `createdAt` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-        AFTER `lastLogin`;
+-- ➕ tblLocalAccounts.createdAt — guarded ADD COLUMN (portable: MySQL 8.0 + MariaDB 10.x)
+SET @col_exists := (
+    SELECT COUNT(*) FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME   = 'tblLocalAccounts'
+      AND COLUMN_NAME  = 'createdAt'
+);
+SET @sql := IF(@col_exists = 0,
+    'ALTER TABLE `tblLocalAccounts` ADD COLUMN `createdAt` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP AFTER `lastLogin`',
+    'SELECT 1'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
 -- 🗂️ Backfill createdAt for existing rows: prefer lastLogin if it's older
 --    than the new default, else leave as the freshly-defaulted NOW().
