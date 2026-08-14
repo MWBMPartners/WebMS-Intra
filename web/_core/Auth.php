@@ -28,6 +28,8 @@
  *   Auth::csrfToken()              → string – get / create CSRF token
  *   Auth::verifyCsrf($tok)         → bool   – compare token constant-time
  *   Auth::curlPost($url, $data)    → ?string – HTTP POST via cURL
+ *   Auth::isCoordinatorOf($id)     → bool   – event coordinator check (#341)
+ *   Auth::isEventTeamMember($id)   → bool   – event team hub view check (#386)
  *
  * @see       https://owasp.org/www-community/controls/Session_Management_Cheat_Sheet
  * @package   Portal\Core
@@ -169,6 +171,85 @@ class Auth
         }
 
         return true;
+    }
+
+    /**
+     * Check whether the active user is any kind of Event Team Hub member
+     * for the given event (#386 Phase 1) — coordinator, crew leader/
+     * participant, job assignee, or a `tblEventPeople` row (host / speaker
+     * / organiser / …). Broader than `isCoordinatorOf()` (which grants
+     * MANAGE rights); this grants VIEW rights on the Team Hub only.
+     *
+     * Mirrors `isCoordinatorOf()`'s shape exactly — admin bypass + DBS
+     * gate come for free via the `isCoordinatorOf()` short-circuit below,
+     * since a coordinator is always also a team member.
+     *
+     * Usage in the hub page:
+     *   if ($eventId <= 0 || Auth::isEventTeamMember($eventId) === false) {
+     *       http_response_code(403); exit('Forbidden');
+     *   }
+     */
+    public static function isEventTeamMember(int $eventId): bool
+    {
+        if ($eventId <= 0 || self::check() === false) {
+            return false;
+        }
+        if (self::isCoordinatorOf($eventId) === true) {
+            return true;
+        }
+        $userId = (int) ($_SESSION['user_id'] ?? 0);
+        if ($userId <= 0) {
+            return false;
+        }
+        $db = App::db();
+
+        // 🎨 Crew leader or participant.
+        $stmt = $db->prepare(
+            'SELECT 1 FROM tblEventCrewMembers m '
+            . 'JOIN tblEventCrews c ON c.crewID = m.crewID '
+            . 'WHERE c.eventID = ? AND m.userID = ? LIMIT 1'
+        );
+        if ($stmt !== false) {
+            $stmt->bind_param('ii', $eventId, $userId);
+            $stmt->execute();
+            $ok = (bool) $stmt->get_result()->fetch_assoc();
+            $stmt->close();
+            if ($ok === true) {
+                return true;
+            }
+        }
+
+        // 🧰 Job assignee.
+        $stmt = $db->prepare(
+            'SELECT 1 FROM tblEventJobAssignments a '
+            . 'JOIN tblEventJobs j ON j.jobID = a.jobID '
+            . 'WHERE j.eventID = ? AND a.userID = ? LIMIT 1'
+        );
+        if ($stmt !== false) {
+            $stmt->bind_param('ii', $eventId, $userId);
+            $stmt->execute();
+            $ok = (bool) $stmt->get_result()->fetch_assoc();
+            $stmt->close();
+            if ($ok === true) {
+                return true;
+            }
+        }
+
+        // 👤 Event person (host / speaker / musician / organiser / …).
+        $stmt = $db->prepare(
+            'SELECT 1 FROM tblEventPeople WHERE eventID = ? AND userID = ? LIMIT 1'
+        );
+        if ($stmt !== false) {
+            $stmt->bind_param('ii', $eventId, $userId);
+            $stmt->execute();
+            $ok = (bool) $stmt->get_result()->fetch_assoc();
+            $stmt->close();
+            if ($ok === true) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /* ====================================================================== */

@@ -2,6 +2,149 @@
 
 
 ## [1.4.0] - 2026-07-22 (alpha)
+- fix(api): #373 (ApiRouter half) — `ApiRouter::dispatch()` and
+  `dispatchV1()` included handler files in static-method scope with no
+  `global $mysqli, $SETTINGS;` import, so any legacy handler reading the
+  bootstrap DB handle as a bare `$mysqli` fatally errored (`null->
+  prepare()`) on first hit. `Router::dispatch()` got this fix for #373
+  already (commit `58871ca`); `ApiRouter` never did. Six live handlers were
+  affected and are unbroken by this fix: `livechat/api/{send,list,moderate,
+  prompts,prompt-publish}.php` (viewer chat + admin moderation, #313) and
+  `livestream/api/ping.php` (viewer session analytics, #317/#318). No-op
+  for handlers already using `App::db()`.
+- fix(calendar): #339 residual — `calendar/manage/save.php`'s create-flow
+  slug-uniqueness probe (`SELECT eventID FROM tblEvents WHERE eventSlug =
+  ?`) had no `siteID` filter, so a slug already taken on one site needlessly
+  suffixed `-2` on another and leaked a cross-tenant existence oracle. Now
+  scoped `AND siteID = ?`. Completes #339 (the schema half — the
+  `uq_event_site_slug` composite unique key — shipped in migration 112).
+- fix(worship): #308 live-sync unreachable — the operator console
+  (`worship/present.php`) and public projector display
+  (`worship/display.php`) poll `/api/worship/state` + POST
+  `/api/worship/advance` every 500ms-1s, but the handlers sat at the
+  unreachable legacy path `_apps/api/worship-{state,advance}.php` (dead
+  `tblRoutes` rows — `api/*` paths are dispatched by `ApiRouter` directly
+  and never consult `tblRoutes`) with no `api.worship.*.enabled` flags —
+  both calls 404'd and the operator↔display sync could never work.
+  Relocated verbatim to the ApiRouter convention path
+  `_apps/worship/api/{state,advance}.php` (precedent: migration 144's
+  `api/livestream/ping` relocation); migration 158 seeds the two
+  `api.worship.*.enabled` flags. Depends on the #373 ApiRouter fix above
+  (both handlers read bare `$mysqli`).
+- feat(admin): #255 — added AppRegistry entries `_core/apps/{noticeboard,
+  worship,salvation,kids}.php` so all four surface in the `/admin/apps`
+  marketplace toggle (37 → 41 registered apps). `AppRegistry::isEnabled()`
+  returns false when an app's settingKey is missing and `Router::dispatch()`
+  403s a registered-but-disabled app's routes, so migration 158 also seeds
+  `worship.enabled` / `salvation.enabled` / `kids.enabled` = `'true'` —
+  these three had no enable flag before (always-on by virtue of not being
+  registered) and would otherwise have gone dark the moment they were
+  registered. `noticeboard.enabled` was already seeded (migration 145).
+- fix(core): dead `api/*` `tblRoutes` cleanup — 19 rows across migrations
+  035(→056)/082/099/100/106/111/133/138 that `Router::handleSpecialRoutes`
+  guarantees can never match (`api/*` paths go straight to `ApiRouter`,
+  which resolves by URL segment, not by a `tblRoutes` lookup — see
+  .claude/CLAUDE.md → "ApiRouter routing trap"). Migration 158 deletes
+  them (`DELETE ... WHERE routeKey IN (...)`, idempotent — precedent:
+  migration 056 did the same for an earlier batch of 5); the matching 19
+  `INSERT` rows are pruned from `full_schema.sql`'s seed blocks too. No
+  `api.*.enabled` SETTINGS rows were touched. The orphaned handler files at
+  `_apps/api/{tours,push,translate,ai-improve}.php` are left in place,
+  parked (no live caller for any of them today).
+- feat(admin): #386 fold-in — `Portal\Core\CloudflareStream::testConnection()`
+  (a minimal `GET /accounts/{acct}/stream?per_page=1`, machine-safe
+  success/message only, never Cloudflare's raw error text) plus a "Test
+  connection" button on `/admin/integrations/cloudflare-stream` (new
+  admin+CSRF-gated `test.php` handler, migration 158 route) — parity with
+  the BookIT Phase 2 affordance, and the cheapest legitimate way to confirm
+  the account ID + API token are valid together ahead of the first real
+  upload.
+- docs: `.claude/CLAUDE.md` — migration coverage note bumped 000-145 →
+  000-158; apps table's "not AppRegistry-registered" markers removed for
+  noticeboard/worship/salvation/kids (now registered, see above) and the
+  app count corrected 37 → 41; refreshed the "Recent ships" entry for this
+  fold-in batch.
+- feat(api): #387 Event Team Hub REST API read endpoints — projectBookIT
+  Event Team Hub Phase 3 integration (projectbookit#347). Two new
+  `_apps/calendar/api/{action}.php` handlers, `hub-resources.php` and
+  `hub-videos.php`, mirroring the `events/list.php`/`detail.php`
+  dual-mode-auth pattern: `ApiAuth::requireRead('eventhub:read')`, a
+  tenant guard confirming the requested `eventID` belongs to `Site::id()`
+  (404s rather than leaking another tenant's event), then a prepared-
+  statement read of that event's `tblEventHubResources` /
+  `tblEventHubVideos` rows (#386). The video endpoint never emits a
+  signing key, playback token, or any `cfstream.*` credential — only
+  `videoRef` (the public YouTube/Vimeo ID or Cloudflare Stream UID a
+  player embeds against) plus playback-policy metadata. New bearer-key
+  scope `eventhub:read` added to `ApiKey::SCOPES` (surfaces automatically
+  in the Admin → Integrations → API Keys mint-form checkbox grid).
+  Migration 157 seeds `api.calendar.hub-resources.enabled` /
+  `api.calendar.hub-videos.enabled` in `tblSettings` — settings-only, no
+  schema, no `tblRoutes` rows (`api/*` paths are dispatched directly by
+  `ApiRouter`, which never consults `tblRoutes` — see .claude/CLAUDE.md →
+  "ApiRouter routing trap"). OpenAPI: new `Event Team Hub` tag +
+  `EventHubResource`/`EventHubVideo` schemas + the two `GET
+  /api/calendar/hub-*` paths in `_core/api-spec.json`.
+- feat(calendar): #386 Phase 1.5 — Event Team Hub direct Cloudflare Stream
+  upload. New `Portal\Core\CloudflareStream` management-API client (Bearer
+  `cfstream.apiToken`, TLS at cURL defaults, token never logged;
+  `createDirectUpload`/`getVideo`/`updateVideo`/`deleteVideo`). Three
+  page-route JSON/form handlers (`calendar/event/hub/upload-url`,
+  `/video-status`, `/video-settings`; migration 156, routes only — 155
+  already shipped every column + setting) let a coordinator/admin mint a
+  one-time direct-upload URL and push a file straight from the browser to
+  Cloudflare (basic ≤200 MB; file never touches the server), poll
+  readiness, and edit Require-Signed-URLs / Allowed-Origins CF-first.
+  Per-user hourly mint rate limit via `tblActivityLogs`; new core
+  `$cspConnectExtra` widens `connect-src` to Cloudflare's upload hosts only
+  for a manager on a configured install; `event-hub-upload.js` enforces the
+  size cap + a host allowlist and tracks CSRF-token rotation across the
+  poll loop. `removeVideo` best-effort-deletes a portal-uploaded video from
+  Cloudflare first (logged, never blocks the local removal).
+- feat(calendar): #386 Phase 1 — Event Team Hub. Per-event staff/volunteer/
+  organiser landing page (`/calendar/event/hub?eventID=N`) extending the
+  calendar app (Calendar/Events/Preaching Plan stays ONE app). New tables
+  `tblEventHubResources` (links/notes grouped by a free-text section,
+  notes rendered via `Portal\Core\Markdown::render()`) and
+  `tblEventHubVideos` — the latter ships its FINAL shape from day one
+  (`uploadStatus` default `'external'` plus the Phase 1.5 upload-lifecycle
+  columns: `errorDetail`, `uploadedAt`, `lastCheckedAt`, `allowedOrigins`)
+  so the Cloudflare direct-upload follow-up never needs an ALTER. New
+  `Portal\Core\VideoEmbed` core helper: allowlist `parse()` detects
+  YouTube/Vimeo/Cloudflare Stream from a pasted URL or bare ID (never
+  stores/embeds an arbitrary raw URL), `embedUrl()` builds the safe iframe
+  src (re-validating the ref's character class immediately before
+  interpolation), `frameSrcOrigins()` computes the page-scoped
+  `$cspFrameExtra` list, and `signedToken()` hand-signs an RS256 JWT via
+  `openssl_sign()` for Cloudflare Stream's signed-URL playback (the
+  vendored `simplejwt` library is verify-only, so this is new signing
+  code, not an extension of it) — never throws, logs via `Logger` and
+  returns null on a missing/invalid signing key so the page renders an
+  "unavailable — check Stream settings" tile instead of a broken iframe.
+  New `Auth::isEventTeamMember()` (coordinator OR crew leader/participant
+  OR job assignee OR a `tblEventPeople` row) gates VIEW access; the
+  existing `isCoordinatorOf() || isAdmin()` idiom still gates MANAGE
+  (inline add/edit/remove/reorder forms for resources + videos, plus a
+  tool strip linking the previously-unlinked
+  `/calendar/event/{crews,jobs,attendance,broadcast}` +
+  `/admin/calendar/registrations` pages). New admin page
+  `/admin/integrations/cloudflare-stream` ships the FULL `cfstream.*`
+  field list — including `apiToken`, which nothing in this release uses —
+  so the Phase 1.5 direct-upload build needs no follow-up migration or
+  admin-page change, only new POST handlers gated behind
+  `CloudflareStream::isConfigured()`; secrets (`apiToken`,
+  `signingKeyPem`) are `isSensitive`-encrypted, never re-displayed, and a
+  blank submit preserves the existing value (mirrors
+  `admin/integrations/zoom/save.php`). "Team Hub" entry-point links added
+  to `my-events.php` rows and the event detail page for any viewer
+  passing `Auth::isEventTeamMember()`. Migration 155 seeds only the four
+  routes whose handler files ship in this PR (the Phase 1.5 upload-url/
+  status JSON endpoints are deliberately NOT seeded yet) plus the full
+  `cfstream.*` settings defaults, all off/blank. Explicitly OUT of scope
+  (Phase 1.5): the Cloudflare *management* API (`CloudflareStream` class),
+  direct-upload endpoints, upload JS, and the `$cspConnectExtra` core
+  change. All 10 `tools/audit-checks/` scripts clean; `full_schema.sql`
+  parity maintained (header bumped to "Covers migrations: 000-155").
 - docs: refresh `.claude/CLAUDE.md` apps table — was ~17 rows, now covers all
   37 AppRegistry apps (`_core/apps/*.php`) plus `noticeboard`/`worship`/
   `salvation`/`kids` (working, shipped, but not yet AppRegistry-registered)

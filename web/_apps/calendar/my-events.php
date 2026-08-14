@@ -97,6 +97,9 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 <div class="portal-data-row-aside text-end">
                     <span class="badge <?php echo $statusBadge[$r['status']] ?? 'bg-secondary'; ?> mb-2"><?php echo htmlspecialchars(ucfirst((string) $r['status']), ENT_QUOTES, 'UTF-8'); ?></span>
                     <div>
+                        <a href="/calendar/event/hub?eventID=<?php echo (int) $r['eventID']; ?>" class="btn btn-outline-secondary btn-sm" title="Team Hub">
+                            <i class="fa-solid fa-people-roof"></i> Team Hub
+                        </a>
                         <a href="/calendar/manage?edit=<?php echo (int) $r['eventID']; ?>" class="btn btn-outline-primary btn-sm" title="Manage">
                             <i class="fa-solid fa-pen"></i> Manage
                         </a>

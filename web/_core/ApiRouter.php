@@ -126,6 +126,11 @@ class ApiRouter
         }
 
         // 🚀 Include the API handler
+        //    This require runs inside dispatch()'s METHOD scope, so — same as
+        //    Router::dispatch() — legacy handlers referencing bare $mysqli /
+        //    $SETTINGS would see them undefined without an explicit import.
+        //    No-op for handlers already using App::db()/App::settings().
+        global $mysqli, $SETTINGS; // #373 — expose bootstrap globals to controllers
         require $apiFile;
     }
 
@@ -218,6 +223,7 @@ class ApiRouter
             ApiResponse::error('This API endpoint is disabled', 403);
         }
 
+        global $mysqli, $SETTINGS; // #373 — expose bootstrap globals to controllers
         require $apiFile;
         exit();
     }

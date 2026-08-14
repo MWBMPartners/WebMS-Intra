@@ -559,7 +559,33 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 </div>
 
 <!-- ====================================================================== -->
-<!-- 6️⃣ Webhooks — Outbound Event Notifications (#324)                      -->
+<!-- 6️⃣ Cloudflare Stream — Event Team Hub video playback (#386)             -->
+<!-- ====================================================================== -->
+<div class="card mb-4">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <h5 class="mb-0"><i class="fa-solid fa-video me-2" aria-hidden="true"></i>Cloudflare Stream</h5>
+        <?php
+        $cfStreamEnabled = ((string) (App::settings('cfstream.enabled') ?? 'false')) === 'true';
+        ?>
+        <?php if ($cfStreamEnabled === true): ?>
+            <span class="badge bg-success"><i class="fa-solid fa-circle-check me-1" aria-hidden="true"></i>Enabled</span>
+        <?php else: ?>
+            <span class="badge bg-secondary"><i class="fa-solid fa-circle-minus me-1" aria-hidden="true"></i>Disabled</span>
+        <?php endif; ?>
+    </div>
+    <div class="card-body">
+        <p class="text-secondary small mb-3">
+            Signing key + video-playback settings for the Calendar <a href="/calendar">Team Hub</a>'s
+            YouTube / Vimeo / Cloudflare Stream video grid (#386).
+        </p>
+        <a href="/admin/integrations/cloudflare-stream" class="btn btn-outline-primary btn-sm">
+            <i class="fa-solid fa-arrow-right me-1" aria-hidden="true"></i>Manage Cloudflare Stream
+        </a>
+    </div>
+</div>
+
+<!-- ====================================================================== -->
+<!-- 7️⃣ Webhooks — Outbound Event Notifications (#324)                      -->
 <!-- ====================================================================== -->
 <div class="card mb-4">
     <div class="card-header d-flex justify-content-between align-items-center">

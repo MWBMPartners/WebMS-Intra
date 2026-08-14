@@ -312,11 +312,18 @@ endif;
                 <?php endforeach; ?>
             </div>
         </div>
-        <?php if (App::isAdmin() === true): ?>
-            <a href="/calendar/manage?edit=<?php echo (int) $event['eventID']; ?>" class="btn btn-outline-primary btn-sm">
-                <i class="fa-solid fa-pen me-1"></i>Edit
-            </a>
-        <?php endif; ?>
+        <div class="d-flex gap-2">
+            <?php if (Auth::check() === true && Auth::isEventTeamMember((int) $event['eventID']) === true): ?>
+                <a href="/calendar/event/hub?eventID=<?php echo (int) $event['eventID']; ?>" class="btn btn-outline-secondary btn-sm">
+                    <i class="fa-solid fa-people-roof me-1"></i>Team Hub
+                </a>
+            <?php endif; ?>
+            <?php if (App::isAdmin() === true): ?>
+                <a href="/calendar/manage?edit=<?php echo (int) $event['eventID']; ?>" class="btn btn-outline-primary btn-sm">
+                    <i class="fa-solid fa-pen me-1"></i>Edit
+                </a>
+            <?php endif; ?>
+        </div>
     </div>
 
     <div class="row g-4">

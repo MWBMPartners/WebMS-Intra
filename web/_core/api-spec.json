@@ -62,6 +62,10 @@
       "description": "Visual poster wall (Canva embeds, image/video/text posters)"
     },
     {
+      "name": "Event Team Hub",
+      "description": "Per-event resources list + video grid — projectBookIT Event Team Hub integration (#387)"
+    },
+    {
       "name": "Expenses",
       "description": "Expense claims, line items, and (session-only) approval workflow."
     },
@@ -823,6 +827,89 @@
             "type": "boolean"
           }
         }
+      },
+      "EventHubResource": {
+        "type": "object",
+        "description": "One row from an event's Team Hub Resources list (GET /api/calendar/hub-resources) — a link or a free-text note, grouped into a free-text section label.",
+        "properties": {
+          "resourceID": {
+            "type": "integer"
+          },
+          "section": {
+            "type": "string",
+            "example": "Before the event",
+            "description": "Free-text grouping label, e.g. \"Before the event\" / \"On the day\"."
+          },
+          "resourceType": {
+            "type": "string",
+            "enum": [
+              "link",
+              "note"
+            ]
+          },
+          "title": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string",
+            "nullable": true,
+            "description": "Set when resourceType=link."
+          },
+          "body": {
+            "type": "string",
+            "nullable": true,
+            "description": "Set when resourceType=note. Markdown source (unrendered)."
+          },
+          "sortOrder": {
+            "type": "integer"
+          }
+        }
+      },
+      "EventHubVideo": {
+        "type": "object",
+        "description": "One row from an event's Team Hub video grid (GET /api/calendar/hub-videos). NEVER includes signing keys, playback tokens, or any cfstream.* credential — videoRef is the public provider ID/UID a player embeds against.",
+        "properties": {
+          "videoID": {
+            "type": "integer"
+          },
+          "provider": {
+            "type": "string",
+            "enum": [
+              "youtube",
+              "vimeo",
+              "cloudflare"
+            ]
+          },
+          "videoRef": {
+            "type": "string",
+            "description": "YouTube 11-char ID / Vimeo numeric ID / Cloudflare Stream 32-hex UID — the public reference a player embeds against, never a secret."
+          },
+          "title": {
+            "type": "string"
+          },
+          "requiresSignedUrl": {
+            "type": "boolean",
+            "description": "cloudflare only — whether playback requires a signed URL. Policy metadata, not a token."
+          },
+          "allowedOrigins": {
+            "type": "string",
+            "nullable": true,
+            "description": "cloudflare only — comma-joined allowed embed origins."
+          },
+          "uploadStatus": {
+            "type": "string",
+            "enum": [
+              "external",
+              "pending",
+              "processing",
+              "ready",
+              "error"
+            ]
+          },
+          "sortOrder": {
+            "type": "integer"
+          }
+        }
       }
     }
   },
@@ -1016,6 +1103,130 @@
           },
           "404": {
             "description": "Event not found or already deleted"
+          }
+        }
+      }
+    },
+    "/api/calendar/hub-resources": {
+      "get": {
+        "tags": [
+          "Event Team Hub",
+          "Legacy Alias"
+        ],
+        "summary": "List an event's Team Hub resources (links + notes)",
+        "description": "Requires scope `eventhub:read` (bearer) or an authenticated session. The event must belong to the caller's own site — a bearer key is tenant-pinned to the site it was minted for — or this 404s rather than revealing another tenant's event. Built for the projectBookIT Event Team Hub integration (#387).",
+        "parameters": [
+          {
+            "name": "eventID",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "eventID": {
+                      "type": "integer"
+                    },
+                    "resources": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/EventHubResource"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing/invalid eventID"
+          },
+          "401": {
+            "description": "Auth required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Endpoint disabled, or bearer key missing the `eventhub:read` scope"
+          },
+          "404": {
+            "description": "Event not found (including: exists, but on a different tenant's site)"
+          }
+        }
+      }
+    },
+    "/api/calendar/hub-videos": {
+      "get": {
+        "tags": [
+          "Event Team Hub",
+          "Legacy Alias"
+        ],
+        "summary": "List an event's Team Hub video grid",
+        "description": "Requires scope `eventhub:read` (bearer) or an authenticated session. Same tenant guard as GET /api/calendar/hub-resources. The response NEVER includes a signing key, playback token, or any `cfstream.*` credential — only `videoRef` (the public provider ID/UID a player embeds against) and playback-policy metadata. Built for the projectBookIT Event Team Hub integration (#387).",
+        "parameters": [
+          {
+            "name": "eventID",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "eventID": {
+                      "type": "integer"
+                    },
+                    "videos": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/EventHubVideo"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing/invalid eventID"
+          },
+          "401": {
+            "description": "Auth required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Endpoint disabled, or bearer key missing the `eventhub:read` scope"
+          },
+          "404": {
+            "description": "Event not found (including: exists, but on a different tenant's site)"
           }
         }
       }

@@ -60,6 +60,7 @@ class ApiKey
         'tasks:read', 'tasks:write',
         'noticeboard:read', 'noticeboard:write',
         'users:read', 'users:write',
+        'eventhub:read',
     ];
 
     /**

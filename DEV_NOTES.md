@@ -2160,4 +2160,364 @@ returning a plain-text `OK {"sitesSwept":N,"inserted":{...}}` summary.
 
 ---
 
-Last updated: July 2026
+## Event Team Hub Phase 1 (#386)
+
+### Architecture: extends the calendar app, not a new app
+
+`/calendar/event/hub` lives in `_apps/calendar/` (`event-hub.php` +
+`event-hub-save.php`), not a new top-level app — CLAUDE.md is explicit
+that Calendar/Events/Preaching Plan is ONE app, and every input the hub
+composes (event, coordinators, crews, jobs, people) already lives in the
+calendar app's tables, keyed by `eventID`. The two genuinely reusable
+pieces — provider detection, embed URLs, CF signed tokens, CSP frame-src
+lists — live in `_core/VideoEmbed.php` so `/live`, noticeboard, or
+recordings can adopt the same helper later without dragging in the
+calendar app.
+
+### Access control: `canView` vs `canManage`
+
+Two distinct gates, deliberately different in breadth:
+
+- `canView` = `Auth::isEventTeamMember($eventId)` — coordinator OR crew
+  leader/participant OR job assignee OR a `tblEventPeople` row (host/
+  speaker/organiser/…). Grants read access to the hub page only.
+- `canManage` = `App::isAdmin() || Auth::isCoordinatorOf($eventId)` — the
+  existing house idiom, unchanged, used by every other event sub-tool
+  (crews/jobs/attendance/broadcast). Grants the inline add/edit/remove/
+  reorder forms and the tool-strip links.
+
+`isEventTeamMember()` mirrors `isCoordinatorOf()`'s shape exactly (same
+`self::check()` + `$eventId <= 0` guards, same `$db->prepare()` /
+`bind_param()` / `fetch_assoc()` / `close()` rhythm) so the two methods
+stay trivially comparable during review. All four membership tables
+(`tblEventCoordinators`, `tblEventCrewMembers`, `tblEventJobAssignments`,
+`tblEventPeople`) cascade-delete with their event, so hub access can never
+outlive the event it's scoped to.
+
+### Video providers: allowlist detection, never a raw embed
+
+`VideoEmbed::parse()` is the single place a pasted string becomes a
+`{provider, ref}` pair — YouTube (`watch?v=`, `youtu.be/`, `/shorts/`,
+`/live/`, `/embed/`), Vimeo (`vimeo.com/<id>`,
+`player.vimeo.com/video/<id>`), or Cloudflare Stream (UID embedded in
+`customer-*.cloudflarestream.com`, `watch.cloudflarestream.com`, or
+`iframe.videodelivery.net`, or a bare 32-hex UID). Anything else returns
+`null` — `event-hub-save.php`'s `addVideo` action flashes an error and
+stores nothing. Every `embedUrl()` call re-validates the ref's character
+class immediately before string-interpolating it into an iframe `src`
+(the same discipline as `Livestream::embedUrl()`'s ID sanitiser), so even
+a corrupted/tampered database row can't produce an XSS-bearing iframe.
+
+### Cloudflare Stream signed-URL playback (no vendored JWT encoder)
+
+`_vendor/simplejwt/JWT.php` is **verify-only** (built for MS365/Google ID
+tokens) — it has no encode/sign capability, and it is deliberately not
+extended for this, since it's scoped as an IdP-token verifier. Signing is
+new code in `VideoEmbed::signedToken()`:
+
+1. Build the compact JWT segments by hand: `header = {"alg":"RS256",
+   "kid":<keyID>}`, `payload = {"sub":<uid>, "kid":<keyID>,
+   "exp":now+ttl, "downloadable":false}`, both base64url-encoded (RFC
+   4648 §5, no padding).
+2. `openssl_sign($header.'.'.$payload, $signature, $pem,
+   OPENSSL_ALGO_SHA256)` — the same primitive `simplejwt` uses for
+   verification, just run in the opposite direction.
+3. Token = `header.payload.` + base64url(`$signature`).
+
+The PEM (`cfstream.signingKeyPem`, `isSensitive = 1`, libsodium-encrypted
+via `encrypt_setting()`/`decrypt_setting()`) and the key ID never leave
+the server — only the short-lived JWT reaches the browser, inside an
+iframe `src` that itself is never logged. A missing/invalid key makes
+`signedToken()` return `null` (logged via `Logger::errorPlatform()`,
+**never** logging the PEM or signature) — the hub page renders an
+"unavailable — check Stream settings" tile rather than a broken iframe.
+Tokens are cached in `$_SESSION['cfstream_tokens'][$uid]` plus a
+per-request static memo, reused while more than 1/10th of
+`cfstream.tokenTtlSeconds` (default 21600s / 6h) remains — RSA-2048
+signing is ~1ms, so this is belt-and-braces, not load-bearing.
+
+### Cloudflare Stream credential-setup runbook
+
+Two **separate** credentials — see the two-credential explainer on
+`/admin/integrations/cloudflare-stream` itself:
+
+1. **Pick the Cloudflare account** that owns (or will own) the Stream
+   subscription. This portal's Cloudflare MCP connection exposes D1/KV/
+   R2/Workers only, **not Stream** — the portal cannot see or create
+   either credential below; an admin must do both in the Cloudflare
+   dashboard/API directly.
+2. **Create the Stream:Edit API token** (Phase 1.5 — captured now for
+   forward-compatibility, unused by anything shipped in this release):
+   Cloudflare dashboard → **My Profile → API Tokens → Create Token →
+   Custom Token** → permission **Account → Cloudflare Stream → Edit**,
+   scoped to the one account from step 1 (not "all accounts"), no zone
+   permissions. Optionally pin it to the DreamHost server's outbound IP
+   under "Client IP Address Filtering". Paste the token into **API
+   token** on the admin page — it's `isSensitive`-encrypted and never
+   re-displayed once saved.
+3. **Create the signing key** (used TODAY for signed-URL playback): the
+   Cloudflare dashboard has **no UI** for this — it must be created via
+   the API:
+   ```
+   curl -X POST "https://api.cloudflare.com/client/v4/accounts/<accountID>/stream/keys" \
+        -H "Authorization: Bearer <a token with Stream:Edit>"
+   ```
+   The response contains `result.id` (→ **Signing key ID**) and
+   `result.pem` (→ **Signing key PEM**, base64-encoded in the API
+   response — paste the decoded PEM, including the
+   `-----BEGIN PRIVATE KEY-----`/`-----END-----` lines, into the
+   textarea). **This is a one-time, non-retrievable secret** — Cloudflare
+   does not let you fetch the private key again after creation, so paste
+   it into the admin page (or a password manager) immediately.
+4. Fill in **Account ID** (32-hex, from the Cloudflare dashboard URL or
+   `GET /accounts`) and **Customer code** (the `customer-<code>` segment
+   your account's Stream playback URLs already use — visible on any
+   existing video's embed code, or `GET /accounts/{id}/stream` → any
+   video's `preview`/`playback.hls` URL).
+5. Tick **Enable Cloudflare Stream video embeds** and save. Existing
+   Cloudflare Stream videos on the hub whose `requiresSignedUrl` is
+   unticked will start rendering immediately (playback needs only the
+   customer code); signed videos need the signing key from step 3.
+
+### Phase 1 vs Phase 1.5 scope
+
+Phase 1 (this build) is **external references only** — a coordinator
+pastes a YouTube/Vimeo URL or a Cloudflare Stream UID/URL;
+`tblEventHubVideos.uploadStatus` is always `'external'`. Deliberately OUT
+of scope, tracked as Phase 1.5 against the same issue (#386):
+
+- `Portal\Core\CloudflareStream` — the Cloudflare *management* API client
+  (mint/poll/edit/delete direct-creator-uploads), modelled on `Zoom.php`.
+- The direct-upload JSON endpoints (`calendar/event/hub/video/upload-url`,
+  `calendar/event/hub/video/status`) and the vanilla-XHR upload widget
+  (progress bar, no `tus` in the first build — CSP forbids CDN JS, and
+  `tus-js-client` would have to be vendored).
+- `$cspConnectExtra` — a new page-scoped CSP extension point mirroring
+  the existing `$cspImgExtra`/`$cspMediaExtra`/`$cspFrameExtra` trio in
+  `header.php`, needed so the browser can POST straight to Cloudflare's
+  upload URL without touching DreamHost's PHP upload limits.
+
+`tblEventHubVideos` already carries every Phase 1.5 column
+(`uploadStatus`, `errorDetail`, `uploadedAt`, `lastCheckedAt`,
+`allowedOrigins`) and the admin page already carries every Phase 1.5
+setting (`cfstream.apiToken`, `cfstream.maxUploadDurationSeconds`,
+`cfstream.uploadMintPerHour`, `cfstream.defaultRequireSignedUrls`,
+`cfstream.allowedOrigins`) — Phase 1.5 should need zero schema/settings/
+admin-page changes, only new POST handlers gated behind
+`CloudflareStream::isConfigured()`.
+
+#### Phase 1.5 — SHIPPED (migration 156, routes only)
+
+As predicted, Phase 1.5 needed no schema/settings/admin-page change — just
+`Portal\Core\CloudflareStream` and three page-route handlers seeded by
+migration 156 (routes only):
+
+- `calendar/event/hub/upload-url` (POST, JSON) — mints a one-time
+  direct-upload URL via `CloudflareStream::createDirectUpload()` and inserts
+  an `uploadStatus='pending'` row. Gated in order: session → CSRF →
+  admin/coordinator → cross-site → `isConfigured()` → per-user hourly rate
+  limit (counts `tblActivityLogs` `CfStreamUploadMinted` rows in the last 60
+  min — no separate table) → input/origins validation → CF call. Returns the
+  rotated CSRF token so the no-reload poll loop keeps working.
+- `calendar/event/hub/video-status` (POST, JSON) — polled ~4 s; terminal
+  (`external`/`ready`/`error`) + non-CF rows return the stored state with no
+  CF call; `pending`/`processing` throttled to one CF GET per ~5 s;
+  reconciles the `requiresSignedUrl`/`allowedOrigins` mirrors from every
+  live GET; a transient CF failure only stamps `lastCheckedAt`, never flips
+  a video to `error`.
+- `calendar/event/hub/video-settings` (POST, form + redirect/flash) —
+  **CF-first**: `CloudflareStream::updateVideo()` runs first, the local
+  mirror updates only on confirmed success.
+
+Client: `web/public_html/assets/js/event-hub-upload.js` — basic ≤200 MB
+upload (tus deferred, still not vendored), enforces the size cap **and** a
+host allowlist (`upload.videodelivery.net` / `upload.cloudflarestream.com`)
+on the returned `uploadURL`, and writes each response's rotated CSRF token
+back into `<meta name="csrf-token">` and every `input[name=csrf_token]`.
+`$cspConnectExtra` was added to `header.php` (identical pattern to
+`$cspFrameExtra`); the hub sets it to the two upload hosts only for a
+manager on a configured install. `event-hub-save.php`'s `removeVideo`
+best-effort-deletes a portal-uploaded CF video first (a CF failure is logged
+but never blocks the local delete — a coordinator must never get stuck with
+an undeleteable row, e.g. when CF already 404s the asset).
+
+**Runbook — the second credential (API token).** Distinct from the signing
+key (step 3 above): Cloudflare dashboard → **My Profile → API Tokens →
+Create Custom Token** → permission **Account → Cloudflare Stream → Edit**,
+scoped to the Stream-owning account only → paste into
+`admin/integrations/cloudflare-stream` (`cfstream.apiToken`). With it set
+plus `cfstream.accountID`, the "Upload to Cloudflare" panel appears on the
+hub for coordinators/admins. Until it is set, `CloudflareStream::
+isConfigured()` is false and the whole upload path is inert — the hub is
+exactly the Phase-1 paste-a-link experience.
+
+---
+
+## Event Team Hub REST API read endpoints (#387)
+
+### Why: projectBookIT Event Team Hub Phase 3 integration
+
+`_apps/calendar/api/hub-resources.php` and `hub-videos.php` expose the two
+tables from Event Team Hub Phase 1 (#386, migration 155) over the public
+REST API so an external system — projectBookIT's Event Team Hub Phase 3
+(projectbookit#347) — can pull a given event's resources/videos with a
+site-scoped bearer key, without any session/cookie access to this portal.
+
+### Convention path, ApiRouter routing trap applies exactly as usual
+
+Both handlers live at `_apps/calendar/api/{action}.php` — the standard
+convention path `ApiRouter::dispatch()` resolves directly from the URL
+(`api/calendar/hub-resources` → `_apps/calendar/api/hub-resources.php`).
+**Neither is registered in `tblRoutes`** — `api/*` paths never reach
+`tblRoutes` at all (`Router::handleSpecialRoutes` hands them straight to
+`ApiRouter::dispatch` first) — see CLAUDE.md's "ApiRouter routing trap".
+The only gate is `api.calendar.hub-resources.enabled` /
+`api.calendar.hub-videos.enabled` in `tblSettings`, seeded `'true'` by
+migration 157 (settings-only migration — no schema, no routes).
+
+Note `calendar` was **not** added to `ApiRouter::V1_RESOURCES` — these two
+endpoints are legacy-convention-path only, reachable at
+`/api/calendar/hub-resources` / `/api/calendar/hub-videos`, with no
+`/api/v1/calendar/...` facade alias. Adding one is a reasonable future
+follow-up but was out of scope for #387 (the projectBookIT consumer only
+needs the legacy shape).
+
+### Auth: same dual-mode pattern as `events/list.php`/`detail.php`
+
+Both handlers open with `ApiAuth::requireRead('eventhub:read')` — the
+identical one-line dual-mode (bearer OR session) + scope-check idiom used
+by every other read endpoint. `eventhub:read` is a **read-only** scope
+(no `eventhub:write` counterpart exists yet — the Team Hub's own
+add/edit/remove/reorder actions stay on `event-hub-save.php`'s session-only
+CSRF-protected form POST; the REST surface here is consumption-only for
+Phase 3). The admin API-keys mint form's `scopeGroups` grouping
+(`_apps/admin/integrations/api-keys.php`) already tolerates a
+read-without-write resource — it renders only the checkboxes present in
+`ApiKey::SCOPES` for that resource prefix, so `eventhub` shows a single
+"Read" checkbox with no empty "Write" slot.
+
+### Tenant guard: explicit 404, not a WHERE-clause-only filter
+
+`tblEventHubResources`/`tblEventHubVideos` are child tables of `tblEvents`
+with **no own `siteID` column** (matches the `tblEventCrews`/`tblEventJobs`
+precedent from migrations 117/118 — see the migration 155 header). Both
+handlers therefore run an explicit tenant-guard query BEFORE touching
+either hub table:
+
+```php
+SELECT eventID FROM tblEvents WHERE eventID = ? AND siteID = ? AND isDeleted = 0 LIMIT 1
+```
+
+A miss (wrong site OR event doesn't exist OR soft-deleted) returns the
+identical `ApiResponse::error('Event not found', 404)` in every case —
+there is no separate "event exists but wrong tenant" response shape, so a
+scan across `eventID` values from another tenant's API key can't be used
+to enumerate which IDs exist elsewhere.
+
+### No-secret-leak discipline on the video endpoint
+
+`hub-videos.php` SELECTs an explicit column list — `videoID, provider,
+videoRef, title, requiresSignedUrl, allowedOrigins, uploadStatus,
+sortOrder` — never `SELECT *`, so a future `tblEventHubVideos` ALTER
+(e.g. a Phase 2 column) can't silently widen the API response. `videoRef`
+is intentionally included: it's the public YouTube/Vimeo ID or Cloudflare
+Stream UID a player embeds against, not a secret. What's deliberately
+EXCLUDED: any Cloudflare signing key, any signed playback token (minted
+per-viewer by `VideoEmbed::signedToken()` on the portal's own hub page,
+never handed to an API consumer), and every `cfstream.*` setting value —
+none of those columns/settings are read by either handler at all.
+`requiresSignedUrl`/`allowedOrigins` are playback-*policy* metadata (would
+a token be required, from which origins), not the token/key material
+itself, so returning them is safe and useful to a consumer deciding how to
+embed the video.
+
+---
+
+## Discovery-pass fold-in batch (#373 ApiRouter half, #339, #308, #255, migration 158)
+
+### ApiRouter never got the Router.php #373 fix
+
+`Router::dispatch()` was fixed for #373 by importing `global $mysqli,
+$SETTINGS;` immediately before `require $targetFile;` (commit `58871ca`) —
+PHP include scope is the enclosing function's locals, so a legacy controller
+reading the bootstrap DB handle as a bare `$mysqli` needs that global
+imported into `dispatch()`'s scope or it resolves to `null`.
+`ApiRouter::dispatch()`/`dispatchV1()` include handlers the identical way
+(`require $apiFile;` inside a static method) but never got the same
+import — six live handlers (`livechat/api/*`, `livestream/api/ping.php`)
+read bare `$mysqli` and fatally errored (`Fatal error: Call to a member
+function prepare() on null`) on every request. Fixed by mirroring
+`Router.php:128` at both `ApiRouter.php` call sites. No-op for handlers
+already using `App::db()` (the preferred pattern for new code).
+
+### Worship live-sync relocation — same shape as migration 144
+
+`worship/present.php` (operator console) and `worship/display.php` (public
+projector display) poll `/api/worship/state` + POST `/api/worship/advance`.
+The real handlers pre-existed at `_apps/api/worship-{state,advance}.php`
+— a location `ApiRouter::dispatch()` can never resolve to, because it
+builds the include path directly from the URL segments
+(`_apps/{appName}/api/{action}.php`) and never queries `tblRoutes`. Moved
+both files **verbatim** (same SQL, same auth checks, same CCLI logging) to
+`_apps/worship/api/{state,advance}.php` — the only change is the file
+location and the docblock. Precedent: migration 144 did the identical
+relocation for `api/livestream/ping` → `_apps/livestream/api/ping.php`.
+Migration 158 seeds `api.worship.state.enabled` / `api.worship.advance.
+enabled` = `'true'`; ApiRouter 403s a convention-path handler with no
+enabled flag exactly like a missing one, so the relocation alone isn't
+enough.
+
+### AppRegistry trap — registering an always-on app needs its enable seed IN THE SAME migration
+
+`AppRegistry::isEnabled()` returns `false` when an app's `settingKey` is
+absent from `$SETTINGS` (`AppRegistry.php:95-116`), and
+`Router::dispatch()` renders a 403 "app disabled" page for any registered-
+but-disabled app's routes (`Router.php:113-117`). Before this batch,
+`noticeboard`/`worship`/`salvation`/`kids` had working routes/tables/
+handlers but no `_core/apps/{slug}.php` file — `AppRegistry::appForRoute()`
+never matched them, so `Router::dispatch()`'s gate check (`$owningApp !==
+null && isEnabled(...) === false`) short-circuited on `$owningApp === null`
+and every request passed through ungated. The moment a `_core/apps/{slug}
+.php` file is added, that app becomes gate-eligible — if its `enabled`
+setting isn't ALSO seeded `true` in the same change, the app goes dark
+immediately (silent 403 on every route). `noticeboard.enabled` was already
+seeded (migration 145) since it self-checks the setting directly in its own
+code; `worship`/`salvation`/`kids` had no enable flag anywhere, so migration
+158 seeds all three `= 'true'` in the same migration that ships their
+`_core/apps/*.php` files — never split across two migrations/PRs.
+
+### Dead `api/*` tblRoutes rows — the check_*.py DELETE-tombstone parser only understands `= '...'` / `IN (...)`
+
+`check_route_targets.py` and `check_schema_seed_parity.py` both model
+`DELETE FROM tblRoutes WHERE routeKey = '...'` and `... WHERE routeKey IN
+(...)` structurally (see each script's `delete_re`/`DELETE_RE`) so they can
+compute the "final state" after every migration replays and confirm
+`full_schema.sql` stays in parity. A `LIKE 'api/%'` pattern is NOT
+recognised by either regex — using it would have left the 19 removed rows
+looking "still expected" in `full_schema.sql`, breaking parity. Migration
+158 therefore spells out all 19 `routeKey` values explicitly in a `DELETE
+... WHERE routeKey IN (...)` — functionally identical to a `LIKE` sweep
+(nothing else currently starts with `api/`) but readable by the audit
+tooling. Precedent: migration 056 did the same explicit-list `DELETE` for
+an earlier batch of 5 dead `api/*` rows.
+
+### Cloudflare Stream "Test connection" — machine-safe response only
+
+`CloudflareStream::testConnection()` calls the cheapest Stream endpoint
+that validates BOTH `cfstream.accountID` and `cfstream.apiToken` together —
+`GET /accounts/{acct}/stream?per_page=1` — succeeds on a brand-new account
+with zero videos, no uid needed. Returns `{success, message}` with a small
+fixed set of generic messages (not-configured / 401-403 / 404 / generic
+transport failure) — Cloudflare's own error text is deliberately never
+echoed back to the browser (only logged server-side via the shared
+`request()` path, same as every other `CloudflareStream` call), so a
+copy-pasted screenshot of the admin page can't leak anything
+token-adjacent. This is also the best low-risk way to firm up the
+**[CF-kc]**-flagged endpoint set (see `CloudflareStream.php`'s class
+docblock) before the first real upload — a wrong endpoint shape now
+surfaces as a clear "could not reach Cloudflare Stream" on the settings
+page instead of a silent failure discovered mid-upload.
+
+---
+
+Last updated: August 2026
