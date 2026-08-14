@@ -41,6 +41,7 @@
  *   CloudflareStream::getVideo($uid)                                  -> ?array (CF's `result` object)
  *   CloudflareStream::updateVideo($uid, $signed, $origins)            -> bool
  *   CloudflareStream::deleteVideo($uid)                               -> bool
+ *   CloudflareStream::testConnection()                                -> array{success:bool,message:string}
  *
  * @package   Portal\Core
  * @author    MWBM Partners Ltd (t/a MWservices)
@@ -225,6 +226,64 @@ class CloudflareStream
         $resp = self::request('DELETE', '/stream/' . $uid);
 
         return $resp['success'] === true;
+    }
+
+    /* ====================================================================== */
+    /* Connectivity check                                                     */
+    /* ====================================================================== */
+
+    /**
+     * Admin-page "Test connection" button (#386 fold-in — parity with the
+     * BookIT Phase 2 affordance, and the cheapest legitimate way to confirm
+     * the **[CF-kc]** endpoint set actually matches the live API before the
+     * first real upload). Calls the cheapest Stream endpoint that proves
+     * BOTH `cfstream.accountID` and `cfstream.apiToken` are valid together —
+     * `GET /accounts/{acct}/stream?per_page=1` — which succeeds even on an
+     * account with zero videos and needs no existing uid.
+     *
+     * Returns MACHINE-SAFE keys only. Cloudflare's raw error text is never
+     * surfaced here (only logged server-side via the shared `request()`
+     * path, same as every other call in this class) — a wrong/leaked token
+     * must never round-trip into a screenshot or support ticket.
+     *
+     * @return array{success:bool,message:string}
+     */
+    public static function testConnection(): array
+    {
+        if (self::isConfigured() === false) {
+            return [
+                'success' => false,
+                'message' => 'Account ID and API token must both be set before testing.',
+            ];
+        }
+
+        $resp = self::request('GET', '/stream?per_page=1');
+
+        if ($resp['success'] === true) {
+            return [
+                'success' => true,
+                'message' => 'Connected — Cloudflare accepted the account ID and API token.',
+            ];
+        }
+
+        // 🛡️ A handful of actionable, generic shapes — never Cloudflare's
+        //    own error text (see docblock).
+        if ($resp['httpCode'] === 401 || $resp['httpCode'] === 403) {
+            return [
+                'success' => false,
+                'message' => 'Cloudflare rejected the API token — check it has Stream:Edit scope on this account.',
+            ];
+        }
+        if ($resp['httpCode'] === 404) {
+            return [
+                'success' => false,
+                'message' => 'Account not found — double-check the account ID.',
+            ];
+        }
+        return [
+            'success' => false,
+            'message' => 'Could not reach Cloudflare Stream — check network connectivity and try again.',
+        ];
     }
 
     /* ====================================================================== */

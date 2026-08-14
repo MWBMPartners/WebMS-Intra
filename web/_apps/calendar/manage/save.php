@@ -175,9 +175,12 @@ if ($action === 'create') {
     $originalSlug = $slug;
     $counter = 1;
     while (true) {
-        $stmt = $mysqli->prepare('SELECT eventID FROM tblEvents WHERE eventSlug = ? LIMIT 1');
+        // 🌐 #339 — scope the uniqueness probe to the current site so a slug
+        //    already taken on another site doesn't needlessly suffix this one
+        //    (and so this isn't a cross-tenant existence oracle).
+        $stmt = $mysqli->prepare('SELECT eventID FROM tblEvents WHERE eventSlug = ? AND siteID = ? LIMIT 1');
         if ($stmt !== false) {
-            $stmt->bind_param('s', $slug);
+            $stmt->bind_param('si', $slug, $siteId);
             $stmt->execute();
             $exists = $stmt->get_result()->fetch_assoc();
             $stmt->close();

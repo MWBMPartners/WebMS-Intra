@@ -2433,4 +2433,91 @@ embed the video.
 
 ---
 
+## Discovery-pass fold-in batch (#373 ApiRouter half, #339, #308, #255, migration 158)
+
+### ApiRouter never got the Router.php #373 fix
+
+`Router::dispatch()` was fixed for #373 by importing `global $mysqli,
+$SETTINGS;` immediately before `require $targetFile;` (commit `58871ca`) —
+PHP include scope is the enclosing function's locals, so a legacy controller
+reading the bootstrap DB handle as a bare `$mysqli` needs that global
+imported into `dispatch()`'s scope or it resolves to `null`.
+`ApiRouter::dispatch()`/`dispatchV1()` include handlers the identical way
+(`require $apiFile;` inside a static method) but never got the same
+import — six live handlers (`livechat/api/*`, `livestream/api/ping.php`)
+read bare `$mysqli` and fatally errored (`Fatal error: Call to a member
+function prepare() on null`) on every request. Fixed by mirroring
+`Router.php:128` at both `ApiRouter.php` call sites. No-op for handlers
+already using `App::db()` (the preferred pattern for new code).
+
+### Worship live-sync relocation — same shape as migration 144
+
+`worship/present.php` (operator console) and `worship/display.php` (public
+projector display) poll `/api/worship/state` + POST `/api/worship/advance`.
+The real handlers pre-existed at `_apps/api/worship-{state,advance}.php`
+— a location `ApiRouter::dispatch()` can never resolve to, because it
+builds the include path directly from the URL segments
+(`_apps/{appName}/api/{action}.php`) and never queries `tblRoutes`. Moved
+both files **verbatim** (same SQL, same auth checks, same CCLI logging) to
+`_apps/worship/api/{state,advance}.php` — the only change is the file
+location and the docblock. Precedent: migration 144 did the identical
+relocation for `api/livestream/ping` → `_apps/livestream/api/ping.php`.
+Migration 158 seeds `api.worship.state.enabled` / `api.worship.advance.
+enabled` = `'true'`; ApiRouter 403s a convention-path handler with no
+enabled flag exactly like a missing one, so the relocation alone isn't
+enough.
+
+### AppRegistry trap — registering an always-on app needs its enable seed IN THE SAME migration
+
+`AppRegistry::isEnabled()` returns `false` when an app's `settingKey` is
+absent from `$SETTINGS` (`AppRegistry.php:95-116`), and
+`Router::dispatch()` renders a 403 "app disabled" page for any registered-
+but-disabled app's routes (`Router.php:113-117`). Before this batch,
+`noticeboard`/`worship`/`salvation`/`kids` had working routes/tables/
+handlers but no `_core/apps/{slug}.php` file — `AppRegistry::appForRoute()`
+never matched them, so `Router::dispatch()`'s gate check (`$owningApp !==
+null && isEnabled(...) === false`) short-circuited on `$owningApp === null`
+and every request passed through ungated. The moment a `_core/apps/{slug}
+.php` file is added, that app becomes gate-eligible — if its `enabled`
+setting isn't ALSO seeded `true` in the same change, the app goes dark
+immediately (silent 403 on every route). `noticeboard.enabled` was already
+seeded (migration 145) since it self-checks the setting directly in its own
+code; `worship`/`salvation`/`kids` had no enable flag anywhere, so migration
+158 seeds all three `= 'true'` in the same migration that ships their
+`_core/apps/*.php` files — never split across two migrations/PRs.
+
+### Dead `api/*` tblRoutes rows — the check_*.py DELETE-tombstone parser only understands `= '...'` / `IN (...)`
+
+`check_route_targets.py` and `check_schema_seed_parity.py` both model
+`DELETE FROM tblRoutes WHERE routeKey = '...'` and `... WHERE routeKey IN
+(...)` structurally (see each script's `delete_re`/`DELETE_RE`) so they can
+compute the "final state" after every migration replays and confirm
+`full_schema.sql` stays in parity. A `LIKE 'api/%'` pattern is NOT
+recognised by either regex — using it would have left the 19 removed rows
+looking "still expected" in `full_schema.sql`, breaking parity. Migration
+158 therefore spells out all 19 `routeKey` values explicitly in a `DELETE
+... WHERE routeKey IN (...)` — functionally identical to a `LIKE` sweep
+(nothing else currently starts with `api/`) but readable by the audit
+tooling. Precedent: migration 056 did the same explicit-list `DELETE` for
+an earlier batch of 5 dead `api/*` rows.
+
+### Cloudflare Stream "Test connection" — machine-safe response only
+
+`CloudflareStream::testConnection()` calls the cheapest Stream endpoint
+that validates BOTH `cfstream.accountID` and `cfstream.apiToken` together —
+`GET /accounts/{acct}/stream?per_page=1` — succeeds on a brand-new account
+with zero videos, no uid needed. Returns `{success, message}` with a small
+fixed set of generic messages (not-configured / 401-403 / 404 / generic
+transport failure) — Cloudflare's own error text is deliberately never
+echoed back to the browser (only logged server-side via the shared
+`request()` path, same as every other `CloudflareStream` call), so a
+copy-pasted screenshot of the admin page can't leak anything
+token-adjacent. This is also the best low-risk way to firm up the
+**[CF-kc]**-flagged endpoint set (see `CloudflareStream.php`'s class
+docblock) before the first real upload — a wrong endpoint shape now
+surfaces as a clear "could not reach Cloudflare Stream" on the settings
+page instead of a silent failure discovered mid-upload.
+
+---
+
 Last updated: August 2026

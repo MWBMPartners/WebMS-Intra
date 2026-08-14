@@ -174,6 +174,18 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 <button class="btn btn-primary" type="submit">Save settings</button>
             </div>
         </form>
+
+        <form method="post" action="/admin/integrations/cloudflare-stream/test" class="mt-3 pt-3 border-top">
+            <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
+            <button class="btn btn-outline-secondary" type="submit"
+                    <?php echo ($hasApiToken === false || $accountId === '') ? 'disabled' : ''; ?>>
+                <i class="fa-solid fa-plug me-1"></i>Test connection
+            </button>
+            <small class="text-muted d-block mt-1">
+                Confirms the account ID + API token above are valid together — calls Cloudflare's Stream list
+                endpoint, nothing is uploaded or changed.
+            </small>
+        </form>
     </div>
 </div>
 

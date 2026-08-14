@@ -24,7 +24,7 @@ web/                <- ALL deployable files (synced to server via SFTP)
                        app's PHP handlers live here; Router resolves
                        tblRoutes.targetFile against PORTAL_APPS = _apps/.
   _vendor/simplejwt/<- Vendored RS256 JWT verifier
-  _sql/             <- Numbered SQL migrations (000-145 + full_schema.sql)
+  _sql/             <- Numbered SQL migrations (000-158 + full_schema.sql)
   _lang/            <- I18n translation files (en.php, cy.php, …)
   _install/         <- Standalone 6-step installation wizard (bootstrap-free)
   public_html/      <- Web root: ONLY the front controller + static assets +
@@ -46,9 +46,8 @@ web/                <- ALL deployable files (synced to server via SFTP)
 
 `web/_apps/` holds ~47 top-level entries; `web/_core/apps/*.php` is the
 AppRegistry — the single source of truth for **installable marketplace
-apps** (toggleable per-site at `/admin/apps`), 37 of them. The table below
-is every user-facing app, whether or not it's AppRegistry-registered (see
-note below the table for the 4 that aren't, and for dirs that are
+apps** (toggleable per-site at `/admin/apps`), 41 of them. The table below
+is every user-facing app (see note below the table for dirs that are
 infrastructure rather than apps).
 
 | Slug | Route | What it does |
@@ -69,12 +68,12 @@ infrastructure rather than apps).
 | giving | `/giving` | Contributions log, Gift Aid capture, HMRC export, year-end statements; two-person offering count, pledge campaigns, bank reconciliation (#299) |
 | help | `/help/*` | In-app guides (getting-started, expenses, calendar, prayer-requests, admin, faq, …) |
 | invites | `/invites` | Single-use invite links so new members self-register with role pre-assigned |
-| kids | `/kids/*` | Children's ministry check-in / check-out with 6-digit safeguarding badge codes (#298) — **not** AppRegistry-registered, see note |
+| kids | `/kids/*` | Children's ministry check-in / check-out with 6-digit safeguarding badge codes (#298) |
 | leadership | `/leadership` | Roles + assignments + history + CSV |
 | livestream | `/live` | Embed YouTube / Vimeo / Twitch / Facebook livestreams with countdown + session analytics |
 | milestones | `/milestones` | Birthdays, anniversaries, joining dates with daily digest for designated roles |
 | newsletter | `/newsletter` | Compose, schedule, send branded HTML newsletters (internal sender; MailerMatt adapter slot reserved) |
-| noticeboard | `/noticeboard` | Visual poster wall (Canva embeds, image/video/text posters, weekday recurrence, QR share) (#360, #363) — **not** AppRegistry-registered, see note |
+| noticeboard | `/noticeboard` | Visual poster wall (Canva embeds, image/video/text posters, weekday recurrence, QR share) (#360, #363) |
 | offboarding | `/offboarding` | One-click revocation when a volunteer/staff member leaves: sessions, credentials, roles, leadership |
 | payments | `/payments` | Pluggable payment processor (Stripe live; PayPal/GoCardless adapters reserved), feeds Giving + Projects |
 | photos | `/photos` | Photo gallery, moderation queue, tiered role-based visibility, EXIF-aware serving |
@@ -85,7 +84,7 @@ infrastructure rather than apps).
 | recordings | `/recordings` | Searchable audio/video library with podcast RSS feed, HTML5 playback |
 | resources | `/resources` | Bookable resources (rooms, equipment, vehicles) with conflict detection + approval workflow |
 | rota | `/rota` | Recurring duty / shift assignments with swap requests and reminders |
-| salvation | `/decision-card` | Public decision-card / salvation tracker form + admin follow-up workflow (#316) — **not** AppRegistry-registered, see note |
+| salvation | `/decision-card` | Public decision-card / salvation tracker form + admin follow-up workflow (#316) |
 | service-plans | `/service-plans` | Programme run-sheet builder (preacher, scripture, hymns, AV, welcome team); operator → confidence-monitor messaging (#300) |
 | settings | `/settings` | Generic dot-notation settings editor |
 | site | `/site` | Multi-site switcher handler |
@@ -94,17 +93,10 @@ infrastructure rather than apps).
 | transcription | `/admin/transcription` | Auto-transcribe Recordings via Whisper / AssemblyAI / local whisper.cpp; full-text search |
 | translation | `/admin/translation` | Auto-translate user content via Anthropic / OpenAI / Google / DeepL / LibreTranslate, cached after first translate |
 | visitors | `/visitors` | First-time visitor capture with follow-up cadence + kanban workflow |
-| worship | `/worship/*` | Live presentation layer for Service Plans — operator console, public projector display, song library + CCLI usage log (#308) — **not** AppRegistry-registered, see note |
+| worship | `/worship/*` | Live presentation layer for Service Plans — operator console, public projector display, song library + CCLI usage log (#308) |
 | zoom | `/admin/integrations/zoom` | OAuth Zoom integration: create meetings from calendar events, auto-link recordings via webhook |
 | api | `/api/*`, `/api/v1/*` | JSON REST API — read + write across events/announcements/attendance/prayer-requests/documents/expenses/leadership/tasks/noticeboard/users; dual-mode auth (session or bearer API key, #323 Phase 2) |
 | offline | `/offline` | PWA offline fallback |
-
-**AppRegistry gap:** `noticeboard`, `worship`, `salvation`, `kids` have working
-routes/tables/handlers but no `_core/apps/{slug}.php` file, so they don't
-surface in the `/admin/apps` marketplace toggle. `noticeboard` does check its
-own `noticeboard.enabled` setting directly; `worship`/`salvation`/`kids` have
-no enable flag at all and are always-on once their migration has run. Worth a
-follow-up issue if unintentional.
 
 **Infrastructure, not apps:** several `web/_apps/` dirs back the apps above or
 the framework rather than being standalone apps — `account/` (self-service
@@ -159,7 +151,27 @@ Calendar/Events/Preaching Plan is ONE app ("Events") — `/calendar` covers view
 
 ## Recent ships (chronological)
 
-- **PR #372** (accumulating, draft, `claude/alpha-enhancements` → `alpha`) — this
+- **PR #372** (accumulating, draft, `claude/alpha-enhancements` → `alpha`) — a
+  discovery-pass fold-in batch on top of #386/#387 (migrations 155-157):
+  #373 ApiRouter half — `ApiRouter.php` never got the `global $mysqli,
+  $SETTINGS;` import Router.php gained for #373, fatally breaking 6 live-chat
+  /livestream handlers; fixed at both `dispatch()` and `dispatchV1()`. #339
+  residual — `calendar/manage/save.php`'s create-flow slug-uniqueness probe
+  now scopes to `siteID`. Worship live-sync (#308) — `/api/worship/state` +
+  `/api/worship/advance` were unreachable (dead legacy `_apps/api/worship-
+  *.php` + tblRoutes rows, no `api.worship.*.enabled` flags); relocated to
+  the ApiRouter convention path `_apps/worship/api/{state,advance}.php`
+  (precedent: migration 144's livestream/ping relocation). AppRegistry
+  (#255) — added `_core/apps/{noticeboard,worship,salvation,kids}.php` so
+  all 41 apps surface in `/admin/apps`; seeded the 3 missing enable flags
+  (worship/salvation/kids) so registering them didn't silently 403 three
+  live apps. Dead-route cleanup — removed 19 unreachable `api/*` tblRoutes
+  rows (Router never consults tblRoutes for `api/*` paths) plus the matching
+  full_schema.sql seed-block prune. Cloudflare Stream `testConnection()` +
+  admin "Test connection" button (#386 parity with BookIT Phase 2). All in
+  migration 158 + one full_schema fold; CI-green (10/10 audit checks, `php
+  -l` clean). See `.claude/HANDOFF.md` for the fuller discovery-pass notes.
+- **PR #372** — this
   session's additions on top of the #323 Phase 2 base below: #299 "Giving
   polish" sub-features — two-person offering-count session (sub-1, migration
   150), pledge campaigns (sub-2, migration 151), bank reconciliation (sub-3,

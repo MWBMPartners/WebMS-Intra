@@ -2,6 +2,68 @@
 
 
 ## [1.4.0] - 2026-07-22 (alpha)
+- fix(api): #373 (ApiRouter half) — `ApiRouter::dispatch()` and
+  `dispatchV1()` included handler files in static-method scope with no
+  `global $mysqli, $SETTINGS;` import, so any legacy handler reading the
+  bootstrap DB handle as a bare `$mysqli` fatally errored (`null->
+  prepare()`) on first hit. `Router::dispatch()` got this fix for #373
+  already (commit `58871ca`); `ApiRouter` never did. Six live handlers were
+  affected and are unbroken by this fix: `livechat/api/{send,list,moderate,
+  prompts,prompt-publish}.php` (viewer chat + admin moderation, #313) and
+  `livestream/api/ping.php` (viewer session analytics, #317/#318). No-op
+  for handlers already using `App::db()`.
+- fix(calendar): #339 residual — `calendar/manage/save.php`'s create-flow
+  slug-uniqueness probe (`SELECT eventID FROM tblEvents WHERE eventSlug =
+  ?`) had no `siteID` filter, so a slug already taken on one site needlessly
+  suffixed `-2` on another and leaked a cross-tenant existence oracle. Now
+  scoped `AND siteID = ?`. Completes #339 (the schema half — the
+  `uq_event_site_slug` composite unique key — shipped in migration 112).
+- fix(worship): #308 live-sync unreachable — the operator console
+  (`worship/present.php`) and public projector display
+  (`worship/display.php`) poll `/api/worship/state` + POST
+  `/api/worship/advance` every 500ms-1s, but the handlers sat at the
+  unreachable legacy path `_apps/api/worship-{state,advance}.php` (dead
+  `tblRoutes` rows — `api/*` paths are dispatched by `ApiRouter` directly
+  and never consult `tblRoutes`) with no `api.worship.*.enabled` flags —
+  both calls 404'd and the operator↔display sync could never work.
+  Relocated verbatim to the ApiRouter convention path
+  `_apps/worship/api/{state,advance}.php` (precedent: migration 144's
+  `api/livestream/ping` relocation); migration 158 seeds the two
+  `api.worship.*.enabled` flags. Depends on the #373 ApiRouter fix above
+  (both handlers read bare `$mysqli`).
+- feat(admin): #255 — added AppRegistry entries `_core/apps/{noticeboard,
+  worship,salvation,kids}.php` so all four surface in the `/admin/apps`
+  marketplace toggle (37 → 41 registered apps). `AppRegistry::isEnabled()`
+  returns false when an app's settingKey is missing and `Router::dispatch()`
+  403s a registered-but-disabled app's routes, so migration 158 also seeds
+  `worship.enabled` / `salvation.enabled` / `kids.enabled` = `'true'` —
+  these three had no enable flag before (always-on by virtue of not being
+  registered) and would otherwise have gone dark the moment they were
+  registered. `noticeboard.enabled` was already seeded (migration 145).
+- fix(core): dead `api/*` `tblRoutes` cleanup — 19 rows across migrations
+  035(→056)/082/099/100/106/111/133/138 that `Router::handleSpecialRoutes`
+  guarantees can never match (`api/*` paths go straight to `ApiRouter`,
+  which resolves by URL segment, not by a `tblRoutes` lookup — see
+  .claude/CLAUDE.md → "ApiRouter routing trap"). Migration 158 deletes
+  them (`DELETE ... WHERE routeKey IN (...)`, idempotent — precedent:
+  migration 056 did the same for an earlier batch of 5); the matching 19
+  `INSERT` rows are pruned from `full_schema.sql`'s seed blocks too. No
+  `api.*.enabled` SETTINGS rows were touched. The orphaned handler files at
+  `_apps/api/{tours,push,translate,ai-improve}.php` are left in place,
+  parked (no live caller for any of them today).
+- feat(admin): #386 fold-in — `Portal\Core\CloudflareStream::testConnection()`
+  (a minimal `GET /accounts/{acct}/stream?per_page=1`, machine-safe
+  success/message only, never Cloudflare's raw error text) plus a "Test
+  connection" button on `/admin/integrations/cloudflare-stream` (new
+  admin+CSRF-gated `test.php` handler, migration 158 route) — parity with
+  the BookIT Phase 2 affordance, and the cheapest legitimate way to confirm
+  the account ID + API token are valid together ahead of the first real
+  upload.
+- docs: `.claude/CLAUDE.md` — migration coverage note bumped 000-145 →
+  000-158; apps table's "not AppRegistry-registered" markers removed for
+  noticeboard/worship/salvation/kids (now registered, see above) and the
+  app count corrected 37 → 41; refreshed the "Recent ships" entry for this
+  fold-in batch.
 - feat(api): #387 Event Team Hub REST API read endpoints — projectBookIT
   Event Team Hub Phase 3 integration (projectbookit#347). Two new
   `_apps/calendar/api/{action}.php` handlers, `hub-resources.php` and

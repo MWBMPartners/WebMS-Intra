@@ -677,6 +677,21 @@ Exposes the Event Team Hub tables shipped in #386 (migration 155) to external in
 
 ---
 
+### Discovery-pass fold-in batch — ApiRouter fix, worship live-sync, AppRegistry completion (#373, #339, #308, #255, #386, 2026-08-14)
+
+A reviewed batch of correctness fixes + small enhancements surfaced by a discovery pass over `claude/alpha-enhancements`. All grouped into one migration (158) + one `full_schema.sql` fold.
+
+| Item | Issue | Migration | Status |
+|---|---|---|---|
+| `ApiRouter::dispatch()`/`dispatchV1()` now import `global $mysqli, $SETTINGS;` immediately before including a handler — mirrors the `Router::dispatch()` fix for #373, which `ApiRouter` never got. Unbreaks 6 live handlers that fatally errored on bare `$mysqli`: `livechat/api/{send,list,moderate,prompts,prompt-publish}.php` + `livestream/api/ping.php` | #373 | — | ✅ |
+| `calendar/manage/save.php` create-flow slug-uniqueness probe now scopes `AND siteID = ?` — closes the #339 residual (schema half shipped in migration 112) | #339 | — | ✅ |
+| Worship live-sync relocated: `/api/worship/state` + `/api/worship/advance` moved from the unreachable legacy `_apps/api/worship-{state,advance}.php` (dead `tblRoutes` rows, no enable flags) to the ApiRouter convention path `_apps/worship/api/{state,advance}.php` — the operator console ↔ projector display sync (#308) was unreachable before this fix | #308 | 158 | ✅ |
+| AppRegistry entries added: `_core/apps/{noticeboard,worship,salvation,kids}.php` — all four now surface in `/admin/apps` (37 → 41 registered apps). `worship.enabled` / `salvation.enabled` / `kids.enabled` seeded `'true'` (previously no enable flag at all — always-on by virtue of not being registered; registering without seeding would have silently 403'd all three) | #255 | 158 | ✅ |
+| Dead `api/*` `tblRoutes` cleanup — 19 rows across migrations 035(→056)/082/099/100/106/111/133/138 that `ApiRouter` can never reach via `tblRoutes` removed (`DELETE ... WHERE routeKey IN (...)`, idempotent); matching rows pruned from `full_schema.sql`'s seed blocks. No `api.*.enabled` settings touched; orphaned `_apps/api/{tours,push,translate,ai-improve}.php` handlers left parked (no live caller) | — | 158 | ✅ |
+| `Portal\Core\CloudflareStream::testConnection()` — minimal `GET /accounts/{acct}/stream?per_page=1`, machine-safe `{success,message}` only (never Cloudflare's raw error text) — plus a "Test connection" button on `/admin/integrations/cloudflare-stream` (new `test.php` handler, admin+CSRF gated) | #386 | 158 | ✅ |
+
+---
+
 ## Audit scripts (`tools/audit-checks/`)
 
 CI-runnable static audits invoked from PHP-static-analysis workflow:

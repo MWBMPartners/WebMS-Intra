@@ -13,7 +13,7 @@
 -- present in web/_sql/ are marked as executed in tblMigrations so the
 -- web-based Migrator won't re-run them.
 --
--- Covers migrations: 000-157 (DDL + settings/routes seeds + tblMigrations
+-- Covers migrations: 000-158 (DDL + settings/routes seeds + tblMigrations
 -- marks). When you add a new migration, port its DDL/seeds into the
 -- appropriate section here AND add its filename to the seed block at the
 -- end of this file. CI enforces this via
@@ -2873,11 +2873,10 @@ INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue
     (NULL, 'portal.tours.welcome_active','1', '1', 0)
 ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
 
--- 🎯 Tour playback API routes (matches migration 082 / #253)
-INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
-    ('api/tours/active',   'api/tours/active.php',   1),
-    ('api/tours/complete', 'api/tours/complete.php', 1)
-ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+-- 🎯 Tour playback routes (matches migration 082 / #253) — the api/tours/*
+-- rows were dead config (ApiRouter never consults tblRoutes for api/* paths;
+-- see .claude/CLAUDE.md → "ApiRouter routing trap") and were removed by
+-- migration 158 (#373 fold-in dead-route cleanup).
 
 -- 🎛️ Settings group sub-pages (matches migration 083 / #252)
 INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
@@ -4242,7 +4241,8 @@ CREATE TABLE IF NOT EXISTS `tblUserTranslationPref` (
 INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
     ('admin/translation',      'admin/translation/index.php',  1),
     ('admin/translation/save', 'admin/translation/save.php',   1),
-    ('api/translate',          'api/translate.php',            1),
+    -- api/translate removed by migration 158 (#373 fold-in): dead tblRoutes
+    -- config, ApiRouter never consults tblRoutes for api/* paths.
     ('account/translation',    'account/translation.php',      1)
 ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 
@@ -4300,8 +4300,9 @@ CREATE TABLE IF NOT EXISTS `tblAiUsage` (
 INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
     ('admin/ai-assist',         'admin/ai-assist/index.php',  1),
     ('admin/ai-assist/save',    'admin/ai-assist/save.php',   1),
-    ('admin/ai-assist/prompt',  'admin/ai-assist/prompt.php', 1),
-    ('api/ai-assist/improve',   'api/ai-improve.php',         1)
+    ('admin/ai-assist/prompt',  'admin/ai-assist/prompt.php', 1)
+    -- api/ai-assist/improve removed by migration 158 (#373 fold-in): dead
+    -- tblRoutes config, ApiRouter never consults tblRoutes for api/* paths.
 ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 
 INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
@@ -4505,28 +4506,13 @@ ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
 -- =============================================================================
 -- Migration 106: REST API write-side CRUD endpoints (#157)
 -- =============================================================================
--- Registers route targetFiles so check_route_targets.py confirms each is
--- reachable. ApiRouter::dispatch() actually routes by URL pattern
--- (`api/{appName}/{action}`) and resolves to {appName}/api/{action}.php,
--- so the targetFile values here are informational — the audit still
--- needs them.
-
-INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
-    -- Announcements
-    ('api/announcements/create', 'announcements/api/create.php', 1),
-    ('api/announcements/update', 'announcements/api/update.php', 1),
-    ('api/announcements/delete', 'announcements/api/delete.php', 1),
-    -- Tasks
-    ('api/tasks/create',         'tasks/api/create.php',         1),
-    ('api/tasks/complete',       'tasks/api/complete.php',       1),
-    ('api/tasks/delete',         'tasks/api/delete.php',         1),
-    -- Prayer Requests
-    ('api/prayer-requests/create',   'prayer-requests/api/create.php',   1),
-    ('api/prayer-requests/moderate', 'prayer-requests/api/moderate.php', 1),
-    -- Leadership
-    ('api/leadership/assign',   'leadership/api/assign.php',   1),
-    ('api/leadership/unassign', 'leadership/api/unassign.php', 1)
-ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+-- Originally also registered informational tblRoutes rows for these
+-- endpoints, but ApiRouter::dispatch() actually routes by URL pattern
+-- (`api/{appName}/{action}`) → `{appName}/api/{action}.php` and NEVER
+-- consults tblRoutes for api/* paths (see .claude/CLAUDE.md → "ApiRouter
+-- routing trap") — those 10 rows were dead config, removed by migration 158
+-- (#373 fold-in dead-route cleanup). The api.*.enabled settings flags below
+-- are the real (and only) gate these endpoints need, so they stay.
 
 INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
     -- Mirror the existing per-action enabled-flag convention from v1.0.
@@ -4601,8 +4587,9 @@ ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
     ('widget/countdown.json',              'widget/countdown-json.php',            0),
     ('widget/countdown',                   'widget/countdown-preview.php',         0),
-    ('api/push/subscribe',                 'api/push/subscribe.php',               0),
-    ('api/push/unsubscribe',               'api/push/unsubscribe.php',             0),
+    -- api/push/subscribe + api/push/unsubscribe removed by migration 158
+    -- (#373 fold-in): dead tblRoutes config, ApiRouter never consults
+    -- tblRoutes for api/* paths; the handlers remain parked pending #322.
     ('admin/integrations/webhooks',        'admin/integrations/webhooks/index.php', 1),
     ('admin/integrations/webhooks/save',   'admin/integrations/webhooks/save.php',  1),
     ('admin/integrations/webhooks/delete', 'admin/integrations/webhooks/delete.php', 1)
@@ -4733,8 +4720,10 @@ INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
     ('decision-card/save',            'salvation/card-save.php',          0),
     ('admin/decision-cards',          'admin/salvation/cards.php',        1),
     ('admin/decision-cards/act',      'admin/salvation/cards-act.php',    1),
-    -- 133_livestream_analytics.sql (#318)
-    ('api/livestream/ping',           'api/livestream-ping.php',          0),
+    -- 133_livestream_analytics.sql (#318) — api/livestream/ping removed by
+    -- migration 158 (#373 fold-in): dead tblRoutes config, superseded by
+    -- migration 144's relocation to _apps/livestream/api/ping.php (which
+    -- ApiRouter reaches directly by convention path, no tblRoutes needed).
     -- 134_denominational_reports.sql
     ('admin/reports/denominational',  'admin/reports/denominational.php', 1),
     -- 135_song_library.sql (#309)
@@ -4767,8 +4756,10 @@ INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
     -- 138_worship_present_state.sql (#308)
     ('worship/present',                        'worship/present.php',                     1),
     ('worship/display',                        'worship/display.php',                     0),
-    ('api/worship/state',                      'api/worship-state.php',                   0),
-    ('api/worship/advance',                    'api/worship-advance.php',                 1),
+    -- api/worship/state + api/worship/advance removed by migration 158
+    -- (#373/#0.2 fold-in): dead tblRoutes config (ApiRouter never consults
+    -- tblRoutes for api/* paths) that also pointed at handlers relocated to
+    -- the reachable convention path _apps/worship/api/{state,advance}.php.
     -- 139_worship_phase3.sql
     ('worship/plan/reorder',                   'worship/plan-reorder.php',                1),
     ('admin/reports/ccli',                     'admin/reports/ccli.php',                  1),
@@ -5047,6 +5038,32 @@ INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue
     (NULL, 'api.calendar.hub-resources.enabled', 'true', 'true', 0),
     (NULL, 'api.calendar.hub-videos.enabled',    'true', 'true', 0)
 ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
+-- ── from 158_worship_api_route_cleanup.sql (#373 / #308 / #255 / #386) ────────
+-- (1) Enable flags for the relocated worship live-sync endpoints
+-- (`_apps/worship/api/{state,advance}.php` — moved from the unreachable
+-- legacy `_apps/api/worship-{state,advance}.php`, precedent: migration 144's
+-- livestream/ping relocation). (2) AppRegistry enable flags for
+-- worship/salvation/kids — trap: `AppRegistry::isEnabled()` returns FALSE
+-- when the setting is missing, and these three had none before being
+-- registered this session, so they MUST be seeded 'true' to stay on
+-- (noticeboard.enabled already seeded — migration 145, not repeated). The
+-- matching dead-route DELETE (19 `api/*` tblRoutes rows removed from the
+-- seed blocks above) needs no full_schema counterpart — a fresh install
+-- never inserts them in the first place. (3) Cloudflare Stream "Test
+-- connection" page route — plain tblRoutes row (not api/*), mirrors the two
+-- sibling rows already seeded by migration 155 above.
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'api.worship.state.enabled',   'true', 'true', 0),
+    (NULL, 'api.worship.advance.enabled', 'true', 'true', 0),
+    (NULL, 'worship.enabled',             'true', 'true', 0),
+    (NULL, 'salvation.enabled',           'true', 'true', 0),
+    (NULL, 'kids.enabled',                'true', 'true', 0)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('admin/integrations/cloudflare-stream/test', 'admin/integrations/cloudflare-stream/test.php', 1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 
 
 -- =============================================================================
@@ -6259,4 +6276,7 @@ INSERT INTO `tblMigrations` (`filename`) VALUES ('156_event_team_hub_upload.sql'
 ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
 INSERT INTO `tblMigrations` (`filename`) VALUES ('157_eventhub_api.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('158_worship_api_route_cleanup.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;
