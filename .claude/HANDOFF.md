@@ -1,116 +1,128 @@
-# Handoff — alpha enhancement bundle (draft PR #372)
+# Handoff — Event Team Hub + release promotion to production
 
-**Updated:** 2026-07-23 (session close — docs hygiene pass, #183)
-**Branch:** `claude/alpha-enhancements` → **draft PR #372** → `alpha`
-**HEAD:** `527e801` — working tree clean.
-**CI:** all green — Psalm, CodeQL, static-security, PHP-lint, actionlint, JS
-checks, and the `e2e-migrations` harness all pass through migration 154.
-PR Security Checks bot comment clean (see standing instruction in
-`.claude/CLAUDE.md`).
+**Updated:** 2026-08-14 (session close)
+**Product version:** `1.4.x` (automation owns the exact patch — see Notes).
+**Primary work this session:** the **Event Team Hub** feature (WebMS-Intra
+*and* projectBookIT) + a discovery-driven batch of core fixes, then a full
+**alpha → beta → release-candidate → main** release promotion.
 
-Draft status is deliberate: `auto-merge-alpha.yml` only auto-merges
-non-draft PRs, so #372 stays draft until the user says merge. Enhancement
-work accumulates into this ONE PR rather than spawning new ones (user
-decision, still in force).
+## Branch / tier state (at close)
 
----
+| Branch | Tip | State |
+| --- | --- | --- |
+| `alpha` | (this commit) | Event Team Hub + all fixes; v1.4.x; deployed ✅ |
+| `beta` | `44beb5e` | promoted via PR #389; deployed ✅; auto-bumped 1.4.1 |
+| `release-candidate` | `8004749` | promoted via PR #390; deploy in flight |
+| `main` | promotion in flight | rc → main is the final hop (PRODUCTION) |
+| `claude/alpha-enhancements` | `6bec0cf` | the working branch; merged to alpha via **PR #388** |
+| projectBookIT `feat/347-event-team-hub` | `06afac3` | **NOT merged** — still an open feature branch |
 
-## What shipped this session (folded into #372)
+The four-tier flow is `alpha → beta → release-candidate → main`. Promotion
+PRs hit a predictable `version.php` + `CHANGELOG.md` conflict (each tier
+diverges on those two metadata files); resolve by keeping the *higher*
+version + the fuller CHANGELOG (back-merge the base into the head, push the
+head, then merge the PR so CI + deploy run). `auto-merge-alpha.yml`
+fast-tracks *alpha* PRs only; beta/rc/main are merged manually once green.
 
-- **#299 "Giving polish"** — two-person offering-count session (sub-1,
-  migration 150), pledge campaigns (sub-2, migration 151), bank
-  reconciliation (sub-3, migration 152), plus the online/project-gift
-  auto-attribution follow-up (`Giving::attributeGift()` wired into
-  `Payments::markPaymentSucceeded()` and `Projects::fulfilPledge()`).
-  Sub-4 (recurring-giving account updater) needs Stripe Billing — not
-  started, kept deferred (see below).
-- **#303 Phase 2** — Discipleship per-user progress + auto-completion
-  (migration 153): enrolments, per-step progress, auto-sweep from
-  attendance/RSVP evidence, member "my pathways" view, pastor roster.
-- **#300 v2** — Service Plans operator → confidence-monitor message channel
-  (migration 154), closing the last open piece of #300.
-- **GDPR eraser fix** — `Portal\Core\GdprEraser::catalogue()` had wrong/
-  mis-cased table names that silently skipped erasure; corrected, and added
-  previously-missed auth-residue tables (`tblLocalAccounts`,
-  `tblLinkedAccounts`, `tblTrustedDevices`, `tblPasswordResets`,
-  `tblKidProfiles`). Plus an unrelated demo-data-wipe table-name fix.
-- **New CI check** — `tools/audit-checks/check_php_table_refs.py` flags
-  `tblXxx`-shaped identifiers hard-coded in PHP that don't exist in
-  `full_schema.sql` (closes the gap that let the GDPR bug above slip past
-  review). Wired into `pr-security.yml` as check 14.
-- **native `confirm()` cleanup** — last 11 call sites converted to the house
-  `data-confirm` pattern; `check_no_native_confirm.py` now reports 0.
-- Base of #372 (already landed pre-session): #323 Phase 2 REST API v1
-  write surface (dual-mode `ApiAuth`, `/api/v1/{resource}` facade, new
-  write endpoints, `ApiKey::SCOPES` + rotation, per-key rate limiting,
-  `Site::forceContext`) + #324 outbound webhooks admin CRUD.
+## What shipped this session
 
-Full prose detail for all of the above: top of `CHANGELOG.md` under
-`[1.4.0] - 2026-07-22 (alpha)`. Apps inventory: `.claude/CLAUDE.md` →
-"Apps (shipped on `main`)".
+### Event Team Hub — WebMS-Intra (#386, #387)
+- **Phase 1** (`593ab5c`, migration 155) — `/calendar/event/hub`: resources
+  (links + Markdown notes), a YouTube/Vimeo/Cloudflare Stream video grid
+  with **signed-URL playback**, viewer roster context, coordinator tool
+  strip. New `_core/VideoEmbed` (allowlist parse + safe embeds + RS256
+  `signedToken` via `openssl_sign`), `Auth::isEventTeamMember()`, admin
+  `/admin/integrations/cloudflare-stream` config page.
+- **Phase 1.5** (`7c50496`, migration 156) — direct browser→Cloudflare
+  upload: `_core/CloudflareStream` mgmt client, mint/status/settings page
+  routes, `event-hub-upload.js` (200 MB cap + host allowlist + CSRF
+  rotation), core `$cspConnectExtra`, in-portal Require-Signed-URLs /
+  Allowed-Origins config.
+- **#387** (`3b85b82`, migration 157) — `/api/calendar/hub-resources` +
+  `hub-videos` read endpoints (tenant-scoped, identical-404, no secret
+  leak) + `eventhub:read` scope in `ApiKey::SCOPES` — consumed by the
+  projectBookIT sync.
 
----
+### Discovery-driven core fixes (`6bec0cf`, migration 158)
+- **#373 (ApiRouter globals fatal)** — `ApiRouter::dispatch()`/`dispatchV1()`
+  never imported `global $mysqli, $SETTINGS;`, so 6 live handlers
+  (`livechat/api/*` ×5 + `livestream/api/ping.php`) fataled on first hit.
+  Fixed (Router.php already had it). **This was a real production bug.**
+- **#308 worship live-sync** — operator/projector polled `/api/worship/
+  state|advance` but the handlers sat at unreachable legacy paths with no
+  enable flags → 404. Relocated to `_apps/worship/api/{state,advance}.php` +
+  seeded `api.worship.*.enabled`.
+- **#339** — `calendar/manage/save.php` slug probe now site-scoped.
+- **#255 AppRegistry** — added `_core/apps/{noticeboard,worship,salvation,
+  kids}.php` + seeded `worship/salvation/kids.enabled='true'` (⚠️ see Notes).
+- Dead `api/*` `tblRoutes` cleanup (19 rows) + CF "Test connection" button +
+  CLAUDE.md docs bump.
+
+### projectBookIT (`feat/347-event-team-hub`, NOT merged)
+Ported the whole capability: Phase 0 CSP consolidation + `$routeParams` fix
+(`2edd175`), Phase 1 hub + `VideoEmbedService` (`bfa2b82`/`fd7e96d`), Phase 2
+CF direct upload (`604d58e`), Phase 3 one-way **WebMS→BookIT sync**
+(`WebmsIntraSyncService`, migration 071, cron step, admin link UI) (`0fdb5f4`),
+plus rate-limit + webhook-annotation fold-ins (`06afac3`). Issue
+**projectbookit#347**.
+
+### Issue hygiene
+Closed 16 issues with evidence: #303, #311, #363, #323, #375, #300, #338,
+#360, #364, #194, #183, #374, #386, #387, #339, #373. Merged the 3
+Dependabot codeql-action PRs (#382/#384/#385 → main/beta/rc).
 
 ## Remaining / next
 
-### Awaiting user decision (Bucket B)
+### Release pipeline (in flight at close)
+- Finish **release-candidate → main** (the production hop): create PR,
+  resolve the version/CHANGELOG conflict, merge once CI green, monitor the
+  **production** SFTP deploy. `main` merges may also fire `release.yml` /
+  version-bump — watch for a tag.
 
-- **#234** — Azure Mail.Send delegated-permission grant (high value; needs
-  tenant admin consent, can't self-serve).
-- **#322 / #141** — Web push: VAPID keypair generation/approval (admin UI
-  can generate it, but a human should approve enabling push).
-- **#373** — 1-minute live-confirm check: verify `/attendance` (and other
-  dispatched routes) actually render on alpha post the `global $mysqli,
-  $SETTINGS;` scope fix — needs a live runtime check, not just code review.
-- **#105 / #106** — GitHub repo settings changes — owner-only, can't
-  self-serve.
-- **#370** — Dependabot tri-branch PR — pushed to
-  `claude/dependabot-alpha-beta-branches-q24zd7` → main, no PR opened yet
-  (harness rule); needs user to open/merge.
-- **#304** — In-app messaging — offer polling Phase 1 vs keep deferred;
-  needs a product-scope call before starting.
-- **Product sequencing** — #153 / #150 / #156 / #155 — order of upcoming
-  work, needs user prioritisation.
-- **Confirm-keep-deferred** (no action unless user says otherwise):
-  - **#302** — special-category data encryption risk (safeguarding/health
-    fields) — flagged as a real risk, deferred pending scope decision.
-  - **#299 sub-4** — recurring-giving account updater — needs Stripe
-    Billing, not started.
-  - **#320 / #321** — adversarial-review sign-off items — deferred pending
-    user review.
-- **New this session — policy item:** `tblSalvationCards` retention. The
-  table is name-keyed (no `userID`), so it's structurally unreachable by the
-  user-keyed GDPR erasure engine (`GdprEraser` already documents this
-  exclusion deliberately — see `#303 Phase 2` catalogue notes). Needs a
-  retention/redaction policy decision from the user — not a code bug, a
-  data-protection scope question.
+### Owner actions (non-blocking; features are inert until done)
+- **Cloudflare Stream** (both platforms): create a **Stream:Edit** API token
+  + a signing key on the Stream-owning account; paste into each platform's
+  admin. Until then the CF path is fully inert (YouTube/Vimeo still work).
+- **projectBookIT**: decide whether to merge `feat/347-event-team-hub`;
+  apply migrations 070/071 in order; to enable sync, mint a WebMS-Intra key
+  scoped `events:read`+`eventhub:read` (tenant-pinned) and paste into BookIT.
 
-### Safe autonomous items still open
+### Real bugs found, filed, not yet fixed
+- **projectbookit#348** — `tblWebhooks` schema drift: migrations 039 vs 053
+  define incompatible shapes (039 wins); `WebhookService` (#254) reads
+  columns that don't exist on the live table → "Unknown column" on any real
+  install. Needs a reconciliation migration + a canonical-shape decision.
+- **projectBookIT `VideoConferenceService::getSetting`** bypasses `Settings`
+  decryption (§10.3) — ticketed, deferred (out of hub scope).
 
-- **A7** — `site.url` setting seeding: needs an installer-vs-derive-at-
-  runtime decision before implementing; low value. Verify current state
-  before picking a direction.
-- **A9** — Issue-tracker hygiene: close ~12 issues that are verified-shipped
-  per this session's and prior sessions' work but still open on GitHub.
-  Best done once #372 actually merges (so "closes #NNN" commit references
-  resolve against the merged history, not a draft branch).
-
----
+### Deferred (owner / product decisions, unchanged)
+#299 sub-4 (Stripe Billing), #234 (tenant-admin consent), #322/#141 (web
+push VAPID approval), #302/#304/#320/#321, #128/#150/#153/#155/#156 (new
+apps), #361/#362/#365 (Noticeboard wave 2), #248 (largely done),
+#97–#103 (BookIT-as-provider — the *reverse* direction, NOT superseded by
+#387), #105/#106/#107 (owner-only repo/ops). `tblSalvationCards` retention
+is a data-protection policy question, not code.
 
 ## Notes for the next session
 
-- Don't hand-edit `web/_core/version.php` — automation owns version bumps
-  on alpha/beta pushes (`version-bump.yml`); this session did not touch it
-  per instruction.
-- Don't hand-add alpha CHANGELOG entries on merge — `changelog.yml` handles
-  that; this session's CHANGELOG entries were added directly per explicit
-  instruction to this docs-only pass; verify no duplicate/conflicting entry
-  appears when #372 merges.
-- `_core/apps/*.php` (AppRegistry) is missing entries for `noticeboard`,
-  `worship`, `salvation`, `kids` — real, working, shipped apps that simply
-  don't appear in `/admin/apps`. Flagged in `.claude/CLAUDE.md`'s apps table
-  note; not fixed here (docs-only pass) — worth a follow-up issue if
-  unintentional.
-- #183 (DEV_NOTES stale `core/`/`vendor/` path refs) — fixed this session,
-  see CHANGELOG. Verify no other stale bare-path instances have crept back
-  in before closing the issue for good.
+- **Don't hand-edit `web/_core/version.php` or add alpha CHANGELOG entries**
+  — `version-bump.yml` + `changelog.yml` own them (they auto-commit
+  `[skip ci]` after each alpha/beta merge; beta auto-bumped to 1.4.1 this
+  session). Expect per-tier version divergence — resolve promotion conflicts
+  by keeping the higher version.
+- **AppRegistry deploy-ordering caveat:** worship/salvation/kids now gate on
+  settings seeded by **migration 158**. `AppRegistry::isEnabled()` returns
+  false when the setting is missing, so on an existing install they 403 in
+  the window between code-deploy and running 158 — **run migration 158 as
+  part of any upgrade** (worship live-sync needs it too, so it's mandatory
+  regardless).
+- **`[CF-kc]` Cloudflare endpoints** (direct_upload body, edit verb, 200 MB
+  ceiling, upload host) are from training knowledge — docs are egress-blocked
+  here. Re-verify at the first live upload; safe because the CF path is inert
+  until credentials are configured. The admin "Test connection" button is the
+  cheapest live check.
+- **`removeVideo` divergence is deliberate** — WebMS best-effort (source of
+  truth), BookIT abort-on-failure (satellite). Both documented inline; do
+  not "fix" to match.
+- One handoff doc only: **this file**. `MEMORY.md` is the separate durable
+  memory; `CLAUDE.md` is the project instructions.
