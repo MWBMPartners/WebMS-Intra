@@ -11,10 +11,44 @@
 -- @link https://github.com/MWBMPartners/WebMS-Intra/issues/347
 -- =============================================================================
 
-ALTER TABLE `tblEvents`
-    ADD COLUMN IF NOT EXISTS `registrationEnabled` TINYINT(1) NOT NULL DEFAULT 0 AFTER `capacityCount`,
-    ADD COLUMN IF NOT EXISTS `registrationOpensAt`  DATETIME DEFAULT NULL AFTER `registrationEnabled`,
-    ADD COLUMN IF NOT EXISTS `registrationClosesAt` DATETIME DEFAULT NULL AFTER `registrationOpensAt`;
+-- ➕ tblEvents.registrationEnabled — guarded ADD COLUMN (portable: MySQL 8.0 + MariaDB 10.x)
+SET @col_exists := (
+    SELECT COUNT(*) FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME   = 'tblEvents'
+      AND COLUMN_NAME  = 'registrationEnabled'
+);
+SET @sql := IF(@col_exists = 0,
+    'ALTER TABLE `tblEvents` ADD COLUMN `registrationEnabled` TINYINT(1) NOT NULL DEFAULT 0 AFTER `capacityCount`',
+    'SELECT 1'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+-- ➕ tblEvents.registrationOpensAt — guarded ADD COLUMN
+SET @col_exists := (
+    SELECT COUNT(*) FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME   = 'tblEvents'
+      AND COLUMN_NAME  = 'registrationOpensAt'
+);
+SET @sql := IF(@col_exists = 0,
+    'ALTER TABLE `tblEvents` ADD COLUMN `registrationOpensAt` DATETIME DEFAULT NULL AFTER `registrationEnabled`',
+    'SELECT 1'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+-- ➕ tblEvents.registrationClosesAt — guarded ADD COLUMN
+SET @col_exists := (
+    SELECT COUNT(*) FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME   = 'tblEvents'
+      AND COLUMN_NAME  = 'registrationClosesAt'
+);
+SET @sql := IF(@col_exists = 0,
+    'ALTER TABLE `tblEvents` ADD COLUMN `registrationClosesAt` DATETIME DEFAULT NULL AFTER `registrationOpensAt`',
+    'SELECT 1'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
 CREATE TABLE IF NOT EXISTS `tblEventRegistrations` (
     `registrationID`         INT          NOT NULL AUTO_INCREMENT,

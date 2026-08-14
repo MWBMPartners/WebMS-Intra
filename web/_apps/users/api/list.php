@@ -17,15 +17,12 @@
 
 declare(strict_types=1);
 
+use Portal\Core\ApiAuth;
 use Portal\Core\ApiResponse;
 use Portal\Core\App;
 use Portal\Core\Site;
 
-ApiResponse::requireAuth();
-
-if (App::isAdmin() !== true) {
-    ApiResponse::error('Admin access required', 403);
-}
+ApiAuth::requireRead('users:read', sessionNeedsAdmin: true);
 
 $db     = App::db();
 $siteId = Site::id();

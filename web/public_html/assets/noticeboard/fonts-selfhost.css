@@ -1,0 +1,235 @@
+/**
+ * =============================================================================
+ * Noticeboard — self-hosted fonts (#361) 🅰️
+ * =============================================================================
+ * HAND-MAINTAINED — NOT part of the generated Design bundle.
+ *
+ * The generated `noticeboard.css` / `noticeboard.noeval.js` (dc-runtime
+ * output, regenerated from the Claude Design page — see DEV_NOTES.md
+ * "Noticeboard React bundle") ship a
+ *   @import url('https://fonts.googleapis.com/css2?family=...')
+ * The portal CSP does not allowlist fonts.googleapis.com / fonts.gstatic.com
+ * (self-hosting stance, PR #356), so that @import is dead on arrival — every
+ * request it would make is blocked and the board silently falls back to
+ * system fonts. It is left in place in the generated file (harmless, just
+ * inert) rather than hand-edited, per the "generated — do not edit" rule.
+ *
+ * This file SUPERSEDES that blocked @import by self-hosting the exact same
+ * four families/weights as same-origin `@font-face` rules, so they resolve
+ * under CSP without any third-party request. Loaded via a page <link> in
+ * `_apps/noticeboard/index.php`, placed BEFORE the generated `noticeboard.css`
+ * <link> so these @font-face declarations exist before anything tries to
+ * render text with them.
+ *
+ * Family names below match the generated bundle EXACTLY (verified by
+ * grepping noticeboard.css / noticeboard.noeval.js):
+ *   - 'Bricolage Grotesque'  (poster titles, sans mode; headings)
+ *   - 'Instrument Serif'    (poster titles, serif mode)
+ *   - 'IBM Plex Mono'       (kickers, meta/date labels, UI chrome)
+ *   - 'IBM Plex Sans'       (body / buttons / #noticeboard-root default)
+ *
+ * Source: @fontsource v5.3.0 packages (SIL OFL-1.1) —
+ *   @fontsource-variable/bricolage-grotesque, @fontsource/instrument-serif,
+ *   @fontsource/ibm-plex-mono, @fontsource/ibm-plex-sans.
+ * Weights match the Google Fonts URL the generated bundle requests:
+ *   Bricolage Grotesque — variable, wght 400/600/800 (opsz axis pinned to
+ *     the family default; fontsource ships opsz/wght as separate
+ *     single-axis instances and the bundle only varies wght+weight, not
+ *     optical size, so the wght-axis file is the correct pick)
+ *   Instrument Serif     — 400 upright + 400 italic
+ *   IBM Plex Mono        — 400, 500
+ *   IBM Plex Sans        — 400, 500, 600
+ * Subsets: latin + latin-ext (Welsh — see _lang/cy.php — needs latin-ext for
+ * ŵ/ŷ/Ŵ/Ŷ etc.; both subsets together add ~115 KB total, still nowhere near
+ * a size concern). Cyrillic/Greek/Vietnamese subsets are skipped entirely.
+ * Redistributed OFL license texts: OFL-bricolage-grotesque.txt,
+ * OFL-instrument-serif.txt, OFL-ibm-plex-mono.txt, OFL-ibm-plex-sans.txt
+ * (this directory).
+ *
+ * unicode-range values below are the standard Google Fonts latin / latin-ext
+ * codepoint boundaries (identical across all four families' own generated
+ * multi-subset CSS) so the browser fetches only the subset the page's text
+ * actually needs.
+ *
+ * @package   Portal\Apps\Noticeboard
+ * @author    MWBM Partners Ltd (t/a MWservices)
+ * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
+ * @version   1.0.0
+ * =============================================================================
+ */
+
+/* ---------------------------------------------------------------------------
+ * Bricolage Grotesque — variable (wght 400..800), used at 400/600/800.
+ * opsz axis is fixed at the font's default optical size (fontsource ships
+ * opsz and wght as separate single-axis variable instances; the generated
+ * bundle only ever sets font-weight, never font-optical-sizing, so pinning
+ * opsz to default is behaviour-equivalent to what Google Fonts served).
+ * ------------------------------------------------------------------------- */
+@font-face {
+    font-family: 'Bricolage Grotesque';
+    font-style: normal;
+    font-display: swap;
+    font-weight: 400 800;
+    src: url('/assets/noticeboard/fonts/bricolage-grotesque-latin-wght-normal.woff2') format('woff2-variations');
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+    font-family: 'Bricolage Grotesque';
+    font-style: normal;
+    font-display: swap;
+    font-weight: 400 800;
+    src: url('/assets/noticeboard/fonts/bricolage-grotesque-latin-ext-wght-normal.woff2') format('woff2-variations');
+    unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+/* ---------------------------------------------------------------------------
+ * Instrument Serif — 400 upright + 400 italic (only weight the family ships).
+ * ------------------------------------------------------------------------- */
+@font-face {
+    font-family: 'Instrument Serif';
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url('/assets/noticeboard/fonts/instrument-serif-latin-400-normal.woff2') format('woff2');
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+    font-family: 'Instrument Serif';
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url('/assets/noticeboard/fonts/instrument-serif-latin-ext-400-normal.woff2') format('woff2');
+    unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+    font-family: 'Instrument Serif';
+    font-style: italic;
+    font-weight: 400;
+    font-display: swap;
+    src: url('/assets/noticeboard/fonts/instrument-serif-latin-400-italic.woff2') format('woff2');
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+    font-family: 'Instrument Serif';
+    font-style: italic;
+    font-weight: 400;
+    font-display: swap;
+    src: url('/assets/noticeboard/fonts/instrument-serif-latin-ext-400-italic.woff2') format('woff2');
+    unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+/* ---------------------------------------------------------------------------
+ * IBM Plex Mono — 400, 500.
+ * ------------------------------------------------------------------------- */
+@font-face {
+    font-family: 'IBM Plex Mono';
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url('/assets/noticeboard/fonts/ibm-plex-mono-latin-400-normal.woff2') format('woff2');
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+    font-family: 'IBM Plex Mono';
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url('/assets/noticeboard/fonts/ibm-plex-mono-latin-ext-400-normal.woff2') format('woff2');
+    unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+    font-family: 'IBM Plex Mono';
+    font-style: normal;
+    font-weight: 500;
+    font-display: swap;
+    src: url('/assets/noticeboard/fonts/ibm-plex-mono-latin-500-normal.woff2') format('woff2');
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+    font-family: 'IBM Plex Mono';
+    font-style: normal;
+    font-weight: 500;
+    font-display: swap;
+    src: url('/assets/noticeboard/fonts/ibm-plex-mono-latin-ext-500-normal.woff2') format('woff2');
+    unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+/* ---------------------------------------------------------------------------
+ * IBM Plex Sans — 400, 500, 600.
+ * ------------------------------------------------------------------------- */
+@font-face {
+    font-family: 'IBM Plex Sans';
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url('/assets/noticeboard/fonts/ibm-plex-sans-latin-400-normal.woff2') format('woff2');
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+    font-family: 'IBM Plex Sans';
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url('/assets/noticeboard/fonts/ibm-plex-sans-latin-ext-400-normal.woff2') format('woff2');
+    unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+    font-family: 'IBM Plex Sans';
+    font-style: normal;
+    font-weight: 500;
+    font-display: swap;
+    src: url('/assets/noticeboard/fonts/ibm-plex-sans-latin-500-normal.woff2') format('woff2');
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+    font-family: 'IBM Plex Sans';
+    font-style: normal;
+    font-weight: 500;
+    font-display: swap;
+    src: url('/assets/noticeboard/fonts/ibm-plex-sans-latin-ext-500-normal.woff2') format('woff2');
+    unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+    font-family: 'IBM Plex Sans';
+    font-style: normal;
+    font-weight: 600;
+    font-display: swap;
+    src: url('/assets/noticeboard/fonts/ibm-plex-sans-latin-600-normal.woff2') format('woff2');
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+    font-family: 'IBM Plex Sans';
+    font-style: normal;
+    font-weight: 600;
+    font-display: swap;
+    src: url('/assets/noticeboard/fonts/ibm-plex-sans-latin-ext-600-normal.woff2') format('woff2');
+    unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+/* ---------------------------------------------------------------------------
+ * Fallback layer — if any self-hosted face were ever unavailable (e.g. a
+ * deploy that dropped the woff2 files), fall through to the portal's own
+ * self-hosted Plus Jakarta Sans (PR #356, assets/css/brand-fonts.css) before
+ * hitting the system stack. This does NOT touch the generated bundle's
+ * per-poster inline `font-family:` values (those name 'IBM Plex Sans' /
+ * 'IBM Plex Mono' / 'Bricolage Grotesque' / 'Instrument Serif' directly and
+ * can't route through a fallback chain without editing generated code) —
+ * only #noticeboard-root's own base font-family benefits directly. In
+ * practice this is moot: the @font-face rules above make all four families
+ * resolve, so the fallback only ever engages in a broken-deploy scenario.
+ * ------------------------------------------------------------------------- */
+#noticeboard-root {
+    font-family: 'IBM Plex Sans', 'Plus Jakarta Sans', system-ui, sans-serif;
+}

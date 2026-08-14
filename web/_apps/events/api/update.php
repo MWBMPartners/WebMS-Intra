@@ -20,28 +20,14 @@
 
 declare(strict_types=1);
 
+use Portal\Core\ApiAuth;
 use Portal\Core\ApiResponse;
 use Portal\Core\App;
-use Portal\Core\Auth;
 use Portal\Core\Logger;
 use Portal\Core\Site;
 
-if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    ApiResponse::error('POST required', 405);
-}
-ApiResponse::requireAuth();
-ApiResponse::requireAdmin();
-Auth::ensureSession();
-
-$body = json_decode((string) file_get_contents('php://input'), true);
-if (is_array($body) === false) {
-    $body = [];
-}
-
-$csrfHeader = $_SERVER['HTTP_X_CSRF_TOKEN'] ?? '';
-if (Auth::verifyCsrf($csrfHeader !== '' ? $csrfHeader : (string) ($body['csrf_token'] ?? '')) === false) {
-    ApiResponse::error('CSRF check failed', 403);
-}
+ApiAuth::requireMethod('POST');
+$body = ApiAuth::requireWrite('events:write');
 
 $eventId = (int) ($_GET['id'] ?? $body['eventID'] ?? 0);
 if ($eventId <= 0) {

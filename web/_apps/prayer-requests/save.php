@@ -9,12 +9,13 @@
  *   - Validates subject / body / visibility / anonymous flag
  *   - Honours requireModeration setting (pending vs active)
  *   - Honours allowCongregationFeed setting (downgrades to leadership if off)
+ *   - Opt-in round-robin auto-assign to a prayer partner (#311, migration 148)
  *
  * @package   Portal\PrayerRequests
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   0.10.0
+ * @version   1.4.0
  * -----------------------------------------------------------------------------
  */
 
@@ -23,6 +24,7 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Logger;
+use Portal\Core\PrayerChain;
 use Portal\Core\Site;
 
 // 🛡️ Only POST
@@ -127,6 +129,10 @@ if ($ok === false) {
 }
 
 Logger::activity('PrayerRequestSubmitted', 'Request #' . $newId . ' submitted (status=' . $initialStatus . ')');
+
+// 🙏 Opt-in round-robin auto-assign (#311, migration 148) — no-op unless
+// prayer-requests.autoAssign = 'true'; swallows its own failures.
+PrayerChain::maybeAutoAssign($siteId, $newId);
 
 // 🪝 Outbound webhook (#324) — fire-and-forget. Never blocks the user flow.
 \Portal\Core\WebhookDispatcher::emit('prayer-requests.created', [
