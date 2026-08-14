@@ -1,5 +1,5 @@
 <?php
-// Path: _apps/api/worship-advance.php
+// Path: _apps/worship/api/advance.php
 /**
  * -----------------------------------------------------------------------------
  * Worship — Operator command POST handler (#308 Phase 2 + Phase 3)
@@ -21,7 +21,20 @@
  *
  * Returns JSON identical in shape to /api/worship/state.
  *
+ * Relocated from the unreachable legacy path _apps/api/worship-advance.php
+ * (#373 fold-in). ApiRouter::dispatch() resolves `api/{appName}/{action}` to
+ * `_apps/{appName}/api/{action}.php` and never consults tblRoutes — the old
+ * location's tblRoutes row (migration 138) was dead configuration the router
+ * could never reach, so `/api/worship/advance` 404'd for every operator
+ * console since #308 shipped. This file is the word-for-word logic moved to
+ * the ApiRouter convention path, now reachable, and — since
+ * ApiRouter::dispatch()/dispatchV1() import `global $mysqli, $SETTINGS;`
+ * before the require (#373) — the bare `$mysqli` below resolves correctly.
+ * Precedent: migration 144 did the identical relocation for
+ * `api/livestream/ping` → `_apps/livestream/api/ping.php`.
+ *
  * @link https://github.com/MWBMPartners/WebMS-Intra/issues/308
+ * @link https://github.com/MWBMPartners/WebMS-Intra/issues/373
  * -----------------------------------------------------------------------------
  */
 

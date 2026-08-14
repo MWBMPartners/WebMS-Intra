@@ -32,7 +32,7 @@ CREATE TABLE IF NOT EXISTS `tblDbsChecks` (
     CONSTRAINT `fk_dbs_recorder` FOREIGN KEY (`recordedByID`) REFERENCES `tblUsers`(`userID`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
-INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isEncrypted`) VALUES
+INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isSensitive`) VALUES
     ('safeguarding.dbs_required_for_coordinators', '0', 0),
     ('safeguarding.dbs_renewal_warning_days',      '90', 0)
 ON DUPLICATE KEY UPDATE `settingKey` = VALUES(`settingKey`);

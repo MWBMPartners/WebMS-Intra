@@ -51,7 +51,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 <div class="col-12 d-flex gap-2 mt-3">
                     <button class="btn btn-primary"><i class="fa-solid fa-save me-1"></i>Save</button>
                     <?php if ($isNew !== true): ?>
-                        <button name="delete" value="1" class="btn btn-outline-danger" onclick="return confirm('Archive this song?');"><i class="fa-solid fa-box-archive me-1"></i>Archive</button>
+                        <button name="delete" value="1" class="btn btn-outline-danger" data-confirm="Archive this song?" data-confirm-destructive="true"><i class="fa-solid fa-box-archive me-1"></i>Archive</button>
                     <?php endif; ?>
                     <a href="/worship/songs" class="btn btn-link ms-auto">Back</a>
                 </div>

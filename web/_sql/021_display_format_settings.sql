@@ -9,4 +9,5 @@ VALUES
 ON DUPLICATE KEY UPDATE `settingValue` = VALUES(`settingValue`);
 
 -- 📋 Track migration
-INSERT INTO `tblMigrations` (`filename`) VALUES ('021_display_format_settings.sql');
+INSERT INTO `tblMigrations` (`filename`) VALUES ('021_display_format_settings.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;

@@ -146,6 +146,46 @@ class App
     }
 
     /**
+     * Resolve a SINGLE setting's effective value for a SPECIFIC site, at call
+     * time, directly from tblSettings — NOT from the bootstrap $SETTINGS
+     * snapshot (which is frozen for the host-detected site).
+     *
+     * This exists for the API bearer path (#323 Phase 2): a bearer request is
+     * pinned to the key's own site (Site::forceContext), which may differ from
+     * the host-detected site the bootstrap snapshot was built for. Reading a
+     * per-site override (e.g. api.events.create.enabled scoped to siteID=A, or
+     * api.rateLimit.perKey.maxRequests) against the frozen snapshot would read
+     * the WRONG tenant. A site-specific row wins over the global (siteID IS
+     * NULL) default; returns null when neither exists.
+     *
+     * @param string $settingKey Flat setting key (e.g. 'api.events.create.enabled').
+     * @param int    $siteId     The authoritative site to resolve against.
+     *
+     * @return string|null The effective value, or null if unset.
+     */
+    public static function settingForSite(string $settingKey, int $siteId): ?string
+    {
+        $db = self::db();
+        // Prefer the site-specific override; fall back to the global default.
+        // `siteID IS NULL` sorts to 1 (true) for the global row and 0 for the
+        // site-specific row, so ASC returns the site-specific row first.
+        $stmt = $db->prepare(
+            'SELECT settingValue FROM tblSettings '
+            . 'WHERE settingKey = ? AND (siteID = ? OR siteID IS NULL) '
+            . 'ORDER BY (siteID IS NULL) ASC LIMIT 1'
+        );
+        if ($stmt === false) {
+            return null;
+        }
+        $stmt->bind_param('si', $settingKey, $siteId);
+        $stmt->execute();
+        $row = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+
+        return $row !== null ? (string) $row['settingValue'] : null;
+    }
+
+    /**
      * Get the current authenticated user's data.
      * Lazy-loads from the database using the session user_id.
      * Returns null if no user is logged in.

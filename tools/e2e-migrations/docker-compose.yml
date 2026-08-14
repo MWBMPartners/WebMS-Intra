@@ -1,6 +1,8 @@
 # End-to-end migration test harness — see tools/e2e-migrations/run.sh
 # Spins up a disposable MySQL 8.0.36 instance matching the production
-# server's minimum supported version (ADD COLUMN IF NOT EXISTS needs >=8.0.29).
+# server's confirmed version. MySQL does not support MariaDB's
+# `IF [NOT] EXISTS` DDL extensions — migrations use the information_schema
+# guard idiom instead (see DEV_NOTES.md → "Portable DDL convention").
 services:
   mysql:
     image: mysql:8.0.36

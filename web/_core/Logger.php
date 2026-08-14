@@ -98,6 +98,14 @@ class Logger
      * @param array|null  $oldData    Previous state (null for create)
      * @param array|null  $newData    New state (null for delete)
      * @param int|null    $userId     Acting user ID
+     * @param int|null    $apiKeyId   tblApiKeys.keyID when the change arrived via bearer API
+     *                                key (#323 Phase 2). Null auto-resolves from
+     *                                Portal\Core\ApiAuth::apiKeyId() IF that class exists yet
+     *                                (it ships in a later #323 Phase 2 bundle) — guarded by
+     *                                class_exists() so this stays backward-compatible until then.
+     * @param string|null $source     'session' or 'apikey'. Null auto-resolves from
+     *                                Portal\Core\ApiAuth::source() IF that class exists yet,
+     *                                else defaults to 'session'.
      */
     public static function audit(
         string $tableName,
@@ -105,10 +113,34 @@ class Logger
         string $action,
         ?array $oldData = null,
         ?array $newData = null,
-        ?int $userId = null
+        ?int $userId = null,
+        ?int $apiKeyId = null,
+        ?string $source = null
     ): void {
         $db = self::db();
         $siteId = Site::id();
+
+        // 🔌 Auto-resolve API-key attribution from Portal\Core\ApiAuth when
+        //    the caller didn't pass it explicitly. ApiAuth doesn't exist yet
+        //    as of this bundle (#323 Phase 2 B1 ships schema + primitives
+        //    only) — class_exists()/method_exists() guards keep every
+        //    existing call site (which never passes these two args)
+        //    compiling and behaving exactly as before.
+        if ($apiKeyId === null
+            && class_exists('Portal\\Core\\ApiAuth') === true
+            && method_exists('Portal\\Core\\ApiAuth', 'apiKeyId') === true
+        ) {
+            $apiKeyId = \Portal\Core\ApiAuth::apiKeyId();
+        }
+        if ($source === null
+            && class_exists('Portal\\Core\\ApiAuth') === true
+            && method_exists('Portal\\Core\\ApiAuth', 'source') === true
+        ) {
+            $source = \Portal\Core\ApiAuth::source();
+        }
+        if ($source === null) {
+            $source = 'session';
+        }
 
         // 📋 Build change set for updates (diff old vs new)
         $changeSet = null;
@@ -148,16 +180,16 @@ class Logger
 
         $stmt = $db->prepare(
             'INSERT INTO tblAuditTrail '
-            . '(siteID, userID, tableName, recordID, action, fieldName, oldValue, newValue, changeSet, ipAddress) '
-            . 'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+            . '(siteID, userID, apiKeyID, source, tableName, recordID, action, fieldName, oldValue, newValue, changeSet, ipAddress) '
+            . 'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         );
         if ($stmt === false) {
             error_log('Audit trail prepare failed: ' . $db->error);
             return;
         }
         $stmt->bind_param(
-            'iisissssss',
-            $siteId, $userId, $tableName, $recordId, $action,
+            'iiississssss',
+            $siteId, $userId, $apiKeyId, $source, $tableName, $recordId, $action,
             $fieldName, $oldValue, $newValue, $changeSet, $ip
         );
         $stmt->execute();

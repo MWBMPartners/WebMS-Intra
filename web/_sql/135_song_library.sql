@@ -25,7 +25,7 @@ CREATE TABLE IF NOT EXISTS `tblSongs` (
     CONSTRAINT `fk_song_creator` FOREIGN KEY (`createdByID`) REFERENCES `tblUsers`(`userID`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
-INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isEncrypted`) VALUES
+INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isSensitive`) VALUES
     ('worship.ccli_account_number', '', 0)
 ON DUPLICATE KEY UPDATE `settingKey` = VALUES(`settingKey`);
 
