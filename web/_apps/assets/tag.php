@@ -50,14 +50,23 @@
  * message only; no withheld field (owner/cost/serial/location/agreements)
  * is ever exposed here or accepted by found-save.php.
  *
+ * SCAN LOG (#410, this pass): alongside the existing `audit('token', …,
+ * 'scan')` event, this page now ALSO calls `AssetRegister::recordScan()`
+ * — a separate, purpose-built, queryable log row (`tblAssetScanLog`) that
+ * feeds item.php's manager-only scan-analytics sparkbar. Stores ONLY
+ * salted hashes (never a raw IP/User-Agent) and never throws, so a
+ * logging failure can never break this public page. See
+ * AssetRegister::recordScan()'s own doc + class header point 11.
+ *
  * @package   Portal\Assets
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.1.0
+ * @version   1.2.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/393
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/395
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/401
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/410
  * -----------------------------------------------------------------------------
  */
 
@@ -136,6 +145,18 @@ if ($globalPagesEnabled === false || $assetPageEnabled === false || $isConfident
 // request that errors out mid-render still leaves a trail), then render
 // the minimal safe public page.
 AssetRegister::audit('token', $assetId, $assetId, 'scan', actorType: $loggedIn === true ? 'user' : 'public');
+
+// 🔍 Scan log (#410) — a SEPARATE, purpose-built row alongside the audit()
+// call above (NOT instead of it — see AssetRegister's class header point
+// 11 for why both exist). Context is always 'public' here (this file only
+// ever renders the public /a/{token} page); the actor is the session user
+// when this branch was reached by a logged-in-but-non-privileged viewer,
+// else null (anonymous) — same `> 0 ? … : null` guard audit() itself uses
+// above, so a defensively-empty session never inserts a bogus actorUserID
+// of 0. recordScan() never throws — a logging failure can never break
+// this public page.
+$scanActorUserId = $loggedIn === true ? (int) ($_SESSION['user_id'] ?? 0) : 0;
+AssetRegister::recordScan($assetId, 'public', $scanActorUserId > 0 ? $scanActorUserId : null);
 
 $assetName  = (string) $asset['name'];
 $siteName   = (string) (Site::branding('name') ?? App::settings('site.name') ?? 'this organisation');

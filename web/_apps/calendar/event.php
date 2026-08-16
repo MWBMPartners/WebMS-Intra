@@ -7,17 +7,27 @@
  * Displays full details for a single event, including description, location,
  * people, links, materials, and series info. Accessed via /calendar/event?slug=X
  *
+ * Assigned assets (#409) — Asset Tracker items assigned to this event via
+ * AssetRegister::listAssetsForEvent(). Gated on Auth::check() (unlike the
+ * Documents/Materials sections above it) — this reveals what equipment
+ * will be on-site and when, which a public/anonymous visitor should never
+ * see. The Unassign button posts to _apps/assets/event-assign.php, which
+ * re-derives its own admin/asset_manager/isResponsibleFor() gate
+ * independently server-side.
+ *
  * @package   Portal\Calendar
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   0.3.0
+ * @version   0.4.0
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/409
  * -----------------------------------------------------------------------------
  */
 
 declare(strict_types=1);
 
 use Portal\Core\App;
+use Portal\Core\AssetRegister;
 use Portal\Core\Auth;
 use Portal\Core\Router;
 use Portal\Core\Site;
@@ -133,6 +143,28 @@ if ($stmt !== false) {
     }
     $stmt->close();
 }
+
+// 📦 Assigned assets (#409) — physical/digital assets assigned to this
+// event via AssetRegister::listAssetsForEvent() (Asset Tracker, #393).
+// Gated on Auth::check() — UNLIKE the Documents/Materials sections above,
+// this reveals WHAT EQUIPMENT will be on-site and WHEN, which is not safe
+// to expose to an anonymous public visitor on a public event page (see
+// this file's own render gate further down). Always queried when logged
+// in, regardless of whether the Asset Tracker app itself is enabled —
+// mirrors this file's existing Documents/Materials sections, which don't
+// gate on their own app's enabled flag either; an uninstalled/empty Asset
+// Tracker simply yields zero rows either way.
+$assignedAssets = [];
+if (Auth::check() === true) {
+    $assignedAssets = AssetRegister::listAssetsForEvent((int) $event['eventID'], $siteId);
+}
+// 🛡️ Unassign-button gate — deliberately the general manager gate (not a
+// per-asset isResponsibleFor() check, which would mean an extra query per
+// row on a page that's mostly about the EVENT, not the assets) — hiding
+// the button for a merely-responsible-but-non-manager viewer here is a UI
+// conservatism only; event-assign.php still independently re-derives and
+// re-checks the WIDER admin/asset_manager/isResponsibleFor() gate itself.
+$canManageAssets = App::isAdmin() === true || App::hasRole('asset_manager') === true;
 
 // 📋 Fetch event themes
 $themes = [];
@@ -418,6 +450,52 @@ endif;
                                 </div>
                             </div>
                         <?php endforeach; ?>
+                    </div>
+                </div>
+            <?php endif; ?>
+
+            <!-- 📦 Assigned assets (#409) — gated on Auth::check() above;
+                 see that comment for why this section (unlike Documents/
+                 Materials) is never shown to an anonymous public visitor. -->
+            <?php if (Auth::check() === true && count($assignedAssets) > 0): ?>
+                <div class="card mb-4">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0"><i class="fa-solid fa-box me-2"></i>Assigned assets</h5>
+                        <a href="/assets?eventID=<?php echo (int) $event['eventID']; ?>" class="small text-decoration-none">Assign an asset &rarr;</a>
+                    </div>
+                    <div class="card-body">
+                        <div class="portal-data-list">
+                            <?php foreach ($assignedAssets as $aa): ?>
+                                <div class="portal-data-row align-items-center">
+                                    <div class="col-6 col-md-7">
+                                        <a href="/assets/item?id=<?php echo (int) $aa['assetID']; ?>" class="text-decoration-none">
+                                            <?php echo htmlspecialchars((string) $aa['assetName'], ENT_QUOTES, 'UTF-8'); ?>
+                                        </a>
+                                        <?php if (!empty($aa['assetTagCode'])): ?>
+                                            <br><small class="text-muted"><?php echo htmlspecialchars((string) $aa['assetTagCode'], ENT_QUOTES, 'UTF-8'); ?></small>
+                                        <?php endif; ?>
+                                    </div>
+                                    <div class="col-4 col-md-3 small text-muted">
+                                        <?php echo htmlspecialchars(ucwords(str_replace('-', ' ', (string) $aa['assetStatus'])), ENT_QUOTES, 'UTF-8'); ?>
+                                    </div>
+                                    <?php if ($canManageAssets === true): ?>
+                                        <div class="col-2 text-end">
+                                            <form method="post" action="/assets/event-assign" class="d-inline"
+                                                  data-confirm="Remove this asset's assignment to this event?" data-confirm-destructive="true">
+                                                <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
+                                                <input type="hidden" name="action" value="unassign">
+                                                <input type="hidden" name="assetID" value="<?php echo (int) $aa['assetID']; ?>">
+                                                <input type="hidden" name="assignmentID" value="<?php echo (int) $aa['assignmentID']; ?>">
+                                                <input type="hidden" name="returnTo" value="/calendar/event?slug=<?php echo htmlspecialchars((string) $event['eventSlug'], ENT_QUOTES, 'UTF-8'); ?>">
+                                                <button type="submit" class="btn btn-sm btn-outline-danger" title="Unassign">
+                                                    <i class="fa-solid fa-trash"></i>
+                                                </button>
+                                            </form>
+                                        </div>
+                                    <?php endif; ?>
+                                </div>
+                            <?php endforeach; ?>
+                        </div>
                     </div>
                 </div>
             <?php endif; ?>

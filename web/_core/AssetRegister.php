@@ -288,6 +288,72 @@
  *      render) to keep a single request from asking dompdf to lay out an
  *      unbounded number of label cells.
  *
+ *  10. Asset ↔ event assignments (#409, Phase 2 Pass 2). `tblAssetEventAssignments`
+ *      (migration 160) links an asset to a calendar event, with an OPTIONAL
+ *      assignment window (`assignedFrom`/`assignedUntil`) distinct from the
+ *      event's own start/end — NULL on either side means "use the event's
+ *      own window" (see the migration's column comments; `item.php`/
+ *      `event.php` render that fallback rather than inventing dates).
+ *      `listEventAssignments()` (per-asset, newest-assigned first) and
+ *      `listAssetsForEvent()` (per-event, alphabetical) are the two read
+ *      directions `item.php`'s Assigned-events panel and the calendar
+ *      event page's own Assigned-assets section respectively call.
+ *      `assignToEvent()` does NOT trust its caller (same convention as
+ *      `addOwner()`/`createLoanRequest()` — a cross-app link is a
+ *      security-relevant record): it re-confirms the asset via `self::
+ *      get()` AND independently re-validates the posted `eventID` exists
+ *      on `Site::id()` (mirrors `_apps/documents/upload.php`'s own
+ *      eventID re-validation — an event id from another tenant, or one
+ *      that never existed, is rejected exactly like an unknown assetID
+ *      would be, never trusted just because a form posted it), validates
+ *      any supplied `assignedFrom`/`assignedUntil` as real datetimes with
+ *      `assignedFrom` ≤ `assignedUntil` when both are given, then runs an
+ *      ADVISORY overlap check (an active loan on this asset, OR another
+ *      event assignment whose window intersects the one requested) —
+ *      WARNS, never blocks, same two-tier "advisory vs enforced" pattern
+ *      `assignSeat()` (point 7 above) uses for seat-cap enforcement. The
+ *      `uq_astev_asset_event` unique key (one row per asset+event pair) is
+ *      caught via `\mysqli_sql_exception` into a friendly "already
+ *      assigned" warning, exactly like `addIdentifier()`'s own duplicate-
+ *      catch shape (point 4). `unassignFromEvent()` is IDOR-guarded
+ *      (`assignmentID` + `assetID` + `siteID`, read-then-delete) exactly
+ *      like `removeOwner()`. Every mutation routes through `self::audit()`
+ *      with entityType `'event-link'` — UNLIKE the `'token'`/`'label'`
+ *      event-only entities (points 8-9 above), `'event-link'` NOW has a
+ *      real backing table and IS wired into `TABLE_FOR_ENTITY`, so these
+ *      rows also mirror into the platform's generic `tblAuditTrail` via
+ *      `Logger::audit()`, not just `tblAssetAudit`.
+ *
+ *  11. Scan log + "my assets" + reminder-log foundation (#410, Phase 2
+ *      Pass 2). `tblAssetScanLog` (migration 160) is a PURPOSE-BUILT,
+ *      queryable log distinct from the existing `audit('token', …, 'scan')`
+ *      EVENT tag.php already wrote (point 8 above) — both are written on
+ *      every eligible view (`recordScan()` is called ALONGSIDE, not
+ *      instead of, the existing audit() call), because `tblAssetAudit` is
+ *      the generic append-only choke point while `tblAssetScanLog` exists
+ *      specifically to be aggregated (`scanStats()`/`scanStatsForSite()`,
+ *      the 30-day sparkbars on `item.php`'s manager-only analytics strip)
+ *      without scanning the much busier generic audit table. `recordScan()`
+ *      stores ONLY salted-SHA-256 hashes — `ipHash` via the existing
+ *      private `ipHash()` (point 2 above, unchanged), `userAgentHash` via
+ *      a new `saltedHash()` helper that factors out that SAME salt-file
+ *      scheme so both hashes are computed identically — NEVER a raw IP or
+ *      User-Agent string. It is wrapped in its own try/catch and NEVER
+ *      throws: a public lost-and-found page view, or an internal re-scan,
+ *      must never 500 because a log write failed. `purgeExpiredScanLog()`
+ *      deletes rows older than `assets.scan_log_retention_days` (seeded by
+ *      migration 160) — provided now, wired into the #405 reminder-sweep
+ *      cron in a later pass, same "method ships now, caller lands later"
+ *      precedent as `purgeExpiredFoundReports()` (point 8). `listForUser()`
+ *      is the read behind `_apps/assets/my.php` — STRICTLY the session
+ *      user's own assets, reached three ways (direct/dept/group
+ *      `tblAssetOwners` rows, reusing `isResponsibleFor()`'s exact three
+ *      joins; an active `tblAssetLoans` row with this user as
+ *      `counterpartyUserID`; an active `tblAssetLicenseAssignments` seat)
+ *      — de-duplicated by `assetID` with every matching reason folded into
+ *      one `reasons[]` array per row, so an asset the viewer both owns AND
+ *      currently has on loan appears once, not twice.
+ *
  * All queries are MySQLi prepared statements via `App::db()` — never
  * string-interpolated user input (house rule, .claude/CLAUDE.md → Code Style).
  *
@@ -295,7 +361,7 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.7.0
+ * @version   1.8.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/393
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/394
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/395
@@ -307,6 +373,8 @@
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/401
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/402
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/404
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/409
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/410
  * -----------------------------------------------------------------------------
  */
 
@@ -429,6 +497,9 @@ class AssetRegister
 
     /** @var string[] tblAssetMaintenance.status (#399) */
     public const MAINTENANCE_STATUSES = ['scheduled', 'completed', 'cancelled'];
+
+    /** @var string[] tblAssetScanLog.scanContext (#404 Pass 2 / #410) */
+    public const SCAN_CONTEXTS = ['public', 'internal'];
 
     /* ==========================================================================
      * 🔑 Public token
@@ -669,10 +740,14 @@ class AssetRegister
     /**
      * Map tblAssetAudit.entityType → the real table Logger::audit() should
      * attribute create/update/delete rows to. Entities with no table of
-     * their own yet (label generation, event-link, stocktake, kiosk — all
-     * later sub-issues) are omitted on purpose; audit() simply skips the
+     * their own yet (label generation, stocktake, kiosk — all later sub-
+     * issues) are omitted on purpose; audit() simply skips the
      * Logger::audit() call for those (the tblAssetAudit row above still
-     * captures the action either way).
+     * captures the action either way). `'event-link'` USED to be one of
+     * those placeholders (see older revisions of this comment) — #409
+     * (Phase 2 Pass 2) gave it a real backing table
+     * (`tblAssetEventAssignments`, migration 160), so it is wired in below
+     * like every other entity with a table of its own.
      *
      * @var array<string, string>
      */
@@ -685,6 +760,7 @@ class AssetRegister
         'identifier'   => 'tblAssetIdentifiers',
         'license'      => 'tblAssetLicenseAssignments',
         'found-report' => 'tblAssetFoundReports',
+        'event-link'   => 'tblAssetEventAssignments',
     ];
 
     /**
@@ -727,17 +803,20 @@ class AssetRegister
     }
 
     /**
-     * Salted SHA-256 of the client IP. Salted with the same per-install key
+     * Salted SHA-256 of an arbitrary value, using the SAME per-install key
      * file `encrypt_setting()`/`decrypt_setting()` use (bootstrap.php,
-     * `_auth_keys/enc.key`) so the hash is stable for THIS install (lets an
-     * admin correlate repeat scans/reports from the same visitor) but not
-     * reversible or comparable across installs — no raw IP is ever stored.
+     * `_auth_keys/enc.key`) as the salt — factored out of `ipHash()` (#404
+     * Pass 2 / #410) so `ipHash()` AND the new `userAgentHash()` compute
+     * their digests with the EXACT SAME scheme rather than two
+     * independently-written (and liable to drift) implementations. Stable
+     * for THIS install (lets an admin correlate repeat scans/reports from
+     * the same visitor) but not reversible or comparable across installs —
+     * the raw value passed in is NEVER stored anywhere.
      *
      * @return string 64-char hex SHA-256 digest
      */
-    private static function ipHash(): string
+    private static function saltedHash(string $value): string
     {
-        $ip = self::clientIp();
         $keyPath = PORTAL_ROOT . DIRECTORY_SEPARATOR . '_auth_keys' . DIRECTORY_SEPARATOR . 'enc.key';
         // 🛟 Fall back to the portal version string when the key file isn't
         //    readable (e.g. very early in the installer flow) — still a
@@ -746,7 +825,37 @@ class AssetRegister
         $salt = is_readable($keyPath) === true
             ? (string) file_get_contents($keyPath)
             : (defined('PORTAL_VERSION') ? (string) PORTAL_VERSION : 'webms-intra');
-        return hash('sha256', $salt . '|' . $ip);
+        return hash('sha256', $salt . '|' . $value);
+    }
+
+    /**
+     * Salted SHA-256 of the client IP — see saltedHash() above for the
+     * scheme. Output is BIT-IDENTICAL to this method's own pre-#410
+     * implementation (the salt-loading logic simply moved into the shared
+     * helper); every existing caller (createFoundReport(), audit()) is
+     * unaffected.
+     *
+     * @return string 64-char hex SHA-256 digest
+     */
+    private static function ipHash(): string
+    {
+        return self::saltedHash(self::clientIp());
+    }
+
+    /**
+     * Salted SHA-256 of the scanner's User-Agent header (#410) — same
+     * saltedHash() scheme as ipHash() immediately above, so
+     * `tblAssetScanLog.userAgentHash` is computed identically to
+     * `tblAssetScanLog.ipHash`/`tblAssetAudit.ipHash`. A missing header
+     * (some bots/tools omit it) hashes the empty string rather than being
+     * skipped — recordScan() always writes a value into this NOT-quite-
+     * mandatory-but-always-populated column.
+     *
+     * @return string 64-char hex SHA-256 digest
+     */
+    private static function userAgentHash(): string
+    {
+        return self::saltedHash((string) ($_SERVER['HTTP_USER_AGENT'] ?? ''));
     }
 
     /**
@@ -3831,6 +3940,41 @@ class AssetRegister
     }
 
     /**
+     * Validate + normalise an optional DATETIME string for
+     * assignToEvent()'s `assignedFrom`/`assignedUntil` (#409). Same
+     * null/string/false contract as parseOptionalDate() above, but for a
+     * DATETIME column rather than a DATE one, and accepts EITHER shape a
+     * caller might hand it:
+     *   - 'Y-m-d\TH:i[:s]' — what a browser's <input type="datetime-local">
+     *     posts (the 'T' separator).
+     *   - 'Y-m-d H:i[:s]'  — a plain space-separated value (e.g. a future
+     *     API caller, or a value round-tripped from this same column).
+     * Always returns the normalised 'Y-m-d H:i:s' shape MySQL's DATETIME
+     * columns expect (never the 'T'-separated one — MySQL does not accept
+     * that literal), so callers never insert an un-normalised value.
+     *
+     * @return string|false|null
+     */
+    private static function parseOptionalDateTime(mixed $raw): string|false|null
+    {
+        $value = trim((string) ($raw ?? ''));
+        if ($value === '') {
+            return null;
+        }
+        // 🌐 Normalise the datetime-local 'T' separator to a space BEFORE
+        // parsing, so both accepted shapes above funnel through the same
+        // two-format attempt below.
+        $normalised = str_replace('T', ' ', $value);
+        foreach (['Y-m-d H:i:s', 'Y-m-d H:i'] as $format) {
+            $parsed = \DateTime::createFromFormat($format, $normalised);
+            if ($parsed !== false && $parsed->format($format) === $normalised) {
+                return $parsed->format('Y-m-d H:i:s');
+            }
+        }
+        return false;
+    }
+
+    /**
      * Add a maintenance/service log entry to an asset. Validates:
      *   - The asset exists and is on this site (self::get()).
      *   - maintType ∈ MAINTENANCE_TYPES.
@@ -5733,5 +5877,644 @@ class AssetRegister
     private static function mmFmt(float $value): string
     {
         return rtrim(rtrim(number_format($value, 3, '.', ''), '0'), '.');
+    }
+
+    /* ==========================================================================
+     * 📅 Event assignments (#409, Phase 2 Pass 2) — see class header point 10.
+     * ======================================================================== */
+
+    /**
+     * List an asset's event assignments, newest-assigned first. Joined to
+     * the event's own name/slug/window so item.php's Assigned-events panel
+     * never needs a second round-trip per row.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public static function listEventAssignments(int $assetId): array
+    {
+        $db = App::db();
+        $siteId = Site::id();
+
+        $stmt = $db->prepare(
+            'SELECT ea.*, e.eventName, e.eventSlug, e.startDateTime, e.endDateTime, '
+            . '       u.fullName AS assignedByName '
+            . 'FROM tblAssetEventAssignments ea '
+            . 'JOIN tblEvents e ON e.eventID = ea.eventID '
+            . 'LEFT JOIN tblUsers u ON u.userID = ea.assignedByID '
+            . 'WHERE ea.assetID = ? AND ea.siteID = ? '
+            . 'ORDER BY ea.createdAt DESC'
+        );
+        if ($stmt === false) {
+            error_log('AssetRegister::listEventAssignments() prepare failed: ' . $db->error);
+            return [];
+        }
+        $stmt->bind_param('ii', $assetId, $siteId);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        $rows = [];
+        while ($row = $result->fetch_assoc()) {
+            $rows[] = $row;
+        }
+        $stmt->close();
+        return $rows;
+    }
+
+    /**
+     * List the assets assigned to one event, alphabetical by asset name —
+     * the read behind the calendar event page's own "Assigned assets"
+     * section. `$siteId` is an explicit parameter (unlike most reads in
+     * this class, which pull `Site::id()` themselves) because the calendar
+     * app's own controllers already resolve/pass their own site context;
+     * this mirrors that convention rather than silently re-deriving it.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public static function listAssetsForEvent(int $eventId, int $siteId): array
+    {
+        $db = App::db();
+
+        $stmt = $db->prepare(
+            'SELECT ea.assignmentID, ea.assetID, ea.assignedFrom, ea.assignedUntil, ea.notes, '
+            . '       a.name AS assetName, a.assetTagCode, a.status AS assetStatus '
+            . 'FROM tblAssetEventAssignments ea '
+            . 'JOIN tblAssets a ON a.assetID = ea.assetID AND a.isDeleted = 0 '
+            . 'WHERE ea.eventID = ? AND ea.siteID = ? '
+            . 'ORDER BY a.name ASC'
+        );
+        if ($stmt === false) {
+            error_log('AssetRegister::listAssetsForEvent() prepare failed: ' . $db->error);
+            return [];
+        }
+        $stmt->bind_param('ii', $eventId, $siteId);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        $rows = [];
+        while ($row = $result->fetch_assoc()) {
+            $rows[] = $row;
+        }
+        $stmt->close();
+        return $rows;
+    }
+
+    /**
+     * Assign an asset to an event. Does NOT trust its caller (see class
+     * header point 10): re-confirms the asset via self::get() AND
+     * independently re-validates the posted eventID exists on THIS site
+     * (mirrors `_apps/documents/upload.php`'s own eventID re-validation —
+     * never trust a posted eventID just because a form supplied one).
+     *
+     * Validates:
+     *   - The asset exists and is on this site (self::get()).
+     *   - eventID is a real, non-deleted event on Site::id().
+     *   - assignedFrom/assignedUntil, when supplied, are real datetimes
+     *     (parseOptionalDateTime()) with assignedFrom <= assignedUntil
+     *     when both are given.
+     *
+     * ADVISORY (never blocking — see class header's "two-tier" note): warns
+     * when the asset has an active loan, or when another event assignment
+     * for this asset overlaps the requested window (each open end of the
+     * window defaults to the EVENT's own start/end, mirroring migration
+     * 160's column comments) — the caller decides whether to surface those
+     * warnings, the assignment is saved either way.
+     *
+     * The `uq_astev_asset_event` unique key (one row per asset+event pair)
+     * is caught via \mysqli_sql_exception into a friendly "already
+     * assigned" warning — same catch shape as addIdentifier() above.
+     *
+     * $data keys: eventID (int), assignedFrom (datetime string|''),
+     * assignedUntil (datetime string|''), notes.
+     *
+     * @param array<string, mixed> $data
+     *
+     * @return array{id: int, warnings: string[]}
+     */
+    public static function assignToEvent(int $assetId, array $data, int $actorUserId): array
+    {
+        $db     = App::db();
+        $siteId = Site::id();
+
+        // 🔒 Asset must exist and be on this site — get() is itself
+        // site-scoped via Site::id().
+        if (self::get($assetId) === null) {
+            error_log('AssetRegister::assignToEvent() asset not found on this site: #' . $assetId);
+            return ['id' => 0, 'warnings' => ['Asset not found.']];
+        }
+
+        // 🔒 DOUBLE IDOR guard, half 2 — the eventID is re-validated against
+        // THIS site from scratch, exactly like the asset lookup above.
+        // NEVER trust a posted eventID.
+        $eventId = (int) ($data['eventID'] ?? 0);
+        if ($eventId <= 0) {
+            return ['id' => 0, 'warnings' => ['An event is required.']];
+        }
+        $eStmt = $db->prepare(
+            'SELECT eventID, eventName, startDateTime, endDateTime FROM tblEvents '
+            . 'WHERE eventID = ? AND siteID = ? AND isDeleted = 0 LIMIT 1'
+        );
+        if ($eStmt === false) {
+            error_log('AssetRegister::assignToEvent() event lookup prepare failed: ' . $db->error);
+            return ['id' => 0, 'warnings' => ['Could not verify the event — please try again.']];
+        }
+        $eStmt->bind_param('ii', $eventId, $siteId);
+        $eStmt->execute();
+        $event = $eStmt->get_result()->fetch_assoc();
+        $eStmt->close();
+        if ($event === null || $event === false) {
+            error_log('AssetRegister::assignToEvent() event not found on this site: #' . $eventId);
+            return ['id' => 0, 'warnings' => ['Event not found.']];
+        }
+
+        // 📅 Optional assignment window — parseOptionalDateTime() returns
+        // null (not set — use the event's own window), a normalised
+        // 'Y-m-d H:i:s' string, or false (invalid, reject the whole op).
+        $assignedFrom = self::parseOptionalDateTime($data['assignedFrom'] ?? '');
+        if ($assignedFrom === false) {
+            return ['id' => 0, 'warnings' => ['Invalid "assigned from" date/time.']];
+        }
+        $assignedUntil = self::parseOptionalDateTime($data['assignedUntil'] ?? '');
+        if ($assignedUntil === false) {
+            return ['id' => 0, 'warnings' => ['Invalid "assigned until" date/time.']];
+        }
+        if ($assignedFrom !== null && $assignedUntil !== null && $assignedFrom > $assignedUntil) {
+            return ['id' => 0, 'warnings' => ['"Assigned from" must be before "assigned until".']];
+        }
+
+        $notes = trim((string) ($data['notes'] ?? ''));
+        $notes = $notes !== '' ? mb_substr($notes, 0, 500) : null;
+
+        $warnings = [];
+
+        // 🚦 ADVISORY 1 — an active loan on this asset. Doesn't inspect the
+        // loan's own dates (a loan has no fixed "until", see tblAssetLoans'
+        // own dueDate semantics) — merely flags that the asset is
+        // currently out, so a manager double-books with their eyes open.
+        $loanStmt = $db->prepare(
+            "SELECT 1 FROM tblAssetLoans WHERE assetID = ? AND siteID = ? AND status = 'active' LIMIT 1"
+        );
+        if ($loanStmt !== false) {
+            $loanStmt->bind_param('ii', $assetId, $siteId);
+            $loanStmt->execute();
+            if ($loanStmt->get_result()->fetch_assoc() !== null) {
+                $warnings[] = 'This asset is currently out on an active loan.';
+            }
+            $loanStmt->close();
+        }
+
+        // 🚦 ADVISORY 2 — another event assignment for this asset whose
+        // window overlaps the one being requested. Each side's open end
+        // defaults to the EVENT's own start/end (COALESCE), mirroring
+        // migration 160's column comments and this method's own docblock.
+        $windowStart = $assignedFrom ?? (string) $event['startDateTime'];
+        $windowEnd   = $assignedUntil ?? (string) ($event['endDateTime'] ?? $event['startDateTime']);
+        $overlapStmt = $db->prepare(
+            'SELECT e.eventName FROM tblAssetEventAssignments ea '
+            . 'JOIN tblEvents e ON e.eventID = ea.eventID '
+            . 'WHERE ea.assetID = ? AND ea.siteID = ? AND ea.eventID != ? '
+            . 'AND COALESCE(ea.assignedFrom, e.startDateTime) <= ? '
+            . 'AND COALESCE(ea.assignedUntil, e.endDateTime, e.startDateTime) >= ? '
+            . 'LIMIT 1'
+        );
+        if ($overlapStmt !== false) {
+            $overlapStmt->bind_param('iiiss', $assetId, $siteId, $eventId, $windowEnd, $windowStart);
+            $overlapStmt->execute();
+            $overlapRow = $overlapStmt->get_result()->fetch_assoc();
+            $overlapStmt->close();
+            if ($overlapRow !== null && $overlapRow !== false) {
+                $warnings[] = 'This asset overlaps another event assignment ("' . (string) $overlapRow['eventName'] . '") in this window.';
+            }
+        }
+
+        $fields = [
+            'siteID'        => [$siteId, 'i'],
+            'assetID'       => [$assetId, 'i'],
+            'eventID'       => [$eventId, 'i'],
+            'assignedByID'  => [$actorUserId, 'i'],
+            'assignedFrom'  => [$assignedFrom, 's'],
+            'assignedUntil' => [$assignedUntil, 's'],
+            'notes'         => [$notes, 's'],
+        ];
+        ['columns' => $columns, 'types' => $types, 'params' => $params] = self::splitFields($fields);
+        $placeholders = implode(', ', array_fill(0, count($columns), '?'));
+
+        $newId = 0;
+        try {
+            $stmt = $db->prepare('INSERT INTO tblAssetEventAssignments (`' . implode('`, `', $columns) . '`) VALUES (' . $placeholders . ')');
+            if ($stmt === false) {
+                throw new \RuntimeException('Failed to prepare event-assignment insert: ' . $db->error);
+            }
+            $stmt->bind_param($types, ...$params);
+            $stmt->execute();
+            $newId = (int) $stmt->insert_id;
+            $stmt->close();
+        } catch (\mysqli_sql_exception $e) {
+            // 🪞 Most likely cause: uq_astev_asset_event — this asset is
+            // already assigned to this event. Friendly, non-fatal warning
+            // rather than a 500 — see method doc.
+            error_log('AssetRegister::assignToEvent() insert failed: ' . $e->getMessage());
+            return ['id' => 0, 'warnings' => ['This asset is already assigned to this event.']];
+        } catch (\Throwable $e) {
+            error_log('AssetRegister::assignToEvent() failed: ' . $e->getMessage());
+            return ['id' => 0, 'warnings' => ['Could not assign the asset — please try again.']];
+        }
+
+        if ($newId <= 0) {
+            return ['id' => 0, 'warnings' => ['Could not assign the asset — please try again.']];
+        }
+
+        $auditNew = [];
+        foreach ($fields as $col => $pair) {
+            $auditNew[$col] = $pair[0];
+        }
+        self::audit('event-link', $newId, $assetId, 'create', null, $auditNew);
+
+        return ['id' => $newId, 'warnings' => $warnings];
+    }
+
+    /**
+     * Remove an event-assignment row. IDOR guard: the row must belong to
+     * BOTH $assetId AND the current site before it's touched — mirrors
+     * removeOwner()'s own "confirm it belongs to this asset first" pattern.
+     *
+     * @return bool True if a row existed (for this asset, on this site)
+     *              and was removed
+     */
+    public static function unassignFromEvent(int $assignmentId, int $assetId, int $actorUserId): bool
+    {
+        $db     = App::db();
+        $siteId = Site::id();
+
+        $stmt = $db->prepare('SELECT * FROM tblAssetEventAssignments WHERE assignmentID = ? AND assetID = ? AND siteID = ? LIMIT 1');
+        if ($stmt === false) {
+            return false;
+        }
+        $stmt->bind_param('iii', $assignmentId, $assetId, $siteId);
+        $stmt->execute();
+        $old = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+
+        if ($old === null || $old === false) {
+            return false;
+        }
+
+        $delStmt = $db->prepare('DELETE FROM tblAssetEventAssignments WHERE assignmentID = ? AND assetID = ? AND siteID = ?');
+        if ($delStmt === false) {
+            return false;
+        }
+        $delStmt->bind_param('iii', $assignmentId, $assetId, $siteId);
+        $ok = $delStmt->execute();
+        $affected = $delStmt->affected_rows;
+        $delStmt->close();
+
+        if ($ok === false || $affected <= 0) {
+            return false;
+        }
+
+        self::audit('event-link', $assignmentId, $assetId, 'delete', $old, null);
+
+        return true;
+    }
+
+    /* ==========================================================================
+     * 🔍 Scan log + "my assets" (#410, Phase 2 Pass 2) — see class header
+     * point 11.
+     * ======================================================================== */
+
+    /**
+     * Insert one tblAssetScanLog row. NEVER throws — wrapped in its own
+     * try/catch so a logging failure can never break the page that called
+     * it (the public lost-and-found page, or an internal manager re-scan).
+     * Stores ONLY salted hashes (ipHash/userAgentHash — see saltedHash()'s
+     * doc above); the raw IP/User-Agent are never persisted anywhere.
+     *
+     * This is DELIBERATELY separate from self::audit()'s existing
+     * `audit('token', …, 'scan')` event (#401) — tag.php calls BOTH,
+     * side by side, on the same view; see class header point 11 for why
+     * two records exist for the one event.
+     *
+     * @param string   $context 'public' (the /a/{token} page) or 'internal'
+     *                          (a logged-in manager re-scan) — anything
+     *                          else silently falls back to 'public' (the
+     *                          column's own schema default) rather than
+     *                          failing the write.
+     * @param int|null $actorUserId Session user id for an internal scan;
+     *                          null for an anonymous public one.
+     */
+    public static function recordScan(int $assetId, string $context, ?int $actorUserId): void
+    {
+        if ($assetId <= 0) {
+            return;
+        }
+        try {
+            $db     = App::db();
+            $siteId = Site::id();
+            $context = in_array($context, self::SCAN_CONTEXTS, true) === true ? $context : 'public';
+            $ipHash = self::ipHash();
+            $uaHash = self::userAgentHash();
+
+            $stmt = $db->prepare(
+                'INSERT INTO tblAssetScanLog (siteID, assetID, scanContext, actorUserID, ipHash, userAgentHash) '
+                . 'VALUES (?, ?, ?, ?, ?, ?)'
+            );
+            if ($stmt === false) {
+                error_log('AssetRegister::recordScan() prepare failed: ' . $db->error);
+                return;
+            }
+            $stmt->bind_param('iisiss', $siteId, $assetId, $context, $actorUserId, $ipHash, $uaHash);
+            $stmt->execute();
+            $stmt->close();
+        } catch (\Throwable $e) {
+            // 🛟 Never fatal — see method doc. Logged for diagnosis only.
+            error_log('AssetRegister::recordScan() failed: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * Daily scan counts for one asset over the trailing $days, oldest
+     * first, with EVERY day represented (zero-filled) so item.php's
+     * manager-only sparkbar renders a consistent number of bars regardless
+     * of how few days actually had a scan. Uses idx_astscn_asset_created.
+     *
+     * @return array<int, array{date: string, count: int}>
+     */
+    public static function scanStats(int $assetId, int $days = 30): array
+    {
+        $db = App::db();
+        $days = max(1, min($days, 365));
+
+        $stmt = $db->prepare(
+            'SELECT DATE(createdAt) AS scanDate, COUNT(*) AS cnt FROM tblAssetScanLog '
+            . 'WHERE assetID = ? AND createdAt >= DATE_SUB(CURDATE(), INTERVAL ? DAY) '
+            . 'GROUP BY DATE(createdAt)'
+        );
+        if ($stmt === false) {
+            error_log('AssetRegister::scanStats() prepare failed: ' . $db->error);
+            return [];
+        }
+        $stmt->bind_param('ii', $assetId, $days);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        $counts = [];
+        while ($row = $result->fetch_assoc()) {
+            $counts[(string) $row['scanDate']] = (int) $row['cnt'];
+        }
+        $stmt->close();
+
+        return self::zeroFillDailyCounts($counts, $days);
+    }
+
+    /**
+     * Site-wide equivalent of scanStats() above — same zero-filled shape,
+     * grouped across every asset on the site. Uses idx_astscn_site_created.
+     *
+     * @return array<int, array{date: string, count: int}>
+     */
+    public static function scanStatsForSite(int $siteId, int $days = 30): array
+    {
+        $db = App::db();
+        $days = max(1, min($days, 365));
+
+        $stmt = $db->prepare(
+            'SELECT DATE(createdAt) AS scanDate, COUNT(*) AS cnt FROM tblAssetScanLog '
+            . 'WHERE siteID = ? AND createdAt >= DATE_SUB(CURDATE(), INTERVAL ? DAY) '
+            . 'GROUP BY DATE(createdAt)'
+        );
+        if ($stmt === false) {
+            error_log('AssetRegister::scanStatsForSite() prepare failed: ' . $db->error);
+            return [];
+        }
+        $stmt->bind_param('ii', $siteId, $days);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        $counts = [];
+        while ($row = $result->fetch_assoc()) {
+            $counts[(string) $row['scanDate']] = (int) $row['cnt'];
+        }
+        $stmt->close();
+
+        return self::zeroFillDailyCounts($counts, $days);
+    }
+
+    /**
+     * Shared zero-fill pass for scanStats()/scanStatsForSite() above —
+     * expands a sparse {date: count} map into a dense, oldest-first array
+     * covering EVERY day in the trailing $days window.
+     *
+     * @param array<string, int> $counts
+     *
+     * @return array<int, array{date: string, count: int}>
+     */
+    private static function zeroFillDailyCounts(array $counts, int $days): array
+    {
+        $result = [];
+        for ($i = $days - 1; $i >= 0; $i--) {
+            $d = date('Y-m-d', strtotime('-' . $i . ' days'));
+            $result[] = ['date' => $d, 'count' => $counts[$d] ?? 0];
+        }
+        return $result;
+    }
+
+    /**
+     * Delete tblAssetScanLog rows older than
+     * `assets.scan_log_retention_days` (seeded '365' by migration 160) for
+     * one site. Provided now, wired into the #405 reminder-sweep cron in a
+     * later pass — same "method ships now, caller lands later" precedent
+     * as purgeExpiredFoundReports() (class header point 8).
+     *
+     * @return int Number of rows deleted
+     */
+    public static function purgeExpiredScanLog(int $siteId): int
+    {
+        $db = App::db();
+
+        $retentionDays = (int) (App::settings('assets.scan_log_retention_days') ?? 365);
+        if ($retentionDays <= 0) {
+            $retentionDays = 365;
+        }
+
+        $stmt = $db->prepare(
+            'DELETE FROM tblAssetScanLog WHERE siteID = ? AND createdAt < DATE_SUB(NOW(), INTERVAL ? DAY)'
+        );
+        if ($stmt === false) {
+            error_log('AssetRegister::purgeExpiredScanLog() prepare failed: ' . $db->error);
+            return 0;
+        }
+        $stmt->bind_param('ii', $siteId, $retentionDays);
+        $stmt->execute();
+        $deleted = $stmt->affected_rows;
+        $stmt->close();
+
+        return (int) $deleted;
+    }
+
+    /**
+     * List the assets the given user is connected to — the read behind
+     * `_apps/assets/my.php`. STRICTLY scoped to $userId (the caller MUST
+     * pass the session user's own id — see my.php's own header for why no
+     * id parameter is ever accepted there) and Site::id(). Three
+     * independent ways an asset can appear, folded together and
+     * de-duplicated by assetID (an asset the viewer both owns AND
+     * currently has on loan appears ONCE, with both reasons listed):
+     *
+     *   - 'owner'    — a tblAssetOwners row for this user, DIRECT or via a
+     *                  dept/group they belong to. Reuses isResponsibleFor()'s
+     *                  exact three joins (direct/dept/group), just run as
+     *                  three ordinary SELECTs here rather than three
+     *                  early-return existence checks.
+     *   - 'on-loan'  — an active tblAssetLoans row with this user as
+     *                  counterpartyUserID (works for EITHER direction —
+     *                  counterpartyUserID is only ever set when
+     *                  counterpartyType='user' regardless of whether the
+     *                  site is lending out or borrowing in).
+     *   - 'licensed' — an active tblAssetLicenseAssignments seat for this
+     *                  user.
+     *
+     * @return array<int, array<string, mixed>> Each row carries the asset's
+     *         core display fields PLUS `reasons` (string[], a subset of
+     *         'owner'|'on-loan'|'licensed'), `loanDueDate`/`loanIsOverdue`
+     *         (only meaningful when 'on-loan' is in reasons), and
+     *         `seatLabel` (only meaningful when 'licensed' is in reasons).
+     */
+    public static function listForUser(int $userId): array
+    {
+        if ($userId <= 0) {
+            return [];
+        }
+
+        $db     = App::db();
+        $siteId = Site::id();
+        $rows   = []; // assetID => row, accumulated across the three sources below
+
+        // 👤 1a. Direct ownership.
+        $stmt = $db->prepare(
+            'SELECT a.assetID, a.name, a.assetKind, a.assetTagCode, a.status, a.conditionState '
+            . 'FROM tblAssetOwners o JOIN tblAssets a ON a.assetID = o.assetID '
+            . 'WHERE o.partyType = "user" AND o.userID = ? AND a.siteID = ? AND a.isDeleted = 0'
+        );
+        if ($stmt !== false) {
+            $stmt->bind_param('ii', $userId, $siteId);
+            $stmt->execute();
+            $result = $stmt->get_result();
+            while ($row = $result->fetch_assoc()) {
+                self::foldUserAssetRow($rows, $row, 'owner');
+            }
+            $stmt->close();
+        }
+
+        // 🏢 1b. Dept ownership — mirrors isResponsibleFor()'s dept join.
+        $stmt = $db->prepare(
+            'SELECT a.assetID, a.name, a.assetKind, a.assetTagCode, a.status, a.conditionState '
+            . 'FROM tblAssetOwners o '
+            . 'JOIN tblUserDepts ud ON ud.deptID = o.deptID '
+            . 'JOIN tblAssets a ON a.assetID = o.assetID '
+            . "WHERE o.partyType = 'dept' AND ud.userID = ? AND a.siteID = ? AND a.isDeleted = 0"
+        );
+        if ($stmt !== false) {
+            $stmt->bind_param('ii', $userId, $siteId);
+            $stmt->execute();
+            $result = $stmt->get_result();
+            while ($row = $result->fetch_assoc()) {
+                self::foldUserAssetRow($rows, $row, 'owner');
+            }
+            $stmt->close();
+        }
+
+        // 👥 1c. Group ownership — mirrors isResponsibleFor()'s group join.
+        $stmt = $db->prepare(
+            'SELECT a.assetID, a.name, a.assetKind, a.assetTagCode, a.status, a.conditionState '
+            . 'FROM tblAssetOwners o '
+            . 'JOIN tblUserGroups ug ON ug.groupID = o.groupID '
+            . 'JOIN tblAssets a ON a.assetID = o.assetID '
+            . "WHERE o.partyType = 'group' AND ug.userID = ? AND a.siteID = ? AND a.isDeleted = 0"
+        );
+        if ($stmt !== false) {
+            $stmt->bind_param('ii', $userId, $siteId);
+            $stmt->execute();
+            $result = $stmt->get_result();
+            while ($row = $result->fetch_assoc()) {
+                self::foldUserAssetRow($rows, $row, 'owner');
+            }
+            $stmt->close();
+        }
+
+        // 🔄 2. Active loans to this user.
+        $stmt = $db->prepare(
+            'SELECT a.assetID, a.name, a.assetKind, a.assetTagCode, a.status, a.conditionState, '
+            . '       l.dueDate AS loanDueDate '
+            . 'FROM tblAssetLoans l JOIN tblAssets a ON a.assetID = l.assetID '
+            . "WHERE l.counterpartyUserID = ? AND l.status = 'active' AND a.siteID = ? AND a.isDeleted = 0"
+        );
+        if ($stmt !== false) {
+            $stmt->bind_param('ii', $userId, $siteId);
+            $stmt->execute();
+            $result = $stmt->get_result();
+            $today = date('Y-m-d');
+            while ($row = $result->fetch_assoc()) {
+                $loanDueDate = $row['loanDueDate'];
+                unset($row['loanDueDate']);
+                self::foldUserAssetRow($rows, $row, 'on-loan', [
+                    'loanDueDate'   => $loanDueDate,
+                    'loanIsOverdue' => $loanDueDate !== null && (string) $loanDueDate < $today,
+                ]);
+            }
+            $stmt->close();
+        }
+
+        // 🔑 3. Active licence seats assigned to this user.
+        $stmt = $db->prepare(
+            'SELECT a.assetID, a.name, a.assetKind, a.assetTagCode, a.status, a.conditionState, '
+            . '       la.seatLabel AS licSeatLabel '
+            . 'FROM tblAssetLicenseAssignments la JOIN tblAssets a ON a.assetID = la.licenseAssetID '
+            . "WHERE la.userID = ? AND la.status = 'active' AND a.siteID = ? AND a.isDeleted = 0"
+        );
+        if ($stmt !== false) {
+            $stmt->bind_param('ii', $userId, $siteId);
+            $stmt->execute();
+            $result = $stmt->get_result();
+            while ($row = $result->fetch_assoc()) {
+                $seatLabel = $row['licSeatLabel'];
+                unset($row['licSeatLabel']);
+                self::foldUserAssetRow($rows, $row, 'licensed', ['seatLabel' => $seatLabel]);
+            }
+            $stmt->close();
+        }
+
+        $result = array_values($rows);
+        usort($result, static fn (array $x, array $y): int => strcmp((string) $x['name'], (string) $y['name']));
+        return $result;
+    }
+
+    /**
+     * Fold one asset row + reason into listForUser()'s accumulator by
+     * reference, de-duplicating by assetID — a second/third source hitting
+     * the SAME asset appends its reason (and any $extra fields) onto the
+     * row already there rather than creating a duplicate entry.
+     *
+     * @param array<int, array<string, mixed>> $rows Accumulator, by reference
+     * @param array<string, mixed>             $assetRow Must carry at least assetID/name/assetKind/assetTagCode/status/conditionState
+     * @param array<string, mixed>             $extra Additional fields to merge onto the row (e.g. loanDueDate)
+     */
+    private static function foldUserAssetRow(array &$rows, array $assetRow, string $reason, array $extra = []): void
+    {
+        $assetId = (int) $assetRow['assetID'];
+        if (isset($rows[$assetId]) === false) {
+            $rows[$assetId] = [
+                'assetID'        => $assetId,
+                'name'           => (string) $assetRow['name'],
+                'assetKind'      => (string) $assetRow['assetKind'],
+                'assetTagCode'   => $assetRow['assetTagCode'],
+                'status'         => (string) $assetRow['status'],
+                'conditionState' => (string) $assetRow['conditionState'],
+                'reasons'        => [],
+                'loanDueDate'    => null,
+                'loanIsOverdue'  => false,
+                'seatLabel'      => null,
+            ];
+        }
+        if (in_array($reason, $rows[$assetId]['reasons'], true) === false) {
+            $rows[$assetId]['reasons'][] = $reason;
+        }
+        foreach ($extra as $key => $value) {
+            $rows[$assetId][$key] = $value;
+        }
     }
 }
