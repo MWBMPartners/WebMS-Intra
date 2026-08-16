@@ -122,6 +122,43 @@
  *      loan record and the asset's own status column disagreeing about
  *      whether the item is out/in.
  *
+ *   6. Maintenance log + depreciation (#399, this pass). `canManageMaintenance()`
+ *      is an EXACT mirror of `canApproveLoan()` (point 5 above) — same
+ *      session-scoped admin/asset_manager bypass, same direct/dept/group
+ *      `tblAssetOwners` joins — narrowed to the `isMaintenanceAuthority`
+ *      flag instead of `isLendingAuthority`. `listMaintenance()` (per-asset,
+ *      newest performed/created first) and `listUpcomingMaintenance()`
+ *      (site-wide, every SCHEDULED entry with a `nextDueDate` set, soonest
+ *      first — feeds `maintenance.php`'s no-`assetID` view) both resolve a
+ *      `performedByDisplay` name (the linked portal user, or the free-text
+ *      `performedByName`, or null) and compute `isOverdue`/`isUpcoming` in
+ *      PHP once per row, same rationale as `listLoans()`'s `isOverdue` (see
+ *      point 5). `addMaintenance()`/`updateMaintenance()` re-validate
+ *      `maintType`/`status` against this class's ENUM allow-lists,
+ *      `costPence` (int ≥ 0 or null — the CALLER converts a pounds input to
+ *      pence, mirroring every other money field in this app), both dates
+ *      via the shared `parseOptionalDate()` helper, and `performedByUserID`
+ *      via `partyExistsOnSite()` (reused unchanged from #396) when supplied
+ *      — exactly one of a real portal user OR free-text `performedByName`
+ *      is persisted per row, though (unlike `addOwner()`'s party FK or
+ *      `createLoanRequest()`'s counterparty) BOTH may legitimately be blank
+ *      (unattended/self-service maintenance with no named performer).
+ *      `updateMaintenance()`/`deleteMaintenance()` IDOR-guard on
+ *      `maintID` + `assetID` + `siteID` before ever touching a row, same
+ *      shape as `loanAction()`'s read-then-mutate pattern. Every mutation
+ *      routes through `self::audit()` (entityType `'maintenance'`, already
+ *      wired into `TABLE_FOR_ENTITY` since the #395 audit choke-point pass).
+ *      `computeStraightLineValue()` is a PURE helper (no DB, no site/audit
+ *      context) — display-only "as of today" estimate for `item.php`'s
+ *      Depreciation readout; it clamps at the salvage value (never
+ *      negative-depreciates below it) and at the purchase cost (never
+ *      appreciates above it, even against a mis-entered salvage value
+ *      exceeding cost), and returns null rather than guessing whenever any
+ *      required input is missing or the method isn't `'straight-line'`.
+ *      Reducing-balance and PERSISTING `tblAssets.currentValuePence`/
+ *      `valuationDate` are explicitly out of scope here — Phase-3 cron work
+ *      per #399's spec.
+ *
  * All queries are MySQLi prepared statements via `App::db()` — never
  * string-interpolated user input (house rule, .claude/CLAUDE.md → Code Style).
  *
@@ -136,6 +173,7 @@
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/396
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/397
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/398
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/399
  * -----------------------------------------------------------------------------
  */
 
@@ -252,6 +290,12 @@ class AssetRegister
      * @var string[]
      */
     public const OWNER_AUTHORITY_FIELDS = ['isLendingAuthority', 'isMaintenanceAuthority'];
+
+    /** @var string[] tblAssetMaintenance.maintType (#399) */
+    public const MAINTENANCE_TYPES = ['service', 'repair', 'inspection', 'calibration', 'upgrade', 'other'];
+
+    /** @var string[] tblAssetMaintenance.status (#399) */
+    public const MAINTENANCE_STATUSES = ['scheduled', 'completed', 'cancelled'];
 
     /* ==========================================================================
      * 🔑 Public token
@@ -3323,6 +3367,705 @@ class AssetRegister
         self::audit('loan', $loanId, $assetId, 'cancel', ['status' => $currentStatus], ['status' => 'cancelled']);
 
         return ['ok' => true, 'msg' => 'Loan cancelled.'];
+    }
+
+    /* ==========================================================================
+     * 🔧 Maintenance log + 💷 depreciation (#399)
+     * ------------------------------------------------------------------------
+     * `tblAssetMaintenance` mutations DO route through self::audit()
+     * (entityType 'maintenance', already wired into TABLE_FOR_ENTITY since
+     * the #395 audit choke-point pass). See this class's header comment
+     * (point 6) for the full design rationale — canManageMaintenance()'s
+     * exact mirror of canApproveLoan(), the read helpers'
+     * performedByDisplay/isOverdue/isUpcoming computation, and
+     * computeStraightLineValue()'s pure-function contract.
+     * ======================================================================== */
+
+    /**
+     * Does the given user (default: current session user) have MAINTENANCE
+     * authority for this asset? EXACT mirror of {@see canApproveLoan()} —
+     * see that method's own doc for the full rationale behind the
+     * session-scoped admin/asset_manager bypass and why `$userId` is
+     * treated the way it is; every line below is identical to that method
+     * except the ownership flag it checks. True when EITHER:
+     *   - The user is an admin or holds the asset_manager role, OR
+     *   - The user is a direct `tblAssetOwners` party for this asset with
+     *     `isMaintenanceAuthority = 1`, or belongs to a dept/group that IS
+     *     such a party.
+     */
+    public static function canManageMaintenance(int $assetId, ?int $userId = null): bool
+    {
+        if ($assetId <= 0) {
+            return false;
+        }
+
+        $sessionUserId = Auth::check() === true ? (int) ($_SESSION['user_id'] ?? 0) : 0;
+        $checkingSessionUser = ($userId === null) || ($userId === $sessionUserId && $sessionUserId > 0);
+
+        if ($userId === null) {
+            $userId = $sessionUserId;
+        }
+        if ($userId <= 0) {
+            return false;
+        }
+
+        // 🛡️ Admin / asset_manager bypass — session-user-only, see
+        // canApproveLoan()'s doc for why.
+        if ($checkingSessionUser === true
+            && (App::isAdmin() === true || App::hasRole('asset_manager') === true)
+        ) {
+            return true;
+        }
+
+        $db = App::db();
+
+        // 👤 Direct maintenance-authority ownership row.
+        $stmt = $db->prepare(
+            'SELECT 1 FROM tblAssetOwners '
+            . 'WHERE assetID = ? AND partyType = "user" AND userID = ? AND isMaintenanceAuthority = 1 LIMIT 1'
+        );
+        if ($stmt !== false) {
+            $stmt->bind_param('ii', $assetId, $userId);
+            $stmt->execute();
+            $hit = (bool) $stmt->get_result()->fetch_assoc();
+            $stmt->close();
+            if ($hit === true) {
+                return true;
+            }
+        }
+
+        // 🏢 Department maintenance authority — mirrors canApproveLoan()'s
+        //    dept join, narrowed to isMaintenanceAuthority.
+        $stmt = $db->prepare(
+            'SELECT 1 FROM tblAssetOwners o '
+            . 'JOIN tblUserDepts ud ON ud.deptID = o.deptID '
+            . 'WHERE o.assetID = ? AND o.partyType = "dept" AND o.isMaintenanceAuthority = 1 AND ud.userID = ? LIMIT 1'
+        );
+        if ($stmt !== false) {
+            $stmt->bind_param('ii', $assetId, $userId);
+            $stmt->execute();
+            $hit = (bool) $stmt->get_result()->fetch_assoc();
+            $stmt->close();
+            if ($hit === true) {
+                return true;
+            }
+        }
+
+        // 👥 Group maintenance authority — mirrors canApproveLoan()'s group join.
+        $stmt = $db->prepare(
+            'SELECT 1 FROM tblAssetOwners o '
+            . 'JOIN tblUserGroups ug ON ug.groupID = o.groupID '
+            . 'WHERE o.assetID = ? AND o.partyType = "group" AND o.isMaintenanceAuthority = 1 AND ug.userID = ? LIMIT 1'
+        );
+        if ($stmt !== false) {
+            $stmt->bind_param('ii', $assetId, $userId);
+            $stmt->execute();
+            $hit = (bool) $stmt->get_result()->fetch_assoc();
+            $stmt->close();
+            if ($hit === true) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * List an asset's maintenance/service history, newest performed (or,
+     * for a scheduled entry with no performedAt yet, newest created) first.
+     * Resolves a single `performedByDisplay` name — the linked portal
+     * user's name when `performedByUserID` is set, else the free-text
+     * `performedByName`, else null (caller renders a muted "—") — and
+     * computes `isOverdue`/`isUpcoming` in PHP once per row (status =
+     * 'scheduled' AND nextDueDate in the past/future respectively — same
+     * "compute once here, not per-caller" rationale as listLoans()'s
+     * isOverdue, see this class's header point 5).
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public static function listMaintenance(int $assetId): array
+    {
+        $db = App::db();
+        $stmt = $db->prepare(
+            'SELECT m.*, u.fullName AS performedByUserName '
+            . 'FROM tblAssetMaintenance m '
+            . 'LEFT JOIN tblUsers u ON u.userID = m.performedByUserID '
+            . 'WHERE m.assetID = ? '
+            . 'ORDER BY COALESCE(m.performedAt, DATE(m.createdAt)) DESC, m.maintID DESC'
+        );
+        if ($stmt === false) {
+            error_log('AssetRegister::listMaintenance() prepare failed: ' . $db->error);
+            return [];
+        }
+        $stmt->bind_param('i', $assetId);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        $rows = [];
+        $today = date('Y-m-d');
+        while ($row = $result->fetch_assoc()) {
+            $row['performedByDisplay'] = self::maintenancePerformedByDisplay($row);
+            $row['isOverdue']  = (string) $row['status'] === 'scheduled'
+                && $row['nextDueDate'] !== null
+                && (string) $row['nextDueDate'] < $today;
+            $row['isUpcoming'] = (string) $row['status'] === 'scheduled'
+                && $row['nextDueDate'] !== null
+                && (string) $row['nextDueDate'] >= $today;
+            $rows[] = $row;
+        }
+        $stmt->close();
+        return $rows;
+    }
+
+    /**
+     * Site-wide "maintenance due" view — every SCHEDULED entry with a
+     * nextDueDate set, across every asset on this site, soonest due first.
+     * Feeds `maintenance.php`'s site-wide view (rendered when no
+     * `?assetID=` is supplied). Confidential-asset filtering mirrors
+     * listLoans()/listForSite()'s own `$includeConfidential` param exactly
+     * (false = excluded; true = a caller that has already verified the
+     * viewer is privileged for confidential assets).
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public static function listUpcomingMaintenance(int $siteId, bool $includeConfidential = false): array
+    {
+        $db = App::db();
+
+        $where = ['m.siteID = ?', "m.status = 'scheduled'", 'm.nextDueDate IS NOT NULL'];
+        if ($includeConfidential === false) {
+            $where[] = 'a.isConfidential = 0';
+        }
+
+        $sql = 'SELECT m.*, a.name AS assetName, a.assetTagCode, a.isConfidential, '
+             . '       u.fullName AS performedByUserName '
+             . 'FROM tblAssetMaintenance m '
+             . 'JOIN tblAssets a ON a.assetID = m.assetID AND a.isDeleted = 0 '
+             . 'LEFT JOIN tblUsers u ON u.userID = m.performedByUserID '
+             . 'WHERE ' . implode(' AND ', $where) . ' '
+             . 'ORDER BY m.nextDueDate ASC';
+
+        $stmt = $db->prepare($sql);
+        if ($stmt === false) {
+            error_log('AssetRegister::listUpcomingMaintenance() prepare failed: ' . $db->error);
+            return [];
+        }
+        $stmt->bind_param('i', $siteId);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        $rows = [];
+        $today = date('Y-m-d');
+        while ($row = $result->fetch_assoc()) {
+            $row['performedByDisplay'] = self::maintenancePerformedByDisplay($row);
+            $row['isOverdue'] = (string) $row['nextDueDate'] < $today;
+            $rows[] = $row;
+        }
+        $stmt->close();
+        return $rows;
+    }
+
+    /**
+     * Shared performedByDisplay resolution for listMaintenance()/
+     * listUpcomingMaintenance() — factored out so the two read helpers
+     * can't drift on this fallback logic. Requires the row to already
+     * carry a LEFT JOINed `performedByUserName` column (both callers'
+     * SQL provides this).
+     *
+     * @param array<string, mixed> $row
+     */
+    private static function maintenancePerformedByDisplay(array $row): ?string
+    {
+        if ($row['performedByUserID'] !== null) {
+            return $row['performedByUserName'] ?? '(deleted user)';
+        }
+        if ($row['performedByName'] !== null && (string) $row['performedByName'] !== '') {
+            return (string) $row['performedByName'];
+        }
+        return null;
+    }
+
+    /**
+     * Validate + normalise an optional Y-m-d date string. Returns:
+     *   - null   when $raw is empty/absent (a legitimate "not set" value)
+     *   - string the normalised Y-m-d value when $raw parses as a real
+     *            calendar date
+     *   - false  when $raw is non-empty but not a valid Y-m-d date (the
+     *            caller should reject the whole operation)
+     *
+     * Factored out of createLoanRequest()'s inline dueDate validation
+     * (which stays as-is, unchanged, to avoid touching #398 behaviour)
+     * since addMaintenance()/updateMaintenance() each need the identical
+     * check twice (performedAt + nextDueDate).
+     *
+     * @return string|false|null
+     */
+    private static function parseOptionalDate(mixed $raw): string|false|null
+    {
+        $value = trim((string) ($raw ?? ''));
+        if ($value === '') {
+            return null;
+        }
+        $parsed = \DateTime::createFromFormat('Y-m-d', $value);
+        if ($parsed === false || $parsed->format('Y-m-d') !== $value) {
+            return false;
+        }
+        return $value;
+    }
+
+    /**
+     * Add a maintenance/service log entry to an asset. Validates:
+     *   - The asset exists and is on this site (self::get()).
+     *   - maintType ∈ MAINTENANCE_TYPES.
+     *   - title is non-empty, ≤255 chars (VARCHAR(255) column).
+     *   - status ∈ MAINTENANCE_STATUSES (defaults to 'completed', matching
+     *     the column's own schema default).
+     *   - costPence, when supplied, is an int ≥ 0 — the CALLER
+     *     (maintenance-save.php) is responsible for converting a pounds
+     *     form input to pence before this is reached, same convention as
+     *     every other money field in this app (#266).
+     *   - performedAt / nextDueDate, when supplied, are real Y-m-d dates
+     *     (via the shared parseOptionalDate() helper).
+     *   - performedByUserID, when supplied (a positive int), must exist on
+     *     this site (partyExistsOnSite('user', …), reused unchanged from
+     *     #396) — otherwise the free-text performedByName is used instead.
+     *     UNLIKE addOwner()'s party FK or createLoanRequest()'s
+     *     counterparty, BOTH may legitimately be blank at once (e.g.
+     *     unattended/self-service maintenance with no named performer) —
+     *     this is not an "exactly one of" rule.
+     *
+     * $data keys: maintType, title, details, performedByUserID (int|0),
+     * performedByName, costPence (int|null — already pence), performedAt
+     * (Y-m-d|''), nextDueDate (Y-m-d|''), status.
+     *
+     * @param array<string, mixed> $data
+     *
+     * @return int New maintID, or 0 on validation failure or insert failure
+     */
+    public static function addMaintenance(int $assetId, array $data, int $actorUserId): int
+    {
+        $db     = App::db();
+        $siteId = Site::id();
+
+        if (self::get($assetId) === null) {
+            error_log('AssetRegister::addMaintenance() asset not found on this site: #' . $assetId);
+            return 0;
+        }
+
+        $maintType = (string) ($data['maintType'] ?? '');
+        if (in_array($maintType, self::MAINTENANCE_TYPES, true) === false) {
+            error_log('AssetRegister::addMaintenance() invalid maintType: ' . $maintType);
+            return 0;
+        }
+
+        $title = trim((string) ($data['title'] ?? ''));
+        if ($title === '') {
+            error_log('AssetRegister::addMaintenance() title is required');
+            return 0;
+        }
+        $title = mb_substr($title, 0, 255);
+
+        $status = (string) ($data['status'] ?? 'completed');
+        if (in_array($status, self::MAINTENANCE_STATUSES, true) === false) {
+            error_log('AssetRegister::addMaintenance() invalid status: ' . $status);
+            return 0;
+        }
+
+        $details = trim((string) ($data['details'] ?? ''));
+        $details = $details !== '' ? $details : null;
+
+        $costPence = null;
+        if (isset($data['costPence']) === true && $data['costPence'] !== null && $data['costPence'] !== '') {
+            $costPence = (int) $data['costPence'];
+            if ($costPence < 0) {
+                error_log('AssetRegister::addMaintenance() costPence must be >= 0');
+                return 0;
+            }
+        }
+
+        $performedAt = self::parseOptionalDate($data['performedAt'] ?? null);
+        if ($performedAt === false) {
+            error_log('AssetRegister::addMaintenance() invalid performedAt date');
+            return 0;
+        }
+        $nextDueDate = self::parseOptionalDate($data['nextDueDate'] ?? null);
+        if ($nextDueDate === false) {
+            error_log('AssetRegister::addMaintenance() invalid nextDueDate date');
+            return 0;
+        }
+
+        // 👤 performedByUserID — see method doc: not an "exactly one of"
+        // rule like addOwner()/createLoanRequest(), both may be blank.
+        $performedByUserId = (int) ($data['performedByUserID'] ?? 0);
+        $performedByName = null;
+        if ($performedByUserId > 0) {
+            if (self::partyExistsOnSite('user', $performedByUserId, $siteId) === false) {
+                error_log('AssetRegister::addMaintenance() performedByUserID not found on this site: #' . $performedByUserId);
+                return 0;
+            }
+        } else {
+            $performedByUserId = null;
+            $freeText = trim((string) ($data['performedByName'] ?? ''));
+            $performedByName = $freeText !== '' ? mb_substr($freeText, 0, 255) : null;
+        }
+
+        $fields = [
+            'siteID'            => [$siteId, 'i'],
+            'assetID'           => [$assetId, 'i'],
+            'maintType'         => [$maintType, 's'],
+            'title'             => [$title, 's'],
+            'details'           => [$details, 's'],
+            'performedByUserID' => [$performedByUserId, 'i'],
+            'performedByName'   => [$performedByName, 's'],
+            'costPence'         => [$costPence, 'i'],
+            'performedAt'       => [$performedAt, 's'],
+            'nextDueDate'       => [$nextDueDate, 's'],
+            'status'            => [$status, 's'],
+            'createdByID'       => [$actorUserId, 'i'],
+        ];
+
+        ['columns' => $columns, 'types' => $types, 'params' => $params] = self::splitFields($fields);
+        $placeholders = implode(', ', array_fill(0, count($columns), '?'));
+
+        $stmt = $db->prepare('INSERT INTO tblAssetMaintenance (`' . implode('`, `', $columns) . '`) VALUES (' . $placeholders . ')');
+        if ($stmt === false) {
+            error_log('AssetRegister::addMaintenance() prepare failed: ' . $db->error);
+            return 0;
+        }
+
+        try {
+            $stmt->bind_param($types, ...$params);
+            $stmt->execute();
+        } catch (\mysqli_sql_exception $e) {
+            error_log('AssetRegister::addMaintenance() insert failed: ' . $e->getMessage());
+            $stmt->close();
+            return 0;
+        }
+        $newId = (int) $stmt->insert_id;
+        $stmt->close();
+
+        if ($newId <= 0) {
+            return 0;
+        }
+
+        $auditNew = [];
+        foreach ($fields as $col => $pair) {
+            $auditNew[$col] = $pair[0];
+        }
+        self::audit('maintenance', $newId, $assetId, 'create', null, $auditNew);
+
+        return $newId;
+    }
+
+    /**
+     * Update an existing maintenance entry. IDOR guard: the row must
+     * belong to BOTH $assetId AND the current site before anything is
+     * read or touched — mirrors loanAction()'s "load scoped to all three,
+     * then mutate" pattern. Re-runs every validation rule addMaintenance()
+     * does (this method does NOT trust its caller's validation, matching
+     * addOwner()'s "re-validate everything" convention rather than
+     * createAsset()/updateAsset()'s "caller validates" one — a maintenance
+     * entry is a security-relevant record of who-did-what-when, same
+     * rationale as the loan register).
+     *
+     * $data keys: identical shape to addMaintenance()'s.
+     *
+     * @param array<string, mixed> $data
+     *
+     * @return bool True on success, false if the row doesn't exist (for
+     *              this asset, on this site) or any validation rule fails
+     */
+    public static function updateMaintenance(int $maintId, int $assetId, array $data, int $actorUserId): bool
+    {
+        $db     = App::db();
+        $siteId = Site::id();
+
+        // 🔒 IDOR guard FIRST — before any validation or mutation.
+        $stmt = $db->prepare('SELECT * FROM tblAssetMaintenance WHERE maintID = ? AND assetID = ? AND siteID = ? LIMIT 1');
+        if ($stmt === false) {
+            error_log('AssetRegister::updateMaintenance() prepare failed: ' . $db->error);
+            return false;
+        }
+        $stmt->bind_param('iii', $maintId, $assetId, $siteId);
+        $stmt->execute();
+        $old = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+
+        if ($old === null || $old === false) {
+            return false;
+        }
+
+        $maintType = (string) ($data['maintType'] ?? '');
+        if (in_array($maintType, self::MAINTENANCE_TYPES, true) === false) {
+            error_log('AssetRegister::updateMaintenance() invalid maintType: ' . $maintType);
+            return false;
+        }
+
+        $title = trim((string) ($data['title'] ?? ''));
+        if ($title === '') {
+            error_log('AssetRegister::updateMaintenance() title is required');
+            return false;
+        }
+        $title = mb_substr($title, 0, 255);
+
+        $status = (string) ($data['status'] ?? 'completed');
+        if (in_array($status, self::MAINTENANCE_STATUSES, true) === false) {
+            error_log('AssetRegister::updateMaintenance() invalid status: ' . $status);
+            return false;
+        }
+
+        $details = trim((string) ($data['details'] ?? ''));
+        $details = $details !== '' ? $details : null;
+
+        $costPence = null;
+        if (isset($data['costPence']) === true && $data['costPence'] !== null && $data['costPence'] !== '') {
+            $costPence = (int) $data['costPence'];
+            if ($costPence < 0) {
+                error_log('AssetRegister::updateMaintenance() costPence must be >= 0');
+                return false;
+            }
+        }
+
+        $performedAt = self::parseOptionalDate($data['performedAt'] ?? null);
+        if ($performedAt === false) {
+            error_log('AssetRegister::updateMaintenance() invalid performedAt date');
+            return false;
+        }
+        $nextDueDate = self::parseOptionalDate($data['nextDueDate'] ?? null);
+        if ($nextDueDate === false) {
+            error_log('AssetRegister::updateMaintenance() invalid nextDueDate date');
+            return false;
+        }
+
+        $performedByUserId = (int) ($data['performedByUserID'] ?? 0);
+        $performedByName = null;
+        if ($performedByUserId > 0) {
+            if (self::partyExistsOnSite('user', $performedByUserId, $siteId) === false) {
+                error_log('AssetRegister::updateMaintenance() performedByUserID not found on this site: #' . $performedByUserId);
+                return false;
+            }
+        } else {
+            $performedByUserId = null;
+            $freeText = trim((string) ($data['performedByName'] ?? ''));
+            $performedByName = $freeText !== '' ? mb_substr($freeText, 0, 255) : null;
+        }
+
+        $fields = [
+            'maintType'         => [$maintType, 's'],
+            'title'             => [$title, 's'],
+            'details'           => [$details, 's'],
+            'performedByUserID' => [$performedByUserId, 'i'],
+            'performedByName'   => [$performedByName, 's'],
+            'costPence'         => [$costPence, 'i'],
+            'performedAt'       => [$performedAt, 's'],
+            'nextDueDate'       => [$nextDueDate, 's'],
+            'status'            => [$status, 's'],
+        ];
+
+        ['columns' => $columns, 'types' => $types, 'params' => $params] = self::splitFields($fields);
+        $setClause = implode(', ', array_map(static fn (string $c): string => '`' . $c . '` = ?', $columns));
+        $types    .= 'iii';
+        $params[]  = $maintId;
+        $params[]  = $assetId;
+        $params[]  = $siteId;
+
+        $stmt = $db->prepare('UPDATE tblAssetMaintenance SET ' . $setClause . ' WHERE maintID = ? AND assetID = ? AND siteID = ?');
+        if ($stmt === false) {
+            error_log('AssetRegister::updateMaintenance() prepare failed: ' . $db->error);
+            return false;
+        }
+
+        try {
+            $stmt->bind_param($types, ...$params);
+            $ok = $stmt->execute();
+        } catch (\mysqli_sql_exception $e) {
+            error_log('AssetRegister::updateMaintenance() update failed: ' . $e->getMessage());
+            $stmt->close();
+            return false;
+        }
+        $stmt->close();
+
+        if ($ok === false) {
+            return false;
+        }
+
+        // 📜 Audit — restrict the diff to just the editable fields we
+        // touched, same convention as updateAsset()'s own audit call.
+        $auditOld = array_intersect_key($old, $fields);
+        $auditNew = [];
+        foreach ($fields as $col => $pair) {
+            $auditNew[$col] = $pair[0];
+        }
+        self::audit('maintenance', $maintId, $assetId, 'update', $auditOld, $auditNew);
+
+        return true;
+    }
+
+    /**
+     * Delete a maintenance entry. IDOR guard: the row must belong to BOTH
+     * $assetId AND the current site before it's touched — mirrors
+     * removeOwner()/removeIdentifier()'s own "confirm it belongs to this
+     * asset first" pattern.
+     *
+     * @return bool True if a row existed (for this asset, on this site)
+     *              and was removed
+     */
+    public static function deleteMaintenance(int $maintId, int $assetId, int $actorUserId): bool
+    {
+        $db     = App::db();
+        $siteId = Site::id();
+
+        $stmt = $db->prepare('SELECT * FROM tblAssetMaintenance WHERE maintID = ? AND assetID = ? AND siteID = ? LIMIT 1');
+        if ($stmt === false) {
+            return false;
+        }
+        $stmt->bind_param('iii', $maintId, $assetId, $siteId);
+        $stmt->execute();
+        $old = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+
+        if ($old === null || $old === false) {
+            return false;
+        }
+
+        $delStmt = $db->prepare('DELETE FROM tblAssetMaintenance WHERE maintID = ? AND assetID = ? AND siteID = ?');
+        if ($delStmt === false) {
+            return false;
+        }
+        $delStmt->bind_param('iii', $maintId, $assetId, $siteId);
+        $ok = $delStmt->execute();
+        $affected = $delStmt->affected_rows;
+        $delStmt->close();
+
+        if ($ok === false || $affected <= 0) {
+            return false;
+        }
+
+        self::audit('maintenance', $maintId, $assetId, 'delete', $old, null);
+
+        return true;
+    }
+
+    /**
+     * Pure straight-line depreciation estimate — NO DATABASE ACCESS, no
+     * site/audit context. Given an asset row (anything with
+     * depreciationMethod/purchaseCostPence/purchaseDate/usefulLifeMonths/
+     * salvageValuePence keys — i.e. whatever self::get() returns), computes
+     * the asset's estimated current book value in pence AS OF a given date
+     * (defaults to today).
+     *
+     * Returns null (display-only "not computable" — the caller must NEVER
+     * invent a value) when:
+     *   - depreciationMethod !== 'straight-line' (reducing-balance is
+     *     explicitly Phase-3 cron work, per #399's spec — this method makes
+     *     no attempt at it), OR
+     *   - purchaseCostPence, usefulLifeMonths, or purchaseDate is missing,
+     *     OR usefulLifeMonths <= 0.
+     *
+     * Otherwise: linearly depreciates from purchaseCostPence down to
+     * salvageValuePence (defaults to 0 pence when not set) over
+     * usefulLifeMonths WHOLE calendar months from purchaseDate, using
+     * DateTime::diff() (not a naive day-count/30) so a calendar month
+     * always counts as one month regardless of its actual length. Clamped
+     * at BOTH ends:
+     *   - elapsed time is floored at 0 — an $asOfDate before purchaseDate
+     *     (clock skew, a back-dated valuation request) can never produce
+     *     NEGATIVE depreciation (a value ABOVE purchase cost);
+     *   - elapsed months are capped at usefulLifeMonths — once fully
+     *     depreciated the value sits at salvage and never falls further;
+     *   - a salvageValuePence that (bad data entry) exceeds
+     *     purchaseCostPence is itself clamped down to purchaseCostPence
+     *     first, so the formula can never depreciate UPWARDS.
+     * A final belt-and-braces clamp after the arithmetic guards against any
+     * rounding drift pushing the result fractionally outside
+     * [salvage, purchaseCost].
+     *
+     * @param array<string, mixed> $asset
+     *
+     * @return int|null Estimated current value in pence, or null when not
+     *                   computable / method isn't 'straight-line'
+     */
+    public static function computeStraightLineValue(array $asset, ?string $asOfDate = null): ?int
+    {
+        if ((string) ($asset['depreciationMethod'] ?? 'none') !== 'straight-line') {
+            return null;
+        }
+
+        $purchaseCostPenceRaw = $asset['purchaseCostPence'] ?? null;
+        $usefulLifeMonthsRaw  = $asset['usefulLifeMonths'] ?? null;
+        $purchaseDateRaw      = $asset['purchaseDate'] ?? null;
+
+        if ($purchaseCostPenceRaw === null || $usefulLifeMonthsRaw === null
+            || $purchaseDateRaw === null || (string) $purchaseDateRaw === ''
+        ) {
+            return null;
+        }
+
+        $purchaseCostPence = (int) $purchaseCostPenceRaw;
+        $usefulLifeMonths  = (int) $usefulLifeMonthsRaw;
+        if ($purchaseCostPence < 0 || $usefulLifeMonths <= 0) {
+            return null;
+        }
+
+        $salvageValuePenceRaw = $asset['salvageValuePence'] ?? null;
+        $salvageValuePence = $salvageValuePenceRaw !== null ? (int) $salvageValuePenceRaw : 0;
+        if ($salvageValuePence < 0) {
+            $salvageValuePence = 0;
+        }
+        // 🛟 A mis-entered salvage value ABOVE the purchase cost would
+        // otherwise make the formula below depreciate UPWARDS — clamp it
+        // down first so the value can never appreciate. See method doc.
+        if ($salvageValuePence > $purchaseCostPence) {
+            $salvageValuePence = $purchaseCostPence;
+        }
+
+        try {
+            $purchaseDate = new \DateTime((string) $purchaseDateRaw);
+        } catch (\Throwable $e) {
+            return null; // 🛟 Unparseable purchaseDate — never guess.
+        }
+
+        $asOf = null;
+        if ($asOfDate !== null) {
+            try {
+                $asOf = new \DateTime($asOfDate);
+            } catch (\Throwable $e) {
+                $asOf = null; // 🛟 Bad override — fall through to "today".
+            }
+        }
+        if ($asOf === null) {
+            $asOf = new \DateTime('today');
+        }
+
+        // 📅 Elapsed WHOLE calendar months since purchase — floored at 0 (an
+        // $asOf before purchaseDate must never produce negative elapsed
+        // time). DateTime::diff()'s y/m fields already count only whole
+        // completed months; a partial month in progress (diff->d > 0) is
+        // deliberately NOT rounded up, matching usefulLifeMonths' own
+        // whole-month unit.
+        $elapsedMonths = 0;
+        if ($asOf >= $purchaseDate) {
+            $diff = $purchaseDate->diff($asOf);
+            $elapsedMonths = ($diff->y * 12) + $diff->m;
+        }
+
+        // 🔒 Cap at the useful life — once fully depreciated the value sits
+        // at salvage and never falls further (see method doc).
+        $depreciableMonths = min($elapsedMonths, $usefulLifeMonths);
+
+        $depreciableAmount = $purchaseCostPence - $salvageValuePence;
+        $depreciatedSoFar  = (int) round(($depreciableAmount * $depreciableMonths) / $usefulLifeMonths);
+
+        $currentValue = $purchaseCostPence - $depreciatedSoFar;
+
+        // 🔒 Final belt-and-braces clamp against rounding drift — see
+        // method doc's closing paragraph.
+        if ($currentValue < $salvageValuePence) {
+            $currentValue = $salvageValuePence;
+        }
+        if ($currentValue > $purchaseCostPence) {
+            $currentValue = $purchaseCostPence;
+        }
+
+        return $currentValue;
     }
 
     /* ==========================================================================
