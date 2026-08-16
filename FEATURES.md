@@ -692,6 +692,30 @@ A reviewed batch of correctness fixes + small enhancements surfaced by a discove
 
 ---
 
+### Asset Tracker — physical & digital asset register, Phase 1 complete (#393-#403, 2026-08-16)
+
+New top-level app at `/assets`, slug `assets` — a register of physical and digital assets (equipment, furniture, vehicles, software licences, subscriptions) with ownership, lending, maintenance, identifiers, licence seats, printable QR labels, and a public lost-and-found page. 13-table schema (`tblAsset*`) shipped whole in one foundation migration (159); every subsequent sub-issue built CRUD/UI on top of it without further schema churn, closing out with docs/help/CSV export.
+
+| Item | Issue | Migration | Status |
+|---|---|---|---|
+| Foundation — 13-table schema, `AppRegistry` entry, route/setting seeds (with documented stub handlers for not-yet-built sub-issues), `AssetRegister::audit()` choke-point every mutation writes through (redacts `licenseKey`/`publicToken` from change-sets) | #393 / #395 | 159 | ✅ |
+| Register CRUD — list/create/edit/soft-delete, categories, locations, file/link resources, `_uploads/assets/` uploads | #394 | 159 | ✅ |
+| Co-ownership — owner/custodian parties (user, department, group, OR an external organisation via `tblAssetOrgs`), fractional share, per-owner lending/maintenance authority flags, and the confidential "Ownership & legal documents" vault (agreement/insurance/legal resources, visible only to managers + responsible owner-parties) | #396 | 159 | ✅ |
+| Identifiers — GS1 key family (GIAI/GRAI/GTIN/GLN/SSCC/…), retail barcodes (EAN/UPC/ITF-14), RFID/EPC carrier codes; format/check-digit validation is a non-blocking warning, never a hard reject | #397 | 159 | ✅ |
+| Loan register — lend (out) and borrow (in) directions, request → approve/decline → check-out → check-in lifecycle, condition captured at both check-out and check-in, swap-chain support via `parentLoanID` | #398 | 159 | ✅ |
+| Maintenance log — service/repair/inspection/calibration/upgrade history, cost + next-due tracking, plus a display-only straight-line depreciation estimate on the asset page (never persisted, never invented when the inputs are incomplete) | #399 | 159 | ✅ |
+| Software licences & seats — encrypted licence key (manager-only reveal), per-device/per-user/free-text seat assignment ledger with active/released history, seat-usage summary (used/free/over-allocated) | #400 | 159 | ✅ |
+| Public lost-and-found — `/a/{token}` public page (`Router` special-case, not a `tblRoutes` row) with a uniform-404 access model so confidential/disabled/unknown tokens are indistinguishable from the outside; anonymous "I found this" submissions (CSRF + Captcha + honeypot + rate-limited) land in a manager triage queue | #401 | 159 | ✅ |
+| QR asset-tag labels — GET-only live-preview label designer (size preset, field selection, QR/barcode symbology, sheet start-offset, copies) plus a PDF generator sharing the exact same layout engine as the preview | #402 | 159 | ✅ |
+| In-app Help guide at `/help/assets` (plain-English, no jargon) + a Help Centre index card; register CSV export (`?export=csv` on the existing index page — no new route) honouring the same manager-gated confidential filter as the HTML view, excluding `licenseKey`/`publicToken`/every other secret column, logged via the activity trail | #403 | 159 (route seed appended) | ✅ |
+
+**Tables:** `tblAssetCategories`, `tblAssetLocations`, `tblAssetOrgs`, `tblAssets`, `tblAssetOwners`, `tblAssetLoans`, `tblAssetMaintenance`, `tblAssetResources`, `tblAssetFoundReports`, `tblAssetIdentifierTypes`, `tblAssetIdentifiers`, `tblAssetLicenseAssignments`, `tblAssetAudit`
+**Settings:** `assets.enabled`, `assets.maxFileSize`, `assets.public_page_enabled`, `assets.found_report_retention_days`, `assets.license_seat_block`, `api.assets.qr.enabled`
+
+**Phase 1 limitations:** stocktake/bulk-audit and kiosk check-in/out modes are scoped for a later phase (`tblAssetAudit.entityType` already reserves `stocktake`/`kiosk` values so no future ALTER is needed); identifier-scheme vocabulary management has no admin screen yet (the 21 seeded types are fixed for this phase).
+
+---
+
 ## Audit scripts (`tools/audit-checks/`)
 
 CI-runnable static audits invoked from PHP-static-analysis workflow:

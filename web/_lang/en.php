@@ -193,6 +193,7 @@ return [
     'assets.subtitle'               => 'Track physical and digital assets — ownership, loans, maintenance, licences, and lost-and-found.',
     'assets.new_asset'              => 'New asset',
     'assets.empty_state'            => 'No assets recorded yet.',
+    'assets.export_csv'             => 'Export CSV',
 
     // =========================================================================
     // 🛡️ Admin

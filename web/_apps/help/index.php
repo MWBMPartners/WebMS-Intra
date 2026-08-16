@@ -175,6 +175,21 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         </a>
     </div>
 
+    <!-- Asset Tracker -->
+    <div class="col-12 col-sm-6 col-lg-4">
+        <a href="/help/assets" class="text-decoration-none text-reset">
+            <div class="portal-card portal-card-branded h-100 p-4">
+                <div class="d-flex align-items-center gap-3 mb-3">
+                    <span class="d-inline-flex align-items-center justify-content-center rounded-3 bg-success bg-opacity-10 text-success" style="width:48px;height:48px;">
+                        <i class="fa-solid fa-boxes-stacked fa-lg"></i>
+                    </span>
+                    <h5 class="mb-0">Asset Tracker</h5>
+                </div>
+                <p class="text-secondary mb-0 small">Adding assets, ownership, lending and borrowing, maintenance logs, licences, printed labels, and the public lost-and-found page.</p>
+            </div>
+        </a>
+    </div>
+
     <!-- Translations & Languages -->
     <div class="col-12 col-sm-6 col-lg-4">
         <a href="/help/translations" class="text-decoration-none text-reset">

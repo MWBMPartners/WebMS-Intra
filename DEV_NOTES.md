@@ -1609,6 +1609,73 @@ submitter for pastoral follow-up.
 
 ---
 
+## Asset Tracker (assets)
+
+Top-level app at `/assets`, slug `assets`, model class
+`Portal\Core\AssetRegister` (`_core/AssetRegister.php`), 13-table schema
+(`tblAsset*`) shipped whole in migration 159 (#393/#395), with the
+register/ownership/loans/maintenance/identifiers/licences/labels/lost-
+and-found UI built out across #394-#402, and docs + a register CSV
+export closing out Phase 1 (#403).
+
+### Two meanings of "asset" — do not conflate
+
+This codebase uses the word "asset" for two **completely unrelated**
+things:
+
+1. **`Portal\Core\Asset`** (`_core/Asset.php`) + `public_html/assets/` —
+   web **infrastructure**. The `Asset` class builds CDN-with-fallback
+   `<link>`/`<script>` tags (Bootstrap, Font Awesome) with SRI hashes;
+   `public_html/assets/` is the static webroot directory (CSS, JS,
+   images, fonts, vendor bundles, per-brand artwork). Nothing here is
+   ever stored in the database.
+2. **The Asset Tracker app** (`_apps/assets/`, slug `assets`, model
+   `Portal\Core\AssetRegister`, tables `tblAsset*`) — a completely
+   separate domain concept: the organisation's own physical/digital
+   inventory (laptops, chairs, vehicles, software licences), with
+   ownership, loans, maintenance, and a public lost-and-found page.
+
+The two never share code, tables, or routes — but they DO share a
+routing collision that needed an explicit fix (see below), so keep the
+distinction in mind before assuming a grep hit for "asset" means the
+other one.
+
+### `.htaccess` — the bare `/assets` route rewrite
+
+The physical static directory `public_html/assets/` and the Asset
+Tracker's bare route `/assets` collide at the URL level. Apache's
+existing "skip rewriting for an existing directory" rule
+(`RewriteCond %{REQUEST_FILENAME} !-d`) would resolve a bare `/assets`
+request to that static directory (a listing/404, depending on server
+config) rather than routing it to the front controller, so the Asset
+Tracker's own register page would never be reachable. `public_html/
+.htaccess` carries a small rule ahead of the static-file/-directory
+checks that intercepts ONLY the exact bare path (`^assets/?$`, with or
+without a trailing slash) and sends it to `index.php` before those
+checks run:
+
+```apache
+RewriteRule ^assets/?$ index.php [QSA,L]
+```
+
+Deep links like `/assets/item` or `/assets/edit` are untouched — they
+don't match `^assets/?$` and fall through to the normal rewrite below
+unaffected, since there's no colliding `assets/item/` directory on
+disk.
+
+### Register CSV export — no dedicated route
+
+The register's CSV export (#403) is a query-string switch
+(`?export=csv`) on the existing `_apps/assets/index.php` handler rather
+than a new `assets/export` route — it reuses the exact same
+`AssetRegister::listForSite()` call (and therefore the exact same
+manager-gated confidential filter) the HTML view already makes, so the
+two can never drift apart on what a given viewer is allowed to see.
+The export column list is an explicit allow-list; `licenseKey` and
+`publicToken` are never selected for it.
+
+---
+
 ## Troubleshooting
 
 ### "CSRF" error on form submission

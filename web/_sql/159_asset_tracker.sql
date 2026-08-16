@@ -515,13 +515,18 @@ INSERT INTO `tblAssetIdentifierTypes`
 ON DUPLICATE KEY UPDATE `label` = VALUES(`label`);
 
 -- -----------------------------------------------------------------------------
--- 🗺️ Routes. Protected app routes first, then the one public route
--- (found-save). The public /a/{token} lost-and-found page is a
+-- 🗺️ Routes. Protected app routes first, then the two public routes
+-- (found-save, help/assets — help routes are public site-wide, matching
+-- every other help/* row). The public /a/{token} lost-and-found page is a
 -- Router::handleSpecialRoutes() special case (like /e/{slug}) — NOT a
 -- tblRoutes row, so it is not seeded here (see _core/Router.php).
 -- Every targetFile below resolves to a real handler shipped in this same
 -- change — either the full page (index.php) or a documented
--- "later sub-issue" stub — so check_route_targets.py stays green.
+-- "later sub-issue" stub — so check_route_targets.py stays green. The
+-- help/assets row was appended later, in the docs/CSV-export sub-issue
+-- (#403), once the in-app guide existed to point at — still idempotent
+-- (ON DUPLICATE KEY UPDATE) and still a no-op replay on an up-to-date
+-- schema, same as every other row in this block.
 -- -----------------------------------------------------------------------------
 INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
     ('assets',                    'assets/index.php',            1),
@@ -547,7 +552,8 @@ INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
     ('assets/labels',             'assets/labels.php',            1),
     ('assets/labels-pdf',         'assets/labels-pdf.php',        1),
     ('assets/found-reports',      'assets/found-reports.php',     1),
-    ('assets/found-save',         'assets/found-save.php',        0)
+    ('assets/found-save',         'assets/found-save.php',        0),
+    ('help/assets',               'help/assets.php',              0)
 ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 
 -- -----------------------------------------------------------------------------

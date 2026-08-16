@@ -1350,6 +1350,11 @@ class AssetRegister
      * Recognised $filters keys (all optional): 'status', 'categoryID',
      * 'assetKind', 'search' (matches name/serialNumber/assetTagCode).
      *
+     * Row shape also carries `purchaseDate`/`purchaseCostPence` (added for
+     * the register's CSV export — #403) alongside the display fields the
+     * HTML index page already used; both are ordinary nullable columns, so
+     * extending the SELECT here is safe for every existing caller.
+     *
      * @param array{status?: string, categoryID?: int, assetKind?: string, search?: string} $filters
      * @param bool $includeConfidential Whether confidential assets (isConfidential = 1)
      *             are included in the results. Defaults to false — pass true only for
@@ -1399,6 +1404,7 @@ class AssetRegister
         $sql = 'SELECT a.assetID, a.assetKind, a.name, a.description, a.categoryID, a.locationID, '
              . '       a.manufacturer, a.model, a.serialNumber, a.assetTagCode, a.conditionState, '
              . '       a.status, a.isConfidential, a.publicToken, a.publicPageEnabled, a.updatedAt, '
+             . '       a.purchaseDate, a.purchaseCostPence, '
              . '       c.categoryName, l.locationName '
              . 'FROM tblAssets a '
              . 'LEFT JOIN tblAssetCategories c ON c.categoryID = a.categoryID '

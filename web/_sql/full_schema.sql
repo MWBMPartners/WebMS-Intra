@@ -6470,7 +6470,8 @@ INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
     ('assets/labels',             'assets/labels.php',            1),
     ('assets/labels-pdf',         'assets/labels-pdf.php',        1),
     ('assets/found-reports',      'assets/found-reports.php',     1),
-    ('assets/found-save',         'assets/found-save.php',        0)
+    ('assets/found-save',         'assets/found-save.php',        0),
+    ('help/assets',               'help/assets.php',              0)
 ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 
 

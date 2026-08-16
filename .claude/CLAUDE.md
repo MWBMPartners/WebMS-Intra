@@ -46,7 +46,7 @@ web/                <- ALL deployable files (synced to server via SFTP)
 
 `web/_apps/` holds ~47 top-level entries; `web/_core/apps/*.php` is the
 AppRegistry — the single source of truth for **installable marketplace
-apps** (toggleable per-site at `/admin/apps`), 41 of them. The table below
+apps** (toggleable per-site at `/admin/apps`), 42 of them. The table below
 is every user-facing app (see note below the table for dirs that are
 infrastructure rather than apps).
 
@@ -55,6 +55,7 @@ infrastructure rather than apps).
 | admin | `/admin` | Users, roles, settings, sites, errors, activity, audit, migrations, integrations, workflows, reports, **captcha config** |
 | ai-assist | `/admin/ai-assist` | LLM-assisted drafting for announcements, prayer requests, newsletter (Anthropic / OpenAI / local ollama) |
 | announcements | `/announcements` | Per-site text announcements, pinned + scheduled posts |
+| assets | `/assets` | Physical & digital asset register — ownership/co-ownership, lending & borrowing, maintenance logs, GS1/RFID identifiers, software licence seats, printable QR labels, public lost-and-found page |
 | attendance | `/attendance` | Sessions, headcount by service type, reports, CSV |
 | auth | `/auth/*` | Local + MS365 + Google + WebAuthn + 2FA TOTP; password policy + strength meter; self-service "my account" pages live at `/account/*` |
 | calendar | `/calendar` | Events, series, RSVP, exports; seven view modes shipped via #137/#138 |

@@ -11,13 +11,27 @@
  * seats/labels still arrive in later sub-issues (see item.php's placeholder
  * cards).
  *
+ * CSV EXPORT (#403) — `?export=csv` streams the SAME filtered register as a
+ * CSV download instead of rendering the HTML page. Deliberately NOT a new
+ * route: it's a query-string switch on this existing handler, matching the
+ * house "no route sprawl for a superset of an existing view" convention
+ * already used by labels.php's own filter-form. The export reuses the exact
+ * same `AssetRegister::listForSite($siteId, $filters, $canManage)` call the
+ * HTML branch already makes — the SAME $canManage flag both decides whether
+ * the HTML page renders manager-only affordances AND whether the export
+ * includes confidential assets, so a non-manager's CSV can never contain
+ * more than that same viewer already sees in the browser. The CSV never
+ * includes `licenseKey`, `publicToken`, or any other secret column — only
+ * the plain descriptive/inventory fields listed in $csvHeaders below.
+ *
  * @package   Portal\Assets
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.1.0
+ * @version   1.2.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/393
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/394
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/403
  * -----------------------------------------------------------------------------
  */
 
@@ -26,7 +40,9 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\AssetRegister;
 use Portal\Core\Auth;
+use Portal\Core\CsvExporter;
 use Portal\Core\I18n;
+use Portal\Core\Logger;
 use Portal\Core\Site;
 
 // 🔐 Every Asset Tracker page requires an authenticated session — this app
@@ -51,7 +67,77 @@ if ($statusFilter !== '') {
     $filters['status'] = $statusFilter;
 }
 
+// 📤 CSV export branch (#403) — checked BEFORE the (identical either way)
+// register query below, so a failed CSRF check fails fast without ever
+// touching the database. See the file header CSV EXPORT note above for the
+// confidential-filter/no-secrets guarantees this branch relies on.
+$isCsvExport = ($_GET['export'] ?? '') === 'csv';
+if ($isCsvExport === true) {
+    // 🛡️ CSRF verification via GET token — mirrors every other CSV export
+    // endpoint in the codebase (leadership/export.php, attendance/export.php,
+    // admin/users/export.php, admin/activity/export.php).
+    if (Auth::verifyCsrf($_GET['csrf_token'] ?? '') === false) {
+        $_SESSION['flash_msg']  = 'Invalid or expired form token. Please try again.';
+        $_SESSION['flash_type'] = 'danger';
+        header('Location: /assets' . ($statusFilter !== '' ? '?status=' . urlencode($statusFilter) : ''));
+        exit();
+    }
+}
+
+// 🔒 SAME confidential filter for both the HTML view and the CSV export —
+// $canManage is the ONLY thing that decides whether confidential assets are
+// included (see AssetRegister::listForSite()'s own $includeConfidential
+// param), so a non-manager's export can never leak an item they couldn't
+// already see on the register page itself.
 $assets = AssetRegister::listForSite($siteId, $filters, $canManage);
+
+if ($isCsvExport === true) {
+    // 📊 Column allow-list — deliberately explicit rather than dumping the
+    // whole $assets row, so a future column added to listForSite() never
+    // silently starts appearing in an export without a conscious decision
+    // here. NEVER includes licenseKey, publicToken, or any other secret —
+    // see the file header note.
+    $csvHeaders = [
+        'Name', 'Kind', 'Category', 'Location', 'Manufacturer', 'Model',
+        'Serial Number', 'Asset Tag', 'Condition', 'Status',
+        'Purchase Date', 'Purchase Cost (GBP)',
+    ];
+    $csvRows = [];
+    foreach ($assets as $asset) {
+        $purchaseCostPence = $asset['purchaseCostPence'] ?? null;
+        $csvRows[] = [
+            'Name'                 => (string) $asset['name'],
+            'Kind'                 => ucfirst((string) $asset['assetKind']),
+            'Category'             => $asset['categoryName'] !== null ? (string) $asset['categoryName'] : '',
+            'Location'             => $asset['locationName'] !== null ? (string) $asset['locationName'] : '',
+            'Manufacturer'         => $asset['manufacturer'] !== null ? (string) $asset['manufacturer'] : '',
+            'Model'                => $asset['model'] !== null ? (string) $asset['model'] : '',
+            'Serial Number'        => $asset['serialNumber'] !== null ? (string) $asset['serialNumber'] : '',
+            'Asset Tag'            => $asset['assetTagCode'] !== null ? (string) $asset['assetTagCode'] : '',
+            'Condition'            => ucwords(str_replace('-', ' ', (string) $asset['conditionState'])),
+            'Status'               => ucwords(str_replace('-', ' ', (string) $asset['status'])),
+            'Purchase Date'        => $asset['purchaseDate'] !== null ? (string) $asset['purchaseDate'] : '',
+            'Purchase Cost (GBP)'  => $purchaseCostPence !== null ? number_format(((int) $purchaseCostPence) / 100, 2, '.', '') : '',
+        ];
+    }
+
+    // 📓 Audit trail — who exported, how many rows, under which filter.
+    // Mirrors AssetRegister::audit()'s own "resolve the session user or
+    // record none" convention rather than a raw $_SESSION read at the call
+    // site.
+    $exportUserId = (int) ($_SESSION['user_id'] ?? 0);
+    Logger::activity(
+        'AssetRegisterExported',
+        'Exported ' . count($csvRows) . ' asset(s) to CSV'
+            . ($statusFilter !== '' ? ' (status filter: ' . $statusFilter . ')' : ''),
+        $exportUserId > 0 ? $exportUserId : null
+    );
+
+    // 📥 CsvExporter::download() sets Content-Type/Content-Disposition,
+    // streams the file, and calls exit() itself — nothing below this
+    // branch ever runs for an export request.
+    CsvExporter::download('assets-export-' . date('Y-m-d') . '.csv', $csvRows, $csvHeaders);
+}
 
 // 📌 Page metadata
 $pageTitle   = 'Asset Tracker';
@@ -75,6 +161,15 @@ $statusBadge = [
     'stolen'     => 'danger',
 ];
 $kindIcon = ['physical' => 'fa-box', 'digital' => 'fa-cloud'];
+
+// 📤 CSV export link (#403) — carries the SAME status filter as the current
+// view plus a fresh CSRF token, so clicking it exports exactly what's on
+// screen (see the CSRF check in the export branch above, and
+// AssetRegister::listForSite()'s $canManage-gated confidential filter).
+$exportCsvUrl = '/assets?export=csv&csrf_token=' . urlencode(Auth::csrfToken());
+if ($statusFilter !== '') {
+    $exportCsvUrl .= '&status=' . urlencode($statusFilter);
+}
 ?>
 
 <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center mb-4">
@@ -82,13 +177,16 @@ $kindIcon = ['physical' => 'fa-box', 'digital' => 'fa-cloud'];
         <h1 class="mb-1"><i class="fa-solid fa-boxes-stacked me-2"></i><?php echo htmlspecialchars(I18n::t('assets.title'), ENT_QUOTES, 'UTF-8'); ?></h1>
         <p class="text-secondary mb-0"><?php echo htmlspecialchars(I18n::t('assets.subtitle'), ENT_QUOTES, 'UTF-8'); ?></p>
     </div>
-    <?php if ($canManage === true): ?>
-        <div>
+    <div class="d-flex gap-2 mt-2 mt-md-0">
+        <a href="<?php echo htmlspecialchars($exportCsvUrl, ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-success btn-sm" title="Export the current list as CSV">
+            <i class="fa-solid fa-file-csv me-1"></i><?php echo htmlspecialchars(I18n::t('assets.export_csv'), ENT_QUOTES, 'UTF-8'); ?>
+        </a>
+        <?php if ($canManage === true): ?>
             <a href="/assets/edit" class="btn btn-primary btn-sm">
                 <i class="fa-solid fa-plus me-1"></i><?php echo htmlspecialchars(I18n::t('assets.new_asset'), ENT_QUOTES, 'UTF-8'); ?>
             </a>
-        </div>
-    <?php endif; ?>
+        <?php endif; ?>
+    </div>
 </div>
 
 <?php if (count($assets) === 0): ?>
