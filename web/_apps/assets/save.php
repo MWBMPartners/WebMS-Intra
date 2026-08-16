@@ -24,9 +24,10 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.0.0
+ * @version   1.1.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/393
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/394
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/396
  * -----------------------------------------------------------------------------
  */
 
@@ -252,6 +253,19 @@ if ($assetId > 0) {
     $_SESSION['flash_msg']  = 'Asset created.';
     $_SESSION['flash_type'] = 'success';
 }
+
+// -----------------------------------------------------------------------------
+// 📜 Ownership terms (#396) — a SEPARATE write path from the field set
+// above, via AssetRegister::updateOwnershipTerms() (its own audit entry,
+// entityType 'asset'). edit.php offers this field for convenience
+// alongside the rest of the asset record, but the underlying mutation is
+// the SAME method the Owners panel's "set-terms" quick-edit
+// (owners-save.php) calls — one choke point regardless of which screen
+// triggered the change. Always called (even with an empty string, which
+// clears the column) since the textarea is always present in the posted
+// form, whether or not the manager touched it.
+// -----------------------------------------------------------------------------
+AssetRegister::updateOwnershipTerms($assetId, (string) ($_POST['ownershipTerms'] ?? ''), $userId);
 
 header('Location: /assets/item?id=' . $assetId);
 exit();

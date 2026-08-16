@@ -21,9 +21,10 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.0.0
+ * @version   1.1.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/393
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/394
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/396
  * -----------------------------------------------------------------------------
  */
 
@@ -326,6 +327,19 @@ $nonce = htmlspecialchars(App::cspNonce(), ENT_QUOTES, 'UTF-8');
                 <label class="form-label" for="salvageValuePounds">Salvage value</label>
                 <input type="number" step="0.01" min="0" class="form-control" id="salvageValuePounds" name="salvageValuePounds" value="<?php echo $poundsVal('salvageValuePence'); ?>">
             </div>
+        </div>
+    </div>
+
+    <!-- 📜 Ownership terms (#396) -->
+    <div class="card mb-3">
+        <div class="card-header"><h2 class="h5 mb-0">Ownership terms</h2></div>
+        <div class="card-body">
+            <label class="form-label" for="ownershipTerms">Free-text ownership / agreement terms</label>
+            <textarea class="form-control" id="ownershipTerms" name="ownershipTerms" rows="3" maxlength="65535"
+                      placeholder="e.g. Loaned in from Riverside Trust under a 12-month renewable agreement — see the Ownership &amp; legal vault for the signed copy."><?php echo $val('ownershipTerms'); ?></textarea>
+            <small class="text-muted">
+                Co-owners/custodians, lending &amp; maintenance authority, and confidential agreement documents (ownership agreements, insurance, legal paperwork) are managed from the asset's own page — see the <strong>Owners</strong> and <strong>Ownership &amp; legal vault</strong> panels there, not here.
+            </small>
         </div>
     </div>
 

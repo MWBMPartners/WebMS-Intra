@@ -20,13 +20,28 @@
  * exist" (no oracle that would let a logged-in-but-unprivileged user learn
  * an asset is confidential just by trying its resource ids).
  *
+ * VAULT-TYPE GATE (#396): ownership-agreement/insurance/legal resources are
+ * ALWAYS privileged-only here, EVEN when the owning asset itself is NOT
+ * `isConfidential`. This is deliberately a SEPARATE condition from the rule
+ * above, not folded into it — item.php's Ownership & legal vault panel
+ * only ever LINKS to these ids for a privileged viewer (the general
+ * Resources panel excludes vault types from its listing entirely, see that
+ * file's header), but a direct/guessed `?id=` request to this endpoint
+ * bypasses that UI-level hiding completely. Without this second gate, a
+ * vault document attached to a perfectly ordinary (non-confidential) asset
+ * would be downloadable by ANY logged-in user who learns/guesses its
+ * resourceID — the vault would be "restricted" only by not being linked
+ * to, not by actual access control. Same uniform-404 (never 403) as the
+ * confidential-asset gate, for the same anti-oracle reason.
+ *
  * @package   Portal\Assets
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.0.0
+ * @version   1.1.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/393
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/394
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/396
  * -----------------------------------------------------------------------------
  */
 
@@ -77,8 +92,14 @@ if ($asset === null) {
     return;
 }
 
-// 🔒 Confidential-asset gate — see file header.
-if ((int) $asset['isConfidential'] === 1) {
+// 🔒 Two INDEPENDENT gates — see file header for why they're separate.
+// Either one being true is enough to require privilege; the privileged
+// check itself is only computed once either condition applies (avoids an
+// unnecessary isResponsibleFor() query on the common case: a non-vault
+// resource on a non-confidential asset, downloadable by any viewer).
+$isVaultResource = in_array((string) $resource['resourceType'], AssetRegister::AGREEMENT_VAULT_RESOURCE_TYPES, true);
+$isConfidentialAsset = (int) $asset['isConfidential'] === 1;
+if ($isVaultResource === true || $isConfidentialAsset === true) {
     $privileged = App::isAdmin() === true
         || App::hasRole('asset_manager') === true
         || AssetRegister::isResponsibleFor($assetId) === true;

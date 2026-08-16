@@ -4,7 +4,7 @@
  * -----------------------------------------------------------------------------
  * Asset Tracker — Register + Audit Choke-Point 📦🔐
  * -----------------------------------------------------------------------------
- * Service class for the Asset Tracker app (slug `assets`, #393). Two
+ * Service class for the Asset Tracker app (slug `assets`, #393). Three
  * responsibilities:
  *
  *   1. AUDIT CHOKE-POINT (#395). Every Asset Tracker mutation — today and in
@@ -49,6 +49,26 @@
  *      confidential-asset access gates), and `decryptLicenseKey()` (the
  *      manager-only reveal on `_apps/assets/item.php`).
  *
+ *   3. Co-ownership + external orgs + agreement vault (#396, this pass).
+ *      `listOwners()`/`addOwner()`/`removeOwner()`/`setOwnerAuthority()`
+ *      manage `tblAssetOwners` — UNLIKE createAsset()/updateAsset(),
+ *      `addOwner()` does NOT trust its caller's validation; it re-checks
+ *      partyType/roleKind ENUMs, the "exactly one of userID/deptID/groupID/
+ *      orgID" rule (no SQL constraint enforces this — see migration 159's
+ *      table comment), FK existence/site-scope, and the sharePercent range
+ *      itself (see that method's own doc for why). `listOrgs()`/
+ *      `saveOrg()`/`toggleOrgActive()` manage the external-organisation
+ *      register (`tblAssetOrgs`) with the same site-wide/`Logger::
+ *      activity()`-only convention as categories/locations. `owner`
+ *      mutations DO route through `self::audit()` (entityType `'owner'`);
+ *      `updateOwnershipTerms()` writes `tblAssets.ownershipTerms` via
+ *      entityType `'asset'`, same as updateAsset(). `listAgreementDocs()`
+ *      is a restricted view over the SAME `tblAssetResources` table
+ *      `listResources()` reads — see `AGREEMENT_VAULT_RESOURCE_TYPES`'s doc
+ *      and `_apps/assets/item.php`'s header for the access-control split
+ *      between the general Resources panel and the confidential vault
+ *      panel.
+ *
  * All queries are MySQLi prepared statements via `App::db()` — never
  * string-interpolated user input (house rule, .claude/CLAUDE.md → Code Style).
  *
@@ -56,10 +76,11 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.1.0
+ * @version   1.2.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/393
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/394
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/395
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/396
  * -----------------------------------------------------------------------------
  */
 
@@ -122,6 +143,39 @@ class AssetRegister
      * @var string[]
      */
     public const PUBLIC_ELIGIBLE_RESOURCE_TYPES = ['manual', 'guide', 'photo'];
+
+    /**
+     * Resource types that make up the confidential "Ownership & legal vault"
+     * (#396) — a strict subset of RESOURCE_TYPES, and the exact complement
+     * of the vault-panel restriction: `_apps/assets/item.php` renders these
+     * ONLY inside the admin/asset_manager/isResponsibleFor()-gated vault
+     * panel, and filters them OUT of the general (any-logged-in-viewer)
+     * Resources panel — see listAgreementDocs() below and item.php's own
+     * header comment. Every one of these types is already excluded from
+     * PUBLIC_ELIGIBLE_RESOURCE_TYPES above, so addResource() can never mark
+     * one isPublic=1 regardless of what a tampered form posts.
+     *
+     * @var string[]
+     */
+    public const AGREEMENT_VAULT_RESOURCE_TYPES = ['ownership-agreement', 'insurance', 'legal'];
+
+    /** @var string[] tblAssetOwners.partyType */
+    public const OWNER_PARTY_TYPES = ['user', 'dept', 'group', 'org'];
+
+    /** @var string[] tblAssetOwners.roleKind */
+    public const OWNER_ROLE_KINDS = ['owner', 'co-owner', 'custodian', 'stakeholder'];
+
+    /**
+     * The two tblAssetOwners boolean columns setOwnerAuthority() is allowed
+     * to flip. Deliberately a closed allow-list — see that method's inline
+     * comment for why a validated column name from a small constant set is
+     * safe to interpolate into an UPDATE's SET clause (never user input
+     * directly), unlike every VALUE in this class which always travels via
+     * a bound parameter.
+     *
+     * @var string[]
+     */
+    public const OWNER_AUTHORITY_FIELDS = ['isLendingAuthority', 'isMaintenanceAuthority'];
 
     /* ==========================================================================
      * 🔑 Public token
@@ -1406,6 +1460,654 @@ class AssetRegister
         self::audit('resource', $resourceId, $assetId, 'delete', $row, null);
 
         return true;
+    }
+
+    /* ==========================================================================
+     * 👥 Owners + custodianship (#396)
+     * ------------------------------------------------------------------------
+     * `tblAssetOwners` deliberately has NO SQL-level constraint enforcing
+     * "exactly one of userID/deptID/groupID/orgID" (see migration 159's
+     * table comment) — that integrity rule lives entirely in addOwner()
+     * below, which is why (unlike createAsset()/updateAsset(), which trust
+     * their caller completely) addOwner() re-validates partyType, roleKind,
+     * the exactly-one-FK rule, FK existence/site-scope, and the
+     * sharePercent range itself rather than delegating that to
+     * owners-save.php. Every mutation here routes through self::audit()
+     * with entityType 'owner' (maps to tblAssetOwners via TABLE_FOR_ENTITY).
+     * ======================================================================== */
+
+    /**
+     * List an asset's owner/custodian rows with the party's display name
+     * resolved via a LEFT JOIN against whichever table partyType points at
+     * (at most one of the four joins will ever match a given row, since
+     * exactly one FK is populated per row — see addOwner()). A party whose
+     * underlying row was itself hard-deleted out from under an ON DELETE
+     * CASCADE race is defensively labelled rather than left blank — in
+     * practice this should never happen since every FK here is
+     * ON DELETE CASCADE (the owner row disappears alongside its party), but
+     * the fallback costs nothing and avoids ever rendering an empty name.
+     *
+     * Ordered by roleKind (owner first, then co-owner/custodian/
+     * stakeholder) so the primary owner(s) always list first regardless of
+     * insertion order.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public static function listOwners(int $assetId): array
+    {
+        $db = App::db();
+        $stmt = $db->prepare(
+            'SELECT o.*, '
+            . '      u.fullName   AS userName, '
+            . '      d.deptName   AS deptName, '
+            . '      g.groupName  AS groupName, '
+            . '      org.orgName  AS orgName '
+            . 'FROM tblAssetOwners o '
+            . 'LEFT JOIN tblUsers u      ON u.userID = o.userID '
+            . 'LEFT JOIN tblDepts d      ON d.deptID = o.deptID '
+            . 'LEFT JOIN tblGroups g     ON g.groupID = o.groupID '
+            . 'LEFT JOIN tblAssetOrgs org ON org.orgID = o.orgID '
+            . 'WHERE o.assetID = ? '
+            . "ORDER BY FIELD(o.roleKind, 'owner', 'co-owner', 'custodian', 'stakeholder'), o.ownerID ASC"
+        );
+        if ($stmt === false) {
+            error_log('AssetRegister::listOwners() prepare failed: ' . $db->error);
+            return [];
+        }
+        $stmt->bind_param('i', $assetId);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        $rows = [];
+        while ($row = $result->fetch_assoc()) {
+            // 🏷️ Resolve a single display name from whichever join matched
+            // this row's partyType — see method doc for the fallback.
+            $row['partyName'] = match ((string) $row['partyType']) {
+                'user'  => $row['userName']  ?? '(deleted user)',
+                'dept'  => $row['deptName']  ?? '(deleted department)',
+                'group' => $row['groupName'] ?? '(deleted group)',
+                'org'   => $row['orgName']   ?? '(deleted organisation)',
+                default => 'Unknown party',
+            };
+            $rows[] = $row;
+        }
+        $stmt->close();
+        return $rows;
+    }
+
+    /**
+     * Confirm a party id genuinely exists AND (for site-scoped party types)
+     * belongs to the current site, before addOwner() ever inserts a row
+     * pointing at it. Mirrors save.php's own FK-existence pattern but lives
+     * here because addOwner() owns its full validation contract — see this
+     * section's header comment for why that's a deliberate deviation from
+     * createAsset()/updateAsset()'s "caller validates" convention.
+     *
+     * tblGroups carries no siteID column (global reference data, like
+     * tblRoles — see full_schema.sql) so a group is checked for existence
+     * only, with no site filter; every other party type is scoped to
+     * $siteId.
+     */
+    private static function partyExistsOnSite(string $partyType, int $partyId, int $siteId): bool
+    {
+        if ($partyId <= 0) {
+            return false;
+        }
+        $db = App::db();
+
+        switch ($partyType) {
+            case 'user':
+                // 👤 A user "exists on this site" via an active tblUserSites
+                // row — mirrors _apps/leadership/assign.php's own picker
+                // query.
+                $stmt = $db->prepare(
+                    'SELECT 1 FROM tblUsers u '
+                    . 'INNER JOIN tblUserSites us ON us.userID = u.userID AND us.siteID = ? AND us.isActive = 1 '
+                    . 'WHERE u.userID = ? AND u.isActive = 1 LIMIT 1'
+                );
+                if ($stmt === false) {
+                    return false;
+                }
+                $stmt->bind_param('ii', $siteId, $partyId);
+                break;
+
+            case 'dept':
+                $stmt = $db->prepare('SELECT 1 FROM tblDepts WHERE deptID = ? AND siteID = ? LIMIT 1');
+                if ($stmt === false) {
+                    return false;
+                }
+                $stmt->bind_param('ii', $partyId, $siteId);
+                break;
+
+            case 'group':
+                // 🌐 Global — no siteID column on tblGroups, see doc above.
+                $stmt = $db->prepare('SELECT 1 FROM tblGroups WHERE groupID = ? LIMIT 1');
+                if ($stmt === false) {
+                    return false;
+                }
+                $stmt->bind_param('i', $partyId);
+                break;
+
+            case 'org':
+                $stmt = $db->prepare('SELECT 1 FROM tblAssetOrgs WHERE orgID = ? AND siteID = ? LIMIT 1');
+                if ($stmt === false) {
+                    return false;
+                }
+                $stmt->bind_param('ii', $partyId, $siteId);
+                break;
+
+            default:
+                return false;
+        }
+
+        $stmt->execute();
+        $hit = $stmt->get_result()->fetch_assoc() !== null;
+        $stmt->close();
+        return $hit;
+    }
+
+    /**
+     * Add an owner/custodian row for an asset. UNLIKE createAsset()/
+     * updateAsset(), this method does NOT trust its caller's validation —
+     * see this section's header comment. Every one of the following is
+     * enforced here, and the row is rejected (return 0) if any fails:
+     *
+     *   - The asset exists and is on the current site.
+     *   - partyType ∈ OWNER_PARTY_TYPES.
+     *   - roleKind ∈ OWNER_ROLE_KINDS (falls back to 'owner' if omitted).
+     *   - EXACTLY ONE of userID/deptID/groupID/orgID is a positive int, and
+     *     it is the one matching $data['partyType'] — a dept id supplied
+     *     while partyType=user (e.g. a tampered form) is rejected outright
+     *     rather than silently accepted under the wrong party type.
+     *   - That one party id actually exists and (where applicable) belongs
+     *     to the current site (partyExistsOnSite() above).
+     *   - sharePercent, when supplied, is within 0–100 (matches the
+     *     DECIMAL(5,2) column's intended range — a fractional ownership
+     *     share can never be negative or exceed 100%).
+     *
+     * $data keys: partyType, userID|deptID|groupID|orgID (only the one
+     * matching partyType need be set — the others are ignored), roleKind,
+     * sharePercent (float|null), isLendingAuthority (bool-ish),
+     * isMaintenanceAuthority (bool-ish), notes.
+     *
+     * @param array<string, mixed> $data
+     *
+     * @return int New ownerID, or 0 on validation failure or insert failure
+     */
+    public static function addOwner(int $assetId, array $data, int $actorUserId): int
+    {
+        $db     = App::db();
+        $siteId = Site::id();
+
+        // 🔒 The asset itself must exist and be on this site — get() is
+        // already site-scoped via Site::id() (see that method's doc).
+        if (self::get($assetId) === null) {
+            error_log('AssetRegister::addOwner() asset not found on this site: #' . $assetId);
+            return 0;
+        }
+
+        $partyType = (string) ($data['partyType'] ?? '');
+        if (in_array($partyType, self::OWNER_PARTY_TYPES, true) === false) {
+            error_log('AssetRegister::addOwner() invalid partyType: ' . $partyType);
+            return 0;
+        }
+
+        $roleKind = (string) ($data['roleKind'] ?? 'owner');
+        if (in_array($roleKind, self::OWNER_ROLE_KINDS, true) === false) {
+            error_log('AssetRegister::addOwner() invalid roleKind: ' . $roleKind);
+            return 0;
+        }
+
+        // 🔀 EXACTLY ONE of the four party FKs — the core integrity rule
+        // this table has no SQL constraint for (migration 159's table
+        // comment). Coerce every candidate to int|null first (0/''/
+        // non-numeric ⇒ null) so a stray empty string can never be mistaken
+        // for "this id is set".
+        $partyIds = [
+            'user'  => (int) ($data['userID']  ?? 0),
+            'dept'  => (int) ($data['deptID']  ?? 0),
+            'group' => (int) ($data['groupID'] ?? 0),
+            'org'   => (int) ($data['orgID']   ?? 0),
+        ];
+        foreach ($partyIds as $k => $v) {
+            $partyIds[$k] = $v > 0 ? $v : null;
+        }
+        $suppliedCount = count(array_filter($partyIds, static fn (?int $v): bool => $v !== null));
+        if ($suppliedCount !== 1) {
+            error_log('AssetRegister::addOwner() expected exactly one party FK, got ' . $suppliedCount);
+            return 0;
+        }
+        if ($partyIds[$partyType] === null) {
+            error_log('AssetRegister::addOwner() the supplied party FK does not match partyType=' . $partyType);
+            return 0;
+        }
+        $partyId = $partyIds[$partyType];
+
+        // 🔍 FK existence + site-scope — never trust a bare posted int.
+        if (self::partyExistsOnSite($partyType, $partyId, $siteId) === false) {
+            error_log('AssetRegister::addOwner() party not found on this site: ' . $partyType . '#' . $partyId);
+            return 0;
+        }
+
+        // 📐 sharePercent 0–100 or null.
+        $sharePercent = null;
+        if (isset($data['sharePercent']) === true && $data['sharePercent'] !== null && $data['sharePercent'] !== '') {
+            $sharePercent = (float) $data['sharePercent'];
+            if ($sharePercent < 0.0 || $sharePercent > 100.0) {
+                error_log('AssetRegister::addOwner() sharePercent out of range: ' . $sharePercent);
+                return 0;
+            }
+        }
+
+        $isLendingAuthority     = ((bool) ($data['isLendingAuthority'] ?? false)) === true ? 1 : 0;
+        $isMaintenanceAuthority = ((bool) ($data['isMaintenanceAuthority'] ?? false)) === true ? 1 : 0;
+
+        $notes = trim((string) ($data['notes'] ?? ''));
+        $notes = $notes !== '' ? mb_substr($notes, 0, 500) : null;
+
+        $fields = [
+            'siteID'                 => [$siteId, 'i'],
+            'assetID'                => [$assetId, 'i'],
+            'partyType'              => [$partyType, 's'],
+            'userID'                 => [$partyIds['user'], 'i'],
+            'deptID'                 => [$partyIds['dept'], 'i'],
+            'groupID'                => [$partyIds['group'], 'i'],
+            'orgID'                  => [$partyIds['org'], 'i'],
+            'roleKind'               => [$roleKind, 's'],
+            'sharePercent'           => [$sharePercent, 'd'],
+            'isLendingAuthority'     => [$isLendingAuthority, 'i'],
+            'isMaintenanceAuthority' => [$isMaintenanceAuthority, 'i'],
+            'notes'                  => [$notes, 's'],
+        ];
+
+        ['columns' => $columns, 'types' => $types, 'params' => $params] = self::splitFields($fields);
+        $placeholders = implode(', ', array_fill(0, count($columns), '?'));
+
+        $stmt = $db->prepare('INSERT INTO tblAssetOwners (`' . implode('`, `', $columns) . '`) VALUES (' . $placeholders . ')');
+        if ($stmt === false) {
+            error_log('AssetRegister::addOwner() prepare failed: ' . $db->error);
+            return 0;
+        }
+
+        try {
+            $stmt->bind_param($types, ...$params);
+            $stmt->execute();
+        } catch (\mysqli_sql_exception $e) {
+            error_log('AssetRegister::addOwner() insert failed: ' . $e->getMessage());
+            $stmt->close();
+            return 0;
+        }
+        $newId = (int) $stmt->insert_id;
+        $stmt->close();
+
+        if ($newId <= 0) {
+            return 0;
+        }
+
+        $auditNew = [];
+        foreach ($fields as $col => $pair) {
+            $auditNew[$col] = $pair[0];
+        }
+        self::audit('owner', $newId, $assetId, 'create', null, $auditNew);
+
+        return $newId;
+    }
+
+    /**
+     * Remove an owner/custodian row. IDOR guard: the row must belong to
+     * BOTH $assetId AND the current site before it's touched — a bare
+     * ownerID from a tampered form is never trusted on its own (mirrors
+     * resource-save.php's delete-branch "confirm it belongs to this asset
+     * first" pattern).
+     *
+     * @return bool True if a row existed (for this asset, on this site)
+     *              and was removed
+     */
+    public static function removeOwner(int $ownerId, int $assetId, int $actorUserId): bool
+    {
+        $db     = App::db();
+        $siteId = Site::id();
+
+        $stmt = $db->prepare('SELECT * FROM tblAssetOwners WHERE ownerID = ? AND assetID = ? AND siteID = ? LIMIT 1');
+        if ($stmt === false) {
+            return false;
+        }
+        $stmt->bind_param('iii', $ownerId, $assetId, $siteId);
+        $stmt->execute();
+        $old = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+
+        if ($old === null || $old === false) {
+            return false;
+        }
+
+        $delStmt = $db->prepare('DELETE FROM tblAssetOwners WHERE ownerID = ? AND assetID = ? AND siteID = ?');
+        if ($delStmt === false) {
+            return false;
+        }
+        $delStmt->bind_param('iii', $ownerId, $assetId, $siteId);
+        $ok = $delStmt->execute();
+        $affected = $delStmt->affected_rows;
+        $delStmt->close();
+
+        if ($ok === false || $affected <= 0) {
+            return false;
+        }
+
+        self::audit('owner', $ownerId, $assetId, 'delete', $old, null);
+
+        return true;
+    }
+
+    /**
+     * Flip ONE of the two independent authority flags (isLendingAuthority /
+     * isMaintenanceAuthority) on an existing owner row. Deliberately
+     * separate from addOwner()/a hypothetical updateOwner() — the design
+     * treats these two flags as independent of roleKind (e.g. an
+     * organisation can be a 'co-owner' while a department is the
+     * isLendingAuthority for the same asset) and independent of each
+     * other, so a single-field toggle is the natural shape for the UI
+     * (item.php renders one small button per flag, per row).
+     *
+     * $field is checked against OWNER_AUTHORITY_FIELDS BEFORE it is
+     * interpolated into the UPDATE's SET clause — this is the one place in
+     * this class a column NAME (not a bound value) is built from caller
+     * input, and it is only ever safe because that input is first
+     * constrained to a two-item closed allow-list; every VALUE in the same
+     * query still travels via a bound parameter.
+     *
+     * Same IDOR guard as removeOwner() — the row must belong to $assetId on
+     * the current site.
+     *
+     * @return bool True if the row existed (for this asset, on this site)
+     *              and was updated
+     */
+    public static function setOwnerAuthority(int $ownerId, int $assetId, string $field, bool $value, int $actorUserId): bool
+    {
+        if (in_array($field, self::OWNER_AUTHORITY_FIELDS, true) === false) {
+            error_log('AssetRegister::setOwnerAuthority() invalid field: ' . $field);
+            return false;
+        }
+
+        $db     = App::db();
+        $siteId = Site::id();
+
+        $stmt = $db->prepare('SELECT * FROM tblAssetOwners WHERE ownerID = ? AND assetID = ? AND siteID = ? LIMIT 1');
+        if ($stmt === false) {
+            return false;
+        }
+        $stmt->bind_param('iii', $ownerId, $assetId, $siteId);
+        $stmt->execute();
+        $old = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+
+        if ($old === null || $old === false) {
+            return false;
+        }
+
+        $newVal = $value === true ? 1 : 0;
+        $oldVal = (int) $old[$field];
+        if ($oldVal === $newVal) {
+            return true; // no-op — already at the requested state
+        }
+
+        $updStmt = $db->prepare('UPDATE tblAssetOwners SET `' . $field . '` = ? WHERE ownerID = ? AND assetID = ? AND siteID = ?');
+        if ($updStmt === false) {
+            return false;
+        }
+        $updStmt->bind_param('iiii', $newVal, $ownerId, $assetId, $siteId);
+        $ok = $updStmt->execute();
+        $updStmt->close();
+
+        if ($ok === false) {
+            return false;
+        }
+
+        self::audit('owner', $ownerId, $assetId, 'update', [$field => $oldVal], [$field => $newVal]);
+
+        return true;
+    }
+
+    /**
+     * Set (or clear, with an empty string) an asset's free-text ownership/
+     * agreement terms (tblAssets.ownershipTerms — e.g. "loaned in from
+     * Riverside Trust under a 12-month renewable agreement; see vault for
+     * the signed copy"). Audited under entityType 'asset' (like
+     * updateAsset()) since this touches a tblAssets column, not a
+     * tblAssetOwners row.
+     *
+     * @return bool True on success, false if the asset doesn't exist / isn't
+     *              on this site
+     */
+    public static function updateOwnershipTerms(int $assetId, string $terms, int $actorUserId): bool
+    {
+        $db     = App::db();
+        $siteId = Site::id();
+
+        $old = self::get($assetId);
+        if ($old === null) {
+            return false;
+        }
+
+        $terms = trim($terms);
+        $termsOrNull = $terms !== '' ? $terms : null;
+
+        $stmt = $db->prepare('UPDATE tblAssets SET ownershipTerms = ? WHERE assetID = ? AND siteID = ?');
+        if ($stmt === false) {
+            error_log('AssetRegister::updateOwnershipTerms() prepare failed: ' . $db->error);
+            return false;
+        }
+        $stmt->bind_param('sii', $termsOrNull, $assetId, $siteId);
+        $ok = $stmt->execute();
+        $stmt->close();
+
+        if ($ok === false) {
+            return false;
+        }
+
+        self::audit(
+            'asset',
+            $assetId,
+            $assetId,
+            'update',
+            ['ownershipTerms' => $old['ownershipTerms'] ?? null],
+            ['ownershipTerms' => $termsOrNull]
+        );
+
+        return true;
+    }
+
+    /* ==========================================================================
+     * 🏢 External organisations register (#396)
+     * ------------------------------------------------------------------------
+     * Site-wide reference data (hire companies, partner charities,
+     * suppliers, …) that owner rows and loan counterparties can point at.
+     * Like categories/locations above, this is NOT asset-scoped, so it logs
+     * via a plain Logger::activity() call rather than self::audit() — same
+     * rationale as that section's header comment.
+     * ======================================================================== */
+
+    /**
+     * List a site's external organisations, optionally active-only.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public static function listOrgs(int $siteId, bool $activeOnly = false): array
+    {
+        $db = App::db();
+        $sql = 'SELECT * FROM tblAssetOrgs WHERE siteID = ?'
+            . ($activeOnly === true ? ' AND isActive = 1' : '')
+            . ' ORDER BY orgName ASC';
+        $stmt = $db->prepare($sql);
+        if ($stmt === false) {
+            error_log('AssetRegister::listOrgs() prepare failed: ' . $db->error);
+            return [];
+        }
+        $stmt->bind_param('i', $siteId);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        $rows = [];
+        while ($row = $result->fetch_assoc()) {
+            $rows[] = $row;
+        }
+        $stmt->close();
+        return $rows;
+    }
+
+    /**
+     * Create or update an external organisation. $orgId = 0 creates a new
+     * row; a positive id updates that row (scoped to $siteId). Mirrors
+     * saveCategory()/saveLocation()'s shape and soft-validation style
+     * (blank name ⇒ 0/failure; everything else is trimmed/length-capped
+     * rather than hard-rejected) — the intended caller (`_apps/assets/
+     * orgs.php`) passes $_POST straight through, same as
+     * categories.php/locations.php do for their own save methods.
+     *
+     * $data keys: orgName (required), contactName, contactEmail (must be a
+     * valid email or it is silently dropped to NULL — mirrors
+     * salvation/card-save.php's own soft-validation convention for an
+     * optional email field), contactPhone, agreementRef, notes.
+     *
+     * @param array<string, mixed> $data
+     *
+     * @return int The organisation's id (new or existing), or 0 on failure /
+     *             validation error (blank name)
+     */
+    public static function saveOrg(int $siteId, int $orgId, array $data, int $actorUserId): int
+    {
+        $db   = App::db();
+        $name = trim((string) ($data['orgName'] ?? ''));
+        if ($name === '') {
+            return 0;
+        }
+        $name = mb_substr($name, 0, 255);
+
+        $contactName = trim((string) ($data['contactName'] ?? ''));
+        $contactName = $contactName !== '' ? mb_substr($contactName, 0, 150) : null;
+
+        $contactEmail = trim((string) ($data['contactEmail'] ?? ''));
+        $contactEmail = ($contactEmail !== '' && filter_var($contactEmail, FILTER_VALIDATE_EMAIL) !== false)
+            ? mb_substr($contactEmail, 0, 255)
+            : null;
+
+        $contactPhone = trim((string) ($data['contactPhone'] ?? ''));
+        $contactPhone = $contactPhone !== '' ? mb_substr($contactPhone, 0, 50) : null;
+
+        $agreementRef = trim((string) ($data['agreementRef'] ?? ''));
+        $agreementRef = $agreementRef !== '' ? mb_substr($agreementRef, 0, 100) : null;
+
+        $notes = trim((string) ($data['notes'] ?? ''));
+        $notes = $notes !== '' ? $notes : null;
+
+        try {
+            if ($orgId > 0) {
+                $stmt = $db->prepare(
+                    'UPDATE tblAssetOrgs SET orgName = ?, contactName = ?, contactEmail = ?, contactPhone = ?, agreementRef = ?, notes = ? '
+                    . 'WHERE orgID = ? AND siteID = ?'
+                );
+                if ($stmt === false) {
+                    return 0;
+                }
+                $stmt->bind_param('ssssssii', $name, $contactName, $contactEmail, $contactPhone, $agreementRef, $notes, $orgId, $siteId);
+                $ok = $stmt->execute();
+                $stmt->close();
+                if ($ok === false) {
+                    return 0;
+                }
+                Logger::activity('AssetOrgSaved', 'Updated asset organisation: ' . $name, $actorUserId);
+                return $orgId;
+            }
+
+            $stmt = $db->prepare(
+                'INSERT INTO tblAssetOrgs (siteID, orgName, contactName, contactEmail, contactPhone, agreementRef, notes) VALUES (?, ?, ?, ?, ?, ?, ?)'
+            );
+            if ($stmt === false) {
+                return 0;
+            }
+            $stmt->bind_param('issssss', $siteId, $name, $contactName, $contactEmail, $contactPhone, $agreementRef, $notes);
+            $ok = $stmt->execute();
+            $newId = (int) $stmt->insert_id;
+            $stmt->close();
+            if ($ok === false || $newId <= 0) {
+                return 0;
+            }
+            Logger::activity('AssetOrgSaved', 'Created asset organisation: ' . $name, $actorUserId);
+            return $newId;
+        } catch (\mysqli_sql_exception $e) {
+            error_log('AssetRegister::saveOrg() failed: ' . $e->getMessage());
+            return 0;
+        }
+    }
+
+    /**
+     * Flip an organisation's isActive flag. See toggleCategoryActive() —
+     * same shape, same "stays selectable/visible on already-linked owner/
+     * loan rows" rationale (an org going inactive only hides it from the
+     * "add owner"/"add org" pickers going forward).
+     */
+    public static function toggleOrgActive(int $orgId, int $siteId, int $actorUserId): bool
+    {
+        $db = App::db();
+        $stmt = $db->prepare('UPDATE tblAssetOrgs SET isActive = 1 - isActive WHERE orgID = ? AND siteID = ?');
+        if ($stmt === false) {
+            return false;
+        }
+        $stmt->bind_param('ii', $orgId, $siteId);
+        $ok = $stmt->execute();
+        $affected = $stmt->affected_rows;
+        $stmt->close();
+        if ($ok === true && $affected > 0) {
+            Logger::activity('AssetOrgToggled', 'Toggled active state for asset organisation #' . $orgId, $actorUserId);
+        }
+        return $ok === true && $affected > 0;
+    }
+
+    /* ==========================================================================
+     * 📜 Ownership & legal vault (#396)
+     * ------------------------------------------------------------------------
+     * A restricted VIEW over the same tblAssetResources table listResources()
+     * already reads — not a separate table. See item.php's header for the
+     * access-control split: the general Resources panel (any logged-in
+     * viewer who can see the asset) EXCLUDES these types entirely; only the
+     * admin/asset_manager/isResponsibleFor()-gated vault panel calls this
+     * method. isPublic is already forced to 0 for every type in
+     * AGREEMENT_VAULT_RESOURCE_TYPES by addResource() (see
+     * PUBLIC_ELIGIBLE_RESOURCE_TYPES's doc) — this method is an additional,
+     * independent layer restricting who ever SEES these rows at all, public
+     * or not.
+     * ======================================================================== */
+
+    /**
+     * List an asset's ownership-agreement/insurance/legal resources —
+     * the confidential vault's contents. Callers MUST gate rendering of
+     * both this method's result and the fact that it was called at all
+     * behind a privileged check (see class header) — this method performs
+     * no authorisation of its own, matching decryptLicenseKey()'s contract.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public static function listAgreementDocs(int $assetId): array
+    {
+        $db    = App::db();
+        $types = self::AGREEMENT_VAULT_RESOURCE_TYPES;
+        $placeholders = implode(', ', array_fill(0, count($types), '?'));
+
+        $stmt = $db->prepare(
+            'SELECT * FROM tblAssetResources WHERE assetID = ? AND resourceType IN (' . $placeholders . ') '
+            . 'ORDER BY createdAt DESC'
+        );
+        if ($stmt === false) {
+            error_log('AssetRegister::listAgreementDocs() prepare failed: ' . $db->error);
+            return [];
+        }
+        $stmt->bind_param('i' . str_repeat('s', count($types)), $assetId, ...$types);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        $rows = [];
+        while ($row = $result->fetch_assoc()) {
+            $rows[] = $row;
+        }
+        $stmt->close();
+        return $rows;
     }
 
     /* ==========================================================================
