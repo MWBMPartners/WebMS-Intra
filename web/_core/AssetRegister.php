@@ -295,7 +295,7 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.6.0
+ * @version   1.7.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/393
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/394
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/395
@@ -306,6 +306,7 @@
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/400
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/401
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/402
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/404
  * -----------------------------------------------------------------------------
  */
 
@@ -1502,7 +1503,10 @@ class AssetRegister
      *   warrantyExpiry, warrantyDetails, licenseKey (PLAINTEXT — this method
      *   encrypts it), licenseSeats, renewalDate, accessUrl,
      *   depreciationMethod, usefulLifeMonths, salvageValuePence,
-     *   isConfidential, publicPageEnabled, parentAssetID.
+     *   isConfidential, publicPageEnabled, parentAssetID, labelSymbology
+     *   (#404 — one of LABEL_SYMBOLOGIES; caller validates against that
+     *   allow-list before ever reaching here, same contract as every other
+     *   ENUM field in this list).
      *
      * Caller contract: every field must already be validated/coerced to its
      * correct PHP type (int|string|null, ENUM values checked against this
@@ -1558,6 +1562,7 @@ class AssetRegister
             'isConfidential'     => [(int) ($data['isConfidential'] ?? 0), 'i'],
             'publicToken'        => [$publicToken, 's'],
             'publicPageEnabled'  => [(int) ($data['publicPageEnabled'] ?? 1), 'i'],
+            'labelSymbology'     => [(string) ($data['labelSymbology'] ?? 'qr'), 's'],
             'parentAssetID'      => [$data['parentAssetID'] ?? null, 'i'],
             'createdByID'        => [$actorUserId, 'i'],
         ];
@@ -1665,6 +1670,7 @@ class AssetRegister
             'salvageValuePence'  => [$data['salvageValuePence'] ?? null, 'i'],
             'isConfidential'     => [(int) ($data['isConfidential'] ?? 0), 'i'],
             'publicPageEnabled'  => [(int) ($data['publicPageEnabled'] ?? 0), 'i'],
+            'labelSymbology'     => [(string) ($data['labelSymbology'] ?? $old['labelSymbology']), 's'],
             'parentAssetID'      => [$data['parentAssetID'] ?? null, 'i'],
         ];
         if ($licenseKeyChanged === true) {
@@ -5095,6 +5101,53 @@ class AssetRegister
     ];
 
     /**
+     * Recognised label barcode symbologies — mirrors `tblAssets.labelSymbology`'s
+     * ENUM exactly (migration 159, unused until this pass — #404). Stored
+     * per-asset; `buildLabelSheets()` reads each asset's own value to
+     * decide what to render alongside/instead of the QR code (see that
+     * method's own doc for the fallback-to-QR behaviour when the chosen
+     * symbology's source value is missing/invalid).
+     *
+     * @var string[]
+     */
+    public const LABEL_SYMBOLOGIES = ['qr', 'code128', 'ean13', 'upca', 'itf14', 'qr+code128'];
+
+    /** @var array<string, string> Human labels for LABEL_SYMBOLOGIES, keyed the same — feeds edit.php's `<select>`. */
+    public const LABEL_SYMBOLOGY_LABELS = [
+        'qr'         => 'QR code (links to the public lost-and-found page)',
+        'code128'    => 'Code 128 (asset tag code)',
+        'ean13'      => 'EAN-13 (primary EAN-13 identifier)',
+        'upca'       => 'UPC-A (primary UPC-A identifier)',
+        'itf14'      => 'ITF-14 (primary ITF-14 identifier)',
+        'qr+code128' => 'QR code + Code 128 (both)',
+    ];
+
+    /**
+     * Which `LABEL_SYMBOLOGIES` values require a barcode lookup at all
+     * (i.e. everything except the plain `'qr'` choice) — `buildLabelSheets()`
+     * checks this to decide whether it needs to touch `Barcode::generate()`
+     * for a given asset.
+     *
+     * @var string[]
+     */
+    private const BARCODE_SYMBOLOGIES = ['code128', 'ean13', 'upca', 'itf14', 'qr+code128'];
+
+    /**
+     * Maps a `LABEL_SYMBOLOGIES` GS1 value to the `tblAssetIdentifierTypes.typeCode`
+     * (migration 159 seed data) whose PRIMARY `tblAssetIdentifiers` row
+     * supplies the barcode's source value — see `assetsForLabels()`'s
+     * `barcodeIdentifierValue` subquery, which uses the identical mapping
+     * in SQL (`CASE a.labelSymbology WHEN ...`) so the two never drift.
+     *
+     * @var array<string, string>
+     */
+    private const GS1_IDENTIFIER_TYPE_CODES = [
+        'ean13' => 'EAN-13',
+        'upca'  => 'UPC-A',
+        'itf14' => 'ITF-14',
+    ];
+
+    /**
      * Hard caps `labels-pdf.php` enforces server-side, regardless of what
      * the designer's own GET preview happened to render — see that file's
      * header for the OOM-guard rationale. Copies-per-asset AND the total
@@ -5129,7 +5182,12 @@ class AssetRegister
      *
      * @return array<int, array<string, mixed>> Rows keyed numerically (NOT
      *         by assetID), each: assetID, name, assetTagCode, serialNumber,
-     *         publicToken, categoryName, locationName, owningOrgName.
+     *         publicToken, labelSymbology, categoryName, locationName,
+     *         owningOrgName, barcodeIdentifierValue (#404 — the asset's
+     *         PRIMARY `tblAssetIdentifiers` row matching whichever GS1
+     *         scheme `labelSymbology` calls for, or NULL when
+     *         `labelSymbology` isn't a GS1 symbology or no such row
+     *         exists — see `GS1_IDENTIFIER_TYPE_CODES`).
      */
     public static function assetsForLabels(int $siteId, array $assetIds): array
     {
@@ -5157,12 +5215,26 @@ class AssetRegister
         $db = App::db();
         $placeholders = implode(', ', array_fill(0, count($ids), '?'));
 
-        $sql = 'SELECT a.assetID, a.name, a.assetTagCode, a.serialNumber, a.publicToken, '
+        $sql = 'SELECT a.assetID, a.name, a.assetTagCode, a.serialNumber, a.publicToken, a.labelSymbology, '
              . '       c.categoryName, l.locationName, '
              . "       (SELECT org.orgName FROM tblAssetOwners o "
              . '        JOIN tblAssetOrgs org ON org.orgID = o.orgID '
              . "        WHERE o.assetID = a.assetID AND o.partyType = 'org' "
-             . '        ORDER BY o.ownerID ASC LIMIT 1) AS owningOrgName '
+             . '        ORDER BY o.ownerID ASC LIMIT 1) AS owningOrgName, '
+             // 🔢 #404 — the asset's PRIMARY identifier row for whichever
+             // GS1 scheme its OWN labelSymbology calls for (NULL for every
+             // other row, incl. plain 'qr'/'code128'/'qr+code128' assets —
+             // this subquery is a no-op for those). Same value→typeCode
+             // mapping as GS1_IDENTIFIER_TYPE_CODES in PHP; kept in lock-
+             // step by both places citing each other.
+             . "       (SELECT i.value FROM tblAssetIdentifiers i "
+             . '        WHERE i.assetID = a.assetID AND i.isPrimary = 1 '
+             . "          AND i.typeCode = CASE a.labelSymbology "
+             . "                             WHEN 'ean13' THEN 'EAN-13' "
+             . "                             WHEN 'upca'  THEN 'UPC-A' "
+             . "                             WHEN 'itf14' THEN 'ITF-14' "
+             . '                             ELSE NULL END '
+             . '        LIMIT 1) AS barcodeIdentifierValue '
              . 'FROM tblAssets a '
              . 'LEFT JOIN tblAssetCategories c ON c.categoryID = a.categoryID '
              . 'LEFT JOIN tblAssetLocations l ON l.locationID = a.locationID '
@@ -5312,13 +5384,24 @@ class AssetRegister
      *        `renderLabelCellInner()`'s own doc: that preset is always
      *        QR + asset tag code only, regardless of what's ticked, since
      *        38×21mm has no room for more).
-     * @param bool     $qrOn
+     * @param bool     $qrOn      Master "render a machine-readable code at
+     *        all" switch — when true, EACH asset renders per its OWN
+     *        `labelSymbology` (#404): plain QR for `'qr'`, a barcode ALONE
+     *        for `'code128'`/`'ean13'`/`'upca'`/`'itf14'`, or BOTH for
+     *        `'qr+code128'`. When an asset's chosen barcode symbology has
+     *        no usable source value (see `LABEL_SYMBOLOGIES` doc — missing
+     *        assetTagCode for Code 128, or no valid PRIMARY matching
+     *        identifier for the GS1 symbologies), that ONE asset silently
+     *        falls back to QR-only and a note is added to the returned
+     *        `warnings` array — never fatal, never blocks the rest of the
+     *        batch. When false, no code of any kind renders (unchanged
+     *        pre-#404 behaviour).
      * @param int      $offset  Leading empty cell positions to skip —
      *        caller clamps this to `[0, cellsPerSheet-1]` first.
      * @param int      $copies  Copies per asset — caller clamps this to
      *        `[1, MAX_LABEL_COPIES]` first.
      *
-     * @return array{css: string, html: string, sheetCount: int, labelCount: int}
+     * @return array{css: string, html: string, sheetCount: int, labelCount: int, warnings: string[]}
      */
     public static function buildLabelSheets(
         array $assets,
@@ -5342,13 +5425,25 @@ class AssetRegister
         // actually matters security-wise).
         $fields = array_values(array_intersect($fields, self::LABEL_FIELDS));
 
-        // 🔳 QR data URIs — computed ONCE per unique asset, not once per
-        // printed COPY, so a run of e.g. 20 copies of the same asset
-        // doesn't re-encode the identical QR matrix 20 times. mime is
-        // whatever Qr::generate() actually returned (PNG when gd is
-        // loaded, SVG otherwise — see that class's own doc) rather than
-        // assumed, so this degrades gracefully on a gd-less install.
+        // 🔳 QR + 🏷️ barcode data URIs — computed ONCE per unique asset, not
+        // once per printed COPY, so a run of e.g. 20 copies of the same
+        // asset doesn't re-encode the identical QR/barcode 20 times. mime
+        // is whatever Qr::generate()/Barcode::generate() actually returned
+        // (PNG when gd is loaded, SVG otherwise — see those classes' own
+        // docs) rather than assumed, so this degrades gracefully on a
+        // gd-less install.
+        //
+        // The QR is ALWAYS resolved here (not just for symbology='qr') —
+        // it doubles as the universal fallback image for any barcode
+        // symbology whose source value turns out missing/invalid below
+        // (#404's documented "never fatal, fall back to QR + warn"
+        // behaviour) — computing it lazily inside that fallback branch
+        // instead would break the "once per unique asset" guarantee this
+        // comment promises.
         $qrCache = [];
+        $barcodeCache = [];
+        $symbologyCache = [];
+        $warnings = [];
         if ($qrOn === true) {
             foreach ($assets as $asset) {
                 $assetId = (int) ($asset['assetID'] ?? 0);
@@ -5361,6 +5456,59 @@ class AssetRegister
                     $qr = Qr::generate($url, ['format' => 'png', 'size' => 256, 'ecc' => 'M']);
                     if (($qr['bytes'] ?? '') !== '') {
                         $qrCache[$assetId] = 'data:' . $qr['mime'] . ';base64,' . base64_encode($qr['bytes']);
+                    }
+                }
+
+                // 🏷️ #404 — this asset's own chosen symbology. An
+                // unrecognised stored value (should never happen — the
+                // column is an ENUM and save.php validates against
+                // LABEL_SYMBOLOGIES — but defend anyway) never reaches the
+                // renderer as anything but 'qr'.
+                $symbology = (string) ($asset['labelSymbology'] ?? 'qr');
+                if (in_array($symbology, self::LABEL_SYMBOLOGIES, true) === false) {
+                    $symbology = 'qr';
+                }
+                $symbologyCache[$assetId] = $symbology;
+                $barcodeCache[$assetId] = null;
+                if (in_array($symbology, self::BARCODE_SYMBOLOGIES, true) === false) {
+                    continue; // plain 'qr' — nothing more to compute for this asset
+                }
+
+                $assetName = (string) ($asset['name'] ?? '');
+                if ($symbology === 'code128' || $symbology === 'qr+code128') {
+                    // ← assetTagCode, falling back to a synthesised
+                    // 'AST-{id}' code when the field is blank (task spec).
+                    $code = (string) ($asset['assetTagCode'] ?? '');
+                    if ($code === '') {
+                        $code = 'AST-' . $assetId;
+                    }
+                    $bc = Barcode::generate('code128', $code, ['format' => 'png', 'height' => 200, 'moduleWidth' => 3, 'quietModules' => 6]);
+                    if ($bc['valid'] === true && ($bc['bytes'] ?? '') !== '') {
+                        $barcodeCache[$assetId] = 'data:' . $bc['mime'] . ';base64,' . base64_encode($bc['bytes']);
+                    } else {
+                        // Reachable, not just belt-and-braces: assetTagCode
+                        // is free-text VARCHAR(50) and Code 128 only covers
+                        // ASCII 0-127 (Barcode::generate()'s own doc) — an
+                        // emoji or accented character in a manager-entered
+                        // tag code lands here. Barcode::generate() never
+                        // fatals either way, so fall back to QR-only, same
+                        // as the GS1 branch below.
+                        $warnings[] = "Asset #{$assetId} ({$assetName}) — Code 128 label could not be rendered (asset tag code contains characters outside printable ASCII, or is too long); printed with the QR code instead.";
+                    }
+                } else {
+                    // ← the asset's PRIMARY identifier matching this GS1
+                    // scheme (assetsForLabels()'s barcodeIdentifierValue
+                    // subquery) — absent or invalid means fall back to QR
+                    // and warn, never fatal (task security musts).
+                    $identValue = (string) ($asset['barcodeIdentifierValue'] ?? '');
+                    $bc = $identValue !== ''
+                        ? Barcode::generate($symbology, $identValue, ['format' => 'png', 'height' => 200, 'moduleWidth' => 3, 'quietModules' => 6])
+                        : null;
+                    if ($bc !== null && $bc['valid'] === true && ($bc['bytes'] ?? '') !== '') {
+                        $barcodeCache[$assetId] = 'data:' . $bc['mime'] . ';base64,' . base64_encode($bc['bytes']);
+                    } else {
+                        $warnings[] = "Asset #{$assetId} ({$assetName}) has no valid primary "
+                            . strtoupper($symbology) . ' identifier — printed with the QR code instead.';
                     }
                 }
             }
@@ -5406,9 +5554,22 @@ class AssetRegister
                     $html .= '<div class="lbl-cell lbl-empty" style="' . $style . '"></div>';
                     continue;
                 }
-                $qrDataUri = $qrOn === true ? ($qrCache[(int) ($cell['assetID'] ?? 0)] ?? null) : null;
+                // 🎯 #404 — resolve which of QR/barcode actually show for
+                // THIS asset: 'qr' and 'qr+code128' always show the QR;
+                // 'qr+code128' additionally shows the barcode when it
+                // rendered; any pure barcode symbology shows the barcode
+                // ALONE when it rendered, or falls back to QR-alone when
+                // it didn't (the warning for that fallback was already
+                // recorded once, above, when the cache was built).
+                $assetId = (int) ($cell['assetID'] ?? 0);
+                $cellSymbology = $symbologyCache[$assetId] ?? 'qr';
+                $barcodeReady  = ($barcodeCache[$assetId] ?? null) !== null;
+                $showQr      = $qrOn === true && ($cellSymbology === 'qr' || $cellSymbology === 'qr+code128' || $barcodeReady === false);
+                $showBarcode = $qrOn === true && $barcodeReady === true && $cellSymbology !== 'qr';
+                $qrDataUri      = $showQr === true      ? ($qrCache[$assetId] ?? null)      : null;
+                $barcodeDataUri = $showBarcode === true ? ($barcodeCache[$assetId] ?? null) : null;
                 $html .= '<div class="lbl-cell" style="' . $style . '">'
-                    . self::renderLabelCellInner($cell, $fields, $isSmallTag, $qrDataUri)
+                    . self::renderLabelCellInner($cell, $fields, $isSmallTag, $qrDataUri, $barcodeDataUri)
                     . '</div>';
             }
             $html .= '</div>';
@@ -5419,26 +5580,42 @@ class AssetRegister
             'html'       => $html,
             'sheetCount' => $sheetCount,
             'labelCount' => $labelCount,
+            'warnings'   => $warnings,
         ];
     }
 
     /**
-     * Inner HTML for ONE label cell — QR (optional) plus the selected text
-     * fields, or, for the `'small-tag'` preset, QR + asset tag code ONLY.
-     * Every text value is `htmlspecialchars()`'d (see `buildLabelSheets()`'s
-     * own SECURITY note).
+     * Inner HTML for ONE label cell — QR and/or barcode (both optional)
+     * plus the selected text fields, or, for the `'small-tag'` preset, QR
+     * + asset tag code ONLY. Every text value is `htmlspecialchars()`'d
+     * (see `buildLabelSheets()`'s own SECURITY note).
      *
-     * @param array<string, mixed> $asset     A row from `assetsForLabels()`.
-     * @param string[]             $fields    Already filtered to LABEL_FIELDS
-     *                                        by the caller.
-     * @param bool                 $isSmallTag
-     * @param string|null          $qrDataUri Pre-built `data:image/...`
-     *                                        string from `buildLabelSheets()`'s
-     *                                        cache, or null when QR is off
-     *                                        or this asset had no valid
-     *                                        public URL.
+     * @param array<string, mixed> $asset          A row from `assetsForLabels()`.
+     * @param string[]             $fields         Already filtered to LABEL_FIELDS
+     *                                              by the caller.
+     * @param bool                 $isSmallTag     Small-tag preset ALWAYS
+     *                                              ignores `$barcodeDataUri`
+     *                                              (#404) — 38×21mm has no
+     *                                              room for a QR PLUS a
+     *                                              second machine-readable
+     *                                              code, same "regardless
+     *                                              of the caller's choice"
+     *                                              precedent as it already
+     *                                              sets for `$fields`.
+     * @param string|null          $qrDataUri      Pre-built `data:image/...`
+     *                                              string from `buildLabelSheets()`'s
+     *                                              cache, or null when QR
+     *                                              isn't shown for this cell
+     *                                              (barcode is showing
+     *                                              instead, or QR is off).
+     * @param string|null          $barcodeDataUri Pre-built `data:image/...`
+     *                                              string for this asset's
+     *                                              chosen barcode symbology
+     *                                              (#404), or null when a
+     *                                              barcode isn't shown for
+     *                                              this cell.
      */
-    private static function renderLabelCellInner(array $asset, array $fields, bool $isSmallTag, ?string $qrDataUri): string
+    private static function renderLabelCellInner(array $asset, array $fields, bool $isSmallTag, ?string $qrDataUri, ?string $barcodeDataUri): string
     {
         $html = '';
         if ($qrDataUri !== null) {
@@ -5446,16 +5623,26 @@ class AssetRegister
         }
 
         if ($isSmallTag === true) {
-            // 🏷️ Small tag = QR + code only, regardless of $fields — a
-            // 38×21mm label has no room for more than one short line (see
-            // LABEL_PRESETS's own doc). Falls back to a truncated asset
-            // name when no assetTagCode is recorded.
+            // 🏷️ Small tag = QR + code only, regardless of $fields OR the
+            // asset's own labelSymbology (#404) — a 38×21mm label has no
+            // room for more than one short line (see LABEL_PRESETS's own
+            // doc). Falls back to a truncated asset name when no
+            // assetTagCode is recorded.
             $code = (string) ($asset['assetTagCode'] ?? '');
             if ($code === '') {
                 $code = mb_substr((string) ($asset['name'] ?? ''), 0, 16);
             }
             $html .= '<div class="lbl-code">' . htmlspecialchars($code, ENT_QUOTES, 'UTF-8') . '</div>';
             return $html;
+        }
+
+        // 🏷️ #404 — the asset's chosen barcode (Code 128/EAN-13/UPC-A/
+        // ITF-14), when buildLabelSheets() resolved one for this cell.
+        // Deliberately AFTER the small-tag early-return above so that
+        // preset never renders a barcode image regardless of what the
+        // caller passed in.
+        if ($barcodeDataUri !== null) {
+            $html .= '<img class="lbl-barcode" src="' . htmlspecialchars($barcodeDataUri, ENT_QUOTES, 'UTF-8') . '" alt="">';
         }
 
         // 🗂️ Fixed canonical order regardless of the order $fields arrived
@@ -5518,6 +5705,7 @@ class AssetRegister
                 gap: 1.5mm;
             }
             .lbl-qr { width: 14mm; height: 14mm; flex: 0 0 auto; }
+            .lbl-barcode { width: 26mm; height: 11mm; flex: 0 0 auto; object-fit: contain; }
             .lbl-text { min-width: 0; overflow: hidden; }
             .lf {
                 font-size: 7pt;

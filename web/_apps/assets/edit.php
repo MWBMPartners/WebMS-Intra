@@ -17,14 +17,21 @@
  * actually posted regardless of `assetKind`, so the toggle never gates
  * anything security-relevant; it's a UI convenience, not a validation rule.
  *
+ * "Label symbology" (#404) picks which barcode `AssetRegister::buildLabelSheets()`
+ * prints on this asset's Label Designer labels — see
+ * `AssetRegister::LABEL_SYMBOLOGIES`/`LABEL_SYMBOLOGY_LABELS` for the
+ * allow-list and `save.php` for the server-side validation (never trust
+ * this `<select>`'s posted value alone).
+ *
  * @package   Portal\Assets
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.1.0
+ * @version   1.2.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/393
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/394
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/396
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/404
  * -----------------------------------------------------------------------------
  */
 
@@ -217,7 +224,21 @@ $nonce = htmlspecialchars(App::cspNonce(), ENT_QUOTES, 'UTF-8');
             <div class="col-md-3">
                 <label class="form-label" for="assetTagCode">Asset tag code</label>
                 <input type="text" class="form-control" id="assetTagCode" name="assetTagCode" maxlength="50" value="<?php echo $val('assetTagCode'); ?>">
-                <small class="text-muted">Must be unique per site — printed on the physical label (labels arrive in a later sub-issue).</small>
+                <small class="text-muted">Must be unique per site — printed on the physical label as the Code 128 barcode value (falls back to "AST-{id}" when blank).</small>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label" for="labelSymbology">Label symbology</label>
+                <select class="form-select" id="labelSymbology" name="labelSymbology">
+                    <?php foreach (AssetRegister::LABEL_SYMBOLOGIES as $sym): ?>
+                        <option value="<?php echo htmlspecialchars($sym, ENT_QUOTES, 'UTF-8'); ?>"<?php echo $selected($val('labelSymbology', 'qr'), $sym); ?>>
+                            <?php echo htmlspecialchars(AssetRegister::LABEL_SYMBOLOGY_LABELS[$sym], ENT_QUOTES, 'UTF-8'); ?>
+                        </option>
+                    <?php endforeach; ?>
+                </select>
+                <small class="text-muted">
+                    Which code prints on <a href="/assets/labels">Label Designer</a> labels (#404). EAN-13/UPC-A/ITF-14
+                    need a matching primary identifier recorded below, or the label falls back to the QR code.
+                </small>
             </div>
             <div class="col-12">
                 <label class="form-label" for="features">Features / spec notes</label>
