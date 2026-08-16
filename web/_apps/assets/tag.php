@@ -34,17 +34,30 @@
  *      reaches a real, public-eligible asset leaves no scan trail to
  *      correlate against.
  *
- * The full "I found this" submission form (posting to
- * _apps/assets/found-save.php) is a later sub-issue — this pass ships a
- * minimal, safe, read-only public view plus a placeholder for that form.
+ * THE "I FOUND THIS" FORM (#401, this pass) posts to
+ * _apps/assets/found-save.php — that file re-derives EVERY gate above
+ * independently (asset lookup by token, uniform 404, the same three-part
+ * eligibility check) rather than trusting that a visitor who reached this
+ * render still passes them by the time they submit; see found-save.php's
+ * own header for its full gate chain (CSRF, Captcha, honeypot, per-IP
+ * rate limit). This page's OWN job re: that form is limited to: issuing
+ * the session-scoped CSRF token, rendering the multi-provider Captcha
+ * widget (`Portal\Core\Captcha` — the SAME class/helper
+ * `_apps/prayer-requests/anonymous.php` and `_apps/visitors/public-form.php`
+ * use), rendering the honeypot field, and showing the flash message
+ * found-save.php's redirect leaves in the session. The field allow-list
+ * is UNCHANGED from the foundation pass — reporterName/reporterContact/
+ * message only; no withheld field (owner/cost/serial/location/agreements)
+ * is ever exposed here or accepted by found-save.php.
  *
  * @package   Portal\Assets
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.0.0
+ * @version   1.1.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/393
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/395
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/401
  * -----------------------------------------------------------------------------
  */
 
@@ -52,7 +65,9 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\AssetRegister;
+use Portal\Core\Asset;
 use Portal\Core\Auth;
+use Portal\Core\Captcha;
 use Portal\Core\Router;
 use Portal\Core\Site;
 
@@ -129,6 +144,20 @@ $brandName  = method_exists(Site::class, 'productName') === true ? (string) Site
 $assetNameSafe = htmlspecialchars($assetName, ENT_QUOTES, 'UTF-8');
 $siteNameSafe  = htmlspecialchars($siteName, ENT_QUOTES, 'UTF-8');
 $brandNameSafe = htmlspecialchars($brandName, ENT_QUOTES, 'UTF-8');
+
+// 🛡️ CSRF token for the "I found this" form below — the session was
+// already started (Auth::ensureSession() above) purely so an anonymous
+// visitor can still carry a CSRF token, same convention as
+// prayer-requests/anonymous.php and visitors/public-form.php.
+$csrfToken = Auth::csrfToken();
+
+// 🚩 Flash message left by found-save.php's post-submit redirect back to
+// THIS page (session-based flash, same $_SESSION['flash_msg']/
+// ['flash_type'] convention every internal app controller uses — see
+// e.g. item.php). Consumed once, then cleared.
+$flashMsg  = (string) ($_SESSION['flash_msg']  ?? '');
+$flashType = (string) ($_SESSION['flash_type'] ?? 'info');
+unset($_SESSION['flash_msg'], $_SESSION['flash_type']);
 ?><!DOCTYPE html>
 <html lang="en">
 <head>
@@ -138,7 +167,19 @@ $brandNameSafe = htmlspecialchars($brandName, ENT_QUOTES, 'UTF-8');
     <!-- 🤖 Never index a lost-and-found token page — it identifies a
          specific physical item and its owning organisation. -->
     <meta name="robots" content="noindex, nofollow, noai, noimageai">
+    <!-- 🎨 Bootstrap + Font Awesome (CDN with local fallback, #401) — the
+         foundation pass's placeholder button already used Bootstrap
+         classes (btn btn-outline-secondary) without loading Bootstrap's
+         CSS; now that a real form/alert/badge set of Bootstrap classes is
+         in play, load it properly rather than compound that gap. -->
+    <?php echo Asset::bootstrapCss(); ?>
+    <?php echo Asset::fontAwesomeCss(); ?>
     <link rel="stylesheet" href="/assets/css/portal.css">
+    <!-- 🤖 Captcha script for the active provider (Turnstile/reCAPTCHA/
+         hCaptcha) — empty string, and Captcha::widget() below likewise
+         empty, when no provider is configured (graceful degradation,
+         same as every other Captcha::-using public form). -->
+    <?php echo Captcha::scriptTag(); ?>
     <style>
         body { margin: 0; font-family: system-ui, -apple-system, sans-serif; background: #f8f9fa; }
         .tag-hero {
@@ -150,6 +191,13 @@ $brandNameSafe = htmlspecialchars($brandName, ENT_QUOTES, 'UTF-8');
         .info-card { background: #fff; padding: 1.5rem; border-radius: 8px; margin-bottom: 1rem; box-shadow: 0 1px 4px rgba(0,0,0,.05); }
         .info-card h2 { margin-top: 0; font-size: 1.1rem; color: #0d9488; }
         .tag-footer { text-align: center; padding: 2rem 1rem; color: #6c757d; font-size: .85rem; }
+        /* 🕳️ Honeypot (#401) — visually hidden from a sighted human AND
+           removed from tab order, but still present in the DOM/markup for
+           a naive scraping bot to auto-fill. A real visitor never sees or
+           reaches this field; found-save.php silently treats a filled-in
+           value as "this was a bot" and pretends the submission succeeded
+           without ever writing a tblAssetFoundReports row. */
+        .hp-field { position: absolute; left: -9999px; top: -9999px; width: 1px; height: 1px; overflow: hidden; }
     </style>
 </head>
 <body>
@@ -167,14 +215,60 @@ $brandNameSafe = htmlspecialchars($brandName, ENT_QUOTES, 'UTF-8');
             <strong><?php echo $siteNameSafe; ?></strong> or get in touch with them directly —
             they will be able to confirm the best way to arrange its return.
         </p>
-        <!-- 🚧 The full "report found" submission form (posts to
-             /assets/found-save) is a later Asset Tracker sub-issue. This
-             placeholder keeps the page honest about what's available
-             today rather than presenting a form that doesn't do anything
-             yet. -->
-        <button type="button" class="btn btn-outline-secondary" disabled title="Coming in a later Asset Tracker update">
-            <i class="fa-solid fa-flag me-1"></i>Report as found (coming soon)
-        </button>
+
+        <?php if ($flashMsg !== ''): ?>
+            <!-- 🚩 Flash from found-save.php's post-submit redirect — see
+                 setup code above. htmlspecialchars() even though every
+                 flash string this file's own controller sets is a fixed
+                 literal (defence in depth — never trust that stays true). -->
+            <div class="alert alert-<?php echo htmlspecialchars($flashType, ENT_QUOTES, 'UTF-8'); ?> mb-3" role="alert">
+                <?php echo htmlspecialchars($flashMsg, ENT_QUOTES, 'UTF-8'); ?>
+            </div>
+        <?php endif; ?>
+
+        <!-- 📝 "I found this" form (#401) — posts to found-save.php, which
+             re-derives every access gate independently (see this file's
+             header). Carries the TOKEN (not a numeric assetID) so
+             found-save.php looks the asset up exactly the way this page
+             did. Field allow-list is deliberately tiny: a name, SOME way
+             to get in touch (or at least a message), nothing else. -->
+        <form method="post" action="/assets/found-save" novalidate>
+            <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrfToken, ENT_QUOTES, 'UTF-8'); ?>">
+            <input type="hidden" name="token" value="<?php echo htmlspecialchars($token, ENT_QUOTES, 'UTF-8'); ?>">
+
+            <!-- 🕳️ Honeypot — see the .hp-field style comment above. Real
+                 humans never see this; a bot that blindly fills every
+                 field it can find will trip it. aria-hidden + tabindex=-1
+                 + autocomplete=off so it's also invisible to assistive
+                 tech and never reachable by keyboard tabbing. -->
+            <div class="hp-field" aria-hidden="true">
+                <label for="website">Leave this field blank</label>
+                <input type="text" id="website" name="website" tabindex="-1" autocomplete="off">
+            </div>
+
+            <div class="mb-3">
+                <label for="reporterName" class="form-label">Your name <span class="text-muted">(optional)</span></label>
+                <input type="text" class="form-control" id="reporterName" name="reporterName" maxlength="150" autocomplete="name">
+            </div>
+
+            <div class="mb-3">
+                <label for="reporterContact" class="form-label">Email or phone <span class="text-muted">(so we can reach you)</span></label>
+                <input type="text" class="form-control" id="reporterContact" name="reporterContact" maxlength="255" autocomplete="email">
+            </div>
+
+            <div class="mb-3">
+                <label for="message" class="form-label">Message <span class="text-muted">(optional)</span></label>
+                <textarea class="form-control" id="message" name="message" rows="3" maxlength="4000" placeholder="Where/when you found it, or anything else that might help…"></textarea>
+            </div>
+
+            <p class="small text-muted">Please provide at least an email/phone number or a short message so we know how to follow up.</p>
+
+            <?php echo Captcha::widget(); ?>
+
+            <button type="submit" class="btn btn-success w-100 mt-2">
+                <i class="fa-solid fa-flag me-1"></i>Report as found
+            </button>
+        </form>
     </div>
 </main>
 

@@ -433,6 +433,19 @@ if ($canManageMaintenance === true) {
 // usefulLifeMonths/purchaseDate is missing).
 $estimatedCurrentValuePence = AssetRegister::computeStraightLineValue($asset);
 
+// 🔍 Found-reports summary (#401) — manager-only. A small "how many
+// public 'I found this' submissions has this asset received" surfacing
+// on top of the full triage queue (_apps/assets/found-reports.php,
+// linked from the panel below) — not fetched for a non-manager, mirrors
+// $identifierTypes' own manager-only fetch above.
+$foundReportsForAsset = $canManage === true
+    ? AssetRegister::listFoundReports($siteId, ['assetID' => $assetId])
+    : [];
+$newFoundReportCount = count(array_filter(
+    $foundReportsForAsset,
+    static fn (array $r): bool => (string) $r['status'] === 'new'
+));
+
 // 📜 Recent audit strip — last 8 rows for this asset, actor name resolved
 // via a LEFT JOIN (tblAssetAudit carries no FK by design — see migration
 // 159's header — so the actor row may no longer exist).
@@ -625,6 +638,73 @@ $nonce = htmlspecialchars(App::cspNonce(), ENT_QUOTES, 'UTF-8');
         <?php endif; ?>
     </div>
 </div>
+
+<!-- 🔗 Public page & lost-and-found (#401) — manager-only: this panel
+     shows/links the SECRET public token (whoever holds it reaches the
+     public page — see tag.php's own access-model header) and offers the
+     "Regenerate public token" control, so it is gated on $canManage, not
+     the wider $privileged (a responsible owner-party who isn't a manager
+     can view/act on Loans/Maintenance elsewhere on this page, but does
+     NOT get to rotate or read this asset's public token). The
+     confidential/public-page-enabled TOGGLE itself already lives on
+     edit.php (isConfidential + publicPageEnabled checkboxes, wired
+     through save.php → AssetRegister::updateAsset() — #394); this panel
+     links there rather than duplicating that form. -->
+<?php if ($canManage === true): ?>
+<div class="card mb-3">
+    <div class="card-header"><h2 class="h5 mb-0">Public page &amp; lost-and-found</h2></div>
+    <div class="card-body row g-3">
+        <div class="col-md-6">
+            <strong>Public page status</strong><br>
+            <?php if ((int) $asset['isConfidential'] === 1): ?>
+                <span class="badge bg-secondary"><i class="fa-solid fa-lock me-1"></i>Confidential — never public</span>
+            <?php elseif ((int) $asset['publicPageEnabled'] === 1): ?>
+                <span class="badge bg-success"><i class="fa-solid fa-globe me-1"></i>Enabled</span>
+            <?php else: ?>
+                <span class="badge bg-secondary">Disabled</span>
+            <?php endif; ?>
+            <br><small class="text-muted">Change this on the <a href="/assets/edit?id=<?php echo $assetId; ?>">Edit asset</a> page.</small>
+        </div>
+        <div class="col-md-6">
+            <strong>Lost-and-found link</strong><br>
+            <?php if ((int) $asset['isConfidential'] === 1 || (int) $asset['publicPageEnabled'] !== 1): ?>
+                <span class="text-muted">Not publicly reachable while disabled/confidential.</span>
+            <?php else: ?>
+                <a href="/a/<?php echo htmlspecialchars((string) $asset['publicToken'], ENT_QUOTES, 'UTF-8'); ?>"
+                   target="_blank" rel="noopener noreferrer" class="small">
+                    /a/<?php echo htmlspecialchars((string) $asset['publicToken'], ENT_QUOTES, 'UTF-8'); ?>
+                    <i class="fa-solid fa-arrow-up-right-from-square fa-xs"></i>
+                </a>
+            <?php endif; ?>
+        </div>
+        <div class="col-12 d-flex flex-wrap align-items-center gap-2">
+            <a href="/assets/found-reports?assetID=<?php echo $assetId; ?>" class="btn btn-outline-secondary btn-sm">
+                <i class="fa-solid fa-flag me-1"></i>Found-item reports
+                <?php if ($newFoundReportCount > 0): ?>
+                    <span class="badge bg-danger ms-1"><?php echo (int) $newFoundReportCount; ?> new</span>
+                <?php elseif (count($foundReportsForAsset) > 0): ?>
+                    <span class="badge bg-secondary ms-1"><?php echo count($foundReportsForAsset); ?></span>
+                <?php endif; ?>
+            </a>
+            <!-- ⚠️ Destructive — EVERY printed label/QR code encoding the
+                 CURRENT token stops resolving the instant this runs (see
+                 AssetRegister::regeneratePublicToken()'s own doc). Folded
+                 into save.php's action= dispatch rather than a new route
+                 — see that file's header (#401 scope: no new routes). -->
+            <form method="post" action="/assets/save" class="d-inline"
+                  data-confirm="Regenerate this asset's public token? Any printed labels or QR codes using the CURRENT link will stop working immediately."
+                  data-confirm-destructive="true">
+                <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
+                <input type="hidden" name="action" value="regenerate-token">
+                <input type="hidden" name="assetID" value="<?php echo $assetId; ?>">
+                <button type="submit" class="btn btn-outline-warning btn-sm">
+                    <i class="fa-solid fa-rotate me-1"></i>Regenerate public token
+                </button>
+            </form>
+        </div>
+    </div>
+</div>
+<?php endif; ?>
 
 <?php if ($isDigital === true): ?>
 <!-- 💻 Digital / licensing — general metadata only; the licence key and

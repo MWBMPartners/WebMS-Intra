@@ -20,14 +20,28 @@
  * record itself is management-only, unlike attaching a resource, which an
  * owner-party may also do — see resource-save.php).
  *
+ * ACTION DISPATCH (#401): this file's ONE additional action —
+ * `action=regenerate-token` — rotates an asset's public lost-and-found
+ * token via `AssetRegister::regeneratePublicToken()`. It's folded into
+ * this existing route rather than registering a new `tblRoutes` row (per
+ * #401's scope — no new routes/migrations), mirroring the
+ * `categories.php`/`orgs.php` self-posting `action=`-dispatch convention
+ * used elsewhere in this app. The dispatch check runs BEFORE the
+ * create/update flow's own field coercion below (which expects a full
+ * asset-edit form post, `name` included) so the small standalone
+ * "Regenerate public token" form on item.php — which posts only
+ * `assetID` + `action` — never falls through into that validation. Same
+ * CSRF-first + manager-gate ordering as every other branch in this file.
+ *
  * @package   Portal\Assets
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.1.0
+ * @version   1.2.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/393
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/394
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/396
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/401
  * -----------------------------------------------------------------------------
  */
 
@@ -59,6 +73,23 @@ $db      = App::db();
 $siteId  = Site::id();
 $userId  = (int) ($_SESSION['user_id'] ?? 0);
 $assetId = (int) ($_POST['assetID'] ?? 0);
+
+// -----------------------------------------------------------------------------
+// 🔁 Action dispatch (#401) — see file header. Every other posted `action`
+// value (including the normal edit form, which never sends one) falls
+// through unchanged to the create/update flow below.
+// -----------------------------------------------------------------------------
+if ((string) ($_POST['action'] ?? '') === 'regenerate-token') {
+    $newToken = $assetId > 0 ? AssetRegister::regeneratePublicToken($assetId, $userId) : null;
+
+    $_SESSION['flash_msg']  = $newToken !== null
+        ? 'Public token regenerated — the old QR code/label link no longer works.'
+        : 'Could not regenerate the public token — the asset may no longer exist.';
+    $_SESSION['flash_type'] = $newToken !== null ? 'success' : 'danger';
+
+    header('Location: /assets/item?id=' . $assetId);
+    exit();
+}
 
 /**
  * Redirect back to the edit form (create) or item page (update) with a

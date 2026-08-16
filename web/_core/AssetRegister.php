@@ -206,6 +206,41 @@
  *      secret the licence asset carries; `decryptLicenseKey()` (#394)
  *      remains the one and only reveal path, unchanged by this pass.
  *
+ *   8. Public QR page + lost-and-found flow (#401, this pass).
+ *      `regeneratePublicToken()` sits alongside `generatePublicToken()`
+ *      (point 1 below) — a manager-only rotation of an asset's public
+ *      token (`_apps/assets/item.php`'s "Regenerate public token" control,
+ *      folded into `save.php` via `action=regenerate-token` rather than a
+ *      new route — see that controller's header). Audits entityType
+ *      `'token'`, action `'regenerate'` — the SAME entityType tag.php's
+ *      view-audit already uses for `'scan'`, and deliberately NOT in
+ *      `TABLE_FOR_ENTITY` (no real "token" table — see that constant's own
+ *      doc), so this never attempts a `tblAuditTrail` mirror, exactly like
+ *      the scan event. `createFoundReport()`/`listFoundReports()`/
+ *      `setFoundReportStatus()`/`purgeExpiredFoundReports()` are the
+ *      `tblAssetFoundReports` CRUD for the public "I found this" form
+ *      (`_apps/assets/tag.php`) and its admin triage queue
+ *      (`_apps/assets/found-reports.php`). `createFoundReport()` is the
+ *      ONLY method in this class ever called with NO authenticated
+ *      session behind it — `_apps/assets/found-save.php` calls it only
+ *      after its own captcha + CSRF + honeypot + per-IP rate-limit gate
+ *      chain passes (mirroring `tag.php`'s own uniform-404 asset-lookup
+ *      gates first) — so it trims/caps its own input rather than trusting
+ *      a caller the way `createAsset()`/`updateAsset()` do, and audits
+ *      with `actorType: 'public'` (no `actorUserID`) rather than resolving
+ *      one from `$_SESSION`. `setFoundReportStatus()` is the ONLY manager
+ *      action here and is IDOR-guarded (`reportID` + `siteID`) exactly
+ *      like `removeIdentifier()`. `purgeExpiredFoundReports()` deletes
+ *      reports past `assets.found_report_retention_days` (GDPR — a
+ *      found-report row holds third-party PII with no consenting account
+ *      behind it) but is not wired into any cron route by this pass — see
+ *      that method's own doc for why. `publicIpHash()` is a thin public
+ *      wrapper around the existing PRIVATE `ipHash()` (point 2 below) so
+ *      `found-save.php`'s `RateLimiter::tooMany()`/`recordHit()` bucket
+ *      key reuses the EXACT SAME salted-SHA-256 the found-report row's own
+ *      `ipHash` column stores, rather than a second, divergent hashing
+ *      scheme.
+ *
  * All queries are MySQLi prepared statements via `App::db()` — never
  * string-interpolated user input (house rule, .claude/CLAUDE.md → Code Style).
  *
@@ -213,7 +248,7 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.4.0
+ * @version   1.5.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/393
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/394
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/395
@@ -222,6 +257,7 @@
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/398
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/399
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/400
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/401
  * -----------------------------------------------------------------------------
  */
 
@@ -362,6 +398,64 @@ class AssetRegister
         // 🎲 bin2hex(random_bytes(16)) — 16 random bytes → 32 hex chars.
         // See: https://www.php.net/manual/en/function.random-bytes.php
         return bin2hex(random_bytes(16));
+    }
+
+    /**
+     * Rotate an asset's public lost-and-found token (#401). Manager-only —
+     * the caller (`_apps/assets/save.php`'s `action=regenerate-token`
+     * branch) re-checks the admin/asset_manager gate independently before
+     * ever calling this, same "controller gates, model trusts the gate
+     * already ran" convention as every other mutating method in this
+     * class.
+     *
+     * EVERY printed label/QR code encoding the OLD token stops resolving
+     * the instant this runs — item.php's confirm dialog says so — so this
+     * is a deliberate, rare, disruptive action (a lost/compromised label,
+     * or a manager who wants old photocopies to stop working), not
+     * something to call casually.
+     *
+     * @return string|null The new 32-char token on success, or null if the
+     *                      asset doesn't exist (or isn't on this site) or
+     *                      the update failed
+     */
+    public static function regeneratePublicToken(int $assetId, int $actorUserId): ?string
+    {
+        $db     = App::db();
+        $siteId = Site::id();
+
+        // 🔒 Site-scoped existence check — self::get() already applies
+        // Site::id() internally (see that method's own doc for why), same
+        // guard every other single-asset mutator in this class opens with.
+        $old = self::get($assetId);
+        if ($old === null) {
+            return null;
+        }
+        $oldToken = (string) ($old['publicToken'] ?? '');
+        $newToken = self::generatePublicToken();
+
+        $stmt = $db->prepare('UPDATE tblAssets SET publicToken = ? WHERE assetID = ? AND siteID = ?');
+        if ($stmt === false) {
+            error_log('AssetRegister::regeneratePublicToken() prepare failed: ' . $db->error);
+            return null;
+        }
+        $stmt->bind_param('sii', $newToken, $assetId, $siteId);
+        $ok = $stmt->execute();
+        $stmt->close();
+
+        if ($ok === false) {
+            return null;
+        }
+
+        // 📜 Audit — entityType 'token' (NOT in TABLE_FOR_ENTITY, so no
+        // tblAuditTrail mirror is attempted — same convention as tag.php's
+        // own 'scan' event under this same entityType). self::audit()'s
+        // buildChangeSet() redacts `publicToken` by FIELD NAME regardless
+        // (REDACTED_FIELDS, class header point 1) — passing the raw
+        // before/after token values here is safe; neither ever reaches a
+        // log row in plaintext.
+        self::audit('token', $assetId, $assetId, 'regenerate', ['publicToken' => $oldToken], ['publicToken' => $newToken]);
+
+        return $newToken;
     }
 
     /* ==========================================================================
@@ -604,6 +698,23 @@ class AssetRegister
             ? (string) file_get_contents($keyPath)
             : (defined('PORTAL_VERSION') ? (string) PORTAL_VERSION : 'webms-intra');
         return hash('sha256', $salt . '|' . $ip);
+    }
+
+    /**
+     * Public-safe accessor for the private ipHash() above (#401). Exists
+     * SOLELY so `_apps/assets/found-save.php` — the one caller in this
+     * codebase that needs an ipHash outside this class, for its
+     * `RateLimiter::tooMany()`/`recordHit()` bucket key — reuses the
+     * EXACT SAME salted-SHA-256 computation the found-report row's own
+     * `ipHash` column is populated with (via `createFoundReport()`
+     * below), rather than a second, divergent implementation drifting out
+     * of sync with this one over time.
+     *
+     * @return string 64-char hex SHA-256 digest — see ipHash()'s own doc
+     */
+    public static function publicIpHash(): string
+    {
+        return self::ipHash();
     }
 
     /**
@@ -4567,5 +4678,293 @@ class AssetRegister
         self::audit('license', $assignmentId, $licenseAssetId, 'release', ['status' => 'active'], ['status' => 'released']);
 
         return true;
+    }
+
+    /* ==========================================================================
+     * 🔍 Found reports (#401) — public "I found this" submissions
+     * ------------------------------------------------------------------------
+     * `tblAssetFoundReports` CRUD for the public lost-and-found form
+     * (`_apps/assets/tag.php` → `_apps/assets/found-save.php`) and its
+     * manager-only admin triage queue (`_apps/assets/found-reports.php`).
+     * See class header point 8 for the full rationale — in short:
+     * `createFoundReport()` is the one method in this class an anonymous
+     * visitor's request ever reaches (only after found-save.php's own
+     * captcha/CSRF/honeypot/rate-limit gate chain passes), so unlike
+     * createAsset()/updateAsset() it does NOT trust its caller's input —
+     * it trims/caps every field itself, exactly like addOwner()'s /
+     * createLoanRequest()'s "re-validate from scratch" convention for
+     * anything that isn't pure internal-manager input.
+     * ======================================================================== */
+
+    /**
+     * Insert a public "I found this" submission. Trims/caps every field to
+     * its column width, always writes `status = 'new'`, and audits with
+     * `actorType: 'public'` (no `actorUserID` — there is no session behind
+     * this call; see class header point 8). The caller (found-save.php)
+     * is responsible for EVERY gate that must pass before this is ever
+     * reached — captcha, CSRF, honeypot, per-IP rate limit, and the SAME
+     * uniform-404 public-page eligibility check tag.php itself enforces —
+     * this method assumes none of that already happened and re-checks only
+     * the one thing it CAN cheaply re-check itself: that `$assetId` names
+     * a real, non-deleted asset on the current site (`self::get()`).
+     *
+     * $data keys (all optional except that at least one of
+     * reporterContact/message must be non-empty — found-save.php enforces
+     * that before calling; this method does not re-reject on it, it simply
+     * persists whatever non-empty subset it's given):
+     *   reporterName (≤150 chars — VARCHAR(150) column), reporterContact
+     *   (≤255 — VARCHAR(255)), message (≤4000 — TEXT column, capped for
+     *   sanity rather than the column's true unbounded width, mirroring
+     *   prayer-requests/anonymous-save.php's own `body` cap).
+     *
+     * @param array<string, mixed> $data
+     * @param string                $ipHash Salted SHA-256 of the reporter's
+     *                                      IP — see AssetRegister::ipHash()/
+     *                                      publicIpHash(). NEVER the raw IP.
+     *
+     * @return int New reportID, or 0 if the asset doesn't exist (or isn't
+     *             on this site) or the insert failed
+     */
+    public static function createFoundReport(int $assetId, array $data, string $ipHash): int
+    {
+        $db     = App::db();
+        $siteId = Site::id();
+
+        // 🔒 The asset must be a real, non-deleted, on-this-site row —
+        // self::get() applies all three checks via Site::id() (see that
+        // method's own doc). A found-report can never attach to a
+        // dangling/foreign/soft-deleted assetID even if found-save.php's
+        // own gate chain were somehow bypassed upstream.
+        if (self::get($assetId) === null) {
+            error_log('AssetRegister::createFoundReport() asset not found on this site: #' . $assetId);
+            return 0;
+        }
+
+        $reporterName = trim((string) ($data['reporterName'] ?? ''));
+        $reporterName = $reporterName !== '' ? mb_substr($reporterName, 0, 150) : null;
+
+        $reporterContact = trim((string) ($data['reporterContact'] ?? ''));
+        $reporterContact = $reporterContact !== '' ? mb_substr($reporterContact, 0, 255) : null;
+
+        $message = trim((string) ($data['message'] ?? ''));
+        $message = $message !== '' ? mb_substr($message, 0, 4000) : null;
+
+        $stmt = $db->prepare(
+            'INSERT INTO tblAssetFoundReports '
+            . '(siteID, assetID, reporterName, reporterContact, message, ipHash, status) '
+            . "VALUES (?, ?, ?, ?, ?, ?, 'new')"
+        );
+        if ($stmt === false) {
+            error_log('AssetRegister::createFoundReport() prepare failed: ' . $db->error);
+            return 0;
+        }
+        $stmt->bind_param('iissss', $siteId, $assetId, $reporterName, $reporterContact, $message, $ipHash);
+        $ok    = $stmt->execute();
+        $newId = (int) $stmt->insert_id;
+        $stmt->close();
+
+        if ($ok === false || $newId <= 0) {
+            return 0;
+        }
+
+        // 📜 Audit — entityType 'found-report' IS in TABLE_FOR_ENTITY (maps
+        // to tblAssetFoundReports), so this ALSO writes the platform
+        // tblAuditTrail mirror via Logger::audit() — actorType 'public'
+        // means audit() records no actorUserID (see class header point 8
+        // and audit()'s own doc for the actorType-driven attribution
+        // branch).
+        self::audit(
+            'found-report',
+            $newId,
+            $assetId,
+            'create',
+            null,
+            ['reporterName' => $reporterName, 'reporterContact' => $reporterContact, 'message' => $message, 'status' => 'new'],
+            [],
+            'public'
+        );
+
+        return $newId;
+    }
+
+    /**
+     * List found-reports for the admin triage queue
+     * (`_apps/assets/found-reports.php`), newest first, joined to the
+     * owning asset's name. Site-scoped via the `$siteId` parameter (NOT
+     * `Site::id()` internally — mirrors `listForSite()`'s own
+     * caller-supplied-siteId convention, since found-reports.php already
+     * resolves it once via `Site::id()` itself before calling in).
+     *
+     * Recognised $filters keys (both optional): 'status' (one of
+     * new/actioned/closed), 'assetID'.
+     *
+     * @param array{status?: string, assetID?: int} $filters
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public static function listFoundReports(int $siteId, array $filters = []): array
+    {
+        $db = App::db();
+
+        $where  = ['fr.siteID = ?'];
+        $types  = 'i';
+        $params = [$siteId];
+
+        if (isset($filters['status']) === true && $filters['status'] !== '') {
+            $where[]  = 'fr.status = ?';
+            $types   .= 's';
+            $params[] = (string) $filters['status'];
+        }
+        if (isset($filters['assetID']) === true && (int) $filters['assetID'] > 0) {
+            $where[]  = 'fr.assetID = ?';
+            $types   .= 'i';
+            $params[] = (int) $filters['assetID'];
+        }
+
+        // 🪞 INNER JOIN tblAssets — a found-report's assetID is
+        // ON DELETE CASCADE (migration 159), so a hard-deleted asset takes
+        // its reports with it; a SOFT-deleted one (isDeleted=1) still joins
+        // here on purpose (no isDeleted filter) — a manager triaging old
+        // reports should still see one filed against an asset that's since
+        // been retired/disposed, not have it silently vanish from the queue.
+        $sql = 'SELECT fr.*, a.name AS assetName '
+             . 'FROM tblAssetFoundReports fr '
+             . 'INNER JOIN tblAssets a ON a.assetID = fr.assetID '
+             . 'WHERE ' . implode(' AND ', $where) . ' '
+             . 'ORDER BY fr.createdAt DESC';
+
+        $stmt = $db->prepare($sql);
+        if ($stmt === false) {
+            error_log('AssetRegister::listFoundReports() prepare failed: ' . $db->error);
+            return [];
+        }
+        $stmt->bind_param($types, ...$params);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        $rows = [];
+        while ($row = $result->fetch_assoc()) {
+            $rows[] = $row;
+        }
+        $stmt->close();
+        return $rows;
+    }
+
+    /**
+     * Transition a found-report's triage status (new → actioned/closed, or
+     * any other member of the three-value ENUM — the admin triage UI does
+     * not enforce a strict one-way state machine the way loans/maintenance
+     * do; a manager may freely move a report back to 'new' if it turns out
+     * to need another look). IDOR guard: the row must belong to BOTH
+     * `$reportId` AND `$siteId` before it's ever read or touched — mirrors
+     * `removeIdentifier()`'s own "confirm it belongs to this site first"
+     * pattern.
+     *
+     * @return bool True on success, false if `$status` isn't a recognised
+     *              value or the row doesn't exist (for this report, on
+     *              this site)
+     */
+    public static function setFoundReportStatus(int $reportId, int $siteId, string $status, int $actorUserId): bool
+    {
+        if (in_array($status, ['new', 'actioned', 'closed'], true) === false) {
+            return false;
+        }
+
+        $db = App::db();
+
+        // 🔒 IDOR guard FIRST — before any mutation.
+        $stmt = $db->prepare('SELECT * FROM tblAssetFoundReports WHERE reportID = ? AND siteID = ? LIMIT 1');
+        if ($stmt === false) {
+            error_log('AssetRegister::setFoundReportStatus() prepare failed: ' . $db->error);
+            return false;
+        }
+        $stmt->bind_param('ii', $reportId, $siteId);
+        $stmt->execute();
+        $old = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+
+        if ($old === null || $old === false) {
+            return false;
+        }
+
+        $updStmt = $db->prepare('UPDATE tblAssetFoundReports SET status = ? WHERE reportID = ? AND siteID = ?');
+        if ($updStmt === false) {
+            error_log('AssetRegister::setFoundReportStatus() prepare failed: ' . $db->error);
+            return false;
+        }
+        $updStmt->bind_param('sii', $status, $reportId, $siteId);
+        $ok = $updStmt->execute();
+        $updStmt->close();
+
+        if ($ok === false) {
+            return false;
+        }
+
+        // 📜 Audit — entityType 'found-report' (maps to
+        // tblAssetFoundReports via TABLE_FOR_ENTITY, so this ALSO writes
+        // the platform tblAuditTrail mirror). actorType defaults to 'user'
+        // — this action is always a manager acting from a real session
+        // (found-reports.php's own gate — see that file's header), unlike
+        // createFoundReport() above.
+        self::audit(
+            'found-report',
+            $reportId,
+            (int) $old['assetID'],
+            'update',
+            ['status' => (string) $old['status']],
+            ['status' => $status]
+        );
+
+        return true;
+    }
+
+    /**
+     * Delete found-reports older than `assets.found_report_retention_days`
+     * (seeded 180 — migration 159) for the given site. GDPR housekeeping:
+     * a found-report row holds third-party PII (reporterName/
+     * reporterContact/message) volunteered by someone with no portal
+     * account and no consent flow of their own — see migration 159's
+     * table comment for why it's deliberately excluded from
+     * `GdprEraser::catalogue()`'s per-USER erasure sweep (there is no user
+     * to erase it for); age-based retention is the only cleanup path a
+     * row like this gets.
+     *
+     * TODO(#405 reminders cron / Phase 2): this method is ready to call
+     * but NOT wired into any scheduled job by this pass — none of the
+     * existing `web/_apps/cron/*.php` endpoints (event-reminders.php,
+     * import-feeds.php, discipleship-sweep.php) already loop "every site,
+     * every day" in a shape this could just slot into without inventing a
+     * new one, and this sub-issue's scope explicitly excludes adding a new
+     * cron route/migration. Whichever future sub-issue adds a general
+     * daily housekeeping sweep should call
+     * `AssetRegister::purgeExpiredFoundReports($siteId)` once per active
+     * site from there.
+     *
+     * @return int Number of rows deleted
+     */
+    public static function purgeExpiredFoundReports(int $siteId): int
+    {
+        $db = App::db();
+
+        $retentionDays = (int) (App::settings('assets.found_report_retention_days') ?? 180);
+        if ($retentionDays <= 0) {
+            // 🛟 A misconfigured (zero/negative) setting must never be
+            // read as "purge everything immediately" — fall back to the
+            // seeded default rather than mass-deleting on a bad value.
+            $retentionDays = 180;
+        }
+
+        $stmt = $db->prepare(
+            'DELETE FROM tblAssetFoundReports WHERE siteID = ? AND createdAt < DATE_SUB(NOW(), INTERVAL ? DAY)'
+        );
+        if ($stmt === false) {
+            error_log('AssetRegister::purgeExpiredFoundReports() prepare failed: ' . $db->error);
+            return 0;
+        }
+        $stmt->bind_param('ii', $siteId, $retentionDays);
+        $stmt->execute();
+        $deleted = $stmt->affected_rows;
+        $stmt->close();
+
+        return (int) $deleted;
     }
 }
