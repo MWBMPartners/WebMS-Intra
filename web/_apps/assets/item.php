@@ -8,12 +8,34 @@
  * (#398, lend &amp; borrow / approval / condition in-out), the Maintenance
  * panel (#399, service/repair/inspection/calibration history + a
  * depreciation/value readout in the Purchase &amp; warranty card), the
- * Resources panel (list + add-link/upload + delete), a manager-only
- * licence-key reveal for digital assets, the Owners &amp; custodianship
- * panel (#396), the Identifiers panel (#397, GS1 family / EPC-RFID), the
- * restricted Ownership &amp; legal vault panel (#396), a compact
- * recent-audit strip, and placeholder cards for the sub-features that
- * arrive in later Asset Tracker sub-issues (Licence seats / Labels).
+ * Resources panel (list + add-link/upload + delete), the Licence &amp;
+ * seats panel for digital assets (#400, seat-count header + manager-only
+ * licence-key reveal + active/released seat assignments + link-seat form),
+ * the Owners &amp; custodianship panel (#396), the Identifiers panel
+ * (#397, GS1 family / EPC-RFID), the restricted Ownership &amp; legal
+ * vault panel (#396), a compact recent-audit strip, and a placeholder card
+ * for the one sub-feature that still arrives in a later Asset Tracker
+ * sub-issue (Labels).
+ *
+ * LICENCE &amp; SEATS panel (#400) — renders ONLY for `assetKind='digital'`
+ * assets (`$isDigital`). Same read-visible/edit-manager-gated split as the
+ * Loans/Maintenance panels above: the seat-count header and the active +
+ * released assignment lists are visible to any viewer who reaches this
+ * page at all; the "Link a seat" form and each row's Release button are
+ * `$canManage`-only (manager-only, deliberately NOT extended to
+ * `isMaintenanceAuthority`/`isLendingAuthority`/`isResponsibleFor()` — see
+ * `AssetRegister::assignSeat()`'s class-header doc, point 7, and
+ * `license-save.php`'s own header for the rationale) — `license-save.php`/
+ * `license-action.php` re-derive and re-check that same gate independently
+ * server-side, so a hidden control is never the only thing stopping an
+ * unauthorised POST. The masked licence key + manager-only reveal
+ * previously shown in the "Digital / licensing" card now lives inside this
+ * panel instead (moved, not duplicated — see that card's own reduced
+ * field-set below) so there is exactly ONE `licenseKeyMasked`/
+ * `licenseKeyPlain`/`licenseKeyToggle` DOM triple on the page; it reuses
+ * `AssetRegister::decryptLicenseKey()` completely unchanged from #394 (see
+ * this file's own LICENCE-KEY REVEAL note further down) — this pass never
+ * re-implements that decrypt path.
  *
  * LOANS panel (#398) — the list itself (current open loans + a collapsible
  * closed-loan history) is visible to any viewer who reaches this page at
@@ -109,6 +131,7 @@
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/397
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/398
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/399
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/400
  * -----------------------------------------------------------------------------
  */
 
@@ -278,6 +301,74 @@ $hasLicenseKey = $asset['licenseKey'] !== null && (string) $asset['licenseKey'] 
 $licenseKeyPlain = '';
 if ($canManage === true && $hasLicenseKey === true) {
     $licenseKeyPlain = AssetRegister::decryptLicenseKey((string) $asset['licenseKey']);
+}
+
+// 🎟️ Licence seat assignments (#400) — only meaningful for digital assets;
+// fetched unconditionally (both active + released) when $isDigital so the
+// panel below can render the active list AND the collapsible "Show
+// history" section from one call, mirrors listMaintenance()'s "always
+// fetch, template splits by field" convention. AssetRegister::seatSummary()
+// is null-safe when the asset's licenseSeats column is unset (unlimited
+// licence — no seat cap configured).
+$licenseAssignments         = [];
+$licenseActiveAssignments   = [];
+$licenseReleasedAssignments = [];
+$licenseSeatSummary         = ['seats' => null, 'used' => 0, 'free' => null, 'over' => false];
+$licenseCandidateDevices    = [];
+$licenseCandidateUsers      = [];
+if ($isDigital === true) {
+    $licenseAssignments = AssetRegister::listLicenseAssignments($assetId);
+    $licenseActiveAssignments = array_values(array_filter(
+        $licenseAssignments,
+        static fn (array $la): bool => (string) $la['status'] === 'active'
+    ));
+    $licenseReleasedAssignments = array_values(array_filter(
+        $licenseAssignments,
+        static fn (array $la): bool => (string) $la['status'] !== 'active'
+    ));
+    $licenseSeatSummary = AssetRegister::seatSummary(
+        $assetId,
+        $asset['licenseSeats'] !== null ? (int) $asset['licenseSeats'] : null
+    );
+
+    // 🧑‍💻 Target pickers for the "link a seat" form — only fetched for a
+    // manager, since only a manager ever sees that form (license-save.php's
+    // gate is manager-only — see that file's header). Mirrors the Owners/
+    // Maintenance panels' own manager-only picker-fetch pattern above.
+    if ($canManage === true) {
+        // 💻 Any other non-deleted asset on this site can be a "device" —
+        // deliberately not restricted to assetKind='physical' (a licence
+        // seat could legitimately sit on another digital asset, e.g. a VM);
+        // AssetRegister::assignSeat() re-validates it's a real tblAssets
+        // row on this site regardless of what this picker offers.
+        $ldStmt = $db->prepare(
+            'SELECT assetID, name FROM tblAssets WHERE siteID = ? AND isDeleted = 0 AND assetID != ? ORDER BY name ASC'
+        );
+        if ($ldStmt !== false) {
+            $ldStmt->bind_param('ii', $siteId, $assetId);
+            $ldStmt->execute();
+            $ldResult = $ldStmt->get_result();
+            while ($row = $ldResult->fetch_assoc()) {
+                $licenseCandidateDevices[] = $row;
+            }
+            $ldStmt->close();
+        }
+
+        $luStmt = $db->prepare(
+            'SELECT u.userID, u.fullName FROM tblUsers u '
+            . 'INNER JOIN tblUserSites us ON us.userID = u.userID AND us.siteID = ? AND us.isActive = 1 '
+            . 'WHERE u.isActive = 1 ORDER BY u.fullName ASC'
+        );
+        if ($luStmt !== false) {
+            $luStmt->bind_param('i', $siteId);
+            $luStmt->execute();
+            $luResult = $luStmt->get_result();
+            while ($row = $luResult->fetch_assoc()) {
+                $licenseCandidateUsers[] = $row;
+            }
+            $luStmt->close();
+        }
+    }
 }
 
 // 🔄 Loans (#398) — this asset's full loan history via
@@ -536,11 +627,53 @@ $nonce = htmlspecialchars(App::cspNonce(), ENT_QUOTES, 'UTF-8');
 </div>
 
 <?php if ($isDigital === true): ?>
-<!-- 💻 Digital / licensing -->
+<!-- 💻 Digital / licensing — general metadata only; the licence key and
+     seat management now live in the "Licence & seats" panel below (#400). -->
 <div class="card mb-3">
     <div class="card-header"><h2 class="h5 mb-0">Digital / licensing</h2></div>
     <div class="card-body row g-3">
-        <div class="col-md-6">
+        <div class="col-md-6"><strong>Renewal date</strong><br><?php echo $asset['renewalDate'] !== null ? htmlspecialchars((string) $asset['renewalDate'], ENT_QUOTES, 'UTF-8') : '<span class="text-muted">—</span>'; ?></div>
+        <div class="col-md-6"><strong>Access URL</strong><br>
+            <?php if ($asset['accessUrl'] !== null): ?>
+                <a href="<?php echo htmlspecialchars((string) $asset['accessUrl'], ENT_QUOTES, 'UTF-8'); ?>" target="_blank" rel="noopener noreferrer">Open <i class="fa-solid fa-arrow-up-right-from-square fa-xs"></i></a>
+            <?php else: ?>
+                <span class="text-muted">—</span>
+            <?php endif; ?>
+        </div>
+    </div>
+</div>
+
+<!-- 🎟️ Licence & seats (#400) — seat-count header, manager-only licence-key
+     reveal (moved here from the card above — see file header note), the
+     active seat-assignment list + collapsible released history, and a
+     manager-gated "Link a seat" form. Read-visible/edit-manager-gated
+     split identical to the Loans/Maintenance panels above — see this
+     file's LICENCE & SEATS panel header note. -->
+<div class="card mb-3">
+    <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <h2 class="h5 mb-0">Licence &amp; seats</h2>
+        <div>
+            <span class="badge bg-secondary" title="Total seats configured for this licence">
+                Seats: <?php echo $licenseSeatSummary['seats'] !== null ? (int) $licenseSeatSummary['seats'] : 'Unlimited'; ?>
+            </span>
+            <span class="badge bg-info" title="Seats currently in use">Used: <?php echo (int) $licenseSeatSummary['used']; ?></span>
+            <?php if ($licenseSeatSummary['free'] !== null): ?>
+                <span class="badge bg-success" title="Seats still available">Free: <?php echo (int) $licenseSeatSummary['free']; ?></span>
+            <?php endif; ?>
+            <?php if ($licenseSeatSummary['over'] === true): ?>
+                <span class="badge bg-warning text-dark" title="More seats are in use than this licence is configured for">
+                    <i class="fa-solid fa-triangle-exclamation me-1"></i>Over-allocated
+                </span>
+            <?php endif; ?>
+        </div>
+    </div>
+    <div class="card-body">
+        <!-- 🔑 Licence key — masked, manager-only reveal. Reuses
+             AssetRegister::decryptLicenseKey() completely unchanged
+             (#394) — see file header's LICENCE-KEY REVEAL note; the
+             plaintext is only ever embedded in the response when
+             $canManage === true. -->
+        <p class="mb-3">
             <strong>Licence key</strong><br>
             <?php if ($hasLicenseKey === false): ?>
                 <span class="text-muted">Not set</span>
@@ -553,16 +686,150 @@ $nonce = htmlspecialchars(App::cspNonce(), ENT_QUOTES, 'UTF-8');
                     <i class="fa-solid fa-eye me-1"></i>Reveal
                 </button>
             <?php endif; ?>
-        </div>
-        <div class="col-md-2"><strong>Seats</strong><br><?php echo $asset['licenseSeats'] !== null ? (int) $asset['licenseSeats'] : '<span class="text-muted">—</span>'; ?></div>
-        <div class="col-md-2"><strong>Renewal date</strong><br><?php echo $asset['renewalDate'] !== null ? htmlspecialchars((string) $asset['renewalDate'], ENT_QUOTES, 'UTF-8') : '<span class="text-muted">—</span>'; ?></div>
-        <div class="col-md-2"><strong>Access URL</strong><br>
-            <?php if ($asset['accessUrl'] !== null): ?>
-                <a href="<?php echo htmlspecialchars((string) $asset['accessUrl'], ENT_QUOTES, 'UTF-8'); ?>" target="_blank" rel="noopener noreferrer">Open <i class="fa-solid fa-arrow-up-right-from-square fa-xs"></i></a>
-            <?php else: ?>
-                <span class="text-muted">—</span>
-            <?php endif; ?>
-        </div>
+        </p>
+
+        <?php if (count($licenseActiveAssignments) === 0): ?>
+            <p class="text-muted">No seats currently linked.</p>
+        <?php else: ?>
+            <div class="portal-data-list mb-3">
+                <?php foreach ($licenseActiveAssignments as $la): ?>
+                    <div class="portal-data-row align-items-center">
+                        <div class="col-6 col-md-4">
+                            <?php echo htmlspecialchars((string) $la['assignedToDisplay'], ENT_QUOTES, 'UTF-8'); ?>
+                            <?php if ($la['seatLabel'] !== null && (string) $la['seatLabel'] !== ''): ?>
+                                <br><small class="text-muted"><?php echo htmlspecialchars((string) $la['seatLabel'], ENT_QUOTES, 'UTF-8'); ?></small>
+                            <?php endif; ?>
+                        </div>
+                        <div class="col-4 col-md-4 small text-muted">
+                            Linked <?php echo htmlspecialchars((string) $la['linkedAt'], ENT_QUOTES, 'UTF-8'); ?>
+                            <?php if ($la['linkedByName'] !== null): ?>
+                                by <?php echo htmlspecialchars((string) $la['linkedByName'], ENT_QUOTES, 'UTF-8'); ?>
+                            <?php endif; ?>
+                        </div>
+                        <div class="col-2 col-md-4 text-end">
+                            <?php if ($canManage === true): ?>
+                                <form method="post" action="/assets/license-action" class="d-inline"
+                                      data-confirm="Release this seat?" data-confirm-destructive="true">
+                                    <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
+                                    <input type="hidden" name="licenseAssetID" value="<?php echo $assetId; ?>">
+                                    <input type="hidden" name="assignmentID" value="<?php echo (int) $la['assignmentID']; ?>">
+                                    <button type="submit" class="btn btn-sm btn-outline-danger" title="Release this seat">
+                                        <i class="fa-solid fa-right-from-bracket me-1"></i>Release
+                                    </button>
+                                </form>
+                            <?php endif; ?>
+                        </div>
+                    </div>
+                <?php endforeach; ?>
+            </div>
+        <?php endif; ?>
+
+        <?php if (count($licenseReleasedAssignments) > 0): ?>
+            <details class="mb-3">
+                <summary class="text-muted small">Show history (<?php echo count($licenseReleasedAssignments); ?> released)</summary>
+                <div class="portal-data-list mt-2">
+                    <?php foreach ($licenseReleasedAssignments as $la): ?>
+                        <div class="portal-data-row align-items-center text-muted">
+                            <div class="col-6 col-md-4">
+                                <?php echo htmlspecialchars((string) $la['assignedToDisplay'], ENT_QUOTES, 'UTF-8'); ?>
+                                <?php if ($la['seatLabel'] !== null && (string) $la['seatLabel'] !== ''): ?>
+                                    <br><small><?php echo htmlspecialchars((string) $la['seatLabel'], ENT_QUOTES, 'UTF-8'); ?></small>
+                                <?php endif; ?>
+                            </div>
+                            <div class="col-6 col-md-8 small">
+                                Linked <?php echo htmlspecialchars((string) $la['linkedAt'], ENT_QUOTES, 'UTF-8'); ?>
+                                <?php if ($la['linkedByName'] !== null): ?> by <?php echo htmlspecialchars((string) $la['linkedByName'], ENT_QUOTES, 'UTF-8'); ?><?php endif; ?>
+                                <br>Released <?php echo $la['releasedAt'] !== null ? htmlspecialchars((string) $la['releasedAt'], ENT_QUOTES, 'UTF-8') : '—'; ?>
+                                <?php if ($la['releasedByName'] !== null): ?> by <?php echo htmlspecialchars((string) $la['releasedByName'], ENT_QUOTES, 'UTF-8'); ?><?php endif; ?>
+                            </div>
+                        </div>
+                    <?php endforeach; ?>
+                </div>
+            </details>
+        <?php endif; ?>
+
+        <?php if ($canManage === true): ?>
+            <hr>
+            <h3 class="h6">Link a seat</h3>
+            <form method="post" action="/assets/license-save" class="row g-2">
+                <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
+                <input type="hidden" name="licenseAssetID" value="<?php echo $assetId; ?>">
+                <div class="col-md-3">
+                    <label class="form-label small" for="licenseTargetType">Assign to</label>
+                    <select class="form-select form-select-sm" id="licenseTargetType" name="targetType">
+                        <option value="device">Tracked device asset</option>
+                        <option value="user">Portal user</option>
+                        <option value="other">Free-text device name</option>
+                    </select>
+                </div>
+                <div class="col-md-4" id="licenseTargetWrap-device">
+                    <label class="form-label small" for="licenseDeviceAssetID">Device asset</label>
+                    <select class="form-select form-select-sm" id="licenseDeviceAssetID" name="deviceAssetID">
+                        <option value="">Select…</option>
+                        <?php foreach ($licenseCandidateDevices as $d): ?>
+                            <option value="<?php echo (int) $d['assetID']; ?>"><?php echo htmlspecialchars((string) $d['name'], ENT_QUOTES, 'UTF-8'); ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+                <div class="col-md-4" id="licenseTargetWrap-user" hidden>
+                    <label class="form-label small" for="licenseUserID">Portal user</label>
+                    <select class="form-select form-select-sm" id="licenseUserID" name="userID">
+                        <option value="">Select…</option>
+                        <?php foreach ($licenseCandidateUsers as $u): ?>
+                            <option value="<?php echo (int) $u['userID']; ?>"><?php echo htmlspecialchars((string) $u['fullName'], ENT_QUOTES, 'UTF-8'); ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+                <div class="col-md-4" id="licenseTargetWrap-other" hidden>
+                    <label class="form-label small" for="licenseDeviceName">Device name</label>
+                    <input type="text" class="form-control form-control-sm" id="licenseDeviceName" name="deviceName" maxlength="255" placeholder="e.g. Front-of-house laptop">
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label small" for="licenseSeatLabel">Seat label <span class="text-muted">(optional)</span></label>
+                    <input type="text" class="form-control form-control-sm" id="licenseSeatLabel" name="seatLabel" maxlength="100" placeholder="e.g. Seat 3">
+                </div>
+                <div class="col-md-5">
+                    <label class="form-label small" for="licenseSeatNotes">Notes <span class="text-muted">(optional)</span></label>
+                    <input type="text" class="form-control form-control-sm" id="licenseSeatNotes" name="notes" maxlength="500">
+                </div>
+                <div class="col-12">
+                    <small class="text-muted">Choose exactly ONE of a tracked device asset, a portal user, or a free-text device name.</small>
+                </div>
+                <div class="col-12">
+                    <button type="submit" class="btn btn-primary btn-sm"><i class="fa-solid fa-plus me-1"></i>Link seat</button>
+                </div>
+            </form>
+            <script nonce="<?php echo $nonce; ?>">
+            (function () {
+                'use strict';
+                // 🎛️ Progressive-enhancement toggle only — mirrors the
+                // Owners panel's ownerPartyType script above. Hiding the
+                // non-matching pickers does NOT stop their fields being
+                // submitted; license-save.php reads only the field
+                // matching the posted targetType.
+                var typeSelect = document.getElementById('licenseTargetType');
+                var wraps = {
+                    device: document.getElementById('licenseTargetWrap-device'),
+                    user: document.getElementById('licenseTargetWrap-user'),
+                    other: document.getElementById('licenseTargetWrap-other')
+                };
+                function sync() {
+                    if (typeSelect === null) {
+                        return;
+                    }
+                    Object.keys(wraps).forEach(function (key) {
+                        if (wraps[key] !== null) {
+                            wraps[key].hidden = (typeSelect.value !== key);
+                        }
+                    });
+                }
+                if (typeSelect !== null) {
+                    typeSelect.addEventListener('change', sync);
+                    sync();
+                }
+            })();
+            </script>
+        <?php endif; ?>
     </div>
 </div>
 <?php if ($canManage === true && $hasLicenseKey === true): ?>
@@ -1486,7 +1753,6 @@ $nonce = htmlspecialchars(App::cspNonce(), ENT_QUOTES, 'UTF-8');
 <div class="row g-3 mb-3">
     <?php
     $placeholders = [
-        ['icon' => 'fa-key', 'title' => 'Licence seats'],
         ['icon' => 'fa-tag', 'title' => 'Labels'],
     ];
     ?>

@@ -159,6 +159,53 @@
  *      `valuationDate` are explicitly out of scope here — Phase-3 cron work
  *      per #399's spec.
  *
+ *   7. Per-device licence tracking (#400, this pass). `listLicenseAssignments()`
+ *      resolves a single `assignedToDisplay` string per row (the linked
+ *      device-asset's name / the linked portal user's name / the free-text
+ *      `deviceName` — exactly one of the three is ever set per row, same
+ *      "resolve once here" rationale as `listOwners()`'s `partyName` /
+ *      `listLoans()`'s `counterpartyDisplayName`) plus `linkedByName`/
+ *      `releasedByName`, active rows first. `activeSeatCount()`/
+ *      `seatSummary()` are read helpers `item.php`'s header readout and
+ *      `assignSeat()`'s own seat-enforcement both call — `seatSummary()`
+ *      is null-safe throughout when the licence asset's `licenseSeats` is
+ *      NULL (unlimited seats, no cap configured). `assignSeat()` re-
+ *      validates everything from scratch (does NOT trust its caller,
+ *      matching `addOwner()`'s/`createLoanRequest()`'s convention rather
+ *      than `createAsset()`'s "caller validates" one — a seat assignment
+ *      is a security-relevant record of who/what holds a licence): the
+ *      target licence asset must exist on-site AND be `assetKind =
+ *      'digital'`; exactly ONE of {`deviceAssetID` (a real `tblAssets` row
+ *      on this site — re-uses `self::get()`, never a bare posted int),
+ *      `userID` (`partyExistsOnSite('user', …)`, re-used unchanged from
+ *      #396), `deviceName` (non-empty free text)} is required, mirroring
+ *      `addOwner()`'s exactly-one-party-FK rule / `createLoanRequest()`'s
+ *      exactly-one-counterparty rule (same "no SQL constraint enforces
+ *      this" shape — see migration 159's table comment). Seat
+ *      enforcement is WARN-by-default: once `activeSeatCount() >=
+ *      licenseSeats`, the assignment still saves and a warning string is
+ *      returned for the caller to flash, UNLESS the site has opted into
+ *      `App::settings('assets.license_seat_block') === '1'`, in which
+ *      case the assignment is hard-BLOCKED (id 0, no insert, no audit
+ *      row) — the same two-tier "advisory vs enforced" pattern already
+ *      used for identifier validation (non-blocking) vs the exactly-one-FK
+ *      rules above (blocking). `releaseSeat()` is IDOR-guarded
+ *      (`assignmentID` + `licenseAssetID` + `siteID`, read-then-mutate,
+ *      mirrors `updateMaintenance()`'s pattern) and race-safe via a
+ *      `WHERE … AND status = 'active'` guard on the UPDATE itself (0
+ *      affected rows = already released between the read and the write —
+ *      same idiom as `loanAction()`'s state-machine guards) — it NEVER
+ *      hard-deletes; the row is its own permanent history, exactly like
+ *      every other state-machine table in this class. Every mutation
+ *      routes through `self::audit()` (entityType `'license'`, already
+ *      wired into `TABLE_FOR_ENTITY` since the #395 audit choke-point
+ *      pass) — `assignSeat()` audits `'link'`, `releaseSeat()` audits
+ *      `'release'`. The licence KEY itself (`tblAssets.licenseKey`) is
+ *      never read, decrypted, or referenced anywhere in this section —
+ *      seat tracking is entirely about WHO/WHAT holds a seat, not the
+ *      secret the licence asset carries; `decryptLicenseKey()` (#394)
+ *      remains the one and only reveal path, unchanged by this pass.
+ *
  * All queries are MySQLi prepared statements via `App::db()` — never
  * string-interpolated user input (house rule, .claude/CLAUDE.md → Code Style).
  *
@@ -174,6 +221,7 @@
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/397
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/398
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/399
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/400
  * -----------------------------------------------------------------------------
  */
 
@@ -4143,5 +4191,381 @@ class AssetRegister
             error_log('AssetRegister::decryptLicenseKey() failed: ' . $e->getMessage());
             return '';
         }
+    }
+
+    /* ==========================================================================
+     * 🎟️ Per-device licence tracking (#400)
+     * ------------------------------------------------------------------------
+     * `tblAssetLicenseAssignments` — one row per seat handed to a device
+     * asset / portal user / free-text device name, NEVER hard-deleted (a
+     * released seat becomes its own permanent history row, status
+     * 'released' — same convention as `tblAssetLoans`' state machine).
+     * See class header point 7 above for the full design rationale.
+     * ======================================================================== */
+
+    /**
+     * List a licence asset's seat assignments, active rows first (then
+     * released, newest `linkedAt` first within each group). Resolves a
+     * single `assignedToDisplay` string per row — see class header point 7
+     * — plus `linkedByName`/`releasedByName` (LEFT JOINed; either may be
+     * null when the acting user has since been deleted, same soft-reference
+     * convention as `listMaintenance()`'s `performedByUserName`).
+     *
+     * No additional `siteID` filter is applied here beyond
+     * `licenseAssetID` itself — mirrors `listMaintenance()`/
+     * `listLoansForAsset()`'s own shape, since every caller only ever
+     * reaches this method with a `$licenseAssetId` already resolved via
+     * `self::get()` (itself site-scoped via `Site::id()`), so there is
+     * nothing left to additionally restrict at the assignment-row level.
+     *
+     * @param bool $includeReleased When false, only status='active' rows
+     *             are returned (e.g. a seat-count-only caller); defaults to
+     *             true so item.php's panel can render both the active list
+     *             and the collapsible released history from one call.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public static function listLicenseAssignments(int $licenseAssetId, bool $includeReleased = true): array
+    {
+        $db = App::db();
+
+        $sql = 'SELECT la.*, '
+             . '       da.name AS deviceAssetName, '
+             . '       u.fullName AS userName, '
+             . '       lb.fullName AS linkedByName, '
+             . '       rb.fullName AS releasedByName '
+             . 'FROM tblAssetLicenseAssignments la '
+             . 'LEFT JOIN tblAssets da ON da.assetID = la.deviceAssetID '
+             . 'LEFT JOIN tblUsers u ON u.userID = la.userID '
+             . 'LEFT JOIN tblUsers lb ON lb.userID = la.linkedByID '
+             . 'LEFT JOIN tblUsers rb ON rb.userID = la.releasedByID '
+             . 'WHERE la.licenseAssetID = ?'
+             . ($includeReleased === false ? " AND la.status = 'active'" : '')
+             // 🥇 Active first (MySQL sorts boolean-expression DESC true-
+             // before-false), then newest-linked first within each group.
+             . " ORDER BY (la.status = 'active') DESC, la.linkedAt DESC, la.assignmentID DESC";
+
+        $stmt = $db->prepare($sql);
+        if ($stmt === false) {
+            error_log('AssetRegister::listLicenseAssignments() prepare failed: ' . $db->error);
+            return [];
+        }
+        $stmt->bind_param('i', $licenseAssetId);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        $rows = [];
+        while ($row = $result->fetch_assoc()) {
+            // 🏷️ Resolve a single display string from whichever target this
+            // row was assigned to — exactly one of deviceAssetID/userID/
+            // deviceName is ever set per row (assignSeat()'s exactly-one-
+            // target rule below), mirrors listOwners()'s partyName /
+            // listLoans()'s counterpartyDisplayName resolution above.
+            if ($row['deviceAssetID'] !== null) {
+                $row['assignedToDisplay'] = $row['deviceAssetName'] ?? '(deleted asset)';
+            } elseif ($row['userID'] !== null) {
+                $row['assignedToDisplay'] = $row['userName'] ?? '(deleted user)';
+            } elseif ($row['deviceName'] !== null && (string) $row['deviceName'] !== '') {
+                $row['assignedToDisplay'] = (string) $row['deviceName'];
+            } else {
+                // 🛟 Should be unreachable given assignSeat()'s validation,
+                // but a display fallback is cheaper than a fatal here.
+                $row['assignedToDisplay'] = 'Unknown';
+            }
+            $rows[] = $row;
+        }
+        $stmt->close();
+        return $rows;
+    }
+
+    /**
+     * Count a licence asset's currently ACTIVE seat assignments. Used by
+     * both `seatSummary()` (display) and `assignSeat()` (enforcement) — a
+     * single source of truth for "how many seats are in use right now" so
+     * the two can never drift apart.
+     */
+    public static function activeSeatCount(int $licenseAssetId): int
+    {
+        $db = App::db();
+        $stmt = $db->prepare(
+            "SELECT COUNT(*) AS cnt FROM tblAssetLicenseAssignments WHERE licenseAssetID = ? AND status = 'active'"
+        );
+        if ($stmt === false) {
+            error_log('AssetRegister::activeSeatCount() prepare failed: ' . $db->error);
+            return 0;
+        }
+        $stmt->bind_param('i', $licenseAssetId);
+        $stmt->execute();
+        $row = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+        return $row !== null ? (int) $row['cnt'] : 0;
+    }
+
+    /**
+     * Summarise a licence asset's seat usage for display (item.php's
+     * header readout) and for `assignSeat()`'s own enforcement check.
+     * NULL-safe throughout: when `$licenseSeats` is null (no cap
+     * configured — unlimited seats), `seats`/`free` stay null and `over`
+     * is always false, since there is no ceiling to exceed.
+     *
+     * @return array{seats: int|null, used: int, free: int|null, over: bool}
+     */
+    public static function seatSummary(int $licenseAssetId, ?int $licenseSeats): array
+    {
+        $used = self::activeSeatCount($licenseAssetId);
+
+        if ($licenseSeats === null) {
+            // ♾️ Unlimited — no seat cap configured on this licence asset.
+            return ['seats' => null, 'used' => $used, 'free' => null, 'over' => false];
+        }
+
+        return [
+            'seats' => $licenseSeats,
+            'used'  => $used,
+            // 🔒 Floored at 0 for display — an over-allocated licence still
+            // shows "0 free" rather than a confusing negative number; the
+            // `over` flag below is what actually communicates the
+            // over-allocation state.
+            'free'  => max(0, $licenseSeats - $used),
+            'over'  => $used > $licenseSeats,
+        ];
+    }
+
+    /**
+     * Assign (link) a seat on a digital licence asset to a device asset, a
+     * portal user, or a free-text device name. Does NOT trust its caller's
+     * validation — see class header point 7 — every rule below is
+     * re-checked from scratch:
+     *
+     *   - `$licenseAssetId` must exist and be on this site (`self::get()`)
+     *     AND have `assetKind = 'digital'` — a seat can never be attached
+     *     to a physical asset, regardless of what a tampered form posts.
+     *   - EXACTLY ONE of `deviceAssetID` (a real `tblAssets` row on this
+     *     site — re-uses `self::get()`, never a bare posted int),
+     *     `userID` (`partyExistsOnSite('user', …)`), `deviceName`
+     *     (non-empty free text) is required.
+     *   - `seatLabel` (≤100 chars, VARCHAR(100)) and `notes` (≤500 chars,
+     *     VARCHAR(500)) are optional free text.
+     *
+     * Seat enforcement (WARN-by-default, BLOCK behind a setting): when the
+     * licence asset's own `licenseSeats` is set and `activeSeatCount() >=
+     * licenseSeats`, the assignment would push (or keep) this licence
+     * over-allocated. By default that's only a WARNING — the assignment
+     * still saves, and the warning string is returned for the caller to
+     * flash — but when the site has explicitly opted into
+     * `App::settings('assets.license_seat_block') === '1'`, the assignment
+     * is hard-BLOCKED instead (`id` 0, no insert, no audit row) — matching
+     * `addOwner()`'s/`createLoanRequest()`'s "return 0 on the failing
+     * branch, log why" shape rather than throwing.
+     *
+     * $data keys: deviceAssetID (int|0), userID (int|0), deviceName
+     * (string, only the ONE matching field need be set — the others are
+     * ignored, same convention as addOwner()'s partyType-matched FK),
+     * seatLabel (optional), notes (optional).
+     *
+     * @param array<string, mixed> $data
+     *
+     * @return array{id: int, warnings: string[]} id is 0 on any validation
+     *         failure, insert failure, OR a hard block — warnings is
+     *         always populated with a human-readable reason in that case
+     *         too, not just on a successful-but-over-allocated save.
+     */
+    public static function assignSeat(int $licenseAssetId, array $data, int $actorUserId): array
+    {
+        $db     = App::db();
+        $siteId = Site::id();
+
+        // 🔒 The licence asset itself must exist, be on this site, AND be
+        // a 'digital' asset — self::get() is already site-scoped via
+        // Site::id(). Seats can only ever be assigned to a licence, not a
+        // physical asset.
+        $licenseAsset = self::get($licenseAssetId);
+        if ($licenseAsset === null) {
+            error_log('AssetRegister::assignSeat() licence asset not found on this site: #' . $licenseAssetId);
+            return ['id' => 0, 'warnings' => ['Licence asset not found.']];
+        }
+        if ((string) $licenseAsset['assetKind'] !== 'digital') {
+            error_log('AssetRegister::assignSeat() asset is not digital: #' . $licenseAssetId);
+            return ['id' => 0, 'warnings' => ['Only digital (licence) assets can have seats assigned.']];
+        }
+
+        // 🔀 EXACTLY ONE of {deviceAssetID, userID, deviceName} — the core
+        // integrity rule this table has no SQL constraint for (mirrors
+        // addOwner()'s exactly-one-party-FK rule / createLoanRequest()'s
+        // exactly-one-counterparty rule — see class header point 7).
+        $deviceAssetId = (int) ($data['deviceAssetID'] ?? 0);
+        $deviceAssetId = $deviceAssetId > 0 ? $deviceAssetId : null;
+        $targetUserId  = (int) ($data['userID'] ?? 0);
+        $targetUserId  = $targetUserId > 0 ? $targetUserId : null;
+        $deviceName    = trim((string) ($data['deviceName'] ?? ''));
+        $deviceName    = $deviceName !== '' ? $deviceName : null;
+
+        $targetsSupplied = (int) ($deviceAssetId !== null) + (int) ($targetUserId !== null) + (int) ($deviceName !== null);
+        if ($targetsSupplied !== 1) {
+            error_log('AssetRegister::assignSeat() expected exactly one target, got ' . $targetsSupplied);
+            return ['id' => 0, 'warnings' => ['Choose exactly one target for this seat — a tracked device, a portal user, or a free-text device name.']];
+        }
+
+        if ($deviceAssetId !== null) {
+            // 🔍 A real tblAssets row on this site — reuses self::get(),
+            // never a bare posted int (per class header point 7's note on
+            // this specific validation).
+            if (self::get($deviceAssetId) === null) {
+                error_log('AssetRegister::assignSeat() deviceAssetID not found on this site: #' . $deviceAssetId);
+                return ['id' => 0, 'warnings' => ['That device asset was not found on this site.']];
+            }
+        } elseif ($targetUserId !== null) {
+            // 🔍 FK existence + site-scope — never trust a bare posted int
+            // (reuses partyExistsOnSite() unchanged from #396).
+            if (self::partyExistsOnSite('user', $targetUserId, $siteId) === false) {
+                error_log('AssetRegister::assignSeat() userID not found on this site: #' . $targetUserId);
+                return ['id' => 0, 'warnings' => ['That user was not found on this site.']];
+            }
+        } else {
+            $deviceName = mb_substr($deviceName, 0, 255);
+        }
+
+        $seatLabel = trim((string) ($data['seatLabel'] ?? ''));
+        $seatLabel = $seatLabel !== '' ? mb_substr($seatLabel, 0, 100) : null;
+
+        $notes = trim((string) ($data['notes'] ?? ''));
+        $notes = $notes !== '' ? mb_substr($notes, 0, 500) : null;
+
+        // 🪑 Seat enforcement — WARN by default, hard-BLOCK only behind the
+        // admin-controlled 'assets.license_seat_block' site setting. See
+        // this method's own doc + class header point 7 for the full
+        // rationale. A NULL licenseSeats means "unlimited" — no check at
+        // all in that case.
+        $warnings = [];
+        $licenseSeats = $licenseAsset['licenseSeats'] !== null ? (int) $licenseAsset['licenseSeats'] : null;
+        if ($licenseSeats !== null) {
+            $activeCount = self::activeSeatCount($licenseAssetId);
+            if ($activeCount >= $licenseSeats) {
+                $blockOverAllocation = (string) (App::settings('assets.license_seat_block') ?? '0') === '1';
+                if ($blockOverAllocation === true) {
+                    error_log('AssetRegister::assignSeat() blocked — licence #' . $licenseAssetId . ' has no seats remaining and assets.license_seat_block=1');
+                    return ['id' => 0, 'warnings' => [
+                        'This licence has no seats remaining (' . $activeCount . ' of ' . $licenseSeats . ' in use) — seat over-allocation is blocked for this site.',
+                    ]];
+                }
+                $warnings[] = 'This licence is now over-allocated (' . ($activeCount + 1) . ' of ' . $licenseSeats . ' seats in use).';
+            }
+        }
+
+        $fields = [
+            'siteID'         => [$siteId, 'i'],
+            'licenseAssetID' => [$licenseAssetId, 'i'],
+            'seatLabel'      => [$seatLabel, 's'],
+            'deviceAssetID'  => [$deviceAssetId, 'i'],
+            'userID'         => [$targetUserId, 'i'],
+            'deviceName'     => [$deviceName, 's'],
+            'status'         => ['active', 's'],
+            'linkedByID'     => [$actorUserId, 'i'],
+            'notes'          => [$notes, 's'],
+        ];
+        ['columns' => $columns, 'types' => $types, 'params' => $params] = self::splitFields($fields);
+        $placeholders = implode(', ', array_fill(0, count($columns), '?'));
+
+        $stmt = $db->prepare('INSERT INTO tblAssetLicenseAssignments (`' . implode('`, `', $columns) . '`) VALUES (' . $placeholders . ')');
+        if ($stmt === false) {
+            error_log('AssetRegister::assignSeat() prepare failed: ' . $db->error);
+            return ['id' => 0, 'warnings' => ['Could not save the seat assignment — please try again.']];
+        }
+
+        try {
+            $stmt->bind_param($types, ...$params);
+            $stmt->execute();
+        } catch (\mysqli_sql_exception $e) {
+            error_log('AssetRegister::assignSeat() insert failed: ' . $e->getMessage());
+            $stmt->close();
+            return ['id' => 0, 'warnings' => ['Could not save the seat assignment — please try again.']];
+        }
+        $newId = (int) $stmt->insert_id;
+        $stmt->close();
+
+        if ($newId <= 0) {
+            return ['id' => 0, 'warnings' => ['Could not save the seat assignment — please try again.']];
+        }
+
+        // 📜 Audit the link. The licence KEY itself is never referenced
+        // anywhere in this method — this change-set only ever describes
+        // WHO/WHAT the seat was handed to, never tblAssets.licenseKey (see
+        // class header point 7's closing note).
+        $auditNew = [];
+        foreach ($fields as $col => $pair) {
+            $auditNew[$col] = $pair[0];
+        }
+        self::audit('license', $newId, $licenseAssetId, 'link', null, $auditNew);
+
+        return ['id' => $newId, 'warnings' => $warnings];
+    }
+
+    /**
+     * Release (unlink) an active seat assignment. IDOR guard: the row must
+     * belong to BOTH `$assignmentId` AND `$licenseAssetId` AND the current
+     * site before it's ever read or touched — mirrors
+     * `updateMaintenance()`'s "load scoped to all three, then mutate"
+     * pattern. NEVER hard-deletes — the row is its own permanent history
+     * (same convention as every state-machine table in this class); this
+     * method only ever flips `status` → 'released' and stamps
+     * `releasedAt`/`releasedByID`.
+     *
+     * Race-safe: the actual state transition is guarded by
+     * `WHERE … AND status = 'active'` on the UPDATE itself, so a row that
+     * moved to 'released' between the SELECT above and this UPDATE (e.g. a
+     * double-click, or two tabs racing) simply yields 0 affected rows and
+     * a clean `false` return — same idiom as `loanAction()`'s per-verb
+     * state-machine guards.
+     *
+     * @return bool True on success, false if the row doesn't exist (for
+     *              this licence asset, on this site) or was already
+     *              released
+     */
+    public static function releaseSeat(int $assignmentId, int $licenseAssetId, int $actorUserId): bool
+    {
+        $db     = App::db();
+        $siteId = Site::id();
+
+        // 🔒 IDOR guard FIRST — before any mutation.
+        $stmt = $db->prepare(
+            'SELECT * FROM tblAssetLicenseAssignments WHERE assignmentID = ? AND licenseAssetID = ? AND siteID = ? LIMIT 1'
+        );
+        if ($stmt === false) {
+            error_log('AssetRegister::releaseSeat() prepare failed: ' . $db->error);
+            return false;
+        }
+        $stmt->bind_param('iii', $assignmentId, $licenseAssetId, $siteId);
+        $stmt->execute();
+        $old = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+
+        if ($old === null || $old === false) {
+            return false;
+        }
+
+        // 🚦 State guard — WHERE ... AND status='active' on the UPDATE
+        // itself (race-safe — see method doc above).
+        $updStmt = $db->prepare(
+            "UPDATE tblAssetLicenseAssignments SET status = 'released', releasedAt = NOW(), releasedByID = ? "
+            . " WHERE assignmentID = ? AND licenseAssetID = ? AND siteID = ? AND status = 'active'"
+        );
+        if ($updStmt === false) {
+            error_log('AssetRegister::releaseSeat() prepare failed: ' . $db->error);
+            return false;
+        }
+        $updStmt->bind_param('iiii', $actorUserId, $assignmentId, $licenseAssetId, $siteId);
+        $ok = $updStmt->execute();
+        $affected = $updStmt->affected_rows;
+        $updStmt->close();
+
+        if ($ok === false || $affected <= 0) {
+            return false;
+        }
+
+        // 📜 Audit — old/new capture just the status transition, matching
+        // loanAction()'s own change-set shape for its state-machine
+        // transitions. NEVER a hard delete — see method doc.
+        self::audit('license', $assignmentId, $licenseAssetId, 'release', ['status' => 'active'], ['status' => 'released']);
+
+        return true;
     }
 }
