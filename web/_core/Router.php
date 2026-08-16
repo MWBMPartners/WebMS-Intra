@@ -261,6 +261,27 @@ class Router
             }
         }
 
+        // 🏷️ Asset Tracker public lost-and-found page (#393) — short URL
+        //    /a/<token>. Cloned from the /e/<slug> block above. The token
+        //    is tblAssets.publicToken — always exactly 32 lowercase-hex
+        //    chars (bin2hex(random_bytes(16)), see AssetRegister::
+        //    generatePublicToken()) — so the pattern is anchored and exact
+        //    rather than the open-ended slug pattern above. Not a
+        //    tblRoutes row: like /e/<slug>, this bypasses the DB route
+        //    lookup entirely so the page works even with tblRoutes
+        //    unreachable/mid-migration. The handler
+        //    (web/_apps/assets/tag.php) owns the full uniform-404 logic
+        //    for unknown/disabled/confidential tokens — see its header
+        //    comment.
+        if (str_starts_with($path, 'a/') === true) {
+            $token = substr($path, 2);
+            if (preg_match('/^[a-f0-9]{32}$/', $token) === 1) {
+                $_GET['token'] = $token;
+                require PORTAL_APPS . DIRECTORY_SEPARATOR . 'assets' . DIRECTORY_SEPARATOR . 'tag.php';
+                return true;
+            }
+        }
+
         return false;
     }
 

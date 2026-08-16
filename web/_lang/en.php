@@ -27,6 +27,7 @@ return [
     // 🧭 Navigation
     // =========================================================================
     'nav.dashboard'         => 'Dashboard',
+    'nav.assets'            => 'Assets',
     'nav.admin'             => 'Admin',
     'nav.admin_dashboard'   => 'Admin Dashboard',
     'nav.error_log'         => 'Error Log',
@@ -184,6 +185,15 @@ return [
     'attendance.manage_types'       => 'Manage Service Types',
     'attendance.no_sessions'        => 'No attendance sessions recorded.',
     'attendance.save'               => 'Save Attendance',
+
+    // =========================================================================
+    // 📦 Asset Tracker
+    // =========================================================================
+    'assets.title'                  => 'Asset Tracker',
+    'assets.subtitle'               => 'Track physical and digital assets — ownership, loans, maintenance, licences, and lost-and-found.',
+    'assets.new_asset'              => 'New asset',
+    'assets.empty_state'            => 'No assets recorded yet.',
+    'assets.export_csv'             => 'Export CSV',
 
     // =========================================================================
     // 🛡️ Admin
