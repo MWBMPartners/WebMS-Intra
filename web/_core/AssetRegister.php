@@ -4,33 +4,50 @@
  * -----------------------------------------------------------------------------
  * Asset Tracker — Register + Audit Choke-Point 📦🔐
  * -----------------------------------------------------------------------------
- * Foundation service class for the Asset Tracker app (slug `assets`, #393).
- * Two responsibilities in this pass:
+ * Service class for the Asset Tracker app (slug `assets`, #393). Two
+ * responsibilities:
  *
  *   1. AUDIT CHOKE-POINT (#395). Every Asset Tracker mutation — today and in
- *      every later sub-issue (save/delete/loans/maintenance/licences/labels/
- *      found-reports/…) — is meant to route through `self::audit()` so
+ *      every later sub-issue (loans/maintenance/licences/labels/
+ *      found-reports/…) — routes through `self::audit()` so
  *      `tblAssetAudit` (immutable, no-FK, mirrors tblAuditTrail) and the
  *      existing platform logs (`Logger::activity()` always;
  *      `Logger::audit()` on create/update/delete) stay in lock-step. Sensitive
  *      fields (`licenseKey`, `publicToken`) are redacted before anything
- *      touches a log row.
+ *      touches a log row — see createAsset()/updateAsset()'s inline comments
+ *      for the one subtlety this pass discovered: that redaction is airtight
+ *      for THIS class's own `tblAssetAudit` write, but the mirrored
+ *      `Logger::audit()` call serialises whatever raw `$old`/`$new` arrays
+ *      it's handed with no redaction pass of its own — so every caller in
+ *      this file that touches `licenseKey` passes a marker string, never the
+ *      plaintext or ciphertext, into `self::audit()`'s change-set arguments.
  *
- *      `audit()` is deliberately PUBLIC, not private, despite this class
- *      being the only intended writer for now: the public lost-and-found
- *      page (`_apps/assets/tag.php`) is a legitimate external caller today
+ *      `audit()` is deliberately PUBLIC, not private: the public lost-and-
+ *      found page (`_apps/assets/tag.php`) is a legitimate external caller
  *      — it records a `token`/`scan` event on every valid public view — and
- *      every later sub-issue's save/delete/loan-action/etc handlers will
- *      call it directly too, since their own AssetRegister methods don't
- *      exist yet in this foundation pass. The "choke point" property is
- *      about there being exactly ONE audit-writing code path, not about
+ *      every mutating controller in `_apps/assets/` calls it (indirectly, via
+ *      this class's own methods) too. The "choke point" property is about
+ *      there being exactly ONE audit-writing code path, not about
  *      language-level visibility.
  *
- *   2. Minimal read helpers (`listForSite()`, `get()`) for the register
- *      index page, plus `generatePublicToken()` (used when an asset is
- *      created) and `validateIdentifier()` / `isResponsibleFor()`, which
- *      later sub-issues (identifiers-save, item.php's access gate) will
- *      lean on.
+ *   2. Register CRUD + reference data + resources (#394, this pass).
+ *      `createAsset()` / `updateAsset()` / `softDeleteAsset()` are the ONLY
+ *      supported way to mutate `tblAssets` — callers (`_apps/assets/save.php`
+ *      / `delete.php`) are responsible for validating/coercing raw input
+ *      first; these methods trust their caller's types completely. Category
+ *      and location reference data (`listCategories()`/`saveCategory()`/
+ *      `toggleCategoryActive()` and the location equivalents) log via a
+ *      plain `Logger::activity()` call rather than `self::audit()` — that
+ *      choke-point is asset-scoped (every row requires a real assetID) and
+ *      categories/locations are site-wide, not owned by any one asset.
+ *      Resource attachments (`listResources()`/`addResource()`/
+ *      `deleteResource()`) DO route through `self::audit()` (entityType
+ *      `'resource'`) since every resource belongs to exactly one asset.
+ *      Plus `listForSite()`/`get()` (read helpers — `get()` is site-scoped
+ *      via `Site::id()`), `generatePublicToken()`, `validateIdentifier()` /
+ *      `isResponsibleFor()` (leaned on by later sub-issues + this one's
+ *      confidential-asset access gates), and `decryptLicenseKey()` (the
+ *      manager-only reveal on `_apps/assets/item.php`).
  *
  * All queries are MySQLi prepared statements via `App::db()` — never
  * string-interpolated user input (house rule, .claude/CLAUDE.md → Code Style).
@@ -39,8 +56,9 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.0.0
+ * @version   1.1.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/393
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/394
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/395
  * -----------------------------------------------------------------------------
  */
@@ -65,6 +83,45 @@ class AssetRegister
 
     /** Marker written in place of a redacted field's old/new value. */
     private const REDACTED_MARKER = '••• redacted •••';
+
+    /* ==========================================================================
+     * 📋 Allow-lists (#394) — the single source of truth for every ENUM
+     * column tblAssets/tblAssetResources define. Shared between save.php's
+     * validation and edit.php's dropdown rendering so the two can never
+     * silently drift apart.
+     * ======================================================================== */
+
+    /** @var string[] tblAssets.assetKind */
+    public const ASSET_KINDS = ['physical', 'digital'];
+
+    /** @var string[] tblAssets.conditionState / tblAssetLoans.conditionOut|conditionIn */
+    public const CONDITION_STATES = ['new', 'excellent', 'good', 'fair', 'poor', 'broken'];
+
+    /** @var string[] tblAssets.status */
+    public const ASSET_STATUSES = [
+        'in-service', 'in-repair', 'on-loan', 'borrowed', 'in-storage',
+        'retired', 'disposed', 'lost', 'stolen',
+    ];
+
+    /** @var string[] tblAssets.depreciationMethod */
+    public const DEPRECIATION_METHODS = ['none', 'straight-line', 'reducing-balance'];
+
+    /** @var string[] tblAssetResources.resourceType */
+    public const RESOURCE_TYPES = [
+        'manual', 'guide', 'video', 'photo', 'receipt',
+        'ownership-agreement', 'insurance', 'legal', 'other',
+    ];
+
+    /**
+     * Resource types that may EVER be shown on the public /a/{token}
+     * lost-and-found page (isPublic=1). Ownership agreements, insurance,
+     * legal docs and receipts are NEVER public — they are the confidential
+     * "ownership & legal" vault and must never leak to an anonymous scanner,
+     * regardless of what an isPublic checkbox/tampered POST says.
+     *
+     * @var string[]
+     */
+    public const PUBLIC_ELIGIBLE_RESOURCE_TYPES = ['manual', 'guide', 'photo'];
 
     /* ==========================================================================
      * 🔑 Public token
@@ -202,9 +259,46 @@ class AssetRegister
         if (in_array($action, ['create', 'update', 'delete'], true) === true) {
             $table = self::TABLE_FOR_ENTITY[$entityType] ?? null;
             if ($table !== null) {
-                Logger::audit($table, $entityID > 0 ? $entityID : $assetID, $action, $old, $new, $actorUserID, $apiKeyId);
+                // 🔒 Redact sensitive fields BEFORE handing the raw before/
+                //    after rows to Logger::audit() — unlike buildChangeSet()
+                //    (which redacts tblAssetAudit above), Logger::audit()
+                //    serialises tblAuditTrail's oldValue/newValue with no
+                //    redaction of its own. Centralising it here makes the
+                //    choke-point safe even if a caller forgets to pre-mask.
+                Logger::audit(
+                    $table,
+                    $entityID > 0 ? $entityID : $assetID,
+                    $action,
+                    self::redactForLog($old),
+                    self::redactForLog($new),
+                    $actorUserID,
+                    $apiKeyId
+                );
             }
         }
+    }
+
+    /**
+     * Return a copy of a raw before/after row with REDACTED_FIELDS values
+     * replaced by the redaction marker, so secrets (licenseKey ciphertext,
+     * publicToken) never reach the platform audit trail. Null passes
+     * through unchanged.
+     *
+     * @param array<string, mixed>|null $row
+     *
+     * @return array<string, mixed>|null
+     */
+    private static function redactForLog(?array $row): ?array
+    {
+        if ($row === null) {
+            return null;
+        }
+        foreach (self::REDACTED_FIELDS as $field) {
+            if (array_key_exists($field, $row) === true) {
+                $row[$field] = self::REDACTED_MARKER;
+            }
+        }
+        return $row;
     }
 
     /**
@@ -588,6 +682,15 @@ class AssetRegister
      * Fetch a single non-deleted asset by id, or null if it doesn't exist
      * (or is soft-deleted).
      *
+     * 🔒 Site-scoped via `Site::id()` (#394 hardening) — every other
+     * AssetRegister read/write is scoped to the active site (listForSite(),
+     * softDeleteAsset(), updateAsset(), …); this one originally wasn't,
+     * which would have let a valid assetID from ANOTHER site's register be
+     * read cross-tenant by any caller that didn't separately re-check
+     * `siteID` itself. Every current caller (`_apps/assets/item.php`,
+     * `edit.php`, `save.php` via updateAsset(), `resource-save.php`,
+     * `resource-download.php`) now also gets this for free.
+     *
      * @return array<string, mixed>|null
      */
     public static function get(int $assetId): ?array
@@ -596,14 +699,740 @@ class AssetRegister
             return null;
         }
         $db = App::db();
-        $stmt = $db->prepare('SELECT * FROM tblAssets WHERE assetID = ? AND isDeleted = 0 LIMIT 1');
+        $siteId = Site::id();
+        $stmt = $db->prepare('SELECT * FROM tblAssets WHERE assetID = ? AND siteID = ? AND isDeleted = 0 LIMIT 1');
         if ($stmt === false) {
             return null;
         }
-        $stmt->bind_param('i', $assetId);
+        $stmt->bind_param('ii', $assetId, $siteId);
         $stmt->execute();
         $row = $stmt->get_result()->fetch_assoc();
         $stmt->close();
         return $row !== false && $row !== null ? $row : null;
+    }
+
+    /* ==========================================================================
+     * 📦 Asset CRUD (#394)
+     * ======================================================================== */
+
+    /**
+     * Build a table-driven {column => [value, mysqliBindType]} map into its
+     * three parallel pieces (columns / placeholders / types / params) for an
+     * INSERT or UPDATE SET clause. Centralising this avoids the classic bug
+     * of a hand-counted bind_param() type string silently drifting out of
+     * sync with the column list as fields get added/reordered — every
+     * mutating method below builds its column set through this helper
+     * instead of writing the type string by hand.
+     *
+     * @param array<string, array{0: mixed, 1: string}> $fields
+     *
+     * @return array{columns: string[], types: string, params: mixed[]}
+     */
+    private static function splitFields(array $fields): array
+    {
+        return [
+            'columns' => array_keys($fields),
+            'types'   => implode('', array_column($fields, 1)),
+            'params'  => array_column($fields, 0),
+        ];
+    }
+
+    /**
+     * Create a new asset (physical or digital). Generates the public
+     * lost-and-found token, encrypts `licenseKey` when supplied (digital
+     * assets — libsodium via `encrypt_setting()`, see bootstrap.php), and
+     * records a `create` row via `self::audit()`.
+     *
+     * $data keys (all optional except `name`; anything omitted falls back
+     * to the column's schema default) — see migration 159_asset_tracker.sql
+     * for the authoritative column list:
+     *   assetKind, name, description, categoryID, locationID, manufacturer,
+     *   model, serialNumber, assetTagCode, features, conditionState, status,
+     *   purchaseDate, purchaseStore, purchaseCostPence, currency,
+     *   warrantyExpiry, warrantyDetails, licenseKey (PLAINTEXT — this method
+     *   encrypts it), licenseSeats, renewalDate, accessUrl,
+     *   depreciationMethod, usefulLifeMonths, salvageValuePence,
+     *   isConfidential, publicPageEnabled, parentAssetID.
+     *
+     * Caller contract: every field must already be validated/coerced to its
+     * correct PHP type (int|string|null, ENUM values checked against this
+     * class's allow-list constants) — see `_apps/assets/save.php`, which is
+     * the one intended caller. This method does NOT re-validate ENUM/FK
+     * values; it only handles persistence, token generation, encryption,
+     * and audit logging.
+     *
+     * @param array<string, mixed> $data
+     *
+     * @return int New assetID, or 0 on failure
+     */
+    public static function createAsset(array $data, int $actorUserId): int
+    {
+        $db     = App::db();
+        $siteId = Site::id();
+
+        // 🔐 licenseKey — encrypt when supplied, else leave the column NULL.
+        // The column NEVER holds plaintext (schema comment + class header).
+        $rawLicenseKey       = trim((string) ($data['licenseKey'] ?? ''));
+        $licenseKeyProvided  = $rawLicenseKey !== '';
+        $licenseKeyCipher    = $licenseKeyProvided === true ? encrypt_setting($rawLicenseKey) : null;
+
+        $publicToken = self::generatePublicToken();
+
+        $fields = [
+            'siteID'             => [$siteId, 'i'],
+            'assetKind'          => [(string) ($data['assetKind'] ?? 'physical'), 's'],
+            'name'               => [(string) ($data['name'] ?? ''), 's'],
+            'description'        => [$data['description'] ?? null, 's'],
+            'categoryID'         => [$data['categoryID'] ?? null, 'i'],
+            'locationID'         => [$data['locationID'] ?? null, 'i'],
+            'manufacturer'       => [$data['manufacturer'] ?? null, 's'],
+            'model'              => [$data['model'] ?? null, 's'],
+            'serialNumber'       => [$data['serialNumber'] ?? null, 's'],
+            'assetTagCode'       => [$data['assetTagCode'] ?? null, 's'],
+            'features'           => [$data['features'] ?? null, 's'],
+            'conditionState'     => [(string) ($data['conditionState'] ?? 'good'), 's'],
+            'status'             => [(string) ($data['status'] ?? 'in-service'), 's'],
+            'purchaseDate'       => [$data['purchaseDate'] ?? null, 's'],
+            'purchaseStore'      => [$data['purchaseStore'] ?? null, 's'],
+            'purchaseCostPence'  => [$data['purchaseCostPence'] ?? null, 'i'],
+            'currency'           => [(string) ($data['currency'] ?? 'GBP'), 's'],
+            'warrantyExpiry'     => [$data['warrantyExpiry'] ?? null, 's'],
+            'warrantyDetails'    => [$data['warrantyDetails'] ?? null, 's'],
+            'licenseKey'         => [$licenseKeyCipher, 's'],
+            'licenseSeats'       => [$data['licenseSeats'] ?? null, 'i'],
+            'renewalDate'        => [$data['renewalDate'] ?? null, 's'],
+            'accessUrl'          => [$data['accessUrl'] ?? null, 's'],
+            'depreciationMethod' => [(string) ($data['depreciationMethod'] ?? 'none'), 's'],
+            'usefulLifeMonths'   => [$data['usefulLifeMonths'] ?? null, 'i'],
+            'salvageValuePence'  => [$data['salvageValuePence'] ?? null, 'i'],
+            'isConfidential'     => [(int) ($data['isConfidential'] ?? 0), 'i'],
+            'publicToken'        => [$publicToken, 's'],
+            'publicPageEnabled'  => [(int) ($data['publicPageEnabled'] ?? 1), 'i'],
+            'parentAssetID'      => [$data['parentAssetID'] ?? null, 'i'],
+            'createdByID'        => [$actorUserId, 'i'],
+        ];
+
+        ['columns' => $columns, 'types' => $types, 'params' => $params] = self::splitFields($fields);
+        $placeholders = implode(', ', array_fill(0, count($columns), '?'));
+
+        $stmt = $db->prepare('INSERT INTO tblAssets (`' . implode('`, `', $columns) . '`) VALUES (' . $placeholders . ')');
+        if ($stmt === false) {
+            error_log('AssetRegister::createAsset() prepare failed: ' . $db->error);
+            return 0;
+        }
+
+        try {
+            $stmt->bind_param($types, ...$params);
+            $stmt->execute();
+        } catch (\mysqli_sql_exception $e) {
+            // 🪞 Most likely cause: a duplicate assetTagCode within this
+            // site (uq_asset_tag) — mysqli_report(MYSQLI_REPORT_STRICT) is
+            // enabled repo-wide (bootstrap.php), so a constraint violation
+            // throws here rather than returning false.
+            error_log('AssetRegister::createAsset() insert failed: ' . $e->getMessage());
+            $stmt->close();
+            return 0;
+        }
+        $newId = (int) $stmt->insert_id;
+        $stmt->close();
+
+        if ($newId <= 0) {
+            return 0;
+        }
+
+        // 📜 Audit the create. licenseKey/publicToken are NEVER placed in
+        // the change-set as plaintext, ciphertext, or the raw token — see
+        // updateAsset()'s matching comment for why: AssetRegister::audit()
+        // redacts by FIELD NAME for its own tblAssetAudit row, but the
+        // mirrored tblAuditTrail row (via Logger::audit()) serialises
+        // whatever raw arrays we hand it with no redaction pass of its own.
+        $auditNew = [];
+        foreach ($fields as $col => $pair) {
+            if ($col === 'publicToken') {
+                continue; // internal secret token — omit entirely, never logged
+            }
+            $auditNew[$col] = $pair[0];
+        }
+        $auditNew['licenseKey'] = $licenseKeyProvided === true ? '(set)' : null;
+
+        self::audit('asset', $newId, $newId, 'create', null, $auditNew);
+
+        return $newId;
+    }
+
+    /**
+     * Update an existing asset. `licenseKey` follows a "leave blank to
+     * keep" convention — edit.php never pre-fills this field with the
+     * decrypted value (it's write-only in the UI), so an empty submission
+     * means "don't touch the stored licence key", not "clear it".
+     *
+     * Same caller contract as createAsset(): $data must already be
+     * validated/coerced by the caller (`_apps/assets/save.php`).
+     *
+     * @param array<string, mixed> $data
+     *
+     * @return bool True on success, false if the asset doesn't exist (or
+     *              isn't on this site) or the update failed
+     */
+    public static function updateAsset(int $assetId, array $data, int $actorUserId): bool
+    {
+        $db     = App::db();
+        $siteId = Site::id();
+
+        $old = self::get($assetId);
+        if ($old === null || (int) $old['siteID'] !== $siteId) {
+            return false;
+        }
+
+        $rawLicenseKey      = trim((string) ($data['licenseKey'] ?? ''));
+        $licenseKeyChanged  = $rawLicenseKey !== '';
+        $licenseKeyCipher   = $licenseKeyChanged === true ? encrypt_setting($rawLicenseKey) : null;
+
+        $fields = [
+            'assetKind'          => [(string) ($data['assetKind'] ?? $old['assetKind']), 's'],
+            'name'               => [(string) ($data['name'] ?? $old['name']), 's'],
+            'description'        => [$data['description'] ?? null, 's'],
+            'categoryID'         => [$data['categoryID'] ?? null, 'i'],
+            'locationID'         => [$data['locationID'] ?? null, 'i'],
+            'manufacturer'       => [$data['manufacturer'] ?? null, 's'],
+            'model'              => [$data['model'] ?? null, 's'],
+            'serialNumber'       => [$data['serialNumber'] ?? null, 's'],
+            'assetTagCode'       => [$data['assetTagCode'] ?? null, 's'],
+            'features'           => [$data['features'] ?? null, 's'],
+            'conditionState'     => [(string) ($data['conditionState'] ?? $old['conditionState']), 's'],
+            'status'             => [(string) ($data['status'] ?? $old['status']), 's'],
+            'purchaseDate'       => [$data['purchaseDate'] ?? null, 's'],
+            'purchaseStore'      => [$data['purchaseStore'] ?? null, 's'],
+            'purchaseCostPence'  => [$data['purchaseCostPence'] ?? null, 'i'],
+            'currency'           => [(string) ($data['currency'] ?? $old['currency']), 's'],
+            'warrantyExpiry'     => [$data['warrantyExpiry'] ?? null, 's'],
+            'warrantyDetails'    => [$data['warrantyDetails'] ?? null, 's'],
+            'licenseSeats'       => [$data['licenseSeats'] ?? null, 'i'],
+            'renewalDate'        => [$data['renewalDate'] ?? null, 's'],
+            'accessUrl'          => [$data['accessUrl'] ?? null, 's'],
+            'depreciationMethod' => [(string) ($data['depreciationMethod'] ?? $old['depreciationMethod']), 's'],
+            'usefulLifeMonths'   => [$data['usefulLifeMonths'] ?? null, 'i'],
+            'salvageValuePence'  => [$data['salvageValuePence'] ?? null, 'i'],
+            'isConfidential'     => [(int) ($data['isConfidential'] ?? 0), 'i'],
+            'publicPageEnabled'  => [(int) ($data['publicPageEnabled'] ?? 0), 'i'],
+            'parentAssetID'      => [$data['parentAssetID'] ?? null, 'i'],
+        ];
+        if ($licenseKeyChanged === true) {
+            $fields['licenseKey'] = [$licenseKeyCipher, 's'];
+        }
+
+        ['columns' => $columns, 'types' => $types, 'params' => $params] = self::splitFields($fields);
+        $setClause = implode(', ', array_map(static fn (string $c): string => '`' . $c . '` = ?', $columns));
+        $types    .= 'ii';
+        $params[]  = $assetId;
+        $params[]  = $siteId;
+
+        $stmt = $db->prepare('UPDATE tblAssets SET ' . $setClause . ' WHERE assetID = ? AND siteID = ?');
+        if ($stmt === false) {
+            error_log('AssetRegister::updateAsset() prepare failed: ' . $db->error);
+            return false;
+        }
+
+        try {
+            $stmt->bind_param($types, ...$params);
+            $ok = $stmt->execute();
+        } catch (\mysqli_sql_exception $e) {
+            // 🪞 Most likely cause: a duplicate assetTagCode within this
+            // site (uq_asset_tag) — see createAsset()'s matching comment.
+            error_log('AssetRegister::updateAsset() update failed: ' . $e->getMessage());
+            $stmt->close();
+            return false;
+        }
+        $stmt->close();
+
+        if ($ok === false) {
+            return false;
+        }
+
+        // 📜 Audit — restrict the diff to just the editable fields we
+        // touched (avoids a misleading "cleared" diff against columns like
+        // createdAt/isDeleted/publicToken that $data never mentions).
+        // licenseKey is NEVER placed in either side as plaintext OR
+        // ciphertext — see createAsset()'s comment for why a marker string
+        // is the only safe payload to hand to self::audit().
+        $auditOld = array_intersect_key($old, $fields);
+        $auditNew = [];
+        foreach ($fields as $col => $pair) {
+            $auditNew[$col] = $pair[0];
+        }
+        if ($licenseKeyChanged === true) {
+            $auditOld['licenseKey'] = '(previous value)';
+            $auditNew['licenseKey'] = '(new value)';
+        }
+
+        self::audit('asset', $assetId, $assetId, 'update', $auditOld, $auditNew);
+
+        return true;
+    }
+
+    /**
+     * Soft-delete an asset (isDeleted = 1) — never a hard DELETE, so every
+     * child row (resources/owners/loans/…) and every audit trail entry
+     * keeps a valid assetID to point back at.
+     *
+     * @return bool True if a row was actually deleted, false if the asset
+     *              didn't exist, wasn't on this site, or was already deleted
+     */
+    public static function softDeleteAsset(int $assetId, int $actorUserId): bool
+    {
+        $db     = App::db();
+        $siteId = Site::id();
+
+        $stmt = $db->prepare('UPDATE tblAssets SET isDeleted = 1 WHERE assetID = ? AND siteID = ? AND isDeleted = 0');
+        if ($stmt === false) {
+            error_log('AssetRegister::softDeleteAsset() prepare failed: ' . $db->error);
+            return false;
+        }
+        $stmt->bind_param('ii', $assetId, $siteId);
+        $ok = $stmt->execute();
+        $affected = $stmt->affected_rows;
+        $stmt->close();
+
+        if ($ok === false || $affected <= 0) {
+            return false;
+        }
+
+        self::audit('asset', $assetId, $assetId, 'delete', ['isDeleted' => 0], ['isDeleted' => 1]);
+
+        return true;
+    }
+
+    /* ==========================================================================
+     * 🏷️ Categories + 📍 Locations — reference data (#394)
+     * ------------------------------------------------------------------------
+     * Deliberately NOT routed through self::audit() — that choke-point is
+     * asset-scoped (every row requires an assetID), and categories/
+     * locations are site-wide reference data with no owning asset. A small
+     * Logger::activity() call is enough to keep them visible in the shared
+     * admin activity log without forcing an artificial assetID=0 through
+     * the asset audit trail.
+     * ======================================================================== */
+
+    /**
+     * List a site's asset categories, optionally active-only.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public static function listCategories(int $siteId, bool $activeOnly = false): array
+    {
+        $db = App::db();
+        $sql = 'SELECT * FROM tblAssetCategories WHERE siteID = ?'
+            . ($activeOnly === true ? ' AND isActive = 1' : '')
+            . ' ORDER BY sortOrder ASC, categoryName ASC';
+        $stmt = $db->prepare($sql);
+        if ($stmt === false) {
+            error_log('AssetRegister::listCategories() prepare failed: ' . $db->error);
+            return [];
+        }
+        $stmt->bind_param('i', $siteId);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        $rows = [];
+        while ($row = $result->fetch_assoc()) {
+            $rows[] = $row;
+        }
+        $stmt->close();
+        return $rows;
+    }
+
+    /**
+     * Create or update an asset category. $categoryId = 0 creates a new
+     * row; a positive id updates that row (scoped to $siteId).
+     *
+     * $data keys: categoryName (required), icon (optional, Font Awesome
+     * class), sortOrder (optional, default 0).
+     *
+     * @param array<string, mixed> $data
+     *
+     * @return int The category's id (new or existing), or 0 on failure /
+     *             validation error (blank name)
+     */
+    public static function saveCategory(int $siteId, int $categoryId, array $data, int $actorUserId): int
+    {
+        $db   = App::db();
+        $name = trim((string) ($data['categoryName'] ?? ''));
+        if ($name === '') {
+            return 0;
+        }
+        $icon = trim((string) ($data['icon'] ?? ''));
+        $icon = $icon !== '' ? $icon : null;
+        $sortOrder = (int) ($data['sortOrder'] ?? 0);
+
+        try {
+            if ($categoryId > 0) {
+                $stmt = $db->prepare(
+                    'UPDATE tblAssetCategories SET categoryName = ?, icon = ?, sortOrder = ? WHERE categoryID = ? AND siteID = ?'
+                );
+                if ($stmt === false) {
+                    return 0;
+                }
+                $stmt->bind_param('ssiii', $name, $icon, $sortOrder, $categoryId, $siteId);
+                $ok = $stmt->execute();
+                $affected = $stmt->affected_rows;
+                $stmt->close();
+                if ($ok === false || $affected < 0) {
+                    return 0;
+                }
+                Logger::activity('AssetCategorySaved', 'Updated asset category: ' . $name, $actorUserId);
+                return $categoryId;
+            }
+
+            $stmt = $db->prepare('INSERT INTO tblAssetCategories (siteID, categoryName, icon, sortOrder) VALUES (?, ?, ?, ?)');
+            if ($stmt === false) {
+                return 0;
+            }
+            $stmt->bind_param('issi', $siteId, $name, $icon, $sortOrder);
+            $ok = $stmt->execute();
+            $newId = (int) $stmt->insert_id;
+            $stmt->close();
+            if ($ok === false || $newId <= 0) {
+                return 0;
+            }
+            Logger::activity('AssetCategorySaved', 'Created asset category: ' . $name, $actorUserId);
+            return $newId;
+        } catch (\mysqli_sql_exception $e) {
+            error_log('AssetRegister::saveCategory() failed: ' . $e->getMessage());
+            return 0;
+        }
+    }
+
+    /**
+     * Flip a category's isActive flag (1 → 0 or 0 → 1) in a single
+     * round-trip. Inactive categories stay selectable on already-assigned
+     * assets (see listCategories()'s $activeOnly param) — this only hides
+     * them from the "create/edit asset" dropdown.
+     */
+    public static function toggleCategoryActive(int $categoryId, int $siteId, int $actorUserId): bool
+    {
+        $db = App::db();
+        $stmt = $db->prepare('UPDATE tblAssetCategories SET isActive = 1 - isActive WHERE categoryID = ? AND siteID = ?');
+        if ($stmt === false) {
+            return false;
+        }
+        $stmt->bind_param('ii', $categoryId, $siteId);
+        $ok = $stmt->execute();
+        $affected = $stmt->affected_rows;
+        $stmt->close();
+        if ($ok === true && $affected > 0) {
+            Logger::activity('AssetCategoryToggled', 'Toggled active state for asset category #' . $categoryId, $actorUserId);
+        }
+        return $ok === true && $affected > 0;
+    }
+
+    /**
+     * List a site's asset locations, optionally active-only.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public static function listLocations(int $siteId, bool $activeOnly = false): array
+    {
+        $db = App::db();
+        $sql = 'SELECT * FROM tblAssetLocations WHERE siteID = ?'
+            . ($activeOnly === true ? ' AND isActive = 1' : '')
+            . ' ORDER BY locationName ASC';
+        $stmt = $db->prepare($sql);
+        if ($stmt === false) {
+            error_log('AssetRegister::listLocations() prepare failed: ' . $db->error);
+            return [];
+        }
+        $stmt->bind_param('i', $siteId);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        $rows = [];
+        while ($row = $result->fetch_assoc()) {
+            $rows[] = $row;
+        }
+        $stmt->close();
+        return $rows;
+    }
+
+    /**
+     * Create or update an asset location. Supports self-nesting via
+     * parentLocationID (e.g. Building → Room → Cupboard) — a single-hop
+     * self-reference (a location naming itself as its own parent) is
+     * rejected by falling back to NULL; deeper cycles can't occur because
+     * the parent dropdown only ever offers locations that already exist.
+     *
+     * $data keys: locationName (required), details (optional),
+     * parentLocationID (optional, int or blank).
+     *
+     * @param array<string, mixed> $data
+     *
+     * @return int The location's id (new or existing), or 0 on failure /
+     *             validation error (blank name)
+     */
+    public static function saveLocation(int $siteId, int $locationId, array $data, int $actorUserId): int
+    {
+        $db   = App::db();
+        $name = trim((string) ($data['locationName'] ?? ''));
+        if ($name === '') {
+            return 0;
+        }
+        $details = trim((string) ($data['details'] ?? ''));
+        $details = $details !== '' ? $details : null;
+        $parentLocationId = (int) ($data['parentLocationID'] ?? 0);
+        $parentLocationId = $parentLocationId > 0 ? $parentLocationId : null;
+        if ($parentLocationId !== null && $parentLocationId === $locationId) {
+            $parentLocationId = null; // 🔁 can't be its own parent
+        }
+
+        try {
+            if ($locationId > 0) {
+                $stmt = $db->prepare(
+                    'UPDATE tblAssetLocations SET locationName = ?, details = ?, parentLocationID = ? WHERE locationID = ? AND siteID = ?'
+                );
+                if ($stmt === false) {
+                    return 0;
+                }
+                $stmt->bind_param('ssiii', $name, $details, $parentLocationId, $locationId, $siteId);
+                $ok = $stmt->execute();
+                $stmt->close();
+                if ($ok === false) {
+                    return 0;
+                }
+                Logger::activity('AssetLocationSaved', 'Updated asset location: ' . $name, $actorUserId);
+                return $locationId;
+            }
+
+            $stmt = $db->prepare('INSERT INTO tblAssetLocations (siteID, locationName, details, parentLocationID) VALUES (?, ?, ?, ?)');
+            if ($stmt === false) {
+                return 0;
+            }
+            $stmt->bind_param('issi', $siteId, $name, $details, $parentLocationId);
+            $ok = $stmt->execute();
+            $newId = (int) $stmt->insert_id;
+            $stmt->close();
+            if ($ok === false || $newId <= 0) {
+                return 0;
+            }
+            Logger::activity('AssetLocationSaved', 'Created asset location: ' . $name, $actorUserId);
+            return $newId;
+        } catch (\mysqli_sql_exception $e) {
+            error_log('AssetRegister::saveLocation() failed: ' . $e->getMessage());
+            return 0;
+        }
+    }
+
+    /**
+     * Flip a location's isActive flag. See toggleCategoryActive() — same
+     * shape, same "stays selectable on already-assigned assets" rationale.
+     */
+    public static function toggleLocationActive(int $locationId, int $siteId, int $actorUserId): bool
+    {
+        $db = App::db();
+        $stmt = $db->prepare('UPDATE tblAssetLocations SET isActive = 1 - isActive WHERE locationID = ? AND siteID = ?');
+        if ($stmt === false) {
+            return false;
+        }
+        $stmt->bind_param('ii', $locationId, $siteId);
+        $ok = $stmt->execute();
+        $affected = $stmt->affected_rows;
+        $stmt->close();
+        if ($ok === true && $affected > 0) {
+            Logger::activity('AssetLocationToggled', 'Toggled active state for asset location #' . $locationId, $actorUserId);
+        }
+        return $ok === true && $affected > 0;
+    }
+
+    /* ==========================================================================
+     * 📎 Resources (#394)
+     * ======================================================================== */
+
+    /**
+     * List an asset's attached resources (manuals/guides/photos/receipts/…),
+     * newest first.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public static function listResources(int $assetId): array
+    {
+        $db = App::db();
+        $stmt = $db->prepare('SELECT * FROM tblAssetResources WHERE assetID = ? ORDER BY createdAt DESC');
+        if ($stmt === false) {
+            error_log('AssetRegister::listResources() prepare failed: ' . $db->error);
+            return [];
+        }
+        $stmt->bind_param('i', $assetId);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        $rows = [];
+        while ($row = $result->fetch_assoc()) {
+            $rows[] = $row;
+        }
+        $stmt->close();
+        return $rows;
+    }
+
+    /**
+     * Attach a resource to an asset — either an external link OR an
+     * uploaded file (the caller, `_apps/assets/resource-save.php`, is
+     * responsible for enforcing exactly-one-of and for the upload
+     * allow-list/MIME-sniff/size-cap/safe-filename work; this method only
+     * persists whatever it's handed).
+     *
+     * $data keys: resourceType (validated against RESOURCE_TYPES by the
+     * caller), title, linkUrl|null, fileName|null, filePath|null (relative
+     * to _uploads/assets/), fileSize|null, mimeType|null, isPublic (0|1,
+     * optional).
+     *
+     * @param array<string, mixed> $data
+     *
+     * @return int New resourceID, or 0 on failure
+     */
+    public static function addResource(int $assetId, array $data, int $actorUserId): int
+    {
+        $db     = App::db();
+        $siteId = Site::id();
+
+        // 🔒 Only manual/guide/photo may ever be public — an ownership
+        // agreement / insurance / legal / receipt attachment must NEVER be
+        // exposed on the public /a/{token} page, even if a tampered form
+        // submits isPublic=1 for one. Enforced at the model so EVERY caller
+        // (this pass's resource-save.php and any future one) is covered.
+        $resType  = (string) ($data['resourceType'] ?? 'other');
+        $isPublic = (in_array($resType, self::PUBLIC_ELIGIBLE_RESOURCE_TYPES, true) === true
+            && (int) ($data['isPublic'] ?? 0) === 1) ? 1 : 0;
+
+        $fields = [
+            'siteID'       => [$siteId, 'i'],
+            'assetID'      => [$assetId, 'i'],
+            'resourceType' => [$resType, 's'],
+            'title'        => [(string) ($data['title'] ?? ''), 's'],
+            'linkUrl'      => [$data['linkUrl'] ?? null, 's'],
+            'fileName'     => [$data['fileName'] ?? null, 's'],
+            'filePath'     => [$data['filePath'] ?? null, 's'],
+            'fileSize'     => [$data['fileSize'] ?? null, 'i'],
+            'mimeType'     => [$data['mimeType'] ?? null, 's'],
+            'isPublic'     => [$isPublic, 'i'],
+            'uploadedByID' => [$actorUserId, 'i'],
+        ];
+
+        ['columns' => $columns, 'types' => $types, 'params' => $params] = self::splitFields($fields);
+        $placeholders = implode(', ', array_fill(0, count($columns), '?'));
+
+        $stmt = $db->prepare('INSERT INTO tblAssetResources (`' . implode('`, `', $columns) . '`) VALUES (' . $placeholders . ')');
+        if ($stmt === false) {
+            error_log('AssetRegister::addResource() prepare failed: ' . $db->error);
+            return 0;
+        }
+
+        try {
+            $stmt->bind_param($types, ...$params);
+            $stmt->execute();
+        } catch (\mysqli_sql_exception $e) {
+            error_log('AssetRegister::addResource() insert failed: ' . $e->getMessage());
+            $stmt->close();
+            return 0;
+        }
+        $newId = (int) $stmt->insert_id;
+        $stmt->close();
+
+        if ($newId <= 0) {
+            return 0;
+        }
+
+        // 📜 No sensitive fields here (unlike tblAssets) — the full row is
+        // safe to log as-is.
+        $auditNew = [];
+        foreach ($fields as $col => $pair) {
+            $auditNew[$col] = $pair[0];
+        }
+        self::audit('resource', $newId, $assetId, 'create', null, $auditNew);
+
+        return $newId;
+    }
+
+    /**
+     * Delete a resource — removes the DB row AND, for a file-backed
+     * resource, the underlying file under _uploads/assets/. Site-scoped via
+     * Site::id() so a resourceID from another tenant can never be reached
+     * even if guessed. The file is unlinked BEFORE the DB row so a failed
+     * unlink still leaves a recoverable DB record rather than an orphaned,
+     * un-referenced file.
+     *
+     * @return bool True if the resource existed (on this site) and was
+     *              removed
+     */
+    public static function deleteResource(int $resourceId, int $actorUserId): bool
+    {
+        $db     = App::db();
+        $siteId = Site::id();
+
+        $stmt = $db->prepare('SELECT * FROM tblAssetResources WHERE resourceID = ? AND siteID = ? LIMIT 1');
+        if ($stmt === false) {
+            return false;
+        }
+        $stmt->bind_param('ii', $resourceId, $siteId);
+        $stmt->execute();
+        $row = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+
+        if ($row === null || $row === false) {
+            return false;
+        }
+
+        $assetId = (int) $row['assetID'];
+
+        if (($row['filePath'] ?? null) !== null && (string) $row['filePath'] !== '') {
+            // 🔒 basename() — the same path-safety rule as
+            // _apps/assets/resource-download.php's stream; filePath is
+            // always server-generated (see resource-save.php) but this
+            // stays defensive rather than trusting that invariant blindly.
+            $diskPath = PORTAL_ROOT . DIRECTORY_SEPARATOR . '_uploads' . DIRECTORY_SEPARATOR . 'assets'
+                . DIRECTORY_SEPARATOR . basename((string) $row['filePath']);
+            if (is_file($diskPath) === true) {
+                @unlink($diskPath);
+            }
+        }
+
+        $delStmt = $db->prepare('DELETE FROM tblAssetResources WHERE resourceID = ? AND siteID = ?');
+        if ($delStmt === false) {
+            return false;
+        }
+        $delStmt->bind_param('ii', $resourceId, $siteId);
+        $ok = $delStmt->execute();
+        $affected = $delStmt->affected_rows;
+        $delStmt->close();
+
+        if ($ok === false || $affected <= 0) {
+            return false;
+        }
+
+        self::audit('resource', $resourceId, $assetId, 'delete', $row, null);
+
+        return true;
+    }
+
+    /* ==========================================================================
+     * 🔓 Licence key reveal (#394)
+     * ======================================================================== */
+
+    /**
+     * Decrypt a stored `tblAssets.licenseKey` ciphertext for display.
+     * Callers MUST gate this behind a manager-only check themselves (see
+     * `_apps/assets/item.php`) — this method performs no authorisation of
+     * its own, matching `decrypt_setting()`'s own contract (bootstrap.php).
+     *
+     * @param string|null $cipher Base64-encoded ciphertext (as stored in
+     *                            tblAssets.licenseKey), or null/empty
+     *
+     * @return string Decrypted plaintext, or '' when empty/unset/tampered
+     */
+    public static function decryptLicenseKey(?string $cipher): string
+    {
+        if ($cipher === null || $cipher === '') {
+            return '';
+        }
+        try {
+            return decrypt_setting($cipher);
+        } catch (\Throwable $e) {
+            error_log('AssetRegister::decryptLicenseKey() failed: ' . $e->getMessage());
+            return '';
+        }
     }
 }

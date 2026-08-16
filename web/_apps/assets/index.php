@@ -5,18 +5,19 @@
  * Asset Tracker — Register Index 📦
  * -----------------------------------------------------------------------------
  * Lists non-deleted assets for the active site via
- * Portal\Core\AssetRegister::listForSite(). Foundation-pass page (#393) —
- * the "New asset" button and every row link point at handlers that are
- * still "coming in a later sub-issue" stubs (see e.g. _apps/assets/edit.php,
- * _apps/assets/item.php); this page itself is fully functional as a
- * read-only register view.
+ * Portal\Core\AssetRegister::listForSite(). The "New asset" button and every
+ * row link now point at real handlers (#394 — _apps/assets/edit.php,
+ * _apps/assets/item.php); ownership/loans/maintenance/identifiers/licence
+ * seats/labels still arrive in later sub-issues (see item.php's placeholder
+ * cards).
  *
  * @package   Portal\Assets
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.0.0
+ * @version   1.1.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/393
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/394
  * -----------------------------------------------------------------------------
  */
 
