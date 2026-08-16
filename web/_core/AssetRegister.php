@@ -4,7 +4,7 @@
  * -----------------------------------------------------------------------------
  * Asset Tracker — Register + Audit Choke-Point 📦🔐
  * -----------------------------------------------------------------------------
- * Service class for the Asset Tracker app (slug `assets`, #393). Three
+ * Service class for the Asset Tracker app (slug `assets`, #393). Four
  * responsibilities:
  *
  *   1. AUDIT CHOKE-POINT (#395). Every Asset Tracker mutation — today and in
@@ -69,6 +69,22 @@
  *      between the general Resources panel and the confidential vault
  *      panel.
  *
+ *   4. Global identifiers (#397, this pass). `listIdentifierTypes()` reads
+ *      the GLOBAL `tblAssetIdentifierTypes` vocabulary (21 standard GS1/
+ *      barcode/RFID schemes seeded by migration 159 — no admin screen to
+ *      manage that vocabulary ships in this pass, see #397's scope note).
+ *      `listIdentifiers()`/`addIdentifier()`/`removeIdentifier()`/
+ *      `setPrimaryIdentifier()` manage `tblAssetIdentifiers` — `identifier`
+ *      mutations DO route through `self::audit()`. Reuses
+ *      `validateIdentifier()` (added in the #394 pass above) unchanged —
+ *      format/check-digit validation is NON-BLOCKING, so `addIdentifier()`
+ *      always saves and only ever downgrades the row's `isVerified` flag
+ *      or surfaces a warning string, never rejects. Single-primary-per-
+ *      asset enforcement has no SQL constraint backing it (same "PHP, not
+ *      schema" convention as tblAssetOwners' exactly-one-party-FK rule in
+ *      #396 above) and is wrapped in an explicit DB transaction so a
+ *      mid-way failure can't leave an asset with zero primary identifiers.
+ *
  * All queries are MySQLi prepared statements via `App::db()` — never
  * string-interpolated user input (house rule, .claude/CLAUDE.md → Code Style).
  *
@@ -76,11 +92,12 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.2.0
+ * @version   1.3.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/393
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/394
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/395
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/396
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/397
  * -----------------------------------------------------------------------------
  */
 
@@ -563,6 +580,369 @@ class AssetRegister
         }
         $calculated = (10 - ($sum % 10)) % 10;
         return $calculated === $checkDigit;
+    }
+
+    /* ==========================================================================
+     * 🆔 Identifiers (#397) — GS1 family / EPC-RFID identifiers per asset.
+     * ------------------------------------------------------------------------
+     * `tblAssetIdentifiers` mutations DO route through self::audit()
+     * (entityType 'identifier', maps to the table via TABLE_FOR_ENTITY) —
+     * same convention as owners/resources above. `listIdentifierTypes()` is
+     * a read over the GLOBAL, site-agnostic `tblAssetIdentifierTypes`
+     * vocabulary seeded by migration 159 (21 standard schemes) — this pass
+     * ships NO admin screen to manage that vocabulary (see #397's scope
+     * note); users pick from what's already seeded.
+     *
+     * Single-primary enforcement (addIdentifier()'s isPrimary branch and
+     * setPrimaryIdentifier()) has no SQL constraint backing it — same
+     * "enforced in PHP, not in the schema" convention as tblAssetOwners'
+     * exactly-one-party-FK rule (#396 section above) — so both methods wrap
+     * their "clear every other row" + "write this row" pair in an
+     * App::beginTransaction()/commit()/rollback() unit (mirrors
+     * attendance/api/create.php's shape) rather than letting a failure
+     * between the two steps leave an asset with zero primary identifiers.
+     * ======================================================================== */
+
+    /**
+     * List every ACTIVE identifier-scheme type (tblAssetIdentifierTypes),
+     * ordered by sortOrder. Migration 159's seed data puts GIAI/GRAI first
+     * (the two GS1 keys purpose-built for identifying assets), then the
+     * rest of the GS1-key family, retail barcodes, RFID/EPC carriers, and
+     * classification codes. GLOBAL reference data — no siteID column
+     * (mirrors tblRoles, see migration 159's header) — so no site filter
+     * applies. Feeds the add-identifier `<select>`'s `<optgroup>` grouping
+     * on item.php; `category` is the grouping key.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public static function listIdentifierTypes(): array
+    {
+        $db = App::db();
+        // 🪞 No user input in this query (a static, unparameterised read of
+        // global reference data) — a plain query() is safe and matches the
+        // house convention already used for the equally-global tblGroups
+        // read in _apps/assets/item.php's owner-picker.
+        $result = $db->query(
+            'SELECT * FROM tblAssetIdentifierTypes WHERE isActive = 1 ORDER BY sortOrder ASC, label ASC'
+        );
+        $rows = [];
+        if ($result !== false) {
+            while ($row = $result->fetch_assoc()) {
+                $rows[] = $row;
+            }
+        }
+        return $rows;
+    }
+
+    /**
+     * List an asset's recorded identifiers, LEFT JOINed to their type
+     * (label/category/checkDigitScheme). `typeCode` is a SOFT reference
+     * (migration 159's header) — a row whose type was later deactivated,
+     * or was never a real seeded code to begin with, still lists, with the
+     * join columns null; this method fills a friendly fallback so item.php
+     * never has to special-case a missing join itself (mirrors
+     * listOwners()'s partyName fallback for the identical reason).
+     *
+     * Ordered primary-first, then by the type's category (GS1 keys →
+     * retail barcodes → carriers → classification → other) and sortOrder
+     * — matching the add-form's optgroup order in item.php.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public static function listIdentifiers(int $assetId): array
+    {
+        $db = App::db();
+        $stmt = $db->prepare(
+            'SELECT i.*, t.label AS typeLabel, t.category AS typeCategory, '
+            . '      t.checkDigitScheme AS typeCheckDigitScheme '
+            . 'FROM tblAssetIdentifiers i '
+            . 'LEFT JOIN tblAssetIdentifierTypes t ON t.typeCode = i.typeCode '
+            . 'WHERE i.assetID = ? '
+            . "ORDER BY i.isPrimary DESC, "
+            . "FIELD(t.category, 'gs1-key', 'retail-barcode', 'carrier', 'classification', 'other') ASC, "
+            . 't.sortOrder ASC, i.identifierID ASC'
+        );
+        if ($stmt === false) {
+            error_log('AssetRegister::listIdentifiers() prepare failed: ' . $db->error);
+            return [];
+        }
+        $stmt->bind_param('i', $assetId);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        $rows = [];
+        while ($row = $result->fetch_assoc()) {
+            // 🪞 Soft-reference fallback — see method doc above.
+            $row['typeLabel']    = $row['typeLabel']    ?? (string) $row['typeCode'];
+            $row['typeCategory'] = $row['typeCategory'] ?? 'other';
+            $rows[] = $row;
+        }
+        $stmt->close();
+        return $rows;
+    }
+
+    /**
+     * Add a GS1/barcode/RFID identifier to an asset. Runs
+     * `self::validateIdentifier()` (format regex + check-digit — reused
+     * unchanged, never re-implemented here) and ALWAYS saves — validation
+     * only ever produces non-blocking warnings that the caller
+     * (`identifiers-save.php`) surfaces via a flash message. `isVerified`
+     * is set to 1 only when validation passed with ZERO warnings — a known
+     * type whose format/check-digit both confirm cleanly; an unknown type,
+     * a non-numeric check-digit target, or the stubbed GMN scheme all
+     * still SAVE, just unverified (no ✔ badge on item.php).
+     *
+     * $data keys: typeCode (required, ≤20 chars — VARCHAR(20) column),
+     * value (required, ≤255 chars), subScheme (optional, ≤30 chars),
+     * isPrimary (bool-ish), notes (optional, ≤500 chars).
+     *
+     * Single-primary enforcement: when isPrimary is requested, every OTHER
+     * identifier on this asset is cleared to isPrimary=0 first, in the
+     * SAME transaction as the insert — see this section's header comment
+     * for why a plain sequential UPDATE-then-INSERT (as tblAssetOwners'
+     * exactly-one-FK rule gets away with, since that rule has no
+     * multi-statement race) isn't quite enough here: a duplicate-key
+     * failure on the insert must not leave every other identifier cleared
+     * with no replacement primary written.
+     *
+     * Duplicate guard: `uq_asset_ident (assetID, typeCode, value)` — a
+     * repeat submission of the same type+value for this asset throws
+     * `mysqli_sql_exception` (MYSQLI_REPORT_STRICT is enabled repo-wide,
+     * bootstrap.php), caught here and turned into a friendly "already
+     * recorded" warning with id 0 rather than a 500 — mirrors
+     * createAsset()/updateAsset()'s own duplicate-catch shape for
+     * uq_asset_tag.
+     *
+     * @param array<string, mixed> $data
+     *
+     * @return array{id: int, warnings: string[]} id is 0 on any failure
+     *         (asset not found, blank required field, or a caught
+     *         duplicate) — warnings is always populated with a
+     *         human-readable reason in that case too, not just on a
+     *         successful-but-imperfect save.
+     */
+    public static function addIdentifier(int $assetId, array $data, int $actorUserId): array
+    {
+        $db     = App::db();
+        $siteId = Site::id();
+
+        // 🔒 Asset must exist and be on this site — get() is itself
+        // site-scoped via Site::id().
+        if (self::get($assetId) === null) {
+            error_log('AssetRegister::addIdentifier() asset not found on this site: #' . $assetId);
+            return ['id' => 0, 'warnings' => ['Asset not found.']];
+        }
+
+        // 🔢 typeCode — SOFT reference (migration 159 header): any
+        // non-empty value up to the column's 20-char cap is accepted.
+        // Whether it names a real, active type is exactly what
+        // validateIdentifier() below already checks and warns about — not
+        // duplicated here.
+        $typeCode = trim((string) ($data['typeCode'] ?? ''));
+        if ($typeCode === '') {
+            return ['id' => 0, 'warnings' => ['An identifier type is required.']];
+        }
+        $typeCode = mb_substr($typeCode, 0, 20);
+
+        // 📋 value — required, ≤255 (VARCHAR(255) column).
+        $value = trim((string) ($data['value'] ?? ''));
+        if ($value === '') {
+            return ['id' => 0, 'warnings' => ['A value is required.']];
+        }
+        $value = mb_substr($value, 0, 255);
+
+        $subScheme = trim((string) ($data['subScheme'] ?? ''));
+        $subScheme = $subScheme !== '' ? mb_substr($subScheme, 0, 30) : null;
+
+        $notes = trim((string) ($data['notes'] ?? ''));
+        $notes = $notes !== '' ? mb_substr($notes, 0, 500) : null;
+
+        $isPrimary = ((bool) ($data['isPrimary'] ?? false)) === true ? 1 : 0;
+
+        // ✅ Non-blocking validation — see this section's header + the
+        // dedicated "Identifier validation" section above for the
+        // algorithm. NEVER rejects; only informs $warnings and
+        // $isVerified below.
+        $validation = self::validateIdentifier($typeCode, $value);
+        $warnings   = $validation['warnings'];
+        // 🏅 "Cleanly" verified = valid AND zero warnings — an unknown
+        // type, a non-numeric mod-10 target, or the GMN stub all still
+        // save, but none of them earn the ✔ verified badge (see method
+        // doc above).
+        $isVerified = ($validation['valid'] === true && count($warnings) === 0) ? 1 : 0;
+
+        $fields = [
+            'siteID'      => [$siteId, 'i'],
+            'assetID'     => [$assetId, 'i'],
+            'typeCode'    => [$typeCode, 's'],
+            'subScheme'   => [$subScheme, 's'],
+            'value'       => [$value, 's'],
+            'isPrimary'   => [$isPrimary, 'i'],
+            'isVerified'  => [$isVerified, 'i'],
+            'notes'       => [$notes, 's'],
+            'createdByID' => [$actorUserId, 'i'],
+        ];
+        ['columns' => $columns, 'types' => $types, 'params' => $params] = self::splitFields($fields);
+        $placeholders = implode(', ', array_fill(0, count($columns), '?'));
+
+        // 💾 Transaction — "clear other primaries" + "insert" are one
+        // atomic unit whenever isPrimary is requested. See this section's
+        // header comment for why.
+        App::beginTransaction();
+        $newId = 0;
+        try {
+            if ($isPrimary === 1) {
+                $clearStmt = $db->prepare('UPDATE tblAssetIdentifiers SET isPrimary = 0 WHERE assetID = ? AND siteID = ?');
+                if ($clearStmt === false) {
+                    throw new \RuntimeException('Failed to prepare primary-clear: ' . $db->error);
+                }
+                $clearStmt->bind_param('ii', $assetId, $siteId);
+                $clearStmt->execute();
+                $clearStmt->close();
+            }
+
+            $stmt = $db->prepare('INSERT INTO tblAssetIdentifiers (`' . implode('`, `', $columns) . '`) VALUES (' . $placeholders . ')');
+            if ($stmt === false) {
+                throw new \RuntimeException('Failed to prepare identifier insert: ' . $db->error);
+            }
+            $stmt->bind_param($types, ...$params);
+            $stmt->execute();
+            $newId = (int) $stmt->insert_id;
+            $stmt->close();
+
+            App::commit();
+        } catch (\mysqli_sql_exception $e) {
+            // 🪞 Most likely cause: uq_asset_ident (assetID, typeCode,
+            // value) — this exact type+value is already recorded for this
+            // asset. A friendly, non-fatal warning rather than a 500 — see
+            // method doc.
+            App::rollback();
+            error_log('AssetRegister::addIdentifier() insert failed: ' . $e->getMessage());
+            return ['id' => 0, 'warnings' => ['This identifier is already recorded on this asset.']];
+        } catch (\Throwable $e) {
+            App::rollback();
+            error_log('AssetRegister::addIdentifier() failed: ' . $e->getMessage());
+            return ['id' => 0, 'warnings' => ['Could not save the identifier — please try again.']];
+        }
+
+        if ($newId <= 0) {
+            return ['id' => 0, 'warnings' => ['Could not save the identifier — please try again.']];
+        }
+
+        $auditNew = [];
+        foreach ($fields as $col => $pair) {
+            $auditNew[$col] = $pair[0];
+        }
+        self::audit('identifier', $newId, $assetId, 'create', null, $auditNew);
+
+        return ['id' => $newId, 'warnings' => $warnings];
+    }
+
+    /**
+     * Remove an identifier row. IDOR guard: the row must belong to BOTH
+     * $assetId AND the current site before it's touched — mirrors
+     * removeOwner()'s own "confirm it belongs to this asset first"
+     * pattern.
+     *
+     * @return bool True if a row existed (for this asset, on this site)
+     *              and was removed
+     */
+    public static function removeIdentifier(int $identifierId, int $assetId, int $actorUserId): bool
+    {
+        $db     = App::db();
+        $siteId = Site::id();
+
+        $stmt = $db->prepare('SELECT * FROM tblAssetIdentifiers WHERE identifierID = ? AND assetID = ? AND siteID = ? LIMIT 1');
+        if ($stmt === false) {
+            return false;
+        }
+        $stmt->bind_param('iii', $identifierId, $assetId, $siteId);
+        $stmt->execute();
+        $old = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+
+        if ($old === null || $old === false) {
+            return false;
+        }
+
+        $delStmt = $db->prepare('DELETE FROM tblAssetIdentifiers WHERE identifierID = ? AND assetID = ? AND siteID = ?');
+        if ($delStmt === false) {
+            return false;
+        }
+        $delStmt->bind_param('iii', $identifierId, $assetId, $siteId);
+        $ok = $delStmt->execute();
+        $affected = $delStmt->affected_rows;
+        $delStmt->close();
+
+        if ($ok === false || $affected <= 0) {
+            return false;
+        }
+
+        self::audit('identifier', $identifierId, $assetId, 'delete', $old, null);
+
+        return true;
+    }
+
+    /**
+     * Promote one identifier to the asset's single primary, clearing every
+     * other one first — same single-primary rule as addIdentifier()'s
+     * isPrimary branch, wrapped in the same transaction shape so a
+     * mid-way failure can't leave the asset primary-less. IDOR-guarded
+     * like removeIdentifier() above.
+     *
+     * @return bool True if the row existed (for this asset, on this site)
+     *              and is now primary (including the already-primary
+     *              no-op case)
+     */
+    public static function setPrimaryIdentifier(int $identifierId, int $assetId, int $actorUserId): bool
+    {
+        $db     = App::db();
+        $siteId = Site::id();
+
+        $stmt = $db->prepare('SELECT * FROM tblAssetIdentifiers WHERE identifierID = ? AND assetID = ? AND siteID = ? LIMIT 1');
+        if ($stmt === false) {
+            return false;
+        }
+        $stmt->bind_param('iii', $identifierId, $assetId, $siteId);
+        $stmt->execute();
+        $old = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+
+        if ($old === null || $old === false) {
+            return false;
+        }
+
+        if ((int) $old['isPrimary'] === 1) {
+            return true; // 🔁 no-op — already primary
+        }
+
+        App::beginTransaction();
+        try {
+            $clearStmt = $db->prepare('UPDATE tblAssetIdentifiers SET isPrimary = 0 WHERE assetID = ? AND siteID = ?');
+            if ($clearStmt === false) {
+                throw new \RuntimeException('Failed to prepare primary-clear: ' . $db->error);
+            }
+            $clearStmt->bind_param('ii', $assetId, $siteId);
+            $clearStmt->execute();
+            $clearStmt->close();
+
+            $setStmt = $db->prepare('UPDATE tblAssetIdentifiers SET isPrimary = 1 WHERE identifierID = ? AND assetID = ? AND siteID = ?');
+            if ($setStmt === false) {
+                throw new \RuntimeException('Failed to prepare primary-set: ' . $db->error);
+            }
+            $setStmt->bind_param('iii', $identifierId, $assetId, $siteId);
+            $setStmt->execute();
+            $setStmt->close();
+
+            App::commit();
+        } catch (\Throwable $e) {
+            App::rollback();
+            error_log('AssetRegister::setPrimaryIdentifier() failed: ' . $e->getMessage());
+            return false;
+        }
+
+        self::audit('identifier', $identifierId, $assetId, 'update', ['isPrimary' => 0], ['isPrimary' => 1]);
+
+        return true;
     }
 
     /* ==========================================================================
