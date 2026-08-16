@@ -85,6 +85,43 @@
  *      #396 above) and is wrapped in an explicit DB transaction so a
  *      mid-way failure can't leave an asset with zero primary identifiers.
  *
+ *   5. Loan register (#398, this pass). `canApproveLoan()` is the lending-
+ *      authority gate every mutating loan action checks — true for an
+ *      admin/asset_manager OR for a user with `isLendingAuthority = 1` on a
+ *      `tblAssetOwners` row for this asset (direct, or via a dept/group
+ *      they belong to — modelled on `isResponsibleFor()`'s own joins, just
+ *      filtered to the lending-authority flag). Unlike `isResponsibleFor()`,
+ *      this method DOES fold the admin/manager bypass in itself (see its
+ *      own doc for why that bypass is only applied when checking the
+ *      CURRENT session user, never an arbitrary `$userId` a caller passes
+ *      in). `listLoans()`/`listLoansForAsset()` are read helpers (the
+ *      former site-wide for `_apps/assets/loans.php`'s register, the
+ *      latter asset-scoped for `item.php`'s Loans panel) that resolve a
+ *      human `counterpartyDisplayName` and compute `isOverdue` in PHP
+ *      (status='active' AND dueDate in the past — MySQL 8 has no reliable
+ *      timezone-aware "is this DATE column before today" that doesn't need
+ *      the same `CURDATE()` PHP would otherwise duplicate, so the flag is
+ *      computed once, in one place, right after the fetch). `tblAssetLoans`
+ *      mutations DO route through `self::audit()` (entityType 'loan') —
+ *      `createLoanRequest()` audits 'create'; `loanAction()`'s five private
+ *      per-verb helpers (`loanApprove()`/`loanDecline()`/`loanCheckout()`/
+ *      `loanCheckin()`/`loanCancel()`) each audit their own verb. The
+ *      state-machine (requested → approved/declined; approved/requested →
+ *      active; active → returned; requested/approved → cancelled) is
+ *      enforced by a `WHERE … AND status = '…'` guard on every UPDATE
+ *      (an affected-rows check catches a state that moved between the
+ *      read and the write, same race-safety idiom as `setOwnerAuthority()`'s
+ *      no-op check) — no action ever reaches a state its current status
+ *      doesn't legally allow, and every rejection returns a friendly
+ *      `msg` rather than throwing. `loanCheckout()`/`loanCheckin()` are the
+ *      only two loan actions that ALSO touch `tblAssets` (status, and for
+ *      check-in, `conditionState` too) — both wrap their loan-row UPDATE
+ *      and their `tblAssets` UPDATE in one `App::beginTransaction()`/
+ *      `commit()`/`rollback()` unit, same convention as `addIdentifier()`'s
+ *      transactional pair above, so a mid-way failure can never leave the
+ *      loan record and the asset's own status column disagreeing about
+ *      whether the item is out/in.
+ *
  * All queries are MySQLi prepared statements via `App::db()` — never
  * string-interpolated user input (house rule, .claude/CLAUDE.md → Code Style).
  *
@@ -92,12 +129,13 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.3.0
+ * @version   1.4.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/393
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/394
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/395
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/396
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/397
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/398
  * -----------------------------------------------------------------------------
  */
 
@@ -181,6 +219,27 @@ class AssetRegister
 
     /** @var string[] tblAssetOwners.roleKind */
     public const OWNER_ROLE_KINDS = ['owner', 'co-owner', 'custodian', 'stakeholder'];
+
+    /** @var string[] tblAssetLoans.direction — 'out' = we lend; 'in' = we borrow (#398) */
+    public const LOAN_DIRECTIONS = ['out', 'in'];
+
+    /** @var string[] tblAssetLoans.counterpartyType (#398) */
+    public const LOAN_COUNTERPARTY_TYPES = ['user', 'org', 'other'];
+
+    /** @var string[] tblAssetLoans.status — the full loan lifecycle (#398) */
+    public const LOAN_STATUSES = ['requested', 'approved', 'declined', 'active', 'returned', 'cancelled'];
+
+    /**
+     * Statuses a loan may be created into via {@see createLoanRequest()} or
+     * transitioned OUT OF by {@see loanAction()}'s `approve`/`decline`/
+     * `checkout`/`cancel` verbs — i.e. every status that still represents
+     * an unresolved/in-flight loan. Used by both createLoanRequest()'s
+     * "one unresolved loan at a time per asset" guard and loans.php's
+     * `overdueOnly`-adjacent "active" filter shorthand.
+     *
+     * @var string[]
+     */
+    public const LOAN_OPEN_STATUSES = ['requested', 'approved', 'active'];
 
     /**
      * The two tblAssetOwners boolean columns setOwnerAuthority() is allowed
@@ -2439,6 +2498,831 @@ class AssetRegister
             Logger::activity('AssetOrgToggled', 'Toggled active state for asset organisation #' . $orgId, $actorUserId);
         }
         return $ok === true && $affected > 0;
+    }
+
+    /* ==========================================================================
+     * 🔄 Loan register (#398) — lend & borrow, approval, condition in/out.
+     * ------------------------------------------------------------------------
+     * `tblAssetLoans` mutations DO route through self::audit() (entityType
+     * 'loan') — see this class's header comment (point 5) for the full
+     * design rationale: the lending-authority gate (canApproveLoan()), the
+     * read helpers' isOverdue/counterpartyDisplayName computation, the
+     * per-verb state-machine guards, and the transactional loan+asset pair
+     * checkout()/checkin() each wrap.
+     * ======================================================================== */
+
+    /**
+     * Does the given user (default: current session user) have LENDING
+     * authority for this asset? True when EITHER:
+     *   - The user is an admin or holds the asset_manager role, OR
+     *   - The user is a direct `tblAssetOwners` party for this asset with
+     *     `isLendingAuthority = 1`, or belongs to a dept/group that IS such
+     *     a party (modelled on isResponsibleFor()'s own three joins above,
+     *     narrowed to the lending-authority flag).
+     *
+     * UNLIKE isResponsibleFor(), this method folds the admin/manager bypass
+     * in itself (per #398's spec) — but `App::isAdmin()`/`App::hasRole()`
+     * are both session-bound (they read `App::user()`, which is keyed off
+     * `$_SESSION['user_id']` — see App.php), so that bypass is applied ONLY
+     * when `$userId` is null (defaults to the session user) or explicitly
+     * equals the current session user. A caller that passes some OTHER
+     * user's id — e.g. checking a different user's authority than whoever
+     * is logged in right now — never gets an admin "yes" borrowed from the
+     * CURRENT session; it only ever gets a "yes" from that other user's own
+     * isLendingAuthority ownership rows, checked directly in the DB below.
+     * Every controller in this pass only ever calls this with the actor's
+     * own id (== the session user), so this distinction changes no
+     * observable behaviour today — it exists so the method stays correct
+     * if a future caller ever asks about someone else's authority.
+     */
+    public static function canApproveLoan(int $assetId, ?int $userId = null): bool
+    {
+        if ($assetId <= 0) {
+            return false;
+        }
+
+        $sessionUserId = Auth::check() === true ? (int) ($_SESSION['user_id'] ?? 0) : 0;
+        $checkingSessionUser = ($userId === null) || ($userId === $sessionUserId && $sessionUserId > 0);
+
+        if ($userId === null) {
+            $userId = $sessionUserId;
+        }
+        if ($userId <= 0) {
+            return false;
+        }
+
+        // 🛡️ Admin / asset_manager bypass — session-user-only, see doc above.
+        if ($checkingSessionUser === true
+            && (App::isAdmin() === true || App::hasRole('asset_manager') === true)
+        ) {
+            return true;
+        }
+
+        $db = App::db();
+
+        // 👤 Direct lending-authority ownership row.
+        $stmt = $db->prepare(
+            'SELECT 1 FROM tblAssetOwners '
+            . 'WHERE assetID = ? AND partyType = "user" AND userID = ? AND isLendingAuthority = 1 LIMIT 1'
+        );
+        if ($stmt !== false) {
+            $stmt->bind_param('ii', $assetId, $userId);
+            $stmt->execute();
+            $hit = (bool) $stmt->get_result()->fetch_assoc();
+            $stmt->close();
+            if ($hit === true) {
+                return true;
+            }
+        }
+
+        // 🏢 Department lending authority — the asset's lending authority is
+        //    a dept this user belongs to (tblUserDepts), mirrors
+        //    isResponsibleFor()'s dept join.
+        $stmt = $db->prepare(
+            'SELECT 1 FROM tblAssetOwners o '
+            . 'JOIN tblUserDepts ud ON ud.deptID = o.deptID '
+            . 'WHERE o.assetID = ? AND o.partyType = "dept" AND o.isLendingAuthority = 1 AND ud.userID = ? LIMIT 1'
+        );
+        if ($stmt !== false) {
+            $stmt->bind_param('ii', $assetId, $userId);
+            $stmt->execute();
+            $hit = (bool) $stmt->get_result()->fetch_assoc();
+            $stmt->close();
+            if ($hit === true) {
+                return true;
+            }
+        }
+
+        // 👥 Group lending authority — mirrors isResponsibleFor()'s group join.
+        $stmt = $db->prepare(
+            'SELECT 1 FROM tblAssetOwners o '
+            . 'JOIN tblUserGroups ug ON ug.groupID = o.groupID '
+            . 'WHERE o.assetID = ? AND o.partyType = "group" AND o.isLendingAuthority = 1 AND ug.userID = ? LIMIT 1'
+        );
+        if ($stmt !== false) {
+            $stmt->bind_param('ii', $assetId, $userId);
+            $stmt->execute();
+            $hit = (bool) $stmt->get_result()->fetch_assoc();
+            $stmt->close();
+            if ($hit === true) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * List loans for a site — both directions, every status by default.
+     * Resolves a human `counterpartyDisplayName` (the counterparty user's
+     * name / org's name / the free-text name, depending on
+     * `counterpartyType`) and computes `isOverdue` (status='active' AND
+     * dueDate is in the past) in PHP once per row, right after the fetch,
+     * rather than duplicating a `CURDATE()` condition across every caller.
+     * Newest-created first (ordered by `loanID DESC` — tblAssetLoans has no
+     * `createdAt` column, so the auto-increment PK is the closest available
+     * proxy for insertion order, same convention `listOwners()` uses for
+     * per-role ordering with no timestamp of its own to sort by).
+     *
+     * Recognised $filters keys (all optional): 'assetID' (int),
+     * 'direction' ('out'|'in'), 'status' (one of LOAN_STATUSES),
+     * 'overdueOnly' (bool — when true, forces status='active' AND an
+     * elapsed dueDate regardless of any 'status' filter also supplied).
+     *
+     * @param array{assetID?: int, direction?: string, status?: string, overdueOnly?: bool} $filters
+     * @param bool $includeConfidential Mirrors listForSite()'s own param —
+     *             false (default) excludes loans belonging to a
+     *             confidential asset; pass true only for a caller that has
+     *             already verified the viewer may see confidential assets
+     *             (e.g. _apps/assets/loans.php's $canManage check).
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public static function listLoans(int $siteId, array $filters = [], bool $includeConfidential = false): array
+    {
+        $db = App::db();
+
+        $where  = ['l.siteID = ?'];
+        $types  = 'i';
+        $params = [$siteId];
+
+        if ($includeConfidential === false) {
+            $where[] = 'a.isConfidential = 0';
+        }
+        if (isset($filters['assetID']) === true && (int) $filters['assetID'] > 0) {
+            $where[]  = 'l.assetID = ?';
+            $types   .= 'i';
+            $params[] = (int) $filters['assetID'];
+        }
+        if (isset($filters['direction']) === true && in_array((string) $filters['direction'], self::LOAN_DIRECTIONS, true) === true) {
+            $where[]  = 'l.direction = ?';
+            $types   .= 's';
+            $params[] = (string) $filters['direction'];
+        }
+        if (isset($filters['status']) === true && in_array((string) $filters['status'], self::LOAN_STATUSES, true) === true) {
+            $where[]  = 'l.status = ?';
+            $types   .= 's';
+            $params[] = (string) $filters['status'];
+        }
+        if ((bool) ($filters['overdueOnly'] ?? false) === true) {
+            // 🕒 Literal condition, no bound parameter needed — CURDATE() is
+            // a constant expression, not user input. Deliberately ANDed on
+            // top of whatever 'status' filter was also supplied above
+            // (e.g. status=returned + overdueOnly=true legitimately yields
+            // zero rows rather than silently overriding one or the other).
+            $where[] = "l.status = 'active' AND l.dueDate IS NOT NULL AND l.dueDate < CURDATE()";
+        }
+
+        $sql = 'SELECT l.*, a.name AS assetName, a.assetTagCode, a.isConfidential, '
+             . '       u.fullName AS counterpartyUserName, org.orgName AS counterpartyOrgName, '
+             . '       ru.fullName AS requestedByName, au.fullName AS approvedByName '
+             . 'FROM tblAssetLoans l '
+             . 'JOIN tblAssets a ON a.assetID = l.assetID '
+             . 'LEFT JOIN tblUsers u ON u.userID = l.counterpartyUserID '
+             . 'LEFT JOIN tblAssetOrgs org ON org.orgID = l.counterpartyOrgID '
+             . 'LEFT JOIN tblUsers ru ON ru.userID = l.requestedByID '
+             . 'LEFT JOIN tblUsers au ON au.userID = l.approvedByID '
+             . 'WHERE ' . implode(' AND ', $where) . ' '
+             . 'ORDER BY l.loanID DESC';
+
+        $stmt = $db->prepare($sql);
+        if ($stmt === false) {
+            error_log('AssetRegister::listLoans() prepare failed: ' . $db->error);
+            return [];
+        }
+        $stmt->bind_param($types, ...$params);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        $rows = [];
+        $today = date('Y-m-d');
+        while ($row = $result->fetch_assoc()) {
+            $row['counterpartyDisplayName'] = match ((string) $row['counterpartyType']) {
+                'user'  => $row['counterpartyUserName'] ?? '(deleted user)',
+                'org'   => $row['counterpartyOrgName']  ?? '(deleted organisation)',
+                'other' => ($row['counterpartyName'] !== null && (string) $row['counterpartyName'] !== '')
+                    ? (string) $row['counterpartyName']
+                    : '(unspecified)',
+                default => 'Unknown',
+            };
+            $row['isOverdue'] = (string) $row['status'] === 'active'
+                && $row['dueDate'] !== null
+                && (string) $row['dueDate'] < $today;
+            $rows[] = $row;
+        }
+        $stmt->close();
+        return $rows;
+    }
+
+    /**
+     * List a single asset's full loan history (every status), newest
+     * first — thin wrapper over listLoans() scoped to one assetID. Always
+     * includes confidential-asset loans regardless of the caller's own
+     * privilege, because the CALLER (item.php) has already gated access to
+     * the asset itself before ever reaching this point — there is nothing
+     * left to additionally restrict at the loan-row level for a single,
+     * already-authorised asset.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public static function listLoansForAsset(int $assetId): array
+    {
+        return self::listLoans(Site::id(), ['assetID' => $assetId], true);
+    }
+
+    /**
+     * Create a new loan REQUEST. Any logged-in user may call this — the
+     * gated step is approval (canApproveLoan()), not the request itself,
+     * per #398's spec. Always inserts status='requested' and NEVER touches
+     * `tblAssets.status` — an asset only becomes on-loan/borrowed once
+     * loanAction()'s `checkout` verb actually hands it over.
+     *
+     * Validates:
+     *   - The asset exists and is on this site (self::get()).
+     *   - direction ∈ LOAN_DIRECTIONS.
+     *   - counterpartyType ∈ LOAN_COUNTERPARTY_TYPES, with the ONE matching
+     *     field present: counterpartyUserID must exist on this site
+     *     (partyExistsOnSite('user', …), reused unchanged from #396) /
+     *     counterpartyOrgID must exist on this site (partyExistsOnSite
+     *     ('org', …)) / counterpartyName must be non-empty free text.
+     *   - dueDate, when supplied, is a real Y-m-d date.
+     *   - conditionOut, when supplied, is one of CONDITION_STATES.
+     *   - This asset has no other unresolved loan already in flight
+     *     (status ∈ LOAN_OPEN_STATUSES) — prevents two people
+     *     requesting/holding the same physical item at once and prevents a
+     *     later checkout() from clobbering tblAssets.status while an
+     *     earlier loan on the same asset is still active.
+     *
+     * $data keys: direction, counterpartyType, counterpartyUserID|
+     * counterpartyOrgID|counterpartyName (only the one matching
+     * counterpartyType need be set), counterpartyContact, dueDate
+     * (Y-m-d|''), conditionOut (one of CONDITION_STATES|''), notes.
+     *
+     * @param array<string, mixed> $data
+     *
+     * @return int New loanID, or 0 on validation failure or insert failure
+     */
+    public static function createLoanRequest(int $assetId, array $data, int $actorUserId): int
+    {
+        $db     = App::db();
+        $siteId = Site::id();
+
+        if (self::get($assetId) === null) {
+            error_log('AssetRegister::createLoanRequest() asset not found on this site: #' . $assetId);
+            return 0;
+        }
+
+        $direction = (string) ($data['direction'] ?? '');
+        if (in_array($direction, self::LOAN_DIRECTIONS, true) === false) {
+            error_log('AssetRegister::createLoanRequest() invalid direction: ' . $direction);
+            return 0;
+        }
+
+        $counterpartyType = (string) ($data['counterpartyType'] ?? '');
+        if (in_array($counterpartyType, self::LOAN_COUNTERPARTY_TYPES, true) === false) {
+            error_log('AssetRegister::createLoanRequest() invalid counterpartyType: ' . $counterpartyType);
+            return 0;
+        }
+
+        // 🔀 Exactly the ONE field matching counterpartyType is populated —
+        // mirrors addOwner()'s exactly-one-party-FK re-validation above
+        // (this table has the analogous "no SQL constraint enforces it"
+        // shape — see migration 159's tblAssetLoans column comments).
+        $counterpartyUserId = null;
+        $counterpartyOrgId  = null;
+        $counterpartyName   = null;
+        switch ($counterpartyType) {
+            case 'user':
+                $counterpartyUserId = (int) ($data['counterpartyUserID'] ?? 0);
+                if ($counterpartyUserId <= 0 || self::partyExistsOnSite('user', $counterpartyUserId, $siteId) === false) {
+                    error_log('AssetRegister::createLoanRequest() counterparty user not found on this site: #' . $counterpartyUserId);
+                    return 0;
+                }
+                break;
+
+            case 'org':
+                $counterpartyOrgId = (int) ($data['counterpartyOrgID'] ?? 0);
+                if ($counterpartyOrgId <= 0 || self::partyExistsOnSite('org', $counterpartyOrgId, $siteId) === false) {
+                    error_log('AssetRegister::createLoanRequest() counterparty org not found on this site: #' . $counterpartyOrgId);
+                    return 0;
+                }
+                break;
+
+            case 'other':
+                $counterpartyName = trim((string) ($data['counterpartyName'] ?? ''));
+                if ($counterpartyName === '') {
+                    error_log('AssetRegister::createLoanRequest() counterpartyName required for counterpartyType=other');
+                    return 0;
+                }
+                $counterpartyName = mb_substr($counterpartyName, 0, 255);
+                break;
+        }
+
+        $counterpartyContact = trim((string) ($data['counterpartyContact'] ?? ''));
+        $counterpartyContact = $counterpartyContact !== '' ? mb_substr($counterpartyContact, 0, 255) : null;
+
+        // 📅 dueDate — optional, must parse as a real Y-m-d calendar date
+        // (createFromFormat + round-trip re-format catches e.g. '2025-02-30').
+        $dueDate = null;
+        $dueDateRaw = trim((string) ($data['dueDate'] ?? ''));
+        if ($dueDateRaw !== '') {
+            $parsed = \DateTime::createFromFormat('Y-m-d', $dueDateRaw);
+            if ($parsed === false || $parsed->format('Y-m-d') !== $dueDateRaw) {
+                error_log('AssetRegister::createLoanRequest() invalid dueDate: ' . $dueDateRaw);
+                return 0;
+            }
+            $dueDate = $dueDateRaw;
+        }
+
+        // 🎨 conditionOut — optional, must be a recognised condition value.
+        $conditionOut = null;
+        $conditionOutRaw = trim((string) ($data['conditionOut'] ?? ''));
+        if ($conditionOutRaw !== '') {
+            if (in_array($conditionOutRaw, self::CONDITION_STATES, true) === false) {
+                error_log('AssetRegister::createLoanRequest() invalid conditionOut: ' . $conditionOutRaw);
+                return 0;
+            }
+            $conditionOut = $conditionOutRaw;
+        }
+
+        $notes = trim((string) ($data['notes'] ?? ''));
+        $notes = $notes !== '' ? $notes : null;
+
+        // 🚦 One unresolved loan at a time per asset — see method doc.
+        $openPlaceholders = implode(', ', array_fill(0, count(self::LOAN_OPEN_STATUSES), '?'));
+        $openStmt = $db->prepare(
+            'SELECT 1 FROM tblAssetLoans WHERE assetID = ? AND siteID = ? AND status IN (' . $openPlaceholders . ') LIMIT 1'
+        );
+        if ($openStmt !== false) {
+            $openTypes = 'ii' . str_repeat('s', count(self::LOAN_OPEN_STATUSES));
+            $openStmt->bind_param($openTypes, $assetId, $siteId, ...self::LOAN_OPEN_STATUSES);
+            $openStmt->execute();
+            $hasOpenLoan = $openStmt->get_result()->fetch_assoc() !== null;
+            $openStmt->close();
+            if ($hasOpenLoan === true) {
+                error_log('AssetRegister::createLoanRequest() asset already has an unresolved loan: #' . $assetId);
+                return 0;
+            }
+        }
+
+        $fields = [
+            'siteID'               => [$siteId, 'i'],
+            'assetID'              => [$assetId, 'i'],
+            'direction'            => [$direction, 's'],
+            'counterpartyType'     => [$counterpartyType, 's'],
+            'counterpartyUserID'   => [$counterpartyUserId, 'i'],
+            'counterpartyOrgID'    => [$counterpartyOrgId, 'i'],
+            'counterpartyName'     => [$counterpartyName, 's'],
+            'counterpartyContact'  => [$counterpartyContact, 's'],
+            'status'               => ['requested', 's'],
+            'conditionOut'         => [$conditionOut, 's'],
+            'dueDate'              => [$dueDate, 's'],
+            'requestedByID'        => [$actorUserId, 'i'],
+            'notes'                => [$notes, 's'],
+        ];
+        ['columns' => $columns, 'types' => $types, 'params' => $params] = self::splitFields($fields);
+        $placeholders = implode(', ', array_fill(0, count($columns), '?'));
+
+        $stmt = $db->prepare('INSERT INTO tblAssetLoans (`' . implode('`, `', $columns) . '`) VALUES (' . $placeholders . ')');
+        if ($stmt === false) {
+            error_log('AssetRegister::createLoanRequest() prepare failed: ' . $db->error);
+            return 0;
+        }
+
+        try {
+            $stmt->bind_param($types, ...$params);
+            $stmt->execute();
+        } catch (\mysqli_sql_exception $e) {
+            error_log('AssetRegister::createLoanRequest() insert failed: ' . $e->getMessage());
+            $stmt->close();
+            return 0;
+        }
+        $newId = (int) $stmt->insert_id;
+        $stmt->close();
+
+        if ($newId <= 0) {
+            return 0;
+        }
+
+        $auditNew = [];
+        foreach ($fields as $col => $pair) {
+            $auditNew[$col] = $pair[0];
+        }
+        self::audit('loan', $newId, $assetId, 'create', null, $auditNew);
+
+        return $newId;
+    }
+
+    /**
+     * Dispatch a loan state-change action. ALWAYS re-loads the loan row
+     * scoped to BOTH $loanId AND $assetId AND the current site FIRST (the
+     * IDOR guard every per-verb helper below relies on — none of them
+     * re-checks siteID/assetID themselves, because this method already
+     * guarantees the row it hands them belongs to this asset on this
+     * site). `$actorUserId`'s authority (canApproveLoan() / "is this the
+     * original requester") is computed once, here, from the freshly-loaded
+     * row, and passed down — the private per-verb helpers never re-derive
+     * it, so there is exactly one place this gate can be gotten wrong.
+     *
+     * Recognised $action values: approve | decline | checkout | checkin |
+     * cancel. An unrecognised value is rejected with ok=false rather than
+     * silently no-op'ing.
+     *
+     * $data keys used, depending on $action: declineReason (decline),
+     * conditionOut/conditionOutNotes (checkout — optional, confirms/
+     * overrides what was recorded at request time), conditionIn/
+     * conditionInNotes (checkin — conditionIn is REQUIRED).
+     *
+     * @param array<string, mixed> $data
+     *
+     * @return array{ok: bool, msg: string}
+     */
+    public static function loanAction(int $loanId, int $assetId, string $action, array $data, int $actorUserId): array
+    {
+        $db     = App::db();
+        $siteId = Site::id();
+
+        // 🔒 IDOR guard FIRST — before any authority check or mutation. See
+        // method doc — every private helper below trusts this scoping.
+        $stmt = $db->prepare('SELECT * FROM tblAssetLoans WHERE loanID = ? AND assetID = ? AND siteID = ? LIMIT 1');
+        if ($stmt === false) {
+            error_log('AssetRegister::loanAction() prepare failed: ' . $db->error);
+            return ['ok' => false, 'msg' => 'Could not load the loan — please try again.'];
+        }
+        $stmt->bind_param('iii', $loanId, $assetId, $siteId);
+        $stmt->execute();
+        $loan = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+
+        if ($loan === null || $loan === false) {
+            return ['ok' => false, 'msg' => 'Loan not found.'];
+        }
+
+        $isRequester = (int) $loan['requestedByID'] === $actorUserId;
+        $canApprove  = self::canApproveLoan($assetId, $actorUserId);
+
+        return match ($action) {
+            'approve'  => self::loanApprove($loan, $canApprove, $actorUserId),
+            'decline'  => self::loanDecline($loan, $data, $canApprove, $actorUserId),
+            'checkout' => self::loanCheckout($loan, $data, $canApprove, $actorUserId),
+            'checkin'  => self::loanCheckin($loan, $data, $canApprove, $isRequester),
+            'cancel'   => self::loanCancel($loan, $canApprove, $isRequester),
+            default    => ['ok' => false, 'msg' => 'Unrecognised loan action.'],
+        };
+    }
+
+    /**
+     * `requested` → `approved`. Requires canApproveLoan(). The `WHERE …
+     * AND status = 'requested'` clause on the UPDATE is the state-machine
+     * enforcement itself (not just the earlier read-time check) — if the
+     * status moved between loanAction()'s read and this write (a race), 0
+     * rows are affected and this correctly reports failure rather than
+     * silently approving a loan that's no longer 'requested'.
+     *
+     * @param array<string, mixed> $loan Freshly-loaded, IDOR-checked row
+     *
+     * @return array{ok: bool, msg: string}
+     */
+    private static function loanApprove(array $loan, bool $canApprove, int $actorUserId): array
+    {
+        if ($canApprove === false) {
+            return ['ok' => false, 'msg' => 'You do not have lending authority for this asset.'];
+        }
+        if ((string) $loan['status'] !== 'requested') {
+            return ['ok' => false, 'msg' => 'Only a requested loan can be approved.'];
+        }
+
+        $db      = App::db();
+        $loanId  = (int) $loan['loanID'];
+        $assetId = (int) $loan['assetID'];
+        $siteId  = (int) $loan['siteID'];
+
+        $stmt = $db->prepare(
+            "UPDATE tblAssetLoans SET status = 'approved', approvedByID = ?, approvedAt = NOW() "
+            . " WHERE loanID = ? AND assetID = ? AND siteID = ? AND status = 'requested'"
+        );
+        if ($stmt === false) {
+            error_log('AssetRegister::loanApprove() prepare failed: ' . $db->error);
+            return ['ok' => false, 'msg' => 'Could not approve the loan — please try again.'];
+        }
+        $stmt->bind_param('iiii', $actorUserId, $loanId, $assetId, $siteId);
+        $ok = $stmt->execute();
+        $affected = $stmt->affected_rows;
+        $stmt->close();
+
+        if ($ok === false || $affected <= 0) {
+            return ['ok' => false, 'msg' => 'Could not approve the loan — it may have already changed state.'];
+        }
+
+        self::audit(
+            'loan',
+            $loanId,
+            $assetId,
+            'approve',
+            ['status' => 'requested'],
+            ['status' => 'approved', 'approvedByID' => $actorUserId]
+        );
+
+        return ['ok' => true, 'msg' => 'Loan approved.'];
+    }
+
+    /**
+     * `requested` → `declined`. Requires canApproveLoan(). Same
+     * WHERE-guarded-UPDATE state-machine enforcement as loanApprove().
+     *
+     * @param array<string, mixed> $loan Freshly-loaded, IDOR-checked row
+     * @param array<string, mixed> $data 'declineReason' (optional, ≤500 chars)
+     *
+     * @return array{ok: bool, msg: string}
+     */
+    private static function loanDecline(array $loan, array $data, bool $canApprove, int $actorUserId): array
+    {
+        if ($canApprove === false) {
+            return ['ok' => false, 'msg' => 'You do not have lending authority for this asset.'];
+        }
+        if ((string) $loan['status'] !== 'requested') {
+            return ['ok' => false, 'msg' => 'Only a requested loan can be declined.'];
+        }
+
+        $reason = trim((string) ($data['declineReason'] ?? ''));
+        $reason = $reason !== '' ? mb_substr($reason, 0, 500) : null;
+
+        $db      = App::db();
+        $loanId  = (int) $loan['loanID'];
+        $assetId = (int) $loan['assetID'];
+        $siteId  = (int) $loan['siteID'];
+
+        $stmt = $db->prepare(
+            "UPDATE tblAssetLoans SET status = 'declined', approvedByID = ?, approvedAt = NOW(), declineReason = ? "
+            . " WHERE loanID = ? AND assetID = ? AND siteID = ? AND status = 'requested'"
+        );
+        if ($stmt === false) {
+            error_log('AssetRegister::loanDecline() prepare failed: ' . $db->error);
+            return ['ok' => false, 'msg' => 'Could not decline the loan — please try again.'];
+        }
+        $stmt->bind_param('isiii', $actorUserId, $reason, $loanId, $assetId, $siteId);
+        $ok = $stmt->execute();
+        $affected = $stmt->affected_rows;
+        $stmt->close();
+
+        if ($ok === false || $affected <= 0) {
+            return ['ok' => false, 'msg' => 'Could not decline the loan — it may have already changed state.'];
+        }
+
+        self::audit(
+            'loan',
+            $loanId,
+            $assetId,
+            'decline',
+            ['status' => 'requested'],
+            ['status' => 'declined', 'declineReason' => $reason]
+        );
+
+        return ['ok' => true, 'msg' => 'Loan declined.'];
+    }
+
+    /**
+     * `requested`|`approved` → `active` — the physical (or digital) hand-
+     * over. Requires canApproveLoan() (an approver may check a loan out
+     * directly from 'requested', skipping a separate approve step — the
+     * approvedByID/approvedAt columns are still backfilled via COALESCE so
+     * the record always shows who authorised it either way). Sets
+     * `dateOut = NOW()` and captures/confirms conditionOut(+Notes) at the
+     * point of hand-over — a caller may leave these blank to keep whatever
+     * was recorded at request time, or supply new values to override them.
+     *
+     * TRANSACTIONAL: the loan-row UPDATE and the `tblAssets.status` UPDATE
+     * (→ 'on-loan' for direction='out', 'borrowed' for direction='in') are
+     * one atomic unit via App::beginTransaction()/commit()/rollback() — see
+     * this class's header comment (point 5) for why a mid-way failure must
+     * never leave the loan and the asset's own status column disagreeing.
+     *
+     * @param array<string, mixed> $loan Freshly-loaded, IDOR-checked row
+     * @param array<string, mixed> $data 'conditionOut'/'conditionOutNotes' (both optional)
+     *
+     * @return array{ok: bool, msg: string}
+     */
+    private static function loanCheckout(array $loan, array $data, bool $canApprove, int $actorUserId): array
+    {
+        if ($canApprove === false) {
+            return ['ok' => false, 'msg' => 'You do not have lending authority for this asset.'];
+        }
+        $currentStatus = (string) $loan['status'];
+        if (in_array($currentStatus, ['requested', 'approved'], true) === false) {
+            return ['ok' => false, 'msg' => 'Only a requested or approved loan can be checked out.'];
+        }
+
+        $loanId    = (int) $loan['loanID'];
+        $assetId   = (int) $loan['assetID'];
+        $siteId    = (int) $loan['siteID'];
+        $direction = (string) $loan['direction'];
+
+        // 🎨 conditionOut/Notes — confirm-or-override at hand-over; falls
+        // back to whatever was recorded at request time (may be null) when
+        // the checkout form leaves these blank.
+        $conditionOut = $loan['conditionOut'];
+        $conditionOutRaw = trim((string) ($data['conditionOut'] ?? ''));
+        if ($conditionOutRaw !== '') {
+            if (in_array($conditionOutRaw, self::CONDITION_STATES, true) === false) {
+                return ['ok' => false, 'msg' => 'Invalid condition value.'];
+            }
+            $conditionOut = $conditionOutRaw;
+        }
+        $conditionOutNotesRaw = trim((string) ($data['conditionOutNotes'] ?? ''));
+        $conditionOutNotes = $conditionOutNotesRaw !== ''
+            ? mb_substr($conditionOutNotesRaw, 0, 500)
+            : ($loan['conditionOutNotes'] ?? null);
+
+        $newAssetStatus = $direction === 'out' ? 'on-loan' : 'borrowed';
+
+        $db = App::db();
+        App::beginTransaction();
+        try {
+            // approvedByID/approvedAt are backfilled via COALESCE so a
+            // direct requested→active checkout (the approver skipping the
+            // separate 'approve' step) still records who authorised it.
+            $stmt = $db->prepare(
+                "UPDATE tblAssetLoans SET status = 'active', dateOut = NOW(), "
+                . 'conditionOut = ?, conditionOutNotes = ?, '
+                . 'approvedByID = COALESCE(approvedByID, ?), approvedAt = COALESCE(approvedAt, NOW()) '
+                . " WHERE loanID = ? AND assetID = ? AND siteID = ? AND status IN ('requested', 'approved')"
+            );
+            if ($stmt === false) {
+                throw new \RuntimeException('Failed to prepare loan checkout: ' . $db->error);
+            }
+            $stmt->bind_param('ssiiii', $conditionOut, $conditionOutNotes, $actorUserId, $loanId, $assetId, $siteId);
+            $stmt->execute();
+            $affected = $stmt->affected_rows;
+            $stmt->close();
+            if ($affected <= 0) {
+                // 🏁 Race — status moved since loanAction()'s read. Thrown
+                // here so the catch block below rolls back cleanly and
+                // reports the same friendly message as every other guard.
+                throw new \RuntimeException('Loan row did not update — status already changed');
+            }
+
+            $assetStmt = $db->prepare('UPDATE tblAssets SET status = ? WHERE assetID = ? AND siteID = ?');
+            if ($assetStmt === false) {
+                throw new \RuntimeException('Failed to prepare asset status update: ' . $db->error);
+            }
+            $assetStmt->bind_param('sii', $newAssetStatus, $assetId, $siteId);
+            $assetStmt->execute();
+            $assetStmt->close();
+
+            App::commit();
+        } catch (\Throwable $e) {
+            App::rollback();
+            error_log('AssetRegister::loanCheckout() failed: ' . $e->getMessage());
+            return ['ok' => false, 'msg' => 'Could not check out this loan — it may have already changed state.'];
+        }
+
+        self::audit(
+            'loan',
+            $loanId,
+            $assetId,
+            'checkout',
+            ['status' => $currentStatus],
+            ['status' => 'active', 'conditionOut' => $conditionOut, 'assetStatus' => $newAssetStatus]
+        );
+
+        return ['ok' => true, 'msg' => 'Loan checked out — condition and dates recorded.'];
+    }
+
+    /**
+     * `active` → `returned` — the item comes back. Requires canApproveLoan()
+     * OR the ORIGINAL requester (the person who took the item out is
+     * allowed to record its return themselves, without needing a manager
+     * to do it for them — an approver can still do it too). conditionIn is
+     * REQUIRED (unlike conditionOut, which is optional throughout the rest
+     * of the lifecycle) — the point of check-in is precisely to capture the
+     * item's condition on return, so this is the one place that value isn't
+     * allowed to be silently skipped.
+     *
+     * TRANSACTIONAL, same shape as loanCheckout(): the loan-row UPDATE and
+     * the `tblAssets` UPDATE — status → 'in-service' AND conditionState ←
+     * conditionIn (the returned item's condition becomes the asset's
+     * current recorded condition) — are one atomic unit.
+     *
+     * @param array<string, mixed> $loan Freshly-loaded, IDOR-checked row
+     * @param array<string, mixed> $data 'conditionIn' (required), 'conditionInNotes' (optional)
+     *
+     * @return array{ok: bool, msg: string}
+     */
+    private static function loanCheckin(array $loan, array $data, bool $canApprove, bool $isRequester): array
+    {
+        if ($canApprove === false && $isRequester === false) {
+            return ['ok' => false, 'msg' => 'Only the original requester or someone with lending authority can check this loan in.'];
+        }
+        if ((string) $loan['status'] !== 'active') {
+            return ['ok' => false, 'msg' => 'Only an active loan can be checked in.'];
+        }
+
+        $conditionInRaw = trim((string) ($data['conditionIn'] ?? ''));
+        if ($conditionInRaw === '' || in_array($conditionInRaw, self::CONDITION_STATES, true) === false) {
+            return ['ok' => false, 'msg' => "Please record the item's condition on return."];
+        }
+        $conditionIn = $conditionInRaw;
+
+        $conditionInNotesRaw = trim((string) ($data['conditionInNotes'] ?? ''));
+        $conditionInNotes = $conditionInNotesRaw !== '' ? mb_substr($conditionInNotesRaw, 0, 500) : null;
+
+        $loanId  = (int) $loan['loanID'];
+        $assetId = (int) $loan['assetID'];
+        $siteId  = (int) $loan['siteID'];
+
+        $db = App::db();
+        App::beginTransaction();
+        try {
+            $stmt = $db->prepare(
+                "UPDATE tblAssetLoans SET status = 'returned', dateIn = NOW(), conditionIn = ?, conditionInNotes = ? "
+                . " WHERE loanID = ? AND assetID = ? AND siteID = ? AND status = 'active'"
+            );
+            if ($stmt === false) {
+                throw new \RuntimeException('Failed to prepare loan checkin: ' . $db->error);
+            }
+            $stmt->bind_param('ssiii', $conditionIn, $conditionInNotes, $loanId, $assetId, $siteId);
+            $stmt->execute();
+            $affected = $stmt->affected_rows;
+            $stmt->close();
+            if ($affected <= 0) {
+                throw new \RuntimeException('Loan row did not update — status already changed');
+            }
+
+            $assetStmt = $db->prepare('UPDATE tblAssets SET status = ?, conditionState = ? WHERE assetID = ? AND siteID = ?');
+            if ($assetStmt === false) {
+                throw new \RuntimeException('Failed to prepare asset status update: ' . $db->error);
+            }
+            $inService = 'in-service';
+            $assetStmt->bind_param('ssii', $inService, $conditionIn, $assetId, $siteId);
+            $assetStmt->execute();
+            $assetStmt->close();
+
+            App::commit();
+        } catch (\Throwable $e) {
+            App::rollback();
+            error_log('AssetRegister::loanCheckin() failed: ' . $e->getMessage());
+            return ['ok' => false, 'msg' => 'Could not check in this loan — it may have already changed state.'];
+        }
+
+        self::audit(
+            'loan',
+            $loanId,
+            $assetId,
+            'checkin',
+            ['status' => 'active'],
+            ['status' => 'returned', 'conditionIn' => $conditionIn, 'assetStatus' => 'in-service']
+        );
+
+        return ['ok' => true, 'msg' => 'Loan checked in — asset marked in-service.'];
+    }
+
+    /**
+     * `requested`|`approved` → `cancelled`. Allowed for the ORIGINAL
+     * requester (they may withdraw their own request/approved-but-not-yet-
+     * collected loan) OR canApproveLoan(). An `active` loan can NEVER be
+     * cancelled — once the item has actually changed hands, the only way
+     * back is `checkin` (a real return), not a cancellation that would
+     * otherwise leave `tblAssets.status` untouched while the loan record
+     * silently vanished from the open list.
+     *
+     * @param array<string, mixed> $loan Freshly-loaded, IDOR-checked row
+     *
+     * @return array{ok: bool, msg: string}
+     */
+    private static function loanCancel(array $loan, bool $canApprove, bool $isRequester): array
+    {
+        if ($canApprove === false && $isRequester === false) {
+            return ['ok' => false, 'msg' => 'Only the requester or someone with lending authority can cancel this loan.'];
+        }
+        $currentStatus = (string) $loan['status'];
+        if (in_array($currentStatus, ['requested', 'approved'], true) === false) {
+            return ['ok' => false, 'msg' => 'Only a requested or approved loan can be cancelled.'];
+        }
+
+        $db      = App::db();
+        $loanId  = (int) $loan['loanID'];
+        $assetId = (int) $loan['assetID'];
+        $siteId  = (int) $loan['siteID'];
+
+        $stmt = $db->prepare(
+            "UPDATE tblAssetLoans SET status = 'cancelled' "
+            . " WHERE loanID = ? AND assetID = ? AND siteID = ? AND status IN ('requested', 'approved')"
+        );
+        if ($stmt === false) {
+            error_log('AssetRegister::loanCancel() prepare failed: ' . $db->error);
+            return ['ok' => false, 'msg' => 'Could not cancel the loan — please try again.'];
+        }
+        $stmt->bind_param('iii', $loanId, $assetId, $siteId);
+        $ok = $stmt->execute();
+        $affected = $stmt->affected_rows;
+        $stmt->close();
+
+        if ($ok === false || $affected <= 0) {
+            return ['ok' => false, 'msg' => 'Could not cancel the loan — it may have already changed state.'];
+        }
+
+        self::audit('loan', $loanId, $assetId, 'cancel', ['status' => $currentStatus], ['status' => 'cancelled']);
+
+        return ['ok' => true, 'msg' => 'Loan cancelled.'];
     }
 
     /* ==========================================================================

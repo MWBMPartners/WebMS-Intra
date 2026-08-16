@@ -4,13 +4,27 @@
  * -----------------------------------------------------------------------------
  * Asset Tracker — View Asset 📦
  * -----------------------------------------------------------------------------
- * Full detail view for a single asset — core fields, the Resources panel
- * (list + add-link/upload + delete), a manager-only licence-key reveal for
- * digital assets, the Owners &amp; custodianship panel (#396), the
- * Identifiers panel (#397, GS1 family / EPC-RFID), the restricted
+ * Full detail view for a single asset — core fields, the Loans panel
+ * (#398, lend &amp; borrow / approval / condition in-out), the Resources
+ * panel (list + add-link/upload + delete), a manager-only licence-key
+ * reveal for digital assets, the Owners &amp; custodianship panel (#396),
+ * the Identifiers panel (#397, GS1 family / EPC-RFID), the restricted
  * Ownership &amp; legal vault panel (#396), a compact recent-audit strip,
  * and placeholder cards for the sub-features that arrive in later Asset
- * Tracker sub-issues (Loans / Maintenance / Licence seats / Labels).
+ * Tracker sub-issues (Maintenance / Licence seats / Labels).
+ *
+ * LOANS panel (#398) — the list itself (current open loans + a collapsible
+ * closed-loan history) is visible to any viewer who reaches this page at
+ * all, same read-visible convention as Owners/Identifiers above. Every
+ * action button (approve/decline/checkout/checkin/cancel) is gated
+ * per-button, computed ONCE via `$canApproveThisLoan =
+ * AssetRegister::canApproveLoan($assetId, $userId)` plus a per-loan
+ * "is this viewer the original requester" check for checkin/cancel (which
+ * that pair of actions also allows) — approve/decline/checkout show ONLY
+ * for `$canApproveThisLoan`. `AssetRegister::loanAction()` re-derives and
+ * re-checks every one of these gates independently server-side (see that
+ * method's own doc) — a button this page chooses not to render is never
+ * the ONLY thing stopping an unauthorised POST from succeeding.
  *
  * IDENTIFIERS panel (#397) — same read-visible/edit-manager-gated split as
  * the Owners panel immediately above it (see that note below): the list
@@ -69,11 +83,12 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.2.0
+ * @version   1.3.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/393
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/394
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/396
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/397
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/398
  * -----------------------------------------------------------------------------
  */
 
@@ -245,6 +260,27 @@ if ($canManage === true && $hasLicenseKey === true) {
     $licenseKeyPlain = AssetRegister::decryptLicenseKey((string) $asset['licenseKey']);
 }
 
+// 🔄 Loans (#398) — this asset's full loan history via
+// AssetRegister::listLoansForAsset(), split into "open" (requested/
+// approved/active — the ones that can still change state) and "closed"
+// (declined/returned/cancelled — historical, shown in a collapsible
+// history section) so the panel below can render each group differently
+// without re-querying. canApproveLoan() is computed ONCE here for the
+// current viewer/asset pair and reused for every action button in the
+// panel — AssetRegister::loanAction() re-checks it independently server
+// side regardless, so a hidden button never becomes a security boundary.
+$assetLoans = AssetRegister::listLoansForAsset($assetId);
+$openLoans = array_values(array_filter(
+    $assetLoans,
+    static fn (array $l): bool => in_array((string) $l['status'], AssetRegister::LOAN_OPEN_STATUSES, true) === true
+));
+$closedLoans = array_values(array_filter(
+    $assetLoans,
+    static fn (array $l): bool => in_array((string) $l['status'], AssetRegister::LOAN_OPEN_STATUSES, true) === false
+));
+$hasOpenLoan = count($openLoans) > 0;
+$canApproveThisLoan = AssetRegister::canApproveLoan($assetId, $userId);
+
 // 📜 Recent audit strip — last 8 rows for this asset, actor name resolved
 // via a LEFT JOIN (tblAssetAudit carries no FK by design — see migration
 // 159's header — so the actor row may no longer exist).
@@ -286,6 +322,12 @@ $resourceIcon = [
     'photo' => 'fa-image', 'receipt' => 'fa-receipt', 'ownership-agreement' => 'fa-file-signature',
     'insurance' => 'fa-shield-halved', 'legal' => 'fa-gavel', 'other' => 'fa-paperclip',
 ];
+// 🔄 Loans panel lookups (#398).
+$loanStatusBadge = [
+    'requested' => 'warning', 'approved' => 'info', 'declined' => 'secondary',
+    'active' => 'primary', 'returned' => 'success', 'cancelled' => 'secondary',
+];
+$loanDirectionLabel = ['out' => 'Lending out', 'in' => 'Borrowing in'];
 // 👥 Owners panel lookups (#396).
 $partyIcon = [
     'user' => 'fa-user', 'dept' => 'fa-building', 'group' => 'fa-people-group', 'org' => 'fa-handshake',
@@ -457,6 +499,174 @@ $nonce = htmlspecialchars(App::cspNonce(), ENT_QUOTES, 'UTF-8');
 </script>
 <?php endif; ?>
 <?php endif; ?>
+
+<!-- 🔄 Loans (#398) — lend & borrow, approval, condition in/out. Any viewer
+     reaching this page can see the panel; management actions (approve/
+     decline/checkout/checkin/cancel) are gated per-button by
+     $canApproveThisLoan (canApproveLoan()) or, for checkin/cancel, that OR
+     the loan's own original requester — AssetRegister::loanAction()
+     re-enforces every one of these gates independently server-side, so a
+     hidden button is never the only thing standing between a viewer and
+     an action they're not allowed to take. -->
+<div class="card mb-3">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <h2 class="h5 mb-0">Loans</h2>
+        <?php if ($hasOpenLoan === false): ?>
+            <a href="/assets/loan?assetID=<?php echo $assetId; ?>" class="btn btn-outline-primary btn-sm">
+                <i class="fa-solid fa-right-left me-1"></i>Lend out / Record borrowing
+            </a>
+        <?php endif; ?>
+    </div>
+    <div class="card-body">
+        <!-- 🚦 Current status strip. -->
+        <p class="mb-3">
+            <?php if (in_array((string) $asset['status'], ['on-loan', 'borrowed'], true) === true): ?>
+                <span class="badge bg-<?php echo htmlspecialchars($statusBadge[(string) $asset['status']] ?? 'info', ENT_QUOTES, 'UTF-8'); ?>">
+                    <?php echo (string) $asset['status'] === 'on-loan' ? 'Currently on loan' : 'Currently borrowed in'; ?>
+                </span>
+            <?php else: ?>
+                <span class="badge bg-success">Available</span>
+            <?php endif; ?>
+        </p>
+
+        <?php if (count($openLoans) === 0 && count($closedLoans) === 0): ?>
+            <p class="text-muted">No loans recorded yet for this asset.</p>
+        <?php endif; ?>
+
+        <?php if (count($openLoans) > 0): ?>
+            <div class="portal-data-list mb-3">
+                <?php foreach ($openLoans as $loan): ?>
+                    <?php
+                    $loanStatus = (string) $loan['status'];
+                    $loanIsOverdue = (bool) $loan['isOverdue'];
+                    $loanIsRequester = (int) $loan['requestedByID'] === $userId;
+                    ?>
+                    <div class="portal-data-row align-items-start <?php echo $loanIsOverdue === true ? 'bg-danger-subtle' : ''; ?>">
+                        <div class="col-6 col-md-4">
+                            <i class="fa-solid fa-<?php echo (string) $loan['direction'] === 'out' ? 'arrow-right' : 'arrow-left'; ?> me-2 text-muted"></i>
+                            <?php echo htmlspecialchars($loanDirectionLabel[(string) $loan['direction']] ?? (string) $loan['direction'], ENT_QUOTES, 'UTF-8'); ?>
+                            <br><small class="text-muted"><?php echo htmlspecialchars((string) $loan['counterpartyDisplayName'], ENT_QUOTES, 'UTF-8'); ?></small>
+                        </div>
+                        <div class="col-3 col-md-2">
+                            <span class="badge bg-<?php echo htmlspecialchars($loanStatusBadge[$loanStatus] ?? 'secondary', ENT_QUOTES, 'UTF-8'); ?>">
+                                <?php echo htmlspecialchars(ucwords($loanStatus), ENT_QUOTES, 'UTF-8'); ?>
+                            </span>
+                        </div>
+                        <div class="col-3 col-md-2">
+                            <?php if ($loan['dueDate'] !== null): ?>
+                                <?php echo htmlspecialchars((string) $loan['dueDate'], ENT_QUOTES, 'UTF-8'); ?>
+                                <?php if ($loanIsOverdue === true): ?>
+                                    <br><span class="badge bg-danger"><i class="fa-solid fa-triangle-exclamation me-1"></i>Overdue</span>
+                                <?php endif; ?>
+                            <?php else: ?>
+                                <span class="text-muted">—</span>
+                            <?php endif; ?>
+                        </div>
+                        <div class="col-12 col-md-4 text-md-end">
+                            <?php if ($loanStatus === 'requested' && $canApproveThisLoan === true): ?>
+                                <form method="post" action="/assets/loan-action" class="d-inline">
+                                    <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
+                                    <input type="hidden" name="action" value="approve">
+                                    <input type="hidden" name="assetID" value="<?php echo $assetId; ?>">
+                                    <input type="hidden" name="loanID" value="<?php echo (int) $loan['loanID']; ?>">
+                                    <button type="submit" class="btn btn-sm btn-success mb-1"><i class="fa-solid fa-check me-1"></i>Approve</button>
+                                </form>
+                                <form method="post" action="/assets/loan-action" class="d-inline"
+                                      data-confirm="Decline this loan request?" data-confirm-destructive="true">
+                                    <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
+                                    <input type="hidden" name="action" value="decline">
+                                    <input type="hidden" name="assetID" value="<?php echo $assetId; ?>">
+                                    <input type="hidden" name="loanID" value="<?php echo (int) $loan['loanID']; ?>">
+                                    <button type="submit" class="btn btn-sm btn-outline-danger mb-1"><i class="fa-solid fa-xmark me-1"></i>Decline</button>
+                                </form>
+                            <?php endif; ?>
+                            <?php if ($loanStatus === 'approved' && $canApproveThisLoan === true): ?>
+                                <details class="d-inline-block mb-1 text-start">
+                                    <summary class="btn btn-sm btn-primary"><i class="fa-solid fa-dolly me-1"></i>Check out</summary>
+                                    <form method="post" action="/assets/loan-action" class="mt-2">
+                                        <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
+                                        <input type="hidden" name="action" value="checkout">
+                                        <input type="hidden" name="assetID" value="<?php echo $assetId; ?>">
+                                        <input type="hidden" name="loanID" value="<?php echo (int) $loan['loanID']; ?>">
+                                        <label class="form-label small">Condition at hand-over</label>
+                                        <select class="form-select form-select-sm mb-1" name="conditionOut">
+                                            <option value="">Keep as recorded</option>
+                                            <?php foreach (AssetRegister::CONDITION_STATES as $c): ?>
+                                                <option value="<?php echo htmlspecialchars($c, ENT_QUOTES, 'UTF-8'); ?>"<?php echo ((string) ($loan['conditionOut'] ?? '')) === $c ? ' selected' : ''; ?>><?php echo htmlspecialchars(ucwords($c), ENT_QUOTES, 'UTF-8'); ?></option>
+                                            <?php endforeach; ?>
+                                        </select>
+                                        <button type="submit" class="btn btn-sm btn-primary">Confirm check-out</button>
+                                    </form>
+                                </details>
+                            <?php endif; ?>
+                            <?php if ($loanStatus === 'active' && ($canApproveThisLoan === true || $loanIsRequester === true)): ?>
+                                <details class="d-inline-block mb-1 text-start">
+                                    <summary class="btn btn-sm btn-outline-primary"><i class="fa-solid fa-dolly-flatbed me-1"></i>Check in</summary>
+                                    <form method="post" action="/assets/loan-action" class="mt-2">
+                                        <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
+                                        <input type="hidden" name="action" value="checkin">
+                                        <input type="hidden" name="assetID" value="<?php echo $assetId; ?>">
+                                        <input type="hidden" name="loanID" value="<?php echo (int) $loan['loanID']; ?>">
+                                        <label class="form-label small">Condition on return <span class="text-danger">*</span></label>
+                                        <select class="form-select form-select-sm mb-1" name="conditionIn" required>
+                                            <option value="">Select…</option>
+                                            <?php foreach (AssetRegister::CONDITION_STATES as $c): ?>
+                                                <option value="<?php echo htmlspecialchars($c, ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars(ucwords($c), ENT_QUOTES, 'UTF-8'); ?></option>
+                                            <?php endforeach; ?>
+                                        </select>
+                                        <label class="form-label small">Notes <span class="text-muted">(optional)</span></label>
+                                        <input type="text" class="form-control form-control-sm mb-1" name="conditionInNotes" maxlength="500">
+                                        <button type="submit" class="btn btn-sm btn-primary">Confirm check-in</button>
+                                    </form>
+                                </details>
+                            <?php endif; ?>
+                            <?php if (in_array($loanStatus, ['requested', 'approved'], true) === true && ($canApproveThisLoan === true || $loanIsRequester === true)): ?>
+                                <form method="post" action="/assets/loan-action" class="d-inline"
+                                      data-confirm="Cancel this loan?" data-confirm-destructive="true">
+                                    <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
+                                    <input type="hidden" name="action" value="cancel">
+                                    <input type="hidden" name="assetID" value="<?php echo $assetId; ?>">
+                                    <input type="hidden" name="loanID" value="<?php echo (int) $loan['loanID']; ?>">
+                                    <button type="submit" class="btn btn-sm btn-outline-secondary mb-1"><i class="fa-solid fa-ban me-1"></i>Cancel</button>
+                                </form>
+                            <?php endif; ?>
+                        </div>
+                    </div>
+                <?php endforeach; ?>
+            </div>
+        <?php endif; ?>
+
+        <?php if (count($closedLoans) > 0): ?>
+            <details>
+                <summary class="text-muted small">Loan history (<?php echo count($closedLoans); ?>)</summary>
+                <div class="portal-data-list mt-2">
+                    <?php foreach ($closedLoans as $loan): ?>
+                        <div class="portal-data-row align-items-center">
+                            <div class="col-6 col-md-4">
+                                <i class="fa-solid fa-<?php echo (string) $loan['direction'] === 'out' ? 'arrow-right' : 'arrow-left'; ?> me-2 text-muted"></i>
+                                <?php echo htmlspecialchars($loanDirectionLabel[(string) $loan['direction']] ?? (string) $loan['direction'], ENT_QUOTES, 'UTF-8'); ?>
+                                <br><small class="text-muted"><?php echo htmlspecialchars((string) $loan['counterpartyDisplayName'], ENT_QUOTES, 'UTF-8'); ?></small>
+                            </div>
+                            <div class="col-3 col-md-3">
+                                <span class="badge bg-<?php echo htmlspecialchars($loanStatusBadge[(string) $loan['status']] ?? 'secondary', ENT_QUOTES, 'UTF-8'); ?>">
+                                    <?php echo htmlspecialchars(ucwords((string) $loan['status']), ENT_QUOTES, 'UTF-8'); ?>
+                                </span>
+                                <?php if ((string) $loan['status'] === 'declined' && $loan['declineReason'] !== null && (string) $loan['declineReason'] !== ''): ?>
+                                    <br><small class="text-muted"><?php echo htmlspecialchars((string) $loan['declineReason'], ENT_QUOTES, 'UTF-8'); ?></small>
+                                <?php endif; ?>
+                            </div>
+                            <div class="col-3 col-md-5 small text-muted">
+                                <?php if ($loan['dateOut'] !== null): ?>Out: <?php echo htmlspecialchars((string) $loan['dateOut'], ENT_QUOTES, 'UTF-8'); ?><br><?php endif; ?>
+                                <?php if ($loan['dateIn'] !== null): ?>In: <?php echo htmlspecialchars((string) $loan['dateIn'], ENT_QUOTES, 'UTF-8'); ?><?php endif; ?>
+                                <?php if ($loan['conditionIn'] !== null): ?> (<?php echo htmlspecialchars(ucwords((string) $loan['conditionIn']), ENT_QUOTES, 'UTF-8'); ?>)<?php endif; ?>
+                            </div>
+                        </div>
+                    <?php endforeach; ?>
+                </div>
+            </details>
+        <?php endif; ?>
+    </div>
+</div>
 
 <!-- 📎 Resources -->
 <div class="card mb-3">
@@ -986,7 +1196,6 @@ $nonce = htmlspecialchars(App::cspNonce(), ENT_QUOTES, 'UTF-8');
 <div class="row g-3 mb-3">
     <?php
     $placeholders = [
-        ['icon' => 'fa-right-left',   'title' => 'Loans'],
         ['icon' => 'fa-screwdriver-wrench', 'title' => 'Maintenance'],
         ['icon' => 'fa-key',          'title' => 'Licence seats'],
         ['icon' => 'fa-tag',          'title' => 'Labels'],
