@@ -25,7 +25,13 @@
  *   • /auth/login*           — admins need to sign in to fix it
  *   • /admin/upgrade*        — the upgrader itself
  *   • /admin/maintenance*    — backup / restore UI
- *   • /assets/*              — CSS/JS for the maintenance page
+ *   • /assets/css/* /js/* /images/* /fonts/* /vendor/* /noticeboard/*
+ *                            — static subdirs only (CSS/JS for the
+ *                              maintenance page itself). NOT a bare
+ *                              `assets/` prefix (#393) — the Asset Tracker
+ *                              app now owns the `/assets` route, and a
+ *                              bare prefix would let its pages bypass
+ *                              maintenance mode entirely via prefix match.
  *
  * @package   Portal\Core
  * @author    MWBM Partners Ltd (t/a MWservices)
@@ -50,7 +56,20 @@ class Maintenance
         'auth/logout',
         'admin/upgrade',
         'admin/maintenance',
-        'assets/',
+        // 🎯 Static asset subdirs ONLY (#393) — deliberately NOT a bare
+        //    `assets/` prefix. The Asset Tracker app's routes all live
+        //    under `/assets` too (`/assets`, `/assets/item`, …), and a
+        //    bare-prefix entry here would let every Asset Tracker page
+        //    bypass maintenance mode right along with the CSS/JS this
+        //    list exists to allow. Listing the real static subdirs by
+        //    name keeps the CSS/JS the maintenance page itself needs
+        //    reachable while closing that gap.
+        'assets/css/',
+        'assets/js/',
+        'assets/images/',
+        'assets/fonts/',
+        'assets/vendor/',
+        'assets/noticeboard/',
         'offline',
     ];
 

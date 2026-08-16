@@ -51,6 +51,17 @@ RewriteCond %{REQUEST_URI} !^/api-docs/index\.php$
 RewriteCond %{REQUEST_URI} !^/error\.php$
 RewriteRule .* - [R=404,L]
 
+# 🏷️ Asset Tracker app route (#393). The bare `/assets` URL collides with
+#     the physical static `assets/` directory (css/js/images/fonts/vendor)
+#     below — the `!-d` check two rules down would resolve `/assets` to
+#     that directory's listing/index rather than the front controller, so
+#     the Asset Tracker's own register page would never be reachable. This
+#     rule intercepts ONLY the exact bare path (with or without a trailing
+#     slash) and sends it to index.php before the static-file/-dir checks
+#     run. Deep links like `/assets/item` are untouched — they don't match
+#     `^assets/?$` and fall through to the normal rewrite below.
+RewriteRule ^assets/?$ index.php [QSA,L]
+
 # 📁 Skip rewriting for existing static files (CSS, JS, images, fonts,
 #     /robots.txt, /openapi.json, /manifest.json, /sw.js, etc.)
 RewriteCond %{REQUEST_FILENAME} !-f

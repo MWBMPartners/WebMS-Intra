@@ -103,6 +103,22 @@ class GdprEraser
             // no separate catalogue entry is needed for `tblKidCheckins`.
             ['table' => 'tblKidProfiles',      'userCol' => 'parentUserID', 'action' => 'delete'],
 
+            // #393 Asset Tracker. tblAssetFoundReports is deliberately
+            // NOT catalogued here — it's filled by the public, anonymous
+            // "I found this" form (reporterName/reporterContact are free
+            // text, never tied to a portal userID), so there is no
+            // per-user column to match against for an erasure request —
+            // same reasoning as the tblAttendanceSessions/Counts note at
+            // the top of this method. tblAssetOwners IS a hard delete
+            // (not anonymise) because an ownership row with its userID
+            // nulled is meaningless — an "owner" row that owns nothing is
+            // just clutter, unlike e.g. an authorship attribution which
+            // stays useful once detached.
+            ['table' => 'tblAssetOwners',               'userCol' => 'userID',               'action' => 'delete'],
+            ['table' => 'tblAssetLoans',                'userCol' => 'counterpartyUserID',   'action' => 'anonymise', 'nullCols' => [], 'reason' => 'loan history retained for asset custody chain; borrower/lender identity detached'],
+            ['table' => 'tblAssetLicenseAssignments',   'userCol' => 'userID',               'action' => 'anonymise', 'nullCols' => [], 'reason' => 'seat-assignment history retained for licence compliance; assignee identity detached'],
+            ['table' => 'tblAssetAudit',                'userCol' => 'actorUserID',          'action' => 'anonymise', 'nullCols' => [], 'reason' => 'audit history retained (mirrors tblAuditTrail — no FK, immutable record); actor identity detached'],
+
             // Final step — anonymise the user row itself rather than delete,
             // so foreign keys with ON DELETE SET NULL don't cascade-blow
             // historical attributions we wanted to keep.
