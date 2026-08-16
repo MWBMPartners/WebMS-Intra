@@ -560,6 +560,17 @@ $nonce = htmlspecialchars(App::cspNonce(), ENT_QUOTES, 'UTF-8');
     </div>
     <?php if ($canManage === true): ?>
         <div class="d-flex gap-2 mt-2 mt-md-0">
+            <!-- 🏷️ Print label (#402) — preselects this one asset in the
+                 label designer (labels.php's own `?assetID=` first-load
+                 handling; see that file's header). Manager-only, same gate
+                 as Edit/Delete — printing a QR label is an administrative
+                 action, not something a merely-responsible owner-party
+                 needs (mirrors the "Public page & lost-and-found" panel's
+                 own $canManage-only gate above, since the label encodes
+                 that same public token). -->
+            <a href="/assets/labels?assetID=<?php echo $assetId; ?>" class="btn btn-outline-secondary btn-sm">
+                <i class="fa-solid fa-tag me-1"></i>Print label
+            </a>
             <a href="/assets/edit?id=<?php echo $assetId; ?>" class="btn btn-outline-primary btn-sm">
                 <i class="fa-solid fa-pen me-1"></i>Edit
             </a>
@@ -1828,26 +1839,6 @@ $nonce = htmlspecialchars(App::cspNonce(), ENT_QUOTES, 'UTF-8');
     </div>
 </div>
 <?php endif; ?>
-
-<!-- 🚧 Placeholders for later sub-issues -->
-<div class="row g-3 mb-3">
-    <?php
-    $placeholders = [
-        ['icon' => 'fa-tag', 'title' => 'Labels'],
-    ];
-    ?>
-    <?php foreach ($placeholders as $p): ?>
-        <div class="col-6 col-md-4 col-lg-2">
-            <div class="card h-100 text-center text-muted">
-                <div class="card-body">
-                    <i class="fa-solid <?php echo htmlspecialchars($p['icon'], ENT_QUOTES, 'UTF-8'); ?> fa-lg mb-2"></i>
-                    <div class="small fw-semibold"><?php echo htmlspecialchars($p['title'], ENT_QUOTES, 'UTF-8'); ?></div>
-                    <div class="small">Arrives in a later sub-issue</div>
-                </div>
-            </div>
-        </div>
-    <?php endforeach; ?>
-</div>
 
 <!-- 📜 Recent activity -->
 <div class="card mb-3">
