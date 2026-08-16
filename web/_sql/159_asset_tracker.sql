@@ -171,11 +171,11 @@ CREATE TABLE IF NOT EXISTS `tblAssets` (
     KEY `idx_ast_site_kind` (`siteID`, `assetKind`),
     KEY `idx_ast_serial` (`serialNumber`),
     KEY `idx_ast_parent` (`parentAssetID`),
-    CONSTRAINT `fk_ast_site`     FOREIGN KEY (`siteID`)       REFERENCES `tblSites`(`siteID`),
-    CONSTRAINT `fk_ast_category` FOREIGN KEY (`categoryID`)   REFERENCES `tblAssetCategories`(`categoryID`) ON DELETE SET NULL,
-    CONSTRAINT `fk_ast_location` FOREIGN KEY (`locationID`)   REFERENCES `tblAssetLocations`(`locationID`) ON DELETE SET NULL,
-    CONSTRAINT `fk_ast_parent`   FOREIGN KEY (`parentAssetID`) REFERENCES `tblAssets`(`assetID`) ON DELETE SET NULL,
-    CONSTRAINT `fk_ast_creator`  FOREIGN KEY (`createdByID`)  REFERENCES `tblUsers`(`userID`) ON DELETE RESTRICT
+    CONSTRAINT `fk_asset_site`     FOREIGN KEY (`siteID`)        REFERENCES `tblSites`(`siteID`),
+    CONSTRAINT `fk_asset_category` FOREIGN KEY (`categoryID`)    REFERENCES `tblAssetCategories`(`categoryID`) ON DELETE SET NULL,
+    CONSTRAINT `fk_asset_location` FOREIGN KEY (`locationID`)    REFERENCES `tblAssetLocations`(`locationID`) ON DELETE SET NULL,
+    CONSTRAINT `fk_asset_parent`   FOREIGN KEY (`parentAssetID`) REFERENCES `tblAssets`(`assetID`) ON DELETE SET NULL,
+    CONSTRAINT `fk_asset_creator`  FOREIGN KEY (`createdByID`)   REFERENCES `tblUsers`(`userID`) ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
 COMMENT='Asset Tracker — the register itself (#393)';
 
