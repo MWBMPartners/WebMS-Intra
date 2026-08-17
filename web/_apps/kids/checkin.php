@@ -72,7 +72,7 @@ if (isset($_SESSION['kids_badge_issued']) === true) {
 
     <form method="get" class="mb-4">
         <div class="input-group">
-            <input type="text" name="q" value="<?php echo htmlspecialchars($q, ENT_QUOTES, 'UTF-8'); ?>" maxlength="80" autofocus class="form-control form-control-lg" placeholder="Search child by name…">
+            <input type="text" name="q" value="<?php echo htmlspecialchars($q, ENT_QUOTES, 'UTF-8'); ?>" maxlength="80" autofocus class="form-control form-control-lg" placeholder="Search child by name…" aria-label="Search child by name">
             <button class="btn btn-primary"><i class="fa-solid fa-magnifying-glass"></i></button>
         </div>
     </form>
@@ -121,7 +121,7 @@ if (isset($_SESSION['kids_badge_issued']) === true) {
                     <strong><?php echo htmlspecialchars((string) $o['fullName'], ENT_QUOTES, 'UTF-8'); ?></strong>
                     <span class="badge bg-secondary ms-1" style="font-family:monospace;"><?php echo htmlspecialchars((string) $o['badgeCode'], ENT_QUOTES, 'UTF-8'); ?></span>
                     <?php if (!empty($o['allergies'])): ?>
-                        <span class="badge bg-danger ms-1"><i class="fa-solid fa-triangle-exclamation"></i></span>
+                        <span class="badge bg-danger ms-1" aria-label="Allergy alert" title="Allergy on file"><i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i></span>
                     <?php endif; ?>
                     <div class="small text-muted">in @ <?php echo htmlspecialchars(date('H:i', strtotime((string) $o['checkedInAt'])), ENT_QUOTES, 'UTF-8'); ?></div>
                 </div>

@@ -11,13 +11,14 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   0.8.2
+ * @version   0.8.3
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/96
  * -----------------------------------------------------------------------------
  */
 
 declare(strict_types=1);
 
+use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Logger;
 use Portal\Core\Site;
@@ -64,6 +65,15 @@ $tStmt->close();
 
 if ($task === null) {
     $_SESSION['flash_msg']  = 'Task not found.';
+    $_SESSION['flash_type'] = 'danger';
+    header('Location: /tasks');
+    exit();
+}
+
+// 🛡️ IDOR guard — only the assignee or an admin may complete this task
+//     (mirrors tasks/api/complete.php:49-53).
+if ((int) $task['assignedToID'] !== $userId && App::isAdmin() !== true) {
+    $_SESSION['flash_msg']  = 'Only the assignee or an admin can complete this task.';
     $_SESSION['flash_type'] = 'danger';
     header('Location: /tasks');
     exit();
@@ -118,7 +128,7 @@ if ((int) $task['isRecurring'] === 1 && $task['recurrenceType'] !== null) {
         );
         if ($nStmt !== false) {
             $nStmt->bind_param(
-                'issiisSsisi',
+                'issiisssisi',
                 $siteId, $task['title'], $task['description'],
                 $task['assignedToID'], $userId, $task['priority'],
                 $nextDue, $task['recurrenceType'], $interval,

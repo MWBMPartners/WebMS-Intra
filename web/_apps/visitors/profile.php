@@ -71,10 +71,11 @@ if ($coordRole !== '') {
         'SELECT DISTINCT u.userID, u.fullName FROM tblUsers u '
         . 'INNER JOIN tblUserRoles ur ON ur.userID = u.userID '
         . 'INNER JOIN tblRoles r ON r.roleID = ur.roleID AND r.roleKey = ? '
+        . 'INNER JOIN tblUserSites us ON us.userID = u.userID AND us.siteID = ? AND us.isActive = 1 '
         . 'WHERE u.isActive = 1 ORDER BY u.fullName'
     );
     if ($stmt !== false) {
-        $stmt->bind_param('s', $coordRole);
+        $stmt->bind_param('si', $coordRole, $siteId);
         $stmt->execute();
         $rs = $stmt->get_result();
         while ($r = $rs->fetch_assoc()) {
@@ -83,12 +84,19 @@ if ($coordRole !== '') {
         $stmt->close();
     }
 } else {
-    $rs = $db->query("SELECT userID, fullName FROM tblUsers WHERE isActive = 1 ORDER BY fullName");
-    if ($rs !== false) {
+    $stmt = $db->prepare(
+        'SELECT u.userID, u.fullName FROM tblUsers u '
+        . 'INNER JOIN tblUserSites us ON us.userID = u.userID AND us.siteID = ? AND us.isActive = 1 '
+        . 'WHERE u.isActive = 1 ORDER BY u.fullName'
+    );
+    if ($stmt !== false) {
+        $stmt->bind_param('i', $siteId);
+        $stmt->execute();
+        $rs = $stmt->get_result();
         while ($r = $rs->fetch_assoc()) {
             $users[] = $r;
         }
-        $rs->free();
+        $stmt->close();
     }
 }
 

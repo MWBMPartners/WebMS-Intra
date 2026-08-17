@@ -26,21 +26,23 @@ $q = trim((string) ($_GET['q'] ?? ''));
 // 🔍 Search — name LIKE only (privacy by default). Result rows respect
 //    per-field visibility at display time.
 $users = [];
-$sql = 'SELECT userID, fullName, displayBio, displayPhone, emailAddress AS email, displayAddress, displayPhoto, '
-     . '       visibilityName, visibilityRoles, visibilityEmail, visibilityPhone, visibilityAddress, '
-     . '       visibilityBio, visibilityPhoto '
-     . 'FROM tblUsers WHERE isActive = 1';
-$types = '';
-$params = [];
+$sql = 'SELECT u.userID, u.fullName, u.displayBio, u.displayPhone, u.emailAddress AS email, u.displayAddress, u.displayPhoto, '
+     . '       u.visibilityName, u.visibilityRoles, u.visibilityEmail, u.visibilityPhone, u.visibilityAddress, '
+     . '       u.visibilityBio, u.visibilityPhoto '
+     . 'FROM tblUsers u '
+     . 'INNER JOIN tblUserSites us ON us.userID = u.userID AND us.siteID = ? AND us.isActive = 1 '
+     . 'WHERE u.isActive = 1';
+$types = 'i';
+$params = [$siteId];
 if ($q !== '') {
-    $sql .= ' AND fullName LIKE ?';
+    $sql .= ' AND u.fullName LIKE ?';
     $types .= 's';
     $params[] = '%' . $q . '%';
 }
-$sql .= " AND (visibilityName IN ('members','public') OR userID = ?)";
+$sql .= " AND (u.visibilityName IN ('members','public') OR u.userID = ?)";
 $types .= 'i';
 $params[] = $userId;
-$sql .= ' ORDER BY fullName LIMIT 200';
+$sql .= ' ORDER BY u.fullName LIMIT 200';
 
 $stmt = $db->prepare($sql);
 if ($stmt !== false) {
@@ -80,7 +82,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
 <form method="get" class="mb-3">
     <div class="input-group">
-        <input type="text" name="q" class="form-control" placeholder="Search by name…" value="<?php echo htmlspecialchars($q, ENT_QUOTES, 'UTF-8'); ?>">
+        <input type="text" name="q" class="form-control" placeholder="Search by name…" aria-label="Search by name" value="<?php echo htmlspecialchars($q, ENT_QUOTES, 'UTF-8'); ?>">
         <button type="submit" class="btn btn-primary"><i class="fa-solid fa-magnifying-glass"></i></button>
     </div>
 </form>

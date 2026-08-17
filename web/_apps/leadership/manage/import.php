@@ -16,7 +16,7 @@
  *
  * @package   Portal\Leadership
  * @license   All Rights Reserved
- * @version   1.0.0
+ * @version   1.0.1
  * -----------------------------------------------------------------------------
  */
 
@@ -112,9 +112,15 @@ $parseCsv = static function (string $tmpFile) use ($siteId, $mysqli): array {
         if ($userEmail === '') {
             $rowErr[] = 'userEmail required';
         } else {
-            $uStmt = $mysqli->prepare('SELECT userID FROM tblUsers WHERE LOWER(emailAddress) = ? AND isActive = 1 LIMIT 1');
+            // 🛡️ Site-scoped lookup (mirrors leadership/assign.php:87-93) — a
+            //     bare email match would resolve to a member of ANY site.
+            $uStmt = $mysqli->prepare(
+                'SELECT u.userID FROM tblUsers u '
+                . 'INNER JOIN tblUserSites us ON us.userID = u.userID AND us.siteID = ? AND us.isActive = 1 '
+                . 'WHERE LOWER(u.emailAddress) = ? AND u.isActive = 1 LIMIT 1'
+            );
             if ($uStmt !== false) {
-                $uStmt->bind_param('s', $userEmail);
+                $uStmt->bind_param('is', $siteId, $userEmail);
                 $uStmt->execute();
                 $ur = $uStmt->get_result()->fetch_assoc();
                 $uStmt->close();

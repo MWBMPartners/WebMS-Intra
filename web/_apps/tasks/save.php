@@ -10,7 +10,7 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   0.8.2
+ * @version   0.8.3
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/96
  * -----------------------------------------------------------------------------
  */
@@ -64,6 +64,28 @@ if (in_array($priority, $validPriorities, true) === false) {
 }
 
 if ($taskId > 0) {
+    // 🛡️ IDOR guard — only the assignee, the creator, or an admin may edit
+    //     (mirrors tasks/api/complete.php:49-53). Scoping by siteID alone let
+    //     any logged-in member update any other member's task in-site.
+    $authTask = null;
+    $authStmt = $mysqli->prepare('SELECT assignedToID, createdByID FROM tblTasks WHERE taskID = ? AND siteID = ? LIMIT 1');
+    if ($authStmt !== false) {
+        $authStmt->bind_param('ii', $taskId, $siteId);
+        $authStmt->execute();
+        $authTask = $authStmt->get_result()->fetch_assoc();
+        $authStmt->close();
+    }
+    if ($authTask === null
+        || ((int) $authTask['assignedToID'] !== $userId
+            && (int) $authTask['createdByID'] !== $userId
+            && App::isAdmin() !== true)
+    ) {
+        $_SESSION['flash_msg']  = 'You do not have permission to edit this task.';
+        $_SESSION['flash_type'] = 'danger';
+        header('Location: /tasks');
+        exit();
+    }
+
     // 📋 Update
     $stmt = $mysqli->prepare(
         'UPDATE tblTasks SET title = ?, description = ?, priority = ?, dueDate = ?, '

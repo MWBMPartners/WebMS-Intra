@@ -11,7 +11,7 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   0.8.2
+ * @version   0.8.3
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/96
  * -----------------------------------------------------------------------------
  */
@@ -54,6 +54,20 @@ if ($editId !== null && $editId > 0) {
         $eStmt->execute();
         $editing = $eStmt->get_result()->fetch_assoc();
         $eStmt->close();
+    }
+    // 🛡️ IDOR guard — only the assignee, the creator, or an admin may view
+    //     the edit form (mirrors tasks/api/complete.php:49-53). Scoping by
+    //     siteID alone let any logged-in member load any other member's
+    //     task details into the edit form.
+    if ($editing !== null
+        && (int) $editing['assignedToID'] !== $userId
+        && (int) $editing['createdByID'] !== $userId
+        && $isAdmin !== true
+    ) {
+        $_SESSION['flash_msg']  = 'You do not have permission to edit this task.';
+        $_SESSION['flash_type'] = 'danger';
+        header('Location: /tasks');
+        exit();
     }
 }
 
