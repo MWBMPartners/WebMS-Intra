@@ -149,36 +149,58 @@ switch ($action) {
     // 🙋 Identify — PIN entry. Rate-limited BEFORE the PIN is checked.
     // -------------------------------------------------------------------
     case 'identify':
-        $ipHash = AssetRegister::publicIpHash();
-        // 🪣 Two tiers — per device+IP (tight) and per device across ANY
-        // IP (looser, catches distributed brute force through one stolen
-        // token). Bucket keys per acceptance criterion.
-        $deviceIpBucket = 'astkiosk_pin:' . $tokenId . ':' . $ipHash;
-        $deviceBucket   = 'astkiosk_pin_dev:' . $tokenId;
-
-        $tooManyDeviceIp = RateLimiter::tooMany($deviceIpBucket, 5, 300);
-        $tooManyDevice   = RateLimiter::tooMany($deviceBucket, 20, 300);
-
-        if ($tooManyDeviceIp === true || $tooManyDevice === true) {
-            // 🚫 Refuse WITHOUT ever checking the PIN.
-            $retryAfter = max(
-                RateLimiter::retryAfter($deviceIpBucket, 5, 300),
-                RateLimiter::retryAfter($deviceBucket, 20, 300)
-            );
-            $bounce('Too many attempts — please try again in ' . $retryAfter . ' second(s).', 'warning');
-        }
-
         $identifier = trim((string) ($_POST['identifier'] ?? ''));
         $pin        = trim((string) ($_POST['pin'] ?? ''));
+
+        // 🪣 Rate-limit tiers — ALL checked BEFORE the PIN is ever verified,
+        // ALL incremented on any failure. Four tiers, because no single one
+        // is sufficient on its own (see #414 security review):
+        //   • device+IP (tight) — but the IP component (publicIpHash() →
+        //     CF-Connecting-IP/X-Forwarded-For) is spoofable by a direct
+        //     attacker, so this tier alone can be bypassed;
+        //   • device-only — un-spoofable (fixed tokenId), a hard ceiling on
+        //     one terminal's total attempt rate;
+        //   • per-IDENTIFIER burst + daily — the REAL defence against a
+        //     targeted slow brute-force of ONE victim's PIN, INDEPENDENT of
+        //     any IP header. Keyed on a hash of the lowercased identifier so
+        //     a valid and an invalid identifier are throttled IDENTICALLY
+        //     (no user-enumeration oracle), capping a patient attacker at 30
+        //     guesses/day/identifier — infeasible even against a 4-digit
+        //     space (10k combos → ~1 year). An empty identifier skips these
+        //     two (nothing to key on); the device tiers still apply.
+        $ipHash = AssetRegister::publicIpHash();
+        $idHash = $identifier !== '' ? hash('sha256', strtolower($identifier)) : '';
+
+        $buckets = [
+            ['astkiosk_pin:' . $tokenId . ':' . $ipHash, 5, 300],
+            ['astkiosk_pin_dev:' . $tokenId,            10, 300],
+        ];
+        if ($idHash !== '') {
+            $buckets[] = ['astkiosk_pin_id:' . $siteId . ':' . $idHash,     5,   300];
+            $buckets[] = ['astkiosk_pin_idday:' . $siteId . ':' . $idHash, 30, 86400];
+        }
+
+        $retryAfter = 0;
+        foreach ($buckets as [$bucketKey, $bucketMax, $bucketWindow]) {
+            if (RateLimiter::tooMany($bucketKey, $bucketMax, $bucketWindow) === true) {
+                $retryAfter = max($retryAfter, RateLimiter::retryAfter($bucketKey, $bucketMax, $bucketWindow));
+            }
+        }
+        if ($retryAfter > 0) {
+            // 🚫 Refuse WITHOUT ever checking the PIN.
+            $bounce('Too many attempts — please try again in ' . $retryAfter . ' second(s).', 'warning');
+        }
 
         $user     = $identifier !== '' ? AssetRegister::resolveKioskUser($siteId, $identifier) : null;
         $verified = $user !== null && AssetRegister::verifyKioskPin($siteId, (int) $user['userID'], $pin);
 
         if ($verified === false) {
             // 🙈 Uniform failure — unknown identifier, no PIN set, and a
-            // wrong PIN are all indistinguishable from this response.
-            RateLimiter::recordHit($deviceIpBucket, 300);
-            RateLimiter::recordHit($deviceBucket, 300);
+            // wrong PIN are all indistinguishable from this response. Every
+            // tier records the failed attempt.
+            foreach ($buckets as [$bucketKey, , $bucketWindow]) {
+                RateLimiter::recordHit($bucketKey, $bucketWindow);
+            }
             Logger::activity('AssetKioskIdentifyFailed', 'Failed kiosk identify on terminal #' . $tokenId);
             $bounce('Incorrect details — please try again.', 'danger');
         }
@@ -201,7 +223,13 @@ switch ($action) {
         $code  = trim((string) ($_POST['code'] ?? ''));
         $asset = $code !== '' ? AssetRegister::findByScanCode($siteId, $code) : null;
         if ($asset === null) {
-            $bounce('Item not found — check the code and try again.', 'danger');
+            // 🙈 SAME message kioskCheckout() gives for a confidential /
+            // non-loanable asset (#414 security review) — a code that
+            // resolves to NOTHING and one that resolves to an unavailable
+            // asset are indistinguishable, so an identified user can't use
+            // this endpoint to confirm whether a guessed tag/serial code
+            // exists on the site.
+            $bounce("That item isn't available to check out here.", 'danger');
         }
 
         $result = AssetRegister::kioskCheckout((int) $asset['assetID'], $kioskUserId, $tokenId);
