@@ -30,13 +30,17 @@
  *   Auth::curlPost($url, $data)    → ?string – HTTP POST via cURL
  *   Auth::isCoordinatorOf($id)     → bool   – event coordinator check (#341)
  *   Auth::isEventTeamMember($id)   → bool   – event team hub view check (#386)
+ *   Auth::encrypt($plain)          → string – encrypt a secret (TOTP, etc.)
+ *   Auth::decrypt($encoded)        → string – decrypt a secret ('' on failure)
+ *   Auth::userRequires2fa($id)     → bool   – does this user have TOTP enabled?
+ *   Auth::deviceIsTrusted($id)     → bool   – is this browser a trusted device?
  *
  * @see       https://owasp.org/www-community/controls/Session_Management_Cheat_Sheet
  * @package   Portal\Core
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   0.5.0
+ * @version   0.6.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra
  * -----------------------------------------------------------------------------
  */
@@ -508,6 +512,17 @@ class Auth
                 // 🔗 Auto-link the MS365 account
                 self::linkAccount($userId, 'ms365', $sub !== '' ? $sub : $email, $email, $mysqli);
             } else {
+                // 🚫 Deactivated-account guard (#B7b). See
+                // findInactiveUserByEmail()'s docblock for the full
+                // rationale — without this, an offboarded user signing
+                // back in via MS365 would crash createUser() on the
+                // emailAddress UNIQUE constraint instead of seeing a
+                // clean error.
+                if (self::findInactiveUserByEmail($email, $mysqli) !== null) {
+                    Logger::activity('LoginBlocked', 'MS365 sign-in attempt for a deactivated account: ' . $email);
+                    self::oauthError('This account has been deactivated. Please contact your administrator.', 403);
+                }
+
                 // ➕ Create new user + link
                 $userId = self::createUser($name, $email, $avatar, $mysqli);
                 self::linkAccount($userId, 'ms365', $sub !== '' ? $sub : $email, $email, $mysqli);
@@ -522,7 +537,7 @@ class Auth
             }
         }
 
-        /* ----------------------- 6. Create session & redirect -------------- */
+        /* ----------------------- 6. Create session -------------------------- */
         // 🔄 Regenerate session ID to prevent session fixation attacks
         // See: https://owasp.org/www-community/attacks/Session_fixation
         session_regenerate_id(true);
@@ -534,6 +549,26 @@ class Auth
         // 🌐 Set active site ID for multi-site context
         self::setSessionSiteId($userId, $mysqli);
 
+        /* ----------------------- 7. 🔐 2FA gate (#B2) ------------------------ */
+        // 🛡️ SSO auto-links by email (step 5 above), so WITHOUT this gate a
+        // 2FA-enrolled user — or an attacker who has taken over their SSO
+        // identity — would sail straight past the TOTP challenge that the
+        // password login path enforces. Mirrors
+        // `_apps/auth/login/index.php`'s POST handler EXACTLY: same session
+        // keys (`2fa_user_id`, `login_redirect`), same unset() pair, same
+        // deviceIsTrusted() "remembered device" bypass, same redirect
+        // target. The verify handler promotes `2fa_user_id` back to
+        // `user_id` on a successful challenge.
+        if (self::userRequires2fa($userId) === true && self::deviceIsTrusted($userId) === false) {
+            $_SESSION['2fa_user_id']    = $userId;
+            $_SESSION['login_redirect'] = self::safeRedirectUrl($_GET['redirect'] ?? '/');
+            unset($_SESSION['user_id'], $_SESSION['2fa_passed']);
+            Logger::activity('LoginMS365Pending2fa', 'MS365 login pending 2FA challenge', $userId);
+            header('Location: /auth/2fa/verify', true, 302);
+            exit();
+        }
+
+        /* ----------------------- 8. Redirect --------------------------------- */
         // 📝 Log the successful login
         Logger::activity('LoginMS365', 'User logged in via Microsoft 365');
 
@@ -716,6 +751,13 @@ class Auth
                 // 🔗 Auto-link the Google account
                 self::linkAccount($userId, 'google', $sub, $email, $mysqli);
             } else {
+                // 🚫 Deactivated-account guard (#B7b) — same rationale as
+                // callbackMS365() above.
+                if (self::findInactiveUserByEmail($email, $mysqli) !== null) {
+                    Logger::activity('LoginBlocked', 'Google sign-in attempt for a deactivated account: ' . $email);
+                    self::oauthError('This account has been deactivated. Please contact your administrator.', 403);
+                }
+
                 // ➕ Create new user + link
                 $userId = self::createUser($name, $email, $avatar, $mysqli);
                 self::linkAccount($userId, 'google', $sub, $email, $mysqli);
@@ -730,7 +772,7 @@ class Auth
             }
         }
 
-        /* ----------------------- 6. Create session & redirect -------------- */
+        /* ----------------------- 6. Create session -------------------------- */
         session_regenerate_id(true);
 
         $_SESSION['user_id']    = $userId;
@@ -740,6 +782,21 @@ class Auth
         // 🌐 Set active site ID for multi-site context
         self::setSessionSiteId($userId, $mysqli);
 
+        /* ----------------------- 7. 🔐 2FA gate (#B2) ------------------------ */
+        // 🛡️ Same SSO-bypass hole as callbackMS365() above — see the comment
+        // there for the full rationale. Mirrors the password login path's
+        // gate EXACTLY: same session keys, same unset() pair, same
+        // deviceIsTrusted() bypass, same redirect target.
+        if (self::userRequires2fa($userId) === true && self::deviceIsTrusted($userId) === false) {
+            $_SESSION['2fa_user_id']    = $userId;
+            $_SESSION['login_redirect'] = self::safeRedirectUrl($_GET['redirect'] ?? '/');
+            unset($_SESSION['user_id'], $_SESSION['2fa_passed']);
+            Logger::activity('LoginGooglePending2fa', 'Google login pending 2FA challenge', $userId);
+            header('Location: /auth/2fa/verify', true, 302);
+            exit();
+        }
+
+        /* ----------------------- 8. Redirect --------------------------------- */
         Logger::activity('LoginGoogle', 'User logged in via Google OAuth');
 
         $target = self::safeRedirectUrl($_GET['redirect'] ?? '/');
@@ -938,6 +995,48 @@ class Auth
             'requireSpecial'   => $requireSpecial,
             'rules'            => $rules,
         ];
+    }
+
+    /* ====================================================================== */
+    /* TOTP secret encryption (#B1)                                           */
+    /* ====================================================================== */
+
+    /**
+     * Encrypt a value for storage (e.g. a TOTP shared secret) using the same
+     * libsodium secretbox scheme as the settings encryptor.
+     *
+     * 🔐 Thin wrapper around the global `encrypt_setting()` helper defined in
+     * bootstrap.php — kept here so 2FA call sites (`_apps/auth/2fa/*.php`)
+     * can go through `Auth::` like every other Auth-owned secret operation,
+     * without reaching past the class into the global namespace. Signature
+     * mirrors `encrypt_setting()` exactly.
+     *
+     * @param string $plain Plaintext value to encrypt
+     *
+     * @return string Base64-encoded "nonce + ciphertext", safe for storage
+     */
+    public static function encrypt(string $plain): string
+    {
+        return encrypt_setting($plain);
+    }
+
+    /**
+     * Decrypt a value previously produced by `Auth::encrypt()` /
+     * `encrypt_setting()`.
+     *
+     * 🔐 Thin wrapper around the global `decrypt_setting()` helper — see
+     * `Auth::encrypt()` above. Matches `decrypt_setting()`'s contract
+     * exactly: returns an EMPTY STRING (never `false`) if the value is
+     * malformed, was encrypted under a different key, or has been tampered
+     * with — callers must check `!== ''`, not `!== false`.
+     *
+     * @param string $encoded Base64-encoded ciphertext (nonce prepended)
+     *
+     * @return string Decrypted plaintext, or '' on failure
+     */
+    public static function decrypt(string $encoded): string
+    {
+        return decrypt_setting($encoded);
     }
 
     /* ====================================================================== */
@@ -1414,6 +1513,39 @@ class Auth
     private static function findUserByEmail(string $email, \mysqli $db): ?int
     {
         $stmt = $db->prepare('SELECT userID FROM tblUsers WHERE emailAddress = ? AND isActive = 1 LIMIT 1');
+        if ($stmt === false) {
+            return null;
+        }
+        $stmt->bind_param('s', $email);
+        $stmt->execute();
+        $row = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+
+        return $row !== null ? (int) $row['userID'] : null;
+    }
+
+    /**
+     * 🚫 Check whether an email address belongs to a DEACTIVATED user
+     * (`isActive = 0`) — the mirror image of `findUserByEmail()`, which
+     * only ever matches active users.
+     *
+     * Used by the OAuth callbacks (#B7b) to detect an offboarded person
+     * signing back in via SSO. Offboarding (`_apps/offboarding/do.php`)
+     * deactivates the user AND deletes their `tblLinkedAccounts` row, so
+     * without this check `findUserByLink()`/`findUserByEmail()` both come
+     * back null and the callback would fall through to `createUser()` —
+     * which then throws on the `tblUsers.emailAddress` UNIQUE constraint
+     * (mysqli is configured MYSQLI_REPORT_STRICT, so that's an uncaught
+     * exception / white-screen, not a clean error).
+     *
+     * @param string  $email Email address (already lowercased)
+     * @param \mysqli $db    Database connection
+     *
+     * @return int|null Deactivated user's ID if found, null otherwise
+     */
+    private static function findInactiveUserByEmail(string $email, \mysqli $db): ?int
+    {
+        $stmt = $db->prepare('SELECT userID FROM tblUsers WHERE emailAddress = ? AND isActive = 0 LIMIT 1');
         if ($stmt === false) {
             return null;
         }

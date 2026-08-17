@@ -182,7 +182,7 @@ CREATE TABLE IF NOT EXISTS `tblUsers` (
     `isAdmin`      TINYINT(1)   DEFAULT 0,
     `isRootAdmin`  TINYINT(1)   DEFAULT 0,
     `notifyPrefs`  JSON         DEFAULT NULL COMMENT 'User notification preferences (JSON: {emailDigest, expenseUpdates, eventReminders})',
-    `totpSecret`   VARCHAR(64)  DEFAULT NULL COMMENT 'Encrypted TOTP shared secret (from migration 032)',
+    `totpSecret`   VARCHAR(255) DEFAULT NULL COMMENT 'Encrypted TOTP shared secret (libsodium via encrypt_setting(); widened 64→255 in migration 165)',
     `totpEnabled`  TINYINT(1)   NOT NULL DEFAULT 0 COMMENT 'TOTP 2FA enabled flag (from migration 032)',
     `calendarToken` VARCHAR(64) DEFAULT NULL COMMENT 'iCal feed token (from migration 080)',
     -- 🕯️ Sabbath quiet-hours per-user override (from migration 070 / #231)
@@ -6941,4 +6941,7 @@ INSERT INTO `tblMigrations` (`filename`) VALUES ('163_tours_api_route_fix.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
 INSERT INTO `tblMigrations` (`filename`) VALUES ('164_kids_care_prayer_gap_fixes.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('165_widen_totp_secret.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;

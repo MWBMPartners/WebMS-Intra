@@ -11,7 +11,7 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   0.8.2
+ * @version   0.9.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/92
  * -----------------------------------------------------------------------------
  */
@@ -20,6 +20,7 @@ declare(strict_types=1);
 
 use Portal\Core\Auth;
 use Portal\Core\Logger;
+use Portal\Core\RateLimiter;
 use Portal\Core\Totp;
 
 Auth::ensureSession();
@@ -36,6 +37,27 @@ $pendingUserId = (int) $_SESSION['2fa_user_id'];
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
         $_SESSION['flash_msg']  = 'Invalid or expired form token.';
+        $_SESSION['flash_type'] = 'danger';
+        header('Location: /auth/2fa/verify');
+        exit();
+    }
+
+    // 🚦 Rate-limit TOTP/backup-code guesses (#B3). Unlike the password
+    // login form and the OAuth callbacks, this challenge previously had NO
+    // throttle at all — an attacker holding the password (or a hijacked
+    // pending-2FA session) could brute-force the 6-digit code unthrottled.
+    // Bucket is keyed on the pending userID + IP so one leaked/guessed
+    // password doesn't let an attacker grind the code from anywhere, while
+    // a legitimate user retrying from one browser isn't punished for other
+    // users' failures. Reuses the generic sliding-window bucket API
+    // (tblApiRateLimits) — same mechanism as the API rate limiter and the
+    // Assets kiosk PIN throttle.
+    $rateBucket = 'totp_verify:' . $pendingUserId . ':' . RateLimiter::clientIp();
+    $rateMax    = 5;
+    $rateWindow = 900; // 15 minutes — mirrors the login form's default window
+    if (RateLimiter::tooMany($rateBucket, $rateMax, $rateWindow) === true) {
+        $retryAfter = RateLimiter::retryAfter($rateBucket, $rateMax, $rateWindow);
+        $_SESSION['flash_msg']  = 'Too many attempts. Please try again in ' . (int) ceil($retryAfter / 60) . ' minute(s).';
         $_SESSION['flash_type'] = 'danger';
         header('Location: /auth/2fa/verify');
         exit();
@@ -102,14 +124,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $bcStmt->close();
         }
     } else {
-        // 🔍 Verify TOTP code
+        // 🔍 Verify TOTP code. Auth::decrypt() mirrors decrypt_setting()'s
+        // contract exactly — it returns '' (never false) on failure, so the
+        // guard below checks for the empty string, not `false` (#B1).
         $secret = Auth::decrypt($uRow['totpSecret']);
-        if ($secret !== false) {
+        if ($secret !== '') {
             $verified = Totp::verify($secret, $code);
         }
     }
 
     if ($verified === false) {
+        // 🚦 Count this guess against the rate-limit bucket opened above
+        // (#B3) — covers both TOTP and backup-code attempts.
+        RateLimiter::recordHit($rateBucket, $rateWindow);
         Logger::activity('TotpVerifyFailed', 'Failed 2FA verification attempt', $pendingUserId);
         $_SESSION['flash_msg']  = 'Invalid code. Please try again.';
         $_SESSION['flash_type'] = 'danger';
