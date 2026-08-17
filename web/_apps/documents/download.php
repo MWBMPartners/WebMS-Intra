@@ -10,7 +10,7 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   0.8.2
+ * @version   0.8.3
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/90
  * -----------------------------------------------------------------------------
  */
@@ -77,5 +77,6 @@ header('Content-Type: ' . $mimeType);
 header('Content-Disposition: attachment; filename="' . addcslashes($fileName, '"') . '"');
 header('Content-Length: ' . filesize($filePath));
 header('Cache-Control: no-cache, must-revalidate');
+header('X-Content-Type-Options: nosniff');
 readfile($filePath);
 exit();

@@ -227,8 +227,9 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 <input type="hidden" name="channelID" value="<?php echo (int) $c['channelID']; ?>">
                 <button type="submit"
                         class="btn btn-outline-danger btn-sm"
-                        data-confirm="Delete this channel and all its schedules?">
-                    <i class="fa-solid fa-trash"></i>
+                        data-confirm="Delete this channel and all its schedules?"
+                        title="Delete channel" aria-label="Delete channel">
+                    <i class="fa-solid fa-trash" aria-hidden="true"></i>
                 </button>
             </form>
         </div>
@@ -267,8 +268,9 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                     <input type="hidden" name="scheduleID" value="<?php echo (int) $s['scheduleID']; ?>">
                                     <button type="submit"
                                             class="btn btn-outline-danger btn-sm"
-                                            data-confirm="Delete this schedule slot?">
-                                        <i class="fa-solid fa-trash"></i>
+                                            data-confirm="Delete this schedule slot?"
+                                            title="Delete schedule" aria-label="Delete schedule">
+                                        <i class="fa-solid fa-trash" aria-hidden="true"></i>
                                     </button>
                                 </form>
                             </div>

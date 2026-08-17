@@ -67,8 +67,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         <form method="post" action="/account/payment-methods/delete" class="d-inline">
                             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                             <input type="hidden" name="methodID" value="<?php echo (int) $m['methodID']; ?>">
-                            <button type="submit" class="btn btn-outline-danger btn-sm" data-confirm="Forget this card?">
-                                <i class="fa-solid fa-trash"></i>
+                            <button type="submit" class="btn btn-outline-danger btn-sm" data-confirm="Forget this card?" title="Forget this card" aria-label="Forget this card">
+                                <i class="fa-solid fa-trash" aria-hidden="true"></i>
                             </button>
                         </form>
                     </div>

@@ -55,13 +55,25 @@ if ($stmt !== false) {
     $stmt->close();
 }
 
+// 🛡️ Site-scoped presenter picker (security review) — the previous
+// unscoped query listed every active user across every tenant on this
+// install, leaking cross-site membership. Only users active on THIS site
+// belong in the dropdown.
 $users = [];
-$rs = $db->query("SELECT userID, fullName FROM tblUsers WHERE isActive = 1 ORDER BY fullName");
-if ($rs !== false) {
+$stmt = $db->prepare(
+    'SELECT u.userID, u.fullName FROM tblUsers u '
+    . 'JOIN tblUserSites us ON us.userID = u.userID '
+    . 'WHERE us.siteID = ? AND us.isActive = 1 AND u.isActive = 1 '
+    . 'ORDER BY u.fullName'
+);
+if ($stmt !== false) {
+    $stmt->bind_param('i', $siteId);
+    $stmt->execute();
+    $rs = $stmt->get_result();
     while ($r = $rs->fetch_assoc()) {
         $users[] = $r;
     }
-    $rs->free();
+    $stmt->close();
 }
 
 $pageTitle   = (string) $plan['title'];

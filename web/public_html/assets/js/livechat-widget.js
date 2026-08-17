@@ -120,8 +120,8 @@
         const form = document.createElement('form');
         form.className = 'webms-livechat-form';
         form.innerHTML =
-            '<input name="displayName" type="text" maxlength="40" placeholder="Your name" required>' +
-            '<input name="body" type="text" maxlength="500" placeholder="Say something…" required>' +
+            '<input name="displayName" type="text" maxlength="40" placeholder="Your name" aria-label="Your name" required>' +
+            '<input name="body" type="text" maxlength="500" placeholder="Say something…" aria-label="Message" required>' +
             '<button type="submit">Send</button>';
         host.appendChild(form);
 

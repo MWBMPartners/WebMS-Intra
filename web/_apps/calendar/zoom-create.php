@@ -29,6 +29,14 @@ $db      = App::db();
 $siteId  = Site::id();
 $userId  = (int) ($_SESSION['user_id'] ?? 0);
 $eventId = (int) ($_POST['eventID'] ?? 0);
+
+// 🛡️ Per-event authorization (security review) — admin OR the event's
+// coordinator, matching every other write handler under calendar/*.php.
+if ($eventId <= 0 || (App::isAdmin() === false && Auth::isCoordinatorOf($eventId) === false)) {
+    http_response_code(403);
+    exit('Forbidden');
+}
+
 $settings = App::settings()['zoom'] ?? [];
 $mode    = (string) ($settings['mode'] ?? 'org');
 

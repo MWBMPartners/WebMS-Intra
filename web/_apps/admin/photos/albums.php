@@ -136,8 +136,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                             <input type="hidden" name="action" value="delete">
                             <input type="hidden" name="albumID" value="<?php echo (int) $a['albumID']; ?>">
-                            <button type="submit" class="btn btn-outline-danger btn-sm" data-confirm="Delete this album? Photos stay (un-albumed) and can be re-assigned.">
-                                <i class="fa-solid fa-trash"></i>
+                            <button type="submit" class="btn btn-outline-danger btn-sm" data-confirm="Delete this album? Photos stay (un-albumed) and can be re-assigned." title="Delete album" aria-label="Delete album">
+                                <i class="fa-solid fa-trash" aria-hidden="true"></i>
                             </button>
                         </form>
                     </div>

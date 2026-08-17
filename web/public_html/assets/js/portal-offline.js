@@ -288,21 +288,37 @@
         dot.id = 'portal-conn-indicator';
         dot.className = 'portal-conn-indicator';
         dot.title = 'Connection status';
+        dot.setAttribute('aria-hidden', 'true'); // decorative — srText below carries the info
         dot.style.cssText =
             'display:inline-block;width:10px;height:10px;border-radius:50%;' +
             'background:#22c55e;margin-left:8px;vertical-align:middle;';
         document.body.appendChild(dot);
+
+        // ♿ Colour-only status is invisible to screen-reader users and
+        // anyone who can't distinguish the red/amber/green hues (#a11y).
+        // A visually-hidden aria-live region announces the same state as
+        // text alongside the dot.
+        var srText = document.createElement('span');
+        srText.id = 'portal-conn-indicator-status';
+        srText.className = 'portal-visually-hidden';
+        srText.setAttribute('aria-live', 'polite');
+        srText.textContent = 'Online';
+        document.body.appendChild(srText);
+
         function refresh() {
             list().then(function (entries) {
                 if (navigator.onLine === false) {
                     dot.style.background = '#ef4444'; // red — offline
                     dot.title = 'Offline';
+                    srText.textContent = 'Offline';
                 } else if (entries.length > 0) {
                     dot.style.background = '#f59e0b'; // amber — queueing
                     dot.title = entries.length + ' queued — syncing';
+                    srText.textContent = entries.length + ' item(s) queued — syncing';
                 } else {
                     dot.style.background = '#22c55e'; // green — online
                     dot.title = 'Online';
+                    srText.textContent = 'Online';
                 }
             });
         }

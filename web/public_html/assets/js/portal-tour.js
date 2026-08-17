@@ -38,7 +38,43 @@
         index: 0,
         overlay: null,
         highlightEl: null,
+        previouslyFocused: null,
     };
+
+    // ♿ Focusable elements inside the overlay, for the Tab trap below.
+    function getFocusable() {
+        if (state.overlay === null) {
+            return [];
+        }
+        var nodes = state.overlay.querySelectorAll(
+            'a[href], button:not([disabled]), textarea:not([disabled]), ' +
+            'input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'
+        );
+        return Array.prototype.slice.call(nodes);
+    }
+
+    // ♿ Cycle Tab/Shift+Tab within the overlay's own focusables so focus
+    // never escapes to the page behind it while the tour is open.
+    function trapFocus(e) {
+        var focusable = getFocusable();
+        if (focusable.length === 0) {
+            return;
+        }
+        var first = focusable[0];
+        var last = focusable[focusable.length - 1];
+        var current = document.activeElement;
+        if (e.shiftKey === true) {
+            if (current === first || state.overlay.contains(current) === false) {
+                e.preventDefault();
+                last.focus();
+            }
+        } else {
+            if (current === last || state.overlay.contains(current) === false) {
+                e.preventDefault();
+                first.focus();
+            }
+        }
+    }
 
     function clearHighlight() {
         if (state.highlightEl !== null) {
@@ -115,6 +151,19 @@
         document.body.appendChild(o);
         state.overlay = o;
 
+        // ♿ Focus management (#253 follow-up) — this overlay is a hand-rolled
+        // dialog (no bootstrap.Modal instance to do it for us, unlike
+        // portal-confirm.js), so we replicate its focus handling manually:
+        // remember what had focus before the tour opened, then move focus
+        // into the dialog so it isn't left stranded on the page behind it.
+        state.previouslyFocused = (document.activeElement !== null && typeof document.activeElement.focus === 'function')
+            ? document.activeElement
+            : null;
+        var skipBtn = o.querySelector('[data-tour-skip]');
+        if (skipBtn !== null) {
+            skipBtn.focus();
+        }
+
         o.querySelector('[data-tour-skip]').addEventListener('click', complete);
         o.querySelector('[data-tour-back]').addEventListener('click', function () {
             if (state.index > 0) { state.index--; render(); }
@@ -152,6 +201,7 @@
     function onKeydown(e) {
         if (state.tour === null) { return; }
         if (e.key === 'Escape') { complete(); }
+        else if (e.key === 'Tab') { trapFocus(e); }
         else if (e.key === 'ArrowRight') {
             if (state.index < state.tour.steps.length - 1) { state.index++; render(); }
             else { complete(); }
@@ -167,6 +217,14 @@
             state.overlay = null;
         }
         document.removeEventListener('keydown', onKeydown);
+
+        // ♿ Restore focus to whatever had it before the tour opened —
+        // mirrors portal-confirm.js / Bootstrap Modal's own restore-on-hide
+        // behaviour for its hand-rolled equivalent.
+        if (state.previouslyFocused !== null) {
+            state.previouslyFocused.focus();
+            state.previouslyFocused = null;
+        }
 
         var tour = state.tour;
         state.tour = null;

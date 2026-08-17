@@ -12,7 +12,7 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.0.0
+ * @version   1.0.1
  * @link      https://github.com/MWBMPartners/webMS-Intra/issues/343
  * -----------------------------------------------------------------------------
  */
@@ -161,7 +161,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                             <input type="hidden" name="crewID" value="<?php echo $c['crewID']; ?>">
                             <input type="text" name="externalName" maxlength="120" placeholder="Add by name" class="form-control form-control-sm" required>
                             <select name="role" class="form-select form-select-sm" style="max-width:110px;"><option value="participant">Participant</option><option value="leader">Leader</option></select>
-                            <button class="btn btn-primary btn-sm"><i class="fa-solid fa-plus"></i></button>
+                            <button class="btn btn-primary btn-sm" title="Add member" aria-label="Add member"><i class="fa-solid fa-plus" aria-hidden="true"></i></button>
                         </form>
                     </div>
                 </div>
