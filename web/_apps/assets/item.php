@@ -62,10 +62,25 @@
  * re-checks that same gate independently server-side, so a hidden control
  * is never the only thing stopping an unauthorised POST. The Depreciation
  * readout inside the "Purchase, warranty & depreciation" card
- * (`AssetRegister::computeStraightLineValue()`) is DISPLAY-ONLY and never
- * invents a value — it renders nothing when the asset's depreciation
- * method isn't 'straight-line' or any of purchaseCostPence/
- * usefulLifeMonths/purchaseDate is missing.
+ * (`AssetRegister::computeCurrentValue()`, #412 — dispatches to
+ * `computeStraightLineValue()`/`computeReducingBalanceValue()` by the
+ * asset's own `depreciationMethod`) is DISPLAY-ONLY and never invents a
+ * value — it renders nothing when the method is 'none'/unrecognised or
+ * either pure helper's own required inputs are missing (see each
+ * method's doc — a reducing-balance asset additionally requires a
+ * positive `salvageValuePence`, unlike straight-line).
+ *
+ * VALUE HISTORY panel (#412, Phase 3 Pass 2) — a reverse-chronological
+ * list of `tblAssetValueHistory` snapshots (`AssetRegister::
+ * valueHistory()`), only rendered when that call returns at least one
+ * row. Read-visible to any viewer who reaches this page at all, same
+ * convention as the Owners/Identifiers panels above — a book-value trend
+ * is not itself confidential beyond the page's own existing
+ * confidential-asset gate. Snapshots are written by the `#405` cron's
+ * `AssetRegister::persistCurrentValues()` call, one row per day the
+ * computed value actually CHANGED (see `recordValueSnapshot()`'s own
+ * doc for the write-on-change-only rule) — there is no add/edit control
+ * on this page, this panel is read-only history.
  *
  * IDENTIFIERS panel (#397) — same read-visible/edit-manager-gated split as
  * the Owners panel immediately above it (see that note below): the list
@@ -154,7 +169,7 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.6.0
+ * @version   1.7.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/393
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/394
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/396
@@ -166,6 +181,7 @@
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/408
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/409
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/410
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/412
  * -----------------------------------------------------------------------------
  */
 
@@ -499,14 +515,20 @@ if ($canManageMaintenance === true) {
     }
 }
 
-// 💷 Depreciation / value readout (#399) — straight-line only, DISPLAY
-// ONLY (see AssetRegister::computeStraightLineValue()'s own doc for why
-// reducing-balance + persisting tblAssets.currentValuePence are Phase-3
-// cron work, out of scope here). Returns null — never rendered, NEVER
-// invented — when the asset's depreciation fields aren't set up for a
-// computable estimate (method isn't 'straight-line', or purchaseCostPence/
-// usefulLifeMonths/purchaseDate is missing).
-$estimatedCurrentValuePence = AssetRegister::computeStraightLineValue($asset);
+// 💷 Depreciation / value readout (#399, widened #412) — DISPLAY ONLY,
+// dispatches to whichever pure estimator matches the asset's own
+// depreciationMethod (AssetRegister::computeCurrentValue() — see that
+// method's own doc). Returns null — never rendered, NEVER invented —
+// when the method is 'none'/unrecognised or the matching estimator's
+// own required inputs are missing (see computeStraightLineValue()/
+// computeReducingBalanceValue()'s docs for exactly which per method).
+$estimatedCurrentValuePence = AssetRegister::computeCurrentValue($asset);
+
+// 📈 Value history (#412) — persisted daily snapshots for the panel
+// further down. Read-visible to any viewer who reaches this page (see
+// file header's VALUE HISTORY panel note) — no privilege gate beyond the
+// page's own confidential-asset check above.
+$valueHistory = AssetRegister::valueHistory($assetId, $siteId);
 
 // 🔍 Found-reports summary (#401) — manager-only. A small "how many
 // public 'I found this' submissions has this asset received" surfacing
@@ -713,14 +735,14 @@ $nonce = htmlspecialchars(App::cspNonce(), ENT_QUOTES, 'UTF-8');
         <?php if ($asset['warrantyDetails'] !== null && (string) $asset['warrantyDetails'] !== ''): ?>
             <div class="col-12"><strong>Warranty details</strong><br><?php echo htmlspecialchars((string) $asset['warrantyDetails'], ENT_QUOTES, 'UTF-8'); ?></div>
         <?php endif; ?>
-        <?php /* 💷 Depreciation / value readout (#399) — only shown once a
-                 depreciation method is actually configured on this asset
-                 (edit.php); "Estimated current value" only ever appears
-                 when AssetRegister::computeStraightLineValue() actually
+        <?php /* 💷 Depreciation / value readout (#399, widened #412) — only
+                 shown once a depreciation method is actually configured on
+                 this asset (edit.php); "Estimated current value" only ever
+                 appears when AssetRegister::computeCurrentValue() actually
                  returned a number — see this panel's PHP setup for why a
-                 non-computable case (reducing-balance, or a straight-line
-                 asset missing one of cost/life/purchase-date) NEVER
-                 invents a value here, it simply omits the line. */ ?>
+                 non-computable case (missing cost/life/purchase-date, or —
+                 reducing-balance only — a missing/zero salvage value)
+                 NEVER invents a value here, it simply omits the line. */ ?>
         <?php if ((string) $asset['depreciationMethod'] !== 'none'): ?>
             <div class="col-md-3">
                 <strong>Depreciation method</strong><br>
@@ -731,11 +753,52 @@ $nonce = htmlspecialchars(App::cspNonce(), ENT_QUOTES, 'UTF-8');
             <div class="col-md-3">
                 <strong>Estimated current value</strong><br>
                 <?php echo htmlspecialchars((string) $asset['currency'], ENT_QUOTES, 'UTF-8') . ' ' . number_format($estimatedCurrentValuePence / 100, 2); ?>
-                <br><small class="text-muted">Straight-line estimate, as of today &mdash; not a persisted valuation.</small>
+                <br><small class="text-muted"><?php echo htmlspecialchars(ucwords(str_replace('-', ' ', (string) $asset['depreciationMethod'])), ENT_QUOTES, 'UTF-8'); ?> estimate, as of today &mdash; not a persisted valuation.</small>
             </div>
         <?php endif; ?>
     </div>
 </div>
+
+<?php /* 📈 Value history (#412) — daily book-value snapshots persisted by
+         the #405 cron's AssetRegister::persistCurrentValues() call. Only
+         rendered when there's at least one recorded snapshot; read-visible
+         to any viewer who reaches this page (see file header's VALUE
+         HISTORY panel note). valueHistory() returns oldest→newest (the
+         natural order for a future trend chart) — reversed here for a
+         most-recent-first list, which reads better for a human. */ ?>
+<?php if (count($valueHistory) > 0): ?>
+<div class="card mb-3">
+    <div class="card-header"><h2 class="h5 mb-0"><i class="fa-solid fa-chart-line me-2"></i>Value history</h2></div>
+    <div class="card-body">
+        <p class="text-muted small">
+            A new snapshot is recorded only when the computed value actually changes
+            &mdash; a fully depreciated asset sitting at its salvage value won't grow a
+            new row every day. Most recent first.
+        </p>
+        <div class="portal-data-list">
+            <?php foreach (array_reverse($valueHistory) as $vh): ?>
+                <div class="portal-data-row align-items-center">
+                    <div class="col-5 col-md-3">
+                        <?php echo htmlspecialchars((string) $vh['valueDate'], ENT_QUOTES, 'UTF-8'); ?>
+                    </div>
+                    <div class="col-4 col-md-3">
+                        <?php echo htmlspecialchars((string) $asset['currency'], ENT_QUOTES, 'UTF-8') . ' ' . number_format(((int) $vh['currentValuePence']) / 100, 2); ?>
+                    </div>
+                    <div class="col-3 col-md-3">
+                        <span class="badge bg-secondary"><?php echo htmlspecialchars(ucwords(str_replace('-', ' ', (string) $vh['method'])), ENT_QUOTES, 'UTF-8'); ?></span>
+                    </div>
+                    <div class="col-12 col-md-3 text-md-end">
+                        <span class="badge bg-<?php echo $vh['source'] === 'manual' ? 'info' : 'light text-dark'; ?>">
+                            <i class="fa-solid <?php echo $vh['source'] === 'manual' ? 'fa-user-pen' : 'fa-robot'; ?> me-1"></i>
+                            <?php echo htmlspecialchars(ucwords((string) $vh['source']), ENT_QUOTES, 'UTF-8'); ?>
+                        </span>
+                    </div>
+                </div>
+            <?php endforeach; ?>
+        </div>
+    </div>
+</div>
+<?php endif; ?>
 
 <!-- 🔗 Public page & lost-and-found (#401) — manager-only: this panel
      shows/links the SECRET public token (whoever holds it reaches the

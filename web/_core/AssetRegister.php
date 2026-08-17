@@ -4608,6 +4608,185 @@ class AssetRegister
         return $currentValue;
     }
 
+    /**
+     * Pure reducing-balance (declining-balance) depreciation estimate — NO
+     * DATABASE ACCESS, same contract shape as computeStraightLineValue()
+     * immediately above (same input array, same "null means not computable,
+     * NEVER invent a value" rule). Added for #412 Phase 3 Pass 2.
+     *
+     * THE RATE PROBLEM: a textbook reducing-balance schedule applies a
+     * fixed annual/monthly PERCENTAGE rate — but `tblAssets` has no
+     * `depreciationRate` column (see class header / #412 brief) and never
+     * has. Given only cost, salvage and useful life, the only mathematically
+     * defensible rate is the one that is IMPLIED by requiring the schedule
+     * to land exactly on `salvageValuePence` at the end of
+     * `usefulLifeMonths` — i.e. a constant-percentage GEOMETRIC decay from
+     * cost to salvage:
+     *
+     *     value(elapsed) = cost × (salvage / cost) ^ (min(elapsed, life) / life)
+     *
+     * This is the standard "declining-balance with a target residual value"
+     * construction (solve r such that cost × (1 − r)^life = salvage), just
+     * expressed directly in terms of the salvage ratio rather than backing
+     * out an explicit r first — same answer, fewer intermediate roundings.
+     * At elapsed = 0 this is cost (the base of the exponent to the power
+     * 0 = 1); at elapsed = life it is exactly salvage; in between it curves
+     * — losing more value in early months than a straight-line schedule
+     * would, which is the entire point of choosing reducing-balance over
+     * straight-line for a given asset.
+     *
+     * WHY A ZERO/ABSENT SALVAGE IS REJECTED (the key difference from
+     * computeStraightLineValue(), which happily defaults salvage to 0):
+     * the formula above divides by `purchaseCostPence` inside the ratio and
+     * raises it to a fractional power — with `salvage = 0` the ratio is 0
+     * and the "implied rate" is 100% in month one (the curve would already
+     * be at zero the instant elapsed > 0), which is not a reducing-balance
+     * schedule at all, it is a cliff. A reducing-balance asset therefore
+     * REQUIRES a positive salvage floor to be computable; one with no
+     * salvage recorded is correctly "not computable yet", not "worth
+     * nothing" — the caller must never invent the missing input.
+     *
+     * Returns null when:
+     *   - depreciationMethod !== 'reducing-balance', OR
+     *   - purchaseCostPence is missing or <= 0 (a zero-cost asset has no
+     *     ratio to decay along), OR
+     *   - usefulLifeMonths is missing or <= 0, OR
+     *   - purchaseDate is missing/empty/unparseable, OR
+     *   - salvageValuePence is missing or <= 0 (see above — the degenerate
+     *     case straight-line silently tolerates, reducing-balance cannot).
+     *
+     * Clamps (mirrors computeStraightLineValue() exactly, see its own doc
+     * for the full reasoning on each):
+     *   - a salvageValuePence ABOVE purchaseCostPence is clamped down to
+     *     purchaseCostPence first, so the curve can never appreciate;
+     *   - elapsed WHOLE calendar months use the identical
+     *     DateTime::diff()-based `($diff->y * 12) + $diff->m` logic,
+     *     floored at 0 for an $asOfDate before purchaseDate;
+     *   - the exponent's numerator is capped at usefulLifeMonths, so a
+     *     fully-depreciated asset sits at salvage forever after;
+     *   - a final belt-and-braces clamp of the rounded result back into
+     *     [salvageValuePence, purchaseCostPence] guards against float
+     *     drift from `**`/pow() before the cast to int.
+     *
+     * @param array<string, mixed> $asset
+     *
+     * @return int|null Estimated current value in pence, or null when not
+     *                   computable / method isn't 'reducing-balance'
+     */
+    public static function computeReducingBalanceValue(array $asset, ?string $asOfDate = null): ?int
+    {
+        if ((string) ($asset['depreciationMethod'] ?? 'none') !== 'reducing-balance') {
+            return null;
+        }
+
+        $purchaseCostPenceRaw = $asset['purchaseCostPence'] ?? null;
+        $usefulLifeMonthsRaw  = $asset['usefulLifeMonths'] ?? null;
+        $purchaseDateRaw      = $asset['purchaseDate'] ?? null;
+        $salvageValuePenceRaw = $asset['salvageValuePence'] ?? null;
+
+        if ($purchaseCostPenceRaw === null || $usefulLifeMonthsRaw === null
+            || $purchaseDateRaw === null || (string) $purchaseDateRaw === ''
+            || $salvageValuePenceRaw === null
+        ) {
+            return null;
+        }
+
+        $purchaseCostPence = (int) $purchaseCostPenceRaw;
+        $usefulLifeMonths  = (int) $usefulLifeMonthsRaw;
+        $salvageValuePence = (int) $salvageValuePenceRaw;
+
+        // 🛟 Degenerate inputs — see method doc's "WHY A ZERO/ABSENT
+        // SALVAGE IS REJECTED" paragraph. Never invent a rate.
+        if ($purchaseCostPence <= 0 || $usefulLifeMonths <= 0 || $salvageValuePence <= 0) {
+            return null;
+        }
+
+        // 🛟 A mis-entered salvage value ABOVE the purchase cost would
+        // otherwise make the ratio (salvage / cost) exceed 1 and the curve
+        // would appreciate upward — clamp it down first, same as
+        // computeStraightLineValue()'s own guard.
+        if ($salvageValuePence > $purchaseCostPence) {
+            $salvageValuePence = $purchaseCostPence;
+        }
+
+        try {
+            $purchaseDate = new \DateTime((string) $purchaseDateRaw);
+        } catch (\Throwable $e) {
+            return null; // 🛟 Unparseable purchaseDate — never guess.
+        }
+
+        $asOf = null;
+        if ($asOfDate !== null) {
+            try {
+                $asOf = new \DateTime($asOfDate);
+            } catch (\Throwable $e) {
+                $asOf = null; // 🛟 Bad override — fall through to "today".
+            }
+        }
+        if ($asOf === null) {
+            $asOf = new \DateTime('today');
+        }
+
+        // 📅 Elapsed WHOLE calendar months since purchase — identical logic
+        // to computeStraightLineValue(), floored at 0 for an $asOf before
+        // purchaseDate (never negative elapsed time).
+        $elapsedMonths = 0;
+        if ($asOf >= $purchaseDate) {
+            $diff = $purchaseDate->diff($asOf);
+            $elapsedMonths = ($diff->y * 12) + $diff->m;
+        }
+
+        // 🔒 Cap the exponent at the useful life — once fully depreciated
+        // the value sits at salvage and never falls further.
+        $depreciableMonths = min($elapsedMonths, $usefulLifeMonths);
+
+        // 📉 Constant-percentage geometric decay from cost to salvage — see
+        // method doc's formula. `**` is PHP's exponentiation operator;
+        // guarded by the clamps above so the base ratio is always in
+        // (0, 1] and the exponent always in [0, 1], so no float weirdness
+        // (NAN/INF) can arise here.
+        $salvageRatio = $salvageValuePence / $purchaseCostPence;
+        $exponent     = $depreciableMonths / $usefulLifeMonths;
+        $currentValue = (int) round($purchaseCostPence * ($salvageRatio ** $exponent));
+
+        // 🔒 Final belt-and-braces clamp against rounding drift — see
+        // method doc's closing paragraph.
+        if ($currentValue < $salvageValuePence) {
+            $currentValue = $salvageValuePence;
+        }
+        if ($currentValue > $purchaseCostPence) {
+            $currentValue = $purchaseCostPence;
+        }
+
+        return $currentValue;
+    }
+
+    /**
+     * Thin dispatcher over the two pure per-method estimators above — picks
+     * computeStraightLineValue() or computeReducingBalanceValue() based on
+     * the asset's own `depreciationMethod`, so callers that don't care
+     * WHICH method an asset uses (persistCurrentValues(), the live-fallback
+     * readouts in valueSummaryForSite()/depreciationReportRows(), item.php's
+     * depreciation card) can call one method regardless. `'none'` and any
+     * unrecognised value both return null — NO DATABASE ACCESS, same
+     * "never invent a value" contract as the two methods it dispatches to.
+     *
+     * @param array<string, mixed> $asset
+     *
+     * @return int|null Estimated current value in pence, or null when not
+     *                   computable / method is 'none'/unrecognised
+     */
+    public static function computeCurrentValue(array $asset, ?string $asOfDate = null): ?int
+    {
+        $method = (string) ($asset['depreciationMethod'] ?? 'none');
+
+        return match ($method) {
+            'straight-line'    => self::computeStraightLineValue($asset, $asOfDate),
+            'reducing-balance' => self::computeReducingBalanceValue($asset, $asOfDate),
+            default            => null,
+        };
+    }
+
     /* ==========================================================================
      * 📜 Ownership & legal vault (#396)
      * ------------------------------------------------------------------------
@@ -7017,23 +7196,35 @@ class AssetRegister
     }
 
     /**
-     * For every `'straight-line'`-depreciation asset on a site, compute
-     * today's value via the existing pure `computeStraightLineValue()`
-     * helper (point 6 above, unchanged) and persist it to
+     * For every straight-line OR reducing-balance depreciation asset on a
+     * site, compute today's value via the `computeCurrentValue()`
+     * dispatcher (widened for #412 Phase 3 Pass 2 — was
+     * `computeStraightLineValue()`-only) and persist it to
      * `tblAssets.currentValuePence`/`valuationDate` — a narrow two-column
      * UPDATE, never the full `updateAsset()` field-set (which would
      * misleadingly diff every other column too, and would require a real
-     * `$actorUserId` for a system-driven bulk write). An asset the pure
-     * helper can't compute a value for (missing purchaseCostPence/
-     * usefulLifeMonths/purchaseDate) is left completely untouched — never
-     * zeroed, never guessed, matching computeStraightLineValue()'s own
-     * "return null rather than invent" contract.
+     * `$actorUserId` for a system-driven bulk write). An asset the
+     * dispatcher can't compute a value for (missing an input — see
+     * computeStraightLineValue()/computeReducingBalanceValue()'s own docs
+     * for exactly which) is left completely untouched — never zeroed,
+     * never guessed, matching both pure helpers' own "return null rather
+     * than invent" contract.
      *
      * Deliberately no per-row `self::audit()` call — routine bulk
      * housekeeping, mirroring `purgeExpiredFoundReports()`/
      * `purgeExpiredScanLog()`'s own no-audit convention (points 8/11
      * above); the cron caller's own aggregate `Logger::activity()` call
      * covers the run.
+     *
+     * #412: also writes today's value into `tblAssetValueHistory` via
+     * `recordValueSnapshot()` for every asset whose value WAS computable
+     * this call — independent of whether the `tblAssets` UPDATE below
+     * actually changed a row (a fully-depreciated asset sitting at
+     * salvage writes the SAME value every day; `recordValueSnapshot()`
+     * itself is the one that suppresses that churn, on its own
+     * value-unchanged rule — see its doc). This method's own return value
+     * is unchanged in meaning: it still counts only `tblAssets` rows
+     * written, not history rows.
      *
      * @return int Count of assets whose currentValuePence/valuationDate
      *         were actually written this call
@@ -7044,7 +7235,7 @@ class AssetRegister
 
         $stmt = $db->prepare(
             'SELECT assetID, purchaseCostPence, usefulLifeMonths, purchaseDate, salvageValuePence, depreciationMethod '
-            . "FROM tblAssets WHERE siteID = ? AND isDeleted = 0 AND depreciationMethod = 'straight-line'"
+            . "FROM tblAssets WHERE siteID = ? AND isDeleted = 0 AND depreciationMethod IN ('straight-line', 'reducing-balance')"
         );
         if ($stmt === false) {
             error_log('AssetRegister::persistCurrentValues() prepare failed: ' . $db->error);
@@ -7063,7 +7254,7 @@ class AssetRegister
         $written = 0;
 
         foreach ($assets as $asset) {
-            $value = self::computeStraightLineValue($asset, $today);
+            $value = self::computeCurrentValue($asset, $today);
             if ($value === null) {
                 // 🛟 Not computable (missing an input) — never invented,
                 // never zeroed. Leave the row exactly as it was.
@@ -7093,9 +7284,160 @@ class AssetRegister
                 $written++;
             }
             $upd->close();
+
+            // 📈 #412 — record today's snapshot into the value-history
+            // table regardless of $upd's own affected_rows (see method
+            // doc above); recordValueSnapshot() suppresses its own churn.
+            self::recordValueSnapshot(
+                $siteId,
+                $assetId,
+                $today,
+                $value,
+                (string) $asset['depreciationMethod'],
+                'cron',
+                null
+            );
         }
 
         return $written;
+    }
+
+    /**
+     * Write (or in-place update) one day's snapshot into
+     * `tblAssetValueHistory` for an asset — the #412 depreciation-trend
+     * feed behind item.php's "Value history" panel. WRITE-ON-CHANGE-ONLY
+     * for cron-sourced snapshots, to keep the table compact: an asset
+     * sitting at a fully-depreciated salvage value (or simply unchanged
+     * since yesterday) does NOT get a fresh row every single day — only
+     * the day the computed value first differs from the most recently
+     * recorded one. A manual entry (`$source !== 'cron'`) always writes,
+     * since a manager deliberately recording a valuation is meaningful
+     * regardless of whether the number happens to match the last one.
+     *
+     * Same-day re-runs never duplicate: `uq_astvh_asset_date` (assetID,
+     * valueDate) makes the INSERT below an `ON DUPLICATE KEY UPDATE`
+     * in-place replace, not a second row.
+     *
+     * @return bool True on a successful write (or a deliberate no-op
+     *         skip because the value hasn't moved), false on a
+     *         prepare/execute failure or an invalid $method/$source.
+     */
+    private static function recordValueSnapshot(
+        int $siteId,
+        int $assetId,
+        string $valueDate,
+        int $valuePence,
+        string $method,
+        string $source = 'cron',
+        ?int $recordedById = null
+    ): bool {
+        // 🛟 Defensive ENUM validation — never write a value the column
+        // itself can't hold. Mirrors the "never invent/guess" discipline
+        // applied everywhere else in this class, just for shape rather
+        // than for the value itself.
+        if (in_array($method, ['straight-line', 'reducing-balance', 'manual'], true) === false) {
+            return false;
+        }
+        if (in_array($source, ['cron', 'manual'], true) === false) {
+            return false;
+        }
+
+        $db = App::db();
+
+        // 🔎 Look up the most recently recorded snapshot for this asset
+        // (site-scoped) to decide whether a cron-sourced write would be
+        // pure churn — see method doc.
+        $lookup = $db->prepare(
+            'SELECT valueDate, currentValuePence FROM tblAssetValueHistory '
+            . 'WHERE assetID = ? AND siteID = ? ORDER BY valueDate DESC, valueID DESC LIMIT 1'
+        );
+        if ($lookup === false) {
+            error_log('AssetRegister::recordValueSnapshot() lookup prepare failed: ' . $db->error);
+            return false;
+        }
+        $lookup->bind_param('ii', $assetId, $siteId);
+        $lookup->execute();
+        $latest = $lookup->get_result()->fetch_assoc();
+        $lookup->close();
+
+        if ($source === 'cron' && $latest !== null && (int) $latest['currentValuePence'] === $valuePence) {
+            // 🛟 Unchanged since the last recorded snapshot — no churn.
+            // This is the whole point: a fully-depreciated asset sitting
+            // at salvage does not get a new row every day.
+            return true;
+        }
+
+        $ins = $db->prepare(
+            'INSERT INTO tblAssetValueHistory '
+            . '(siteID, assetID, valueDate, currentValuePence, method, source, recordedByID) '
+            . 'VALUES (?, ?, ?, ?, ?, ?, ?) '
+            . 'ON DUPLICATE KEY UPDATE currentValuePence = VALUES(currentValuePence), '
+            . 'method = VALUES(method), source = VALUES(source), recordedByID = VALUES(recordedByID)'
+        );
+        if ($ins === false) {
+            error_log('AssetRegister::recordValueSnapshot() insert prepare failed: ' . $db->error);
+            return false;
+        }
+        $ins->bind_param('iisissi', $siteId, $assetId, $valueDate, $valuePence, $method, $source, $recordedById);
+        $success = $ins->execute();
+        if ($success === false) {
+            error_log('AssetRegister::recordValueSnapshot() insert execute failed: ' . $ins->error);
+        }
+        $ins->close();
+
+        return $success;
+    }
+
+    /**
+     * Reverse of the write side above — an asset's recorded value-history
+     * rows in chronological (oldest → newest) order, ready either for a
+     * future chart (ASC is the natural order for a trend line) or for a
+     * caller to `array_reverse()` for a most-recent-first list (item.php's
+     * "Value history" panel does exactly that — see that file). Site-scoped
+     * even though the caller (item.php) has already validated the asset
+     * belongs to the current site — an IDOR belt-and-braces match for every
+     * other per-asset read in this class.
+     *
+     * @return array<int, array{valueDate:string, currentValuePence:int,
+     *         method:string, source:string}>
+     */
+    public static function valueHistory(int $assetId, int $siteId, int $limit = 60): array
+    {
+        // 🛟 Clamp into a sane range — never an unbounded/zero/negative
+        // LIMIT from a bad caller.
+        if ($limit < 1) {
+            $limit = 1;
+        }
+        if ($limit > 365) {
+            $limit = 365;
+        }
+
+        $db = App::db();
+
+        $stmt = $db->prepare(
+            'SELECT valueDate, currentValuePence, method, source FROM tblAssetValueHistory '
+            . 'WHERE assetID = ? AND siteID = ? ORDER BY valueDate ASC LIMIT ?'
+        );
+        if ($stmt === false) {
+            error_log('AssetRegister::valueHistory() prepare failed: ' . $db->error);
+            return [];
+        }
+        $stmt->bind_param('iii', $assetId, $siteId, $limit);
+        $stmt->execute();
+        $result = $stmt->get_result();
+
+        $rows = [];
+        while ($row = $result->fetch_assoc()) {
+            $rows[] = [
+                'valueDate'         => (string) $row['valueDate'],
+                'currentValuePence' => (int) $row['currentValuePence'],
+                'method'            => (string) $row['method'],
+                'source'            => (string) $row['source'],
+            ];
+        }
+        $stmt->close();
+
+        return $rows;
     }
 
     /* ==========================================================================
@@ -7107,16 +7449,20 @@ class AssetRegister
      * Register-wide value totals for a site, grouped by category and by
      * status. For each asset, "current value" PREFERS the persisted
      * `currentValuePence` (written by `persistCurrentValues()` above) and
-     * falls back to a live `computeStraightLineValue()` estimate only when
-     * nothing has been persisted yet — an asset that's simply not
-     * computable (reducing-balance, or a straight-line asset missing an
-     * input) is counted in `notValuedCount` rather than folded into a
-     * total as if it were zero (mirrors computeStraightLineValue()'s own
-     * "never invent" contract). `insuranceGapPence` sums (insured −
-     * current) ONLY over assets where BOTH figures are known — an asset
-     * with no insured value recorded, or no computable current value,
-     * contributes nothing to that figure either way. No currency
-     * conversion — see class header point 12's closing note.
+     * falls back to a live `computeCurrentValue()` estimate (#412 — widened
+     * from a `computeStraightLineValue()`-only fallback so a
+     * reducing-balance asset counts toward the totals too, not just
+     * straight-line) only when nothing has been persisted yet — an asset
+     * that's simply not computable by EITHER method (missing an input —
+     * for reducing-balance that includes a missing/zero salvage value, see
+     * `computeReducingBalanceValue()`'s own doc) is counted in
+     * `notValuedCount` rather than folded into a total as if it were zero
+     * (mirrors both pure helpers' own "never invent" contract).
+     * `insuranceGapPence` sums (insured − current) ONLY over assets where
+     * BOTH figures are known — an asset with no insured value recorded, or
+     * no computable current value, contributes nothing to that figure
+     * either way. No currency conversion — see class header point 12's
+     * closing note.
      *
      * @return array{
      *   totals: array{assetCount:int, purchaseCostPence:int, currentValuePence:int,
@@ -7161,7 +7507,7 @@ class AssetRegister
 
             $current = $row['currentValuePence'] !== null
                 ? (int) $row['currentValuePence']
-                : self::computeStraightLineValue($row);
+                : self::computeCurrentValue($row);
 
             if ($current === null) {
                 $totals['notValuedCount']++;
@@ -7267,7 +7613,12 @@ class AssetRegister
         $rows = [];
         while ($row = $result->fetch_assoc()) {
             $persisted = $row['currentValuePence'] !== null ? (int) $row['currentValuePence'] : null;
-            $current   = $persisted ?? self::computeStraightLineValue($row);
+            // #412: computeCurrentValue() dispatcher — was
+            // computeStraightLineValue()-only; widened so a
+            // reducing-balance asset with no persisted value yet still
+            // gets a live estimate row here, matching
+            // valueSummaryForSite()'s own fallback above.
+            $current   = $persisted ?? self::computeCurrentValue($row);
             $purchase  = $row['purchaseCostPence'] !== null ? (int) $row['purchaseCostPence'] : null;
 
             $pctDepreciated = null;
