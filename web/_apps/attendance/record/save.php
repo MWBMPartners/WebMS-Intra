@@ -12,7 +12,7 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   0.3.0
+ * @version   0.3.1
  * -----------------------------------------------------------------------------
  */
 
@@ -173,6 +173,27 @@ if ($action === 'update') {
     $sessionID = (int) ($_POST['sessionID'] ?? 0);
     if ($sessionID <= 0) {
         $_SESSION['flash_msg']  = 'Invalid session ID.';
+        $_SESSION['flash_type'] = 'danger';
+        header('Location: /attendance');
+        exit();
+    }
+
+    // 🛡️ Ownership check — confirm the session belongs to this site BEFORE
+    //     touching tblAttendanceCounts (which has no siteID column of its
+    //     own and is keyed only by sessionID). Mirrors the fetch-first
+    //     pattern in attendance/api/update.php:44-59.
+    $ownsSession = false;
+    $ownStmt = $mysqli->prepare(
+        'SELECT 1 FROM tblAttendanceSessions WHERE sessionID = ? AND isDeleted = 0 AND siteID = ?'
+    );
+    if ($ownStmt !== false) {
+        $ownStmt->bind_param('ii', $sessionID, $siteId);
+        $ownStmt->execute();
+        $ownsSession = ($ownStmt->get_result()->fetch_row() !== null);
+        $ownStmt->close();
+    }
+    if ($ownsSession === false) {
+        $_SESSION['flash_msg']  = 'Attendance session not found.';
         $_SESSION['flash_type'] = 'danger';
         header('Location: /attendance');
         exit();

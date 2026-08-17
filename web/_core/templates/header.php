@@ -16,7 +16,7 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   0.1.0
+ * @version   0.1.1
  * -----------------------------------------------------------------------------
  */
 
@@ -271,6 +271,11 @@ if (count($breadcrumbs) > 0) {
     $total = count($breadcrumbs);
     foreach ($breadcrumbs as $label => $url) {
         $i++;
+        // 🛡️ PHP casts a purely-numeric array key (e.g. a DB-sourced
+        //     fullName of '12345') to int. Under strict_types that makes
+        //     htmlspecialchars() throw a TypeError, fatalling the page —
+        //     cast back to string defensively before escaping.
+        $label = (string) $label;
         if ($i === $total || $url === '') {
             // Active (current) breadcrumb
             echo '<li class="breadcrumb-item active" aria-current="page">';

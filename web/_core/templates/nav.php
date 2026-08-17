@@ -18,7 +18,7 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   0.8.0
+ * @version   0.8.1
  * -----------------------------------------------------------------------------
  */
 
@@ -134,7 +134,7 @@ if ($isLoggedIn === true && Site::isMultisiteEnabled() === true && $navUser !== 
                         </li>
                         <li>
                             <a class="dropdown-item" href="/admin/audit">
-                                <i class="fa-solid fa-shield-halved me-1"></i> Audit Trail
+                                <i class="fa-solid fa-shield-halved me-1"></i> <?php echo htmlspecialchars(t('nav.audit_trail'), ENT_QUOTES, 'UTF-8'); ?>
                             </a>
                         </li>
                         <li><hr class="dropdown-divider"></li>
@@ -158,46 +158,46 @@ if ($isLoggedIn === true && Site::isMultisiteEnabled() === true && $navUser !== 
                         <li><hr class="dropdown-divider"></li>
                         <li>
                             <a class="dropdown-item" href="/admin/apps">
-                                <i class="fa-solid fa-cubes me-1"></i> Apps
+                                <i class="fa-solid fa-cubes me-1"></i> <?php echo htmlspecialchars(t('nav.apps'), ENT_QUOTES, 'UTF-8'); ?>
                             </a>
                         </li>
                         <li>
                             <a class="dropdown-item" href="/admin/reports">
-                                <i class="fa-solid fa-chart-bar me-1"></i> Reports
+                                <i class="fa-solid fa-chart-bar me-1"></i> <?php echo htmlspecialchars(t('nav.reports'), ENT_QUOTES, 'UTF-8'); ?>
                             </a>
                         </li>
                         <li>
                             <a class="dropdown-item" href="/admin/workflows">
-                                <i class="fa-solid fa-diagram-project me-1"></i> Workflows
+                                <i class="fa-solid fa-diagram-project me-1"></i> <?php echo htmlspecialchars(t('nav.workflows'), ENT_QUOTES, 'UTF-8'); ?>
                             </a>
                         </li>
                         <!-- 📣 Notification/compliance admin screens (#gap-fix D3). -->
                         <li><hr class="dropdown-divider"></li>
                         <li>
                             <a class="dropdown-item" href="/admin/sms">
-                                <i class="fa-solid fa-comment-sms me-1"></i> SMS
+                                <i class="fa-solid fa-comment-sms me-1"></i> <?php echo htmlspecialchars(t('nav.sms'), ENT_QUOTES, 'UTF-8'); ?>
                             </a>
                         </li>
                         <li>
                             <a class="dropdown-item" href="/admin/transcription">
-                                <i class="fa-solid fa-closed-captioning me-1"></i> Transcription
+                                <i class="fa-solid fa-closed-captioning me-1"></i> <?php echo htmlspecialchars(t('nav.transcription'), ENT_QUOTES, 'UTF-8'); ?>
                             </a>
                         </li>
                         <li>
                             <a class="dropdown-item" href="/admin/safeguarding/dbs">
-                                <i class="fa-solid fa-user-shield me-1"></i> Safeguarding (DBS)
+                                <i class="fa-solid fa-user-shield me-1"></i> <?php echo htmlspecialchars(t('nav.safeguarding'), ENT_QUOTES, 'UTF-8'); ?>
                             </a>
                         </li>
                         <li>
                             <a class="dropdown-item" href="/admin/decision-cards">
-                                <i class="fa-solid fa-hand-holding-heart me-1"></i> Decision Cards
+                                <i class="fa-solid fa-hand-holding-heart me-1"></i> <?php echo htmlspecialchars(t('nav.decision_cards'), ENT_QUOTES, 'UTF-8'); ?>
                             </a>
                         </li>
                         <?php if (App::isUmbrellaAdmin() === true): ?>
                         <li><hr class="dropdown-divider"></li>
                         <li>
                             <a class="dropdown-item" href="/admin/sites">
-                                <i class="fa-solid fa-sitemap me-1"></i> Sites
+                                <i class="fa-solid fa-sitemap me-1"></i> <?php echo htmlspecialchars(t('nav.sites'), ENT_QUOTES, 'UTF-8'); ?>
                             </a>
                         </li>
                         <?php endif; ?>

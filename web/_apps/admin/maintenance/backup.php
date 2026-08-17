@@ -21,7 +21,7 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.0.0
+ * @version   1.0.1
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/227
  * -----------------------------------------------------------------------------
  */
@@ -70,8 +70,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } elseif ($action === 'restore_table') {
             $name  = (string) ($_POST['name']  ?? '');
             $table = (string) ($_POST['table'] ?? '');
-            if ($name === '' || $table === '') {
-                $flash = 'Missing snapshot name or table.';
+            // 🛡️ Same traversal guard the 'delete' branch below applies to
+            //    $_POST['name'] — reject any '/' or '..' before it's used
+            //    to build a filesystem path.
+            if ($name === '' || $table === '' || str_contains($name, '/') || str_contains($name, '..')) {
+                $flash = 'Missing or invalid snapshot name or table.';
                 $flashType = 'danger';
             } else {
                 Maintenance::setActive(
@@ -97,8 +100,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         } elseif ($action === 'restore_full') {
             $name = (string) ($_POST['name'] ?? '');
-            if ($name === '') {
-                $flash = 'Missing snapshot name.';
+            // 🛡️ Same traversal guard as 'delete' / 'restore_table' above.
+            if ($name === '' || str_contains($name, '/') || str_contains($name, '..')) {
+                $flash = 'Missing or invalid snapshot name.';
                 $flashType = 'danger';
             } else {
                 Maintenance::setActive(

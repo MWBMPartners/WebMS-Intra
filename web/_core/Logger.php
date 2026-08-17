@@ -14,6 +14,7 @@
  * @package    Portal\Core
  * @author     Cambridge SDA
  * @license   All Rights Reserved
+ * @version   1.0.1
  * -----------------------------------------------------------------------------
  */
 
@@ -385,14 +386,36 @@ class Logger
     private static function requestHeaders(): array
     {
         if (function_exists('getallheaders') === true) {
-            return getallheaders();
+            $headers = getallheaders();
+        } else {
+            // Fallback for non-Apache SAPIs
+            $headers = [];
+            foreach ($_SERVER as $name => $value) {
+                if (str_starts_with($name, 'HTTP_') === true) {
+                    $key           = str_replace('_', '-', substr($name, 5));
+                    $headers[$key] = $value;
+                }
+            }
         }
-        // Fallback for non-Apache SAPIs
-        $headers = [];
-        foreach ($_SERVER as $name => $value) {
-            if (str_starts_with($name, 'HTTP_') === true) {
-                $key           = str_replace('_', '-', substr($name, 5));
-                $headers[$key] = $value;
+        return self::redactSensitiveHeaders($headers);
+    }
+
+    /**
+     * 🔒 Redact credential-bearing headers before they are persisted to
+     * tblActivityLogs / tblErrors / DbBackup snapshots. Bearer tokens,
+     * session cookies, CSRF tokens and API keys must never land in plain
+     * text in logs. Mirrors the csrf_token/oauth_state/oauth_nonce scrub
+     * already applied to session snapshots in activity() above.
+     *
+     * @param array<string, string> $headers
+     * @return array<string, string>
+     */
+    private static function redactSensitiveHeaders(array $headers): array
+    {
+        static $sensitive = ['authorization', 'cookie', 'x-csrf-token', 'x-api-key'];
+        foreach ($headers as $name => $value) {
+            if (in_array(strtolower((string) $name), $sensitive, true) === true) {
+                $headers[$name] = '[redacted]';
             }
         }
         return $headers;

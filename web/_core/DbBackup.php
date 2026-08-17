@@ -32,7 +32,7 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.0.0
+ * @version   1.0.1
  * -----------------------------------------------------------------------------
  */
 
@@ -381,8 +381,37 @@ class DbBackup
      */
     public function restoreTable(string $snapshotPath, string $table): array
     {
-        $file = rtrim($snapshotPath, DIRECTORY_SEPARATOR)
-              . DIRECTORY_SEPARATOR . $table . '.json';
+        // 🛡️ Validate the table identifier FIRST — before it is ever used
+        //     to build a filesystem path or interpolated into SQL. Moved
+        //     ahead of the file read (was previously checked only after
+        //     file_get_contents(), which is too late to matter for this
+        //     value but was the wrong order to reason about safely).
+        if (preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/', $table) !== 1) {
+            return [
+                'success'       => false,
+                'rows_restored' => 0,
+                'error'         => 'Invalid table identifier: ' . $table,
+            ];
+        }
+
+        // 🛡️ Path-traversal guard — resolve $snapshotPath with realpath()
+        //     and reject anything that doesn't land inside backupsRoot
+        //     (e.g. a forged `name` containing `../../_auth_keys`) before
+        //     any file is opened.
+        $resolvedRoot     = realpath($this->backupsRoot);
+        $resolvedSnapshot = realpath(rtrim($snapshotPath, DIRECTORY_SEPARATOR));
+        if ($resolvedRoot === false
+            || $resolvedSnapshot === false
+            || str_starts_with($resolvedSnapshot . DIRECTORY_SEPARATOR, $resolvedRoot . DIRECTORY_SEPARATOR) === false
+        ) {
+            return [
+                'success'       => false,
+                'rows_restored' => 0,
+                'error'         => 'Invalid snapshot path.',
+            ];
+        }
+
+        $file = $resolvedSnapshot . DIRECTORY_SEPARATOR . $table . '.json';
         if (is_readable($file) === false) {
             return [
                 'success'       => false,
@@ -407,13 +436,6 @@ class DbBackup
                 'success'       => false,
                 'rows_restored' => 0,
                 'error'         => 'Snapshot file malformed: ' . $file,
-            ];
-        }
-        if (preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/', $table) !== 1) {
-            return [
-                'success'       => false,
-                'rows_restored' => 0,
-                'error'         => 'Invalid table identifier: ' . $table,
             ];
         }
 

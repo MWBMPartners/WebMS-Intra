@@ -15,7 +15,7 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   0.7.0
+ * @version   0.7.1
  * -----------------------------------------------------------------------------
  */
 
@@ -35,6 +35,15 @@ return [
     'nav.user_management'   => 'User Management',
     'nav.migrations'        => 'Migrations',
     'nav.settings'          => 'Settings',
+    'nav.audit_trail'       => 'Audit Trail',
+    'nav.apps'              => 'Apps',
+    'nav.reports'           => 'Reports',
+    'nav.workflows'         => 'Workflows',
+    'nav.sms'               => 'SMS',
+    'nav.transcription'     => 'Transcription',
+    'nav.safeguarding'      => 'Safeguarding (DBS)',
+    'nav.decision_cards'    => 'Decision Cards',
+    'nav.sites'             => 'Sites',
     'nav.my_account'        => 'My Account',
     'nav.sign_in'           => 'Sign In',
     'nav.sign_out'          => 'Sign Out',
@@ -284,6 +293,7 @@ return [
     'error.db_add_setting'                 => 'Database error adding setting.',
     'error.db_create_role'                 => 'Database error creating role.',
     'error.db_import_prepare'              => 'Database error preparing insert.',
+    'error.db_export_activity'             => 'Database error exporting activity log.',
     'error.db_with_detail'                 => 'Database error: :detail',
     'error.csrf_failed'                    => 'CSRF check failed.',
     'error.umbrella_admin_only'            => 'Access denied. Umbrella admin privileges required.',
