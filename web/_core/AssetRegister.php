@@ -354,6 +354,89 @@
  *      one `reasons[]` array per row, so an asset the viewer both owns AND
  *      currently has on loan appears once, not twice.
  *
+ *  12. Reminder sweep + value dashboard (#405 / #408, Phase 2 Pass 3).
+ *      `listDueMaintenanceReminders()`/`listExpiringWarranties()`/
+ *      `listExpiringInsurance()` are the three "due within N days" read
+ *      helpers behind the `#405` cron sweep — each takes an explicit
+ *      `$siteId` (the cron iterates every site, calling
+ *      `Site::forceContext()` before any audit-writing call, but these
+ *      three reads never depend on ambient `Site::id()` themselves) and an
+ *      explicit `$leadDays`, matching items whose relevant date falls in
+ *      `[today, today+leadDays]` inclusive — never anything ALREADY
+ *      overdue (maintenance's own overdue case stays visible via
+ *      `listUpcomingMaintenance()`'s existing `isOverdue` flag; that's a
+ *      management view, not a one-shot reminder). `listOverdueLoans()` is a
+ *      thin wrapper over the existing `listLoans($siteId, ['overdueOnly'
+ *      => true], true)` (point 5 above) — `$includeConfidential = true`
+ *      because this is a system sweep with full visibility, mirroring
+ *      `listLoansForAsset()`'s own "nothing left to restrict" rationale.
+ *      `resolveReminderRecipients()` resolves a due item's audience from
+ *      the ASSET'S OWN `siteID` (looked up fresh, never the caller's
+ *      ambient site — safe to call regardless of which site the cron has
+ *      currently forced) — direct/dept/group `tblAssetOwners` rows
+ *      carrying the requested authority flag (`'maintenance'` →
+ *      `isMaintenanceAuthority`, `'lending'` → `isLendingAuthority`; any
+ *      other value skips the owner-authority join entirely) PLUS, always,
+ *      every active site admin/root-admin/site-root-admin/asset_manager
+ *      role-holder as a fallback audience — mirrors `found-save.php`'s own
+ *      admin-notify query (see that file's header) widened to the full
+ *      4-tier hierarchy `App::isAdmin()` checks. `resolveLoanCounterpartyEmail()`
+ *      is a small companion helper — resolves ONE loan row's own
+ *      borrower/lender contact address (`counterpartyUserID` →
+ *      `tblUsers.emailAddress`, `counterpartyOrgID` →
+ *      `tblAssetOrgs.contactEmail`, or the free-text `counterpartyContact`
+ *      when `counterpartyType = 'other'`, each independently
+ *      `FILTER_VALIDATE_EMAIL`'d) — the cron's loan-overdue reminder unions
+ *      this with `resolveReminderRecipients($assetId, 'lending')` so the
+ *      mail reaches the lending authority AND the actual counterparty,
+ *      never a wider audience (see #405's security musts). Every reminder
+ *      the cron sends is single-shot via `tblAssetReminderLog`'s
+ *      `uq_astrl_ref` unique key (`refType`, `refID`, `dueDate`) — the cron
+ *      checks-then-inserts, catching `\mysqli_sql_exception` on the INSERT
+ *      as the concurrency backstop (same duplicate-catch shape as
+ *      `addIdentifier()`/`assignToEvent()`) — and every send is audited via
+ *      `self::audit()` with `actorType: 'system'`, action `'reminder'`
+ *      (deliberately NOT in the `['create','update','delete']` set
+ *      `audit()` mirrors into `tblAuditTrail` for — a reminder is an EVENT,
+ *      same convention as the `'scan'`/`'print'` events in points 8-9
+ *      above). `persistCurrentValues()` closes the "currentValuePence
+ *      never written" gap `computeStraightLineValue()`'s own doc flagged
+ *      as Phase-3 work (point 6 above) — for every `'straight-line'` asset
+ *      on a site, computes today's value via that SAME pure helper and
+ *      writes it to `tblAssets.currentValuePence`/`valuationDate` via a
+ *      narrow two-column UPDATE (never the full `updateAsset()` field-set,
+ *      which would misleadingly diff every OTHER column too) — an asset
+ *      the pure helper can't compute a value for (missing cost/life/
+ *      purchase-date, or not `'straight-line'`) is simply left untouched,
+ *      never zeroed or guessed. No per-row audit call (routine bulk
+ *      housekeeping — mirrors `purgeExpiredFoundReports()`/
+ *      `purgeExpiredScanLog()`'s own no-audit convention, points 8/11
+ *      above); the cron's own aggregate `Logger::activity()` call covers
+ *      the run. `valueSummaryForSite()`/`depreciationReportRows()` feed
+ *      the `#408` `_apps/assets/value-report.php` screen — both PREFER
+ *      each asset's persisted `currentValuePence` (written by
+ *      `persistCurrentValues()` above) and fall back to a live
+ *      `computeStraightLineValue()` estimate only when nothing has been
+ *      persisted yet, exactly like `item.php`'s own existing depreciation
+ *      readout; an asset that simply isn't computable (reducing-balance,
+ *      or a straight-line asset missing an input) is counted separately
+ *      (`notValuedCount`) rather than folded into a total as if it were
+ *      zero. `valueSummaryForSite()` also totals `insuredValuePence` and
+ *      derives an insurance-gap figure (insured − current, only over
+ *      assets where BOTH are known), grouped by category and by status.
+ *      The four insurance columns feeding this section —
+ *      `insurerName`/`insurancePolicyNumber`/`insuredValuePence`/
+ *      `insuranceRenewalDate` (added to `tblAssets` by migration 160) —
+ *      are ALSO now wired into `createAsset()`/`updateAsset()`'s `$fields`
+ *      maps (this pass is the first to actually persist them) and into
+ *      `item.php`'s `$privileged`-gated readout (admin/asset_manager/
+ *      `isResponsibleFor()` — the SAME gate as the Ownership & legal
+ *      vault, point 8 above, since a policy number/insured value sits at
+ *      roughly that same sensitivity). Neither total in this section
+ *      currency-converts — every pence figure is summed as-is, matching
+ *      the register's existing single-reporting-currency assumption (see
+ *      `_apps/assets/index.php`'s own CSV export, which hard-codes "(GBP)").
+ *
  * All queries are MySQLi prepared statements via `App::db()` — never
  * string-interpolated user input (house rule, .claude/CLAUDE.md → Code Style).
  *
@@ -361,7 +444,7 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.8.0
+ * @version   1.9.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/393
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/394
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/395
@@ -373,6 +456,8 @@
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/401
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/402
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/404
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/405
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/408
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/409
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/410
  * -----------------------------------------------------------------------------
@@ -1612,10 +1697,14 @@ class AssetRegister
      *   warrantyExpiry, warrantyDetails, licenseKey (PLAINTEXT — this method
      *   encrypts it), licenseSeats, renewalDate, accessUrl,
      *   depreciationMethod, usefulLifeMonths, salvageValuePence,
-     *   isConfidential, publicPageEnabled, parentAssetID, labelSymbology
-     *   (#404 — one of LABEL_SYMBOLOGIES; caller validates against that
-     *   allow-list before ever reaching here, same contract as every other
-     *   ENUM field in this list).
+     *   insurerName, insurancePolicyNumber, insuredValuePence (pence —
+     *   caller converts pounds→pence, same house convention as
+     *   purchaseCostPence/salvageValuePence), insuranceRenewalDate (#404
+     *   columns, first persisted this pass — #408), isConfidential,
+     *   publicPageEnabled, parentAssetID, labelSymbology (#404 — one of
+     *   LABEL_SYMBOLOGIES; caller validates against that allow-list before
+     *   ever reaching here, same contract as every other ENUM field in
+     *   this list).
      *
      * Caller contract: every field must already be validated/coerced to its
      * correct PHP type (int|string|null, ENUM values checked against this
@@ -1668,6 +1757,14 @@ class AssetRegister
             'depreciationMethod' => [(string) ($data['depreciationMethod'] ?? 'none'), 's'],
             'usefulLifeMonths'   => [$data['usefulLifeMonths'] ?? null, 'i'],
             'salvageValuePence'  => [$data['salvageValuePence'] ?? null, 'i'],
+            // 🛡️ Insurance (#404 columns, first persisted this pass — #408).
+            // Same "caller already validated/coerced" contract as every
+            // other field in this method — save.php converts pounds→pence
+            // and validates the date before this array is ever built.
+            'insurerName'           => [$data['insurerName'] ?? null, 's'],
+            'insurancePolicyNumber' => [$data['insurancePolicyNumber'] ?? null, 's'],
+            'insuredValuePence'     => [$data['insuredValuePence'] ?? null, 'i'],
+            'insuranceRenewalDate'  => [$data['insuranceRenewalDate'] ?? null, 's'],
             'isConfidential'     => [(int) ($data['isConfidential'] ?? 0), 'i'],
             'publicToken'        => [$publicToken, 's'],
             'publicPageEnabled'  => [(int) ($data['publicPageEnabled'] ?? 1), 'i'],
@@ -1777,6 +1874,12 @@ class AssetRegister
             'depreciationMethod' => [(string) ($data['depreciationMethod'] ?? $old['depreciationMethod']), 's'],
             'usefulLifeMonths'   => [$data['usefulLifeMonths'] ?? null, 'i'],
             'salvageValuePence'  => [$data['salvageValuePence'] ?? null, 'i'],
+            // 🛡️ Insurance (#404 columns, first persisted this pass — #408)
+            // — same doc as createAsset()'s matching block above.
+            'insurerName'           => [$data['insurerName'] ?? null, 's'],
+            'insurancePolicyNumber' => [$data['insurancePolicyNumber'] ?? null, 's'],
+            'insuredValuePence'     => [$data['insuredValuePence'] ?? null, 'i'],
+            'insuranceRenewalDate'  => [$data['insuranceRenewalDate'] ?? null, 's'],
             'isConfidential'     => [(int) ($data['isConfidential'] ?? 0), 'i'],
             'publicPageEnabled'  => [(int) ($data['publicPageEnabled'] ?? 0), 'i'],
             'labelSymbology'     => [(string) ($data['labelSymbology'] ?? $old['labelSymbology']), 's'],
@@ -6516,5 +6619,604 @@ class AssetRegister
         foreach ($extra as $key => $value) {
             $rows[$assetId][$key] = $value;
         }
+    }
+
+    /* ==========================================================================
+     * ⏰ Reminder sweep read helpers (#405, Phase 2 Pass 3) — feed
+     * `_apps/cron/asset-reminders.php`. Every method here is explicitly
+     * `$siteId`-scoped (never ambient `Site::id()`) so the cron can iterate
+     * every site in one process. See class header point 12 for the full
+     * design rationale.
+     * ======================================================================== */
+
+    /**
+     * Scheduled maintenance whose `nextDueDate` falls within
+     * `[today, today+leadDays]` inclusive — extends `listUpcomingMaintenance()`
+     * (which returns EVERY scheduled item with any due date, past or
+     * future) down to just the items the #405 sweep should remind about
+     * today. Newest-due-first is wrong for a reminder feed, so this is
+     * ordered soonest-first, same as `listUpcomingMaintenance()`.
+     *
+     * @return array<int, array<string, mixed>> Each row: maintID, assetID,
+     *         title, maintType, nextDueDate, assetName, assetTagCode
+     */
+    public static function listDueMaintenanceReminders(int $siteId, int $leadDays): array
+    {
+        $db = App::db();
+        $leadDays = max(0, $leadDays);
+
+        $stmt = $db->prepare(
+            'SELECT m.maintID, m.assetID, m.title, m.maintType, m.nextDueDate, '
+            . '       a.name AS assetName, a.assetTagCode '
+            . 'FROM tblAssetMaintenance m '
+            . 'JOIN tblAssets a ON a.assetID = m.assetID AND a.isDeleted = 0 '
+            . "WHERE m.siteID = ? AND m.status = 'scheduled' AND m.nextDueDate IS NOT NULL "
+            . '  AND m.nextDueDate BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL ? DAY) '
+            . 'ORDER BY m.nextDueDate ASC'
+        );
+        if ($stmt === false) {
+            error_log('AssetRegister::listDueMaintenanceReminders() prepare failed: ' . $db->error);
+            return [];
+        }
+        $stmt->bind_param('ii', $siteId, $leadDays);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        $rows = [];
+        while ($row = $result->fetch_assoc()) {
+            $rows[] = $row;
+        }
+        $stmt->close();
+        return $rows;
+    }
+
+    /**
+     * Assets whose `warrantyExpiry` falls within `[today, today+leadDays]`
+     * inclusive.
+     *
+     * @return array<int, array<string, mixed>> Each row: assetID, name,
+     *         assetTagCode, warrantyExpiry
+     */
+    public static function listExpiringWarranties(int $siteId, int $leadDays): array
+    {
+        $db = App::db();
+        $leadDays = max(0, $leadDays);
+
+        $stmt = $db->prepare(
+            'SELECT assetID, name, assetTagCode, warrantyExpiry FROM tblAssets '
+            . 'WHERE siteID = ? AND isDeleted = 0 AND warrantyExpiry IS NOT NULL '
+            . '  AND warrantyExpiry BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL ? DAY) '
+            . 'ORDER BY warrantyExpiry ASC'
+        );
+        if ($stmt === false) {
+            error_log('AssetRegister::listExpiringWarranties() prepare failed: ' . $db->error);
+            return [];
+        }
+        $stmt->bind_param('ii', $siteId, $leadDays);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        $rows = [];
+        while ($row = $result->fetch_assoc()) {
+            $rows[] = $row;
+        }
+        $stmt->close();
+        return $rows;
+    }
+
+    /**
+     * Assets whose `insuranceRenewalDate` falls within
+     * `[today, today+leadDays]` inclusive (#404 columns).
+     *
+     * @return array<int, array<string, mixed>> Each row: assetID, name,
+     *         assetTagCode, insuranceRenewalDate, insurerName,
+     *         insurancePolicyNumber
+     */
+    public static function listExpiringInsurance(int $siteId, int $leadDays): array
+    {
+        $db = App::db();
+        $leadDays = max(0, $leadDays);
+
+        $stmt = $db->prepare(
+            'SELECT assetID, name, assetTagCode, insuranceRenewalDate, insurerName, insurancePolicyNumber '
+            . 'FROM tblAssets '
+            . 'WHERE siteID = ? AND isDeleted = 0 AND insuranceRenewalDate IS NOT NULL '
+            . '  AND insuranceRenewalDate BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL ? DAY) '
+            . 'ORDER BY insuranceRenewalDate ASC'
+        );
+        if ($stmt === false) {
+            error_log('AssetRegister::listExpiringInsurance() prepare failed: ' . $db->error);
+            return [];
+        }
+        $stmt->bind_param('ii', $siteId, $leadDays);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        $rows = [];
+        while ($row = $result->fetch_assoc()) {
+            $rows[] = $row;
+        }
+        $stmt->close();
+        return $rows;
+    }
+
+    /**
+     * Active loans past their `dueDate` — a thin wrapper over the existing
+     * `listLoans()` (#398) `overdueOnly` filter. `$includeConfidential =
+     * true` deliberately — this is a system sweep that needs to notify
+     * about every overdue loan regardless of the asset's confidentiality
+     * flag, mirroring `listLoansForAsset()`'s own "nothing left to
+     * restrict" rationale (see that method's doc).
+     *
+     * @return array<int, array<string, mixed>> Same row shape as listLoans()
+     */
+    public static function listOverdueLoans(int $siteId): array
+    {
+        return self::listLoans($siteId, ['overdueOnly' => true], true);
+    }
+
+    /**
+     * Resolve the email audience for a reminder about ONE asset. Derives
+     * the asset's own `siteID` fresh from `tblAssets` (never the caller's
+     * ambient `Site::id()`) so this is safe to call regardless of which
+     * site the cron currently has forced — see class header point 12.
+     *
+     * Two parts, both always attempted:
+     *   1. Owner-authority holders — direct/dept/group `tblAssetOwners`
+     *      rows carrying the flag `$authority` maps to (`'maintenance'` →
+     *      `isMaintenanceAuthority`, `'lending'` → `isLendingAuthority`;
+     *      any OTHER value, e.g. an insurance/warranty reminder that has
+     *      no dedicated owner-authority flag of its own, simply skips this
+     *      part entirely). Mirrors `canApproveLoan()`/
+     *      `canManageMaintenance()`'s own three joins (point 5/6 above).
+     *   2. Every active site admin/root-admin/site-root-admin/asset_manager
+     *      role-holder on this asset's site, as a fallback audience —
+     *      mirrors `found-save.php`'s own admin-notify query (see that
+     *      file's header), widened to the SAME 4-tier hierarchy
+     *      `App::isAdmin()` checks (found-save.php's version only checked
+     *      the legacy `tblUsers.isAdmin` flag).
+     *
+     * Every candidate address is independently `FILTER_VALIDATE_EMAIL`'d
+     * before being returned — a blank/malformed `emailAddress` on an
+     * otherwise-matching row is silently dropped, never mailed to.
+     *
+     * @return string[] De-duplicated, validated email addresses
+     */
+    public static function resolveReminderRecipients(int $assetId, string $authority): array
+    {
+        if ($assetId <= 0) {
+            return [];
+        }
+
+        $db = App::db();
+
+        // 🌐 Resolve the OWNING site fresh from the asset row itself —
+        // never Site::id() — so this method is correct no matter which
+        // site the caller currently has forced (or none at all).
+        $siteStmt = $db->prepare('SELECT siteID FROM tblAssets WHERE assetID = ? AND isDeleted = 0 LIMIT 1');
+        if ($siteStmt === false) {
+            return [];
+        }
+        $siteStmt->bind_param('i', $assetId);
+        $siteStmt->execute();
+        $siteRow = $siteStmt->get_result()->fetch_assoc();
+        $siteStmt->close();
+        if ($siteRow === null) {
+            return [];
+        }
+        $siteId = (int) $siteRow['siteID'];
+
+        $emails = [];
+
+        // 👤 1. Owner-authority holders (direct/dept/group), narrowed to a
+        // known OWNER_AUTHORITY_FIELDS column — see that constant's own
+        // doc for why a value drawn from this small closed allow-list (and
+        // ONLY from it) is safe to interpolate directly into the SQL below,
+        // exactly like setOwnerAuthority()'s own SET-clause column name.
+        $authorityColumn = match ($authority) {
+            'maintenance' => 'isMaintenanceAuthority',
+            'lending'     => 'isLendingAuthority',
+            default       => null,
+        };
+        if ($authorityColumn !== null && in_array($authorityColumn, self::OWNER_AUTHORITY_FIELDS, true) === true) {
+            $joins = [
+                // direct
+                'JOIN tblUsers u ON u.userID = o.userID WHERE o.assetID = ? AND o.partyType = "user" AND o.' . $authorityColumn . ' = 1',
+                // dept
+                'JOIN tblUserDepts ud ON ud.deptID = o.deptID JOIN tblUsers u ON u.userID = ud.userID WHERE o.assetID = ? AND o.partyType = "dept" AND o.' . $authorityColumn . ' = 1',
+                // group
+                'JOIN tblUserGroups ug ON ug.groupID = o.groupID JOIN tblUsers u ON u.userID = ug.userID WHERE o.assetID = ? AND o.partyType = "group" AND o.' . $authorityColumn . ' = 1',
+            ];
+            foreach ($joins as $joinSql) {
+                $stmt = $db->prepare(
+                    'SELECT DISTINCT u.emailAddress AS email FROM tblAssetOwners o '
+                    . $joinSql
+                    . ' AND u.isActive = 1 AND u.emailAddress IS NOT NULL AND u.emailAddress != ""'
+                );
+                if ($stmt !== false) {
+                    $stmt->bind_param('i', $assetId);
+                    $stmt->execute();
+                    $result = $stmt->get_result();
+                    while ($row = $result->fetch_assoc()) {
+                        $emails[] = (string) $row['email'];
+                    }
+                    $stmt->close();
+                }
+            }
+        }
+
+        // 🛡️ 2. Site admins / asset_manager role-holders — ALWAYS included
+        // as the fallback audience, regardless of whether part 1 above
+        // found anyone. Widens found-save.php's own admin-notify query
+        // (which only checked tblUsers.isAdmin) to the full 4-tier
+        // hierarchy App::isAdmin() checks (tblUsers.isRootAdmin,
+        // tblUserSites.isSiteAdmin/isSiteRootAdmin, legacy tblUsers.isAdmin)
+        // plus the asset_manager role.
+        $roleKey = 'asset_manager';
+        $stmt = $db->prepare(
+            'SELECT DISTINCT u.emailAddress AS email FROM tblUsers u '
+            . 'INNER JOIN tblUserSites us ON us.userID = u.userID AND us.siteID = ? AND us.isActive = 1 '
+            . 'LEFT JOIN tblUserRoles ur ON ur.userID = u.userID '
+            . 'LEFT JOIN tblRoles r ON r.roleID = ur.roleID '
+            . 'WHERE u.isActive = 1 AND u.emailAddress IS NOT NULL AND u.emailAddress != "" '
+            . 'AND (u.isAdmin = 1 OR u.isRootAdmin = 1 OR us.isSiteAdmin = 1 OR us.isSiteRootAdmin = 1 OR r.roleKey = ?)'
+        );
+        if ($stmt !== false) {
+            $stmt->bind_param('is', $siteId, $roleKey);
+            $stmt->execute();
+            $result = $stmt->get_result();
+            while ($row = $result->fetch_assoc()) {
+                $emails[] = (string) $row['email'];
+            }
+            $stmt->close();
+        }
+
+        // 🧼 De-duplicate AND validate every candidate before returning —
+        // callers (the cron) still validate again at send-time, but this
+        // method's own contract is "a clean, ready-to-mail list".
+        $emails = array_values(array_unique($emails));
+        return array_values(array_filter(
+            $emails,
+            static fn (string $e): bool => filter_var($e, FILTER_VALIDATE_EMAIL) !== false
+        ));
+    }
+
+    /**
+     * Resolve ONE loan's own counterparty (borrower/lender) contact
+     * address — companion to resolveReminderRecipients() for the
+     * loan-overdue reminder family, which must reach the actual
+     * counterparty on top of the lending authority (see #405's security
+     * musts — loan-overdue mail is scoped narrower than the other three
+     * families). Mirrors listLoans()'s own `counterpartyDisplayName`
+     * resolution (point 5 above) but returns a mailable address instead
+     * of a display name.
+     *
+     * @param array<string, mixed> $loan A row from listLoans()/
+     *        listOverdueLoans() — must carry counterpartyType,
+     *        counterpartyUserID, counterpartyOrgID, counterpartyContact.
+     *
+     * @return string|null A validated email address, or null when the
+     *         counterparty has no usable one on file
+     */
+    public static function resolveLoanCounterpartyEmail(array $loan): ?string
+    {
+        $db = App::db();
+        $type = (string) ($loan['counterpartyType'] ?? '');
+
+        if ($type === 'user' && ($loan['counterpartyUserID'] ?? null) !== null) {
+            $userId = (int) $loan['counterpartyUserID'];
+            $stmt = $db->prepare(
+                'SELECT emailAddress FROM tblUsers WHERE userID = ? AND isActive = 1 '
+                . 'AND emailAddress IS NOT NULL AND emailAddress != "" LIMIT 1'
+            );
+            if ($stmt !== false) {
+                $stmt->bind_param('i', $userId);
+                $stmt->execute();
+                $row = $stmt->get_result()->fetch_assoc();
+                $stmt->close();
+                $email = $row !== null ? (string) $row['emailAddress'] : null;
+                return ($email !== null && filter_var($email, FILTER_VALIDATE_EMAIL) !== false) ? $email : null;
+            }
+            return null;
+        }
+
+        if ($type === 'org' && ($loan['counterpartyOrgID'] ?? null) !== null) {
+            $orgId = (int) $loan['counterpartyOrgID'];
+            $stmt = $db->prepare(
+                'SELECT contactEmail FROM tblAssetOrgs WHERE orgID = ? AND isActive = 1 '
+                . 'AND contactEmail IS NOT NULL AND contactEmail != "" LIMIT 1'
+            );
+            if ($stmt !== false) {
+                $stmt->bind_param('i', $orgId);
+                $stmt->execute();
+                $row = $stmt->get_result()->fetch_assoc();
+                $stmt->close();
+                $email = $row !== null ? (string) $row['contactEmail'] : null;
+                return ($email !== null && filter_var($email, FILTER_VALIDATE_EMAIL) !== false) ? $email : null;
+            }
+            return null;
+        }
+
+        if ($type === 'other') {
+            $contact = trim((string) ($loan['counterpartyContact'] ?? ''));
+            return ($contact !== '' && filter_var($contact, FILTER_VALIDATE_EMAIL) !== false) ? $contact : null;
+        }
+
+        return null;
+    }
+
+    /**
+     * For every `'straight-line'`-depreciation asset on a site, compute
+     * today's value via the existing pure `computeStraightLineValue()`
+     * helper (point 6 above, unchanged) and persist it to
+     * `tblAssets.currentValuePence`/`valuationDate` — a narrow two-column
+     * UPDATE, never the full `updateAsset()` field-set (which would
+     * misleadingly diff every other column too, and would require a real
+     * `$actorUserId` for a system-driven bulk write). An asset the pure
+     * helper can't compute a value for (missing purchaseCostPence/
+     * usefulLifeMonths/purchaseDate) is left completely untouched — never
+     * zeroed, never guessed, matching computeStraightLineValue()'s own
+     * "return null rather than invent" contract.
+     *
+     * Deliberately no per-row `self::audit()` call — routine bulk
+     * housekeeping, mirroring `purgeExpiredFoundReports()`/
+     * `purgeExpiredScanLog()`'s own no-audit convention (points 8/11
+     * above); the cron caller's own aggregate `Logger::activity()` call
+     * covers the run.
+     *
+     * @return int Count of assets whose currentValuePence/valuationDate
+     *         were actually written this call
+     */
+    public static function persistCurrentValues(int $siteId): int
+    {
+        $db = App::db();
+
+        $stmt = $db->prepare(
+            'SELECT assetID, purchaseCostPence, usefulLifeMonths, purchaseDate, salvageValuePence, depreciationMethod '
+            . "FROM tblAssets WHERE siteID = ? AND isDeleted = 0 AND depreciationMethod = 'straight-line'"
+        );
+        if ($stmt === false) {
+            error_log('AssetRegister::persistCurrentValues() prepare failed: ' . $db->error);
+            return 0;
+        }
+        $stmt->bind_param('i', $siteId);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        $assets = [];
+        while ($row = $result->fetch_assoc()) {
+            $assets[] = $row;
+        }
+        $stmt->close();
+
+        $today = date('Y-m-d');
+        $written = 0;
+
+        foreach ($assets as $asset) {
+            $value = self::computeStraightLineValue($asset, $today);
+            if ($value === null) {
+                // 🛟 Not computable (missing an input) — never invented,
+                // never zeroed. Leave the row exactly as it was.
+                continue;
+            }
+
+            $assetId = (int) $asset['assetID'];
+            // 🕒 Self-assign updatedAt to SUPPRESS its `ON UPDATE
+            //    CURRENT_TIMESTAMP` auto-bump — this is a daily system
+            //    housekeeping write (valuationDate = today changes every
+            //    day), and without this every straight-line asset's
+            //    updatedAt would move daily, churning listForSite()'s
+            //    `ORDER BY updatedAt DESC` and making the register's
+            //    "recently updated" order meaningless. Explicitly setting
+            //    the column (even to its own value) suppresses the auto-
+            //    update on both MySQL 8 and MariaDB.
+            $upd = $db->prepare(
+                'UPDATE tblAssets SET currentValuePence = ?, valuationDate = ?, updatedAt = updatedAt '
+                . 'WHERE assetID = ? AND siteID = ?'
+            );
+            if ($upd === false) {
+                continue;
+            }
+            $upd->bind_param('isii', $value, $today, $assetId, $siteId);
+            $upd->execute();
+            if ($upd->affected_rows > 0) {
+                $written++;
+            }
+            $upd->close();
+        }
+
+        return $written;
+    }
+
+    /* ==========================================================================
+     * 📊 Value dashboard (#408, Phase 2 Pass 3) — feed
+     * `_apps/assets/value-report.php`. See class header point 12.
+     * ======================================================================== */
+
+    /**
+     * Register-wide value totals for a site, grouped by category and by
+     * status. For each asset, "current value" PREFERS the persisted
+     * `currentValuePence` (written by `persistCurrentValues()` above) and
+     * falls back to a live `computeStraightLineValue()` estimate only when
+     * nothing has been persisted yet — an asset that's simply not
+     * computable (reducing-balance, or a straight-line asset missing an
+     * input) is counted in `notValuedCount` rather than folded into a
+     * total as if it were zero (mirrors computeStraightLineValue()'s own
+     * "never invent" contract). `insuranceGapPence` sums (insured −
+     * current) ONLY over assets where BOTH figures are known — an asset
+     * with no insured value recorded, or no computable current value,
+     * contributes nothing to that figure either way. No currency
+     * conversion — see class header point 12's closing note.
+     *
+     * @return array{
+     *   totals: array{assetCount:int, purchaseCostPence:int, currentValuePence:int,
+     *     notValuedCount:int, insuredValuePence:int, insuredAssetCount:int,
+     *     insuranceGapPence:int, underInsuredCount:int},
+     *   byCategory: array<int, array<string, mixed>>,
+     *   byStatus: array<int, array<string, mixed>>
+     * }
+     */
+    public static function valueSummaryForSite(int $siteId): array
+    {
+        $db = App::db();
+
+        $stmt = $db->prepare(
+            'SELECT a.assetID, a.status, a.categoryID, c.categoryName, '
+            . '       a.purchaseCostPence, a.currentValuePence, a.depreciationMethod, '
+            . '       a.usefulLifeMonths, a.salvageValuePence, a.purchaseDate, a.insuredValuePence '
+            . 'FROM tblAssets a LEFT JOIN tblAssetCategories c ON c.categoryID = a.categoryID '
+            . 'WHERE a.siteID = ? AND a.isDeleted = 0'
+        );
+        if ($stmt === false) {
+            error_log('AssetRegister::valueSummaryForSite() prepare failed: ' . $db->error);
+            return ['totals' => [], 'byCategory' => [], 'byStatus' => []];
+        }
+        $stmt->bind_param('i', $siteId);
+        $stmt->execute();
+        $result = $stmt->get_result();
+
+        $totals = [
+            'assetCount' => 0, 'purchaseCostPence' => 0, 'currentValuePence' => 0,
+            'notValuedCount' => 0, 'insuredValuePence' => 0, 'insuredAssetCount' => 0,
+            'insuranceGapPence' => 0, 'underInsuredCount' => 0,
+        ];
+        $byCategory = [];
+        $byStatus = [];
+
+        while ($row = $result->fetch_assoc()) {
+            $totals['assetCount']++;
+
+            $purchase = $row['purchaseCostPence'] !== null ? (int) $row['purchaseCostPence'] : 0;
+            $totals['purchaseCostPence'] += $purchase;
+
+            $current = $row['currentValuePence'] !== null
+                ? (int) $row['currentValuePence']
+                : self::computeStraightLineValue($row);
+
+            if ($current === null) {
+                $totals['notValuedCount']++;
+            } else {
+                $totals['currentValuePence'] += $current;
+            }
+
+            $insured = $row['insuredValuePence'] !== null ? (int) $row['insuredValuePence'] : null;
+            if ($insured !== null) {
+                $totals['insuredValuePence'] += $insured;
+                $totals['insuredAssetCount']++;
+                if ($current !== null) {
+                    $totals['insuranceGapPence'] += ($insured - $current);
+                    if ($insured < $current) {
+                        $totals['underInsuredCount']++;
+                    }
+                }
+            }
+
+            $catKey  = $row['categoryID'] !== null ? (int) $row['categoryID'] : 0;
+            $catName = $row['categoryName'] !== null ? (string) $row['categoryName'] : 'Uncategorised';
+            if (isset($byCategory[$catKey]) === false) {
+                $byCategory[$catKey] = [
+                    'categoryID' => $catKey, 'categoryName' => $catName, 'assetCount' => 0,
+                    'purchaseCostPence' => 0, 'currentValuePence' => 0, 'insuredValuePence' => 0,
+                    'notValuedCount' => 0,
+                ];
+            }
+            $byCategory[$catKey]['assetCount']++;
+            $byCategory[$catKey]['purchaseCostPence'] += $purchase;
+            if ($current !== null) {
+                $byCategory[$catKey]['currentValuePence'] += $current;
+            } else {
+                $byCategory[$catKey]['notValuedCount']++;
+            }
+            if ($insured !== null) {
+                $byCategory[$catKey]['insuredValuePence'] += $insured;
+            }
+
+            $statKey = (string) $row['status'];
+            if (isset($byStatus[$statKey]) === false) {
+                $byStatus[$statKey] = [
+                    'status' => $statKey, 'assetCount' => 0,
+                    'purchaseCostPence' => 0, 'currentValuePence' => 0, 'insuredValuePence' => 0,
+                    'notValuedCount' => 0,
+                ];
+            }
+            $byStatus[$statKey]['assetCount']++;
+            $byStatus[$statKey]['purchaseCostPence'] += $purchase;
+            if ($current !== null) {
+                $byStatus[$statKey]['currentValuePence'] += $current;
+            } else {
+                $byStatus[$statKey]['notValuedCount']++;
+            }
+            if ($insured !== null) {
+                $byStatus[$statKey]['insuredValuePence'] += $insured;
+            }
+        }
+        $stmt->close();
+
+        $byCategoryList = array_values($byCategory);
+        usort($byCategoryList, static fn (array $x, array $y): int => strcmp((string) $x['categoryName'], (string) $y['categoryName']));
+        $byStatusList = array_values($byStatus);
+        usort($byStatusList, static fn (array $x, array $y): int => strcmp((string) $x['status'], (string) $y['status']));
+
+        return ['totals' => $totals, 'byCategory' => $byCategoryList, 'byStatus' => $byStatusList];
+    }
+
+    /**
+     * Per-asset depreciation report rows — name, category, purchase cost,
+     * method, current value (persisted-preferred, live-estimate fallback,
+     * same rule as valueSummaryForSite() above), % depreciated, and
+     * insured value. `isEstimate` distinguishes a persisted valuation from
+     * a live-computed one so the UI can label it accordingly (never
+     * presented as more authoritative than it is).
+     *
+     * @return array<int, array<string, mixed>> Each row: assetID, name,
+     *         assetTagCode, categoryName, purchaseCostPence,
+     *         depreciationMethod, currentValuePence (nullable),
+     *         isEstimate (bool), valuationDate (nullable),
+     *         pctDepreciated (nullable float), insuredValuePence (nullable)
+     */
+    public static function depreciationReportRows(int $siteId): array
+    {
+        $db = App::db();
+
+        $stmt = $db->prepare(
+            'SELECT a.assetID, a.name, a.assetTagCode, c.categoryName, a.purchaseCostPence, '
+            . '       a.depreciationMethod, a.usefulLifeMonths, a.salvageValuePence, a.purchaseDate, '
+            . '       a.currentValuePence, a.valuationDate, a.insuredValuePence '
+            . 'FROM tblAssets a LEFT JOIN tblAssetCategories c ON c.categoryID = a.categoryID '
+            . 'WHERE a.siteID = ? AND a.isDeleted = 0 '
+            . 'ORDER BY a.name ASC'
+        );
+        if ($stmt === false) {
+            error_log('AssetRegister::depreciationReportRows() prepare failed: ' . $db->error);
+            return [];
+        }
+        $stmt->bind_param('i', $siteId);
+        $stmt->execute();
+        $result = $stmt->get_result();
+
+        $rows = [];
+        while ($row = $result->fetch_assoc()) {
+            $persisted = $row['currentValuePence'] !== null ? (int) $row['currentValuePence'] : null;
+            $current   = $persisted ?? self::computeStraightLineValue($row);
+            $purchase  = $row['purchaseCostPence'] !== null ? (int) $row['purchaseCostPence'] : null;
+
+            $pctDepreciated = null;
+            if ($purchase !== null && $purchase > 0 && $current !== null) {
+                $pctDepreciated = round((($purchase - $current) / $purchase) * 100, 1);
+            }
+
+            $rows[] = [
+                'assetID'            => (int) $row['assetID'],
+                'name'               => (string) $row['name'],
+                'assetTagCode'       => $row['assetTagCode'],
+                'categoryName'       => $row['categoryName'],
+                'purchaseCostPence'  => $purchase,
+                'depreciationMethod' => (string) $row['depreciationMethod'],
+                'currentValuePence'  => $current,
+                'isEstimate'         => $persisted === null && $current !== null,
+                'valuationDate'      => $persisted !== null ? $row['valuationDate'] : null,
+                'pctDepreciated'     => $pctDepreciated,
+                'insuredValuePence'  => $row['insuredValuePence'] !== null ? (int) $row['insuredValuePence'] : null,
+            ];
+        }
+        $stmt->close();
+
+        return $rows;
     }
 }

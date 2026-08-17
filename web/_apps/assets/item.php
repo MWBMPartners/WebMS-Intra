@@ -140,11 +140,21 @@
  * daily-count sparkbar built from `AssetRegister::scanStats()` with plain
  * flexbox + inline computed heights — no JS chart library.
  *
+ * INSURANCE panel (#404 columns, first surfaced this pass — #408) —
+ * `$privileged`-gated, the SAME admin/asset_manager/`isResponsibleFor()`
+ * gate as the Ownership & legal vault panel immediately above it (a
+ * policy number/insured value sits at roughly that same sensitivity —
+ * never shown to a plain logged-in viewer who merely reached this page).
+ * Only rendered when at least one of the four fields is actually set.
+ * Read-only here — editing lives on `edit.php`/`save.php`. Flags an
+ * "under-insured" badge when `insuredValuePence` is below the existing
+ * Depreciation card's `$estimatedCurrentValuePence` readout.
+ *
  * @package   Portal\Assets
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.5.0
+ * @version   1.6.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/393
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/394
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/396
@@ -152,6 +162,8 @@
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/398
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/399
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/400
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/404
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/408
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/409
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/410
  * -----------------------------------------------------------------------------
@@ -2009,6 +2021,38 @@ $nonce = htmlspecialchars(App::cspNonce(), ENT_QUOTES, 'UTF-8');
                 <button type="submit" class="btn btn-warning btn-sm"><i class="fa-solid fa-lock me-1"></i>Upload confidential document</button>
             </div>
         </form>
+    </div>
+</div>
+<?php endif; ?>
+
+<!-- 🛡️ Insurance (#404 columns, first surfaced this pass — #408).
+     $privileged-gated — the SAME admin/asset_manager/isResponsibleFor()
+     gate as the Ownership & legal vault immediately above, since a
+     policy number/insured value sits at roughly that same sensitivity
+     (never shown to a plain logged-in viewer who merely reached this
+     page). Only rendered at all when at least ONE insurance field is
+     actually set, so an asset with no insurance recorded doesn't show an
+     empty card. -->
+<?php if ($privileged === true
+    && ($asset['insurerName'] !== null || $asset['insurancePolicyNumber'] !== null
+        || $asset['insuredValuePence'] !== null || $asset['insuranceRenewalDate'] !== null)
+): ?>
+<div class="card mb-3">
+    <div class="card-header"><h2 class="h5 mb-0"><i class="fa-solid fa-shield-halved me-2"></i>Insurance</h2></div>
+    <div class="card-body row g-3">
+        <div class="col-md-3"><strong>Insurer</strong><br><?php echo $asset['insurerName'] !== null ? htmlspecialchars((string) $asset['insurerName'], ENT_QUOTES, 'UTF-8') : '<span class="text-muted">—</span>'; ?></div>
+        <div class="col-md-3"><strong>Policy number</strong><br><?php echo $asset['insurancePolicyNumber'] !== null ? htmlspecialchars((string) $asset['insurancePolicyNumber'], ENT_QUOTES, 'UTF-8') : '<span class="text-muted">—</span>'; ?></div>
+        <div class="col-md-3"><strong>Insured value</strong><br>
+            <?php echo $asset['insuredValuePence'] !== null
+                ? htmlspecialchars((string) $asset['currency'], ENT_QUOTES, 'UTF-8') . ' ' . number_format(((int) $asset['insuredValuePence']) / 100, 2)
+                : '<span class="text-muted">—</span>'; ?>
+        </div>
+        <div class="col-md-3"><strong>Renewal date</strong><br><?php echo $asset['insuranceRenewalDate'] !== null ? htmlspecialchars((string) $asset['insuranceRenewalDate'], ENT_QUOTES, 'UTF-8') : '<span class="text-muted">—</span>'; ?></div>
+        <?php if ($estimatedCurrentValuePence !== null && $asset['insuredValuePence'] !== null && (int) $asset['insuredValuePence'] < $estimatedCurrentValuePence): ?>
+            <div class="col-12">
+                <span class="badge bg-danger"><i class="fa-solid fa-triangle-exclamation me-1"></i>Under-insured — insured value is below the estimated current value</span>
+            </div>
+        <?php endif; ?>
     </div>
 </div>
 <?php endif; ?>
