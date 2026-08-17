@@ -17,14 +17,29 @@
  * actually posted regardless of `assetKind`, so the toggle never gates
  * anything security-relevant; it's a UI convenience, not a validation rule.
  *
+ * "Label symbology" (#404) picks which barcode `AssetRegister::buildLabelSheets()`
+ * prints on this asset's Label Designer labels — see
+ * `AssetRegister::LABEL_SYMBOLOGIES`/`LABEL_SYMBOLOGY_LABELS` for the
+ * allow-list and `save.php` for the server-side validation (never trust
+ * this `<select>`'s posted value alone).
+ *
+ * INSURANCE (#404 columns, first editable this pass — #408): insurerName/
+ * insurancePolicyNumber/insuredValuePounds/insuranceRenewalDate. No EXTRA
+ * gate beyond this whole page's own admin/asset_manager one — unlike
+ * `item.php`'s read-only insurance readout (privileged-gated because that
+ * page is reachable by any logged-in viewer), this page is already
+ * manager-only end-to-end.
+ *
  * @package   Portal\Assets
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.1.0
+ * @version   1.3.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/393
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/394
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/396
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/404
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/408
  * -----------------------------------------------------------------------------
  */
 
@@ -217,7 +232,21 @@ $nonce = htmlspecialchars(App::cspNonce(), ENT_QUOTES, 'UTF-8');
             <div class="col-md-3">
                 <label class="form-label" for="assetTagCode">Asset tag code</label>
                 <input type="text" class="form-control" id="assetTagCode" name="assetTagCode" maxlength="50" value="<?php echo $val('assetTagCode'); ?>">
-                <small class="text-muted">Must be unique per site — printed on the physical label (labels arrive in a later sub-issue).</small>
+                <small class="text-muted">Must be unique per site — printed on the physical label as the Code 128 barcode value (falls back to "AST-{id}" when blank).</small>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label" for="labelSymbology">Label symbology</label>
+                <select class="form-select" id="labelSymbology" name="labelSymbology">
+                    <?php foreach (AssetRegister::LABEL_SYMBOLOGIES as $sym): ?>
+                        <option value="<?php echo htmlspecialchars($sym, ENT_QUOTES, 'UTF-8'); ?>"<?php echo $selected($val('labelSymbology', 'qr'), $sym); ?>>
+                            <?php echo htmlspecialchars(AssetRegister::LABEL_SYMBOLOGY_LABELS[$sym], ENT_QUOTES, 'UTF-8'); ?>
+                        </option>
+                    <?php endforeach; ?>
+                </select>
+                <small class="text-muted">
+                    Which code prints on <a href="/assets/labels">Label Designer</a> labels (#404). EAN-13/UPC-A/ITF-14
+                    need a matching primary identifier recorded below, or the label falls back to the QR code.
+                </small>
             </div>
             <div class="col-12">
                 <label class="form-label" for="features">Features / spec notes</label>
@@ -326,6 +355,35 @@ $nonce = htmlspecialchars(App::cspNonce(), ENT_QUOTES, 'UTF-8');
             <div class="col-md-4">
                 <label class="form-label" for="salvageValuePounds">Salvage value</label>
                 <input type="number" step="0.01" min="0" class="form-control" id="salvageValuePounds" name="salvageValuePounds" value="<?php echo $poundsVal('salvageValuePence'); ?>">
+            </div>
+        </div>
+    </div>
+
+    <!-- 🛡️ Insurance (#404 columns, first editable this pass — #408) -->
+    <div class="card mb-3">
+        <div class="card-header"><h2 class="h5 mb-0">Insurance</h2></div>
+        <div class="card-body row g-3">
+            <div class="col-md-4">
+                <label class="form-label" for="insurerName">Insurer</label>
+                <input type="text" class="form-control" id="insurerName" name="insurerName" maxlength="150" value="<?php echo $val('insurerName'); ?>">
+            </div>
+            <div class="col-md-4">
+                <label class="form-label" for="insurancePolicyNumber">Policy number</label>
+                <input type="text" class="form-control" id="insurancePolicyNumber" name="insurancePolicyNumber" maxlength="100" value="<?php echo $val('insurancePolicyNumber'); ?>">
+            </div>
+            <div class="col-md-4">
+                <label class="form-label" for="insuredValuePounds">Insured value</label>
+                <input type="number" step="0.01" min="0" class="form-control" id="insuredValuePounds" name="insuredValuePounds" value="<?php echo $poundsVal('insuredValuePence'); ?>">
+            </div>
+            <div class="col-md-4">
+                <label class="form-label" for="insuranceRenewalDate">Renewal date</label>
+                <input type="date" class="form-control" id="insuranceRenewalDate" name="insuranceRenewalDate" value="<?php echo $val('insuranceRenewalDate'); ?>">
+                <small class="text-muted">Feeds the automated renewal reminder (Admin &rarr; Asset Tracker settings).</small>
+            </div>
+            <div class="col-12">
+                <small class="text-muted">
+                    Only visible here and on the asset's own page to admins, asset managers, and responsible owner-parties — see the <strong>Insurance</strong> panel on the asset's own page.
+                </small>
             </div>
         </div>
     </div>

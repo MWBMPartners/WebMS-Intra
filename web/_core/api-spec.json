@@ -74,6 +74,10 @@
       "description": "User directory (admin only)"
     },
     {
+      "name": "Assets",
+      "description": "Asset Tracker register — physical & digital assets (#406)"
+    },
+    {
       "name": "Legacy Alias",
       "description": "Pre-v1 endpoint path (`/api/{app}/{action}`). Still fully supported and documented — the /api/v1/{resource} path for the same operation is a thin facade over the identical handler file and enablement flag."
     }
@@ -826,6 +830,91 @@
           "isSiteAdmin": {
             "type": "boolean"
           }
+        }
+      },
+      "Asset": {
+        "type": "object",
+        "description": "A single asset row as returned by list/detail (#406). `licenseKey` and `publicToken` are ALWAYS stripped before this leaves the API (ApiResponse::filterSensitive()) — neither ever appears in a response, on any endpoint. `categoryName`/`locationName` are joined convenience fields.",
+        "properties": {
+          "assetID": { "type": "integer" },
+          "siteID": { "type": "integer" },
+          "assetKind": { "type": "string", "enum": ["physical", "digital"] },
+          "name": { "type": "string" },
+          "description": { "type": "string", "nullable": true },
+          "categoryID": { "type": "integer", "nullable": true },
+          "categoryName": { "type": "string", "nullable": true, "description": "Joined convenience field (list/detail only)." },
+          "locationID": { "type": "integer", "nullable": true },
+          "locationName": { "type": "string", "nullable": true, "description": "Joined convenience field (list/detail only)." },
+          "manufacturer": { "type": "string", "nullable": true },
+          "model": { "type": "string", "nullable": true },
+          "serialNumber": { "type": "string", "nullable": true },
+          "assetTagCode": { "type": "string", "nullable": true, "description": "UNIQUE per site when set." },
+          "conditionState": { "type": "string", "enum": ["new", "excellent", "good", "fair", "poor", "broken"] },
+          "status": { "type": "string", "enum": ["in-service", "in-repair", "on-loan", "borrowed", "in-storage", "retired", "disposed", "lost", "stolen"] },
+          "purchaseDate": { "type": "string", "format": "date", "nullable": true },
+          "purchaseStore": { "type": "string", "nullable": true },
+          "purchaseCostPence": { "type": "integer", "nullable": true, "description": "Integer minor units (pence) — house money convention #266." },
+          "currency": { "type": "string", "example": "GBP" },
+          "warrantyExpiry": { "type": "string", "format": "date", "nullable": true },
+          "warrantyDetails": { "type": "string", "nullable": true },
+          "licenseSeats": { "type": "integer", "nullable": true },
+          "renewalDate": { "type": "string", "format": "date", "nullable": true },
+          "accessUrl": { "type": "string", "nullable": true },
+          "depreciationMethod": { "type": "string", "enum": ["none", "straight-line", "reducing-balance"] },
+          "usefulLifeMonths": { "type": "integer", "nullable": true },
+          "salvageValuePence": { "type": "integer", "nullable": true },
+          "currentValuePence": { "type": "integer", "nullable": true, "description": "Last computed/valued book value, in pence." },
+          "insurerName": { "type": "string", "nullable": true },
+          "insurancePolicyNumber": { "type": "string", "nullable": true },
+          "insuredValuePence": { "type": "integer", "nullable": true },
+          "insuranceRenewalDate": { "type": "string", "format": "date", "nullable": true },
+          "isConfidential": { "type": "boolean", "description": "When true the asset is hidden from non-privileged callers: list/detail/qr return it only to a logged-in session admin or asset_manager (detail/qr also to a responsible owner-party) — never to a bearer key or an ordinary logged-in user. Non-privileged callers get a uniform 404, not a 403." },
+          "publicPageEnabled": { "type": "boolean" },
+          "labelSymbology": { "type": "string", "enum": ["qr", "code128", "ean13", "upca", "itf14", "qr+code128"] },
+          "parentAssetID": { "type": "integer", "nullable": true },
+          "createdByID": { "type": "integer" },
+          "createdAt": { "type": "string", "format": "date-time" },
+          "updatedAt": { "type": "string", "format": "date-time" }
+        }
+      },
+      "AssetCreate": {
+        "type": "object",
+        "required": ["name"],
+        "description": "Unlike the HTML `save.php` form this mirrors, money fields here are PENCE INTEGERS (not pounds-decimal strings), and an invalid ENUM value (assetKind/conditionState/status/currency/depreciationMethod/labelSymbology) 400s rather than silently defaulting — see `_apps/assets/api/_coerce.php`. `licenseKey` travels as PLAINTEXT in the request body only — it is encrypted at rest and NEVER echoed back by any response. On update (PUT/PATCH), only fields present in the JSON body are touched; everything else keeps its current value.",
+        "properties": {
+          "name": { "type": "string", "maxLength": 255, "example": "Conference room projector" },
+          "assetKind": { "type": "string", "enum": ["physical", "digital"], "default": "physical" },
+          "description": { "type": "string", "nullable": true },
+          "categoryID": { "type": "integer", "nullable": true, "description": "Site-scoped FK; silently dropped (NULL) if it doesn't resolve on this site." },
+          "locationID": { "type": "integer", "nullable": true, "description": "Site-scoped FK; silently dropped (NULL) if it doesn't resolve on this site." },
+          "manufacturer": { "type": "string", "nullable": true },
+          "model": { "type": "string", "nullable": true },
+          "serialNumber": { "type": "string", "nullable": true },
+          "assetTagCode": { "type": "string", "nullable": true, "description": "UNIQUE per site — a collision returns 409." },
+          "conditionState": { "type": "string", "enum": ["new", "excellent", "good", "fair", "poor", "broken"], "default": "good" },
+          "status": { "type": "string", "enum": ["in-service", "in-repair", "on-loan", "borrowed", "in-storage", "retired", "disposed", "lost", "stolen"], "default": "in-service" },
+          "purchaseDate": { "type": "string", "format": "date", "nullable": true },
+          "purchaseStore": { "type": "string", "nullable": true },
+          "purchaseCostPence": { "type": "integer", "nullable": true, "description": "PENCE, not pounds — house money convention #266." },
+          "currency": { "type": "string", "default": "GBP", "example": "GBP" },
+          "warrantyExpiry": { "type": "string", "format": "date", "nullable": true },
+          "warrantyDetails": { "type": "string", "nullable": true },
+          "licenseKey": { "type": "string", "description": "PLAINTEXT on write only. Blank/absent leaves it unchanged on update; blank means \"no key\" on create." },
+          "licenseSeats": { "type": "integer", "nullable": true },
+          "renewalDate": { "type": "string", "format": "date", "nullable": true },
+          "accessUrl": { "type": "string", "nullable": true, "description": "http(s) scheme only." },
+          "depreciationMethod": { "type": "string", "enum": ["none", "straight-line", "reducing-balance"], "default": "none" },
+          "usefulLifeMonths": { "type": "integer", "nullable": true },
+          "salvageValuePence": { "type": "integer", "nullable": true },
+          "insurerName": { "type": "string", "nullable": true },
+          "insurancePolicyNumber": { "type": "string", "nullable": true },
+          "insuredValuePence": { "type": "integer", "nullable": true },
+          "insuranceRenewalDate": { "type": "string", "format": "date", "nullable": true },
+          "isConfidential": { "type": "boolean", "default": false },
+          "publicPageEnabled": { "type": "boolean", "default": true },
+          "labelSymbology": { "type": "string", "enum": ["qr", "code128", "ean13", "upca", "itf14", "qr+code128"], "default": "qr" },
+          "parentAssetID": { "type": "integer", "nullable": true },
+          "csrf_token": { "type": "string", "description": "CSRF token (or use X-CSRF-TOKEN header)" }
         }
       },
       "EventHubResource": {
@@ -1611,6 +1700,119 @@
           "403": {
             "description": "Admin required"
           }
+        }
+      }
+    },
+    "/api/assets/list": {
+      "get": {
+        "tags": ["Assets", "Legacy Alias"],
+        "summary": "List assets for the current site",
+        "description": "Requires scope `assets:read` (bearer) or an authenticated session. Confidential assets are returned only to a logged-in session admin/asset_manager — never to a bearer key or an ordinary user (see the `Asset` schema note). **v1 equivalent:** `GET /api/v1/assets`.",
+        "parameters": [
+          { "name": "page", "in": "query", "schema": { "type": "integer", "minimum": 1, "default": 1 } },
+          { "name": "limit", "in": "query", "schema": { "type": "integer", "minimum": 1, "maximum": 100, "default": 20 } },
+          { "name": "status", "in": "query", "schema": { "type": "string" } },
+          { "name": "categoryID", "in": "query", "schema": { "type": "integer" } },
+          { "name": "assetKind", "in": "query", "schema": { "type": "string", "enum": ["physical", "digital"] } },
+          { "name": "search", "in": "query", "schema": { "type": "string" }, "description": "Matches name, serial number, or asset tag code." }
+        ],
+        "responses": {
+          "200": { "description": "OK" },
+          "401": { "description": "Auth required" },
+          "403": { "description": "Endpoint disabled or missing scope" }
+        }
+      }
+    },
+    "/api/assets/detail": {
+      "get": {
+        "tags": ["Assets", "Legacy Alias"],
+        "summary": "Fetch a single asset by id",
+        "description": "Requires scope `assets:read` (bearer) or an authenticated session. **v1 equivalent:** `GET /api/v1/assets/{id}`.",
+        "parameters": [
+          { "name": "id", "in": "query", "required": true, "schema": { "type": "integer" } }
+        ],
+        "responses": {
+          "200": { "description": "OK" },
+          "400": { "description": "id is required" },
+          "401": { "description": "Auth required" },
+          "404": { "description": "Not found — including a cross-site id probe, which never confirms another tenant's asset exists" }
+        }
+      }
+    },
+    "/api/assets/create": {
+      "post": {
+        "tags": ["Assets", "Legacy Alias"],
+        "summary": "Create a new asset",
+        "description": "Requires scope `assets:write` (bearer) or an admin/asset_manager session. Every field is validated/coerced exactly like the `save.php` HTML form (see the `AssetCreate` schema). **v1 equivalent:** `POST /api/v1/assets`.",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AssetCreate" } } }
+        },
+        "responses": {
+          "201": { "description": "Created" },
+          "400": { "description": "Validation error" },
+          "401": { "description": "Auth required" },
+          "403": { "description": "Endpoint disabled, missing scope, or not a manager" },
+          "409": { "description": "assetTagCode already in use on this site" }
+        }
+      }
+    },
+    "/api/assets/update": {
+      "post": {
+        "tags": ["Assets", "Legacy Alias"],
+        "summary": "Update asset fields — only fields present in the body are touched",
+        "description": "Requires scope `assets:write` (bearer) or an admin/asset_manager session. **v1 equivalent:** `PUT`/`PATCH /api/v1/assets/{id}`.",
+        "parameters": [
+          { "name": "id", "in": "query", "required": true, "schema": { "type": "integer" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "type": "object", "description": "Subset of AssetCreate fields." } } }
+        },
+        "responses": {
+          "200": { "description": "OK" },
+          "400": { "description": "Validation error" },
+          "401": { "description": "Auth required" },
+          "404": { "description": "Not found" },
+          "409": { "description": "assetTagCode already in use on this site" }
+        }
+      }
+    },
+    "/api/assets/delete": {
+      "post": {
+        "tags": ["Assets", "Legacy Alias"],
+        "summary": "Soft-delete an asset (isDeleted = 1 — never a hard DELETE)",
+        "description": "Requires scope `assets:write` (bearer) or an admin/asset_manager session. **v1 equivalent:** `DELETE /api/v1/assets/{id}`.",
+        "parameters": [
+          { "name": "id", "in": "query", "required": true, "schema": { "type": "integer" } }
+        ],
+        "responses": {
+          "200": { "description": "OK" },
+          "400": { "description": "assetID is required" },
+          "401": { "description": "Auth required" },
+          "404": { "description": "Not found or already deleted" }
+        }
+      }
+    },
+    "/api/assets/qr": {
+      "get": {
+        "tags": ["Assets"],
+        "summary": "Stream one asset's label image (QR or barcode) — not part of the v1 CRUD facade",
+        "description": "Requires scope `assets:read` (bearer) or an authenticated session; gated by `api.assets.qr.enabled`. Returns a raw image (`image/svg+xml` or `image/png`), never JSON. Encodes ONLY the public lost-and-found URL (QR) or the asset's own tag code/GS1 identifier value (barcode) — no other asset data leaks. Falls back to the QR image (with an `X-Label-Fallback` response header) if the requested barcode symbology has no usable source value — never fatal.",
+        "parameters": [
+          { "name": "id", "in": "query", "required": true, "schema": { "type": "integer" } },
+          { "name": "format", "in": "query", "schema": { "type": "string", "enum": ["svg", "png"], "default": "svg" } },
+          { "name": "symbology", "in": "query", "schema": { "type": "string", "enum": ["qr", "code128", "ean13", "upca", "itf14"] }, "description": "Defaults to the asset's own labelSymbology." }
+        ],
+        "responses": {
+          "200": {
+            "description": "The label image",
+            "content": { "image/svg+xml": {}, "image/png": {} }
+          },
+          "400": { "description": "Missing/invalid id, format, or symbology" },
+          "401": { "description": "Auth required" },
+          "403": { "description": "Endpoint disabled or missing scope" },
+          "404": { "description": "Asset not found" }
         }
       }
     },
@@ -7151,6 +7353,756 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required — no valid session and no valid bearer API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — bearer key missing the required scope, session caller failing the role gate, or the endpoint disabled via the api.{app}.{action}.enabled setting (same flag as the legacy alias).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found — including a cross-site id probe, which 404s rather than 403 so it never confirms another tenant’s row exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Method not allowed for this resource/shape — see the `Allow` response header for the verbs this resource actually supports.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "headers": {
+              "Allow": {
+                "description": "Comma-separated list of supported HTTP verbs.",
+                "schema": {
+                  "type": "string",
+                  "example": "GET, POST"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded (bearer only) — see the `Retry-After` response header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the oldest in-window hit ages out.",
+                "schema": {
+                  "type": "integer",
+                  "example": 42
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/assets": {
+      "get": {
+        "tags": [
+          "Assets"
+        ],
+        "summary": "List assets for the current site (v1)",
+        "description": "Requires scope `assets:read` (bearer) or an authenticated session. Confidential assets are returned only to a logged-in session admin/asset_manager — never to a bearer key or an ordinary user (see the `Asset` schema). **Legacy alias:** `GET /api/assets/list`.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": [],
+            "csrfToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "categoryID",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "assetKind",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "physical",
+                "digital"
+              ]
+            }
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Matches name, serial number, or asset tag code."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1SuccessEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required — no valid session and no valid bearer API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — bearer key missing the required scope, session caller failing the role gate, or the endpoint disabled via the api.{app}.{action}.enabled setting (same flag as the legacy alias).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Method not allowed for this resource/shape — see the `Allow` response header for the verbs this resource actually supports.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "headers": {
+              "Allow": {
+                "description": "Comma-separated list of supported HTTP verbs.",
+                "schema": {
+                  "type": "string",
+                  "example": "GET, POST"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded (bearer only) — see the `Retry-After` response header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the oldest in-window hit ages out.",
+                "schema": {
+                  "type": "integer",
+                  "example": 42
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Assets"
+        ],
+        "summary": "Create a new asset (v1)",
+        "description": "Requires scope `assets:write` (bearer) or an admin/asset_manager session. Every field is validated/coerced exactly like the `save.php` HTML form the API mirrors (ENUM allow-lists, site-scoped FK checks, licenseKey encrypt-on-write) — money fields are PENCE integers, not pounds strings. **Legacy alias:** `POST /api/assets/create`.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": [],
+            "csrfToken": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AssetCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1SuccessEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error — missing/invalid field, or (on an /{id} path) a non-numeric resource id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required — no valid session and no valid bearer API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — bearer key missing the required scope, session caller failing the role gate, or the endpoint disabled via the api.{app}.{action}.enabled setting (same flag as the legacy alias).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Method not allowed for this resource/shape — see the `Allow` response header for the verbs this resource actually supports.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "headers": {
+              "Allow": {
+                "description": "Comma-separated list of supported HTTP verbs.",
+                "schema": {
+                  "type": "string",
+                  "example": "GET, POST"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict — assetTagCode already in use on this site.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded (bearer only) — see the `Retry-After` response header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the oldest in-window hit ages out.",
+                "schema": {
+                  "type": "integer",
+                  "example": 42
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/assets/{id}": {
+      "get": {
+        "tags": [
+          "Assets"
+        ],
+        "summary": "Fetch a single asset by id (v1)",
+        "description": "Requires scope `assets:read` (bearer) or an authenticated session. **Legacy alias:** `GET /api/assets/detail?id={id}`.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": [],
+            "csrfToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "assetID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1SuccessEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required — no valid session and no valid bearer API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — bearer key missing the required scope, session caller failing the role gate, or the endpoint disabled via the api.{app}.{action}.enabled setting (same flag as the legacy alias).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found — including a cross-site id probe, which 404s rather than 403 so it never confirms another tenant’s row exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Method not allowed for this resource/shape — see the `Allow` response header for the verbs this resource actually supports.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "headers": {
+              "Allow": {
+                "description": "Comma-separated list of supported HTTP verbs.",
+                "schema": {
+                  "type": "string",
+                  "example": "GET, POST"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded (bearer only) — see the `Retry-After` response header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the oldest in-window hit ages out.",
+                "schema": {
+                  "type": "integer",
+                  "example": 42
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Assets"
+        ],
+        "summary": "Update asset fields (v1; PATCH-style — only present fields are touched)",
+        "description": "Requires scope `assets:write` (bearer) or an admin/asset_manager session. **Legacy alias:** `POST /api/assets/update?id={id}`.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": [],
+            "csrfToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "assetID"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "description": "Subset of AssetCreate fields."
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1SuccessEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error — missing/invalid field, or (on an /{id} path) a non-numeric resource id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required — no valid session and no valid bearer API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — bearer key missing the required scope, session caller failing the role gate, or the endpoint disabled via the api.{app}.{action}.enabled setting (same flag as the legacy alias).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found — including a cross-site id probe, which 404s rather than 403 so it never confirms another tenant’s row exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Method not allowed for this resource/shape — see the `Allow` response header for the verbs this resource actually supports.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "headers": {
+              "Allow": {
+                "description": "Comma-separated list of supported HTTP verbs.",
+                "schema": {
+                  "type": "string",
+                  "example": "GET, POST"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict — assetTagCode already in use on this site.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded (bearer only) — see the `Retry-After` response header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the oldest in-window hit ages out.",
+                "schema": {
+                  "type": "integer",
+                  "example": 42
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Assets"
+        ],
+        "summary": "Update asset fields (v1; PATCH-style — only present fields are touched)",
+        "description": "Requires scope `assets:write` (bearer) or an admin/asset_manager session. **Legacy alias:** `POST /api/assets/update?id={id}`.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": [],
+            "csrfToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "assetID"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "description": "Subset of AssetCreate fields."
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1SuccessEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error — missing/invalid field, or (on an /{id} path) a non-numeric resource id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required — no valid session and no valid bearer API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — bearer key missing the required scope, session caller failing the role gate, or the endpoint disabled via the api.{app}.{action}.enabled setting (same flag as the legacy alias).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found — including a cross-site id probe, which 404s rather than 403 so it never confirms another tenant’s row exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Method not allowed for this resource/shape — see the `Allow` response header for the verbs this resource actually supports.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "headers": {
+              "Allow": {
+                "description": "Comma-separated list of supported HTTP verbs.",
+                "schema": {
+                  "type": "string",
+                  "example": "GET, POST"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict — assetTagCode already in use on this site.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded (bearer only) — see the `Retry-After` response header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the oldest in-window hit ages out.",
+                "schema": {
+                  "type": "integer",
+                  "example": 42
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Assets"
+        ],
+        "summary": "Soft-delete an asset (v1; isDeleted = 1 — never a hard DELETE)",
+        "description": "Requires scope `assets:write` (bearer) or an admin/asset_manager session. **Legacy alias:** `POST /api/assets/delete?id={id}`.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": [],
+            "csrfToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "assetID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1SuccessEnvelope"
                 }
               }
             }

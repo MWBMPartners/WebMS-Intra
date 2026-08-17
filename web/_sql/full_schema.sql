@@ -6159,6 +6159,10 @@ CREATE TABLE IF NOT EXISTS `tblAssets` (
     `salvageValuePence`   INT           DEFAULT NULL,
     `currentValuePence`   INT           DEFAULT NULL COMMENT 'Last computed/valued book value, in pence',
     `valuationDate`       DATE          DEFAULT NULL,
+    `insurerName`             VARCHAR(150)  DEFAULT NULL COMMENT 'Insurance provider name -- 160 (#404)',
+    `insurancePolicyNumber`   VARCHAR(100)  DEFAULT NULL COMMENT 'Insurance policy/reference number -- 160 (#404)',
+    `insuredValuePence`       INT           DEFAULT NULL COMMENT 'Integer minor units -- house pence convention (#266) -- 160 (#404)',
+    `insuranceRenewalDate`    DATE          DEFAULT NULL COMMENT 'Next insurance renewal due date -- feeds the #405 reminder sweep -- 160 (#404)',
     `ownershipTerms`      TEXT          DEFAULT NULL COMMENT 'Free-text ownership/agreement terms (loaned-in items, shared ownership, etc)',
     `isConfidential`      TINYINT(1)    NOT NULL DEFAULT 0 COMMENT 'Hides the item from the public lost-and-found page (#395 access gate)',
     `publicToken`         CHAR(32)      NOT NULL COMMENT '32-char hex token for the public /a/{token} lost-and-found page',
@@ -6408,13 +6412,89 @@ CREATE TABLE IF NOT EXISTS `tblAssetAudit` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
 COMMENT='Asset Tracker — audit choke-point, no FKs by design (#395)';
 
+-- Asset Tracker Phase 2 (migration 160 / #404) — three new tables. Placed
+-- here (after tblAssets/tblAssetAudit, both already defined above, and
+-- after tblEvents/tblUsers/tblSites which are defined much earlier in
+-- this file) to keep dependency order intact for a fresh install — see
+-- migration 160's own header for the full design notes.
+CREATE TABLE IF NOT EXISTS `tblAssetEventAssignments` (
+    `assignmentID`   INT          NOT NULL AUTO_INCREMENT,
+    `siteID`         INT          NOT NULL DEFAULT 1,
+    `assetID`        INT          NOT NULL,
+    `eventID`        INT          NOT NULL,
+    `assignedByID`   INT          NOT NULL,
+    `assignedFrom`   DATETIME     DEFAULT NULL COMMENT 'NULL = defaults to the event''s own startDateTime',
+    `assignedUntil`  DATETIME     DEFAULT NULL COMMENT 'NULL = defaults to the event''s own endDateTime',
+    `notes`          VARCHAR(500) DEFAULT NULL,
+    `createdAt`      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`assignmentID`),
+    UNIQUE KEY `uq_astev_asset_event` (`assetID`, `eventID`),
+    KEY `idx_astev_site` (`siteID`),
+    KEY `idx_astev_event` (`eventID`),
+    KEY `idx_astev_asset` (`assetID`),
+    CONSTRAINT `fk_astev_site`  FOREIGN KEY (`siteID`)       REFERENCES `tblSites`(`siteID`),
+    CONSTRAINT `fk_astev_asset` FOREIGN KEY (`assetID`)      REFERENCES `tblAssets`(`assetID`) ON DELETE CASCADE,
+    CONSTRAINT `fk_astev_event` FOREIGN KEY (`eventID`)      REFERENCES `tblEvents`(`eventID`) ON DELETE CASCADE,
+    CONSTRAINT `fk_astev_user`  FOREIGN KEY (`assignedByID`) REFERENCES `tblUsers`(`userID`)  ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+COMMENT='Asset Tracker Phase 2 — asset-to-event assignments (#404)';
+
+CREATE TABLE IF NOT EXISTS `tblAssetScanLog` (
+    `scanID`         INT      NOT NULL AUTO_INCREMENT,
+    `siteID`         INT      NOT NULL DEFAULT 1,
+    `assetID`        INT      NOT NULL,
+    `scanContext`    ENUM('public','internal') NOT NULL DEFAULT 'public'
+                     COMMENT 'public = the /a/{token} lost-and-found page; internal = a logged-in manager re-scanning a printed label',
+    `actorUserID`    INT      DEFAULT NULL COMMENT 'NULL for anonymous public scans',
+    `ipHash`         CHAR(64) DEFAULT NULL COMMENT 'Salted SHA-256 of the scanner''s IP — mirrors tblAssetAudit.ipHash/tblAssetFoundReports.ipHash (migration 159)',
+    `userAgentHash`  CHAR(64) DEFAULT NULL COMMENT 'Salted SHA-256 of the scanner''s User-Agent header',
+    `createdAt`      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`scanID`),
+    KEY `idx_astscn_asset_created` (`assetID`, `createdAt`),
+    KEY `idx_astscn_site_created` (`siteID`, `createdAt`),
+    KEY `idx_astscn_site_context` (`siteID`, `scanContext`, `createdAt`),
+    CONSTRAINT `fk_astscn_site`  FOREIGN KEY (`siteID`)  REFERENCES `tblSites`(`siteID`),
+    CONSTRAINT `fk_astscn_asset` FOREIGN KEY (`assetID`) REFERENCES `tblAssets`(`assetID`) ON DELETE CASCADE,
+    CONSTRAINT `fk_astscn_actor` FOREIGN KEY (`actorUserID`) REFERENCES `tblUsers`(`userID`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+COMMENT='Asset Tracker Phase 2 — barcode/QR scan log (#404)';
+
+CREATE TABLE IF NOT EXISTS `tblAssetReminderLog` (
+    `logID`           INT      NOT NULL AUTO_INCREMENT,
+    `siteID`          INT      NOT NULL DEFAULT 1,
+    `refType`         ENUM('maintenance','warranty','insurance','renewal','loan-overdue') NOT NULL
+                      COMMENT 'Which due-date family this reminder was about',
+    `refID`           INT      NOT NULL COMMENT 'No FK by design — see table comment. maintID/assetID(warranty|insurance|renewal)/loanID depending on refType',
+    `assetID`         INT      NOT NULL COMMENT 'No FK by design — see table comment',
+    `dueDate`         DATE     NOT NULL,
+    `recipientCount`  INT      NOT NULL DEFAULT 0,
+    `sentAt`          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`logID`),
+    UNIQUE KEY `uq_astrl_ref` (`refType`, `refID`, `dueDate`),
+    KEY `idx_astrl_site` (`siteID`),
+    KEY `idx_astrl_asset` (`assetID`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+COMMENT='Asset Tracker Phase 2 — reminder single-shot dedupe log, no FKs by design (#404)';
+
 INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
     (NULL, 'assets.enabled',                     'true',     'true',     0),
     (NULL, 'assets.maxFileSize',                 '10485760', '10485760', 0),
     (NULL, 'assets.public_page_enabled',         'true',     'true',     0),
     (NULL, 'assets.found_report_retention_days', '180',      '180',      0),
     (NULL, 'assets.license_seat_block',          '0',        '0',       0),
-    (NULL, 'api.assets.qr.enabled',               'true',     'true',     0)
+    (NULL, 'api.assets.qr.enabled',               'true',     'true',     0),
+    -- Migration 160 / #404 seeds below.
+    (NULL, 'api.assets.list.enabled',               'true', 'true', 0),
+    (NULL, 'api.assets.detail.enabled',             'true', 'true', 0),
+    (NULL, 'api.assets.create.enabled',             'true', 'true', 0),
+    (NULL, 'api.assets.update.enabled',             'true', 'true', 0),
+    (NULL, 'api.assets.delete.enabled',             'true', 'true', 0),
+    (NULL, 'assets.cron_token',                     '',     '',     1),
+    (NULL, 'assets.reminders_enabled',              '1',    '1',    0),
+    (NULL, 'assets.reminder_lead_days_maintenance', '7',    '7',    0),
+    (NULL, 'assets.reminder_lead_days_warranty',    '30',   '30',   0),
+    (NULL, 'assets.reminder_lead_days_insurance',   '30',   '30',   0),
+    (NULL, 'assets.scan_log_retention_days',        '365',  '365',  0)
 ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
 
 INSERT INTO `tblRoles` (`roleKey`, `roleName`)
@@ -6471,7 +6551,13 @@ INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
     ('assets/labels-pdf',         'assets/labels-pdf.php',        1),
     ('assets/found-reports',      'assets/found-reports.php',     1),
     ('assets/found-save',         'assets/found-save.php',        0),
-    ('help/assets',               'help/assets.php',              0)
+    ('help/assets',               'help/assets.php',              0),
+    -- Migration 160 / #404 routes below.
+    ('assets/import',             'assets/import.php',            1),
+    ('assets/my',                 'assets/my.php',                 1),
+    ('assets/value-report',       'assets/value-report.php',       1),
+    ('assets/event-assign',       'assets/event-assign.php',       1),
+    ('cron/asset-reminders',      'cron/asset-reminders.php',      0)
 ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 
 
@@ -6695,4 +6781,7 @@ INSERT INTO `tblMigrations` (`filename`) VALUES ('158_worship_api_route_cleanup.
 ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
 INSERT INTO `tblMigrations` (`filename`) VALUES ('159_asset_tracker.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('160_asset_tracker_phase2.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;

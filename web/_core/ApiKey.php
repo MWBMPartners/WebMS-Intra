@@ -61,6 +61,10 @@ class ApiKey
         'noticeboard:read', 'noticeboard:write',
         'users:read', 'users:write',
         'eventhub:read',
+        // 📦 Asset Tracker REST API (#406, Phase 2 Pass 4) — same
+        // read/write pair shape as every other resource above. `assets:read`
+        // also gates `GET /api/assets/qr` (label image streaming).
+        'assets:read', 'assets:write',
     ];
 
     /**

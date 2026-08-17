@@ -8,18 +8,26 @@
  * Stats show key operational metrics with links to relevant sections.
  * App list reads from settings table keys ending in `.enabled` = true.
  *
+ * Asset Tracker widgets (#410) — "My Assets" (count of assets the current
+ * user owns/borrows/holds a licence seat for, via
+ * AssetRegister::listForUser(), STRICTLY session-user-scoped) plus a
+ * conditional "My Overdue Loans" widget, same "only shown when non-zero"
+ * convention as the non-admin "My Pending Claims" expenses widget above it.
+ *
  * @package   Portal\Dashboard
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   0.8.2
+ * @version   0.9.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/85
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/410
  * -----------------------------------------------------------------------------
  */
 
 declare(strict_types=1);
 
 use Portal\Core\App;
+use Portal\Core\AssetRegister;
 use Portal\Core\Site;
 
 // 📌 Page metadata for the template system
@@ -94,6 +102,39 @@ if (isset($SETTINGS['calendar']['enabled']) === true && $SETTINGS['calendar']['e
             'icon'  => 'fa-solid fa-calendar-week',
             'color' => 'primary',
             'url'   => '/calendar',
+        ];
+    }
+}
+
+// 📦 Asset Tracker — "my assets" count + any overdue loans to me (#410).
+// listForUser() is already STRICTLY session-user-scoped (see its own doc
+// on AssetRegister) — this dashboard card never accepts/derives an id
+// from anything other than $userId above.
+if (isset($SETTINGS['assets']['enabled']) === true && $SETTINGS['assets']['enabled'] === 'true') {
+    $myAssets = AssetRegister::listForUser($userId);
+    $myAssetCount = count($myAssets);
+    if ($myAssetCount > 0) {
+        $widgets[] = [
+            'label' => 'My Assets',
+            'value' => $myAssetCount,
+            'icon'  => 'fa-solid fa-box',
+            'color' => 'primary',
+            'url'   => '/assets/my',
+        ];
+    }
+    // 🚨 Only surfaced when non-zero — mirrors the non-admin "My Pending
+    // Claims" widget's own if ($cnt > 0) convention above.
+    $myOverdueLoanCount = count(array_filter(
+        $myAssets,
+        static fn (array $a): bool => (bool) ($a['loanIsOverdue'] ?? false) === true
+    ));
+    if ($myOverdueLoanCount > 0) {
+        $widgets[] = [
+            'label' => 'My Overdue Loans',
+            'value' => $myOverdueLoanCount,
+            'icon'  => 'fa-solid fa-triangle-exclamation',
+            'color' => 'danger',
+            'url'   => '/assets/my',
         ];
     }
 }

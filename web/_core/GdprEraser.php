@@ -118,6 +118,14 @@ class GdprEraser
             ['table' => 'tblAssetLoans',                'userCol' => 'counterpartyUserID',   'action' => 'anonymise', 'nullCols' => [], 'reason' => 'loan history retained for asset custody chain; borrower/lender identity detached'],
             ['table' => 'tblAssetLicenseAssignments',   'userCol' => 'userID',               'action' => 'anonymise', 'nullCols' => [], 'reason' => 'seat-assignment history retained for licence compliance; assignee identity detached'],
             ['table' => 'tblAssetAudit',                'userCol' => 'actorUserID',          'action' => 'anonymise', 'nullCols' => [], 'reason' => 'audit history retained (mirrors tblAuditTrail — no FK, immutable record); actor identity detached'],
+            // #404 Phase 2 Pass 2 (#410). tblAssetScanLog rows are retained
+            // for scan-volume analytics (item.php's sparkbar) even after
+            // the scanning user is erased — only the actor attribution is
+            // detached, mirroring tblAssetAudit immediately above. The
+            // ipHash/userAgentHash columns are ALREADY salted-hash-only
+            // (never a raw IP/User-Agent — see AssetRegister::recordScan()),
+            // so there is no separate PII column here to null out.
+            ['table' => 'tblAssetScanLog',              'userCol' => 'actorUserID',          'action' => 'anonymise', 'nullCols' => [], 'reason' => 'scan-volume analytics retained; actor identity detached (ipHash/userAgentHash are already salted-hash-only, never raw)'],
 
             // Final step — anonymise the user row itself rather than delete,
             // so foreign keys with ON DELETE SET NULL don't cascade-blow

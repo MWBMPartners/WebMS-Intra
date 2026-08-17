@@ -33,15 +33,23 @@
  * `assetID` + `action` — never falls through into that validation. Same
  * CSRF-first + manager-gate ordering as every other branch in this file.
  *
+ * INSURANCE (#404 columns, first persisted this pass — #408):
+ * insurerName/insurancePolicyNumber (plain `$str()` coercion, same as
+ * every other free-text field here) and insuredValuePounds→
+ * insuredValuePence/insuranceRenewalDate (the SAME `$pence()`/
+ * `$dateOrNull()` helpers purchaseCostPounds/purchaseDate already use).
+ *
  * @package   Portal\Assets
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.2.0
+ * @version   1.4.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/393
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/394
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/396
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/401
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/404
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/408
  * -----------------------------------------------------------------------------
  */
 
@@ -260,8 +268,21 @@ $data = [
     'depreciationMethod' => $enumOrDefault('depreciationMethod', AssetRegister::DEPRECIATION_METHODS, 'none'),
     'usefulLifeMonths'   => $intOrNull('usefulLifeMonths'),
     'salvageValuePence'  => $pence('salvageValuePounds'),
+    // 🛡️ Insurance (#404 columns, first persisted this pass — #408). Same
+    // pounds→pence/date coercion helpers as every other money/date field
+    // in this file — insuredValuePence follows the house pence convention
+    // (#266), insuranceRenewalDate the same Y-m-d validation as
+    // purchaseDate/warrantyExpiry above.
+    'insurerName'           => $str('insurerName', 150),
+    'insurancePolicyNumber' => $str('insurancePolicyNumber', 100),
+    'insuredValuePence'     => $pence('insuredValuePounds'),
+    'insuranceRenewalDate'  => $dateOrNull('insuranceRenewalDate'),
     'isConfidential'     => $bool01('isConfidential'),
     'publicPageEnabled'  => $bool01('publicPageEnabled'),
+    // 🏷️ #404 — printed label barcode choice; validated against the same
+    // allow-list AssetRegister::buildLabelSheets() checks, falling back to
+    // 'qr' for anything not in it (tampered POST, stale form, etc).
+    'labelSymbology'     => $enumOrDefault('labelSymbology', AssetRegister::LABEL_SYMBOLOGIES, 'qr'),
     'parentAssetID'      => $parentAssetId,
 ];
 

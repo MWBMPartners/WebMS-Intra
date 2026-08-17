@@ -120,11 +120,41 @@
  * no such endpoint registered for this sub-issue, so this is the simplest
  * option that still keeps the value off the page for every non-manager.
  *
+ * ASSIGNED EVENTS panel (#409, Phase 2 Pass 2) — same read-visible/
+ * edit-gated split as the Loans/Maintenance panels above: the assignment
+ * history is visible to any viewer reaching this page; the assign form
+ * and each row's Unassign button are `$privileged`-only (reuses the SAME
+ * admin/asset_manager/isResponsibleFor() flag the Ownership & legal vault
+ * panel already computes above — assigning an asset to an event is a
+ * custodianship action, not a manager-only register edit, so it's
+ * deliberately NOT narrowed to `$canManage`). `event-assign.php`
+ * re-derives and re-checks that same gate independently server-side. The
+ * "assign to event" picker supports an optional `?eventID=` query-string
+ * prefill (a deep-link from the calendar event page's own "Assigned
+ * assets" section) — display-only convenience, never trusted as
+ * authorisation; `AssetRegister::assignToEvent()` re-validates the
+ * eventID against `Site::id()` regardless of what pre-selected an option.
+ *
+ * SCAN-ANALYTICS strip (#410, Phase 2 Pass 2) — `$canManage`-only (mirrors
+ * the found-reports summary's own manager-only gate above), a 30-day
+ * daily-count sparkbar built from `AssetRegister::scanStats()` with plain
+ * flexbox + inline computed heights — no JS chart library.
+ *
+ * INSURANCE panel (#404 columns, first surfaced this pass — #408) —
+ * `$privileged`-gated, the SAME admin/asset_manager/`isResponsibleFor()`
+ * gate as the Ownership & legal vault panel immediately above it (a
+ * policy number/insured value sits at roughly that same sensitivity —
+ * never shown to a plain logged-in viewer who merely reached this page).
+ * Only rendered when at least one of the four fields is actually set.
+ * Read-only here — editing lives on `edit.php`/`save.php`. Flags an
+ * "under-insured" badge when `insuredValuePence` is below the existing
+ * Depreciation card's `$estimatedCurrentValuePence` readout.
+ *
  * @package   Portal\Assets
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.4.0
+ * @version   1.6.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/393
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/394
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/396
@@ -132,6 +162,10 @@
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/398
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/399
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/400
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/404
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/408
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/409
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/410
  * -----------------------------------------------------------------------------
  */
 
@@ -392,6 +426,47 @@ $closedLoans = array_values(array_filter(
 $hasOpenLoan = count($openLoans) > 0;
 $canApproveThisLoan = AssetRegister::canApproveLoan($assetId, $userId);
 
+// 📅 Event assignments (#409) — this asset's assignment history via
+// AssetRegister::listEventAssignments(). Read-visible to any viewer
+// reaching this page (mirrors the Loans/Owners/Maintenance panels above);
+// assign/unassign are gated on $privileged (admin/asset_manager OR a
+// responsible owner-party for THIS asset, already computed above) —
+// event-assign.php re-derives and re-checks that same gate independently
+// server-side, so a hidden control is never the only thing stopping an
+// unauthorised POST (same rationale as $canApproveThisLoan above).
+$eventAssignments = AssetRegister::listEventAssignments($assetId);
+
+// 📅 Upcoming-event picker for the "assign to event" form — only fetched
+// when the viewer can actually assign, mirrors the Owners/Maintenance
+// panels' own privileged-only picker-fetch pattern above. Deliberately a
+// plain server-rendered <select> (house convention — no JS chart/
+// autocomplete lib in this app), not a live search box.
+$eventCandidates = [];
+if ($privileged === true) {
+    $evStmt = $db->prepare(
+        'SELECT eventID, eventName, startDateTime FROM tblEvents '
+        . 'WHERE siteID = ? AND isDeleted = 0 AND startDateTime >= DATE_SUB(NOW(), INTERVAL 1 DAY) '
+        . 'ORDER BY startDateTime ASC LIMIT 100'
+    );
+    if ($evStmt !== false) {
+        $evStmt->bind_param('i', $siteId);
+        $evStmt->execute();
+        $evResult = $evStmt->get_result();
+        while ($row = $evResult->fetch_assoc()) {
+            $eventCandidates[] = $row;
+        }
+        $evStmt->close();
+    }
+}
+
+// 🔗 ?eventID= prefill (#409) — deep-link from the calendar event page's
+// "Assign an asset" action pre-selects this event in the picker below.
+// Purely a UX convenience — NOT trusted as authorisation or as a real
+// eventID: the form still posts through event-assign.php, which (via
+// AssetRegister::assignToEvent()) re-validates the eventID against
+// Site::id() from scratch regardless of what pre-selected an option here.
+$prefillEventId = (int) ($_GET['eventID'] ?? 0);
+
 // 🔧 Maintenance (#399) — this asset's full maintenance/service history via
 // AssetRegister::listMaintenance(). canManageMaintenance() is computed ONCE
 // here for the current viewer/asset pair and reused for both the
@@ -445,6 +520,18 @@ $newFoundReportCount = count(array_filter(
     $foundReportsForAsset,
     static fn (array $r): bool => (string) $r['status'] === 'new'
 ));
+
+// 📊 Scan-analytics strip (#410) — manager-only (mirrors the found-reports
+// summary's own $canManage-only fetch immediately above — analytics, not
+// asset custody, so the gate is the general manager one, not $privileged).
+// 30 days of daily scan counts (public lost-and-found views + internal
+// re-scans) for the CSS-only sparkbar further down — no JS chart library
+// in this app.
+$scanStats = $canManage === true ? AssetRegister::scanStats($assetId, 30) : [];
+$scanStatsMax = 0;
+foreach ($scanStats as $s) {
+    $scanStatsMax = max($scanStatsMax, (int) $s['count']);
+}
 
 // 📜 Recent audit strip — last 8 rows for this asset, actor name resolved
 // via a LEFT JOIN (tblAssetAudit carries no FK by design — see migration
@@ -1316,6 +1403,104 @@ $nonce = htmlspecialchars(App::cspNonce(), ENT_QUOTES, 'UTF-8');
     </div>
 </div>
 
+<!-- 📅 Assigned events (#409) — links this asset to calendar events (e.g.
+     "the PA system is assigned to Sunday's service"), with an optional
+     assignment window distinct from the event's own start/end. History is
+     visible to any viewer reaching this page (mirrors the Loans/Owners/
+     Maintenance panels above); the assign form and each row's Unassign
+     button are $privileged-only (admin/asset_manager OR a responsible
+     owner-party for THIS asset) — event-assign.php re-derives and
+     re-checks that same gate independently server-side, so a hidden
+     control is never the only thing stopping an unauthorised POST. -->
+<div class="card mb-3">
+    <div class="card-header"><h2 class="h5 mb-0">Assigned events</h2></div>
+    <div class="card-body">
+        <?php if (count($eventAssignments) === 0): ?>
+            <p class="text-muted">This asset isn't assigned to any events yet.</p>
+        <?php else: ?>
+            <div class="portal-data-list mb-3">
+                <?php foreach ($eventAssignments as $ea): ?>
+                    <div class="portal-data-row align-items-start">
+                        <div class="col-6 col-md-5">
+                            <a href="/calendar/event?slug=<?php echo htmlspecialchars((string) ($ea['eventSlug'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>">
+                                <?php echo htmlspecialchars((string) $ea['eventName'], ENT_QUOTES, 'UTF-8'); ?>
+                            </a>
+                            <br><small class="text-muted"><?php echo htmlspecialchars(date('j M Y, H:i', strtotime((string) $ea['startDateTime'])), ENT_QUOTES, 'UTF-8'); ?></small>
+                        </div>
+                        <div class="col-4 col-md-4 small text-muted">
+                            <?php if ($ea['assignedFrom'] !== null || $ea['assignedUntil'] !== null): ?>
+                                <?php if ($ea['assignedFrom'] !== null): ?>From: <?php echo htmlspecialchars(date('j M Y H:i', strtotime((string) $ea['assignedFrom'])), ENT_QUOTES, 'UTF-8'); ?><br><?php endif; ?>
+                                <?php if ($ea['assignedUntil'] !== null): ?>Until: <?php echo htmlspecialchars(date('j M Y H:i', strtotime((string) $ea['assignedUntil'])), ENT_QUOTES, 'UTF-8'); ?><?php endif; ?>
+                            <?php else: ?>
+                                <span class="text-muted">Uses the event's own window</span>
+                            <?php endif; ?>
+                            <?php if ($ea['notes'] !== null && (string) $ea['notes'] !== ''): ?>
+                                <br><?php echo htmlspecialchars((string) $ea['notes'], ENT_QUOTES, 'UTF-8'); ?>
+                            <?php endif; ?>
+                        </div>
+                        <div class="col-2 col-md-3 text-end">
+                            <?php if ($privileged === true): ?>
+                                <form method="post" action="/assets/event-assign" class="d-inline"
+                                      data-confirm="Remove this asset's assignment to this event?" data-confirm-destructive="true">
+                                    <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
+                                    <input type="hidden" name="action" value="unassign">
+                                    <input type="hidden" name="assetID" value="<?php echo $assetId; ?>">
+                                    <input type="hidden" name="assignmentID" value="<?php echo (int) $ea['assignmentID']; ?>">
+                                    <input type="hidden" name="returnTo" value="item">
+                                    <button type="submit" class="btn btn-sm btn-outline-danger" title="Unassign">
+                                        <i class="fa-solid fa-trash"></i>
+                                    </button>
+                                </form>
+                            <?php endif; ?>
+                        </div>
+                    </div>
+                <?php endforeach; ?>
+            </div>
+        <?php endif; ?>
+
+        <?php if ($privileged === true): ?>
+            <hr>
+            <h3 class="h6">Assign to an event</h3>
+            <?php if (count($eventCandidates) === 0): ?>
+                <p class="text-muted small">No upcoming events found on this site.</p>
+            <?php else: ?>
+                <form method="post" action="/assets/event-assign" class="row g-2">
+                    <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
+                    <input type="hidden" name="action" value="assign">
+                    <input type="hidden" name="assetID" value="<?php echo $assetId; ?>">
+                    <input type="hidden" name="returnTo" value="item">
+                    <div class="col-md-4">
+                        <label class="form-label small" for="eventID">Event</label>
+                        <select class="form-select form-select-sm" id="eventID" name="eventID" required>
+                            <option value="">Select an event…</option>
+                            <?php foreach ($eventCandidates as $ec): ?>
+                                <option value="<?php echo (int) $ec['eventID']; ?>"<?php echo $prefillEventId === (int) $ec['eventID'] ? ' selected' : ''; ?>>
+                                    <?php echo htmlspecialchars((string) $ec['eventName'] . ' — ' . date('j M Y H:i', strtotime((string) $ec['startDateTime'])), ENT_QUOTES, 'UTF-8'); ?>
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label small" for="assignedFrom">From <span class="text-muted">(optional — defaults to the event's own start)</span></label>
+                        <input type="datetime-local" class="form-control form-control-sm" id="assignedFrom" name="assignedFrom">
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label small" for="assignedUntil">Until <span class="text-muted">(optional — defaults to the event's own end)</span></label>
+                        <input type="datetime-local" class="form-control form-control-sm" id="assignedUntil" name="assignedUntil">
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label small" for="eventAssignNotes">Notes <span class="text-muted">(optional)</span></label>
+                        <input type="text" class="form-control form-control-sm" id="eventAssignNotes" name="notes" maxlength="500">
+                    </div>
+                    <div class="col-12">
+                        <button type="submit" class="btn btn-sm btn-primary"><i class="fa-solid fa-calendar-plus me-1"></i>Assign to event</button>
+                    </div>
+                </form>
+            <?php endif; ?>
+        <?php endif; ?>
+    </div>
+</div>
+
 <!-- 📎 Resources -->
 <div class="card mb-3">
     <div class="card-header"><h2 class="h5 mb-0">Resources</h2></div>
@@ -1836,6 +2021,67 @@ $nonce = htmlspecialchars(App::cspNonce(), ENT_QUOTES, 'UTF-8');
                 <button type="submit" class="btn btn-warning btn-sm"><i class="fa-solid fa-lock me-1"></i>Upload confidential document</button>
             </div>
         </form>
+    </div>
+</div>
+<?php endif; ?>
+
+<!-- 🛡️ Insurance (#404 columns, first surfaced this pass — #408).
+     $privileged-gated — the SAME admin/asset_manager/isResponsibleFor()
+     gate as the Ownership & legal vault immediately above, since a
+     policy number/insured value sits at roughly that same sensitivity
+     (never shown to a plain logged-in viewer who merely reached this
+     page). Only rendered at all when at least ONE insurance field is
+     actually set, so an asset with no insurance recorded doesn't show an
+     empty card. -->
+<?php if ($privileged === true
+    && ($asset['insurerName'] !== null || $asset['insurancePolicyNumber'] !== null
+        || $asset['insuredValuePence'] !== null || $asset['insuranceRenewalDate'] !== null)
+): ?>
+<div class="card mb-3">
+    <div class="card-header"><h2 class="h5 mb-0"><i class="fa-solid fa-shield-halved me-2"></i>Insurance</h2></div>
+    <div class="card-body row g-3">
+        <div class="col-md-3"><strong>Insurer</strong><br><?php echo $asset['insurerName'] !== null ? htmlspecialchars((string) $asset['insurerName'], ENT_QUOTES, 'UTF-8') : '<span class="text-muted">—</span>'; ?></div>
+        <div class="col-md-3"><strong>Policy number</strong><br><?php echo $asset['insurancePolicyNumber'] !== null ? htmlspecialchars((string) $asset['insurancePolicyNumber'], ENT_QUOTES, 'UTF-8') : '<span class="text-muted">—</span>'; ?></div>
+        <div class="col-md-3"><strong>Insured value</strong><br>
+            <?php echo $asset['insuredValuePence'] !== null
+                ? htmlspecialchars((string) $asset['currency'], ENT_QUOTES, 'UTF-8') . ' ' . number_format(((int) $asset['insuredValuePence']) / 100, 2)
+                : '<span class="text-muted">—</span>'; ?>
+        </div>
+        <div class="col-md-3"><strong>Renewal date</strong><br><?php echo $asset['insuranceRenewalDate'] !== null ? htmlspecialchars((string) $asset['insuranceRenewalDate'], ENT_QUOTES, 'UTF-8') : '<span class="text-muted">—</span>'; ?></div>
+        <?php if ($estimatedCurrentValuePence !== null && $asset['insuredValuePence'] !== null && (int) $asset['insuredValuePence'] < $estimatedCurrentValuePence): ?>
+            <div class="col-12">
+                <span class="badge bg-danger"><i class="fa-solid fa-triangle-exclamation me-1"></i>Under-insured — insured value is below the estimated current value</span>
+            </div>
+        <?php endif; ?>
+    </div>
+</div>
+<?php endif; ?>
+
+<!-- 📊 Scan-analytics strip (#410) — manager-only. 30-day daily-count
+     sparkbar built from plain flexbox + inline heights (house
+     convention — no JS chart library anywhere in this app), reading
+     AssetRegister::scanStats(), which folds together BOTH scan sources
+     (the public /a/{token} page + an internal manager re-scan). -->
+<?php if ($canManage === true): ?>
+<div class="card mb-3">
+    <div class="card-header"><h2 class="h5 mb-0"><i class="fa-solid fa-chart-column me-2"></i>Scan activity (last 30 days)</h2></div>
+    <div class="card-body">
+        <?php if ($scanStatsMax === 0): ?>
+            <p class="text-muted mb-0">No scans recorded in the last 30 days.</p>
+        <?php else: ?>
+            <div class="d-flex align-items-end gap-1" style="height:60px;">
+                <?php foreach ($scanStats as $s): ?>
+                    <?php $barPct = (int) round(($s['count'] / $scanStatsMax) * 100); ?>
+                    <div class="flex-fill bg-primary rounded-top"
+                         style="height:<?php echo $s['count'] > 0 ? max(4, $barPct) : 0; ?>%; min-height:<?php echo $s['count'] > 0 ? '2px' : '0'; ?>;"
+                         title="<?php echo htmlspecialchars((string) $s['date'] . ': ' . (string) $s['count'] . ' scan' . ((int) $s['count'] === 1 ? '' : 's'), ENT_QUOTES, 'UTF-8'); ?>">
+                    </div>
+                <?php endforeach; ?>
+            </div>
+            <p class="text-muted small mt-2 mb-0">
+                Total: <?php echo array_sum(array_column($scanStats, 'count')); ?> scans over the last 30 days (public lost-and-found page views + internal re-scans).
+            </p>
+        <?php endif; ?>
     </div>
 </div>
 <?php endif; ?>

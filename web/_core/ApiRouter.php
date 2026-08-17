@@ -42,6 +42,14 @@ class ApiRouter
         'tasks'           => 'tasks',
         'noticeboard'     => 'noticeboard',
         'users'           => 'users',
+        // 📦 Asset Tracker REST API (#406, Phase 2 Pass 4) — pure CRUD
+        // (list/detail/create/update/delete all use the default action
+        // names below), so no V1_CREATE_ACTION/V1_UPDATE_ACTION/
+        // V1_DELETE_ACTION override is needed. `qr.php` (label image
+        // streaming) is deliberately NOT part of this map — it isn't a
+        // CRUD verb, so it stays reachable only at the legacy
+        // `/api/assets/qr` path, same as e.g. `noticeboard/api/qr.php`.
+        'assets'          => 'assets',
     ];
 
     /**
