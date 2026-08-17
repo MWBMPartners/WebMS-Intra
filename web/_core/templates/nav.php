@@ -18,7 +18,7 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   0.7.0
+ * @version   0.8.0
  * -----------------------------------------------------------------------------
  */
 
@@ -132,6 +132,11 @@ if ($isLoggedIn === true && Site::isMultisiteEnabled() === true && $navUser !== 
                                 <i class="fa-solid fa-clock-rotate-left me-1"></i> <?php echo htmlspecialchars(t('nav.activity_log'), ENT_QUOTES, 'UTF-8'); ?>
                             </a>
                         </li>
+                        <li>
+                            <a class="dropdown-item" href="/admin/audit">
+                                <i class="fa-solid fa-shield-halved me-1"></i> Audit Trail
+                            </a>
+                        </li>
                         <li><hr class="dropdown-divider"></li>
                         <li>
                             <a class="dropdown-item" href="/admin/users">
@@ -146,6 +151,46 @@ if ($isLoggedIn === true && Site::isMultisiteEnabled() === true && $navUser !== 
                         <li>
                             <a class="dropdown-item" href="/settings">
                                 <i class="fa-solid fa-gear me-1"></i> <?php echo htmlspecialchars(t('nav.settings'), ENT_QUOTES, 'UTF-8'); ?>
+                            </a>
+                        </li>
+                        <!-- 🧩 App marketplace + reporting/workflow config (#gap-fix D3 — previously
+                             reachable only by typing the URL directly). -->
+                        <li><hr class="dropdown-divider"></li>
+                        <li>
+                            <a class="dropdown-item" href="/admin/apps">
+                                <i class="fa-solid fa-cubes me-1"></i> Apps
+                            </a>
+                        </li>
+                        <li>
+                            <a class="dropdown-item" href="/admin/reports">
+                                <i class="fa-solid fa-chart-bar me-1"></i> Reports
+                            </a>
+                        </li>
+                        <li>
+                            <a class="dropdown-item" href="/admin/workflows">
+                                <i class="fa-solid fa-diagram-project me-1"></i> Workflows
+                            </a>
+                        </li>
+                        <!-- 📣 Notification/compliance admin screens (#gap-fix D3). -->
+                        <li><hr class="dropdown-divider"></li>
+                        <li>
+                            <a class="dropdown-item" href="/admin/sms">
+                                <i class="fa-solid fa-comment-sms me-1"></i> SMS
+                            </a>
+                        </li>
+                        <li>
+                            <a class="dropdown-item" href="/admin/transcription">
+                                <i class="fa-solid fa-closed-captioning me-1"></i> Transcription
+                            </a>
+                        </li>
+                        <li>
+                            <a class="dropdown-item" href="/admin/safeguarding/dbs">
+                                <i class="fa-solid fa-user-shield me-1"></i> Safeguarding (DBS)
+                            </a>
+                        </li>
+                        <li>
+                            <a class="dropdown-item" href="/admin/decision-cards">
+                                <i class="fa-solid fa-hand-holding-heart me-1"></i> Decision Cards
                             </a>
                         </li>
                         <?php if (App::isUmbrellaAdmin() === true): ?>

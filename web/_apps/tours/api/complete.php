@@ -1,5 +1,5 @@
 <?php
-// Path: public_html/api/tours/complete.php
+// Path: _apps/tours/api/complete.php
 /**
  * -----------------------------------------------------------------------------
  * Tours API — Mark a tour completed for the current user ✅
@@ -8,11 +8,18 @@
  * via the uq_user_tour unique key). Called when the user finishes OR skips
  * a tour so it doesn't pester them again.
  *
+ * 🚚 Relocated from the unreachable `_apps/api/tours/complete.php` (ApiRouter
+ * never consults tblRoutes for api/* paths — it always resolves
+ * `api/{appName}/{action}` straight to `_apps/{appName}/api/{action}.php`;
+ * see .claude/CLAUDE.md → "ApiRouter routing trap") to this convention path,
+ * gated by `api.tours.complete.enabled` (migration 163). Same bug class + fix
+ * as the worship live-sync relocation in migration 158.
+ *
  * @package   Portal\API
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.0.0
+ * @version   1.1.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/253
  * -----------------------------------------------------------------------------
  */

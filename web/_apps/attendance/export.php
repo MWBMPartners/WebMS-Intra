@@ -8,7 +8,7 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present All Rights Reserved
  * @license   All Rights Reserved
- * @version   0.8.1
+ * @version   0.8.2
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/77
  */
 
@@ -53,7 +53,7 @@ $sql = "SELECT
              WHERE ac.sessionID = s.sessionID) AS TotalAttendance,
             s.notes
         FROM tblAttendanceSessions s
-        LEFT JOIN tblAttendanceServiceTypes st ON st.typeID = s.serviceTypeID
+        LEFT JOIN tblAttendanceServiceTypes st ON st.serviceTypeID = s.serviceTypeID
         WHERE s.siteID = ?
         ORDER BY s.sessionDate DESC";
 

@@ -203,12 +203,51 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     </div>
 </div>
 
-<?php if ((string) $newsletter['status'] !== 'sent' && (string) $newsletter['status'] !== 'sending'): ?>
+<?php
+// 📊 #gap-fix D7 — dispatch() only sends newsletter.batchPerHour recipients
+// per call and flips status straight to 'sending' after the FIRST batch, so
+// a list bigger than the cap never reaches 'sent' unless something re-POSTs
+// /newsletter/send. Work out how many are still pending so the in-progress
+// state below is both visible (a "Continue sending" affordance instead of
+// the Send button silently vanishing) and honestly worded (was previously
+// indistinguishable from "sent").
+$newsletterStatus = (string) $newsletter['status'];
+$pendingRecipients = 0;
+if ($newsletterStatus === 'sending') {
+    $pstmt = $db->prepare(
+        'SELECT COUNT(*) FROM tblNewsletterRecipient WHERE newsletterID = ? AND deliveredAt IS NULL AND errorMsg IS NULL'
+    );
+    if ($pstmt !== false) {
+        $pstmt->bind_param('i', $id);
+        $pstmt->execute();
+        $pstmt->bind_result($pendingRecipients);
+        $pstmt->fetch();
+        $pstmt->close();
+    }
+}
+?>
+
+<?php if (in_array($newsletterStatus, ['draft', 'scheduled'], true) === true): ?>
     <form method="post" action="/newsletter/send" class="d-inline">
         <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
         <input type="hidden" name="newsletterID" value="<?php echo $id; ?>">
         <button class="btn btn-success" type="submit" data-confirm="Send this newsletter now? Recipients will be locked in.">
             <i class="fa-solid fa-paper-plane me-1"></i>Send now
+        </button>
+    </form>
+<?php elseif ($newsletterStatus === 'sending'): ?>
+    <p class="text-warning mb-2">
+        <i class="fa-solid fa-hourglass-half me-1"></i>
+        Sending in progress — <?php echo (int) $newsletter['sentCount']; ?> sent so far,
+        <?php echo (int) $pendingRecipients; ?> still pending. Each click of
+        "Continue sending" dispatches another batch (rate-limited per
+        <code>newsletter.batchPerHour</code>).
+    </p>
+    <form method="post" action="/newsletter/send" class="d-inline">
+        <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
+        <input type="hidden" name="newsletterID" value="<?php echo $id; ?>">
+        <button class="btn btn-warning" type="submit">
+            <i class="fa-solid fa-forward me-1"></i>Continue sending (<?php echo (int) $pendingRecipients; ?> remaining)
         </button>
     </form>
 <?php else: ?>

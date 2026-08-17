@@ -60,13 +60,36 @@ if ($stmt !== false) {
     $stmt->close();
 }
 
-$users = [];
-$rs = $db->query("SELECT userID, fullName FROM tblUsers WHERE isActive = 1 ORDER BY fullName");
-if ($rs !== false) {
-    while ($r = $rs->fetch_assoc()) {
-        $users[] = $r;
+// 👥 Reassignment dropdown — filtered to holders of the configured
+// visitors.coordinator_role (tblUserRoles/tblRoles join — same pattern as
+// PrayerChain::eligiblePartners() and new.php's coordinator picker above).
+// An empty setting falls back to the old "all active users" behaviour.
+$coordRole = (string) (App::settings()['visitors']['coordinator_role'] ?? 'visitor_coordinator');
+$users     = [];
+if ($coordRole !== '') {
+    $stmt = $db->prepare(
+        'SELECT DISTINCT u.userID, u.fullName FROM tblUsers u '
+        . 'INNER JOIN tblUserRoles ur ON ur.userID = u.userID '
+        . 'INNER JOIN tblRoles r ON r.roleID = ur.roleID AND r.roleKey = ? '
+        . 'WHERE u.isActive = 1 ORDER BY u.fullName'
+    );
+    if ($stmt !== false) {
+        $stmt->bind_param('s', $coordRole);
+        $stmt->execute();
+        $rs = $stmt->get_result();
+        while ($r = $rs->fetch_assoc()) {
+            $users[] = $r;
+        }
+        $stmt->close();
     }
-    $rs->free();
+} else {
+    $rs = $db->query("SELECT userID, fullName FROM tblUsers WHERE isActive = 1 ORDER BY fullName");
+    if ($rs !== false) {
+        while ($r = $rs->fetch_assoc()) {
+            $users[] = $r;
+        }
+        $rs->free();
+    }
 }
 
 $pageTitle   = $v['fullName'];

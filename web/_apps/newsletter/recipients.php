@@ -62,6 +62,26 @@ if (count($locked) === 0) {
     $previewRecipients = Newsletter::resolveSegment($siteId, $news['segmentID'] !== null ? (int) $news['segmentID'] : null);
 }
 
+// 📊 #gap-fix D7 — same "still pending" count as edit.php, so a
+// larger-than-batchPerHour list has a visible way to finish sending from
+// this page too, and the per-row "pending" badges above aren't the only
+// clue that the newsletter status is still 'sending' rather than 'sent'.
+$newsletterStatus  = (string) $news['status'];
+$pendingRecipients = 0;
+if ($newsletterStatus === 'sending') {
+    $pstmt = $db->prepare(
+        'SELECT COUNT(*) FROM tblNewsletterRecipient WHERE newsletterID = ? AND deliveredAt IS NULL AND errorMsg IS NULL'
+    );
+    if ($pstmt !== false) {
+        $pstmt->bind_param('i', $id);
+        $pstmt->execute();
+        $pstmt->bind_result($pendingRecipients);
+        $pstmt->fetch();
+        $pstmt->close();
+    }
+}
+$csrf = Auth::csrfToken();
+
 $pageTitle   = 'Recipients';
 $pageSection = 'newsletter';
 $breadcrumbs = ['Dashboard' => '/', 'Newsletter' => '/newsletter', 'Recipients' => ''];
@@ -69,6 +89,22 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 ?>
 
 <h1 class="mb-3"><i class="fa-solid fa-users me-2"></i>Recipients — <?php echo htmlspecialchars((string) $news['title'], ENT_QUOTES, 'UTF-8'); ?></h1>
+
+<?php if ($newsletterStatus === 'sending'): ?>
+    <div class="alert alert-warning d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <span>
+            <i class="fa-solid fa-hourglass-half me-1"></i>
+            Sending in progress — <?php echo (int) $pendingRecipients; ?> recipient(s) still pending.
+        </span>
+        <form method="post" action="/newsletter/send" class="d-inline">
+            <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
+            <input type="hidden" name="newsletterID" value="<?php echo $id; ?>">
+            <button class="btn btn-warning btn-sm" type="submit">
+                <i class="fa-solid fa-forward me-1"></i>Continue sending (<?php echo (int) $pendingRecipients; ?> remaining)
+            </button>
+        </form>
+    </div>
+<?php endif; ?>
 
 <?php if (count($locked) > 0): ?>
     <p class="text-secondary">Delivery state — <?php echo count($locked); ?> recipient(s).</p>
