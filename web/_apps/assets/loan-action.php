@@ -21,13 +21,22 @@
  * posted ids straight through without pre-checking them, exactly like
  * owners-save.php does for ownerID/removeOwner().
  *
+ * `childCondition[]` (#413, Phase 3 Pass 3) — the checkin form additionally
+ * posts one per-component condition select when the loan is a kit parent
+ * with active swept-in component loans (item.php's own checkin markup);
+ * coerced into `$data['childConditions']` (array<int assetID, string
+ * condition>) and passed straight through — AssetRegister::loanCheckin()'s
+ * own cascadeKitCheckin() re-validates every value, this controller does
+ * not.
+ *
  * @package   Portal\Assets
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.0.0
+ * @version   1.1.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/393
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/398
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/413
  * -----------------------------------------------------------------------------
  */
 
@@ -70,6 +79,27 @@ $data = [
     'conditionIn'         => (string) ($_POST['conditionIn'] ?? ''),
     'conditionInNotes'    => (string) ($_POST['conditionInNotes'] ?? ''),
 ];
+
+// 🧰 Kit cascade (#413) — item.php's checkin form, when the loan being
+// checked in is a kit parent with active component loans, additionally
+// posts one `childCondition[<childAssetID>]` select per component (see
+// that form's own markup). Coerced here to array<int assetID, string
+// condition> — never trusted further than that shape — and consumed only
+// by loanCheckin() -> cascadeKitCheckin() for a TOP-LEVEL checkin (see
+// that method's own doc); every other action simply ignores this key,
+// same convention as every other $data entry above.
+$childConditionsRaw = $_POST['childCondition'] ?? [];
+$childConditions = [];
+if (is_array($childConditionsRaw) === true) {
+    foreach ($childConditionsRaw as $childAssetIdRaw => $conditionRaw) {
+        $childAssetIdKey = (int) $childAssetIdRaw;
+        $conditionValue  = trim((string) $conditionRaw);
+        if ($childAssetIdKey > 0 && $conditionValue !== '') {
+            $childConditions[$childAssetIdKey] = $conditionValue;
+        }
+    }
+}
+$data['childConditions'] = $childConditions;
 
 $result = AssetRegister::loanAction($loanId, $assetId, $action, $data, $userId);
 

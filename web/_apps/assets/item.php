@@ -165,11 +165,25 @@
  * "under-insured" badge when `insuredValuePence` is below the existing
  * Depreciation card's `$estimatedCurrentValuePence` readout.
  *
+ * KIT / COMPONENTS panel (#413, Phase 3 Pass 3) — same read-visible/
+ * edit-manager-gated split as the Owners/Identifiers panels above: the
+ * component list (`AssetRegister::kitChildren()`) is visible to any viewer
+ * reaching this page; the Detach button on each row and the "Add
+ * component" picker (`AssetRegister::eligibleKitChildCandidates()`) are
+ * `$canManage`-only, mirrored server-side in kit-save.php. Only rendered
+ * at all when there's at least one component OR the viewer can manage
+ * them (an empty, non-manager-visible panel would just be noise). The
+ * Loans panel's own checkin `<details>` form additionally prompts for a
+ * per-component return condition, ONLY for a top-level loan
+ * (`parentLoanID IS NULL`) on an asset that has components — see
+ * `AssetRegister::cascadeKitCheckout()`/`cascadeKitCheckin()`'s own doc
+ * for the full kit-aware-loan mechanism this panel surfaces.
+ *
  * @package   Portal\Assets
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.7.0
+ * @version   1.8.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/393
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/394
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/396
@@ -182,6 +196,7 @@
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/409
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/410
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/412
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/413
  * -----------------------------------------------------------------------------
  */
 
@@ -256,6 +271,16 @@ if ($asset['parentAssetID'] !== null) {
         $parentAssetName = $paRow !== null ? (string) $paRow['name'] : null;
     }
 }
+
+// 🧰 Kit / components (#413, Phase 3 Pass 3) — this asset's own component
+// list (any viewer reaching this page, same read-visible convention as the
+// Owners/Identifiers panels below) and, manager-only, the picker of assets
+// that are ELIGIBLE to be added as a new component (kit-save.php's `attach`
+// action re-validates every one of AssetRegister::eligibleKitChildCandidates()'s
+// own eligibility rules from scratch regardless — this is a display-only
+// convenience list, never itself an authorisation boundary).
+$kitChildren = AssetRegister::kitChildren($assetId, $siteId);
+$kitCandidates = $canManage === true ? AssetRegister::eligibleKitChildCandidates($assetId, $siteId) : [];
 
 // 📎 Resources — split into "general" (any viewer who can see this asset)
 // and the confidential vault subset (ownership-agreement/insurance/legal —
@@ -710,6 +735,7 @@ $nonce = htmlspecialchars(App::cspNonce(), ENT_QUOTES, 'UTF-8');
         <div class="col-md-3"><strong>Parent asset</strong><br>
             <?php if ($parentAssetName !== null): ?>
                 <a href="/assets/item?id=<?php echo (int) $asset['parentAssetID']; ?>"><?php echo htmlspecialchars($parentAssetName, ENT_QUOTES, 'UTF-8'); ?></a>
+                <br><small class="text-muted">Loaned and returned together with its parent kit.</small>
             <?php else: ?>
                 <span class="text-muted">—</span>
             <?php endif; ?>
@@ -796,6 +822,96 @@ $nonce = htmlspecialchars(App::cspNonce(), ENT_QUOTES, 'UTF-8');
                 </div>
             <?php endforeach; ?>
         </div>
+    </div>
+</div>
+<?php endif; ?>
+
+<!-- 🧰 Kit / components (#413, Phase 3 Pass 3) — this asset's own component
+     list is visible to any viewer reaching this page (same read-visible
+     convention as the Owners/Identifiers panels further down); the Detach
+     button on each row and the "Add component" form are $canManage-only —
+     kit-save.php re-derives and re-checks that same gate independently
+     server-side, so a hidden control is never the only thing stopping an
+     unauthorised POST. Loaning THIS asset (when it has components) checks
+     the whole kit out together — see the Loans panel's own checkin-time
+     kit prompt further down, and AssetRegister::cascadeKitCheckout()/
+     cascadeKitCheckin()'s own doc for the full mechanism. -->
+<?php if (count($kitChildren) > 0 || $canManage === true): ?>
+<div class="card mb-3">
+    <div class="card-header"><h2 class="h5 mb-0"><i class="fa-solid fa-boxes-stacked me-2"></i>Kit / components</h2></div>
+    <div class="card-body">
+        <?php if (count($kitChildren) > 0): ?>
+            <p class="text-muted small">
+                Loaning this asset checks out the whole kit; checking it in returns the components too.
+            </p>
+            <div class="portal-data-list mb-3">
+                <?php foreach ($kitChildren as $kitChild): ?>
+                    <?php $kitChildId = (int) $kitChild['assetID']; ?>
+                    <div class="portal-data-row align-items-center">
+                        <div class="col-6 col-md-5">
+                            <a href="/assets/item?id=<?php echo $kitChildId; ?>">
+                                <?php echo htmlspecialchars((string) $kitChild['name'], ENT_QUOTES, 'UTF-8'); ?>
+                            </a>
+                            <?php if ($kitChild['assetTagCode'] !== null && (string) $kitChild['assetTagCode'] !== ''): ?>
+                                <br><small class="text-muted"><?php echo htmlspecialchars((string) $kitChild['assetTagCode'], ENT_QUOTES, 'UTF-8'); ?></small>
+                            <?php endif; ?>
+                        </div>
+                        <div class="col-3 col-md-4">
+                            <span class="badge bg-<?php echo htmlspecialchars($statusBadge[(string) $kitChild['status']] ?? 'secondary', ENT_QUOTES, 'UTF-8'); ?>">
+                                <?php echo htmlspecialchars(ucwords(str_replace('-', ' ', (string) $kitChild['status'])), ENT_QUOTES, 'UTF-8'); ?>
+                            </span>
+                        </div>
+                        <?php if ($canManage === true): ?>
+                        <div class="col-3 col-md-3 text-md-end">
+                            <form method="post" action="/assets/kit-save" class="d-inline"
+                                  data-confirm="Detach this component from the kit?" data-confirm-destructive="true">
+                                <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
+                                <input type="hidden" name="action" value="detach">
+                                <input type="hidden" name="childAssetID" value="<?php echo $kitChildId; ?>">
+                                <input type="hidden" name="parentAssetID" value="<?php echo $assetId; ?>">
+                                <button type="submit" class="btn btn-sm btn-outline-danger">
+                                    <i class="fa-solid fa-link-slash me-1"></i>Detach
+                                </button>
+                            </form>
+                        </div>
+                        <?php endif; ?>
+                    </div>
+                <?php endforeach; ?>
+            </div>
+        <?php else: ?>
+            <p class="text-muted">No components attached to this asset yet.</p>
+        <?php endif; ?>
+
+        <?php if ($canManage === true): ?>
+            <?php if (count($kitCandidates) > 0): ?>
+                <form method="post" action="/assets/kit-save" class="row g-2 align-items-end">
+                    <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
+                    <input type="hidden" name="action" value="attach">
+                    <input type="hidden" name="parentAssetID" value="<?php echo $assetId; ?>">
+                    <div class="col-auto">
+                        <label class="form-label small" for="kitChildAssetID">Add component</label>
+                        <select class="form-select form-select-sm" id="kitChildAssetID" name="childAssetID" required>
+                            <option value="">Select an asset…</option>
+                            <?php foreach ($kitCandidates as $candidate): ?>
+                                <option value="<?php echo (int) $candidate['assetID']; ?>">
+                                    <?php echo htmlspecialchars((string) $candidate['name'], ENT_QUOTES, 'UTF-8'); ?>
+                                    <?php if ($candidate['assetTagCode'] !== null && (string) $candidate['assetTagCode'] !== ''): ?>
+                                        (<?php echo htmlspecialchars((string) $candidate['assetTagCode'], ENT_QUOTES, 'UTF-8'); ?>)
+                                    <?php endif; ?>
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    <div class="col-auto">
+                        <button type="submit" class="btn btn-sm btn-outline-primary">
+                            <i class="fa-solid fa-plus me-1"></i>Add component
+                        </button>
+                    </div>
+                </form>
+            <?php else: ?>
+                <p class="text-muted small mb-0">No eligible assets to add.</p>
+            <?php endif; ?>
+        <?php endif; ?>
     </div>
 </div>
 <?php endif; ?>
@@ -1212,6 +1328,40 @@ $nonce = htmlspecialchars(App::cspNonce(), ENT_QUOTES, 'UTF-8');
                                         </select>
                                         <label class="form-label small">Notes <span class="text-muted">(optional)</span></label>
                                         <input type="text" class="form-control form-control-sm mb-1" name="conditionInNotes" maxlength="500">
+                                        <?php
+                                        // 🧰 Kit cascade (#413) — a TOP-LEVEL loan (parentLoanID null)
+                                        // on an asset with components: prompt for a per-component return
+                                        // condition. Empty selection = "same as above", i.e. the parent's
+                                        // own conditionIn — AssetRegister::cascadeKitCheckin() already
+                                        // falls back to that when childCondition[] omits (or invalidates)
+                                        // a component. A CHILD loan (parentLoanID set) never shows this —
+                                        // it has no components of its own (kits are one level deep).
+                                        $kitChildLoans = [];
+                                        if ($loan['parentLoanID'] === null && count($kitChildren) > 0) {
+                                            $kitChildLoans = AssetRegister::activeKitChildLoans((int) $loan['loanID'], $siteId);
+                                        }
+                                        ?>
+                                        <?php if (count($kitChildLoans) > 0): ?>
+                                            <div class="border rounded p-2 mb-1 bg-body-tertiary">
+                                                <label class="form-label small mb-1">
+                                                    <i class="fa-solid fa-boxes-stacked me-1"></i>This is a kit &mdash;
+                                                    <?php echo count($kitChildLoans); ?> component(s) will be checked in too:
+                                                </label>
+                                                <?php foreach ($kitChildLoans as $kitChildLoan): ?>
+                                                    <div class="mb-1">
+                                                        <label class="form-label small mb-0">
+                                                            <?php echo htmlspecialchars((string) $kitChildLoan['assetName'], ENT_QUOTES, 'UTF-8'); ?>
+                                                        </label>
+                                                        <select class="form-select form-select-sm" name="childCondition[<?php echo (int) $kitChildLoan['assetID']; ?>]">
+                                                            <option value="">(same as above)</option>
+                                                            <?php foreach (AssetRegister::CONDITION_STATES as $cc): ?>
+                                                                <option value="<?php echo htmlspecialchars($cc, ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars(ucwords($cc), ENT_QUOTES, 'UTF-8'); ?></option>
+                                                            <?php endforeach; ?>
+                                                        </select>
+                                                    </div>
+                                                <?php endforeach; ?>
+                                            </div>
+                                        <?php endif; ?>
                                         <button type="submit" class="btn btn-sm btn-primary">Confirm check-in</button>
                                     </form>
                                 </details>

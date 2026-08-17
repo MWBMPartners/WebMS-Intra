@@ -3717,6 +3717,20 @@ class AssetRegister
             $assetStmt->execute();
             $assetStmt->close();
 
+            // 🧰 Kit cascade (#413) — a TOP-LEVEL checkout (this loan's own
+            // parentLoanID is null) of an asset that has kit components
+            // also sweeps every eligible, currently-available component
+            // into its own chained active loan (parentLoanID = this
+            // loan's id). A CHILD loan's own checkout never re-cascades —
+            // the guard below is what stops that, since a swept-in child
+            // loan always carries a non-null parentLoanID. Inside this
+            // same transaction so a failure here rolls back the parent's
+            // own checkout too — see cascadeKitCheckout()'s own doc.
+            $kitSummary = ['swept' => [], 'skipped' => []];
+            if ($loan['parentLoanID'] === null) {
+                $kitSummary = self::cascadeKitCheckout($loan, $newAssetStatus, $actorUserId);
+            }
+
             App::commit();
         } catch (\Throwable $e) {
             App::rollback();
@@ -3733,7 +3747,17 @@ class AssetRegister
             ['status' => 'active', 'conditionOut' => $conditionOut, 'assetStatus' => $newAssetStatus]
         );
 
-        return ['ok' => true, 'msg' => 'Loan checked out — condition and dates recorded.'];
+        // 📣 Augment the friendly message with what the kit cascade above
+        // actually did — never changes ok=true, purely informational.
+        $msg = 'Loan checked out — condition and dates recorded.';
+        if (count($kitSummary['swept']) > 0) {
+            $msg .= ' ' . count($kitSummary['swept']) . ' kit component(s) checked out too.';
+            if (count($kitSummary['skipped']) > 0) {
+                $msg .= ' (skipped: ' . implode(', ', $kitSummary['skipped']) . ')';
+            }
+        }
+
+        return ['ok' => true, 'msg' => $msg];
     }
 
     /**
@@ -3805,6 +3829,22 @@ class AssetRegister
             $assetStmt->execute();
             $assetStmt->close();
 
+            // 🧰 Kit cascade (#413) — a TOP-LEVEL checkin (this loan's own
+            // parentLoanID is null) of a kit parent also checks in every
+            // one of its still-active swept-in component loans. A CHILD
+            // loan's own checkin never re-cascades, for the same reason as
+            // loanCheckout()'s mirror-image guard above. `childConditions`
+            // (an optional array<int assetID, string condition> posted by
+            // item.php's checkin form) lets the person checking the kit in
+            // record a DIFFERENT return condition per component; any
+            // component left unspecified falls back to the parent's own
+            // $conditionIn — see cascadeKitCheckin()'s own doc.
+            $kitReturned = ['returned' => []];
+            if ($loan['parentLoanID'] === null) {
+                $childConditions = is_array($data['childConditions'] ?? null) ? $data['childConditions'] : [];
+                $kitReturned = self::cascadeKitCheckin($loan, $conditionIn, $childConditions);
+            }
+
             App::commit();
         } catch (\Throwable $e) {
             App::rollback();
@@ -3821,7 +3861,14 @@ class AssetRegister
             ['status' => 'returned', 'conditionIn' => $conditionIn, 'assetStatus' => 'in-service']
         );
 
-        return ['ok' => true, 'msg' => 'Loan checked in — asset marked in-service.'];
+        // 📣 Augment the friendly message with what the kit cascade above
+        // actually did — never changes ok=true, purely informational.
+        $msg = 'Loan checked in — asset marked in-service.';
+        if (count($kitReturned['returned']) > 0) {
+            $msg .= ' ' . count($kitReturned['returned']) . ' kit component(s) returned too.';
+        }
+
+        return ['ok' => true, 'msg' => $msg];
     }
 
     /**
@@ -3872,6 +3919,586 @@ class AssetRegister
         self::audit('loan', $loanId, $assetId, 'cancel', ['status' => $currentStatus], ['status' => 'cancelled']);
 
         return ['ok' => true, 'msg' => 'Loan cancelled.'];
+    }
+
+    /* ==========================================================================
+     * 🧰 Parent/child asset kits + kit-aware loans (#413, Phase 3 Pass 3)
+     * ------------------------------------------------------------------------
+     * `tblAssets.parentAssetID` (a self-FK, pre-provisioned back in
+     * migration 159 — see that migration's `fk_asset_parent` constraint)
+     * lets one asset be flagged as a COMPONENT of another — a camera body
+     * is the parent "kit" asset, its lens/battery/case are children. Kits
+     * are deliberately ONE level deep only: a child can never itself be a
+     * parent (enforced in `attachToKit()` below), so there is no recursive
+     * tree to walk anywhere in this section — every read here is a single
+     * flat `WHERE parentAssetID = ?` or `WHERE parentAssetID IS NULL`.
+     *
+     * `attachToKit()`/`detachFromKit()` are the ONLY supported way to
+     * mutate `parentAssetID` post-creation (creation-time assignment via
+     * `createAsset()`'s own `parentAssetID` field, #394, is untouched by
+     * this pass) — both route through `self::audit()` (entityType
+     * 'asset', action 'update', matching `updateOwnershipTerms()`'s own
+     * convention for a single-column asset mutation that isn't the whole-
+     * record `updateAsset()` path).
+     *
+     * The kit-AWARE LOAN behaviour — `cascadeKitCheckout()`/
+     * `cascadeKitCheckin()` — is the more consequential half: loaning a
+     * kit's PARENT asset out (or receiving it back) implicitly sweeps
+     * every eligible component along with it, via its OWN chained loan
+     * row (`tblAssetLoans.parentLoanID`, also pre-provisioned in migration
+     * 159). Both cascade helpers are called from INSIDE loanCheckout()'s/
+     * loanCheckin()'s own `App::beginTransaction()`/`commit()`/
+     * `rollback()` block — see this class's header comment (point 5) for
+     * why a mid-cascade failure must never leave a kit's parent loan
+     * checked-out/in while its components silently didn't follow, or vice
+     * versa. Both THROW `\RuntimeException` on any prepare/execute
+     * failure (rather than returning a soft failure the caller might
+     * ignore) specifically so that shared catch block rolls back the
+     * WHOLE transaction, parent included.
+     *
+     * The `$loan['parentLoanID'] === null` guard inside loanCheckout()/
+     * loanCheckin() (immediately before each cascade call) is what stops
+     * infinite/re-entrant cascading — a swept-in CHILD loan always has a
+     * non-null parentLoanID, so checking a child loan out/in on its own
+     * (e.g. from item.php's Loans panel on the child asset's own page)
+     * never itself tries to sweep further components. Kits being one
+     * level deep (see above) means this single boolean check is sufficient
+     * — there is no deeper chain to guard against.
+     * ======================================================================== */
+
+    /**
+     * List the direct component ("child") assets currently attached to a
+     * parent kit asset. Site-scoped via the caller-supplied `$siteId`
+     * (not `Site::id()`) so a caller that already has the parent's own
+     * site on hand (e.g. `cascadeKitCheckout()`, working from an
+     * already-loaded loan row) never pays for a redundant lookup —
+     * mirrors `listLoans()`'s own caller-supplied-`$siteId` convention.
+     *
+     * @return array<int, array<string, mixed>> assetID/name/assetTagCode/
+     *         status/conditionState rows, empty when the parent has no
+     *         components (or doesn't exist/isn't on this site).
+     */
+    public static function kitChildren(int $parentAssetId, int $siteId): array
+    {
+        $db = App::db();
+        $stmt = $db->prepare(
+            'SELECT assetID, name, assetTagCode, status, conditionState FROM tblAssets '
+            . 'WHERE parentAssetID = ? AND siteID = ? AND isDeleted = 0 ORDER BY name ASC'
+        );
+        if ($stmt === false) {
+            error_log('AssetRegister::kitChildren() prepare failed: ' . $db->error);
+            return [];
+        }
+        $stmt->bind_param('ii', $parentAssetId, $siteId);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        $rows = [];
+        while ($row = $result->fetch_assoc()) {
+            $rows[] = $row;
+        }
+        $stmt->close();
+        return $rows;
+    }
+
+    /**
+     * Assets on this site that MAY be added as a component of the given
+     * parent — i.e. everything EXCEPT: the parent asset itself, anything
+     * already a component of ANY kit (`parentAssetID IS NOT NULL`),
+     * anything that is ITSELF already a kit parent (kits are one level
+     * deep — see this section's header note), and anything currently on
+     * an unresolved loan (`LOAN_OPEN_STATUSES` — adding a mid-loan asset
+     * to a kit would leave its own loan row orphaned from the kit
+     * relationship it's about to join). Feeds the "Add component" picker
+     * on item.php; deliberately excludes deleted/other-site rows the same
+     * way `self::get()` does.
+     *
+     * @return array<int, array<string, mixed>> assetID/name/assetTagCode/
+     *         status rows, ordered by name.
+     */
+    public static function eligibleKitChildCandidates(int $parentAssetId, int $siteId): array
+    {
+        $db = App::db();
+
+        // 🚦 Open-loan placeholder list built from LOAN_OPEN_STATUSES, not
+        // hard-coded — mirrors createLoanRequest()'s own probe (see this
+        // class's header comment for the house convention this follows).
+        $openPlaceholders = implode(', ', array_fill(0, count(self::LOAN_OPEN_STATUSES), '?'));
+
+        $sql = 'SELECT assetID, name, assetTagCode, status FROM tblAssets '
+             . 'WHERE siteID = ? AND isDeleted = 0 AND assetID <> ? AND parentAssetID IS NULL '
+             . 'AND assetID NOT IN ('
+             . '    SELECT DISTINCT parentAssetID FROM tblAssets WHERE parentAssetID IS NOT NULL AND siteID = ?'
+             . ') '
+             . 'AND assetID NOT IN ('
+             . '    SELECT assetID FROM tblAssetLoans WHERE siteID = ? AND status IN (' . $openPlaceholders . ')'
+             . ') '
+             . 'ORDER BY name ASC';
+
+        $stmt = $db->prepare($sql);
+        if ($stmt === false) {
+            error_log('AssetRegister::eligibleKitChildCandidates() prepare failed: ' . $db->error);
+            return [];
+        }
+        // 🔢 FOUR bound integers precede the status strings: the outer
+        // siteID + assetID, then the siteID inside EACH of the two
+        // NOT IN sub-queries — so the type string is 'iiii', not 'iii'
+        // (a 3-i string would leave bind_param one variable short of the
+        // seven placeholders and fail at runtime).
+        $types = 'iiii' . str_repeat('s', count(self::LOAN_OPEN_STATUSES));
+        $stmt->bind_param($types, $siteId, $parentAssetId, $siteId, $siteId, ...self::LOAN_OPEN_STATUSES);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        $rows = [];
+        while ($row = $result->fetch_assoc()) {
+            $rows[] = $row;
+        }
+        $stmt->close();
+        return $rows;
+    }
+
+    /**
+     * Attach `$childAssetId` as a component of `$parentAssetId`'s kit.
+     * Never fatals — every guard below returns `ok=false` with a message
+     * fit to flash straight back to the user; only an actual DB failure
+     * (prepare returning false) logs via `error_log()` first. Guards, in
+     * order (see this section's header note for the one-level-deep and
+     * open-loan rationale):
+     *   1. both assets exist on THIS site (`self::get()` is itself
+     *      site-scoped via `Site::id()` — a cross-site or missing id
+     *      fails here with the same message as "doesn't exist", never
+     *      leaking which case it was).
+     *   2. child !== parent.
+     *   3. the parent is not itself a component of another kit.
+     *   4. the child does not itself already have components (would
+     *      create a two-level kit).
+     *   5. the child has no existing parent (must be detached first).
+     *   6. the child has no open loan (`LOAN_OPEN_STATUSES`).
+     *
+     * The final UPDATE's `AND parentAssetID IS NULL` clause is the
+     * race-safety net — even if two concurrent requests both pass every
+     * guard above (read-then-write race), only the FIRST write actually
+     * lands; the second affects 0 rows and reports the generic "may have
+     * changed" failure rather than silently overwriting a parent another
+     * request just set.
+     *
+     * @return array{ok: bool, msg: string}
+     */
+    public static function attachToKit(int $childAssetId, int $parentAssetId, int $actorUserId): array
+    {
+        $child = self::get($childAssetId);
+        if ($child === null) {
+            return ['ok' => false, 'msg' => 'Component asset not found.'];
+        }
+        $parent = self::get($parentAssetId);
+        if ($parent === null) {
+            return ['ok' => false, 'msg' => 'Parent (kit) asset not found.'];
+        }
+        if ($childAssetId === $parentAssetId) {
+            return ['ok' => false, 'msg' => 'An asset cannot be a component of itself.'];
+        }
+        if ($parent['parentAssetID'] !== null) {
+            return ['ok' => false, 'msg' => 'The chosen parent is itself a component of another kit — kits are only one level deep.'];
+        }
+
+        $siteId = Site::id();
+
+        if (count(self::kitChildren($childAssetId, $siteId)) > 0) {
+            return ['ok' => false, 'msg' => "That asset already has its own components, so it can't become a component of another kit."];
+        }
+        if ($child['parentAssetID'] !== null) {
+            return ['ok' => false, 'msg' => 'That asset is already part of a kit — detach it first.'];
+        }
+
+        $db = App::db();
+
+        // 🚦 No open loan on the child — mirrors createLoanRequest()'s own
+        // probe (LOAN_OPEN_STATUSES), same rationale as this section's
+        // header note.
+        $openPlaceholders = implode(', ', array_fill(0, count(self::LOAN_OPEN_STATUSES), '?'));
+        $openStmt = $db->prepare(
+            'SELECT 1 FROM tblAssetLoans WHERE assetID = ? AND siteID = ? AND status IN (' . $openPlaceholders . ') LIMIT 1'
+        );
+        if ($openStmt !== false) {
+            $openTypes = 'ii' . str_repeat('s', count(self::LOAN_OPEN_STATUSES));
+            $openStmt->bind_param($openTypes, $childAssetId, $siteId, ...self::LOAN_OPEN_STATUSES);
+            $openStmt->execute();
+            $hasOpenLoan = $openStmt->get_result()->fetch_assoc() !== null;
+            $openStmt->close();
+            if ($hasOpenLoan === true) {
+                return ['ok' => false, 'msg' => "That asset has an open loan and can't be added to a kit right now."];
+            }
+        }
+
+        // 🔒 Narrow, race-safe UPDATE — see method doc.
+        $stmt = $db->prepare(
+            'UPDATE tblAssets SET parentAssetID = ? WHERE assetID = ? AND siteID = ? AND parentAssetID IS NULL'
+        );
+        if ($stmt === false) {
+            error_log('AssetRegister::attachToKit() prepare failed: ' . $db->error);
+            return ['ok' => false, 'msg' => 'Could not attach that component — please try again.'];
+        }
+        $stmt->bind_param('iii', $parentAssetId, $childAssetId, $siteId);
+        $stmt->execute();
+        $affected = $stmt->affected_rows;
+        $stmt->close();
+        if ($affected <= 0) {
+            return ['ok' => false, 'msg' => 'Could not attach that component — it may have changed since you loaded this page.'];
+        }
+
+        self::audit('asset', $childAssetId, $childAssetId, 'update', ['parentAssetID' => null], ['parentAssetID' => $parentAssetId]);
+
+        return ['ok' => true, 'msg' => 'Component added to the kit.'];
+    }
+
+    /**
+     * Detach `$childAssetId` from whichever kit it currently belongs to.
+     * Never fatals — same "return ok=false with a friendly message"
+     * contract as `attachToKit()`. Guards:
+     *   1. the asset exists on this site.
+     *   2. it currently HAS a parent (nothing to detach otherwise).
+     *   3. it has no open loan — a component swept into an active kit
+     *      loan (`parentLoanID` chained to the parent's own loan) can't be
+     *      silently detached out from under that in-flight loan; the loan
+     *      must be checked in (via the normal cascade) first.
+     *
+     * The final UPDATE's `AND parentAssetID IS NOT NULL` clause is the
+     * same race-safety net `attachToKit()`'s own UPDATE uses, mirrored.
+     *
+     * @return array{ok: bool, msg: string}
+     */
+    public static function detachFromKit(int $childAssetId, int $actorUserId): array
+    {
+        $child = self::get($childAssetId);
+        if ($child === null) {
+            return ['ok' => false, 'msg' => 'Component asset not found.'];
+        }
+        if ($child['parentAssetID'] === null) {
+            return ['ok' => false, 'msg' => "That asset isn't part of a kit."];
+        }
+
+        $siteId = Site::id();
+        $db = App::db();
+
+        // 🚦 Same open-loan guard as attachToKit() — see method doc.
+        $openPlaceholders = implode(', ', array_fill(0, count(self::LOAN_OPEN_STATUSES), '?'));
+        $openStmt = $db->prepare(
+            'SELECT 1 FROM tblAssetLoans WHERE assetID = ? AND siteID = ? AND status IN (' . $openPlaceholders . ') LIMIT 1'
+        );
+        if ($openStmt !== false) {
+            $openTypes = 'ii' . str_repeat('s', count(self::LOAN_OPEN_STATUSES));
+            $openStmt->bind_param($openTypes, $childAssetId, $siteId, ...self::LOAN_OPEN_STATUSES);
+            $openStmt->execute();
+            $hasOpenLoan = $openStmt->get_result()->fetch_assoc() !== null;
+            $openStmt->close();
+            if ($hasOpenLoan === true) {
+                return ['ok' => false, 'msg' => "That asset has an open loan and can't be detached right now."];
+            }
+        }
+
+        $oldParentId = (int) $child['parentAssetID'];
+
+        $stmt = $db->prepare(
+            'UPDATE tblAssets SET parentAssetID = NULL WHERE assetID = ? AND siteID = ? AND parentAssetID IS NOT NULL'
+        );
+        if ($stmt === false) {
+            error_log('AssetRegister::detachFromKit() prepare failed: ' . $db->error);
+            return ['ok' => false, 'msg' => 'Could not detach that component — please try again.'];
+        }
+        $stmt->bind_param('ii', $childAssetId, $siteId);
+        $stmt->execute();
+        $affected = $stmt->affected_rows;
+        $stmt->close();
+        if ($affected <= 0) {
+            return ['ok' => false, 'msg' => 'Could not detach that component — it may have changed since you loaded this page.'];
+        }
+
+        self::audit('asset', $childAssetId, $childAssetId, 'update', ['parentAssetID' => $oldParentId], ['parentAssetID' => null]);
+
+        return ['ok' => true, 'msg' => 'Component detached from the kit.'];
+    }
+
+    /**
+     * Child loans currently swept under a parent kit loan — i.e. rows
+     * chained via `parentLoanID` that are still `active`. Feeds the
+     * checkin-time "N component(s) will be checked in too" prompt on
+     * item.php/loans.php; also the read half `cascadeKitCheckin()` itself
+     * drives from below. Deliberately narrowed to `status = 'active'`
+     * (not every child loan ever chained to this parent) — a component
+     * that was independently checked in early (see `cascadeKitCheckin()`'s
+     * own "already returned independently" note) has nothing left to
+     * prompt for.
+     *
+     * @return array<int, array<string, mixed>> loanID/assetID/status/
+     *         assetName/assetTagCode rows, ordered by asset name.
+     */
+    public static function activeKitChildLoans(int $parentLoanId, int $siteId): array
+    {
+        $db = App::db();
+        $stmt = $db->prepare(
+            'SELECT l.loanID, l.assetID, l.status, a.name AS assetName, a.assetTagCode '
+            . 'FROM tblAssetLoans l INNER JOIN tblAssets a ON a.assetID = l.assetID '
+            . "WHERE l.parentLoanID = ? AND l.siteID = ? AND l.status = 'active' ORDER BY a.name ASC"
+        );
+        if ($stmt === false) {
+            error_log('AssetRegister::activeKitChildLoans() prepare failed: ' . $db->error);
+            return [];
+        }
+        $stmt->bind_param('ii', $parentLoanId, $siteId);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        $rows = [];
+        while ($row = $result->fetch_assoc()) {
+            $rows[] = $row;
+        }
+        $stmt->close();
+        return $rows;
+    }
+
+    /**
+     * Sweep a kit parent's eligible components into their own chained
+     * `active` loan rows at the moment the PARENT loan is checked out.
+     * Called from INSIDE `loanCheckout()`'s own transaction (after its
+     * `tblAssets` status UPDATE, before `App::commit()`) — see this
+     * section's header note for why every DB failure here THROWS rather
+     * than returning a soft failure: it must roll back the parent's own
+     * checkout too, not just silently leave some components un-swept.
+     *
+     * Per component (`self::kitChildren($parentAssetId, $siteId)`):
+     *   - SKIPPED (not an error) when the component's own `status` isn't
+     *     `in-service`/`in-storage` (reason "not available" — a retired,
+     *     already-on-loan, or in-repair component can't be handed over
+     *     alongside its kit) or it already has an open loan of its own
+     *     (reason "already on loan" — re-checked here rather than trusted
+     *     from `kitChildren()`'s status column alone, since that column
+     *     can lag a loan row created moments earlier by a concurrent
+     *     request).
+     *   - Otherwise, a new `tblAssetLoans` row is INSERTed copying the
+     *     parent loan's own direction/counterparty/condition-out/due-date
+     *     fields verbatim (see class-level note below on why this is the
+     *     parent row's ORIGINALLY-LOADED values, not any override the
+     *     checkout form supplied this same call), chained via
+     *     `parentLoanID`, `status='active'` immediately (no separate
+     *     request/approve step for a swept-in component — the parent loan
+     *     already carries that authority), and the component's own
+     *     `tblAssets.status` is updated to match the parent's new
+     *     `$newAssetStatus`.
+     *
+     * NOTE: `conditionOut`/`conditionOutNotes`/`dueDate` are read from
+     * `$parentLoan` (the row `loanAction()` loaded BEFORE this checkout's
+     * own UPDATE ran) — if the checkout form supplied an OVERRIDE for the
+     * parent's own condition-at-hand-over, that override is NOT re-read
+     * back out for the components; they inherit whatever was recorded at
+     * REQUEST time. This mirrors the orchestrator's spec verbatim (see
+     * PR #413 design notes) — flagged here rather than silently changed,
+     * since a future pass may want the components to inherit the
+     * confirmed/overridden value instead.
+     *
+     * @param array<string, mixed> $parentLoan The parent's own freshly
+     *        (pre-UPDATE) loaded loan row, exactly as loanCheckout()
+     *        received it.
+     *
+     * @return array{swept: string[], skipped: string[]} Component asset
+     *         names actually swept in, and names+reason for any skipped.
+     */
+    private static function cascadeKitCheckout(array $parentLoan, string $newAssetStatus, int $actorUserId): array
+    {
+        $db            = App::db();
+        $parentAssetId = (int) $parentLoan['assetID'];
+        $siteId        = (int) $parentLoan['siteID'];
+        $parentLoanId  = (int) $parentLoan['loanID'];
+
+        $swept   = [];
+        $skipped = [];
+
+        $openPlaceholders = implode(', ', array_fill(0, count(self::LOAN_OPEN_STATUSES), '?'));
+
+        foreach (self::kitChildren($parentAssetId, $siteId) as $child) {
+            $childAssetId = (int) $child['assetID'];
+            $childName    = (string) $child['name'];
+            $childStatus  = (string) $child['status'];
+
+            if (in_array($childStatus, ['in-service', 'in-storage'], true) === false) {
+                $skipped[] = $childName . ' (not available)';
+                continue;
+            }
+
+            // 🚦 Re-check no open loan — see method doc on why kitChildren()'s
+            // own status column alone isn't trusted for this.
+            $openStmt = $db->prepare(
+                'SELECT 1 FROM tblAssetLoans WHERE assetID = ? AND siteID = ? AND status IN (' . $openPlaceholders . ') LIMIT 1'
+            );
+            if ($openStmt === false) {
+                throw new \RuntimeException('cascadeKitCheckout() prepare (open-loan probe) failed: ' . $db->error);
+            }
+            $openTypes = 'ii' . str_repeat('s', count(self::LOAN_OPEN_STATUSES));
+            $openStmt->bind_param($openTypes, $childAssetId, $siteId, ...self::LOAN_OPEN_STATUSES);
+            $openStmt->execute();
+            $hasOpenLoan = $openStmt->get_result()->fetch_assoc() !== null;
+            $openStmt->close();
+            if ($hasOpenLoan === true) {
+                $skipped[] = $childName . ' (already on loan)';
+                continue;
+            }
+
+            // 📋 Copy the parent loan's shape via splitFields() (this
+            // class's own table-driven column/type/param builder — see
+            // that helper's doc for why a hand-counted bind_param() type
+            // string is the bug this avoids), same convention
+            // createLoanRequest() uses for its own INSERT.
+            $fields = [
+                'siteID'               => [$siteId, 'i'],
+                'assetID'              => [$childAssetId, 'i'],
+                'direction'            => [(string) $parentLoan['direction'], 's'],
+                'counterpartyType'     => [(string) $parentLoan['counterpartyType'], 's'],
+                'counterpartyUserID'   => [$parentLoan['counterpartyUserID'] !== null ? (int) $parentLoan['counterpartyUserID'] : null, 'i'],
+                'counterpartyOrgID'    => [$parentLoan['counterpartyOrgID'] !== null ? (int) $parentLoan['counterpartyOrgID'] : null, 'i'],
+                'counterpartyName'     => [$parentLoan['counterpartyName'], 's'],
+                'counterpartyContact'  => [$parentLoan['counterpartyContact'], 's'],
+                'status'               => ['active', 's'],
+                'approvedByID'         => [$actorUserId, 'i'],
+                'conditionOut'         => [$parentLoan['conditionOut'], 's'],
+                'conditionOutNotes'    => [$parentLoan['conditionOutNotes'], 's'],
+                'dueDate'              => [$parentLoan['dueDate'], 's'],
+                'parentLoanID'         => [$parentLoanId, 'i'],
+                'requestedByID'        => [(int) $parentLoan['requestedByID'], 'i'],
+                'notes'                => ['Auto-added as part of kit loan #' . $parentLoanId, 's'],
+            ];
+            ['columns' => $columns, 'types' => $types, 'params' => $params] = self::splitFields($fields);
+
+            // 🕒 approvedAt/dateOut are inline NOW() literals, appended
+            // after the bound columns — not user data, so no placeholder
+            // needed (same house convention loanCheckout()'s own UPDATE
+            // uses for these two columns).
+            $insertSql = 'INSERT INTO tblAssetLoans (`' . implode('`, `', $columns) . '`, `approvedAt`, `dateOut`) '
+                       . 'VALUES (' . implode(', ', array_fill(0, count($columns), '?')) . ', NOW(), NOW())';
+            $insertStmt = $db->prepare($insertSql);
+            if ($insertStmt === false) {
+                throw new \RuntimeException('cascadeKitCheckout() prepare (child loan insert) failed: ' . $db->error);
+            }
+            $insertStmt->bind_param($types, ...$params);
+            $insertStmt->execute();
+            $childLoanId = (int) $insertStmt->insert_id;
+            $insertStmt->close();
+            if ($childLoanId <= 0) {
+                throw new \RuntimeException('cascadeKitCheckout() insert produced no id for child asset #' . $childAssetId);
+            }
+
+            $childAssetStmt = $db->prepare('UPDATE tblAssets SET status = ? WHERE assetID = ? AND siteID = ?');
+            if ($childAssetStmt === false) {
+                throw new \RuntimeException('cascadeKitCheckout() prepare (child asset status) failed: ' . $db->error);
+            }
+            $childAssetStmt->bind_param('sii', $newAssetStatus, $childAssetId, $siteId);
+            $childAssetStmt->execute();
+            $childAssetStmt->close();
+
+            self::audit(
+                'loan',
+                $childLoanId,
+                $childAssetId,
+                'checkout',
+                null,
+                ['status' => 'active', 'parentLoanID' => $parentLoanId, 'assetStatus' => $newAssetStatus]
+            );
+
+            $swept[] = $childName;
+        }
+
+        return ['swept' => $swept, 'skipped' => $skipped];
+    }
+
+    /**
+     * Check in every still-`active` component swept in under a kit
+     * parent's loan, at the moment the PARENT loan is checked in. Called
+     * from INSIDE `loanCheckin()`'s own transaction (after its
+     * `tblAssets` status UPDATE, before `App::commit()`) — throws on any
+     * DB failure for the same "roll back the whole cascade" reason as
+     * `cascadeKitCheckout()`.
+     *
+     * Per active child loan (`self::activeKitChildLoans()`):
+     *   - resolves ITS OWN return condition from `$childConditions`
+     *     (keyed by assetID — posted by item.php's per-component checkin
+     *     select) when supplied and valid, else falls back to the
+     *     parent's own (already-validated) `$conditionIn`.
+     *   - the loan UPDATE is WHERE-guarded to `status = 'active'` — if 0
+     *     rows are affected the component must already have been checked
+     *     in independently (e.g. a manager checked that one child in on
+     *     its own page moments earlier); that's NOT an error, this method
+     *     simply moves on to the next component rather than throwing.
+     *   - on an actual update, the component's own `tblAssets.status`
+     *     resets to `in-service` and `conditionState` picks up its
+     *     resolved condition, mirroring `loanCheckin()`'s own parent-asset
+     *     update exactly.
+     *
+     * @param array<string, mixed> $parentLoan       The parent's own
+     *        freshly-loaded loan row, exactly as loanCheckin() received
+     *        it.
+     * @param string                $conditionIn      The parent's own
+     *        already-validated return condition (fallback default).
+     * @param array<int, string>    $childConditions  Optional per-child
+     *        overrides, assetID => one of CONDITION_STATES.
+     *
+     * @return array{returned: string[]} Component asset names actually
+     *         checked in by this cascade.
+     */
+    private static function cascadeKitCheckin(array $parentLoan, string $conditionIn, array $childConditions): array
+    {
+        $db           = App::db();
+        $parentLoanId = (int) $parentLoan['loanID'];
+        $siteId       = (int) $parentLoan['siteID'];
+
+        $returned = [];
+
+        foreach (self::activeKitChildLoans($parentLoanId, $siteId) as $childLoan) {
+            $childLoanId  = (int) $childLoan['loanID'];
+            $childAssetId = (int) $childLoan['assetID'];
+            $childName    = (string) $childLoan['assetName'];
+
+            // 🎨 Per-component override, falling back to the parent's own
+            // (already-validated) condition — see method doc.
+            $cond = $childConditions[$childAssetId] ?? $conditionIn;
+            if (in_array($cond, self::CONDITION_STATES, true) === false) {
+                $cond = $conditionIn;
+            }
+
+            $stmt = $db->prepare(
+                "UPDATE tblAssetLoans SET status = 'returned', dateIn = NOW(), conditionIn = ? "
+                . " WHERE loanID = ? AND siteID = ? AND status = 'active'"
+            );
+            if ($stmt === false) {
+                throw new \RuntimeException('cascadeKitCheckin() prepare (loan) failed: ' . $db->error);
+            }
+            $stmt->bind_param('sii', $cond, $childLoanId, $siteId);
+            $stmt->execute();
+            $affected = $stmt->affected_rows;
+            $stmt->close();
+            if ($affected <= 0) {
+                // ⏭️ Already returned independently — see method doc, not
+                // an error condition.
+                continue;
+            }
+
+            $assetStmt = $db->prepare('UPDATE tblAssets SET status = ?, conditionState = ? WHERE assetID = ? AND siteID = ?');
+            if ($assetStmt === false) {
+                throw new \RuntimeException('cascadeKitCheckin() prepare (asset) failed: ' . $db->error);
+            }
+            $inService = 'in-service';
+            $assetStmt->bind_param('ssii', $inService, $cond, $childAssetId, $siteId);
+            $assetStmt->execute();
+            $assetStmt->close();
+
+            self::audit(
+                'loan',
+                $childLoanId,
+                $childAssetId,
+                'checkin',
+                ['status' => 'active'],
+                ['status' => 'returned', 'conditionIn' => $cond, 'assetStatus' => 'in-service']
+            );
+
+            $returned[] = $childName;
+        }
+
+        return ['returned' => $returned];
     }
 
     /* ==========================================================================
