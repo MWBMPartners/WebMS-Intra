@@ -6348,6 +6348,8 @@ CREATE TABLE IF NOT EXISTS `tblAssetIdentifiers` (
     `value`         VARCHAR(255) NOT NULL,
     `isPrimary`     TINYINT(1)   NOT NULL DEFAULT 0,
     `isVerified`    TINYINT(1)   NOT NULL DEFAULT 0,
+    `verifiedAt`    DATETIME     DEFAULT NULL COMMENT 'Timestamp of the last #415 GEPIR verify-cache lookup for this identifier -- 161 (#415)',
+    `verifyNote`    VARCHAR(255) DEFAULT NULL COMMENT 'Human-readable result of the last #415 GEPIR verify-cache lookup -- 161 (#415)',
     `notes`         VARCHAR(500) DEFAULT NULL,
     `createdByID`   INT          NOT NULL,
     `createdAt`     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -6476,6 +6478,105 @@ CREATE TABLE IF NOT EXISTS `tblAssetReminderLog` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
 COMMENT='Asset Tracker Phase 2 — reminder single-shot dedupe log, no FKs by design (#404)';
 
+-- Asset Tracker Phase 3 (migration 161 / #392) — five new tables. Placed
+-- here (after every Phase 1/2 Asset Tracker table above, all of which
+-- these depend on) to keep dependency order intact for a fresh install —
+-- see migration 161's own header for the full design notes.
+CREATE TABLE IF NOT EXISTS `tblAssetStocktakes` (
+    `stocktakeID`   INT          NOT NULL AUTO_INCREMENT,
+    `siteID`        INT          NOT NULL DEFAULT 1,
+    `label`         VARCHAR(150) NOT NULL,
+    `status`        ENUM('open','closed') NOT NULL DEFAULT 'open',
+    `locationID`    INT          DEFAULT NULL COMMENT 'NULL = not scoped to a single location',
+    `categoryID`    INT          DEFAULT NULL COMMENT 'NULL = not scoped to a single category',
+    `startedByID`   INT          NOT NULL,
+    `startedAt`     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `closedByID`    INT          DEFAULT NULL,
+    `closedAt`      DATETIME     DEFAULT NULL,
+    `notes`         TEXT         DEFAULT NULL,
+    PRIMARY KEY (`stocktakeID`),
+    KEY `idx_astst_site_status` (`siteID`, `status`),
+    CONSTRAINT `fk_astst_site`     FOREIGN KEY (`siteID`)       REFERENCES `tblSites`(`siteID`),
+    CONSTRAINT `fk_astst_location` FOREIGN KEY (`locationID`)   REFERENCES `tblAssetLocations`(`locationID`) ON DELETE SET NULL,
+    CONSTRAINT `fk_astst_category` FOREIGN KEY (`categoryID`)   REFERENCES `tblAssetCategories`(`categoryID`) ON DELETE SET NULL,
+    CONSTRAINT `fk_astst_starter`  FOREIGN KEY (`startedByID`)  REFERENCES `tblUsers`(`userID`) ON DELETE RESTRICT,
+    CONSTRAINT `fk_astst_closer`   FOREIGN KEY (`closedByID`)   REFERENCES `tblUsers`(`userID`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+COMMENT='Asset Tracker Phase 3 — stocktake/audit-mode runs (#411)';
+
+CREATE TABLE IF NOT EXISTS `tblAssetStocktakeItems` (
+    `itemID`          INT          NOT NULL AUTO_INCREMENT,
+    `stocktakeID`     INT          NOT NULL,
+    `siteID`          INT          NOT NULL DEFAULT 1,
+    `assetID`         INT          NOT NULL,
+    `verifyStatus`    ENUM('pending','present','missing','moved','unexpected') NOT NULL DEFAULT 'pending',
+    `scannedByID`     INT          DEFAULT NULL,
+    `scannedAt`       DATETIME     DEFAULT NULL,
+    `foundLocationID` INT          DEFAULT NULL COMMENT 'Where the asset was actually scanned, when different from its recorded locationID (verifyStatus=moved)',
+    `notes`           VARCHAR(500) DEFAULT NULL,
+    PRIMARY KEY (`itemID`),
+    UNIQUE KEY `uq_aststi_stocktake_asset` (`stocktakeID`, `assetID`),
+    KEY `idx_aststi_status` (`stocktakeID`, `verifyStatus`),
+    KEY `idx_aststi_site` (`siteID`),
+    CONSTRAINT `fk_aststi_stocktake` FOREIGN KEY (`stocktakeID`)     REFERENCES `tblAssetStocktakes`(`stocktakeID`) ON DELETE CASCADE,
+    CONSTRAINT `fk_aststi_site`      FOREIGN KEY (`siteID`)          REFERENCES `tblSites`(`siteID`),
+    CONSTRAINT `fk_aststi_asset`     FOREIGN KEY (`assetID`)         REFERENCES `tblAssets`(`assetID`) ON DELETE CASCADE,
+    CONSTRAINT `fk_aststi_scanner`   FOREIGN KEY (`scannedByID`)     REFERENCES `tblUsers`(`userID`) ON DELETE SET NULL,
+    CONSTRAINT `fk_aststi_foundloc`  FOREIGN KEY (`foundLocationID`) REFERENCES `tblAssetLocations`(`locationID`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+COMMENT='Asset Tracker Phase 3 — per-asset stocktake scan results (#411)';
+
+CREATE TABLE IF NOT EXISTS `tblAssetValueHistory` (
+    `valueID`            INT      NOT NULL AUTO_INCREMENT,
+    `siteID`             INT      NOT NULL DEFAULT 1,
+    `assetID`            INT      NOT NULL,
+    `valueDate`          DATE     NOT NULL,
+    `currentValuePence`  INT      NOT NULL COMMENT 'Integer minor units — house pence convention (#266)',
+    `method`             ENUM('straight-line','reducing-balance','manual') NOT NULL,
+    `source`             ENUM('cron','manual') NOT NULL DEFAULT 'cron',
+    `recordedByID`       INT      DEFAULT NULL COMMENT 'NULL for a cron-computed row; set for a manual valuation entry',
+    `createdAt`          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`valueID`),
+    UNIQUE KEY `uq_astvh_asset_date` (`assetID`, `valueDate`),
+    KEY `idx_astvh_site_date` (`siteID`, `valueDate`),
+    CONSTRAINT `fk_astvh_site`     FOREIGN KEY (`siteID`)       REFERENCES `tblSites`(`siteID`),
+    CONSTRAINT `fk_astvh_asset`    FOREIGN KEY (`assetID`)      REFERENCES `tblAssets`(`assetID`) ON DELETE CASCADE,
+    CONSTRAINT `fk_astvh_recorder` FOREIGN KEY (`recordedByID`) REFERENCES `tblUsers`(`userID`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+COMMENT='Asset Tracker Phase 3 — depreciation/valuation history (#412)';
+
+CREATE TABLE IF NOT EXISTS `tblAssetKioskTokens` (
+    `tokenID`      INT          NOT NULL AUTO_INCREMENT,
+    `siteID`       INT          NOT NULL DEFAULT 1,
+    `label`        VARCHAR(150) NOT NULL COMMENT 'Human-readable name for the physical terminal, e.g. "AV cupboard tablet"',
+    `token`        CHAR(32)     NOT NULL COMMENT '32-char hex per-device credential — never displayed again after creation (#414)',
+    `isActive`     TINYINT(1)   NOT NULL DEFAULT 1,
+    `createdByID`  INT          NOT NULL,
+    `createdAt`    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `lastSeenAt`   DATETIME     DEFAULT NULL,
+    PRIMARY KEY (`tokenID`),
+    UNIQUE KEY `uq_astkt_token` (`token`),
+    KEY `idx_astkt_site_active` (`siteID`, `isActive`),
+    CONSTRAINT `fk_astkt_site`    FOREIGN KEY (`siteID`)      REFERENCES `tblSites`(`siteID`),
+    CONSTRAINT `fk_astkt_creator` FOREIGN KEY (`createdByID`) REFERENCES `tblUsers`(`userID`) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+COMMENT='Asset Tracker Phase 3 — registered kiosk terminals (#414)';
+
+CREATE TABLE IF NOT EXISTS `tblAssetKioskPins` (
+    `pinID`       INT          NOT NULL AUTO_INCREMENT,
+    `siteID`      INT          NOT NULL DEFAULT 1,
+    `userID`      INT          NOT NULL,
+    `pinHash`     VARCHAR(255) NOT NULL COMMENT 'Hashed PIN — never plaintext, see table comment',
+    `isActive`    TINYINT(1)   NOT NULL DEFAULT 1,
+    `createdAt`   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `lastUsedAt`  DATETIME     DEFAULT NULL,
+    PRIMARY KEY (`pinID`),
+    UNIQUE KEY `uq_astkp_site_user` (`siteID`, `userID`),
+    CONSTRAINT `fk_astkp_site` FOREIGN KEY (`siteID`) REFERENCES `tblSites`(`siteID`),
+    CONSTRAINT `fk_astkp_user` FOREIGN KEY (`userID`) REFERENCES `tblUsers`(`userID`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+COMMENT='Asset Tracker Phase 3 — per-user kiosk check-in/out PINs (#414)';
+
 INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
     (NULL, 'assets.enabled',                     'true',     'true',     0),
     (NULL, 'assets.maxFileSize',                 '10485760', '10485760', 0),
@@ -6494,7 +6595,15 @@ INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue
     (NULL, 'assets.reminder_lead_days_maintenance', '7',    '7',    0),
     (NULL, 'assets.reminder_lead_days_warranty',    '30',   '30',   0),
     (NULL, 'assets.reminder_lead_days_insurance',   '30',   '30',   0),
-    (NULL, 'assets.scan_log_retention_days',        '365',  '365',  0)
+    (NULL, 'assets.scan_log_retention_days',        '365',  '365',  0),
+    -- Migration 161 / #392 Phase 3 seeds below.
+    (NULL, 'assets.kiosk_enabled',                  'false', 'false', 0),
+    (NULL, 'assets.kiosk_idle_timeout_seconds',     '90',    '90',    0),
+    (NULL, 'assets.kiosk_auto_checkout',            'true',  'true',  0),
+    (NULL, 'assets.digital_link_enabled',           'true',  'true',  0),
+    (NULL, 'assets.gepir_verify_enabled',           'false', 'false', 0),
+    (NULL, 'assets.gepir_endpoint',                 '',      '',      0),
+    (NULL, 'api.assets.stocktake-scan.enabled',     'true',  'true',  0)
 ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
 
 INSERT INTO `tblRoles` (`roleKey`, `roleName`)
@@ -6557,7 +6666,17 @@ INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
     ('assets/my',                 'assets/my.php',                 1),
     ('assets/value-report',       'assets/value-report.php',       1),
     ('assets/event-assign',       'assets/event-assign.php',       1),
-    ('cron/asset-reminders',      'cron/asset-reminders.php',      0)
+    ('cron/asset-reminders',      'cron/asset-reminders.php',      0),
+    -- Migration 161 / #392 Phase 3 routes below.
+    ('assets/stocktakes',         'assets/stocktakes.php',         1),
+    ('assets/stocktake',          'assets/stocktake.php',          1),
+    ('assets/stocktake-save',     'assets/stocktake-save.php',     1),
+    ('assets/kit-save',           'assets/kit-save.php',           1),
+    ('assets/kiosks',             'assets/kiosks.php',             1),
+    ('assets/kiosk-save',         'assets/kiosk-save.php',         1),
+    ('assets/kiosk',              'assets/kiosk.php',              0),
+    ('assets/kiosk-action',       'assets/kiosk-action.php',       0),
+    ('assets/identifier-verify',  'assets/identifier-verify.php',  1)
 ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 
 
@@ -6784,4 +6903,7 @@ INSERT INTO `tblMigrations` (`filename`) VALUES ('159_asset_tracker.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
 INSERT INTO `tblMigrations` (`filename`) VALUES ('160_asset_tracker_phase2.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('161_asset_tracker_phase3.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;

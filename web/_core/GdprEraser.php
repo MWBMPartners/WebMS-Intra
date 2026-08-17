@@ -126,6 +126,24 @@ class GdprEraser
             // (never a raw IP/User-Agent — see AssetRegister::recordScan()),
             // so there is no separate PII column here to null out.
             ['table' => 'tblAssetScanLog',              'userCol' => 'actorUserID',          'action' => 'anonymise', 'nullCols' => [], 'reason' => 'scan-volume analytics retained; actor identity detached (ipHash/userAgentHash are already salted-hash-only, never raw)'],
+            // #392 Phase 3 (#411/#412/#414). tblAssetKioskPins IS a hard
+            // delete (not anonymise) — same rationale as tblAssetOwners
+            // above: a PIN tied to an erased user is meaningless, and
+            // `pinHash` is credential-shaped data that must not linger.
+            // tblAssetStocktakeItems/tblAssetStocktakes/tblAssetValueHistory
+            // are retained-and-anonymised — stocktake results and
+            // valuation history stay useful as asset-register history
+            // once the actor/starter/closer/recorder identity is
+            // detached, same convention as tblAssetAudit/tblAssetScanLog
+            // immediately above. tblAssetStocktakes carries TWO per-user
+            // columns (startedByID, closedByID) — this catalogue entry
+            // shape supports only one userCol per row, so both get their
+            // own entry rather than a combined one.
+            ['table' => 'tblAssetKioskPins',            'userCol' => 'userID',               'action' => 'delete'],
+            ['table' => 'tblAssetStocktakeItems',       'userCol' => 'scannedByID',          'action' => 'anonymise', 'nullCols' => [], 'reason' => 'stocktake scan history retained for audit-trail continuity; scanner identity detached'],
+            ['table' => 'tblAssetStocktakes',           'userCol' => 'startedByID',          'action' => 'anonymise', 'nullCols' => [], 'reason' => 'stocktake run history retained; starter identity detached'],
+            ['table' => 'tblAssetStocktakes',           'userCol' => 'closedByID',           'action' => 'anonymise', 'nullCols' => [], 'reason' => 'stocktake run history retained; closer identity detached'],
+            ['table' => 'tblAssetValueHistory',         'userCol' => 'recordedByID',         'action' => 'anonymise', 'nullCols' => [], 'reason' => 'valuation/depreciation history retained for the value dashboard; recorder identity detached'],
 
             // Final step — anonymise the user row itself rather than delete,
             // so foreign keys with ON DELETE SET NULL don't cascade-blow
