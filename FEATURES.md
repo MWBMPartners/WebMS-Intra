@@ -712,7 +712,22 @@ New top-level app at `/assets`, slug `assets` — a register of physical and dig
 **Tables:** `tblAssetCategories`, `tblAssetLocations`, `tblAssetOrgs`, `tblAssets`, `tblAssetOwners`, `tblAssetLoans`, `tblAssetMaintenance`, `tblAssetResources`, `tblAssetFoundReports`, `tblAssetIdentifierTypes`, `tblAssetIdentifiers`, `tblAssetLicenseAssignments`, `tblAssetAudit`
 **Settings:** `assets.enabled`, `assets.maxFileSize`, `assets.public_page_enabled`, `assets.found_report_retention_days`, `assets.license_seat_block`, `api.assets.qr.enabled`
 
-**Phase 1 limitations:** stocktake/bulk-audit and kiosk check-in/out modes are scoped for a later phase (`tblAssetAudit.entityType` already reserves `stocktake`/`kiosk` values so no future ALTER is needed); identifier-scheme vocabulary management has no admin screen yet (the 21 seeded types are fixed for this phase).
+Phase 2 (#404-#410, migration 160) followed on directly: label-PDF polish, scan-log + "my assets" + reminder-log foundation, the reminder sweep + value dashboard cron, asset ↔ event assignments, and insurance fields — see `AssetRegister.php`'s class header points 8-13 for the full breakdown. Phase 3 below closes out the two Phase 1 limitations (stocktake and kiosk mode) and adds depreciation history, kits, and the GS1 Digital Link/GEPIR resolver.
+
+### Asset Tracker Phase 3 — stocktake, kits, depreciation history, kiosk mode, GS1 Digital Link/GEPIR (#411-#415, 2026-08-17)
+
+| Item | Issue | Migration | Status |
+|---|---|---|---|
+| Depreciation value history — `tblAssetValueHistory` snapshot table; `AssetRegister::computeReducingBalanceValue()` (constant-percentage reducing-balance, no `depreciationRate` column — the fixed percentage is derived from cost/salvage/useful-life) alongside the existing straight-line method; item.php's read-only Value History panel is populated by the `#405` cron's write-on-change-only snapshot | #412 | 161 | ✅ |
+| Parent/child kits — `tblAssets.parentAssetID` (already existed, migration 159) now UI-wired: one-level-deep kit hierarchy (a component cannot itself have components), `AssetRegister::attachKitChild()`/`detachKitChild()`/`kitChildren()`/`eligibleKitChildCandidates()`, and kit-aware loans (`cascadeKitCheckout()`/`cascadeKitCheckin()`) that hand a top-level asset's WHOLE kit out/back together, with a per-component return condition captured at check-in | #413 | 161 | ✅ |
+| Stocktake / scan-to-verify — `tblAssetStocktakes` + `tblAssetStocktakeItems`; a manager opens a run (optionally scoped to one location/category), scans assets against the expected set, and `verifyStatus` tracks pending/present/missing/moved/unexpected per asset until the run is closed | #411 | 161 | ✅ |
+| Kiosk self check-in/out — unattended, PUBLIC shared-terminal mode (`tblAssetKioskTokens` per-device credential + `tblAssetKioskPins` per-user PIN); `/assets/kiosk`/`kiosk-action` carry NO login session of their own — identity lives in separate `kiosk_*` session keys, idle-timeout auto-checkout, and every action audits with `actorType: 'kiosk'` attributed to the PIN-resolved user | #414 | 161, 162 | ✅ |
+| GS1 Digital Link resolver + GEPIR verify — public `01/{gtin}`, `8003/{grai}`, `8004/{giai}` short URLs (a `Router::handleSpecialRoutes()` block, NOT a `tblRoutes` row) resolve straight to the matching asset's existing `/a/{token}` public page, globally/cross-site, NEVER matching a confidential asset (excluded in the SQL itself — no oracle); a manager-only "Verify" button on item.php's Identifiers panel runs the local GS1 mod-10 check-digit always, plus an optional GEPIR registry lookup when `assets.gepir_verify_enabled`/`assets.gepir_endpoint` are configured (off by default), caching the outcome in `verifiedAt`/`verifyNote` | #415 | 161 | ✅ |
+
+**Phase 3 tables:** `tblAssetStocktakes`, `tblAssetStocktakeItems`, `tblAssetValueHistory`, `tblAssetKioskTokens`, `tblAssetKioskPins`
+**Phase 3 settings:** `assets.kiosk_enabled`, `assets.kiosk_idle_timeout_seconds`, `assets.kiosk_auto_checkout`, `assets.digital_link_enabled`, `assets.gepir_verify_enabled`, `assets.gepir_endpoint`, `api.assets.stocktake-scan.enabled`
+
+**Phase 3 note:** identifier-scheme vocabulary management still has no admin screen (the 21 seeded types from migration 159 remain fixed) — the one Phase 1 limitation Phase 3 does NOT close.
 
 ---
 

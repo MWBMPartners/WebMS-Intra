@@ -282,6 +282,68 @@ class Router
             }
         }
 
+        // 🔗 Asset Tracker GS1 Digital Link resolver (#415, Phase 3 Pass 6
+        // — FINAL Asset Tracker pass) — recognises the three GS1
+        // Application Identifier path shapes a GS1 Digital Link URI uses
+        // for a bare key-only lookup: 01=GTIN, 8003=GRAI, 8004=GIAI (the
+        // three schemes AssetRegister::resolveDigitalLink()'s own AI→
+        // typeCode map understands — see that method's doc). Modelled
+        // EXACTLY on the `a/{token}` block immediately above: NOT a
+        // tblRoutes row (bypasses the DB route lookup entirely, same
+        // mid-migration-safety rationale as every other special-route
+        // block on this page), ANCHORED regexes so this can never shadow
+        // a real route, and the handler (web/_apps/assets/dl.php) owns
+        // the full feature-gate/uniform-404 logic — this block only ever
+        // sets pre-validated $_GET values and requires it directly.
+        // $path is already lower-cased by extractPath() above, so the
+        // A-Z half of every character class below is unreachable in
+        // practice; kept for shape-parity with the GS1 AI-21/GIAI
+        // alphanumeric ranges themselves, which permit upper-case.
+        //
+        // 01/{gtin}[/21/{serial}] — gtin is 8-14 digits (GS1's own
+        // GTIN-8/12/13/14 family). An optional /21/{serial} suffix
+        // (AI 21 = serial number) is accepted for URL-completeness but
+        // resolveDigitalLink() ignores it — see that method's own doc for
+        // why a serial that doesn't further disambiguate a GTIN lookup is
+        // fine to drop.
+        if (str_starts_with($path, '01/') === true) {
+            if (preg_match('#^01/(\d{8,14})(?:/21/([A-Za-z0-9\-_.]{1,20}))?$#', $path, $m) === 1) {
+                $_GET['dl_ai']     = '01';
+                $_GET['dl_value']  = $m[1];
+                $_GET['dl_serial'] = $m[2] ?? '';
+                require PORTAL_APPS . DIRECTORY_SEPARATOR . 'assets' . DIRECTORY_SEPARATOR . 'dl.php';
+                return true;
+            }
+        }
+
+        // 8003/{grai} — GRAI (AI 8003). GS1's GRAI key is a 14-digit base
+        // that may carry an appended serial in the SAME path segment (no
+        // separate /21/ split, unlike GTIN above), hence the wider
+        // alphanumeric length range.
+        if (str_starts_with($path, '8003/') === true) {
+            if (preg_match('#^8003/([A-Za-z0-9\-_.]{14,30})$#', $path, $m) === 1) {
+                $_GET['dl_ai']     = '8003';
+                $_GET['dl_value']  = $m[1];
+                $_GET['dl_serial'] = '';
+                require PORTAL_APPS . DIRECTORY_SEPARATOR . 'assets' . DIRECTORY_SEPARATOR . 'dl.php';
+                return true;
+            }
+        }
+
+        // 8004/{giai} — GIAI (AI 8004), GS1's alphanumeric, no-fixed-
+        // length individual asset identifier — the key scheme migration
+        // 159's seed data calls out as purpose-built for identifying
+        // assets (see AssetRegister's #397 section).
+        if (str_starts_with($path, '8004/') === true) {
+            if (preg_match('#^8004/([A-Za-z0-9\-_.]{1,30})$#', $path, $m) === 1) {
+                $_GET['dl_ai']     = '8004';
+                $_GET['dl_value']  = $m[1];
+                $_GET['dl_serial'] = '';
+                require PORTAL_APPS . DIRECTORY_SEPARATOR . 'assets' . DIRECTORY_SEPARATOR . 'dl.php';
+                return true;
+            }
+        }
+
         return false;
     }
 

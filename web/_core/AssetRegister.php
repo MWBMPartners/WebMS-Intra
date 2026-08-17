@@ -506,6 +506,39 @@
  *      `kioskCheckin()`'s own join, belt-and-braces since none should
  *      exist there in the first place).
  *
+ *  15. GS1 Digital Link resolver + GEPIR verify (#415, Phase 3 Pass 6 —
+ *      FINAL Asset Tracker pass). `resolveDigitalLink()` is the PUBLIC-safe
+ *      AI(Application Identifier)+key → `publicToken` lookup behind
+ *      `_apps/assets/dl.php`, reached via `Router::handleSpecialRoutes()`'s
+ *      `01/`|`8003/`|`8004/` block (modelled on the `a/{token}` block,
+ *      point 8 — NOT a tblRoutes row). It is deliberately GLOBAL/cross-site
+ *      (GS1 keys are globally unique, same as `/a/{token}` itself) but
+ *      NEVER matches a confidential asset — that exclusion is in the SQL
+ *      WHERE clause, not a post-filter, so there is no code path that could
+ *      hand back a confidential asset's token; an ambiguous match (more
+ *      than one asset) resolves to null the same as no match (no oracle).
+ *      `digitalLinkUri()` is the read-only DISPLAY counterpart for
+ *      item.php's Identifiers panel — builds the canonical
+ *      `https://{host}/{AI}/{value}` URL for a GTIN/GRAI/GIAI row, reusing
+ *      `siteBaseUrl()` (point 8's `labelPublicUrl()` helper) for the
+ *      scheme+host, null for every other typeCode. `verifyIdentifier()` is
+ *      the manager-facing GEPIR (Global Electronic Party Information
+ *      Registry) verify action behind `identifier-verify.php` — ALWAYS
+ *      runs the local GS1 mod-10 check-digit first (via
+ *      `validateIdentifier()`, point 4, completely unchanged), and ONLY
+ *      attempts the outbound GEPIR HTTP lookup (`gepirLookup()`, private —
+ *      5s timeout, TLS verification always on, no redirects followed,
+ *      response-size capped) when `assets.gepir_verify_enabled` is
+ *      explicitly `'true'` AND `assets.gepir_endpoint` is a non-empty
+ *      `https://` URL (both off/empty by default — migration 161). ANY
+ *      GEPIR failure (feature off, no endpoint, network/timeout/parse
+ *      error) falls back to the local check-digit result rather than
+ *      failing the whole action. Caches the outcome in
+ *      `verifiedAt`/`verifyNote` (migration 161) and audits as entityType
+ *      `'identifier'` (already in `TABLE_FOR_ENTITY`, point 4), action
+ *      `'update'` — mirrors into the platform's generic `tblAuditTrail`
+ *      the same as any other identifier edit.
+ *
  * All queries are MySQLi prepared statements via `App::db()` — never
  * string-interpolated user input (house rule, .claude/CLAUDE.md → Code Style).
  *
@@ -513,7 +546,7 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.10.0
+ * @version   1.11.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/393
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/394
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/395
@@ -529,7 +562,11 @@
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/408
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/409
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/410
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/411
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/412
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/413
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/414
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/415
  * -----------------------------------------------------------------------------
  */
 
@@ -1553,6 +1590,471 @@ class AssetRegister
         self::audit('identifier', $identifierId, $assetId, 'update', ['isPrimary' => 0], ['isPrimary' => 1]);
 
         return true;
+    }
+
+    /* ==========================================================================
+     * 🔗 GS1 Digital Link resolver + GEPIR verify (#415, Phase 3 Pass 6 —
+     * FINAL Asset Tracker pass). See class header point 15 for the full
+     * design rationale; the three methods below are the public surface
+     * `_apps/assets/dl.php` (resolveDigitalLink), `item.php`'s Identifiers
+     * panel (digitalLinkUri), and `identifier-verify.php` (verifyIdentifier)
+     * each call.
+     * ======================================================================== */
+
+    /**
+     * GS1 Digital Link resolver — maps a GS1 Application Identifier + key
+     * value straight to the matching asset's PUBLIC token, for
+     * `_apps/assets/dl.php` (reached via `Router::handleSpecialRoutes()`'s
+     * `01/`|`8003/`|`8004/` special-route block) to redirect into the
+     * EXISTING `/a/{token}` public page. This method never renders
+     * anything itself — `tag.php` owns every access-model gate from there
+     * (unknown token / disabled feature / confidential asset all already
+     * collapse to the SAME uniform 404 on that page).
+     *
+     * GLOBAL lookup (no `Site::id()` filter) — GS1 keys are globally
+     * unique by design, the same way `/a/{token}` itself resolves across
+     * every site on this install regardless of which site is currently
+     * host-detected for the request.
+     *
+     * SECURITY: a confidential asset (`isConfidential = 1`) is EXCLUDED
+     * from the match in the SQL WHERE clause itself — never merely
+     * filtered out of a result set afterwards — so there is no code path
+     * where this method could ever hand back a confidential asset's
+     * token. An AMBIGUOUS match (more than one asset sharing the same
+     * key — should never happen given `uq_asset_ident`'s per-asset
+     * uniqueness, but two DIFFERENT assets could share a mis-keyed value)
+     * ALSO resolves to null, exactly like "no match" — no oracle a
+     * scanner could use to distinguish "wrong key" from "right key, but
+     * withheld" from "right key, ambiguous".
+     *
+     * @param string      $ai     GS1 Application Identifier — '01' (GTIN),
+     *                            '8003' (GRAI), or '8004' (GIAI). Any
+     *                            other value returns null immediately.
+     * @param string      $value  The GS1 key value. Already shape-
+     *                            validated by the Router's own anchored
+     *                            regex before this is ever called, but
+     *                            trusted no further than "non-empty"
+     *                            here — the query itself is fully bound,
+     *                            so nothing beyond that is required for
+     *                            safety.
+     * @param string|null $serial Optional AI-21 serial, present only for
+     *                            a `01/…/21/…` Digital Link path.
+     *                            Deliberately NOT used to filter the
+     *                            match (see the class header for the
+     *                            "resolve on the GTIN, a serial that
+     *                            doesn't further disambiguate is fine to
+     *                            drop" design decision) — accepted here
+     *                            purely so the caller's full URL shape
+     *                            has somewhere to go without a signature
+     *                            mismatch.
+     *
+     * @return string|null 32-char lowercase-hex `publicToken`, or null
+     *                      when the AI is unrecognised, the value is
+     *                      blank, or no single non-confidential asset
+     *                      matches.
+     */
+    public static function resolveDigitalLink(string $ai, string $value, ?string $serial = null): ?string
+    {
+        // 🗺️ AI → typeCode. Any other AI is simply not a scheme Asset
+        // Tracker identifiers use — null, immediately, no query at all.
+        $typeCode = match ($ai) {
+            '01'    => 'GTIN',
+            '8003'  => 'GRAI',
+            '8004'  => 'GIAI',
+            default => null,
+        };
+        if ($typeCode === null) {
+            return null;
+        }
+
+        $value = trim($value);
+        if ($value === '') {
+            return null;
+        }
+
+        // 🔒 GLOBAL, cross-site lookup — but NEVER a confidential or
+        // deleted asset (see doc above). Selecting ONLY publicToken keeps
+        // this method structurally incapable of leaking anything beyond
+        // the one field it exists to return, even if a future caller
+        // mishandles its result.
+        $db = App::db();
+        $stmt = $db->prepare(
+            'SELECT a.publicToken FROM tblAssetIdentifiers i '
+            . 'INNER JOIN tblAssets a ON a.assetID = i.assetID '
+            . 'WHERE i.typeCode = ? AND i.value = ? '
+            . 'AND a.isDeleted = 0 AND a.isConfidential = 0 '
+            . 'LIMIT 2'
+        );
+        if ($stmt === false) {
+            error_log('AssetRegister::resolveDigitalLink() prepare failed: ' . $db->error);
+            return null;
+        }
+        $stmt->bind_param('ss', $typeCode, $value);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        $tokens = [];
+        while ($row = $result->fetch_assoc()) {
+            $tokens[] = (string) $row['publicToken'];
+        }
+        $stmt->close();
+
+        // 🚫 Zero OR ambiguous (>1) matches both resolve to null — see
+        // doc above for why "found, but ambiguous" must be
+        // indistinguishable from "not found" (no oracle). LIMIT 2 above
+        // is enough to detect ">1" without counting every match.
+        if (count($tokens) !== 1) {
+            return null;
+        }
+
+        // 🛡️ Defensive re-validation of the shape even though
+        // publicToken is always DB-generated — mirrors labelPublicUrl()'s
+        // own re-check of the very same pattern (point 8).
+        $token = $tokens[0];
+        return preg_match('/^[a-f0-9]{32}$/', $token) === 1 ? $token : null;
+    }
+
+    /**
+     * Canonical GS1 Digital Link URL for one identifier row — DISPLAY
+     * ONLY, for `item.php`'s Identifiers panel (#415) to show alongside a
+     * GS1-family row. Mirrors `labelPublicUrl()`'s own scheme+host
+     * convention (`siteBaseUrl()` below) — `https://{our own request
+     * host}/{AI}/{value}` — but for the THREE GS1 Application Identifiers
+     * `resolveDigitalLink()`/the Router's Digital Link block recognise
+     * (`01`=GTIN, `8003`=GRAI, `8004`=GIAI), not the `/a/{token}` shape
+     * `labelPublicUrl()` builds.
+     *
+     * Returns null for every typeCode OUTSIDE that three — e.g. a retail
+     * barcode or an RFID/EPC carrier has no Digital Link URI of its own
+     * in this scheme, so `item.php` simply omits the link rather than
+     * rendering a misleading one.
+     *
+     * Never escapes the value itself — HTML output escaping is the
+     * caller's job (mirrors every other display helper in this class);
+     * this method only ever builds a plain string.
+     *
+     * @param array<string, mixed> $identifierRow A `listIdentifiers()` row
+     *        — only `typeCode`/`value` are read.
+     * @param string|null          $host          Override HOST (without a
+     *        scheme) for the URI — e.g. for a batch/cron caller with no
+     *        current request. Null (the default) uses `siteBaseUrl()`,
+     *        the SAME scheme+host resolution `labelPublicUrl()` uses for
+     *        the current request.
+     *
+     * @return string|null
+     */
+    public static function digitalLinkUri(array $identifierRow, ?string $host = null): ?string
+    {
+        $typeCode = (string) ($identifierRow['typeCode'] ?? '');
+        $value    = (string) ($identifierRow['value'] ?? '');
+
+        $ai = match ($typeCode) {
+            'GTIN'  => '01',
+            'GRAI'  => '8003',
+            'GIAI'  => '8004',
+            default => null,
+        };
+        if ($ai === null || $value === '') {
+            return null;
+        }
+
+        $base = $host !== null && $host !== '' ? 'https://' . $host : self::siteBaseUrl();
+
+        // 🔗 rawurlencode(), not urlencode() — a GS1 key value is a URL
+        // PATH segment (GIAI may legitimately contain '-'/'_'/'.'), never
+        // a query-string component, and rawurlencode() leaves those
+        // unreserved characters alone (RFC 3986).
+        return $base . '/' . $ai . '/' . rawurlencode($value);
+    }
+
+    /**
+     * Manager-facing GEPIR verify action (#415) — the logic behind
+     * `_apps/assets/identifier-verify.php`'s single POST action. Two
+     * layers, run in order:
+     *
+     *   1. LOCAL check-digit (ALWAYS, the reliable path — never depends
+     *      on network access). GTIN/GRAI reuse `self::validateIdentifier()`
+     *      completely unchanged (the SAME GS1 mod-10 algorithm/format-
+     *      regex pass `addIdentifier()` already runs on every save) — an
+     *      invalid result marks the identifier UNVERIFIED
+     *      (`isVerified = 0`) with a plain `verifyNote` and RETURNS
+     *      IMMEDIATELY; GEPIR is never even attempted for a value that's
+     *      already locally wrong. GIAI has no check-digit scheme (see
+     *      `validateIdentifier()`'s own `checkDigitScheme` lookup on
+     *      `tblAssetIdentifierTypes`) — and neither does any typeCode
+     *      other than GTIN/GRAI — so those always pass this step
+     *      structurally and proceed to step 2.
+     *   2. GEPIR (Global Electronic Party Information Registry) lookup —
+     *      ONLY attempted when `assets.gepir_verify_enabled === 'true'`
+     *      AND `assets.gepir_endpoint` is a non-empty `https://` URL
+     *      (both site-configured, both off/empty by default — migration
+     *      161). A successful lookup's registrant name becomes the
+     *      `verifyNote` (truncated to the column's 255-char cap); ANY
+     *      failure — feature off, no endpoint configured, or
+     *      `gepirLookup()` returning null for any reason (network/
+     *      timeout/non-2xx/unparseable) — falls back to the LOCAL result
+     *      instead of failing the whole action, so a manager clicking
+     *      Verify with GEPIR mis-configured (or simply left at its
+     *      default OFF) still gets a useful, honest outcome rather than
+     *      an error.
+     *
+     * Either way `isVerified` ends up `1` whenever the local check
+     * passed (regardless of whether GEPIR itself succeeded) — GEPIR only
+     * ever enriches the NOTE, it never blocks verification on its own
+     * availability. `verifiedAt` is always stamped `NOW()` on any
+     * outcome (invalid OR verified) — it records "when this identifier
+     * was last checked", not "when it last passed".
+     *
+     * IDOR guard: the identifier row must belong to BOTH `$assetId` AND
+     * `Site::id()` via a JOIN to `tblAssets` (mirrors `removeIdentifier()`/
+     * `setPrimaryIdentifier()`'s own "confirm ownership before touching a
+     * row" pattern) — a request naming another site's identifier
+     * resolves to the same `ok = false` "not found" outcome as a
+     * genuinely missing id.
+     *
+     * Audits as entityType `'identifier'` (already wired into
+     * `TABLE_FOR_ENTITY`), action `'update'` — this ALSO mirrors into the
+     * platform's generic `tblAuditTrail` (#415 acceptance criterion:
+     * "GEPIR verify sets isVerified + audits").
+     *
+     * @return array{ok: bool, msg: string, verified: bool, note: string}
+     *         `ok` is false ONLY when the identifier itself couldn't be
+     *         found/IDOR-matched — every other outcome (invalid check
+     *         digit, GEPIR unavailable, GEPIR success) is `ok = true`
+     *         with `verified`/`note` describing what actually happened.
+     */
+    public static function verifyIdentifier(int $identifierId, int $assetId, int $actorUserId): array
+    {
+        $db     = App::db();
+        $siteId = Site::id();
+
+        // 🔒 IDOR guard — identifierID AND assetID AND siteID (via the
+        // asset) must all agree before this row is touched. See doc above.
+        $stmt = $db->prepare(
+            'SELECT i.* FROM tblAssetIdentifiers i '
+            . 'INNER JOIN tblAssets a ON a.assetID = i.assetID '
+            . 'WHERE i.identifierID = ? AND i.assetID = ? AND a.siteID = ? AND a.isDeleted = 0 '
+            . 'LIMIT 1'
+        );
+        if ($stmt === false) {
+            error_log('AssetRegister::verifyIdentifier() prepare failed: ' . $db->error);
+            return ['ok' => false, 'msg' => 'Could not look up that identifier — please try again.', 'verified' => false, 'note' => ''];
+        }
+        $stmt->bind_param('iii', $identifierId, $assetId, $siteId);
+        $stmt->execute();
+        $row = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+
+        if ($row === null || $row === false) {
+            return ['ok' => false, 'msg' => 'Identifier not found.', 'verified' => false, 'note' => ''];
+        }
+
+        $typeCode    = (string) $row['typeCode'];
+        $value       = (string) $row['value'];
+        $oldVerified = (int) $row['isVerified'];
+
+        // 1️⃣ Local check-digit — the reliable, always-available path.
+        // GIAI (and every non-GTIN/GRAI type) has no check-digit scheme,
+        // so it passes straight through to step 2 below ("structurally
+        // ok" — see method doc).
+        $hasCheckDigit = in_array($typeCode, ['GTIN', 'GRAI'], true) === true;
+        $checkDigitOk  = true;
+        if ($hasCheckDigit === true) {
+            $validation   = self::validateIdentifier($typeCode, $value);
+            $checkDigitOk = $validation['valid'] === true;
+        }
+
+        if ($checkDigitOk === false) {
+            $note = 'Check digit invalid';
+            self::applyVerifyResult($identifierId, $siteId, 0, $note);
+            self::audit(
+                'identifier',
+                $identifierId,
+                $assetId,
+                'update',
+                ['isVerified' => $oldVerified],
+                ['isVerified' => 0, 'verifyNote' => $note]
+            );
+            return ['ok' => true, 'msg' => 'Check digit invalid — identifier marked unverified.', 'verified' => false, 'note' => $note];
+        }
+
+        // 2️⃣ GEPIR — only attempted when explicitly enabled AND a real
+        // https:// endpoint is configured (both off/empty by default).
+        // Any failure falls back to the local-only result rather than
+        // blocking verification — see method doc.
+        $gepirEnabled  = (string) (App::settings('assets.gepir_verify_enabled') ?? 'false') === 'true';
+        $gepirEndpoint = trim((string) (App::settings('assets.gepir_endpoint') ?? ''));
+        $localNote     = $hasCheckDigit === true ? 'Check digit valid' : 'No check-digit scheme for this identifier type';
+
+        $note = $localNote;
+        if ($gepirEnabled === true && $gepirEndpoint !== '' && str_starts_with(strtolower($gepirEndpoint), 'https://') === true) {
+            $registrant = self::gepirLookup($gepirEndpoint, $typeCode, $value);
+            $note = $registrant !== null && $registrant !== ''
+                ? mb_substr($registrant, 0, 255)
+                : $localNote . ' (GEPIR lookup unavailable)';
+        }
+
+        self::applyVerifyResult($identifierId, $siteId, 1, $note);
+        self::audit(
+            'identifier',
+            $identifierId,
+            $assetId,
+            'update',
+            ['isVerified' => $oldVerified],
+            ['isVerified' => 1, 'verifyNote' => $note]
+        );
+
+        return ['ok' => true, 'msg' => 'Identifier verified.', 'verified' => true, 'note' => $note];
+    }
+
+    /**
+     * Shared `UPDATE` for `verifyIdentifier()`'s two outcomes (invalid
+     * check digit / verified) — a single, small, always-site-scoped
+     * write so both call sites stay in lock-step rather than drifting.
+     * `verifiedAt` is ALWAYS stamped `NOW()` regardless of `$isVerified`
+     * — see `verifyIdentifier()`'s own doc for why.
+     */
+    private static function applyVerifyResult(int $identifierId, int $siteId, int $isVerified, string $note): bool
+    {
+        $db = App::db();
+        $stmt = $db->prepare(
+            'UPDATE tblAssetIdentifiers SET isVerified = ?, verifiedAt = NOW(), verifyNote = ? '
+            . 'WHERE identifierID = ? AND siteID = ?'
+        );
+        if ($stmt === false) {
+            error_log('AssetRegister::applyVerifyResult() prepare failed: ' . $db->error);
+            return false;
+        }
+        $stmt->bind_param('isii', $isVerified, $note, $identifierId, $siteId);
+        $ok = $stmt->execute();
+        $stmt->close();
+        return $ok;
+    }
+
+    /**
+     * Best-effort outbound GEPIR (Global Electronic Party Information
+     * Registry) lookup for one GS1 key (#415) — ONLY ever called once
+     * `verifyIdentifier()` has already confirmed `assets.gepir_verify_
+     * enabled` is on and `assets.gepir_endpoint` is a non-empty
+     * `https://` URL (belt-and-braces: this method re-checks the scheme
+     * itself too, never trusting the caller alone for something that
+     * reaches out to the network).
+     *
+     * DEFENSIVE by design — the endpoint is a site-configured value (off
+     * by default), so this treats the far end as untrusted: a short
+     * connect+total timeout, TLS verification ALWAYS on (mirrors
+     * `Captcha::curlPost()`'s own `CURLOPT_SSL_VERIFYPEER`/
+     * `CURLOPT_SSL_VERIFYHOST` pair), redirects NEVER followed (a
+     * misconfigured/compromised endpoint can't bounce this request
+     * elsewhere), and the response is capped BOTH via a `Range` request
+     * header AND a hard `substr()` after retrieval (belt-and-braces —
+     * not every server honours `Range` on a plain GET) before it's ever
+     * `json_decode()`'d. ANY failure — transport, non-2xx, non-JSON, or
+     * a shape with no recognisable registrant field — returns null;
+     * `verifyIdentifier()` is responsible for falling back to the local
+     * check-digit result on null, never surfacing a network error to the
+     * end user.
+     *
+     * The exact GEPIR endpoint shape is site-configured and unknown at
+     * build time (no live GEPIR endpoint is wired up anywhere in this
+     * codebase — the feature ships off by default), so the query
+     * parameters and the registrant-field guesses below are a
+     * reasonable, generic best effort rather than one exact vendor's API
+     * contract.
+     *
+     * @return string|null Registrant/party name, or null on ANY failure
+     */
+    private static function gepirLookup(string $endpoint, string $typeCode, string $value): ?string
+    {
+        // 🛡️ Re-check the scheme even though the one caller already did —
+        // this method reaches the network, so it never trusts a caller
+        // alone for that.
+        if (str_starts_with(strtolower($endpoint), 'https://') === false) {
+            return null;
+        }
+
+        $url = $endpoint . (str_contains($endpoint, '?') === true ? '&' : '?')
+             . 'keyType=' . rawurlencode($typeCode) . '&key=' . rawurlencode($value);
+
+        $ch = curl_init($url);
+        if ($ch === false) {
+            return null;
+        }
+
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_TIMEOUT, 5);
+        curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 3);
+        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, true);
+        curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 2);
+        curl_setopt($ch, CURLOPT_FOLLOWLOCATION, false);
+        // 📏 Cap response size — most servers honour a Range header for a
+        // simple GET; even when one doesn't, the substr() below still
+        // caps what gets json_decode()'d.
+        curl_setopt($ch, CURLOPT_RANGE, '0-65535');
+
+        $raw       = curl_exec($ch);
+        $httpCode  = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $curlErrNo = curl_errno($ch);
+        curl_close($ch);
+
+        if ($raw === false || $curlErrNo !== 0) {
+            error_log('AssetRegister::gepirLookup() transport failure: errno=' . $curlErrNo);
+            return null;
+        }
+        if ($httpCode < 200 || $httpCode >= 300) {
+            return null;
+        }
+
+        $raw = substr((string) $raw, 0, 65536);
+
+        $decoded = json_decode($raw, true);
+        if (is_array($decoded) === true) {
+            // 🪞 Best-effort field-name guesses — see method doc above
+            // for why there's no one exact schema to target.
+            $registrant = self::extractGepirRegistrant($decoded);
+            if ($registrant !== null) {
+                return $registrant;
+            }
+            return null;
+        }
+
+        // 📄 Non-JSON body — treat as plain text; a short, single-line
+        // response is a reasonable heuristic for "just the registrant
+        // name".
+        $text = trim($raw);
+        if ($text !== '' && str_contains($text, "\n") === false && mb_strlen($text) <= 255) {
+            return $text;
+        }
+
+        return null;
+    }
+
+    /**
+     * Pull a registrant/party name out of a decoded GEPIR-style JSON
+     * response, trying a few common top-level field names and one level
+     * of common wrapper keys. Returns null when nothing recognisable is
+     * found — `gepirLookup()` treats that the same as any other failure.
+     *
+     * @param array<string, mixed> $decoded
+     */
+    private static function extractGepirRegistrant(array $decoded): ?string
+    {
+        $fields = ['registrantName', 'partyName', 'name', 'companyName'];
+        foreach ($fields as $field) {
+            if (isset($decoded[$field]) === true && is_string($decoded[$field]) === true && trim($decoded[$field]) !== '') {
+                return trim($decoded[$field]);
+            }
+        }
+        // 🪆 Some GEPIR-style responses nest the party under a wrapper key.
+        foreach (['party', 'result', 'data'] as $wrapper) {
+            if (isset($decoded[$wrapper]) === true && is_array($decoded[$wrapper]) === true) {
+                foreach ($fields as $field) {
+                    if (isset($decoded[$wrapper][$field]) === true && is_string($decoded[$wrapper][$field]) === true && trim($decoded[$wrapper][$field]) !== '') {
+                        return trim($decoded[$wrapper][$field]);
+                    }
+                }
+            }
+        }
+        return null;
     }
 
     /* ==========================================================================

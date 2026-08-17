@@ -2,23 +2,34 @@
 // Path: _apps/assets/identifier-verify.php
 /**
  * -----------------------------------------------------------------------------
- * Asset Tracker — Identifier Verify (GS1 Digital Link / GEPIR) 🔗✅ (#415, Phase 3 Pass 1 stub)
+ * Asset Tracker — Verify Identifier (GS1 Digital Link / GEPIR) 🔗✅ (#415, Phase 3 Pass 6 — FINAL)
  * -----------------------------------------------------------------------------
- * Placeholder for the manager-facing GEPIR (Global Electronic Party
- * Information Registry) verify action — will accept a POST that looks up
- * one `tblAssetIdentifiers` row's GS1 key against the external GEPIR
- * registry (gated by `assets.gepir_verify_enabled`/`assets.gepir_endpoint`,
- * both seeded — the setting off by default — in migration 161) and caches
- * the outcome in the `verifiedAt`/`verifyNote` columns that same migration
- * added. This pass ships ONLY the route + a minimal logged-in stub so
- * check_route_targets.py stays green — the real GS1 Digital Link resolver +
- * GEPIR lookup logic lands in a later Phase 3 pass.
+ * POST handler for the item.php Identifiers panel's per-row "Verify"
+ * button. Replaces the Pass-1 placeholder (which shipped only the route
+ * + a manager-gated stub so `check_route_targets.py` stayed green while
+ * the schema landed ahead of the logic — see migration 161's header).
+ *
+ * Delegates every bit of real work to `AssetRegister::verifyIdentifier()`
+ * (local GS1 mod-10 check-digit ALWAYS, then an optional GEPIR lookup
+ * when `assets.gepir_verify_enabled`/`assets.gepir_endpoint` are
+ * configured — see that method's own doc for the full two-layer design)
+ * — this controller's own job is limited to CSRF, the manager gate, and
+ * turning the returned `$result['msg']` into a flash + redirect, exactly
+ * the same shape as `identifiers-save.php`'s own single-route-multi-
+ * outcome controller.
+ *
+ * Gate: admin OR asset_manager role ONLY — same manager-only gate as
+ * `identifiers-save.php`/`owners-save.php` (deliberately NOT widened to
+ * `isResponsibleFor()`; curating/verifying identifiers is a manager
+ * action, same rationale as `identifiers-save.php`'s own header).
+ *
+ * No HTML rendered — this file only ever redirects.
  *
  * @package   Portal\Assets
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.0.0
+ * @version   2.0.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/415
  * -----------------------------------------------------------------------------
  */
@@ -26,36 +37,52 @@
 declare(strict_types=1);
 
 use Portal\Core\App;
+use Portal\Core\AssetRegister;
 use Portal\Core\Auth;
-use Portal\Core\Router;
 
-// 🔐 Session + manager gate — mirrors every other mutating/manager-only
-// Asset Tracker screen (orgs.php, categories.php, …): admin OR the
-// asset_manager role.
 Auth::ensureSession();
 Auth::requireLogin();
-$canManage = App::isAdmin() === true || App::hasRole('asset_manager') === true;
-if ($canManage === false) {
-    Router::renderError(403);
-    return;
+
+// 🔐 CSRF FIRST — before any side-effect, per house convention (mirrors
+// identifiers-save.php/owners-save.php/save.php).
+if ($_SERVER['REQUEST_METHOD'] !== 'POST' || Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
+    $_SESSION['flash_msg']  = 'Invalid or expired form token. Please try again.';
+    $_SESSION['flash_type'] = 'danger';
+    header('Location: /assets');
+    exit();
 }
 
-$pageTitle   = 'Verify Identifier';
-$pageSection = 'assets';
-$breadcrumbs = ['Dashboard' => '/', 'Assets' => '/assets', 'Verify Identifier' => ''];
-require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
-?>
+// 🛡️ Manager gate — admins or the asset_manager role only. See file
+// header for why this is deliberately NOT widened to isResponsibleFor().
+if (App::isAdmin() !== true && App::hasRole('asset_manager') !== true) {
+    http_response_code(403);
+    exit('Forbidden');
+}
 
-<div class="d-flex justify-content-between align-items-center mb-4">
-    <div>
-        <h1 class="mb-1"><i class="fa-solid fa-magnifying-glass-arrow-right me-2"></i>Verify Identifier</h1>
-        <p class="text-secondary mb-0">Look up a GS1 identifier against the GEPIR registry.</p>
-    </div>
-    <a href="/assets" class="btn btn-outline-secondary btn-sm"><i class="fa-solid fa-arrow-left me-1"></i>Back to Asset Tracker</a>
-</div>
+$userId       = (int) ($_SESSION['user_id'] ?? 0);
+$identifierId = (int) ($_POST['identifierID'] ?? 0);
+$assetId      = (int) ($_POST['assetID'] ?? 0);
 
-<div class="alert alert-info">
-    <i class="fa-solid fa-circle-info me-2"></i>This Asset Tracker feature arrives in a later Phase 3 update.
-</div>
+// 🔒 Site-scope the asset up front, same convention as
+// identifiers-save.php — AssetRegister::get() is itself site-scoped via
+// Site::id(), so an assetID belonging to another tenant resolves to null
+// here and the redirect target below stays a safe generic listing.
+// (verifyIdentifier() ALSO re-checks identifierID+assetID+siteID itself
+// before touching a row — this is defence in depth, not the only guard.)
+$asset = $assetId > 0 ? AssetRegister::get($assetId) : null;
+if ($asset === null || $identifierId <= 0) {
+    $_SESSION['flash_msg']  = 'Asset not found.';
+    $_SESSION['flash_type'] = 'danger';
+    header('Location: /assets');
+    exit();
+}
 
-<?php require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'footer.php'; ?>
+$result = AssetRegister::verifyIdentifier($identifierId, $assetId, $userId);
+
+$_SESSION['flash_msg']  = (string) $result['msg'];
+$_SESSION['flash_type'] = $result['ok'] === true
+    ? ($result['verified'] === true ? 'success' : 'warning')
+    : 'danger';
+
+header('Location: /assets/item?id=' . $assetId);
+exit();

@@ -96,6 +96,21 @@
  * add-form's dropdown — managing that vocabulary itself is intentionally
  * OUT of scope for #397 (no admin screen, no new migration this pass).
  *
+ * DIGITAL LINK + VERIFY (#415, Phase 3 Pass 6 — FINAL) — two additions to
+ * the Identifiers panel above, both read-visible to any viewer reaching
+ * this page: (1) a GS1 Digital Link URI (`AssetRegister::
+ * digitalLinkUri()`) for every GTIN/GRAI/GIAI row, resolving via the
+ * Router's `01/`|`8003/`|`8004/` special-route block through
+ * `dl.php`/`AssetRegister::resolveDigitalLink()` to this SAME asset's
+ * `/a/{token}` public page; (2) the existing `isVerified` badge now also
+ * reflects a manager-run re-check (not just the original add-time
+ * structural pass), showing `verifiedAt`/`verifyNote` as subtext once
+ * one has actually run. The manager-only "Verify" button posts to
+ * `identifier-verify.php`, which runs `AssetRegister::verifyIdentifier()`
+ * — local GS1 mod-10 check-digit ALWAYS, then an optional GEPIR registry
+ * lookup only when `assets.gepir_verify_enabled`/`assets.gepir_endpoint`
+ * are configured (off by default) — see that method's own doc.
+ *
  * OWNERS vs VAULT — two DIFFERENT visibility rules on this one page (#396):
  *   - The Owners panel's LIST is visible (read-only) to any logged-in
  *     viewer who reaches this page at all (i.e. already past the
@@ -183,7 +198,7 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.8.0
+ * @version   1.9.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/393
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/394
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/396
@@ -197,6 +212,7 @@
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/410
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/412
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/413
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/415
  * -----------------------------------------------------------------------------
  */
 
@@ -2028,6 +2044,23 @@ $nonce = htmlspecialchars(App::cspNonce(), ENT_QUOTES, 'UTF-8');
                 <h3 class="h6 text-muted mb-2"><?php echo htmlspecialchars($identCategoryLabel[$identCat], ENT_QUOTES, 'UTF-8'); ?></h3>
                 <div class="portal-data-list mb-3">
                     <?php foreach ($identifiersByCategory[$identCat] as $ident): ?>
+                        <?php
+                        // 🔗 Digital Link URI (#415) — null for every typeCode
+                        // outside the three GS1 keys the resolver understands
+                        // (GTIN/GRAI/GIAI); item.php simply omits the link for
+                        // anything else rather than rendering a misleading one.
+                        $identDlUri = AssetRegister::digitalLinkUri($ident);
+                        // ✅ Verify badge (#415) — colour-blind-safe: colour +
+                        // icon + VISIBLE TEXT, never colour alone. isVerified
+                        // now reflects EITHER the original add-time structural
+                        // check (addIdentifier()) OR a later manager-run
+                        // AssetRegister::verifyIdentifier() re-check
+                        // (check-digit + optional GEPIR) — verifiedAt/
+                        // verifyNote (set only once a verify has actually run)
+                        // distinguish "never checked" from "checked and passed/
+                        // failed" in the subtext below.
+                        $identHasVerifyRun = $ident['verifiedAt'] !== null && (string) $ident['verifiedAt'] !== '';
+                        ?>
                         <div class="portal-data-row align-items-center">
                             <div class="col-6 col-md-4">
                                 <?php echo htmlspecialchars((string) $ident['typeLabel'], ENT_QUOTES, 'UTF-8'); ?>
@@ -2035,7 +2068,16 @@ $nonce = htmlspecialchars(App::cspNonce(), ENT_QUOTES, 'UTF-8');
                                     <span class="badge bg-warning text-dark" title="Primary identifier for this asset"><i class="fa-solid fa-star"></i></span>
                                 <?php endif; ?>
                                 <?php if ((int) $ident['isVerified'] === 1): ?>
-                                    <span class="badge bg-success" title="Verified — format/check-digit confirmed"><i class="fa-solid fa-check"></i></span>
+                                    <span class="badge bg-success" title="Verified — format/check-digit confirmed<?php echo $identHasVerifyRun === true ? ' (last checked ' . htmlspecialchars(date('j M Y', strtotime((string) $ident['verifiedAt'])), ENT_QUOTES, 'UTF-8') . ')' : ''; ?>">
+                                        <i class="fa-solid fa-check me-1"></i>Verified
+                                    </span>
+                                <?php elseif ($identHasVerifyRun === true): ?>
+                                    <span class="badge bg-danger" title="Verification failed — last checked <?php echo htmlspecialchars(date('j M Y', strtotime((string) $ident['verifiedAt'])), ENT_QUOTES, 'UTF-8'); ?>">
+                                        <i class="fa-solid fa-triangle-exclamation me-1"></i>Unverified
+                                    </span>
+                                <?php endif; ?>
+                                <?php if ($identHasVerifyRun === true && $ident['verifyNote'] !== null && (string) $ident['verifyNote'] !== ''): ?>
+                                    <br><small class="text-muted"><?php echo htmlspecialchars((string) $ident['verifyNote'], ENT_QUOTES, 'UTF-8'); ?></small>
                                 <?php endif; ?>
                                 <?php if ($ident['subScheme'] !== null && (string) $ident['subScheme'] !== ''): ?>
                                     <br><small class="text-muted"><?php echo htmlspecialchars((string) $ident['subScheme'], ENT_QUOTES, 'UTF-8'); ?></small>
@@ -2046,9 +2088,31 @@ $nonce = htmlspecialchars(App::cspNonce(), ENT_QUOTES, 'UTF-8');
                             </div>
                             <div class="col-4 col-md-5">
                                 <code><?php echo htmlspecialchars((string) $ident['value'], ENT_QUOTES, 'UTF-8'); ?></code>
+                                <?php if ($identDlUri !== null): ?>
+                                    <!-- 🔗 GS1 Digital Link URI (#415) — resolves via the
+                                         Router's 01|8003|8004 special-route block, through
+                                         AssetRegister::resolveDigitalLink(), to THIS asset's
+                                         own /a/{token} public page. Display-only; never the
+                                         only path to that page. -->
+                                    <br><a href="<?php echo htmlspecialchars($identDlUri, ENT_QUOTES, 'UTF-8'); ?>" class="small text-muted text-break" target="_blank" rel="noopener noreferrer" title="GS1 Digital Link — opens this asset's public page">
+                                        <i class="fa-solid fa-link me-1"></i><?php echo htmlspecialchars($identDlUri, ENT_QUOTES, 'UTF-8'); ?>
+                                    </a>
+                                <?php endif; ?>
                             </div>
                             <div class="col-2 col-md-3 text-end">
                                 <?php if ($canManage === true): ?>
+                                    <!-- 🔍 Verify (#415) — AssetRegister::verifyIdentifier():
+                                         local GS1 mod-10 check-digit ALWAYS, then an optional
+                                         GEPIR lookup when assets.gepir_verify_enabled/
+                                         assets.gepir_endpoint are configured (off by default). -->
+                                    <form method="post" action="/assets/identifier-verify" class="d-inline">
+                                        <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
+                                        <input type="hidden" name="assetID" value="<?php echo $assetId; ?>">
+                                        <input type="hidden" name="identifierID" value="<?php echo (int) $ident['identifierID']; ?>">
+                                        <button type="submit" class="btn btn-sm btn-outline-primary" title="Verify — check digit + GEPIR">
+                                            <i class="fa-solid fa-magnifying-glass-arrow-right"></i>
+                                        </button>
+                                    </form>
                                     <?php if ((int) $ident['isPrimary'] !== 1): ?>
                                         <form method="post" action="/assets/identifiers-save" class="d-inline">
                                             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
