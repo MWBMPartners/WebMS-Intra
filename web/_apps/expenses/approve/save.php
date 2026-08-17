@@ -19,7 +19,7 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   0.4.0
+ * @version   0.4.1
  * -----------------------------------------------------------------------------
  */
 
@@ -95,11 +95,18 @@ if ($claim === null) {
 // -----------------------------------------------------------------------------
 // 🔍 Determine approver's role for this department
 // -----------------------------------------------------------------------------
-$approverRole = 'admin'; // Default if user is admin
-if (App::isAdmin() === false) {
+$approverRole = null;
+$deptRole     = null;
+if (App::isAdmin() === true) {
+    $approverRole = 'admin';
+} else {
+    // 🛡️ Mirror approve/index.php's dept-scoped listing filter — only a row
+    // with an actual approve/lead/mandatory-approver flag counts as authority
+    // over this department, not merely any tblUserDepts membership row.
     $stmt = $mysqli->prepare(
         'SELECT isDeptLead, isApprover, isMandatoryApprover '
-        . 'FROM tblUserDepts WHERE userID = ? AND deptID = ?'
+        . 'FROM tblUserDepts WHERE userID = ? AND deptID = ? '
+        . 'AND (isDeptLead = 1 OR isApprover = 1 OR isMandatoryApprover = 1)'
     );
     if ($stmt !== false) {
         $stmt->bind_param('ii', $userId, $claim['deptID']);
@@ -116,6 +123,14 @@ if (App::isAdmin() === false) {
                 $approverRole = 'dept_approver';
             }
         }
+    }
+
+    // 🛡️ Per-department authorisation gate — a non-admin with no qualifying
+    // tblUserDepts row for THIS claim's department has no authority to
+    // record a decision on it, regardless of the site-wide 'Approver' role.
+    if ($deptRole === null) {
+        http_response_code(403);
+        exit('Forbidden');
     }
 }
 

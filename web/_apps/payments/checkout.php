@@ -18,6 +18,28 @@ use Portal\Core\Auth;
 use Portal\Core\Payments;
 use Portal\Core\Site;
 
+/**
+ * 🛡️ Open-redirect guard for the POST-supplied `return_to` value. Mirrors
+ * assets/event-assign.php's safe-redirect rule: reject protocol-relative
+ * (`//`), absolute-URL (`://`), or non-rooted values; fall back to `/`.
+ *
+ * @param mixed $raw Raw POST value.
+ *
+ * @return string A same-origin, root-relative path.
+ */
+function sanitizeReturnTo(mixed $raw): string
+{
+    $value = (string) $raw;
+    if ($value === ''
+        || str_starts_with($value, '//') === true
+        || str_contains($value, '://') === true
+        || str_starts_with($value, '/') === false
+    ) {
+        return '/';
+    }
+    return $value;
+}
+
 Auth::ensureSession();
 Auth::requireLogin();
 if ($_SERVER['REQUEST_METHOD'] !== 'POST' || Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
@@ -41,7 +63,7 @@ $amountPence = (int) round(((float) $clean) * 100);
 if ($amountPence < 100) {
     $_SESSION['flash_msg']  = 'Minimum amount is 1.00.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: ' . (string) ($_POST['return_to'] ?? '/'));
+    header('Location: ' . sanitizeReturnTo($_POST['return_to'] ?? '/'));
     exit();
 }
 
@@ -53,7 +75,7 @@ $redirect = Payments::startCheckout($siteId, $userId, $amountPence, $currency, $
 if ($redirect === null || $redirect === '') {
     $_SESSION['flash_msg']  = 'Could not start checkout — provider may not be configured.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: ' . (string) ($_POST['return_to'] ?? '/'));
+    header('Location: ' . sanitizeReturnTo($_POST['return_to'] ?? '/'));
     exit();
 }
 

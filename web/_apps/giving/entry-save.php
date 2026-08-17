@@ -55,12 +55,18 @@ if ($amount <= 0 || $categoryId <= 0 || $date === '' || strtotime($date) === fal
     exit();
 }
 
-// Resolve donor: try to match the typed name to a member; otherwise store as free-text.
+// Resolve donor: try to match the typed name to a member; otherwise store as
+// free-text. 🛡️ Site-scoped (INNER JOIN tblUserSites) so a gift can never be
+// attributed to a same-named member of another tenant/site.
 $donorId = null;
 if ($donorName !== '') {
-    $stmt = $db->prepare('SELECT userID FROM tblUsers WHERE fullName = ? AND isActive = 1 LIMIT 1');
+    $stmt = $db->prepare(
+        'SELECT u.userID FROM tblUsers u '
+        . 'INNER JOIN tblUserSites us ON us.userID = u.userID AND us.siteID = ? AND us.isActive = 1 '
+        . 'WHERE u.fullName = ? AND u.isActive = 1 LIMIT 1'
+    );
     if ($stmt !== false) {
-        $stmt->bind_param('s', $donorName);
+        $stmt->bind_param('is', $siteId, $donorName);
         $stmt->execute();
         $row = $stmt->get_result()->fetch_assoc();
         $stmt->close();

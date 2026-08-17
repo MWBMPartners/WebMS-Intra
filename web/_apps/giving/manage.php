@@ -133,12 +133,23 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 <input type="text" class="form-control form-control-sm" name="donorName" list="giving-donors" placeholder="Member name or anonymous">
                 <datalist id="giving-donors">
                     <?php
-                    $r = $db->query('SELECT userID, fullName, emailAddress FROM tblUsers WHERE isActive = 1 ORDER BY fullName LIMIT 500');
-                    if ($r !== false) {
+                    // 🛡️ Site-scoped — mirrors assets/loan.php's counterparty
+                    // picker (INNER JOIN tblUserSites) so this treasurer can't
+                    // see, and therefore can't attribute a gift to, a member
+                    // of another tenant/site.
+                    $donorStmt = $db->prepare(
+                        'SELECT u.userID, u.fullName, u.emailAddress FROM tblUsers u '
+                        . 'INNER JOIN tblUserSites us ON us.userID = u.userID AND us.siteID = ? AND us.isActive = 1 '
+                        . 'WHERE u.isActive = 1 ORDER BY u.fullName LIMIT 500'
+                    );
+                    if ($donorStmt !== false) {
+                        $donorStmt->bind_param('i', $siteId);
+                        $donorStmt->execute();
+                        $r = $donorStmt->get_result();
                         while ($u = $r->fetch_assoc()) {
                             echo '<option data-id="' . (int) $u['userID'] . '" value="' . htmlspecialchars((string) $u['fullName'], ENT_QUOTES, 'UTF-8') . '">';
                         }
-                        $r->free();
+                        $donorStmt->close();
                     }
                     ?>
                 </datalist>

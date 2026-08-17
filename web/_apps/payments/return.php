@@ -19,14 +19,19 @@ Auth::requireLogin();
 
 $db        = App::db();
 $siteId    = Site::id();
+$userId    = (int) ($_SESSION['user_id'] ?? 0);
 $paymentId = (int) ($_GET['payment'] ?? 0);
 $result    = (string) ($_GET['result'] ?? '');
 
+// 🛡️ paymentID is a sequential GET int — scope to the caller's OWN payment
+// (not just the site) so this landing page can't disclose another user's
+// amount/purpose. A mismatched payment simply falls through to the generic
+// "no $payment" branches below (no amount shown, "Return home" link only).
 $payment = null;
 if ($paymentId > 0) {
-    $stmt = $db->prepare('SELECT amountPence, currency, status, purpose, purposeRef FROM tblPayment WHERE paymentID = ? AND siteID = ? LIMIT 1');
+    $stmt = $db->prepare('SELECT amountPence, currency, status, purpose, purposeRef FROM tblPayment WHERE paymentID = ? AND siteID = ? AND userID = ? LIMIT 1');
     if ($stmt !== false) {
-        $stmt->bind_param('ii', $paymentId, $siteId);
+        $stmt->bind_param('iii', $paymentId, $siteId, $userId);
         $stmt->execute();
         $payment = $stmt->get_result()->fetch_assoc();
         $stmt->close();

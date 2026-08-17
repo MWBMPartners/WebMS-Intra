@@ -80,15 +80,15 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <div class="row g-2 align-items-end mb-2">
                 <div class="col-12 col-md-5">
                     <label class="form-label d-md-none">Description</label>
-                    <input type="text" name="itemDesc[]" class="form-control" placeholder="Item <?php echo $rowIdx; ?>">
+                    <input type="text" name="itemDesc[]" class="form-control" aria-label="Description" placeholder="Item <?php echo $rowIdx; ?>">
                 </div>
                 <div class="col-4 col-md-2">
                     <label class="form-label d-md-none">Qty</label>
-                    <input type="number" name="itemQty[]" class="form-control text-end" min="1" value="1">
+                    <input type="number" name="itemQty[]" class="form-control text-end" aria-label="Quantity" min="1" value="1">
                 </div>
                 <div class="col-4 col-md-2">
                     <label class="form-label d-md-none">Unit &pound;</label>
-                    <input type="number" step="0.01" name="itemUnit[]" class="form-control text-end" value="0.00">
+                    <input type="number" step="0.01" name="itemUnit[]" class="form-control text-end" aria-label="Unit price" value="0.00">
                 </div>
                 <div class="col-4 col-md-3"></div>
             </div>
@@ -106,7 +106,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
     <h4 class="mt-4">Supporting Files</h4>
     <div class="mb-3">
-        <div class="dropzone" onclick="document.getElementById('files').click()">Drop files here or click to upload</div>
+        <div class="dropzone" role="button" tabindex="0" onclick="document.getElementById('files').click()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();document.getElementById('files').click();}">Drop files here or click to upload</div>
         <input type="file" name="files[]" id="files" class="form-control d-none" multiple accept="image/*,application/pdf">
         <noscript>
             <input type="file" name="files[]" class="form-control mt-2" multiple accept="image/*,application/pdf">
@@ -138,15 +138,15 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         return `<div class="item-row row g-2 align-items-end mb-2">
             <div class="col-12 col-md-5">
                 <label class="form-label d-md-none">Description</label>
-                <input type="text" name="itemDesc[]" class="form-control" required>
+                <input type="text" name="itemDesc[]" class="form-control" aria-label="Description" required>
             </div>
             <div class="col-4 col-md-2">
                 <label class="form-label d-md-none">Qty</label>
-                <input type="number" name="itemQty[]" class="form-control text-end" min="1" value="1" required>
+                <input type="number" name="itemQty[]" class="form-control text-end" aria-label="Quantity" min="1" value="1" required>
             </div>
             <div class="col-4 col-md-2">
                 <label class="form-label d-md-none">Unit \u00a3</label>
-                <input type="number" step="0.01" name="itemUnit[]" class="form-control text-end" required>
+                <input type="number" step="0.01" name="itemUnit[]" class="form-control text-end" aria-label="Unit price" required>
             </div>
             <div class="col-4 col-md-2 text-end">
                 <label class="form-label d-md-none">Line \u00a3</label>
