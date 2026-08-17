@@ -249,6 +249,11 @@ if ($isLoggedIn === true && Site::isMultisiteEnabled() === true && $navUser !== 
                     <i class="fa-solid fa-eye-low-vision"></i>
                 </button>
 
+                <!-- 📖 Dyslexia-friendly reading mode toggle -->
+                <button type="button" class="portal-read-toggle" aria-label="Toggle dyslexia-friendly reading mode" aria-pressed="false">
+                    <i class="fa-solid fa-book-open-reader"></i>
+                </button>
+
                 <!-- 👤 User dropdown -->
                 <div class="dropdown">
                     <a class="d-flex align-items-center gap-2 text-decoration-none dropdown-toggle"
@@ -303,6 +308,11 @@ if ($isLoggedIn === true && Site::isMultisiteEnabled() === true && $navUser !== 
                 <li class="nav-item">
                     <button type="button" class="portal-cb-toggle" aria-label="Toggle colour-blind safe palette" aria-pressed="false">
                         <i class="fa-solid fa-eye-low-vision"></i>
+                    </button>
+                </li>
+                <li class="nav-item">
+                    <button type="button" class="portal-read-toggle" aria-label="Toggle dyslexia-friendly reading mode" aria-pressed="false">
+                        <i class="fa-solid fa-book-open-reader"></i>
                     </button>
                 </li>
             </ul>

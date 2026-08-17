@@ -225,6 +225,10 @@ header("Content-Security-Policy: default-src 'self'; "
         if (localStorage.getItem('portal-cb') === 'on') {
             html.setAttribute('data-portal-cb', 'on');
         }
+        // Dyslexia-friendly reading mode (toggleable, opt-in)
+        if (localStorage.getItem('portal-read') === 'on') {
+            html.setAttribute('data-portal-read', 'on');
+        }
     })();
     </script>
 

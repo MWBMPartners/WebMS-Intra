@@ -246,6 +246,47 @@
 }
 
 /* ============================================================================
+   2.6 Dyslexia-friendly reading mode (data-portal-read="on")
+
+   Opt-in, persisted in localStorage as 'portal-read' and applied before
+   paint by the FOUC script in header.php (mirrors the colour-blind toggle).
+
+   Follows the British Dyslexia Association Style Guide (2023): a clean
+   sans-serif face, wider inter-letter and inter-word spacing, generous
+   line height (~1.5), and left-aligned (never justified) body text. No web
+   font is fetched — the stack is limited to widely-installed system faces
+   the BDA lists as dyslexia-friendly (Verdana / Tahoma / Trebuchet /
+   Arial), so it stays CSP-safe and adds no network cost.
+   ============================================================================ */
+
+[data-portal-read="on"] {
+    --portal-font-family: Verdana, Tahoma, "Trebuchet MS", "Segoe UI", Arial, sans-serif;
+}
+
+[data-portal-read="on"] body {
+    letter-spacing: 0.03em;
+    word-spacing: 0.12em;
+    line-height: 1.6;
+}
+
+/* Wider spacing + taller leading on flowing text; leave code untouched. */
+[data-portal-read="on"] p,
+[data-portal-read="on"] li,
+[data-portal-read="on"] dd,
+[data-portal-read="on"] label,
+[data-portal-read="on"] .portal-data-list,
+[data-portal-read="on"] .card-text {
+    line-height: 1.7;
+}
+
+/* The BDA advises against justified text (uneven "rivers" of white space). */
+[data-portal-read="on"] p,
+[data-portal-read="on"] li,
+[data-portal-read="on"] .card-text {
+    text-align: left;
+}
+
+/* ============================================================================
    3. Base / Reset
    ============================================================================ */
 
@@ -731,7 +772,8 @@ textarea:focus-visible,
    ============================================================================ */
 
 .portal-theme-toggle,
-.portal-cb-toggle {
+.portal-cb-toggle,
+.portal-read-toggle {
     background: none;
     border: none;
     padding: var(--portal-spacing-sm);
@@ -744,12 +786,15 @@ textarea:focus-visible,
 }
 
 .portal-theme-toggle:hover,
-.portal-cb-toggle:hover {
+.portal-cb-toggle:hover,
+.portal-read-toggle:hover {
     background-color: var(--portal-surface-hover);
 }
 
 /* Visual cue when CB-safe palette is active */
-.portal-cb-toggle[aria-pressed="true"] {
+.portal-cb-toggle[aria-pressed="true"],
+/* Visual cue when dyslexia-friendly reading mode is active */
+.portal-read-toggle[aria-pressed="true"] {
     color: var(--portal-primary);
     background-color: var(--portal-primary-subtle);
 }
