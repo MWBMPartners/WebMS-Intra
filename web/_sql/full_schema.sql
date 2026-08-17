@@ -6401,7 +6401,7 @@ CREATE TABLE IF NOT EXISTS `tblAssetAudit` (
     `action`       VARCHAR(40) NOT NULL COMMENT 'create/update/delete/scan/approve/decline/... — free-form, not ENUM, so new action verbs never need a migration',
     `changeSet`    JSON     DEFAULT NULL COMMENT '{field:{old,new}} — sensitive fields redacted, see AssetRegister::audit()',
     `meta`         JSON     DEFAULT NULL COMMENT 'Free-form extra context (e.g. loan counterparty, label symbology)',
-    `actorType`    ENUM('user','system','public') NOT NULL DEFAULT 'user',
+    `actorType`    ENUM('user','system','public','kiosk') NOT NULL DEFAULT 'user',
     `actorUserID`  INT      DEFAULT NULL COMMENT 'No FK by design — see table comment',
     `apiKeyID`     INT      DEFAULT NULL COMMENT 'tblApiKeys.keyID when the change arrived via bearer API key — no FK by design',
     `ipHash`       CHAR(64) DEFAULT NULL COMMENT 'Salted SHA-256 of the actor''s IP (public/anonymous actions only)',
@@ -6676,7 +6676,8 @@ INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
     ('assets/kiosk-save',         'assets/kiosk-save.php',         1),
     ('assets/kiosk',              'assets/kiosk.php',              0),
     ('assets/kiosk-action',       'assets/kiosk-action.php',       0),
-    ('assets/identifier-verify',  'assets/identifier-verify.php',  1)
+    ('assets/identifier-verify',  'assets/identifier-verify.php',  1),
+    ('assets/kiosk-pin',          'assets/kiosk-pin.php',          1)
 ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 
 
@@ -6906,4 +6907,7 @@ INSERT INTO `tblMigrations` (`filename`) VALUES ('160_asset_tracker_phase2.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
 INSERT INTO `tblMigrations` (`filename`) VALUES ('161_asset_tracker_phase3.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('162_asset_kiosk_pin.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;

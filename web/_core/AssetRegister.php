@@ -437,6 +437,75 @@
  *      the register's existing single-reporting-currency assumption (see
  *      `_apps/assets/index.php`'s own CSV export, which hard-codes "(GBP)").
  *
+ *  14. Kiosk self check-in/out (#414, Phase 3 Pass 5). Unattended, PUBLIC
+ *      terminal access — `_apps/assets/kiosk.php`/`kiosk-action.php` carry
+ *      NO login session; every method in this section is written for that
+ *      threat model (see those files' own headers for the full gate
+ *      chain). `mintKioskToken()`/`setKioskTokenActive()`/
+ *      `deleteKioskToken()`/`listKioskTokens()` manage `tblAssetKioskTokens`
+ *      (the per-DEVICE credential, entityType `'kiosk'`, now wired into
+ *      `TABLE_FOR_ENTITY` above) — admin-only, session-scoped, mirroring
+ *      `mintKioskToken()`'s own token-generation shape on
+ *      `generatePublicToken()`/`regeneratePublicToken()` (point 8) and its
+ *      duplicate-catch shape on `addIdentifier()`'s (point 4).
+ *      `listKioskTokens()` NEVER selects the `token` column — a terminal's
+ *      credential is shown to an admin exactly once, at mint time, in
+ *      `mintKioskToken()`'s own return value. `resolveKioskTerminal()` is
+ *      the PUBLIC-safe token→terminal lookup `kiosk.php`/`kiosk-action.php`
+ *      call on EVERY request (re-validates the `^[a-f0-9]{32}$` shape
+ *      itself, same defensive re-validation convention as `tag.php`/
+ *      `found-save.php` point 8) — an unknown or revoked (`isActive = 0`)
+ *      token returns null with no distinguishing signal between the two
+ *      (no oracle), and a successful resolve bumps `lastSeenAt` via a
+ *      separate, cheap UPDATE. `setKioskPin()`/`clearKioskPin()`/
+ *      `hasKioskPin()` manage a member's OWN `tblAssetKioskPins` row (the
+ *      per-USER credential) — `setKioskPin()` re-validates the PIN shape
+ *      (`^\d{4,6}$`) and rejects a small weak-list/sequential-run/
+ *      all-same-digit PIN (`isWeakKioskPin()`) before `password_hash()`-ing
+ *      it, UPSERT-ing on `uq_astkp_site_user`; `clearKioskPin()` flips
+ *      `isActive = 0` rather than deleting the row (re-setting a PIN later
+ *      re-activates it via the same UPSERT). Neither routes through
+ *      `self::audit()` (a PIN isn't asset-scoped) — both log via a plain
+ *      `Logger::activity()` call instead, mirroring the site-wide
+ *      reference-data convention (point 2). `resolveKioskUser()` resolves
+ *      the SAME "username or email" identifier `Auth::loginLocal()` accepts
+ *      (mirrored exactly, including the lower-cased/trimmed identifier),
+ *      additionally scoped to an ACTIVE `tblUserSites` membership on the
+ *      terminal's OWN site (`partyExistsOnSite('user', …)`'s own join
+ *      shape, point 5) — never trusts a bare userID from the request.
+ *      `verifyKioskPin()` is the `password_verify()` counterpart, bumping
+ *      `lastUsedAt` on success; a missing PIN row simply verifies false,
+ *      never short-circuiting differently from a wrong PIN (no oracle).
+ *      `kioskCheckout()`/`kioskCheckin()` are the actual hand-over/return
+ *      actions — both audit as entityType `'loan'` (NOT `'kiosk'` — a
+ *      kiosk check-in/out IS a loan event, just one with a different actor
+ *      type) via the new `actorType: 'kiosk'` + `actorUserIdOverride` pair
+ *      (point 1's `audit()` change), attributing the row to the PIN-
+ *      resolved user despite there being no session. `kioskCheckout()`
+ *      rejects a confidential asset AND a wrong-status asset with the
+ *      EXACT SAME message (no oracle distinguishing "confidential" from
+ *      "not currently loanable") before separately reporting a genuine
+ *      already-open loan (that leak is acceptable — only a real,
+ *      already-public, non-confidential asset ever reaches that branch).
+ *      Deliberately does NOT run `cascadeKitCheckout()` (#413, point
+ *      unlisted above) — a kiosk hand-over is always a single asset.
+ *      `kioskCheckin()` IDOR-guards on `assetID` + `siteID` +
+ *      `counterpartyUserID` + `direction = 'out'` + `status = 'active'`
+ *      — a kiosk user can only ever check in a loan THEY are the
+ *      counterparty of — PLUS a defensive `isConfidential = 0` join
+ *      (belt-and-braces: `kioskCheckout()` already prevents a confidential
+ *      asset from EVER acquiring such a loan via the kiosk path, but this
+ *      closes the same "never act on a confidential asset" gate against a
+ *      hand-crafted POST targeting a confidential asset a NON-kiosk
+ *      workflow separately loaned to that user). Both wrap their loan-row
+ *      UPDATE and `tblAssets` UPDATE in one transaction, same shape as
+ *      `loanCheckout()`/`loanCheckin()` (point 5). `kioskUserActiveLoans()`
+ *      is the read behind `kiosk.php`'s own check-in list — STRICTLY the
+ *      identified kiosk user's own active 'out' loans, additionally
+ *      excluding confidential assets defensively (same rationale as
+ *      `kioskCheckin()`'s own join, belt-and-braces since none should
+ *      exist there in the first place).
+ *
  * All queries are MySQLi prepared statements via `App::db()` — never
  * string-interpolated user input (house rule, .claude/CLAUDE.md → Code Style).
  *
@@ -444,7 +513,7 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.9.0
+ * @version   1.10.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/393
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/394
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/395
@@ -460,6 +529,7 @@
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/408
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/409
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/410
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/414
  * -----------------------------------------------------------------------------
  */
 
@@ -684,7 +754,13 @@ class AssetRegister
      * @param array|null  $old        Previous field values (null for create/scan/…)
      * @param array|null  $new        New field values (null for delete)
      * @param array       $meta       Free-form extra context stored in tblAssetAudit.meta (JSON)
-     * @param string      $actorType  'user' (default) | 'system' | 'public'
+     * @param string      $actorType  'user' (default) | 'system' | 'public' | 'kiosk'
+     * @param int|null    $actorUserIdOverride Explicit actor id (#414, Phase 3 Pass 5) — when
+     *        non-null, ALWAYS used as actorUserID regardless of $actorType, bypassing the
+     *        session-derived lookup below entirely. Lets a caller with no login session of its
+     *        own (a public kiosk terminal, resolved to a real user via PIN — see
+     *        `_apps/assets/kiosk-action.php`) still attribute the row to that resolved user
+     *        rather than leaving actorUserID null.
      *
      * @return void
      */
@@ -696,7 +772,8 @@ class AssetRegister
         ?array $old = null,
         ?array $new = null,
         array $meta = [],
-        string $actorType = 'user'
+        string $actorType = 'user',
+        ?int $actorUserIdOverride = null
     ): void {
         $db = App::db();
 
@@ -709,7 +786,13 @@ class AssetRegister
         // 🌐 2. Context — site, actor, IP.
         $siteId = Site::id();
         $actorUserID = null;
-        if ($actorType === 'user') {
+        if ($actorUserIdOverride !== null) {
+            // 🎫 #414 override — a kiosk request has no $_SESSION['user_id']
+            // of its own (see class header point 14), so the caller hands
+            // us the PIN-resolved user id directly rather than relying on
+            // the session-derived lookup below.
+            $actorUserID = $actorUserIdOverride;
+        } elseif ($actorType === 'user') {
             // 🪞 Mirrors the house convention used across every controller
             //    (e.g. web/_apps/documents/categories.php) rather than
             //    Auth::user() — avoids an extra DB round-trip when we only
@@ -845,7 +928,14 @@ class AssetRegister
      * (never create/update/delete), so this map is never consulted for
      * them — see startStocktake()/recordStocktakeScan()/closeStocktake()'s
      * own audit() calls for why that keeps the platform trail from being
-     * flooded by high-volume scan events.
+     * flooded by high-volume scan events. `'kiosk'` was the LAST remaining
+     * placeholder named in this comment's own older revisions — #414
+     * (Phase 3 Pass 5) gives it `tblAssetKioskTokens` (terminal register/
+     * revoke/reactivate/delete events), wired in below too. A kiosk
+     * check-in/out itself is NOT an entityType of its own — it audits as
+     * entityType `'loan'` (already mapped below) with `actorType: 'kiosk'`,
+     * so those rows mirror into `tblAuditTrail` exactly like any other
+     * loan checkout/checkin.
      *
      * @var array<string, string>
      */
@@ -860,6 +950,7 @@ class AssetRegister
         'found-report' => 'tblAssetFoundReports',
         'event-link'   => 'tblAssetEventAssignments',
         'stocktake'    => 'tblAssetStocktakes',
+        'kiosk'        => 'tblAssetKioskTokens',
     ];
 
     /**
@@ -8887,5 +8978,728 @@ class AssetRegister
 
         $counts['total'] = $total;
         return $counts;
+    }
+
+    /* ==========================================================================
+     * 🖥️ Kiosk self check-in/out (#414, Phase 3 Pass 5) — see class header
+     * point 14 for the full section overview. EVERY method below may be
+     * called from a PUBLIC, unauthenticated request (`_apps/assets/
+     * kiosk.php`/`kiosk-action.php`) — none of them may EVER trust a
+     * caller-supplied userID/siteID the way createAsset()/updateAsset() do;
+     * every one re-derives or re-validates its own scope from a real,
+     * already-authenticated (by device token or PIN) source.
+     * ======================================================================== */
+
+    /**
+     * A small denylist of PIN values that are trivially guessable —
+     * checked by {@see isWeakKioskPin()} ALONGSIDE the programmatic
+     * all-same-digit / sequential-run checks in that method, so this list
+     * only needs to cover values neither of those two patterns already
+     * catches (e.g. '0123' is a plain ascending run and never reaches
+     * this array at all).
+     *
+     * @var string[]
+     */
+    private const KIOSK_PIN_WEAK_LIST = [
+        '0000', '1111', '2222', '3333', '4444', '5555', '6666', '7777', '8888', '9999',
+        '1234', '4321', '1212', '2121', '000000', '123456', '654321',
+    ];
+
+    /**
+     * True when $pin (already shape-validated by the caller —
+     * {@see setKioskPin()}) is trivially guessable: on the small explicit
+     * {@see KIOSK_PIN_WEAK_LIST}, every digit identical (e.g. '55555'), or
+     * a straight ascending/descending run (e.g. '2345', '9876'). NON-
+     * exhaustive by design (a determined attacker still has to brute-force
+     * a 4-6 digit space, which is what {@see RateLimiter} in `kiosk-
+     * action.php` is actually for) — this is a cheap first line of defence
+     * against the handful of PINs a person is most likely to pick by habit.
+     */
+    private static function isWeakKioskPin(string $pin): bool
+    {
+        if (in_array($pin, self::KIOSK_PIN_WEAK_LIST, true) === true) {
+            return true;
+        }
+        // 🔁 Every digit identical, any length in range.
+        if (preg_match('/^(\d)\1+$/', $pin) === 1) {
+            return true;
+        }
+        // 🔢 A contiguous slice of a straight ascending/descending run.
+        $ascending  = '0123456789';
+        $descending = '9876543210';
+        if (str_contains($ascending, $pin) === true || str_contains($descending, $pin) === true) {
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * Register a new kiosk TERMINAL — mints a 32-hex device token
+     * (`generatePublicToken()`, same shape as an asset's own public token),
+     * retrying on the astronomically unlikely `uq_astkt_token` collision
+     * (mirrors `addIdentifier()`'s own duplicate-catch shape, class header
+     * point 4). ADMIN-only caller (`_apps/assets/kiosk-save.php`) — audited
+     * as a normal session-admin action, NOT the `actorUserIdOverride` path
+     * (the acting admin registered this terminal; no kiosk user is
+     * involved yet). The plaintext token is returned ONCE — see
+     * `listKioskTokens()`'s own doc for why it is never selectable again.
+     *
+     * @return array{ok: bool, msg: string, token?: string, tokenId?: int}
+     */
+    public static function mintKioskToken(string $label, int $actorUserId): array
+    {
+        $label = trim($label);
+        if ($label === '' || mb_strlen($label) > 150) {
+            return ['ok' => false, 'msg' => 'Label is required (max 150 characters).'];
+        }
+
+        $db     = App::db();
+        $siteId = Site::id();
+
+        $token   = null;
+        $tokenId = 0;
+        for ($attempt = 0; $attempt < 5; $attempt++) {
+            $candidate = self::generatePublicToken();
+            $stmt = $db->prepare(
+                'INSERT INTO tblAssetKioskTokens (siteID, label, token, isActive, createdByID) '
+                . 'VALUES (?, ?, ?, 1, ?)'
+            );
+            if ($stmt === false) {
+                error_log('AssetRegister::mintKioskToken() prepare failed: ' . $db->error);
+                return ['ok' => false, 'msg' => 'Could not register the terminal — please try again.'];
+            }
+            try {
+                $stmt->bind_param('issi', $siteId, $label, $candidate, $actorUserId);
+                $stmt->execute();
+                $tokenId = (int) $stmt->insert_id;
+                $stmt->close();
+                $token = $candidate;
+                break;
+            } catch (\mysqli_sql_exception $e) {
+                // 🎲 uq_astkt_token collision — vanishingly unlikely for a
+                // 32-hex value, but retry with a fresh candidate rather
+                // than fail outright (same shape as addIdentifier()'s own
+                // duplicate-catch).
+                $stmt->close();
+                continue;
+            }
+        }
+
+        if ($token === null || $tokenId <= 0) {
+            error_log('AssetRegister::mintKioskToken() could not generate a unique token after 5 attempts');
+            return ['ok' => false, 'msg' => 'Could not register the terminal — please try again.'];
+        }
+
+        // 📜 Normal session-admin actor — the token value itself is NEVER
+        // passed into audit() (see REDACTED_FIELDS' own rationale — a
+        // kiosk terminal token gates the same class of action a publicToken
+        // gates, so it stays out of every log row just as thoroughly, even
+        // though 'token' isn't itself in REDACTED_FIELDS — simplest to
+        // just never hand it to audit() at all).
+        self::audit('kiosk', $tokenId, 0, 'create', null, ['label' => $label]);
+
+        return ['ok' => true, 'msg' => 'Terminal registered.', 'token' => $token, 'tokenId' => $tokenId];
+    }
+
+    /**
+     * Activate/revoke an existing terminal, site-scoped + IDOR-guarded
+     * (read-then-mutate, mirrors `loanAction()`'s own pattern). Revoking
+     * takes effect immediately — `resolveKioskTerminal()` re-checks
+     * `isActive` on EVERY request, so a revoked terminal stops working on
+     * its very next request, mid check-in/out session or not.
+     *
+     * @return array{ok: bool, msg: string}
+     */
+    public static function setKioskTokenActive(int $tokenId, bool $active, int $actorUserId): array
+    {
+        $db     = App::db();
+        $siteId = Site::id();
+
+        $stmt = $db->prepare('SELECT isActive FROM tblAssetKioskTokens WHERE tokenID = ? AND siteID = ? LIMIT 1');
+        if ($stmt === false) {
+            error_log('AssetRegister::setKioskTokenActive() prepare failed: ' . $db->error);
+            return ['ok' => false, 'msg' => 'Could not update the terminal — please try again.'];
+        }
+        $stmt->bind_param('ii', $tokenId, $siteId);
+        $stmt->execute();
+        $row = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+
+        if ($row === null) {
+            return ['ok' => false, 'msg' => 'Terminal not found.'];
+        }
+
+        $oldVal = (int) $row['isActive'];
+        $newVal = $active === true ? 1 : 0;
+
+        $updStmt = $db->prepare('UPDATE tblAssetKioskTokens SET isActive = ? WHERE tokenID = ? AND siteID = ?');
+        if ($updStmt === false) {
+            error_log('AssetRegister::setKioskTokenActive() update prepare failed: ' . $db->error);
+            return ['ok' => false, 'msg' => 'Could not update the terminal — please try again.'];
+        }
+        $updStmt->bind_param('iii', $newVal, $tokenId, $siteId);
+        $updStmt->execute();
+        $updStmt->close();
+
+        self::audit('kiosk', $tokenId, 0, 'update', ['isActive' => $oldVal], ['isActive' => $newVal]);
+
+        return ['ok' => true, 'msg' => $active === true ? 'Terminal reactivated.' : 'Terminal revoked.'];
+    }
+
+    /**
+     * Permanently remove a terminal registration, site-scoped + IDOR-
+     * guarded (read-then-delete, mirrors `removeOwner()`'s own pattern).
+     * Unlike most register/history tables in this class, a decommissioned
+     * kiosk device is genuinely gone — there is no ongoing history value
+     * in keeping a dead terminal row around the way there is for a loan or
+     * a maintenance entry (`setKioskTokenActive()` above is the "keep the
+     * row, just stop trusting it" option for a terminal being temporarily
+     * taken out of service).
+     *
+     * @return array{ok: bool, msg: string}
+     */
+    public static function deleteKioskToken(int $tokenId, int $actorUserId): array
+    {
+        $db     = App::db();
+        $siteId = Site::id();
+
+        $stmt = $db->prepare('SELECT label FROM tblAssetKioskTokens WHERE tokenID = ? AND siteID = ? LIMIT 1');
+        if ($stmt === false) {
+            error_log('AssetRegister::deleteKioskToken() prepare failed: ' . $db->error);
+            return ['ok' => false, 'msg' => 'Could not delete the terminal — please try again.'];
+        }
+        $stmt->bind_param('ii', $tokenId, $siteId);
+        $stmt->execute();
+        $row = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+
+        if ($row === null) {
+            return ['ok' => false, 'msg' => 'Terminal not found.'];
+        }
+
+        $delStmt = $db->prepare('DELETE FROM tblAssetKioskTokens WHERE tokenID = ? AND siteID = ?');
+        if ($delStmt === false) {
+            error_log('AssetRegister::deleteKioskToken() delete prepare failed: ' . $db->error);
+            return ['ok' => false, 'msg' => 'Could not delete the terminal — please try again.'];
+        }
+        $delStmt->bind_param('ii', $tokenId, $siteId);
+        $delStmt->execute();
+        $affected = $delStmt->affected_rows;
+        $delStmt->close();
+
+        if ($affected <= 0) {
+            return ['ok' => false, 'msg' => 'Terminal not found.'];
+        }
+
+        self::audit('kiosk', $tokenId, 0, 'delete', ['label' => (string) $row['label']], null);
+
+        return ['ok' => true, 'msg' => 'Terminal deleted.'];
+    }
+
+    /**
+     * List every registered terminal for a site, newest-registered first.
+     * NEVER selects the `token` column itself — see class header point 14
+     * for why a terminal's credential is a show-once value.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public static function listKioskTokens(int $siteId): array
+    {
+        $db = App::db();
+        $stmt = $db->prepare(
+            'SELECT kt.tokenID, kt.label, kt.isActive, kt.createdAt, kt.lastSeenAt, '
+            . '       u.fullName AS createdByName '
+            . 'FROM tblAssetKioskTokens kt '
+            . 'LEFT JOIN tblUsers u ON u.userID = kt.createdByID '
+            . 'WHERE kt.siteID = ? '
+            . 'ORDER BY kt.createdAt DESC'
+        );
+        if ($stmt === false) {
+            error_log('AssetRegister::listKioskTokens() prepare failed: ' . $db->error);
+            return [];
+        }
+        $stmt->bind_param('i', $siteId);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        $rows = [];
+        while ($row = $result->fetch_assoc()) {
+            $rows[] = $row;
+        }
+        $stmt->close();
+        return $rows;
+    }
+
+    /**
+     * PUBLIC-safe token→terminal resolve — the credential gate every
+     * kiosk request re-checks (class header point 14). Re-validates the
+     * `^[a-f0-9]{32}$` shape itself (never trusts an upstream guarantee —
+     * same defensive convention as `tag.php`/`found-save.php`) before ever
+     * touching the database, then requires `isActive = 1`: an unknown
+     * token and a revoked one are 100% indistinguishable from this
+     * method's return value alone (both null) — no oracle. On a match,
+     * bumps `lastSeenAt` via a separate, cheap UPDATE (best-effort — never
+     * allowed to turn a successful resolve into a failure).
+     *
+     * @return array<string, mixed>|null tokenID/siteID/label, or null
+     */
+    public static function resolveKioskTerminal(string $token): ?array
+    {
+        if (preg_match('/^[a-f0-9]{32}$/', $token) !== 1) {
+            return null;
+        }
+
+        $db = App::db();
+        $stmt = $db->prepare(
+            'SELECT tokenID, siteID, label FROM tblAssetKioskTokens WHERE token = ? AND isActive = 1 LIMIT 1'
+        );
+        if ($stmt === false) {
+            error_log('AssetRegister::resolveKioskTerminal() prepare failed: ' . $db->error);
+            return null;
+        }
+        $stmt->bind_param('s', $token);
+        $stmt->execute();
+        $row = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+
+        if ($row === null) {
+            return null;
+        }
+
+        $tokenId = (int) $row['tokenID'];
+        $bumpStmt = $db->prepare('UPDATE tblAssetKioskTokens SET lastSeenAt = NOW() WHERE tokenID = ?');
+        if ($bumpStmt !== false) {
+            $bumpStmt->bind_param('i', $tokenId);
+            $bumpStmt->execute();
+            $bumpStmt->close();
+        }
+
+        return $row;
+    }
+
+    /**
+     * Set (or change) a member's OWN kiosk PIN — validates shape
+     * (`^\d{4,6}$`) and rejects a weak/guessable value ({@see
+     * isWeakKioskPin()}) before `password_hash()`-ing it and UPSERT-ing on
+     * `uq_astkp_site_user` (re-setting a previously-cleared PIN
+     * re-activates the row in the same statement). Logged via a plain
+     * `Logger::activity()` call rather than `self::audit()` — a PIN isn't
+     * asset-scoped, so it doesn't fit this class's asset-choke-point audit
+     * trail (class header point 14).
+     *
+     * @return array{ok: bool, msg: string}
+     */
+    public static function setKioskPin(int $userId, int $siteId, string $pin): array
+    {
+        $pin = trim($pin);
+        if (preg_match('/^\d{4,6}$/', $pin) !== 1) {
+            return ['ok' => false, 'msg' => 'PIN must be 4-6 digits.'];
+        }
+        if (self::isWeakKioskPin($pin) === true) {
+            return ['ok' => false, 'msg' => 'That PIN is too easy to guess — please choose a less predictable one.'];
+        }
+
+        $hash = password_hash($pin, PASSWORD_DEFAULT);
+
+        $db = App::db();
+        $stmt = $db->prepare(
+            'INSERT INTO tblAssetKioskPins (siteID, userID, pinHash, isActive) VALUES (?, ?, ?, 1) '
+            . 'ON DUPLICATE KEY UPDATE pinHash = VALUES(pinHash), isActive = 1'
+        );
+        if ($stmt === false) {
+            error_log('AssetRegister::setKioskPin() prepare failed: ' . $db->error);
+            return ['ok' => false, 'msg' => 'Could not save your PIN — please try again.'];
+        }
+        $stmt->bind_param('iis', $siteId, $userId, $hash);
+        $ok = $stmt->execute();
+        $stmt->close();
+
+        if ($ok === false) {
+            return ['ok' => false, 'msg' => 'Could not save your PIN — please try again.'];
+        }
+
+        Logger::activity('AssetKioskPinSet', 'Kiosk PIN set/changed', $userId);
+
+        return ['ok' => true, 'msg' => 'Your kiosk PIN has been saved.'];
+    }
+
+    /**
+     * Clear a member's OWN kiosk PIN — flips `isActive = 0` rather than
+     * deleting the row (see `setKioskPin()`'s own UPSERT, which
+     * re-activates it if the member sets a new PIN later).
+     *
+     * @return array{ok: bool, msg: string}
+     */
+    public static function clearKioskPin(int $userId, int $siteId): array
+    {
+        $db = App::db();
+        $stmt = $db->prepare('UPDATE tblAssetKioskPins SET isActive = 0 WHERE userID = ? AND siteID = ?');
+        if ($stmt === false) {
+            error_log('AssetRegister::clearKioskPin() prepare failed: ' . $db->error);
+            return ['ok' => false, 'msg' => 'Could not clear your PIN — please try again.'];
+        }
+        $stmt->bind_param('ii', $userId, $siteId);
+        $stmt->execute();
+        $stmt->close();
+
+        Logger::activity('AssetKioskPinCleared', 'Kiosk PIN cleared', $userId);
+
+        return ['ok' => true, 'msg' => 'Your kiosk PIN has been cleared.'];
+    }
+
+    /**
+     * Whether a member currently has an active kiosk PIN set — NEVER
+     * reveals the PIN itself, only its presence, for `kiosk-pin.php`'s own
+     * "a PIN is currently set" readout.
+     */
+    public static function hasKioskPin(int $userId, int $siteId): bool
+    {
+        $db = App::db();
+        $stmt = $db->prepare(
+            'SELECT 1 FROM tblAssetKioskPins WHERE userID = ? AND siteID = ? AND isActive = 1 LIMIT 1'
+        );
+        if ($stmt === false) {
+            return false;
+        }
+        $stmt->bind_param('ii', $userId, $siteId);
+        $stmt->execute();
+        $row = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+        return $row !== null;
+    }
+
+    /**
+     * Resolve a kiosk identify-form IDENTIFIER (username or email — the
+     * SAME either-or `Auth::loginLocal()` accepts, mirrored exactly
+     * including the lower-cased/trimmed comparison value) to an ACTIVE
+     * user who belongs to `$siteId` via an active `tblUserSites` row
+     * (`partyExistsOnSite('user', …)`'s own join shape, class header point
+     * 5) — never a bare userID from the request. Returns userID/fullName
+     * only; NEVER a password/PIN hash or any other credential material.
+     *
+     * @return array{userID: int, fullName: string}|null
+     */
+    public static function resolveKioskUser(int $siteId, string $identifier): ?array
+    {
+        $identifier = strtolower(trim($identifier));
+        if ($identifier === '') {
+            return null;
+        }
+
+        $db = App::db();
+        $stmt = $db->prepare(
+            'SELECT DISTINCT u.userID, u.fullName '
+            . 'FROM tblUsers u '
+            . 'INNER JOIN tblUserSites us ON us.userID = u.userID AND us.siteID = ? AND us.isActive = 1 '
+            . 'LEFT JOIN tblLocalAccounts la ON la.userID = u.userID '
+            . 'WHERE u.isActive = 1 AND (la.username = ? OR u.emailAddress = ?) '
+            . 'LIMIT 1'
+        );
+        if ($stmt === false) {
+            error_log('AssetRegister::resolveKioskUser() prepare failed: ' . $db->error);
+            return null;
+        }
+        $stmt->bind_param('iss', $siteId, $identifier, $identifier);
+        $stmt->execute();
+        $row = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+
+        return $row !== null ? $row : null;
+    }
+
+    /**
+     * `password_verify()` a kiosk PIN against `$userId`'s active
+     * `tblAssetKioskPins` row, site-scoped. A missing row simply verifies
+     * false — the SAME outcome as a wrong PIN against a real row, so this
+     * method's return value alone never reveals whether the user has a PIN
+     * set at all (the caller — `kiosk-action.php`'s `identify` action —
+     * shows the identical "incorrect details" message either way). Bumps
+     * `lastUsedAt` on a successful verify.
+     */
+    public static function verifyKioskPin(int $siteId, int $userId, string $pin): bool
+    {
+        $db = App::db();
+        $stmt = $db->prepare(
+            'SELECT pinID, pinHash FROM tblAssetKioskPins WHERE siteID = ? AND userID = ? AND isActive = 1 LIMIT 1'
+        );
+        if ($stmt === false) {
+            return false;
+        }
+        $stmt->bind_param('ii', $siteId, $userId);
+        $stmt->execute();
+        $row = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+
+        if ($row === null) {
+            return false;
+        }
+
+        if (password_verify($pin, (string) $row['pinHash']) === false) {
+            return false;
+        }
+
+        $pinId = (int) $row['pinID'];
+        $bumpStmt = $db->prepare('UPDATE tblAssetKioskPins SET lastUsedAt = NOW() WHERE pinID = ?');
+        if ($bumpStmt !== false) {
+            $bumpStmt->bind_param('i', $pinId);
+            $bumpStmt->execute();
+            $bumpStmt->close();
+        }
+
+        return true;
+    }
+
+    /**
+     * Kiosk self-checkout — a single asset, hand-over TO the PIN-resolved
+     * member. Guards: the asset exists on the (forced-context) site, is
+     * NOT confidential, and is in a loanable status (`in-service` or
+     * `in-storage`) — a confidential asset and a wrong-status asset return
+     * the EXACT SAME rejection message (no oracle distinguishing the two;
+     * see class header point 14), checked BEFORE the separate "already has
+     * an open loan" check (which only a real, already-public, non-
+     * confidential asset can ever reach). TRANSACTIONAL, same shape as
+     * `loanCheckout()` (class header point 5): the new loan-row INSERT and
+     * the `tblAssets.status` UPDATE are one atomic unit. Deliberately does
+     * NOT cascade a kit (#413) — a kiosk hand-over is always exactly one
+     * asset. Audits entityType `'loan'`, action `'checkout'`, `actorType:
+     * 'kiosk'`, attributed to `$kioskUserId` via the `audit()`
+     * `actorUserIdOverride` (point 1).
+     *
+     * @return array{ok: bool, msg: string}
+     */
+    public static function kioskCheckout(int $assetId, int $kioskUserId, int $kioskTokenId): array
+    {
+        $asset = self::get($assetId);
+        if ($asset === null) {
+            return ['ok' => false, 'msg' => 'Item not found.'];
+        }
+
+        // 🙈 Uniform rejection — a confidential asset and one that simply
+        // isn't in a loanable status right now are indistinguishable from
+        // this response alone (see method doc).
+        $loanableStatus = in_array((string) $asset['status'], ['in-service', 'in-storage'], true);
+        if ((int) $asset['isConfidential'] === 1 || $loanableStatus === false) {
+            return ['ok' => false, 'msg' => "That item isn't available to check out here."];
+        }
+
+        $db     = App::db();
+        $siteId = Site::id();
+
+        // 🚦 No open loan already in flight — mirrors createLoanRequest()'s
+        // own "one unresolved loan at a time per asset" guard (class
+        // header point 5). Only reached by a real, non-confidential,
+        // loanable-status asset, so revealing "already checked out" here
+        // is not itself an oracle for confidentiality.
+        $openPlaceholders = implode(', ', array_fill(0, count(self::LOAN_OPEN_STATUSES), '?'));
+        $openStmt = $db->prepare(
+            'SELECT 1 FROM tblAssetLoans WHERE assetID = ? AND siteID = ? AND status IN (' . $openPlaceholders . ') LIMIT 1'
+        );
+        if ($openStmt !== false) {
+            $openTypes = 'ii' . str_repeat('s', count(self::LOAN_OPEN_STATUSES));
+            $openStmt->bind_param($openTypes, $assetId, $siteId, ...self::LOAN_OPEN_STATUSES);
+            $openStmt->execute();
+            $hasOpenLoan = $openStmt->get_result()->fetch_assoc() !== null;
+            $openStmt->close();
+            if ($hasOpenLoan === true) {
+                return ['ok' => false, 'msg' => 'That item is already checked out.'];
+            }
+        }
+
+        $conditionOut = (string) $asset['conditionState'];
+        if (in_array($conditionOut, self::CONDITION_STATES, true) === false) {
+            $conditionOut = 'good';
+        }
+
+        $newLoanId  = 0;
+        $newStatus  = 'on-loan';
+        App::beginTransaction();
+        try {
+            $stmt = $db->prepare(
+                'INSERT INTO tblAssetLoans '
+                . '(siteID, assetID, direction, counterpartyType, counterpartyUserID, status, '
+                . 'conditionOut, dateOut, requestedByID, approvedByID, approvedAt) '
+                . "VALUES (?, ?, 'out', 'user', ?, 'active', ?, NOW(), ?, ?, NOW())"
+            );
+            if ($stmt === false) {
+                throw new \RuntimeException('Failed to prepare kiosk checkout: ' . $db->error);
+            }
+            $stmt->bind_param('iiisii', $siteId, $assetId, $kioskUserId, $conditionOut, $kioskUserId, $kioskUserId);
+            $stmt->execute();
+            $newLoanId = (int) $stmt->insert_id;
+            $stmt->close();
+            if ($newLoanId <= 0) {
+                throw new \RuntimeException('Kiosk checkout insert did not return an id');
+            }
+
+            $assetStmt = $db->prepare('UPDATE tblAssets SET status = ? WHERE assetID = ? AND siteID = ?');
+            if ($assetStmt === false) {
+                throw new \RuntimeException('Failed to prepare asset status update: ' . $db->error);
+            }
+            $assetStmt->bind_param('sii', $newStatus, $assetId, $siteId);
+            $assetStmt->execute();
+            $assetStmt->close();
+
+            App::commit();
+        } catch (\Throwable $e) {
+            App::rollback();
+            error_log('AssetRegister::kioskCheckout() failed: ' . $e->getMessage());
+            return ['ok' => false, 'msg' => 'Could not check out this item — please try again or ask a manager for help.'];
+        }
+
+        self::audit(
+            'loan',
+            $newLoanId,
+            $assetId,
+            'checkout',
+            null,
+            ['status' => 'active', 'conditionOut' => $conditionOut, 'assetStatus' => $newStatus],
+            ['kioskTokenID' => $kioskTokenId],
+            'kiosk',
+            $kioskUserId
+        );
+
+        return ['ok' => true, 'msg' => 'Checked out: ' . (string) $asset['name']];
+    }
+
+    /**
+     * Kiosk self-check-in — the PIN-resolved member returns an item they
+     * currently have out. IDOR guard: finds the ONE active `direction =
+     * 'out'` loan on this asset where `counterpartyUserID = $kioskUserId`
+     * — a kiosk user can only ever check in a loan THEY are the
+     * counterparty of, on THIS site — PLUS a defensive `isConfidential =
+     * 0` join (belt-and-braces: `kioskCheckout()` already prevents a
+     * confidential asset from ever acquiring such a loan via the kiosk
+     * path in the first place, but this closes the same gate against a
+     * hand-crafted POST targeting a confidential asset a non-kiosk
+     * workflow separately loaned to this user — see class header point
+     * 14). No match → the SAME friendly failure regardless of WHY (asset
+     * doesn't exist / belongs to someone else / isn't out / is
+     * confidential) — this single query has no separate existence branch
+     * to leak through. `conditionIn` is validated against
+     * `CONDITION_STATES`, defaulting to `'good'` when missing/invalid
+     * (unlike `loanCheckin()`, a kiosk self-service flow doesn't hard-
+     * require the value — a member skipping the condition select
+     * shouldn't block their own check-in). TRANSACTIONAL, same shape as
+     * `loanCheckin()` (class header point 5). Audits entityType `'loan'`,
+     * action `'checkin'`, `actorType: 'kiosk'`, attributed to
+     * `$kioskUserId` via the `audit()` `actorUserIdOverride` (point 1).
+     *
+     * @return array{ok: bool, msg: string}
+     */
+    public static function kioskCheckin(int $assetId, int $kioskUserId, int $kioskTokenId, ?string $conditionIn): array
+    {
+        $db     = App::db();
+        $siteId = Site::id();
+
+        $stmt = $db->prepare(
+            'SELECT l.loanID FROM tblAssetLoans l '
+            . 'JOIN tblAssets a ON a.assetID = l.assetID '
+            . "WHERE l.assetID = ? AND l.siteID = ? AND l.counterpartyUserID = ? "
+            . "AND l.direction = 'out' AND l.status = 'active' AND a.isConfidential = 0 "
+            . 'LIMIT 1'
+        );
+        if ($stmt === false) {
+            error_log('AssetRegister::kioskCheckin() prepare failed: ' . $db->error);
+            return ['ok' => false, 'msg' => "You don't have that item checked out."];
+        }
+        $stmt->bind_param('iii', $assetId, $siteId, $kioskUserId);
+        $stmt->execute();
+        $loan = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+
+        if ($loan === null) {
+            return ['ok' => false, 'msg' => "You don't have that item checked out."];
+        }
+        $loanId = (int) $loan['loanID'];
+
+        $condition = $conditionIn !== null ? trim($conditionIn) : '';
+        if (in_array($condition, self::CONDITION_STATES, true) === false) {
+            $condition = 'good';
+        }
+
+        App::beginTransaction();
+        try {
+            $updStmt = $db->prepare(
+                "UPDATE tblAssetLoans SET status = 'returned', dateIn = NOW(), conditionIn = ? "
+                . " WHERE loanID = ? AND assetID = ? AND siteID = ? AND status = 'active'"
+            );
+            if ($updStmt === false) {
+                throw new \RuntimeException('Failed to prepare kiosk checkin: ' . $db->error);
+            }
+            $updStmt->bind_param('siii', $condition, $loanId, $assetId, $siteId);
+            $updStmt->execute();
+            $affected = $updStmt->affected_rows;
+            $updStmt->close();
+            if ($affected <= 0) {
+                throw new \RuntimeException('Loan row did not update — status already changed');
+            }
+
+            $inService = 'in-service';
+            $assetStmt = $db->prepare('UPDATE tblAssets SET status = ?, conditionState = ? WHERE assetID = ? AND siteID = ?');
+            if ($assetStmt === false) {
+                throw new \RuntimeException('Failed to prepare asset status update: ' . $db->error);
+            }
+            $assetStmt->bind_param('ssii', $inService, $condition, $assetId, $siteId);
+            $assetStmt->execute();
+            $assetStmt->close();
+
+            App::commit();
+        } catch (\Throwable $e) {
+            App::rollback();
+            error_log('AssetRegister::kioskCheckin() failed: ' . $e->getMessage());
+            return ['ok' => false, 'msg' => 'Could not check in this item — it may have already changed state.'];
+        }
+
+        self::audit(
+            'loan',
+            $loanId,
+            $assetId,
+            'checkin',
+            ['status' => 'active'],
+            ['status' => 'returned', 'conditionIn' => $condition, 'assetStatus' => 'in-service'],
+            ['kioskTokenID' => $kioskTokenId],
+            'kiosk',
+            $kioskUserId
+        );
+
+        return ['ok' => true, 'msg' => 'Checked in — thank you!'];
+    }
+
+    /**
+     * The kiosk user's OWN currently-out assets — feeds `kiosk.php`'s
+     * check-in list. STRICTLY `counterpartyUserID = $kioskUserId` AND
+     * `direction = 'out'` AND `status = 'active'`, additionally excluding
+     * confidential assets defensively (same belt-and-braces rationale as
+     * `kioskCheckin()`'s own join — none should ever exist here, but the
+     * filter costs nothing and closes the gate regardless).
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public static function kioskUserActiveLoans(int $kioskUserId, int $siteId): array
+    {
+        if ($kioskUserId <= 0) {
+            return [];
+        }
+
+        $db = App::db();
+        $stmt = $db->prepare(
+            'SELECT l.loanID, a.assetID, a.name, a.assetTagCode '
+            . 'FROM tblAssetLoans l JOIN tblAssets a ON a.assetID = l.assetID '
+            . "WHERE l.counterpartyUserID = ? AND l.siteID = ? AND l.direction = 'out' AND l.status = 'active' "
+            . 'AND a.siteID = ? AND a.isDeleted = 0 AND a.isConfidential = 0 '
+            . 'ORDER BY a.name ASC'
+        );
+        if ($stmt === false) {
+            error_log('AssetRegister::kioskUserActiveLoans() prepare failed: ' . $db->error);
+            return [];
+        }
+        $stmt->bind_param('iii', $kioskUserId, $siteId, $siteId);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        $rows = [];
+        while ($row = $result->fetch_assoc()) {
+            $rows[] = $row;
+        }
+        $stmt->close();
+        return $rows;
     }
 }
