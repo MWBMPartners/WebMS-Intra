@@ -1656,6 +1656,72 @@ class AssetRegister
         return $row !== false && $row !== null ? $row : null;
     }
 
+    /**
+     * Look up an existing, non-deleted asset on this site by an EXACT match
+     * on `assetTagCode` OR `serialNumber` (whichever is supplied) — the
+     * bulk CSV importer's (#407) one duplicate-detection primitive. A row
+     * whose tag code collides with `uq_asset_tag` (siteID, assetTagCode)
+     * would otherwise surface as an opaque `mysqli_sql_exception` from
+     * `createAsset()` instead of a clear per-row "duplicate" dry-run
+     * verdict; `serialNumber` has no DB-level uniqueness constraint at all
+     * (see migration 159 — `idx_ast_serial` is a plain, non-unique index),
+     * so this is the ONLY place that catches a serial-number collision
+     * before import time.
+     *
+     * Tag code is checked FIRST (it's the actual UNIQUE-constrained
+     * column, and cheapest to look up) — if both are supplied and only the
+     * serial matches, that still counts as a duplicate: the caller only
+     * needs "this row collides with an existing asset", not which column.
+     *
+     * @return array<string, mixed>|null The matching asset's assetID/name/
+     *         assetTagCode/serialNumber, or null when both parameters are
+     *         blank, or neither matches anything on this site.
+     */
+    public static function findByTagOrSerial(int $siteId, ?string $assetTagCode, ?string $serialNumber): ?array
+    {
+        $tag    = trim((string) $assetTagCode);
+        $serial = trim((string) $serialNumber);
+        if ($tag === '' && $serial === '') {
+            return null;
+        }
+
+        $db = App::db();
+
+        if ($tag !== '') {
+            $stmt = $db->prepare(
+                'SELECT assetID, name, assetTagCode, serialNumber FROM tblAssets '
+                . 'WHERE siteID = ? AND isDeleted = 0 AND assetTagCode = ? LIMIT 1'
+            );
+            if ($stmt !== false) {
+                $stmt->bind_param('is', $siteId, $tag);
+                $stmt->execute();
+                $row = $stmt->get_result()->fetch_assoc();
+                $stmt->close();
+                if ($row !== null) {
+                    return $row;
+                }
+            }
+        }
+
+        if ($serial !== '') {
+            $stmt = $db->prepare(
+                'SELECT assetID, name, assetTagCode, serialNumber FROM tblAssets '
+                . 'WHERE siteID = ? AND isDeleted = 0 AND serialNumber = ? LIMIT 1'
+            );
+            if ($stmt !== false) {
+                $stmt->bind_param('is', $siteId, $serial);
+                $stmt->execute();
+                $row = $stmt->get_result()->fetch_assoc();
+                $stmt->close();
+                if ($row !== null) {
+                    return $row;
+                }
+            }
+        }
+
+        return null;
+    }
+
     /* ==========================================================================
      * 📦 Asset CRUD (#394)
      * ======================================================================== */
@@ -1709,15 +1775,23 @@ class AssetRegister
      * Caller contract: every field must already be validated/coerced to its
      * correct PHP type (int|string|null, ENUM values checked against this
      * class's allow-list constants) — see `_apps/assets/save.php`, which is
-     * the one intended caller. This method does NOT re-validate ENUM/FK
-     * values; it only handles persistence, token generation, encryption,
-     * and audit logging.
+     * one intended caller (the REST API's `_apps/assets/api/create.php` and
+     * the bulk CSV importer's `_apps/assets/import.php` are the other two —
+     * see `_apps/assets/api/_coerce.php` for the API's equivalent
+     * coercion). This method does NOT re-validate ENUM/FK values; it only
+     * handles persistence, token generation, encryption, and audit logging.
      *
      * @param array<string, mixed> $data
+     * @param array<string, mixed> $meta Extra free-form context stored
+     *        verbatim in `tblAssetAudit.meta` (JSON) — e.g. the bulk CSV
+     *        importer (#407) passes `['importBatch' => $batchId]` so every
+     *        asset a single import created can be traced back to that
+     *        upload. Empty by default — every other caller (save.php, the
+     *        REST API) leaves this unset.
      *
      * @return int New assetID, or 0 on failure
      */
-    public static function createAsset(array $data, int $actorUserId): int
+    public static function createAsset(array $data, int $actorUserId, array $meta = []): int
     {
         $db     = App::db();
         $siteId = Site::id();
@@ -1816,7 +1890,7 @@ class AssetRegister
         }
         $auditNew['licenseKey'] = $licenseKeyProvided === true ? '(set)' : null;
 
-        self::audit('asset', $newId, $newId, 'create', null, $auditNew);
+        self::audit('asset', $newId, $newId, 'create', null, $auditNew, $meta);
 
         return $newId;
     }

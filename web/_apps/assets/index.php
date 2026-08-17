@@ -182,6 +182,14 @@ if ($statusFilter !== '') {
             <i class="fa-solid fa-file-csv me-1"></i><?php echo htmlspecialchars(I18n::t('assets.export_csv'), ENT_QUOTES, 'UTF-8'); ?>
         </a>
         <?php if ($canManage === true): ?>
+            <!-- 📥 Bulk CSV import (#407) — manager-only, mirrors this
+                 page's own $canManage gate; import.php re-checks
+                 independently server-side regardless. -->
+            <a href="/assets/import" class="btn btn-outline-secondary btn-sm" title="Bulk-import assets from a CSV file">
+                <i class="fa-solid fa-file-import me-1"></i>Import CSV
+            </a>
+        <?php endif; ?>
+        <?php if ($canManage === true): ?>
             <!-- 📊 Value dashboard (#408) — manager-only, mirrors this
                  page's own $canManage gate; value-report.php re-checks
                  independently server-side regardless. -->
