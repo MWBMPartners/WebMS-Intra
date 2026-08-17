@@ -26,13 +26,22 @@
  * Filters (GET querystring, all optional): assetID, direction (out|in),
  * status (one of AssetRegister::LOAN_STATUSES), overdueOnly (checkbox).
  *
+ * KIT CASCADE NOTE (#413, Phase 3 Pass 3) — each active, top-level loan's
+ * checkin `<details>` shows a lightweight "Checking in also returns N kit
+ * component(s)" note (via `AssetRegister::activeKitChildLoans()`) rather
+ * than item.php's own roomier per-component condition selects — this
+ * cramped register row has no space for that; the cascade itself falls
+ * back to the loan's own `conditionIn` for every component regardless of
+ * which page triggered the checkin.
+ *
  * @package   Portal\Assets
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.0.0
+ * @version   1.1.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/393
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/398
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/413
  * -----------------------------------------------------------------------------
  */
 
@@ -223,6 +232,19 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         </form>
                     <?php endif; ?>
                     <?php if ($status === 'active' && ($canApproveThis === true || $isRequesterThis === true)): ?>
+                        <?php
+                        // 🧰 Kit cascade (#413) — a lightweight NOTE only on this
+                        // cramped register row (no per-component selects here, unlike
+                        // item.php's own roomier Loans panel — that page's checkin
+                        // form is where the per-component condition override actually
+                        // lives; AssetRegister::cascadeKitCheckin() falls back to this
+                        // loan's own conditionIn for every component regardless of
+                        // which page triggered the checkin). Only a TOP-LEVEL loan
+                        // (parentLoanID null) can have swept-in components.
+                        $kitChildLoanCount = $loan['parentLoanID'] === null
+                            ? count(AssetRegister::activeKitChildLoans((int) $loan['loanID'], $siteId))
+                            : 0;
+                        ?>
                         <details class="d-inline-block mb-1">
                             <summary class="btn btn-sm btn-outline-primary"><i class="fa-solid fa-dolly-flatbed me-1"></i>Check in</summary>
                             <form method="post" action="/assets/loan-action" class="mt-2 text-start">
@@ -231,6 +253,12 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                 <input type="hidden" name="assetID" value="<?php echo $loanAssetId; ?>">
                                 <input type="hidden" name="loanID" value="<?php echo (int) $loan['loanID']; ?>">
                                 <input type="hidden" name="returnTo" value="loans">
+                                <?php if ($kitChildLoanCount > 0): ?>
+                                    <p class="small text-muted mb-1">
+                                        <i class="fa-solid fa-boxes-stacked me-1"></i>Checking in also returns
+                                        <?php echo $kitChildLoanCount; ?> kit component(s).
+                                    </p>
+                                <?php endif; ?>
                                 <label class="form-label small">Condition on return <span class="text-danger">*</span></label>
                                 <select class="form-select form-select-sm mb-1" name="conditionIn" required>
                                     <option value="">Select…</option>

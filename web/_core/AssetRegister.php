@@ -437,6 +437,108 @@
  *      the register's existing single-reporting-currency assumption (see
  *      `_apps/assets/index.php`'s own CSV export, which hard-codes "(GBP)").
  *
+ *  14. Kiosk self check-in/out (#414, Phase 3 Pass 5). Unattended, PUBLIC
+ *      terminal access — `_apps/assets/kiosk.php`/`kiosk-action.php` carry
+ *      NO login session; every method in this section is written for that
+ *      threat model (see those files' own headers for the full gate
+ *      chain). `mintKioskToken()`/`setKioskTokenActive()`/
+ *      `deleteKioskToken()`/`listKioskTokens()` manage `tblAssetKioskTokens`
+ *      (the per-DEVICE credential, entityType `'kiosk'`, now wired into
+ *      `TABLE_FOR_ENTITY` above) — admin-only, session-scoped, mirroring
+ *      `mintKioskToken()`'s own token-generation shape on
+ *      `generatePublicToken()`/`regeneratePublicToken()` (point 8) and its
+ *      duplicate-catch shape on `addIdentifier()`'s (point 4).
+ *      `listKioskTokens()` NEVER selects the `token` column — a terminal's
+ *      credential is shown to an admin exactly once, at mint time, in
+ *      `mintKioskToken()`'s own return value. `resolveKioskTerminal()` is
+ *      the PUBLIC-safe token→terminal lookup `kiosk.php`/`kiosk-action.php`
+ *      call on EVERY request (re-validates the `^[a-f0-9]{32}$` shape
+ *      itself, same defensive re-validation convention as `tag.php`/
+ *      `found-save.php` point 8) — an unknown or revoked (`isActive = 0`)
+ *      token returns null with no distinguishing signal between the two
+ *      (no oracle), and a successful resolve bumps `lastSeenAt` via a
+ *      separate, cheap UPDATE. `setKioskPin()`/`clearKioskPin()`/
+ *      `hasKioskPin()` manage a member's OWN `tblAssetKioskPins` row (the
+ *      per-USER credential) — `setKioskPin()` re-validates the PIN shape
+ *      (`^\d{4,6}$`) and rejects a small weak-list/sequential-run/
+ *      all-same-digit PIN (`isWeakKioskPin()`) before `password_hash()`-ing
+ *      it, UPSERT-ing on `uq_astkp_site_user`; `clearKioskPin()` flips
+ *      `isActive = 0` rather than deleting the row (re-setting a PIN later
+ *      re-activates it via the same UPSERT). Neither routes through
+ *      `self::audit()` (a PIN isn't asset-scoped) — both log via a plain
+ *      `Logger::activity()` call instead, mirroring the site-wide
+ *      reference-data convention (point 2). `resolveKioskUser()` resolves
+ *      the SAME "username or email" identifier `Auth::loginLocal()` accepts
+ *      (mirrored exactly, including the lower-cased/trimmed identifier),
+ *      additionally scoped to an ACTIVE `tblUserSites` membership on the
+ *      terminal's OWN site (`partyExistsOnSite('user', …)`'s own join
+ *      shape, point 5) — never trusts a bare userID from the request.
+ *      `verifyKioskPin()` is the `password_verify()` counterpart, bumping
+ *      `lastUsedAt` on success; a missing PIN row simply verifies false,
+ *      never short-circuiting differently from a wrong PIN (no oracle).
+ *      `kioskCheckout()`/`kioskCheckin()` are the actual hand-over/return
+ *      actions — both audit as entityType `'loan'` (NOT `'kiosk'` — a
+ *      kiosk check-in/out IS a loan event, just one with a different actor
+ *      type) via the new `actorType: 'kiosk'` + `actorUserIdOverride` pair
+ *      (point 1's `audit()` change), attributing the row to the PIN-
+ *      resolved user despite there being no session. `kioskCheckout()`
+ *      rejects a confidential asset AND a wrong-status asset with the
+ *      EXACT SAME message (no oracle distinguishing "confidential" from
+ *      "not currently loanable") before separately reporting a genuine
+ *      already-open loan (that leak is acceptable — only a real,
+ *      already-public, non-confidential asset ever reaches that branch).
+ *      Deliberately does NOT run `cascadeKitCheckout()` (#413, point
+ *      unlisted above) — a kiosk hand-over is always a single asset.
+ *      `kioskCheckin()` IDOR-guards on `assetID` + `siteID` +
+ *      `counterpartyUserID` + `direction = 'out'` + `status = 'active'`
+ *      — a kiosk user can only ever check in a loan THEY are the
+ *      counterparty of — PLUS a defensive `isConfidential = 0` join
+ *      (belt-and-braces: `kioskCheckout()` already prevents a confidential
+ *      asset from EVER acquiring such a loan via the kiosk path, but this
+ *      closes the same "never act on a confidential asset" gate against a
+ *      hand-crafted POST targeting a confidential asset a NON-kiosk
+ *      workflow separately loaned to that user). Both wrap their loan-row
+ *      UPDATE and `tblAssets` UPDATE in one transaction, same shape as
+ *      `loanCheckout()`/`loanCheckin()` (point 5). `kioskUserActiveLoans()`
+ *      is the read behind `kiosk.php`'s own check-in list — STRICTLY the
+ *      identified kiosk user's own active 'out' loans, additionally
+ *      excluding confidential assets defensively (same rationale as
+ *      `kioskCheckin()`'s own join, belt-and-braces since none should
+ *      exist there in the first place).
+ *
+ *  15. GS1 Digital Link resolver + GEPIR verify (#415, Phase 3 Pass 6 —
+ *      FINAL Asset Tracker pass). `resolveDigitalLink()` is the PUBLIC-safe
+ *      AI(Application Identifier)+key → `publicToken` lookup behind
+ *      `_apps/assets/dl.php`, reached via `Router::handleSpecialRoutes()`'s
+ *      `01/`|`8003/`|`8004/` block (modelled on the `a/{token}` block,
+ *      point 8 — NOT a tblRoutes row). It is deliberately GLOBAL/cross-site
+ *      (GS1 keys are globally unique, same as `/a/{token}` itself) but
+ *      NEVER matches a confidential asset — that exclusion is in the SQL
+ *      WHERE clause, not a post-filter, so there is no code path that could
+ *      hand back a confidential asset's token; an ambiguous match (more
+ *      than one asset) resolves to null the same as no match (no oracle).
+ *      `digitalLinkUri()` is the read-only DISPLAY counterpart for
+ *      item.php's Identifiers panel — builds the canonical
+ *      `https://{host}/{AI}/{value}` URL for a GTIN/GRAI/GIAI row, reusing
+ *      `siteBaseUrl()` (point 8's `labelPublicUrl()` helper) for the
+ *      scheme+host, null for every other typeCode. `verifyIdentifier()` is
+ *      the manager-facing GEPIR (Global Electronic Party Information
+ *      Registry) verify action behind `identifier-verify.php` — ALWAYS
+ *      runs the local GS1 mod-10 check-digit first (via
+ *      `validateIdentifier()`, point 4, completely unchanged), and ONLY
+ *      attempts the outbound GEPIR HTTP lookup (`gepirLookup()`, private —
+ *      5s timeout, TLS verification always on, no redirects followed,
+ *      response-size capped) when `assets.gepir_verify_enabled` is
+ *      explicitly `'true'` AND `assets.gepir_endpoint` is a non-empty
+ *      `https://` URL (both off/empty by default — migration 161). ANY
+ *      GEPIR failure (feature off, no endpoint, network/timeout/parse
+ *      error) falls back to the local check-digit result rather than
+ *      failing the whole action. Caches the outcome in
+ *      `verifiedAt`/`verifyNote` (migration 161) and audits as entityType
+ *      `'identifier'` (already in `TABLE_FOR_ENTITY`, point 4), action
+ *      `'update'` — mirrors into the platform's generic `tblAuditTrail`
+ *      the same as any other identifier edit.
+ *
  * All queries are MySQLi prepared statements via `App::db()` — never
  * string-interpolated user input (house rule, .claude/CLAUDE.md → Code Style).
  *
@@ -444,7 +546,7 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.9.0
+ * @version   1.11.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/393
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/394
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/395
@@ -460,6 +562,11 @@
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/408
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/409
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/410
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/411
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/412
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/413
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/414
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/415
  * -----------------------------------------------------------------------------
  */
 
@@ -586,6 +693,12 @@ class AssetRegister
     /** @var string[] tblAssetScanLog.scanContext (#404 Pass 2 / #410) */
     public const SCAN_CONTEXTS = ['public', 'internal'];
 
+    /** @var string[] tblAssetStocktakes.status (#411) */
+    public const STOCKTAKE_STATUSES = ['open', 'closed'];
+
+    /** @var string[] tblAssetStocktakeItems.verifyStatus (#411) */
+    public const STOCKTAKE_VERIFY_STATUSES = ['pending', 'present', 'missing', 'moved', 'unexpected'];
+
     /* ==========================================================================
      * 🔑 Public token
      * ======================================================================== */
@@ -678,7 +791,13 @@ class AssetRegister
      * @param array|null  $old        Previous field values (null for create/scan/…)
      * @param array|null  $new        New field values (null for delete)
      * @param array       $meta       Free-form extra context stored in tblAssetAudit.meta (JSON)
-     * @param string      $actorType  'user' (default) | 'system' | 'public'
+     * @param string      $actorType  'user' (default) | 'system' | 'public' | 'kiosk'
+     * @param int|null    $actorUserIdOverride Explicit actor id (#414, Phase 3 Pass 5) — when
+     *        non-null, ALWAYS used as actorUserID regardless of $actorType, bypassing the
+     *        session-derived lookup below entirely. Lets a caller with no login session of its
+     *        own (a public kiosk terminal, resolved to a real user via PIN — see
+     *        `_apps/assets/kiosk-action.php`) still attribute the row to that resolved user
+     *        rather than leaving actorUserID null.
      *
      * @return void
      */
@@ -690,7 +809,8 @@ class AssetRegister
         ?array $old = null,
         ?array $new = null,
         array $meta = [],
-        string $actorType = 'user'
+        string $actorType = 'user',
+        ?int $actorUserIdOverride = null
     ): void {
         $db = App::db();
 
@@ -703,7 +823,13 @@ class AssetRegister
         // 🌐 2. Context — site, actor, IP.
         $siteId = Site::id();
         $actorUserID = null;
-        if ($actorType === 'user') {
+        if ($actorUserIdOverride !== null) {
+            // 🎫 #414 override — a kiosk request has no $_SESSION['user_id']
+            // of its own (see class header point 14), so the caller hands
+            // us the PIN-resolved user id directly rather than relying on
+            // the session-derived lookup below.
+            $actorUserID = $actorUserIdOverride;
+        } elseif ($actorType === 'user') {
             // 🪞 Mirrors the house convention used across every controller
             //    (e.g. web/_apps/documents/categories.php) rather than
             //    Auth::user() — avoids an extra DB round-trip when we only
@@ -825,14 +951,28 @@ class AssetRegister
     /**
      * Map tblAssetAudit.entityType → the real table Logger::audit() should
      * attribute create/update/delete rows to. Entities with no table of
-     * their own yet (label generation, stocktake, kiosk — all later sub-
-     * issues) are omitted on purpose; audit() simply skips the
-     * Logger::audit() call for those (the tblAssetAudit row above still
-     * captures the action either way). `'event-link'` USED to be one of
-     * those placeholders (see older revisions of this comment) — #409
-     * (Phase 2 Pass 2) gave it a real backing table
-     * (`tblAssetEventAssignments`, migration 160), so it is wired in below
-     * like every other entity with a table of its own.
+     * their own yet (label generation, kiosk — later sub-issues) are
+     * omitted on purpose; audit() simply skips the Logger::audit() call for
+     * those (the tblAssetAudit row above still captures the action either
+     * way). `'event-link'` USED to be one of those placeholders (see older
+     * revisions of this comment) — #409 (Phase 2 Pass 2) gave it a real
+     * backing table (`tblAssetEventAssignments`, migration 160), so it is
+     * wired in below like every other entity with a table of its own.
+     * `'stocktake'` was the same kind of placeholder until #411 (Phase 3
+     * Pass 4) gave it `tblAssetStocktakes` — wired in below too. Its
+     * per-scan child rows (`tblAssetStocktakeItems`) deliberately do NOT
+     * get their own entry: every scan audit call uses action `'scan'`
+     * (never create/update/delete), so this map is never consulted for
+     * them — see startStocktake()/recordStocktakeScan()/closeStocktake()'s
+     * own audit() calls for why that keeps the platform trail from being
+     * flooded by high-volume scan events. `'kiosk'` was the LAST remaining
+     * placeholder named in this comment's own older revisions — #414
+     * (Phase 3 Pass 5) gives it `tblAssetKioskTokens` (terminal register/
+     * revoke/reactivate/delete events), wired in below too. A kiosk
+     * check-in/out itself is NOT an entityType of its own — it audits as
+     * entityType `'loan'` (already mapped below) with `actorType: 'kiosk'`,
+     * so those rows mirror into `tblAuditTrail` exactly like any other
+     * loan checkout/checkin.
      *
      * @var array<string, string>
      */
@@ -846,6 +986,8 @@ class AssetRegister
         'license'      => 'tblAssetLicenseAssignments',
         'found-report' => 'tblAssetFoundReports',
         'event-link'   => 'tblAssetEventAssignments',
+        'stocktake'    => 'tblAssetStocktakes',
+        'kiosk'        => 'tblAssetKioskTokens',
     ];
 
     /**
@@ -1448,6 +1590,471 @@ class AssetRegister
         self::audit('identifier', $identifierId, $assetId, 'update', ['isPrimary' => 0], ['isPrimary' => 1]);
 
         return true;
+    }
+
+    /* ==========================================================================
+     * 🔗 GS1 Digital Link resolver + GEPIR verify (#415, Phase 3 Pass 6 —
+     * FINAL Asset Tracker pass). See class header point 15 for the full
+     * design rationale; the three methods below are the public surface
+     * `_apps/assets/dl.php` (resolveDigitalLink), `item.php`'s Identifiers
+     * panel (digitalLinkUri), and `identifier-verify.php` (verifyIdentifier)
+     * each call.
+     * ======================================================================== */
+
+    /**
+     * GS1 Digital Link resolver — maps a GS1 Application Identifier + key
+     * value straight to the matching asset's PUBLIC token, for
+     * `_apps/assets/dl.php` (reached via `Router::handleSpecialRoutes()`'s
+     * `01/`|`8003/`|`8004/` special-route block) to redirect into the
+     * EXISTING `/a/{token}` public page. This method never renders
+     * anything itself — `tag.php` owns every access-model gate from there
+     * (unknown token / disabled feature / confidential asset all already
+     * collapse to the SAME uniform 404 on that page).
+     *
+     * GLOBAL lookup (no `Site::id()` filter) — GS1 keys are globally
+     * unique by design, the same way `/a/{token}` itself resolves across
+     * every site on this install regardless of which site is currently
+     * host-detected for the request.
+     *
+     * SECURITY: a confidential asset (`isConfidential = 1`) is EXCLUDED
+     * from the match in the SQL WHERE clause itself — never merely
+     * filtered out of a result set afterwards — so there is no code path
+     * where this method could ever hand back a confidential asset's
+     * token. An AMBIGUOUS match (more than one asset sharing the same
+     * key — should never happen given `uq_asset_ident`'s per-asset
+     * uniqueness, but two DIFFERENT assets could share a mis-keyed value)
+     * ALSO resolves to null, exactly like "no match" — no oracle a
+     * scanner could use to distinguish "wrong key" from "right key, but
+     * withheld" from "right key, ambiguous".
+     *
+     * @param string      $ai     GS1 Application Identifier — '01' (GTIN),
+     *                            '8003' (GRAI), or '8004' (GIAI). Any
+     *                            other value returns null immediately.
+     * @param string      $value  The GS1 key value. Already shape-
+     *                            validated by the Router's own anchored
+     *                            regex before this is ever called, but
+     *                            trusted no further than "non-empty"
+     *                            here — the query itself is fully bound,
+     *                            so nothing beyond that is required for
+     *                            safety.
+     * @param string|null $serial Optional AI-21 serial, present only for
+     *                            a `01/…/21/…` Digital Link path.
+     *                            Deliberately NOT used to filter the
+     *                            match (see the class header for the
+     *                            "resolve on the GTIN, a serial that
+     *                            doesn't further disambiguate is fine to
+     *                            drop" design decision) — accepted here
+     *                            purely so the caller's full URL shape
+     *                            has somewhere to go without a signature
+     *                            mismatch.
+     *
+     * @return string|null 32-char lowercase-hex `publicToken`, or null
+     *                      when the AI is unrecognised, the value is
+     *                      blank, or no single non-confidential asset
+     *                      matches.
+     */
+    public static function resolveDigitalLink(string $ai, string $value, ?string $serial = null): ?string
+    {
+        // 🗺️ AI → typeCode. Any other AI is simply not a scheme Asset
+        // Tracker identifiers use — null, immediately, no query at all.
+        $typeCode = match ($ai) {
+            '01'    => 'GTIN',
+            '8003'  => 'GRAI',
+            '8004'  => 'GIAI',
+            default => null,
+        };
+        if ($typeCode === null) {
+            return null;
+        }
+
+        $value = trim($value);
+        if ($value === '') {
+            return null;
+        }
+
+        // 🔒 GLOBAL, cross-site lookup — but NEVER a confidential or
+        // deleted asset (see doc above). Selecting ONLY publicToken keeps
+        // this method structurally incapable of leaking anything beyond
+        // the one field it exists to return, even if a future caller
+        // mishandles its result.
+        $db = App::db();
+        $stmt = $db->prepare(
+            'SELECT a.publicToken FROM tblAssetIdentifiers i '
+            . 'INNER JOIN tblAssets a ON a.assetID = i.assetID '
+            . 'WHERE i.typeCode = ? AND i.value = ? '
+            . 'AND a.isDeleted = 0 AND a.isConfidential = 0 '
+            . 'LIMIT 2'
+        );
+        if ($stmt === false) {
+            error_log('AssetRegister::resolveDigitalLink() prepare failed: ' . $db->error);
+            return null;
+        }
+        $stmt->bind_param('ss', $typeCode, $value);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        $tokens = [];
+        while ($row = $result->fetch_assoc()) {
+            $tokens[] = (string) $row['publicToken'];
+        }
+        $stmt->close();
+
+        // 🚫 Zero OR ambiguous (>1) matches both resolve to null — see
+        // doc above for why "found, but ambiguous" must be
+        // indistinguishable from "not found" (no oracle). LIMIT 2 above
+        // is enough to detect ">1" without counting every match.
+        if (count($tokens) !== 1) {
+            return null;
+        }
+
+        // 🛡️ Defensive re-validation of the shape even though
+        // publicToken is always DB-generated — mirrors labelPublicUrl()'s
+        // own re-check of the very same pattern (point 8).
+        $token = $tokens[0];
+        return preg_match('/^[a-f0-9]{32}$/', $token) === 1 ? $token : null;
+    }
+
+    /**
+     * Canonical GS1 Digital Link URL for one identifier row — DISPLAY
+     * ONLY, for `item.php`'s Identifiers panel (#415) to show alongside a
+     * GS1-family row. Mirrors `labelPublicUrl()`'s own scheme+host
+     * convention (`siteBaseUrl()` below) — `https://{our own request
+     * host}/{AI}/{value}` — but for the THREE GS1 Application Identifiers
+     * `resolveDigitalLink()`/the Router's Digital Link block recognise
+     * (`01`=GTIN, `8003`=GRAI, `8004`=GIAI), not the `/a/{token}` shape
+     * `labelPublicUrl()` builds.
+     *
+     * Returns null for every typeCode OUTSIDE that three — e.g. a retail
+     * barcode or an RFID/EPC carrier has no Digital Link URI of its own
+     * in this scheme, so `item.php` simply omits the link rather than
+     * rendering a misleading one.
+     *
+     * Never escapes the value itself — HTML output escaping is the
+     * caller's job (mirrors every other display helper in this class);
+     * this method only ever builds a plain string.
+     *
+     * @param array<string, mixed> $identifierRow A `listIdentifiers()` row
+     *        — only `typeCode`/`value` are read.
+     * @param string|null          $host          Override HOST (without a
+     *        scheme) for the URI — e.g. for a batch/cron caller with no
+     *        current request. Null (the default) uses `siteBaseUrl()`,
+     *        the SAME scheme+host resolution `labelPublicUrl()` uses for
+     *        the current request.
+     *
+     * @return string|null
+     */
+    public static function digitalLinkUri(array $identifierRow, ?string $host = null): ?string
+    {
+        $typeCode = (string) ($identifierRow['typeCode'] ?? '');
+        $value    = (string) ($identifierRow['value'] ?? '');
+
+        $ai = match ($typeCode) {
+            'GTIN'  => '01',
+            'GRAI'  => '8003',
+            'GIAI'  => '8004',
+            default => null,
+        };
+        if ($ai === null || $value === '') {
+            return null;
+        }
+
+        $base = $host !== null && $host !== '' ? 'https://' . $host : self::siteBaseUrl();
+
+        // 🔗 rawurlencode(), not urlencode() — a GS1 key value is a URL
+        // PATH segment (GIAI may legitimately contain '-'/'_'/'.'), never
+        // a query-string component, and rawurlencode() leaves those
+        // unreserved characters alone (RFC 3986).
+        return $base . '/' . $ai . '/' . rawurlencode($value);
+    }
+
+    /**
+     * Manager-facing GEPIR verify action (#415) — the logic behind
+     * `_apps/assets/identifier-verify.php`'s single POST action. Two
+     * layers, run in order:
+     *
+     *   1. LOCAL check-digit (ALWAYS, the reliable path — never depends
+     *      on network access). GTIN/GRAI reuse `self::validateIdentifier()`
+     *      completely unchanged (the SAME GS1 mod-10 algorithm/format-
+     *      regex pass `addIdentifier()` already runs on every save) — an
+     *      invalid result marks the identifier UNVERIFIED
+     *      (`isVerified = 0`) with a plain `verifyNote` and RETURNS
+     *      IMMEDIATELY; GEPIR is never even attempted for a value that's
+     *      already locally wrong. GIAI has no check-digit scheme (see
+     *      `validateIdentifier()`'s own `checkDigitScheme` lookup on
+     *      `tblAssetIdentifierTypes`) — and neither does any typeCode
+     *      other than GTIN/GRAI — so those always pass this step
+     *      structurally and proceed to step 2.
+     *   2. GEPIR (Global Electronic Party Information Registry) lookup —
+     *      ONLY attempted when `assets.gepir_verify_enabled === 'true'`
+     *      AND `assets.gepir_endpoint` is a non-empty `https://` URL
+     *      (both site-configured, both off/empty by default — migration
+     *      161). A successful lookup's registrant name becomes the
+     *      `verifyNote` (truncated to the column's 255-char cap); ANY
+     *      failure — feature off, no endpoint configured, or
+     *      `gepirLookup()` returning null for any reason (network/
+     *      timeout/non-2xx/unparseable) — falls back to the LOCAL result
+     *      instead of failing the whole action, so a manager clicking
+     *      Verify with GEPIR mis-configured (or simply left at its
+     *      default OFF) still gets a useful, honest outcome rather than
+     *      an error.
+     *
+     * Either way `isVerified` ends up `1` whenever the local check
+     * passed (regardless of whether GEPIR itself succeeded) — GEPIR only
+     * ever enriches the NOTE, it never blocks verification on its own
+     * availability. `verifiedAt` is always stamped `NOW()` on any
+     * outcome (invalid OR verified) — it records "when this identifier
+     * was last checked", not "when it last passed".
+     *
+     * IDOR guard: the identifier row must belong to BOTH `$assetId` AND
+     * `Site::id()` via a JOIN to `tblAssets` (mirrors `removeIdentifier()`/
+     * `setPrimaryIdentifier()`'s own "confirm ownership before touching a
+     * row" pattern) — a request naming another site's identifier
+     * resolves to the same `ok = false` "not found" outcome as a
+     * genuinely missing id.
+     *
+     * Audits as entityType `'identifier'` (already wired into
+     * `TABLE_FOR_ENTITY`), action `'update'` — this ALSO mirrors into the
+     * platform's generic `tblAuditTrail` (#415 acceptance criterion:
+     * "GEPIR verify sets isVerified + audits").
+     *
+     * @return array{ok: bool, msg: string, verified: bool, note: string}
+     *         `ok` is false ONLY when the identifier itself couldn't be
+     *         found/IDOR-matched — every other outcome (invalid check
+     *         digit, GEPIR unavailable, GEPIR success) is `ok = true`
+     *         with `verified`/`note` describing what actually happened.
+     */
+    public static function verifyIdentifier(int $identifierId, int $assetId, int $actorUserId): array
+    {
+        $db     = App::db();
+        $siteId = Site::id();
+
+        // 🔒 IDOR guard — identifierID AND assetID AND siteID (via the
+        // asset) must all agree before this row is touched. See doc above.
+        $stmt = $db->prepare(
+            'SELECT i.* FROM tblAssetIdentifiers i '
+            . 'INNER JOIN tblAssets a ON a.assetID = i.assetID '
+            . 'WHERE i.identifierID = ? AND i.assetID = ? AND a.siteID = ? AND a.isDeleted = 0 '
+            . 'LIMIT 1'
+        );
+        if ($stmt === false) {
+            error_log('AssetRegister::verifyIdentifier() prepare failed: ' . $db->error);
+            return ['ok' => false, 'msg' => 'Could not look up that identifier — please try again.', 'verified' => false, 'note' => ''];
+        }
+        $stmt->bind_param('iii', $identifierId, $assetId, $siteId);
+        $stmt->execute();
+        $row = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+
+        if ($row === null || $row === false) {
+            return ['ok' => false, 'msg' => 'Identifier not found.', 'verified' => false, 'note' => ''];
+        }
+
+        $typeCode    = (string) $row['typeCode'];
+        $value       = (string) $row['value'];
+        $oldVerified = (int) $row['isVerified'];
+
+        // 1️⃣ Local check-digit — the reliable, always-available path.
+        // GIAI (and every non-GTIN/GRAI type) has no check-digit scheme,
+        // so it passes straight through to step 2 below ("structurally
+        // ok" — see method doc).
+        $hasCheckDigit = in_array($typeCode, ['GTIN', 'GRAI'], true) === true;
+        $checkDigitOk  = true;
+        if ($hasCheckDigit === true) {
+            $validation   = self::validateIdentifier($typeCode, $value);
+            $checkDigitOk = $validation['valid'] === true;
+        }
+
+        if ($checkDigitOk === false) {
+            $note = 'Check digit invalid';
+            self::applyVerifyResult($identifierId, $siteId, 0, $note);
+            self::audit(
+                'identifier',
+                $identifierId,
+                $assetId,
+                'update',
+                ['isVerified' => $oldVerified],
+                ['isVerified' => 0, 'verifyNote' => $note]
+            );
+            return ['ok' => true, 'msg' => 'Check digit invalid — identifier marked unverified.', 'verified' => false, 'note' => $note];
+        }
+
+        // 2️⃣ GEPIR — only attempted when explicitly enabled AND a real
+        // https:// endpoint is configured (both off/empty by default).
+        // Any failure falls back to the local-only result rather than
+        // blocking verification — see method doc.
+        $gepirEnabled  = (string) (App::settings('assets.gepir_verify_enabled') ?? 'false') === 'true';
+        $gepirEndpoint = trim((string) (App::settings('assets.gepir_endpoint') ?? ''));
+        $localNote     = $hasCheckDigit === true ? 'Check digit valid' : 'No check-digit scheme for this identifier type';
+
+        $note = $localNote;
+        if ($gepirEnabled === true && $gepirEndpoint !== '' && str_starts_with(strtolower($gepirEndpoint), 'https://') === true) {
+            $registrant = self::gepirLookup($gepirEndpoint, $typeCode, $value);
+            $note = $registrant !== null && $registrant !== ''
+                ? mb_substr($registrant, 0, 255)
+                : $localNote . ' (GEPIR lookup unavailable)';
+        }
+
+        self::applyVerifyResult($identifierId, $siteId, 1, $note);
+        self::audit(
+            'identifier',
+            $identifierId,
+            $assetId,
+            'update',
+            ['isVerified' => $oldVerified],
+            ['isVerified' => 1, 'verifyNote' => $note]
+        );
+
+        return ['ok' => true, 'msg' => 'Identifier verified.', 'verified' => true, 'note' => $note];
+    }
+
+    /**
+     * Shared `UPDATE` for `verifyIdentifier()`'s two outcomes (invalid
+     * check digit / verified) — a single, small, always-site-scoped
+     * write so both call sites stay in lock-step rather than drifting.
+     * `verifiedAt` is ALWAYS stamped `NOW()` regardless of `$isVerified`
+     * — see `verifyIdentifier()`'s own doc for why.
+     */
+    private static function applyVerifyResult(int $identifierId, int $siteId, int $isVerified, string $note): bool
+    {
+        $db = App::db();
+        $stmt = $db->prepare(
+            'UPDATE tblAssetIdentifiers SET isVerified = ?, verifiedAt = NOW(), verifyNote = ? '
+            . 'WHERE identifierID = ? AND siteID = ?'
+        );
+        if ($stmt === false) {
+            error_log('AssetRegister::applyVerifyResult() prepare failed: ' . $db->error);
+            return false;
+        }
+        $stmt->bind_param('isii', $isVerified, $note, $identifierId, $siteId);
+        $ok = $stmt->execute();
+        $stmt->close();
+        return $ok;
+    }
+
+    /**
+     * Best-effort outbound GEPIR (Global Electronic Party Information
+     * Registry) lookup for one GS1 key (#415) — ONLY ever called once
+     * `verifyIdentifier()` has already confirmed `assets.gepir_verify_
+     * enabled` is on and `assets.gepir_endpoint` is a non-empty
+     * `https://` URL (belt-and-braces: this method re-checks the scheme
+     * itself too, never trusting the caller alone for something that
+     * reaches out to the network).
+     *
+     * DEFENSIVE by design — the endpoint is a site-configured value (off
+     * by default), so this treats the far end as untrusted: a short
+     * connect+total timeout, TLS verification ALWAYS on (mirrors
+     * `Captcha::curlPost()`'s own `CURLOPT_SSL_VERIFYPEER`/
+     * `CURLOPT_SSL_VERIFYHOST` pair), redirects NEVER followed (a
+     * misconfigured/compromised endpoint can't bounce this request
+     * elsewhere), and the response is capped BOTH via a `Range` request
+     * header AND a hard `substr()` after retrieval (belt-and-braces —
+     * not every server honours `Range` on a plain GET) before it's ever
+     * `json_decode()`'d. ANY failure — transport, non-2xx, non-JSON, or
+     * a shape with no recognisable registrant field — returns null;
+     * `verifyIdentifier()` is responsible for falling back to the local
+     * check-digit result on null, never surfacing a network error to the
+     * end user.
+     *
+     * The exact GEPIR endpoint shape is site-configured and unknown at
+     * build time (no live GEPIR endpoint is wired up anywhere in this
+     * codebase — the feature ships off by default), so the query
+     * parameters and the registrant-field guesses below are a
+     * reasonable, generic best effort rather than one exact vendor's API
+     * contract.
+     *
+     * @return string|null Registrant/party name, or null on ANY failure
+     */
+    private static function gepirLookup(string $endpoint, string $typeCode, string $value): ?string
+    {
+        // 🛡️ Re-check the scheme even though the one caller already did —
+        // this method reaches the network, so it never trusts a caller
+        // alone for that.
+        if (str_starts_with(strtolower($endpoint), 'https://') === false) {
+            return null;
+        }
+
+        $url = $endpoint . (str_contains($endpoint, '?') === true ? '&' : '?')
+             . 'keyType=' . rawurlencode($typeCode) . '&key=' . rawurlencode($value);
+
+        $ch = curl_init($url);
+        if ($ch === false) {
+            return null;
+        }
+
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_TIMEOUT, 5);
+        curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 3);
+        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, true);
+        curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 2);
+        curl_setopt($ch, CURLOPT_FOLLOWLOCATION, false);
+        // 📏 Cap response size — most servers honour a Range header for a
+        // simple GET; even when one doesn't, the substr() below still
+        // caps what gets json_decode()'d.
+        curl_setopt($ch, CURLOPT_RANGE, '0-65535');
+
+        $raw       = curl_exec($ch);
+        $httpCode  = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $curlErrNo = curl_errno($ch);
+        curl_close($ch);
+
+        if ($raw === false || $curlErrNo !== 0) {
+            error_log('AssetRegister::gepirLookup() transport failure: errno=' . $curlErrNo);
+            return null;
+        }
+        if ($httpCode < 200 || $httpCode >= 300) {
+            return null;
+        }
+
+        $raw = substr((string) $raw, 0, 65536);
+
+        $decoded = json_decode($raw, true);
+        if (is_array($decoded) === true) {
+            // 🪞 Best-effort field-name guesses — see method doc above
+            // for why there's no one exact schema to target.
+            $registrant = self::extractGepirRegistrant($decoded);
+            if ($registrant !== null) {
+                return $registrant;
+            }
+            return null;
+        }
+
+        // 📄 Non-JSON body — treat as plain text; a short, single-line
+        // response is a reasonable heuristic for "just the registrant
+        // name".
+        $text = trim($raw);
+        if ($text !== '' && str_contains($text, "\n") === false && mb_strlen($text) <= 255) {
+            return $text;
+        }
+
+        return null;
+    }
+
+    /**
+     * Pull a registrant/party name out of a decoded GEPIR-style JSON
+     * response, trying a few common top-level field names and one level
+     * of common wrapper keys. Returns null when nothing recognisable is
+     * found — `gepirLookup()` treats that the same as any other failure.
+     *
+     * @param array<string, mixed> $decoded
+     */
+    private static function extractGepirRegistrant(array $decoded): ?string
+    {
+        $fields = ['registrantName', 'partyName', 'name', 'companyName'];
+        foreach ($fields as $field) {
+            if (isset($decoded[$field]) === true && is_string($decoded[$field]) === true && trim($decoded[$field]) !== '') {
+                return trim($decoded[$field]);
+            }
+        }
+        // 🪆 Some GEPIR-style responses nest the party under a wrapper key.
+        foreach (['party', 'result', 'data'] as $wrapper) {
+            if (isset($decoded[$wrapper]) === true && is_array($decoded[$wrapper]) === true) {
+                foreach ($fields as $field) {
+                    if (isset($decoded[$wrapper][$field]) === true && is_string($decoded[$wrapper][$field]) === true && trim($decoded[$wrapper][$field]) !== '') {
+                        return trim($decoded[$wrapper][$field]);
+                    }
+                }
+            }
+        }
+        return null;
     }
 
     /* ==========================================================================
@@ -3717,6 +4324,20 @@ class AssetRegister
             $assetStmt->execute();
             $assetStmt->close();
 
+            // 🧰 Kit cascade (#413) — a TOP-LEVEL checkout (this loan's own
+            // parentLoanID is null) of an asset that has kit components
+            // also sweeps every eligible, currently-available component
+            // into its own chained active loan (parentLoanID = this
+            // loan's id). A CHILD loan's own checkout never re-cascades —
+            // the guard below is what stops that, since a swept-in child
+            // loan always carries a non-null parentLoanID. Inside this
+            // same transaction so a failure here rolls back the parent's
+            // own checkout too — see cascadeKitCheckout()'s own doc.
+            $kitSummary = ['swept' => [], 'skipped' => []];
+            if ($loan['parentLoanID'] === null) {
+                $kitSummary = self::cascadeKitCheckout($loan, $newAssetStatus, $actorUserId);
+            }
+
             App::commit();
         } catch (\Throwable $e) {
             App::rollback();
@@ -3733,7 +4354,17 @@ class AssetRegister
             ['status' => 'active', 'conditionOut' => $conditionOut, 'assetStatus' => $newAssetStatus]
         );
 
-        return ['ok' => true, 'msg' => 'Loan checked out — condition and dates recorded.'];
+        // 📣 Augment the friendly message with what the kit cascade above
+        // actually did — never changes ok=true, purely informational.
+        $msg = 'Loan checked out — condition and dates recorded.';
+        if (count($kitSummary['swept']) > 0) {
+            $msg .= ' ' . count($kitSummary['swept']) . ' kit component(s) checked out too.';
+            if (count($kitSummary['skipped']) > 0) {
+                $msg .= ' (skipped: ' . implode(', ', $kitSummary['skipped']) . ')';
+            }
+        }
+
+        return ['ok' => true, 'msg' => $msg];
     }
 
     /**
@@ -3805,6 +4436,22 @@ class AssetRegister
             $assetStmt->execute();
             $assetStmt->close();
 
+            // 🧰 Kit cascade (#413) — a TOP-LEVEL checkin (this loan's own
+            // parentLoanID is null) of a kit parent also checks in every
+            // one of its still-active swept-in component loans. A CHILD
+            // loan's own checkin never re-cascades, for the same reason as
+            // loanCheckout()'s mirror-image guard above. `childConditions`
+            // (an optional array<int assetID, string condition> posted by
+            // item.php's checkin form) lets the person checking the kit in
+            // record a DIFFERENT return condition per component; any
+            // component left unspecified falls back to the parent's own
+            // $conditionIn — see cascadeKitCheckin()'s own doc.
+            $kitReturned = ['returned' => []];
+            if ($loan['parentLoanID'] === null) {
+                $childConditions = is_array($data['childConditions'] ?? null) ? $data['childConditions'] : [];
+                $kitReturned = self::cascadeKitCheckin($loan, $conditionIn, $childConditions);
+            }
+
             App::commit();
         } catch (\Throwable $e) {
             App::rollback();
@@ -3821,7 +4468,14 @@ class AssetRegister
             ['status' => 'returned', 'conditionIn' => $conditionIn, 'assetStatus' => 'in-service']
         );
 
-        return ['ok' => true, 'msg' => 'Loan checked in — asset marked in-service.'];
+        // 📣 Augment the friendly message with what the kit cascade above
+        // actually did — never changes ok=true, purely informational.
+        $msg = 'Loan checked in — asset marked in-service.';
+        if (count($kitReturned['returned']) > 0) {
+            $msg .= ' ' . count($kitReturned['returned']) . ' kit component(s) returned too.';
+        }
+
+        return ['ok' => true, 'msg' => $msg];
     }
 
     /**
@@ -3872,6 +4526,586 @@ class AssetRegister
         self::audit('loan', $loanId, $assetId, 'cancel', ['status' => $currentStatus], ['status' => 'cancelled']);
 
         return ['ok' => true, 'msg' => 'Loan cancelled.'];
+    }
+
+    /* ==========================================================================
+     * 🧰 Parent/child asset kits + kit-aware loans (#413, Phase 3 Pass 3)
+     * ------------------------------------------------------------------------
+     * `tblAssets.parentAssetID` (a self-FK, pre-provisioned back in
+     * migration 159 — see that migration's `fk_asset_parent` constraint)
+     * lets one asset be flagged as a COMPONENT of another — a camera body
+     * is the parent "kit" asset, its lens/battery/case are children. Kits
+     * are deliberately ONE level deep only: a child can never itself be a
+     * parent (enforced in `attachToKit()` below), so there is no recursive
+     * tree to walk anywhere in this section — every read here is a single
+     * flat `WHERE parentAssetID = ?` or `WHERE parentAssetID IS NULL`.
+     *
+     * `attachToKit()`/`detachFromKit()` are the ONLY supported way to
+     * mutate `parentAssetID` post-creation (creation-time assignment via
+     * `createAsset()`'s own `parentAssetID` field, #394, is untouched by
+     * this pass) — both route through `self::audit()` (entityType
+     * 'asset', action 'update', matching `updateOwnershipTerms()`'s own
+     * convention for a single-column asset mutation that isn't the whole-
+     * record `updateAsset()` path).
+     *
+     * The kit-AWARE LOAN behaviour — `cascadeKitCheckout()`/
+     * `cascadeKitCheckin()` — is the more consequential half: loaning a
+     * kit's PARENT asset out (or receiving it back) implicitly sweeps
+     * every eligible component along with it, via its OWN chained loan
+     * row (`tblAssetLoans.parentLoanID`, also pre-provisioned in migration
+     * 159). Both cascade helpers are called from INSIDE loanCheckout()'s/
+     * loanCheckin()'s own `App::beginTransaction()`/`commit()`/
+     * `rollback()` block — see this class's header comment (point 5) for
+     * why a mid-cascade failure must never leave a kit's parent loan
+     * checked-out/in while its components silently didn't follow, or vice
+     * versa. Both THROW `\RuntimeException` on any prepare/execute
+     * failure (rather than returning a soft failure the caller might
+     * ignore) specifically so that shared catch block rolls back the
+     * WHOLE transaction, parent included.
+     *
+     * The `$loan['parentLoanID'] === null` guard inside loanCheckout()/
+     * loanCheckin() (immediately before each cascade call) is what stops
+     * infinite/re-entrant cascading — a swept-in CHILD loan always has a
+     * non-null parentLoanID, so checking a child loan out/in on its own
+     * (e.g. from item.php's Loans panel on the child asset's own page)
+     * never itself tries to sweep further components. Kits being one
+     * level deep (see above) means this single boolean check is sufficient
+     * — there is no deeper chain to guard against.
+     * ======================================================================== */
+
+    /**
+     * List the direct component ("child") assets currently attached to a
+     * parent kit asset. Site-scoped via the caller-supplied `$siteId`
+     * (not `Site::id()`) so a caller that already has the parent's own
+     * site on hand (e.g. `cascadeKitCheckout()`, working from an
+     * already-loaded loan row) never pays for a redundant lookup —
+     * mirrors `listLoans()`'s own caller-supplied-`$siteId` convention.
+     *
+     * @return array<int, array<string, mixed>> assetID/name/assetTagCode/
+     *         status/conditionState rows, empty when the parent has no
+     *         components (or doesn't exist/isn't on this site).
+     */
+    public static function kitChildren(int $parentAssetId, int $siteId): array
+    {
+        $db = App::db();
+        $stmt = $db->prepare(
+            'SELECT assetID, name, assetTagCode, status, conditionState FROM tblAssets '
+            . 'WHERE parentAssetID = ? AND siteID = ? AND isDeleted = 0 ORDER BY name ASC'
+        );
+        if ($stmt === false) {
+            error_log('AssetRegister::kitChildren() prepare failed: ' . $db->error);
+            return [];
+        }
+        $stmt->bind_param('ii', $parentAssetId, $siteId);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        $rows = [];
+        while ($row = $result->fetch_assoc()) {
+            $rows[] = $row;
+        }
+        $stmt->close();
+        return $rows;
+    }
+
+    /**
+     * Assets on this site that MAY be added as a component of the given
+     * parent — i.e. everything EXCEPT: the parent asset itself, anything
+     * already a component of ANY kit (`parentAssetID IS NOT NULL`),
+     * anything that is ITSELF already a kit parent (kits are one level
+     * deep — see this section's header note), and anything currently on
+     * an unresolved loan (`LOAN_OPEN_STATUSES` — adding a mid-loan asset
+     * to a kit would leave its own loan row orphaned from the kit
+     * relationship it's about to join). Feeds the "Add component" picker
+     * on item.php; deliberately excludes deleted/other-site rows the same
+     * way `self::get()` does.
+     *
+     * @return array<int, array<string, mixed>> assetID/name/assetTagCode/
+     *         status rows, ordered by name.
+     */
+    public static function eligibleKitChildCandidates(int $parentAssetId, int $siteId): array
+    {
+        $db = App::db();
+
+        // 🚦 Open-loan placeholder list built from LOAN_OPEN_STATUSES, not
+        // hard-coded — mirrors createLoanRequest()'s own probe (see this
+        // class's header comment for the house convention this follows).
+        $openPlaceholders = implode(', ', array_fill(0, count(self::LOAN_OPEN_STATUSES), '?'));
+
+        $sql = 'SELECT assetID, name, assetTagCode, status FROM tblAssets '
+             . 'WHERE siteID = ? AND isDeleted = 0 AND assetID <> ? AND parentAssetID IS NULL '
+             . 'AND assetID NOT IN ('
+             . '    SELECT DISTINCT parentAssetID FROM tblAssets WHERE parentAssetID IS NOT NULL AND siteID = ?'
+             . ') '
+             . 'AND assetID NOT IN ('
+             . '    SELECT assetID FROM tblAssetLoans WHERE siteID = ? AND status IN (' . $openPlaceholders . ')'
+             . ') '
+             . 'ORDER BY name ASC';
+
+        $stmt = $db->prepare($sql);
+        if ($stmt === false) {
+            error_log('AssetRegister::eligibleKitChildCandidates() prepare failed: ' . $db->error);
+            return [];
+        }
+        // 🔢 FOUR bound integers precede the status strings: the outer
+        // siteID + assetID, then the siteID inside EACH of the two
+        // NOT IN sub-queries — so the type string is 'iiii', not 'iii'
+        // (a 3-i string would leave bind_param one variable short of the
+        // seven placeholders and fail at runtime).
+        $types = 'iiii' . str_repeat('s', count(self::LOAN_OPEN_STATUSES));
+        $stmt->bind_param($types, $siteId, $parentAssetId, $siteId, $siteId, ...self::LOAN_OPEN_STATUSES);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        $rows = [];
+        while ($row = $result->fetch_assoc()) {
+            $rows[] = $row;
+        }
+        $stmt->close();
+        return $rows;
+    }
+
+    /**
+     * Attach `$childAssetId` as a component of `$parentAssetId`'s kit.
+     * Never fatals — every guard below returns `ok=false` with a message
+     * fit to flash straight back to the user; only an actual DB failure
+     * (prepare returning false) logs via `error_log()` first. Guards, in
+     * order (see this section's header note for the one-level-deep and
+     * open-loan rationale):
+     *   1. both assets exist on THIS site (`self::get()` is itself
+     *      site-scoped via `Site::id()` — a cross-site or missing id
+     *      fails here with the same message as "doesn't exist", never
+     *      leaking which case it was).
+     *   2. child !== parent.
+     *   3. the parent is not itself a component of another kit.
+     *   4. the child does not itself already have components (would
+     *      create a two-level kit).
+     *   5. the child has no existing parent (must be detached first).
+     *   6. the child has no open loan (`LOAN_OPEN_STATUSES`).
+     *
+     * The final UPDATE's `AND parentAssetID IS NULL` clause is the
+     * race-safety net — even if two concurrent requests both pass every
+     * guard above (read-then-write race), only the FIRST write actually
+     * lands; the second affects 0 rows and reports the generic "may have
+     * changed" failure rather than silently overwriting a parent another
+     * request just set.
+     *
+     * @return array{ok: bool, msg: string}
+     */
+    public static function attachToKit(int $childAssetId, int $parentAssetId, int $actorUserId): array
+    {
+        $child = self::get($childAssetId);
+        if ($child === null) {
+            return ['ok' => false, 'msg' => 'Component asset not found.'];
+        }
+        $parent = self::get($parentAssetId);
+        if ($parent === null) {
+            return ['ok' => false, 'msg' => 'Parent (kit) asset not found.'];
+        }
+        if ($childAssetId === $parentAssetId) {
+            return ['ok' => false, 'msg' => 'An asset cannot be a component of itself.'];
+        }
+        if ($parent['parentAssetID'] !== null) {
+            return ['ok' => false, 'msg' => 'The chosen parent is itself a component of another kit — kits are only one level deep.'];
+        }
+
+        $siteId = Site::id();
+
+        if (count(self::kitChildren($childAssetId, $siteId)) > 0) {
+            return ['ok' => false, 'msg' => "That asset already has its own components, so it can't become a component of another kit."];
+        }
+        if ($child['parentAssetID'] !== null) {
+            return ['ok' => false, 'msg' => 'That asset is already part of a kit — detach it first.'];
+        }
+
+        $db = App::db();
+
+        // 🚦 No open loan on the child — mirrors createLoanRequest()'s own
+        // probe (LOAN_OPEN_STATUSES), same rationale as this section's
+        // header note.
+        $openPlaceholders = implode(', ', array_fill(0, count(self::LOAN_OPEN_STATUSES), '?'));
+        $openStmt = $db->prepare(
+            'SELECT 1 FROM tblAssetLoans WHERE assetID = ? AND siteID = ? AND status IN (' . $openPlaceholders . ') LIMIT 1'
+        );
+        if ($openStmt !== false) {
+            $openTypes = 'ii' . str_repeat('s', count(self::LOAN_OPEN_STATUSES));
+            $openStmt->bind_param($openTypes, $childAssetId, $siteId, ...self::LOAN_OPEN_STATUSES);
+            $openStmt->execute();
+            $hasOpenLoan = $openStmt->get_result()->fetch_assoc() !== null;
+            $openStmt->close();
+            if ($hasOpenLoan === true) {
+                return ['ok' => false, 'msg' => "That asset has an open loan and can't be added to a kit right now."];
+            }
+        }
+
+        // 🔒 Narrow, race-safe UPDATE — see method doc.
+        $stmt = $db->prepare(
+            'UPDATE tblAssets SET parentAssetID = ? WHERE assetID = ? AND siteID = ? AND parentAssetID IS NULL'
+        );
+        if ($stmt === false) {
+            error_log('AssetRegister::attachToKit() prepare failed: ' . $db->error);
+            return ['ok' => false, 'msg' => 'Could not attach that component — please try again.'];
+        }
+        $stmt->bind_param('iii', $parentAssetId, $childAssetId, $siteId);
+        $stmt->execute();
+        $affected = $stmt->affected_rows;
+        $stmt->close();
+        if ($affected <= 0) {
+            return ['ok' => false, 'msg' => 'Could not attach that component — it may have changed since you loaded this page.'];
+        }
+
+        self::audit('asset', $childAssetId, $childAssetId, 'update', ['parentAssetID' => null], ['parentAssetID' => $parentAssetId]);
+
+        return ['ok' => true, 'msg' => 'Component added to the kit.'];
+    }
+
+    /**
+     * Detach `$childAssetId` from whichever kit it currently belongs to.
+     * Never fatals — same "return ok=false with a friendly message"
+     * contract as `attachToKit()`. Guards:
+     *   1. the asset exists on this site.
+     *   2. it currently HAS a parent (nothing to detach otherwise).
+     *   3. it has no open loan — a component swept into an active kit
+     *      loan (`parentLoanID` chained to the parent's own loan) can't be
+     *      silently detached out from under that in-flight loan; the loan
+     *      must be checked in (via the normal cascade) first.
+     *
+     * The final UPDATE's `AND parentAssetID IS NOT NULL` clause is the
+     * same race-safety net `attachToKit()`'s own UPDATE uses, mirrored.
+     *
+     * @return array{ok: bool, msg: string}
+     */
+    public static function detachFromKit(int $childAssetId, int $actorUserId): array
+    {
+        $child = self::get($childAssetId);
+        if ($child === null) {
+            return ['ok' => false, 'msg' => 'Component asset not found.'];
+        }
+        if ($child['parentAssetID'] === null) {
+            return ['ok' => false, 'msg' => "That asset isn't part of a kit."];
+        }
+
+        $siteId = Site::id();
+        $db = App::db();
+
+        // 🚦 Same open-loan guard as attachToKit() — see method doc.
+        $openPlaceholders = implode(', ', array_fill(0, count(self::LOAN_OPEN_STATUSES), '?'));
+        $openStmt = $db->prepare(
+            'SELECT 1 FROM tblAssetLoans WHERE assetID = ? AND siteID = ? AND status IN (' . $openPlaceholders . ') LIMIT 1'
+        );
+        if ($openStmt !== false) {
+            $openTypes = 'ii' . str_repeat('s', count(self::LOAN_OPEN_STATUSES));
+            $openStmt->bind_param($openTypes, $childAssetId, $siteId, ...self::LOAN_OPEN_STATUSES);
+            $openStmt->execute();
+            $hasOpenLoan = $openStmt->get_result()->fetch_assoc() !== null;
+            $openStmt->close();
+            if ($hasOpenLoan === true) {
+                return ['ok' => false, 'msg' => "That asset has an open loan and can't be detached right now."];
+            }
+        }
+
+        $oldParentId = (int) $child['parentAssetID'];
+
+        $stmt = $db->prepare(
+            'UPDATE tblAssets SET parentAssetID = NULL WHERE assetID = ? AND siteID = ? AND parentAssetID IS NOT NULL'
+        );
+        if ($stmt === false) {
+            error_log('AssetRegister::detachFromKit() prepare failed: ' . $db->error);
+            return ['ok' => false, 'msg' => 'Could not detach that component — please try again.'];
+        }
+        $stmt->bind_param('ii', $childAssetId, $siteId);
+        $stmt->execute();
+        $affected = $stmt->affected_rows;
+        $stmt->close();
+        if ($affected <= 0) {
+            return ['ok' => false, 'msg' => 'Could not detach that component — it may have changed since you loaded this page.'];
+        }
+
+        self::audit('asset', $childAssetId, $childAssetId, 'update', ['parentAssetID' => $oldParentId], ['parentAssetID' => null]);
+
+        return ['ok' => true, 'msg' => 'Component detached from the kit.'];
+    }
+
+    /**
+     * Child loans currently swept under a parent kit loan — i.e. rows
+     * chained via `parentLoanID` that are still `active`. Feeds the
+     * checkin-time "N component(s) will be checked in too" prompt on
+     * item.php/loans.php; also the read half `cascadeKitCheckin()` itself
+     * drives from below. Deliberately narrowed to `status = 'active'`
+     * (not every child loan ever chained to this parent) — a component
+     * that was independently checked in early (see `cascadeKitCheckin()`'s
+     * own "already returned independently" note) has nothing left to
+     * prompt for.
+     *
+     * @return array<int, array<string, mixed>> loanID/assetID/status/
+     *         assetName/assetTagCode rows, ordered by asset name.
+     */
+    public static function activeKitChildLoans(int $parentLoanId, int $siteId): array
+    {
+        $db = App::db();
+        $stmt = $db->prepare(
+            'SELECT l.loanID, l.assetID, l.status, a.name AS assetName, a.assetTagCode '
+            . 'FROM tblAssetLoans l INNER JOIN tblAssets a ON a.assetID = l.assetID '
+            . "WHERE l.parentLoanID = ? AND l.siteID = ? AND l.status = 'active' ORDER BY a.name ASC"
+        );
+        if ($stmt === false) {
+            error_log('AssetRegister::activeKitChildLoans() prepare failed: ' . $db->error);
+            return [];
+        }
+        $stmt->bind_param('ii', $parentLoanId, $siteId);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        $rows = [];
+        while ($row = $result->fetch_assoc()) {
+            $rows[] = $row;
+        }
+        $stmt->close();
+        return $rows;
+    }
+
+    /**
+     * Sweep a kit parent's eligible components into their own chained
+     * `active` loan rows at the moment the PARENT loan is checked out.
+     * Called from INSIDE `loanCheckout()`'s own transaction (after its
+     * `tblAssets` status UPDATE, before `App::commit()`) — see this
+     * section's header note for why every DB failure here THROWS rather
+     * than returning a soft failure: it must roll back the parent's own
+     * checkout too, not just silently leave some components un-swept.
+     *
+     * Per component (`self::kitChildren($parentAssetId, $siteId)`):
+     *   - SKIPPED (not an error) when the component's own `status` isn't
+     *     `in-service`/`in-storage` (reason "not available" — a retired,
+     *     already-on-loan, or in-repair component can't be handed over
+     *     alongside its kit) or it already has an open loan of its own
+     *     (reason "already on loan" — re-checked here rather than trusted
+     *     from `kitChildren()`'s status column alone, since that column
+     *     can lag a loan row created moments earlier by a concurrent
+     *     request).
+     *   - Otherwise, a new `tblAssetLoans` row is INSERTed copying the
+     *     parent loan's own direction/counterparty/condition-out/due-date
+     *     fields verbatim (see class-level note below on why this is the
+     *     parent row's ORIGINALLY-LOADED values, not any override the
+     *     checkout form supplied this same call), chained via
+     *     `parentLoanID`, `status='active'` immediately (no separate
+     *     request/approve step for a swept-in component — the parent loan
+     *     already carries that authority), and the component's own
+     *     `tblAssets.status` is updated to match the parent's new
+     *     `$newAssetStatus`.
+     *
+     * NOTE: `conditionOut`/`conditionOutNotes`/`dueDate` are read from
+     * `$parentLoan` (the row `loanAction()` loaded BEFORE this checkout's
+     * own UPDATE ran) — if the checkout form supplied an OVERRIDE for the
+     * parent's own condition-at-hand-over, that override is NOT re-read
+     * back out for the components; they inherit whatever was recorded at
+     * REQUEST time. This mirrors the orchestrator's spec verbatim (see
+     * PR #413 design notes) — flagged here rather than silently changed,
+     * since a future pass may want the components to inherit the
+     * confirmed/overridden value instead.
+     *
+     * @param array<string, mixed> $parentLoan The parent's own freshly
+     *        (pre-UPDATE) loaded loan row, exactly as loanCheckout()
+     *        received it.
+     *
+     * @return array{swept: string[], skipped: string[]} Component asset
+     *         names actually swept in, and names+reason for any skipped.
+     */
+    private static function cascadeKitCheckout(array $parentLoan, string $newAssetStatus, int $actorUserId): array
+    {
+        $db            = App::db();
+        $parentAssetId = (int) $parentLoan['assetID'];
+        $siteId        = (int) $parentLoan['siteID'];
+        $parentLoanId  = (int) $parentLoan['loanID'];
+
+        $swept   = [];
+        $skipped = [];
+
+        $openPlaceholders = implode(', ', array_fill(0, count(self::LOAN_OPEN_STATUSES), '?'));
+
+        foreach (self::kitChildren($parentAssetId, $siteId) as $child) {
+            $childAssetId = (int) $child['assetID'];
+            $childName    = (string) $child['name'];
+            $childStatus  = (string) $child['status'];
+
+            if (in_array($childStatus, ['in-service', 'in-storage'], true) === false) {
+                $skipped[] = $childName . ' (not available)';
+                continue;
+            }
+
+            // 🚦 Re-check no open loan — see method doc on why kitChildren()'s
+            // own status column alone isn't trusted for this.
+            $openStmt = $db->prepare(
+                'SELECT 1 FROM tblAssetLoans WHERE assetID = ? AND siteID = ? AND status IN (' . $openPlaceholders . ') LIMIT 1'
+            );
+            if ($openStmt === false) {
+                throw new \RuntimeException('cascadeKitCheckout() prepare (open-loan probe) failed: ' . $db->error);
+            }
+            $openTypes = 'ii' . str_repeat('s', count(self::LOAN_OPEN_STATUSES));
+            $openStmt->bind_param($openTypes, $childAssetId, $siteId, ...self::LOAN_OPEN_STATUSES);
+            $openStmt->execute();
+            $hasOpenLoan = $openStmt->get_result()->fetch_assoc() !== null;
+            $openStmt->close();
+            if ($hasOpenLoan === true) {
+                $skipped[] = $childName . ' (already on loan)';
+                continue;
+            }
+
+            // 📋 Copy the parent loan's shape via splitFields() (this
+            // class's own table-driven column/type/param builder — see
+            // that helper's doc for why a hand-counted bind_param() type
+            // string is the bug this avoids), same convention
+            // createLoanRequest() uses for its own INSERT.
+            $fields = [
+                'siteID'               => [$siteId, 'i'],
+                'assetID'              => [$childAssetId, 'i'],
+                'direction'            => [(string) $parentLoan['direction'], 's'],
+                'counterpartyType'     => [(string) $parentLoan['counterpartyType'], 's'],
+                'counterpartyUserID'   => [$parentLoan['counterpartyUserID'] !== null ? (int) $parentLoan['counterpartyUserID'] : null, 'i'],
+                'counterpartyOrgID'    => [$parentLoan['counterpartyOrgID'] !== null ? (int) $parentLoan['counterpartyOrgID'] : null, 'i'],
+                'counterpartyName'     => [$parentLoan['counterpartyName'], 's'],
+                'counterpartyContact'  => [$parentLoan['counterpartyContact'], 's'],
+                'status'               => ['active', 's'],
+                'approvedByID'         => [$actorUserId, 'i'],
+                'conditionOut'         => [$parentLoan['conditionOut'], 's'],
+                'conditionOutNotes'    => [$parentLoan['conditionOutNotes'], 's'],
+                'dueDate'              => [$parentLoan['dueDate'], 's'],
+                'parentLoanID'         => [$parentLoanId, 'i'],
+                'requestedByID'        => [(int) $parentLoan['requestedByID'], 'i'],
+                'notes'                => ['Auto-added as part of kit loan #' . $parentLoanId, 's'],
+            ];
+            ['columns' => $columns, 'types' => $types, 'params' => $params] = self::splitFields($fields);
+
+            // 🕒 approvedAt/dateOut are inline NOW() literals, appended
+            // after the bound columns — not user data, so no placeholder
+            // needed (same house convention loanCheckout()'s own UPDATE
+            // uses for these two columns).
+            $insertSql = 'INSERT INTO tblAssetLoans (`' . implode('`, `', $columns) . '`, `approvedAt`, `dateOut`) '
+                       . 'VALUES (' . implode(', ', array_fill(0, count($columns), '?')) . ', NOW(), NOW())';
+            $insertStmt = $db->prepare($insertSql);
+            if ($insertStmt === false) {
+                throw new \RuntimeException('cascadeKitCheckout() prepare (child loan insert) failed: ' . $db->error);
+            }
+            $insertStmt->bind_param($types, ...$params);
+            $insertStmt->execute();
+            $childLoanId = (int) $insertStmt->insert_id;
+            $insertStmt->close();
+            if ($childLoanId <= 0) {
+                throw new \RuntimeException('cascadeKitCheckout() insert produced no id for child asset #' . $childAssetId);
+            }
+
+            $childAssetStmt = $db->prepare('UPDATE tblAssets SET status = ? WHERE assetID = ? AND siteID = ?');
+            if ($childAssetStmt === false) {
+                throw new \RuntimeException('cascadeKitCheckout() prepare (child asset status) failed: ' . $db->error);
+            }
+            $childAssetStmt->bind_param('sii', $newAssetStatus, $childAssetId, $siteId);
+            $childAssetStmt->execute();
+            $childAssetStmt->close();
+
+            self::audit(
+                'loan',
+                $childLoanId,
+                $childAssetId,
+                'checkout',
+                null,
+                ['status' => 'active', 'parentLoanID' => $parentLoanId, 'assetStatus' => $newAssetStatus]
+            );
+
+            $swept[] = $childName;
+        }
+
+        return ['swept' => $swept, 'skipped' => $skipped];
+    }
+
+    /**
+     * Check in every still-`active` component swept in under a kit
+     * parent's loan, at the moment the PARENT loan is checked in. Called
+     * from INSIDE `loanCheckin()`'s own transaction (after its
+     * `tblAssets` status UPDATE, before `App::commit()`) — throws on any
+     * DB failure for the same "roll back the whole cascade" reason as
+     * `cascadeKitCheckout()`.
+     *
+     * Per active child loan (`self::activeKitChildLoans()`):
+     *   - resolves ITS OWN return condition from `$childConditions`
+     *     (keyed by assetID — posted by item.php's per-component checkin
+     *     select) when supplied and valid, else falls back to the
+     *     parent's own (already-validated) `$conditionIn`.
+     *   - the loan UPDATE is WHERE-guarded to `status = 'active'` — if 0
+     *     rows are affected the component must already have been checked
+     *     in independently (e.g. a manager checked that one child in on
+     *     its own page moments earlier); that's NOT an error, this method
+     *     simply moves on to the next component rather than throwing.
+     *   - on an actual update, the component's own `tblAssets.status`
+     *     resets to `in-service` and `conditionState` picks up its
+     *     resolved condition, mirroring `loanCheckin()`'s own parent-asset
+     *     update exactly.
+     *
+     * @param array<string, mixed> $parentLoan       The parent's own
+     *        freshly-loaded loan row, exactly as loanCheckin() received
+     *        it.
+     * @param string                $conditionIn      The parent's own
+     *        already-validated return condition (fallback default).
+     * @param array<int, string>    $childConditions  Optional per-child
+     *        overrides, assetID => one of CONDITION_STATES.
+     *
+     * @return array{returned: string[]} Component asset names actually
+     *         checked in by this cascade.
+     */
+    private static function cascadeKitCheckin(array $parentLoan, string $conditionIn, array $childConditions): array
+    {
+        $db           = App::db();
+        $parentLoanId = (int) $parentLoan['loanID'];
+        $siteId       = (int) $parentLoan['siteID'];
+
+        $returned = [];
+
+        foreach (self::activeKitChildLoans($parentLoanId, $siteId) as $childLoan) {
+            $childLoanId  = (int) $childLoan['loanID'];
+            $childAssetId = (int) $childLoan['assetID'];
+            $childName    = (string) $childLoan['assetName'];
+
+            // 🎨 Per-component override, falling back to the parent's own
+            // (already-validated) condition — see method doc.
+            $cond = $childConditions[$childAssetId] ?? $conditionIn;
+            if (in_array($cond, self::CONDITION_STATES, true) === false) {
+                $cond = $conditionIn;
+            }
+
+            $stmt = $db->prepare(
+                "UPDATE tblAssetLoans SET status = 'returned', dateIn = NOW(), conditionIn = ? "
+                . " WHERE loanID = ? AND siteID = ? AND status = 'active'"
+            );
+            if ($stmt === false) {
+                throw new \RuntimeException('cascadeKitCheckin() prepare (loan) failed: ' . $db->error);
+            }
+            $stmt->bind_param('sii', $cond, $childLoanId, $siteId);
+            $stmt->execute();
+            $affected = $stmt->affected_rows;
+            $stmt->close();
+            if ($affected <= 0) {
+                // ⏭️ Already returned independently — see method doc, not
+                // an error condition.
+                continue;
+            }
+
+            $assetStmt = $db->prepare('UPDATE tblAssets SET status = ?, conditionState = ? WHERE assetID = ? AND siteID = ?');
+            if ($assetStmt === false) {
+                throw new \RuntimeException('cascadeKitCheckin() prepare (asset) failed: ' . $db->error);
+            }
+            $inService = 'in-service';
+            $assetStmt->bind_param('ssii', $inService, $cond, $childAssetId, $siteId);
+            $assetStmt->execute();
+            $assetStmt->close();
+
+            self::audit(
+                'loan',
+                $childLoanId,
+                $childAssetId,
+                'checkin',
+                ['status' => 'active'],
+                ['status' => 'returned', 'conditionIn' => $cond, 'assetStatus' => 'in-service']
+            );
+
+            $returned[] = $childName;
+        }
+
+        return ['returned' => $returned];
     }
 
     /* ==========================================================================
@@ -4606,6 +5840,185 @@ class AssetRegister
         }
 
         return $currentValue;
+    }
+
+    /**
+     * Pure reducing-balance (declining-balance) depreciation estimate — NO
+     * DATABASE ACCESS, same contract shape as computeStraightLineValue()
+     * immediately above (same input array, same "null means not computable,
+     * NEVER invent a value" rule). Added for #412 Phase 3 Pass 2.
+     *
+     * THE RATE PROBLEM: a textbook reducing-balance schedule applies a
+     * fixed annual/monthly PERCENTAGE rate — but `tblAssets` has no
+     * `depreciationRate` column (see class header / #412 brief) and never
+     * has. Given only cost, salvage and useful life, the only mathematically
+     * defensible rate is the one that is IMPLIED by requiring the schedule
+     * to land exactly on `salvageValuePence` at the end of
+     * `usefulLifeMonths` — i.e. a constant-percentage GEOMETRIC decay from
+     * cost to salvage:
+     *
+     *     value(elapsed) = cost × (salvage / cost) ^ (min(elapsed, life) / life)
+     *
+     * This is the standard "declining-balance with a target residual value"
+     * construction (solve r such that cost × (1 − r)^life = salvage), just
+     * expressed directly in terms of the salvage ratio rather than backing
+     * out an explicit r first — same answer, fewer intermediate roundings.
+     * At elapsed = 0 this is cost (the base of the exponent to the power
+     * 0 = 1); at elapsed = life it is exactly salvage; in between it curves
+     * — losing more value in early months than a straight-line schedule
+     * would, which is the entire point of choosing reducing-balance over
+     * straight-line for a given asset.
+     *
+     * WHY A ZERO/ABSENT SALVAGE IS REJECTED (the key difference from
+     * computeStraightLineValue(), which happily defaults salvage to 0):
+     * the formula above divides by `purchaseCostPence` inside the ratio and
+     * raises it to a fractional power — with `salvage = 0` the ratio is 0
+     * and the "implied rate" is 100% in month one (the curve would already
+     * be at zero the instant elapsed > 0), which is not a reducing-balance
+     * schedule at all, it is a cliff. A reducing-balance asset therefore
+     * REQUIRES a positive salvage floor to be computable; one with no
+     * salvage recorded is correctly "not computable yet", not "worth
+     * nothing" — the caller must never invent the missing input.
+     *
+     * Returns null when:
+     *   - depreciationMethod !== 'reducing-balance', OR
+     *   - purchaseCostPence is missing or <= 0 (a zero-cost asset has no
+     *     ratio to decay along), OR
+     *   - usefulLifeMonths is missing or <= 0, OR
+     *   - purchaseDate is missing/empty/unparseable, OR
+     *   - salvageValuePence is missing or <= 0 (see above — the degenerate
+     *     case straight-line silently tolerates, reducing-balance cannot).
+     *
+     * Clamps (mirrors computeStraightLineValue() exactly, see its own doc
+     * for the full reasoning on each):
+     *   - a salvageValuePence ABOVE purchaseCostPence is clamped down to
+     *     purchaseCostPence first, so the curve can never appreciate;
+     *   - elapsed WHOLE calendar months use the identical
+     *     DateTime::diff()-based `($diff->y * 12) + $diff->m` logic,
+     *     floored at 0 for an $asOfDate before purchaseDate;
+     *   - the exponent's numerator is capped at usefulLifeMonths, so a
+     *     fully-depreciated asset sits at salvage forever after;
+     *   - a final belt-and-braces clamp of the rounded result back into
+     *     [salvageValuePence, purchaseCostPence] guards against float
+     *     drift from `**`/pow() before the cast to int.
+     *
+     * @param array<string, mixed> $asset
+     *
+     * @return int|null Estimated current value in pence, or null when not
+     *                   computable / method isn't 'reducing-balance'
+     */
+    public static function computeReducingBalanceValue(array $asset, ?string $asOfDate = null): ?int
+    {
+        if ((string) ($asset['depreciationMethod'] ?? 'none') !== 'reducing-balance') {
+            return null;
+        }
+
+        $purchaseCostPenceRaw = $asset['purchaseCostPence'] ?? null;
+        $usefulLifeMonthsRaw  = $asset['usefulLifeMonths'] ?? null;
+        $purchaseDateRaw      = $asset['purchaseDate'] ?? null;
+        $salvageValuePenceRaw = $asset['salvageValuePence'] ?? null;
+
+        if ($purchaseCostPenceRaw === null || $usefulLifeMonthsRaw === null
+            || $purchaseDateRaw === null || (string) $purchaseDateRaw === ''
+            || $salvageValuePenceRaw === null
+        ) {
+            return null;
+        }
+
+        $purchaseCostPence = (int) $purchaseCostPenceRaw;
+        $usefulLifeMonths  = (int) $usefulLifeMonthsRaw;
+        $salvageValuePence = (int) $salvageValuePenceRaw;
+
+        // 🛟 Degenerate inputs — see method doc's "WHY A ZERO/ABSENT
+        // SALVAGE IS REJECTED" paragraph. Never invent a rate.
+        if ($purchaseCostPence <= 0 || $usefulLifeMonths <= 0 || $salvageValuePence <= 0) {
+            return null;
+        }
+
+        // 🛟 A mis-entered salvage value ABOVE the purchase cost would
+        // otherwise make the ratio (salvage / cost) exceed 1 and the curve
+        // would appreciate upward — clamp it down first, same as
+        // computeStraightLineValue()'s own guard.
+        if ($salvageValuePence > $purchaseCostPence) {
+            $salvageValuePence = $purchaseCostPence;
+        }
+
+        try {
+            $purchaseDate = new \DateTime((string) $purchaseDateRaw);
+        } catch (\Throwable $e) {
+            return null; // 🛟 Unparseable purchaseDate — never guess.
+        }
+
+        $asOf = null;
+        if ($asOfDate !== null) {
+            try {
+                $asOf = new \DateTime($asOfDate);
+            } catch (\Throwable $e) {
+                $asOf = null; // 🛟 Bad override — fall through to "today".
+            }
+        }
+        if ($asOf === null) {
+            $asOf = new \DateTime('today');
+        }
+
+        // 📅 Elapsed WHOLE calendar months since purchase — identical logic
+        // to computeStraightLineValue(), floored at 0 for an $asOf before
+        // purchaseDate (never negative elapsed time).
+        $elapsedMonths = 0;
+        if ($asOf >= $purchaseDate) {
+            $diff = $purchaseDate->diff($asOf);
+            $elapsedMonths = ($diff->y * 12) + $diff->m;
+        }
+
+        // 🔒 Cap the exponent at the useful life — once fully depreciated
+        // the value sits at salvage and never falls further.
+        $depreciableMonths = min($elapsedMonths, $usefulLifeMonths);
+
+        // 📉 Constant-percentage geometric decay from cost to salvage — see
+        // method doc's formula. `**` is PHP's exponentiation operator;
+        // guarded by the clamps above so the base ratio is always in
+        // (0, 1] and the exponent always in [0, 1], so no float weirdness
+        // (NAN/INF) can arise here.
+        $salvageRatio = $salvageValuePence / $purchaseCostPence;
+        $exponent     = $depreciableMonths / $usefulLifeMonths;
+        $currentValue = (int) round($purchaseCostPence * ($salvageRatio ** $exponent));
+
+        // 🔒 Final belt-and-braces clamp against rounding drift — see
+        // method doc's closing paragraph.
+        if ($currentValue < $salvageValuePence) {
+            $currentValue = $salvageValuePence;
+        }
+        if ($currentValue > $purchaseCostPence) {
+            $currentValue = $purchaseCostPence;
+        }
+
+        return $currentValue;
+    }
+
+    /**
+     * Thin dispatcher over the two pure per-method estimators above — picks
+     * computeStraightLineValue() or computeReducingBalanceValue() based on
+     * the asset's own `depreciationMethod`, so callers that don't care
+     * WHICH method an asset uses (persistCurrentValues(), the live-fallback
+     * readouts in valueSummaryForSite()/depreciationReportRows(), item.php's
+     * depreciation card) can call one method regardless. `'none'` and any
+     * unrecognised value both return null — NO DATABASE ACCESS, same
+     * "never invent a value" contract as the two methods it dispatches to.
+     *
+     * @param array<string, mixed> $asset
+     *
+     * @return int|null Estimated current value in pence, or null when not
+     *                   computable / method is 'none'/unrecognised
+     */
+    public static function computeCurrentValue(array $asset, ?string $asOfDate = null): ?int
+    {
+        $method = (string) ($asset['depreciationMethod'] ?? 'none');
+
+        return match ($method) {
+            'straight-line'    => self::computeStraightLineValue($asset, $asOfDate),
+            'reducing-balance' => self::computeReducingBalanceValue($asset, $asOfDate),
+            default            => null,
+        };
     }
 
     /* ==========================================================================
@@ -7017,23 +8430,35 @@ class AssetRegister
     }
 
     /**
-     * For every `'straight-line'`-depreciation asset on a site, compute
-     * today's value via the existing pure `computeStraightLineValue()`
-     * helper (point 6 above, unchanged) and persist it to
+     * For every straight-line OR reducing-balance depreciation asset on a
+     * site, compute today's value via the `computeCurrentValue()`
+     * dispatcher (widened for #412 Phase 3 Pass 2 — was
+     * `computeStraightLineValue()`-only) and persist it to
      * `tblAssets.currentValuePence`/`valuationDate` — a narrow two-column
      * UPDATE, never the full `updateAsset()` field-set (which would
      * misleadingly diff every other column too, and would require a real
-     * `$actorUserId` for a system-driven bulk write). An asset the pure
-     * helper can't compute a value for (missing purchaseCostPence/
-     * usefulLifeMonths/purchaseDate) is left completely untouched — never
-     * zeroed, never guessed, matching computeStraightLineValue()'s own
-     * "return null rather than invent" contract.
+     * `$actorUserId` for a system-driven bulk write). An asset the
+     * dispatcher can't compute a value for (missing an input — see
+     * computeStraightLineValue()/computeReducingBalanceValue()'s own docs
+     * for exactly which) is left completely untouched — never zeroed,
+     * never guessed, matching both pure helpers' own "return null rather
+     * than invent" contract.
      *
      * Deliberately no per-row `self::audit()` call — routine bulk
      * housekeeping, mirroring `purgeExpiredFoundReports()`/
      * `purgeExpiredScanLog()`'s own no-audit convention (points 8/11
      * above); the cron caller's own aggregate `Logger::activity()` call
      * covers the run.
+     *
+     * #412: also writes today's value into `tblAssetValueHistory` via
+     * `recordValueSnapshot()` for every asset whose value WAS computable
+     * this call — independent of whether the `tblAssets` UPDATE below
+     * actually changed a row (a fully-depreciated asset sitting at
+     * salvage writes the SAME value every day; `recordValueSnapshot()`
+     * itself is the one that suppresses that churn, on its own
+     * value-unchanged rule — see its doc). This method's own return value
+     * is unchanged in meaning: it still counts only `tblAssets` rows
+     * written, not history rows.
      *
      * @return int Count of assets whose currentValuePence/valuationDate
      *         were actually written this call
@@ -7044,7 +8469,7 @@ class AssetRegister
 
         $stmt = $db->prepare(
             'SELECT assetID, purchaseCostPence, usefulLifeMonths, purchaseDate, salvageValuePence, depreciationMethod '
-            . "FROM tblAssets WHERE siteID = ? AND isDeleted = 0 AND depreciationMethod = 'straight-line'"
+            . "FROM tblAssets WHERE siteID = ? AND isDeleted = 0 AND depreciationMethod IN ('straight-line', 'reducing-balance')"
         );
         if ($stmt === false) {
             error_log('AssetRegister::persistCurrentValues() prepare failed: ' . $db->error);
@@ -7063,7 +8488,7 @@ class AssetRegister
         $written = 0;
 
         foreach ($assets as $asset) {
-            $value = self::computeStraightLineValue($asset, $today);
+            $value = self::computeCurrentValue($asset, $today);
             if ($value === null) {
                 // 🛟 Not computable (missing an input) — never invented,
                 // never zeroed. Leave the row exactly as it was.
@@ -7093,9 +8518,160 @@ class AssetRegister
                 $written++;
             }
             $upd->close();
+
+            // 📈 #412 — record today's snapshot into the value-history
+            // table regardless of $upd's own affected_rows (see method
+            // doc above); recordValueSnapshot() suppresses its own churn.
+            self::recordValueSnapshot(
+                $siteId,
+                $assetId,
+                $today,
+                $value,
+                (string) $asset['depreciationMethod'],
+                'cron',
+                null
+            );
         }
 
         return $written;
+    }
+
+    /**
+     * Write (or in-place update) one day's snapshot into
+     * `tblAssetValueHistory` for an asset — the #412 depreciation-trend
+     * feed behind item.php's "Value history" panel. WRITE-ON-CHANGE-ONLY
+     * for cron-sourced snapshots, to keep the table compact: an asset
+     * sitting at a fully-depreciated salvage value (or simply unchanged
+     * since yesterday) does NOT get a fresh row every single day — only
+     * the day the computed value first differs from the most recently
+     * recorded one. A manual entry (`$source !== 'cron'`) always writes,
+     * since a manager deliberately recording a valuation is meaningful
+     * regardless of whether the number happens to match the last one.
+     *
+     * Same-day re-runs never duplicate: `uq_astvh_asset_date` (assetID,
+     * valueDate) makes the INSERT below an `ON DUPLICATE KEY UPDATE`
+     * in-place replace, not a second row.
+     *
+     * @return bool True on a successful write (or a deliberate no-op
+     *         skip because the value hasn't moved), false on a
+     *         prepare/execute failure or an invalid $method/$source.
+     */
+    private static function recordValueSnapshot(
+        int $siteId,
+        int $assetId,
+        string $valueDate,
+        int $valuePence,
+        string $method,
+        string $source = 'cron',
+        ?int $recordedById = null
+    ): bool {
+        // 🛟 Defensive ENUM validation — never write a value the column
+        // itself can't hold. Mirrors the "never invent/guess" discipline
+        // applied everywhere else in this class, just for shape rather
+        // than for the value itself.
+        if (in_array($method, ['straight-line', 'reducing-balance', 'manual'], true) === false) {
+            return false;
+        }
+        if (in_array($source, ['cron', 'manual'], true) === false) {
+            return false;
+        }
+
+        $db = App::db();
+
+        // 🔎 Look up the most recently recorded snapshot for this asset
+        // (site-scoped) to decide whether a cron-sourced write would be
+        // pure churn — see method doc.
+        $lookup = $db->prepare(
+            'SELECT valueDate, currentValuePence FROM tblAssetValueHistory '
+            . 'WHERE assetID = ? AND siteID = ? ORDER BY valueDate DESC, valueID DESC LIMIT 1'
+        );
+        if ($lookup === false) {
+            error_log('AssetRegister::recordValueSnapshot() lookup prepare failed: ' . $db->error);
+            return false;
+        }
+        $lookup->bind_param('ii', $assetId, $siteId);
+        $lookup->execute();
+        $latest = $lookup->get_result()->fetch_assoc();
+        $lookup->close();
+
+        if ($source === 'cron' && $latest !== null && (int) $latest['currentValuePence'] === $valuePence) {
+            // 🛟 Unchanged since the last recorded snapshot — no churn.
+            // This is the whole point: a fully-depreciated asset sitting
+            // at salvage does not get a new row every day.
+            return true;
+        }
+
+        $ins = $db->prepare(
+            'INSERT INTO tblAssetValueHistory '
+            . '(siteID, assetID, valueDate, currentValuePence, method, source, recordedByID) '
+            . 'VALUES (?, ?, ?, ?, ?, ?, ?) '
+            . 'ON DUPLICATE KEY UPDATE currentValuePence = VALUES(currentValuePence), '
+            . 'method = VALUES(method), source = VALUES(source), recordedByID = VALUES(recordedByID)'
+        );
+        if ($ins === false) {
+            error_log('AssetRegister::recordValueSnapshot() insert prepare failed: ' . $db->error);
+            return false;
+        }
+        $ins->bind_param('iisissi', $siteId, $assetId, $valueDate, $valuePence, $method, $source, $recordedById);
+        $success = $ins->execute();
+        if ($success === false) {
+            error_log('AssetRegister::recordValueSnapshot() insert execute failed: ' . $ins->error);
+        }
+        $ins->close();
+
+        return $success;
+    }
+
+    /**
+     * Reverse of the write side above — an asset's recorded value-history
+     * rows in chronological (oldest → newest) order, ready either for a
+     * future chart (ASC is the natural order for a trend line) or for a
+     * caller to `array_reverse()` for a most-recent-first list (item.php's
+     * "Value history" panel does exactly that — see that file). Site-scoped
+     * even though the caller (item.php) has already validated the asset
+     * belongs to the current site — an IDOR belt-and-braces match for every
+     * other per-asset read in this class.
+     *
+     * @return array<int, array{valueDate:string, currentValuePence:int,
+     *         method:string, source:string}>
+     */
+    public static function valueHistory(int $assetId, int $siteId, int $limit = 60): array
+    {
+        // 🛟 Clamp into a sane range — never an unbounded/zero/negative
+        // LIMIT from a bad caller.
+        if ($limit < 1) {
+            $limit = 1;
+        }
+        if ($limit > 365) {
+            $limit = 365;
+        }
+
+        $db = App::db();
+
+        $stmt = $db->prepare(
+            'SELECT valueDate, currentValuePence, method, source FROM tblAssetValueHistory '
+            . 'WHERE assetID = ? AND siteID = ? ORDER BY valueDate ASC LIMIT ?'
+        );
+        if ($stmt === false) {
+            error_log('AssetRegister::valueHistory() prepare failed: ' . $db->error);
+            return [];
+        }
+        $stmt->bind_param('iii', $assetId, $siteId, $limit);
+        $stmt->execute();
+        $result = $stmt->get_result();
+
+        $rows = [];
+        while ($row = $result->fetch_assoc()) {
+            $rows[] = [
+                'valueDate'         => (string) $row['valueDate'],
+                'currentValuePence' => (int) $row['currentValuePence'],
+                'method'            => (string) $row['method'],
+                'source'            => (string) $row['source'],
+            ];
+        }
+        $stmt->close();
+
+        return $rows;
     }
 
     /* ==========================================================================
@@ -7107,16 +8683,20 @@ class AssetRegister
      * Register-wide value totals for a site, grouped by category and by
      * status. For each asset, "current value" PREFERS the persisted
      * `currentValuePence` (written by `persistCurrentValues()` above) and
-     * falls back to a live `computeStraightLineValue()` estimate only when
-     * nothing has been persisted yet — an asset that's simply not
-     * computable (reducing-balance, or a straight-line asset missing an
-     * input) is counted in `notValuedCount` rather than folded into a
-     * total as if it were zero (mirrors computeStraightLineValue()'s own
-     * "never invent" contract). `insuranceGapPence` sums (insured −
-     * current) ONLY over assets where BOTH figures are known — an asset
-     * with no insured value recorded, or no computable current value,
-     * contributes nothing to that figure either way. No currency
-     * conversion — see class header point 12's closing note.
+     * falls back to a live `computeCurrentValue()` estimate (#412 — widened
+     * from a `computeStraightLineValue()`-only fallback so a
+     * reducing-balance asset counts toward the totals too, not just
+     * straight-line) only when nothing has been persisted yet — an asset
+     * that's simply not computable by EITHER method (missing an input —
+     * for reducing-balance that includes a missing/zero salvage value, see
+     * `computeReducingBalanceValue()`'s own doc) is counted in
+     * `notValuedCount` rather than folded into a total as if it were zero
+     * (mirrors both pure helpers' own "never invent" contract).
+     * `insuranceGapPence` sums (insured − current) ONLY over assets where
+     * BOTH figures are known — an asset with no insured value recorded, or
+     * no computable current value, contributes nothing to that figure
+     * either way. No currency conversion — see class header point 12's
+     * closing note.
      *
      * @return array{
      *   totals: array{assetCount:int, purchaseCostPence:int, currentValuePence:int,
@@ -7161,7 +8741,7 @@ class AssetRegister
 
             $current = $row['currentValuePence'] !== null
                 ? (int) $row['currentValuePence']
-                : self::computeStraightLineValue($row);
+                : self::computeCurrentValue($row);
 
             if ($current === null) {
                 $totals['notValuedCount']++;
@@ -7267,7 +8847,12 @@ class AssetRegister
         $rows = [];
         while ($row = $result->fetch_assoc()) {
             $persisted = $row['currentValuePence'] !== null ? (int) $row['currentValuePence'] : null;
-            $current   = $persisted ?? self::computeStraightLineValue($row);
+            // #412: computeCurrentValue() dispatcher — was
+            // computeStraightLineValue()-only; widened so a
+            // reducing-balance asset with no persisted value yet still
+            // gets a live estimate row here, matching
+            // valueSummaryForSite()'s own fallback above.
+            $current   = $persisted ?? self::computeCurrentValue($row);
             $purchase  = $row['purchaseCostPence'] !== null ? (int) $row['purchaseCostPence'] : null;
 
             $pctDepreciated = null;
@@ -7291,6 +8876,1332 @@ class AssetRegister
         }
         $stmt->close();
 
+        return $rows;
+    }
+
+    /* ==========================================================================
+     * 📋 Stocktake / scan-to-verify (#411)
+     * ==========================================================================
+     * A stocktake "run" (`tblAssetStocktakes`) is opened against the whole
+     * site register or a location/category-scoped subset of it, pre-
+     * populating one `tblAssetStocktakeItems` row per expected asset
+     * (verifyStatus='pending'). A manager then scans assets — each scan
+     * either confirms an expected item ('present'/'moved') or records one
+     * that wasn't expected ('unexpected'); closing the run sweeps every
+     * still-'pending' row to 'missing'. See findByScanCode() for how a raw
+     * scanned string resolves to an asset, and recordStocktakeScan() for
+     * the present/moved/unexpected decision itself.
+     * ======================================================================== */
+
+    /**
+     * Open a new stocktake run for the current site, optionally scoped to
+     * one location and/or one category (either/both NULL = the whole
+     * site's register). Pre-populates `tblAssetStocktakeItems` with one
+     * 'pending' row per matching, non-deleted asset in a single
+     * INSERT…SELECT — see the file-header note above for the run's overall
+     * lifecycle.
+     *
+     * @return array{ok: bool, msg: string, stocktakeId: int}
+     */
+    public static function startStocktake(string $label, ?int $locationId, ?int $categoryId, int $actorUserId): array
+    {
+        $db     = App::db();
+        $siteId = Site::id();
+
+        // 📋 Label — required, ≤150 chars (matches the VARCHAR(150) column).
+        $label = trim($label);
+        if ($label === '' || mb_strlen($label) > 150) {
+            return ['ok' => false, 'msg' => 'A stocktake label is required (max 150 characters).', 'stocktakeId' => 0];
+        }
+
+        // 🔗 Optional scope FKs — must exist on THIS site, exactly like
+        // save.php's own "never trust a bare posted int" FK checks. Unlike
+        // save.php's silent-fallback-to-NULL convention, an invalid scope
+        // id here is a hard failure — a stocktake silently opening against
+        // the WRONG (or no) scope would be a much worse surprise than a
+        // stale category id on an asset edit form.
+        if ($locationId !== null && $locationId > 0) {
+            $chk = $db->prepare('SELECT 1 FROM tblAssetLocations WHERE locationID = ? AND siteID = ? LIMIT 1');
+            if ($chk === false) {
+                return ['ok' => false, 'msg' => 'Could not start the stocktake — please try again.', 'stocktakeId' => 0];
+            }
+            $chk->bind_param('ii', $locationId, $siteId);
+            $chk->execute();
+            $found = $chk->get_result()->fetch_assoc();
+            $chk->close();
+            if ($found === null) {
+                return ['ok' => false, 'msg' => 'The selected location was not found on this site.', 'stocktakeId' => 0];
+            }
+        } else {
+            $locationId = null;
+        }
+
+        if ($categoryId !== null && $categoryId > 0) {
+            $chk = $db->prepare('SELECT 1 FROM tblAssetCategories WHERE categoryID = ? AND siteID = ? LIMIT 1');
+            if ($chk === false) {
+                return ['ok' => false, 'msg' => 'Could not start the stocktake — please try again.', 'stocktakeId' => 0];
+            }
+            $chk->bind_param('ii', $categoryId, $siteId);
+            $chk->execute();
+            $found = $chk->get_result()->fetch_assoc();
+            $chk->close();
+            if ($found === null) {
+                return ['ok' => false, 'msg' => 'The selected category was not found on this site.', 'stocktakeId' => 0];
+            }
+        } else {
+            $categoryId = null;
+        }
+
+        // 💾 Transaction — "create the run" + "pre-populate its expected
+        // items" are one atomic unit: a run with zero expected items
+        // because the pre-populate step failed half-way would be a
+        // confusing, silently-wrong stocktake, not a loud failure.
+        App::beginTransaction();
+        $stocktakeId   = 0;
+        $expectedCount = 0;
+        try {
+            $ins = $db->prepare(
+                "INSERT INTO tblAssetStocktakes (siteID, label, status, locationID, categoryID, startedByID) "
+                . "VALUES (?, ?, 'open', ?, ?, ?)"
+            );
+            if ($ins === false) {
+                throw new \RuntimeException('Failed to prepare stocktake insert: ' . $db->error);
+            }
+            $ins->bind_param('isiii', $siteId, $label, $locationId, $categoryId, $actorUserId);
+            $ins->execute();
+            $stocktakeId = (int) $ins->insert_id;
+            $ins->close();
+
+            if ($stocktakeId <= 0) {
+                throw new \RuntimeException('Stocktake insert did not return an id.');
+            }
+
+            // 📦 Pre-populate expected items — dynamic WHERE built the same
+            // way listForSite() builds its own (siteID + isDeleted always,
+            // locationID/categoryID only when scoped).
+            $where  = ['siteID = ?', 'isDeleted = 0'];
+            $types  = 'i';
+            $params = [$siteId];
+            if ($locationId !== null) {
+                $where[]  = 'locationID = ?';
+                $types   .= 'i';
+                $params[] = $locationId;
+            }
+            if ($categoryId !== null) {
+                $where[]  = 'categoryID = ?';
+                $types   .= 'i';
+                $params[] = $categoryId;
+            }
+
+            $popSql = "INSERT INTO tblAssetStocktakeItems (stocktakeID, siteID, assetID, verifyStatus) "
+                    . "SELECT ?, siteID, assetID, 'pending' FROM tblAssets WHERE " . implode(' AND ', $where);
+            $popStmt = $db->prepare($popSql);
+            if ($popStmt === false) {
+                throw new \RuntimeException('Failed to prepare item pre-populate: ' . $db->error);
+            }
+            $popTypes  = 'i' . $types;
+            $popParams = array_merge([$stocktakeId], $params);
+            $popStmt->bind_param($popTypes, ...$popParams);
+            $popStmt->execute();
+            $expectedCount = $popStmt->affected_rows;
+            $popStmt->close();
+
+            App::commit();
+        } catch (\Throwable $e) {
+            App::rollback();
+            error_log('AssetRegister::startStocktake() failed: ' . $e->getMessage());
+            return ['ok' => false, 'msg' => 'Could not start the stocktake — please try again.', 'stocktakeId' => 0];
+        }
+
+        // 📜 Audit — action 'create' so this ALSO mirrors to the platform
+        // trail (see TABLE_FOR_ENTITY's doc comment) — opening a run is a
+        // low-volume, noteworthy event, unlike the individual scans below.
+        self::audit('stocktake', $stocktakeId, 0, 'create', null, [
+            'label'         => $label,
+            'locationID'    => $locationId,
+            'categoryID'    => $categoryId,
+            'expectedCount' => $expectedCount,
+        ]);
+
+        return ['ok' => true, 'msg' => 'Stocktake started — ' . $expectedCount . ' asset(s) expected.', 'stocktakeId' => $stocktakeId];
+    }
+
+    /**
+     * Resolve a raw scanned string to a site-scoped, non-deleted asset.
+     * Tries, in order, the FIRST match wins:
+     *   (a) exact `assetTagCode`
+     *   (b) exact `serialNumber`
+     *   (c) `publicToken` — a bare 32-char lowercase-hex token, OR a full
+     *       `/a/{token}` label URL (see labelPublicUrl()) from which the
+     *       token is extracted defensively (never interpolated — always a
+     *       bound parameter once found)
+     *   (d) an exact `tblAssetIdentifiers.value` match (GS1/RFID/barcode
+     *       identifiers — #393/#415), joined back to its (site-scoped,
+     *       non-deleted) asset
+     *
+     * Each probe is site-scoped and its own prepared statement, mirroring
+     * findByTagOrSerial()'s own "tag first, cheapest lookup first" shape.
+     *
+     * @return array<string, mixed>|null The full asset row (via self::get()
+     *         — so the caller always gets every column, not just the id
+     *         column each probe selected), or null when nothing matches.
+     */
+    public static function findByScanCode(int $siteId, string $code): ?array
+    {
+        $code = trim($code);
+        if ($code === '') {
+            return null;
+        }
+
+        $db = App::db();
+
+        // (a) assetTagCode — exact match.
+        $stmt = $db->prepare('SELECT assetID FROM tblAssets WHERE siteID = ? AND isDeleted = 0 AND assetTagCode = ? LIMIT 1');
+        if ($stmt !== false) {
+            $stmt->bind_param('is', $siteId, $code);
+            $stmt->execute();
+            $row = $stmt->get_result()->fetch_assoc();
+            $stmt->close();
+            if ($row !== null) {
+                return self::get((int) $row['assetID']);
+            }
+        }
+
+        // (b) serialNumber — exact match.
+        $stmt = $db->prepare('SELECT assetID FROM tblAssets WHERE siteID = ? AND isDeleted = 0 AND serialNumber = ? LIMIT 1');
+        if ($stmt !== false) {
+            $stmt->bind_param('is', $siteId, $code);
+            $stmt->execute();
+            $row = $stmt->get_result()->fetch_assoc();
+            $stmt->close();
+            if ($row !== null) {
+                return self::get((int) $row['assetID']);
+            }
+        }
+
+        // (c) publicToken — bare token or a full /a/{token} URL. The regex
+        // only ever EXTRACTS a candidate substring for a bound parameter
+        // below — the raw $code is never itself interpolated into SQL.
+        $token = null;
+        if (preg_match('/[a-f0-9]{32}/', strtolower($code), $m) === 1) {
+            $token = $m[0];
+        }
+        if ($token !== null) {
+            $stmt = $db->prepare('SELECT assetID FROM tblAssets WHERE siteID = ? AND isDeleted = 0 AND publicToken = ? LIMIT 1');
+            if ($stmt !== false) {
+                $stmt->bind_param('is', $siteId, $token);
+                $stmt->execute();
+                $row = $stmt->get_result()->fetch_assoc();
+                $stmt->close();
+                if ($row !== null) {
+                    return self::get((int) $row['assetID']);
+                }
+            }
+        }
+
+        // (d) tblAssetIdentifiers.value — exact match, site-scoped via a
+        // join back to its (non-deleted) asset.
+        $stmt = $db->prepare(
+            'SELECT i.assetID FROM tblAssetIdentifiers i '
+            . 'JOIN tblAssets a ON a.assetID = i.assetID AND a.isDeleted = 0 '
+            . 'WHERE i.siteID = ? AND a.siteID = ? AND i.value = ? LIMIT 1'
+        );
+        if ($stmt !== false) {
+            $stmt->bind_param('iis', $siteId, $siteId, $code);
+            $stmt->execute();
+            $row = $stmt->get_result()->fetch_assoc();
+            $stmt->close();
+            if ($row !== null) {
+                return self::get((int) $row['assetID']);
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Record one scan-to-verify result against an OPEN stocktake run.
+     * Resolves $code via findByScanCode(), then decides the outcome:
+     *   - Asset WAS expected (a `tblAssetStocktakeItems` row already
+     *     exists for this stocktake+asset): 'present' — or 'moved' when a
+     *     $foundLocationId is given AND differs from the asset's own
+     *     recorded `locationID`.
+     *   - Asset was NOT expected: 'unexpected' (foundLocationID recorded
+     *     verbatim, may be null).
+     * `uq_aststi_stocktake_asset` makes the UPSERT below an in-place
+     * update on a re-scan of the same asset within the same run, never a
+     * duplicate row.
+     *
+     * @return array{ok: bool, msg: string, verifyStatus?: string,
+     *         assetID?: int, assetName?: string, isConfidential?: bool}
+     */
+    public static function recordStocktakeScan(int $stocktakeId, string $code, ?int $foundLocationId, int $actorUserId): array
+    {
+        $db     = App::db();
+        $siteId = Site::id();
+
+        // 🔒 Must be an OPEN run on THIS site.
+        $stmt = $db->prepare("SELECT stocktakeID FROM tblAssetStocktakes WHERE stocktakeID = ? AND siteID = ? AND status = 'open' LIMIT 1");
+        if ($stmt === false) {
+            return ['ok' => false, 'msg' => 'Stocktake not found or already closed.'];
+        }
+        $stmt->bind_param('ii', $stocktakeId, $siteId);
+        $stmt->execute();
+        $found = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+        if ($found === null) {
+            return ['ok' => false, 'msg' => 'Stocktake not found or already closed.'];
+        }
+
+        $asset = self::findByScanCode($siteId, $code);
+        if ($asset === null) {
+            return ['ok' => false, 'msg' => 'Code not recognised on this site.'];
+        }
+        $assetId = (int) $asset['assetID'];
+
+        // 🔗 Optional found-location — validated same as startStocktake()'s
+        // scope FKs, but here an invalid id is a soft "treat as unset"
+        // rather than a hard failure (this is a fast-moving scan flow —
+        // failing the whole scan over a stale dropdown value would be a
+        // much worse UX than just not recording the found-location).
+        if ($foundLocationId !== null && $foundLocationId > 0) {
+            $chk = $db->prepare('SELECT 1 FROM tblAssetLocations WHERE locationID = ? AND siteID = ? LIMIT 1');
+            if ($chk !== false) {
+                $chk->bind_param('ii', $foundLocationId, $siteId);
+                $chk->execute();
+                $chkFound = $chk->get_result()->fetch_assoc();
+                $chk->close();
+                if ($chkFound === null) {
+                    $foundLocationId = null;
+                }
+            } else {
+                $foundLocationId = null;
+            }
+        } else {
+            $foundLocationId = null;
+        }
+
+        // 🔎 Was this asset already expected in this run?
+        $existsStmt = $db->prepare('SELECT itemID FROM tblAssetStocktakeItems WHERE stocktakeID = ? AND assetID = ? LIMIT 1');
+        if ($existsStmt === false) {
+            return ['ok' => false, 'msg' => 'Could not record the scan — please try again.'];
+        }
+        $existsStmt->bind_param('ii', $stocktakeId, $assetId);
+        $existsStmt->execute();
+        $existingItem = $existsStmt->get_result()->fetch_assoc();
+        $existsStmt->close();
+
+        $recordedLocationId = $asset['locationID'] !== null ? (int) $asset['locationID'] : null;
+
+        // -------------------------------------------------------------------
+        // 🧮 verifyStatus decision.
+        // -------------------------------------------------------------------
+        if ($existingItem !== null) {
+            if ($foundLocationId !== null && $foundLocationId !== $recordedLocationId) {
+                $verifyStatus          = 'moved';
+                $storedFoundLocationId = $foundLocationId;
+            } else {
+                $verifyStatus          = 'present';
+                $storedFoundLocationId = null;
+            }
+        } else {
+            $verifyStatus          = 'unexpected';
+            $storedFoundLocationId = $foundLocationId;
+        }
+
+        // 💾 UPSERT — uq_aststi_stocktake_asset makes a re-scan an in-place
+        // update rather than a second row.
+        $upsert = $db->prepare(
+            'INSERT INTO tblAssetStocktakeItems (stocktakeID, siteID, assetID, verifyStatus, scannedByID, scannedAt, foundLocationID) '
+            . 'VALUES (?, ?, ?, ?, ?, NOW(), ?) '
+            . 'ON DUPLICATE KEY UPDATE verifyStatus = VALUES(verifyStatus), scannedByID = VALUES(scannedByID), '
+            . 'scannedAt = VALUES(scannedAt), foundLocationID = VALUES(foundLocationID)'
+        );
+        if ($upsert === false) {
+            error_log('AssetRegister::recordStocktakeScan() prepare failed: ' . $db->error);
+            return ['ok' => false, 'msg' => 'Could not record the scan — please try again.'];
+        }
+        $upsert->bind_param('iiisii', $stocktakeId, $siteId, $assetId, $verifyStatus, $actorUserId, $storedFoundLocationId);
+        $ok = $upsert->execute();
+        $upsert->close();
+        if ($ok === false) {
+            return ['ok' => false, 'msg' => 'Could not record the scan — please try again.'];
+        }
+
+        // 📜 Audit — action 'scan' is NOT in ['create','update','delete'],
+        // so this writes ONLY tblAssetAudit, never the platform trail
+        // (deliberate — scans are high-volume, see TABLE_FOR_ENTITY's doc
+        // comment).
+        self::audit('stocktake', $stocktakeId, $assetId, 'scan', null, ['verifyStatus' => $verifyStatus]);
+
+        return [
+            'ok'             => true,
+            'msg'            => 'Scan recorded.',
+            'verifyStatus'   => $verifyStatus,
+            'assetID'        => $assetId,
+            'assetName'      => (string) $asset['name'],
+            'isConfidential' => (int) ($asset['isConfidential'] ?? 0) === 1,
+        ];
+    }
+
+    /**
+     * Close an open stocktake run: race-safe status flip (only succeeds if
+     * it was still 'open'), then sweep every still-'pending' item to
+     * 'missing' — anything never scanned this run is, by definition,
+     * missing.
+     *
+     * @return array{ok: bool, msg: string}
+     */
+    public static function closeStocktake(int $stocktakeId, int $actorUserId): array
+    {
+        $db     = App::db();
+        $siteId = Site::id();
+
+        App::beginTransaction();
+        $missingCount = 0;
+        try {
+            // 🏁 Race-safe — the `AND status = 'open'` guard means two
+            // concurrent "close" clicks can't both succeed (the second
+            // affects zero rows).
+            $upd = $db->prepare(
+                "UPDATE tblAssetStocktakes SET status = 'closed', closedByID = ?, closedAt = NOW() "
+                . " WHERE stocktakeID = ? AND siteID = ? AND status = 'open'"
+            );
+            if ($upd === false) {
+                throw new \RuntimeException('Failed to prepare stocktake close: ' . $db->error);
+            }
+            $upd->bind_param('iii', $actorUserId, $stocktakeId, $siteId);
+            $upd->execute();
+            $affected = $upd->affected_rows;
+            $upd->close();
+
+            if ($affected <= 0) {
+                App::rollback();
+                return ['ok' => false, 'msg' => 'Stocktake was already closed, or could not be found.'];
+            }
+
+            $missStmt = $db->prepare(
+                "UPDATE tblAssetStocktakeItems SET verifyStatus = 'missing' "
+                . " WHERE stocktakeID = ? AND siteID = ? AND verifyStatus = 'pending'"
+            );
+            if ($missStmt === false) {
+                throw new \RuntimeException('Failed to prepare missing-sweep: ' . $db->error);
+            }
+            $missStmt->bind_param('ii', $stocktakeId, $siteId);
+            $missStmt->execute();
+            $missingCount = $missStmt->affected_rows;
+            $missStmt->close();
+
+            App::commit();
+        } catch (\Throwable $e) {
+            App::rollback();
+            error_log('AssetRegister::closeStocktake() failed: ' . $e->getMessage());
+            return ['ok' => false, 'msg' => 'Could not close the stocktake — please try again.'];
+        }
+
+        // 📜 Audit — action 'update' so this ALSO mirrors to the platform
+        // trail (closing a run is low-volume, unlike the scans that fed
+        // into it).
+        self::audit(
+            'stocktake',
+            $stocktakeId,
+            0,
+            'update',
+            ['status' => 'open'],
+            ['status' => 'closed', 'missingCount' => $missingCount]
+        );
+
+        return ['ok' => true, 'msg' => 'Stocktake closed — ' . $missingCount . ' asset(s) marked missing.'];
+    }
+
+    /**
+     * List a site's stocktake runs (open + closed), newest-started first,
+     * each carrying its starter's/closer's full name, scope location/
+     * category names, and a total expected-item count.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public static function listStocktakes(int $siteId, ?string $status = null): array
+    {
+        $db = App::db();
+
+        $where  = ['st.siteID = ?'];
+        $types  = 'i';
+        $params = [$siteId];
+        if ($status !== null && in_array($status, self::STOCKTAKE_STATUSES, true) === true) {
+            $where[]  = 'st.status = ?';
+            $types   .= 's';
+            $params[] = $status;
+        }
+
+        $sql = 'SELECT st.*, '
+             . '       su.fullName AS startedByName, cu.fullName AS closedByName, '
+             . '       l.locationName, c.categoryName, '
+             . '       (SELECT COUNT(*) FROM tblAssetStocktakeItems i WHERE i.stocktakeID = st.stocktakeID) AS itemCount '
+             . 'FROM tblAssetStocktakes st '
+             . 'LEFT JOIN tblUsers su ON su.userID = st.startedByID '
+             . 'LEFT JOIN tblUsers cu ON cu.userID = st.closedByID '
+             . 'LEFT JOIN tblAssetLocations l ON l.locationID = st.locationID '
+             . 'LEFT JOIN tblAssetCategories c ON c.categoryID = st.categoryID '
+             . 'WHERE ' . implode(' AND ', $where) . ' '
+             . 'ORDER BY st.startedAt DESC';
+
+        $stmt = $db->prepare($sql);
+        if ($stmt === false) {
+            error_log('AssetRegister::listStocktakes() prepare failed: ' . $db->error);
+            return [];
+        }
+        $stmt->bind_param($types, ...$params);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        $rows = [];
+        while ($row = $result->fetch_assoc()) {
+            $rows[] = $row;
+        }
+        $stmt->close();
+        return $rows;
+    }
+
+    /**
+     * Fetch a single stocktake run, site-scoped, with the same starter/
+     * closer/scope names listStocktakes() carries. Null if missing or
+     * belonging to another site.
+     *
+     * @return array<string, mixed>|null
+     */
+    public static function getStocktake(int $stocktakeId, int $siteId): ?array
+    {
+        $db = App::db();
+        $stmt = $db->prepare(
+            'SELECT st.*, '
+            . '       su.fullName AS startedByName, cu.fullName AS closedByName, '
+            . '       l.locationName, c.categoryName '
+            . 'FROM tblAssetStocktakes st '
+            . 'LEFT JOIN tblUsers su ON su.userID = st.startedByID '
+            . 'LEFT JOIN tblUsers cu ON cu.userID = st.closedByID '
+            . 'LEFT JOIN tblAssetLocations l ON l.locationID = st.locationID '
+            . 'LEFT JOIN tblAssetCategories c ON c.categoryID = st.categoryID '
+            . 'WHERE st.stocktakeID = ? AND st.siteID = ? LIMIT 1'
+        );
+        if ($stmt === false) {
+            error_log('AssetRegister::getStocktake() prepare failed: ' . $db->error);
+            return null;
+        }
+        $stmt->bind_param('ii', $stocktakeId, $siteId);
+        $stmt->execute();
+        $row = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+        return $row !== false && $row !== null ? $row : null;
+    }
+
+    /**
+     * List one stocktake run's item rows — asset name/tag, recorded +
+     * found location names, and who/when scanned — optionally filtered to
+     * one verifyStatus. Ordered by verifyStatus then asset name, which
+     * naturally groups the list by outcome for the scan screen.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public static function stocktakeItems(int $stocktakeId, int $siteId, ?string $verifyStatus = null): array
+    {
+        $db = App::db();
+
+        $where  = ['i.stocktakeID = ?', 'i.siteID = ?'];
+        $types  = 'ii';
+        $params = [$stocktakeId, $siteId];
+        if ($verifyStatus !== null && in_array($verifyStatus, self::STOCKTAKE_VERIFY_STATUSES, true) === true) {
+            $where[]  = 'i.verifyStatus = ?';
+            $types   .= 's';
+            $params[] = $verifyStatus;
+        }
+
+        $sql = 'SELECT i.*, a.name AS assetName, a.assetTagCode, a.isConfidential, '
+             . '       rl.locationName AS recordedLocationName, fl.locationName AS foundLocationName, '
+             . '       su.fullName AS scannedByName '
+             . 'FROM tblAssetStocktakeItems i '
+             . 'JOIN tblAssets a ON a.assetID = i.assetID '
+             . 'LEFT JOIN tblAssetLocations rl ON rl.locationID = a.locationID '
+             . 'LEFT JOIN tblAssetLocations fl ON fl.locationID = i.foundLocationID '
+             . 'LEFT JOIN tblUsers su ON su.userID = i.scannedByID '
+             . 'WHERE ' . implode(' AND ', $where) . ' '
+             . 'ORDER BY i.verifyStatus ASC, a.name ASC';
+
+        $stmt = $db->prepare($sql);
+        if ($stmt === false) {
+            error_log('AssetRegister::stocktakeItems() prepare failed: ' . $db->error);
+            return [];
+        }
+        $stmt->bind_param($types, ...$params);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        $rows = [];
+        while ($row = $result->fetch_assoc()) {
+            $rows[] = $row;
+        }
+        $stmt->close();
+        return $rows;
+    }
+
+    /**
+     * Variance summary for one stocktake run — a count per verifyStatus
+     * (every status always present, 0 when there are no rows in it) plus
+     * a 'total' across all of them, via a single GROUP BY query.
+     *
+     * @return array{pending: int, present: int, missing: int, moved: int,
+     *         unexpected: int, total: int}
+     */
+    public static function stocktakeVariance(int $stocktakeId, int $siteId): array
+    {
+        $counts = array_fill_keys(self::STOCKTAKE_VERIFY_STATUSES, 0);
+
+        $db = App::db();
+        $stmt = $db->prepare(
+            'SELECT verifyStatus, COUNT(*) AS cnt FROM tblAssetStocktakeItems '
+            . 'WHERE stocktakeID = ? AND siteID = ? GROUP BY verifyStatus'
+        );
+        if ($stmt === false) {
+            error_log('AssetRegister::stocktakeVariance() prepare failed: ' . $db->error);
+            $counts['total'] = 0;
+            return $counts;
+        }
+        $stmt->bind_param('ii', $stocktakeId, $siteId);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        $total = 0;
+        while ($row = $result->fetch_assoc()) {
+            $status = (string) $row['verifyStatus'];
+            $cnt    = (int) $row['cnt'];
+            if (array_key_exists($status, $counts) === true) {
+                $counts[$status] = $cnt;
+            }
+            $total += $cnt;
+        }
+        $stmt->close();
+
+        $counts['total'] = $total;
+        return $counts;
+    }
+
+    /* ==========================================================================
+     * 🖥️ Kiosk self check-in/out (#414, Phase 3 Pass 5) — see class header
+     * point 14 for the full section overview. EVERY method below may be
+     * called from a PUBLIC, unauthenticated request (`_apps/assets/
+     * kiosk.php`/`kiosk-action.php`) — none of them may EVER trust a
+     * caller-supplied userID/siteID the way createAsset()/updateAsset() do;
+     * every one re-derives or re-validates its own scope from a real,
+     * already-authenticated (by device token or PIN) source.
+     * ======================================================================== */
+
+    /**
+     * A small denylist of PIN values that are trivially guessable —
+     * checked by {@see isWeakKioskPin()} ALONGSIDE the programmatic
+     * all-same-digit / sequential-run checks in that method, so this list
+     * only needs to cover values neither of those two patterns already
+     * catches (e.g. '0123' is a plain ascending run and never reaches
+     * this array at all).
+     *
+     * @var string[]
+     */
+    private const KIOSK_PIN_WEAK_LIST = [
+        '0000', '1111', '2222', '3333', '4444', '5555', '6666', '7777', '8888', '9999',
+        '1234', '4321', '1212', '2121', '000000', '123456', '654321',
+    ];
+
+    /**
+     * True when $pin (already shape-validated by the caller —
+     * {@see setKioskPin()}) is trivially guessable: on the small explicit
+     * {@see KIOSK_PIN_WEAK_LIST}, every digit identical (e.g. '55555'), or
+     * a straight ascending/descending run (e.g. '2345', '9876'). NON-
+     * exhaustive by design (a determined attacker still has to brute-force
+     * a 4-6 digit space, which is what {@see RateLimiter} in `kiosk-
+     * action.php` is actually for) — this is a cheap first line of defence
+     * against the handful of PINs a person is most likely to pick by habit.
+     */
+    private static function isWeakKioskPin(string $pin): bool
+    {
+        if (in_array($pin, self::KIOSK_PIN_WEAK_LIST, true) === true) {
+            return true;
+        }
+        // 🔁 Every digit identical, any length in range.
+        if (preg_match('/^(\d)\1+$/', $pin) === 1) {
+            return true;
+        }
+        // 🔢 A contiguous slice of a straight ascending/descending run.
+        $ascending  = '0123456789';
+        $descending = '9876543210';
+        if (str_contains($ascending, $pin) === true || str_contains($descending, $pin) === true) {
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * Register a new kiosk TERMINAL — mints a 32-hex device token
+     * (`generatePublicToken()`, same shape as an asset's own public token),
+     * retrying on the astronomically unlikely `uq_astkt_token` collision
+     * (mirrors `addIdentifier()`'s own duplicate-catch shape, class header
+     * point 4). ADMIN-only caller (`_apps/assets/kiosk-save.php`) — audited
+     * as a normal session-admin action, NOT the `actorUserIdOverride` path
+     * (the acting admin registered this terminal; no kiosk user is
+     * involved yet). The plaintext token is returned ONCE — see
+     * `listKioskTokens()`'s own doc for why it is never selectable again.
+     *
+     * @return array{ok: bool, msg: string, token?: string, tokenId?: int}
+     */
+    public static function mintKioskToken(string $label, int $actorUserId): array
+    {
+        $label = trim($label);
+        if ($label === '' || mb_strlen($label) > 150) {
+            return ['ok' => false, 'msg' => 'Label is required (max 150 characters).'];
+        }
+
+        $db     = App::db();
+        $siteId = Site::id();
+
+        $token   = null;
+        $tokenId = 0;
+        for ($attempt = 0; $attempt < 5; $attempt++) {
+            $candidate = self::generatePublicToken();
+            $stmt = $db->prepare(
+                'INSERT INTO tblAssetKioskTokens (siteID, label, token, isActive, createdByID) '
+                . 'VALUES (?, ?, ?, 1, ?)'
+            );
+            if ($stmt === false) {
+                error_log('AssetRegister::mintKioskToken() prepare failed: ' . $db->error);
+                return ['ok' => false, 'msg' => 'Could not register the terminal — please try again.'];
+            }
+            try {
+                $stmt->bind_param('issi', $siteId, $label, $candidate, $actorUserId);
+                $stmt->execute();
+                $tokenId = (int) $stmt->insert_id;
+                $stmt->close();
+                $token = $candidate;
+                break;
+            } catch (\mysqli_sql_exception $e) {
+                // 🎲 uq_astkt_token collision — vanishingly unlikely for a
+                // 32-hex value, but retry with a fresh candidate rather
+                // than fail outright (same shape as addIdentifier()'s own
+                // duplicate-catch).
+                $stmt->close();
+                continue;
+            }
+        }
+
+        if ($token === null || $tokenId <= 0) {
+            error_log('AssetRegister::mintKioskToken() could not generate a unique token after 5 attempts');
+            return ['ok' => false, 'msg' => 'Could not register the terminal — please try again.'];
+        }
+
+        // 📜 Normal session-admin actor — the token value itself is NEVER
+        // passed into audit() (see REDACTED_FIELDS' own rationale — a
+        // kiosk terminal token gates the same class of action a publicToken
+        // gates, so it stays out of every log row just as thoroughly, even
+        // though 'token' isn't itself in REDACTED_FIELDS — simplest to
+        // just never hand it to audit() at all).
+        self::audit('kiosk', $tokenId, 0, 'create', null, ['label' => $label]);
+
+        return ['ok' => true, 'msg' => 'Terminal registered.', 'token' => $token, 'tokenId' => $tokenId];
+    }
+
+    /**
+     * Activate/revoke an existing terminal, site-scoped + IDOR-guarded
+     * (read-then-mutate, mirrors `loanAction()`'s own pattern). Revoking
+     * takes effect immediately — `resolveKioskTerminal()` re-checks
+     * `isActive` on EVERY request, so a revoked terminal stops working on
+     * its very next request, mid check-in/out session or not.
+     *
+     * @return array{ok: bool, msg: string}
+     */
+    public static function setKioskTokenActive(int $tokenId, bool $active, int $actorUserId): array
+    {
+        $db     = App::db();
+        $siteId = Site::id();
+
+        $stmt = $db->prepare('SELECT isActive FROM tblAssetKioskTokens WHERE tokenID = ? AND siteID = ? LIMIT 1');
+        if ($stmt === false) {
+            error_log('AssetRegister::setKioskTokenActive() prepare failed: ' . $db->error);
+            return ['ok' => false, 'msg' => 'Could not update the terminal — please try again.'];
+        }
+        $stmt->bind_param('ii', $tokenId, $siteId);
+        $stmt->execute();
+        $row = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+
+        if ($row === null) {
+            return ['ok' => false, 'msg' => 'Terminal not found.'];
+        }
+
+        $oldVal = (int) $row['isActive'];
+        $newVal = $active === true ? 1 : 0;
+
+        $updStmt = $db->prepare('UPDATE tblAssetKioskTokens SET isActive = ? WHERE tokenID = ? AND siteID = ?');
+        if ($updStmt === false) {
+            error_log('AssetRegister::setKioskTokenActive() update prepare failed: ' . $db->error);
+            return ['ok' => false, 'msg' => 'Could not update the terminal — please try again.'];
+        }
+        $updStmt->bind_param('iii', $newVal, $tokenId, $siteId);
+        $updStmt->execute();
+        $updStmt->close();
+
+        self::audit('kiosk', $tokenId, 0, 'update', ['isActive' => $oldVal], ['isActive' => $newVal]);
+
+        return ['ok' => true, 'msg' => $active === true ? 'Terminal reactivated.' : 'Terminal revoked.'];
+    }
+
+    /**
+     * Permanently remove a terminal registration, site-scoped + IDOR-
+     * guarded (read-then-delete, mirrors `removeOwner()`'s own pattern).
+     * Unlike most register/history tables in this class, a decommissioned
+     * kiosk device is genuinely gone — there is no ongoing history value
+     * in keeping a dead terminal row around the way there is for a loan or
+     * a maintenance entry (`setKioskTokenActive()` above is the "keep the
+     * row, just stop trusting it" option for a terminal being temporarily
+     * taken out of service).
+     *
+     * @return array{ok: bool, msg: string}
+     */
+    public static function deleteKioskToken(int $tokenId, int $actorUserId): array
+    {
+        $db     = App::db();
+        $siteId = Site::id();
+
+        $stmt = $db->prepare('SELECT label FROM tblAssetKioskTokens WHERE tokenID = ? AND siteID = ? LIMIT 1');
+        if ($stmt === false) {
+            error_log('AssetRegister::deleteKioskToken() prepare failed: ' . $db->error);
+            return ['ok' => false, 'msg' => 'Could not delete the terminal — please try again.'];
+        }
+        $stmt->bind_param('ii', $tokenId, $siteId);
+        $stmt->execute();
+        $row = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+
+        if ($row === null) {
+            return ['ok' => false, 'msg' => 'Terminal not found.'];
+        }
+
+        $delStmt = $db->prepare('DELETE FROM tblAssetKioskTokens WHERE tokenID = ? AND siteID = ?');
+        if ($delStmt === false) {
+            error_log('AssetRegister::deleteKioskToken() delete prepare failed: ' . $db->error);
+            return ['ok' => false, 'msg' => 'Could not delete the terminal — please try again.'];
+        }
+        $delStmt->bind_param('ii', $tokenId, $siteId);
+        $delStmt->execute();
+        $affected = $delStmt->affected_rows;
+        $delStmt->close();
+
+        if ($affected <= 0) {
+            return ['ok' => false, 'msg' => 'Terminal not found.'];
+        }
+
+        self::audit('kiosk', $tokenId, 0, 'delete', ['label' => (string) $row['label']], null);
+
+        return ['ok' => true, 'msg' => 'Terminal deleted.'];
+    }
+
+    /**
+     * List every registered terminal for a site, newest-registered first.
+     * NEVER selects the `token` column itself — see class header point 14
+     * for why a terminal's credential is a show-once value.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public static function listKioskTokens(int $siteId): array
+    {
+        $db = App::db();
+        $stmt = $db->prepare(
+            'SELECT kt.tokenID, kt.label, kt.isActive, kt.createdAt, kt.lastSeenAt, '
+            . '       u.fullName AS createdByName '
+            . 'FROM tblAssetKioskTokens kt '
+            . 'LEFT JOIN tblUsers u ON u.userID = kt.createdByID '
+            . 'WHERE kt.siteID = ? '
+            . 'ORDER BY kt.createdAt DESC'
+        );
+        if ($stmt === false) {
+            error_log('AssetRegister::listKioskTokens() prepare failed: ' . $db->error);
+            return [];
+        }
+        $stmt->bind_param('i', $siteId);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        $rows = [];
+        while ($row = $result->fetch_assoc()) {
+            $rows[] = $row;
+        }
+        $stmt->close();
+        return $rows;
+    }
+
+    /**
+     * PUBLIC-safe token→terminal resolve — the credential gate every
+     * kiosk request re-checks (class header point 14). Re-validates the
+     * `^[a-f0-9]{32}$` shape itself (never trusts an upstream guarantee —
+     * same defensive convention as `tag.php`/`found-save.php`) before ever
+     * touching the database, then requires `isActive = 1`: an unknown
+     * token and a revoked one are 100% indistinguishable from this
+     * method's return value alone (both null) — no oracle. On a match,
+     * bumps `lastSeenAt` via a separate, cheap UPDATE (best-effort — never
+     * allowed to turn a successful resolve into a failure).
+     *
+     * @return array<string, mixed>|null tokenID/siteID/label, or null
+     */
+    public static function resolveKioskTerminal(string $token): ?array
+    {
+        if (preg_match('/^[a-f0-9]{32}$/', $token) !== 1) {
+            return null;
+        }
+
+        $db = App::db();
+        $stmt = $db->prepare(
+            'SELECT tokenID, siteID, label FROM tblAssetKioskTokens WHERE token = ? AND isActive = 1 LIMIT 1'
+        );
+        if ($stmt === false) {
+            error_log('AssetRegister::resolveKioskTerminal() prepare failed: ' . $db->error);
+            return null;
+        }
+        $stmt->bind_param('s', $token);
+        $stmt->execute();
+        $row = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+
+        if ($row === null) {
+            return null;
+        }
+
+        $tokenId = (int) $row['tokenID'];
+        $bumpStmt = $db->prepare('UPDATE tblAssetKioskTokens SET lastSeenAt = NOW() WHERE tokenID = ?');
+        if ($bumpStmt !== false) {
+            $bumpStmt->bind_param('i', $tokenId);
+            $bumpStmt->execute();
+            $bumpStmt->close();
+        }
+
+        return $row;
+    }
+
+    /**
+     * Set (or change) a member's OWN kiosk PIN — validates shape
+     * (`^\d{4,6}$`) and rejects a weak/guessable value ({@see
+     * isWeakKioskPin()}) before `password_hash()`-ing it and UPSERT-ing on
+     * `uq_astkp_site_user` (re-setting a previously-cleared PIN
+     * re-activates the row in the same statement). Logged via a plain
+     * `Logger::activity()` call rather than `self::audit()` — a PIN isn't
+     * asset-scoped, so it doesn't fit this class's asset-choke-point audit
+     * trail (class header point 14).
+     *
+     * @return array{ok: bool, msg: string}
+     */
+    public static function setKioskPin(int $userId, int $siteId, string $pin): array
+    {
+        $pin = trim($pin);
+        if (preg_match('/^\d{4,6}$/', $pin) !== 1) {
+            return ['ok' => false, 'msg' => 'PIN must be 4-6 digits.'];
+        }
+        if (self::isWeakKioskPin($pin) === true) {
+            return ['ok' => false, 'msg' => 'That PIN is too easy to guess — please choose a less predictable one.'];
+        }
+
+        $hash = password_hash($pin, PASSWORD_DEFAULT);
+
+        $db = App::db();
+        $stmt = $db->prepare(
+            'INSERT INTO tblAssetKioskPins (siteID, userID, pinHash, isActive) VALUES (?, ?, ?, 1) '
+            . 'ON DUPLICATE KEY UPDATE pinHash = VALUES(pinHash), isActive = 1'
+        );
+        if ($stmt === false) {
+            error_log('AssetRegister::setKioskPin() prepare failed: ' . $db->error);
+            return ['ok' => false, 'msg' => 'Could not save your PIN — please try again.'];
+        }
+        $stmt->bind_param('iis', $siteId, $userId, $hash);
+        $ok = $stmt->execute();
+        $stmt->close();
+
+        if ($ok === false) {
+            return ['ok' => false, 'msg' => 'Could not save your PIN — please try again.'];
+        }
+
+        Logger::activity('AssetKioskPinSet', 'Kiosk PIN set/changed', $userId);
+
+        return ['ok' => true, 'msg' => 'Your kiosk PIN has been saved.'];
+    }
+
+    /**
+     * Clear a member's OWN kiosk PIN — flips `isActive = 0` rather than
+     * deleting the row (see `setKioskPin()`'s own UPSERT, which
+     * re-activates it if the member sets a new PIN later).
+     *
+     * @return array{ok: bool, msg: string}
+     */
+    public static function clearKioskPin(int $userId, int $siteId): array
+    {
+        $db = App::db();
+        $stmt = $db->prepare('UPDATE tblAssetKioskPins SET isActive = 0 WHERE userID = ? AND siteID = ?');
+        if ($stmt === false) {
+            error_log('AssetRegister::clearKioskPin() prepare failed: ' . $db->error);
+            return ['ok' => false, 'msg' => 'Could not clear your PIN — please try again.'];
+        }
+        $stmt->bind_param('ii', $userId, $siteId);
+        $stmt->execute();
+        $stmt->close();
+
+        Logger::activity('AssetKioskPinCleared', 'Kiosk PIN cleared', $userId);
+
+        return ['ok' => true, 'msg' => 'Your kiosk PIN has been cleared.'];
+    }
+
+    /**
+     * Whether a member currently has an active kiosk PIN set — NEVER
+     * reveals the PIN itself, only its presence, for `kiosk-pin.php`'s own
+     * "a PIN is currently set" readout.
+     */
+    public static function hasKioskPin(int $userId, int $siteId): bool
+    {
+        $db = App::db();
+        $stmt = $db->prepare(
+            'SELECT 1 FROM tblAssetKioskPins WHERE userID = ? AND siteID = ? AND isActive = 1 LIMIT 1'
+        );
+        if ($stmt === false) {
+            return false;
+        }
+        $stmt->bind_param('ii', $userId, $siteId);
+        $stmt->execute();
+        $row = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+        return $row !== null;
+    }
+
+    /**
+     * Resolve a kiosk identify-form IDENTIFIER (username or email — the
+     * SAME either-or `Auth::loginLocal()` accepts, mirrored exactly
+     * including the lower-cased/trimmed comparison value) to an ACTIVE
+     * user who belongs to `$siteId` via an active `tblUserSites` row
+     * (`partyExistsOnSite('user', …)`'s own join shape, class header point
+     * 5) — never a bare userID from the request. Returns userID/fullName
+     * only; NEVER a password/PIN hash or any other credential material.
+     *
+     * @return array{userID: int, fullName: string}|null
+     */
+    public static function resolveKioskUser(int $siteId, string $identifier): ?array
+    {
+        $identifier = strtolower(trim($identifier));
+        if ($identifier === '') {
+            return null;
+        }
+
+        $db = App::db();
+        $stmt = $db->prepare(
+            'SELECT DISTINCT u.userID, u.fullName '
+            . 'FROM tblUsers u '
+            . 'INNER JOIN tblUserSites us ON us.userID = u.userID AND us.siteID = ? AND us.isActive = 1 '
+            . 'LEFT JOIN tblLocalAccounts la ON la.userID = u.userID '
+            . 'WHERE u.isActive = 1 AND (la.username = ? OR u.emailAddress = ?) '
+            . 'LIMIT 1'
+        );
+        if ($stmt === false) {
+            error_log('AssetRegister::resolveKioskUser() prepare failed: ' . $db->error);
+            return null;
+        }
+        $stmt->bind_param('iss', $siteId, $identifier, $identifier);
+        $stmt->execute();
+        $row = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+
+        return $row !== null ? $row : null;
+    }
+
+    /**
+     * `password_verify()` a kiosk PIN against `$userId`'s active
+     * `tblAssetKioskPins` row, site-scoped. A missing row simply verifies
+     * false — the SAME outcome as a wrong PIN against a real row, so this
+     * method's return value alone never reveals whether the user has a PIN
+     * set at all (the caller — `kiosk-action.php`'s `identify` action —
+     * shows the identical "incorrect details" message either way). Bumps
+     * `lastUsedAt` on a successful verify.
+     */
+    public static function verifyKioskPin(int $siteId, int $userId, string $pin): bool
+    {
+        $db = App::db();
+        $stmt = $db->prepare(
+            'SELECT pinID, pinHash FROM tblAssetKioskPins WHERE siteID = ? AND userID = ? AND isActive = 1 LIMIT 1'
+        );
+        if ($stmt === false) {
+            return false;
+        }
+        $stmt->bind_param('ii', $siteId, $userId);
+        $stmt->execute();
+        $row = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+
+        if ($row === null) {
+            return false;
+        }
+
+        if (password_verify($pin, (string) $row['pinHash']) === false) {
+            return false;
+        }
+
+        $pinId = (int) $row['pinID'];
+        $bumpStmt = $db->prepare('UPDATE tblAssetKioskPins SET lastUsedAt = NOW() WHERE pinID = ?');
+        if ($bumpStmt !== false) {
+            $bumpStmt->bind_param('i', $pinId);
+            $bumpStmt->execute();
+            $bumpStmt->close();
+        }
+
+        return true;
+    }
+
+    /**
+     * Kiosk self-checkout — a single asset, hand-over TO the PIN-resolved
+     * member. Guards: the asset exists on the (forced-context) site, is
+     * NOT confidential, and is in a loanable status (`in-service` or
+     * `in-storage`) — a confidential asset and a wrong-status asset return
+     * the EXACT SAME rejection message (no oracle distinguishing the two;
+     * see class header point 14), checked BEFORE the separate "already has
+     * an open loan" check (which only a real, already-public, non-
+     * confidential asset can ever reach). TRANSACTIONAL, same shape as
+     * `loanCheckout()` (class header point 5): the new loan-row INSERT and
+     * the `tblAssets.status` UPDATE are one atomic unit. Deliberately does
+     * NOT cascade a kit (#413) — a kiosk hand-over is always exactly one
+     * asset. Audits entityType `'loan'`, action `'checkout'`, `actorType:
+     * 'kiosk'`, attributed to `$kioskUserId` via the `audit()`
+     * `actorUserIdOverride` (point 1).
+     *
+     * @return array{ok: bool, msg: string}
+     */
+    public static function kioskCheckout(int $assetId, int $kioskUserId, int $kioskTokenId): array
+    {
+        $asset = self::get($assetId);
+        if ($asset === null) {
+            return ['ok' => false, 'msg' => 'Item not found.'];
+        }
+
+        // 🙈 Uniform rejection — a confidential asset and one that simply
+        // isn't in a loanable status right now are indistinguishable from
+        // this response alone (see method doc).
+        $loanableStatus = in_array((string) $asset['status'], ['in-service', 'in-storage'], true);
+        if ((int) $asset['isConfidential'] === 1 || $loanableStatus === false) {
+            return ['ok' => false, 'msg' => "That item isn't available to check out here."];
+        }
+
+        $db     = App::db();
+        $siteId = Site::id();
+
+        // 🚦 No open loan already in flight — mirrors createLoanRequest()'s
+        // own "one unresolved loan at a time per asset" guard (class
+        // header point 5). Only reached by a real, non-confidential,
+        // loanable-status asset, so revealing "already checked out" here
+        // is not itself an oracle for confidentiality.
+        $openPlaceholders = implode(', ', array_fill(0, count(self::LOAN_OPEN_STATUSES), '?'));
+        $openStmt = $db->prepare(
+            'SELECT 1 FROM tblAssetLoans WHERE assetID = ? AND siteID = ? AND status IN (' . $openPlaceholders . ') LIMIT 1'
+        );
+        if ($openStmt !== false) {
+            $openTypes = 'ii' . str_repeat('s', count(self::LOAN_OPEN_STATUSES));
+            $openStmt->bind_param($openTypes, $assetId, $siteId, ...self::LOAN_OPEN_STATUSES);
+            $openStmt->execute();
+            $hasOpenLoan = $openStmt->get_result()->fetch_assoc() !== null;
+            $openStmt->close();
+            if ($hasOpenLoan === true) {
+                return ['ok' => false, 'msg' => 'That item is already checked out.'];
+            }
+        }
+
+        $conditionOut = (string) $asset['conditionState'];
+        if (in_array($conditionOut, self::CONDITION_STATES, true) === false) {
+            $conditionOut = 'good';
+        }
+
+        $newLoanId  = 0;
+        $newStatus  = 'on-loan';
+        App::beginTransaction();
+        try {
+            $stmt = $db->prepare(
+                'INSERT INTO tblAssetLoans '
+                . '(siteID, assetID, direction, counterpartyType, counterpartyUserID, status, '
+                . 'conditionOut, dateOut, requestedByID, approvedByID, approvedAt) '
+                . "VALUES (?, ?, 'out', 'user', ?, 'active', ?, NOW(), ?, ?, NOW())"
+            );
+            if ($stmt === false) {
+                throw new \RuntimeException('Failed to prepare kiosk checkout: ' . $db->error);
+            }
+            $stmt->bind_param('iiisii', $siteId, $assetId, $kioskUserId, $conditionOut, $kioskUserId, $kioskUserId);
+            $stmt->execute();
+            $newLoanId = (int) $stmt->insert_id;
+            $stmt->close();
+            if ($newLoanId <= 0) {
+                throw new \RuntimeException('Kiosk checkout insert did not return an id');
+            }
+
+            $assetStmt = $db->prepare('UPDATE tblAssets SET status = ? WHERE assetID = ? AND siteID = ?');
+            if ($assetStmt === false) {
+                throw new \RuntimeException('Failed to prepare asset status update: ' . $db->error);
+            }
+            $assetStmt->bind_param('sii', $newStatus, $assetId, $siteId);
+            $assetStmt->execute();
+            $assetStmt->close();
+
+            App::commit();
+        } catch (\Throwable $e) {
+            App::rollback();
+            error_log('AssetRegister::kioskCheckout() failed: ' . $e->getMessage());
+            return ['ok' => false, 'msg' => 'Could not check out this item — please try again or ask a manager for help.'];
+        }
+
+        self::audit(
+            'loan',
+            $newLoanId,
+            $assetId,
+            'checkout',
+            null,
+            ['status' => 'active', 'conditionOut' => $conditionOut, 'assetStatus' => $newStatus],
+            ['kioskTokenID' => $kioskTokenId],
+            'kiosk',
+            $kioskUserId
+        );
+
+        return ['ok' => true, 'msg' => 'Checked out: ' . (string) $asset['name']];
+    }
+
+    /**
+     * Kiosk self-check-in — the PIN-resolved member returns an item they
+     * currently have out. IDOR guard: finds the ONE active `direction =
+     * 'out'` loan on this asset where `counterpartyUserID = $kioskUserId`
+     * — a kiosk user can only ever check in a loan THEY are the
+     * counterparty of, on THIS site — PLUS a defensive `isConfidential =
+     * 0` join (belt-and-braces: `kioskCheckout()` already prevents a
+     * confidential asset from ever acquiring such a loan via the kiosk
+     * path in the first place, but this closes the same gate against a
+     * hand-crafted POST targeting a confidential asset a non-kiosk
+     * workflow separately loaned to this user — see class header point
+     * 14). No match → the SAME friendly failure regardless of WHY (asset
+     * doesn't exist / belongs to someone else / isn't out / is
+     * confidential) — this single query has no separate existence branch
+     * to leak through. `conditionIn` is validated against
+     * `CONDITION_STATES`, defaulting to `'good'` when missing/invalid
+     * (unlike `loanCheckin()`, a kiosk self-service flow doesn't hard-
+     * require the value — a member skipping the condition select
+     * shouldn't block their own check-in). TRANSACTIONAL, same shape as
+     * `loanCheckin()` (class header point 5). Audits entityType `'loan'`,
+     * action `'checkin'`, `actorType: 'kiosk'`, attributed to
+     * `$kioskUserId` via the `audit()` `actorUserIdOverride` (point 1).
+     *
+     * @return array{ok: bool, msg: string}
+     */
+    public static function kioskCheckin(int $assetId, int $kioskUserId, int $kioskTokenId, ?string $conditionIn): array
+    {
+        $db     = App::db();
+        $siteId = Site::id();
+
+        $stmt = $db->prepare(
+            'SELECT l.loanID FROM tblAssetLoans l '
+            . 'JOIN tblAssets a ON a.assetID = l.assetID '
+            . "WHERE l.assetID = ? AND l.siteID = ? AND l.counterpartyUserID = ? "
+            . "AND l.direction = 'out' AND l.status = 'active' AND a.isConfidential = 0 "
+            . 'LIMIT 1'
+        );
+        if ($stmt === false) {
+            error_log('AssetRegister::kioskCheckin() prepare failed: ' . $db->error);
+            return ['ok' => false, 'msg' => "You don't have that item checked out."];
+        }
+        $stmt->bind_param('iii', $assetId, $siteId, $kioskUserId);
+        $stmt->execute();
+        $loan = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+
+        if ($loan === null) {
+            return ['ok' => false, 'msg' => "You don't have that item checked out."];
+        }
+        $loanId = (int) $loan['loanID'];
+
+        $condition = $conditionIn !== null ? trim($conditionIn) : '';
+        if (in_array($condition, self::CONDITION_STATES, true) === false) {
+            $condition = 'good';
+        }
+
+        App::beginTransaction();
+        try {
+            $updStmt = $db->prepare(
+                "UPDATE tblAssetLoans SET status = 'returned', dateIn = NOW(), conditionIn = ? "
+                . " WHERE loanID = ? AND assetID = ? AND siteID = ? AND status = 'active'"
+            );
+            if ($updStmt === false) {
+                throw new \RuntimeException('Failed to prepare kiosk checkin: ' . $db->error);
+            }
+            $updStmt->bind_param('siii', $condition, $loanId, $assetId, $siteId);
+            $updStmt->execute();
+            $affected = $updStmt->affected_rows;
+            $updStmt->close();
+            if ($affected <= 0) {
+                throw new \RuntimeException('Loan row did not update — status already changed');
+            }
+
+            $inService = 'in-service';
+            $assetStmt = $db->prepare('UPDATE tblAssets SET status = ?, conditionState = ? WHERE assetID = ? AND siteID = ?');
+            if ($assetStmt === false) {
+                throw new \RuntimeException('Failed to prepare asset status update: ' . $db->error);
+            }
+            $assetStmt->bind_param('ssii', $inService, $condition, $assetId, $siteId);
+            $assetStmt->execute();
+            $assetStmt->close();
+
+            App::commit();
+        } catch (\Throwable $e) {
+            App::rollback();
+            error_log('AssetRegister::kioskCheckin() failed: ' . $e->getMessage());
+            return ['ok' => false, 'msg' => 'Could not check in this item — it may have already changed state.'];
+        }
+
+        self::audit(
+            'loan',
+            $loanId,
+            $assetId,
+            'checkin',
+            ['status' => 'active'],
+            ['status' => 'returned', 'conditionIn' => $condition, 'assetStatus' => 'in-service'],
+            ['kioskTokenID' => $kioskTokenId],
+            'kiosk',
+            $kioskUserId
+        );
+
+        return ['ok' => true, 'msg' => 'Checked in — thank you!'];
+    }
+
+    /**
+     * The kiosk user's OWN currently-out assets — feeds `kiosk.php`'s
+     * check-in list. STRICTLY `counterpartyUserID = $kioskUserId` AND
+     * `direction = 'out'` AND `status = 'active'`, additionally excluding
+     * confidential assets defensively (same belt-and-braces rationale as
+     * `kioskCheckin()`'s own join — none should ever exist here, but the
+     * filter costs nothing and closes the gate regardless).
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public static function kioskUserActiveLoans(int $kioskUserId, int $siteId): array
+    {
+        if ($kioskUserId <= 0) {
+            return [];
+        }
+
+        $db = App::db();
+        $stmt = $db->prepare(
+            'SELECT l.loanID, a.assetID, a.name, a.assetTagCode '
+            . 'FROM tblAssetLoans l JOIN tblAssets a ON a.assetID = l.assetID '
+            . "WHERE l.counterpartyUserID = ? AND l.siteID = ? AND l.direction = 'out' AND l.status = 'active' "
+            . 'AND a.siteID = ? AND a.isDeleted = 0 AND a.isConfidential = 0 '
+            . 'ORDER BY a.name ASC'
+        );
+        if ($stmt === false) {
+            error_log('AssetRegister::kioskUserActiveLoans() prepare failed: ' . $db->error);
+            return [];
+        }
+        $stmt->bind_param('iii', $kioskUserId, $siteId, $siteId);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        $rows = [];
+        while ($row = $result->fetch_assoc()) {
+            $rows[] = $row;
+        }
+        $stmt->close();
         return $rows;
     }
 }

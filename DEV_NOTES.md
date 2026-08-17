@@ -1674,6 +1674,131 @@ two can never drift apart on what a given viewer is allowed to see.
 The export column list is an explicit allow-list; `licenseKey` and
 `publicToken` are never selected for it.
 
+### Phase 3 (#411-#415) — stocktake, depreciation history, kits, kiosk mode, GS1 Digital Link/GEPIR
+
+Five sub-issues, schema shipped whole in migration 161 (+ one small
+migration 162 ENUM/route addition for the kiosk pass) — the same
+"foundation migration first, logic in later passes" shape Phase 1 used.
+The non-obvious bits a future dev needs, one per sub-issue:
+
+**Kiosk security model (#414).** A kiosk terminal is a shared,
+unattended, PUBLIC device — `assets/kiosk` and `assets/kiosk-action` are
+seeded `isProtected = 0` and NEVER call `Auth::requireLogin()`. Identity
+lives in TWO layers, both distinct from a normal portal login:
+
+- `tblAssetKioskTokens` — the per-DEVICE credential (`?token=` in the
+  URL), minted by an admin, shown once at mint time, never re-readable.
+  `resolveKioskTerminal()` re-validates the `^[a-f0-9]{32}$` shape itself
+  and treats "unknown" and "revoked" (`isActive = 0`) identically (no
+  oracle) — same convention as `/a/{token}`.
+- `tblAssetKioskPins` — the per-USER credential (a short PIN a member
+  sets for themselves at `/assets/kiosk-pin`, a normal session-gated
+  page). `kiosk.php`/`kiosk-action.php` NEVER set `$_SESSION['user_id']`
+  — that would grant the shared device a real portal login. Instead they
+  use their own `kiosk_token_id`/`kiosk_site_id`/`kiosk_user_id`/
+  `kiosk_user_name`/`kiosk_expires` session keys, cleared on terminal
+  switch or idle-timeout (server-enforced on every load, independent of
+  the `assets.kiosk_auto_checkout` client-side countdown display).
+
+Every kiosk check-in/out audits as entityType `'loan'` (it IS a loan
+event) with the new `actorType: 'kiosk'` value +
+`AssetRegister::audit()`'s `$actorUserIdOverride` parameter — the only
+way to attribute a row to a real user with no session of their own. This
+lets an auditor filter `actorType = 'kiosk'` to see every action taken on
+an unattended device, separately from a logged-in `'user'` action.
+`kioskCheckout()`/`kioskCheckin()` both reject a confidential asset with
+the exact same message as a wrong-status one (no oracle) and never run
+`cascadeKitCheckout()` — a kiosk hand-over is always a single asset.
+
+**Reducing-balance depreciation — no `depreciationRate` column (#412).**
+`tblAssets` has no stored percentage; `computeReducingBalanceValue()`
+derives a CONSTANT yearly percentage once, from `costPence`,
+`salvageValuePence`, and `usefulLifeYears`:
+
+```
+rate = 1 - (salvageValuePence / costPence) ^ (1 / usefulLifeYears)
+```
+
+then applies that same fixed rate compounding year-over-year from the
+purchase date to today. Requires a POSITIVE `salvageValuePence` (unlike
+straight-line, which doesn't) — an asset missing that input, or not
+`depreciationMethod = 'reducing-balance'`, simply renders nothing on
+item.php rather than guessing. `tblAssetValueHistory` (one row per
+`(asset, valueDate)`, `uq_astvh_asset_date`) is the snapshot table the
+`#405` cron writes to on a write-on-change-only basis — item.php's Value
+History panel is pure read-only display over that table, never itself a
+compute path.
+
+**Kit design — one level deep, cascade only at checkout (#413).** A kit
+is `tblAssets.parentAssetID` (column existed since migration 159,
+unused until this pass). `attachKitChild()` enforces, in order: both
+assets exist on this site; child ≠ parent; the PARENT is not itself
+someone else's component (no two-level nesting); the CHILD doesn't
+already have components of its own (same reason); the child has no
+EXISTING parent (detach first); the child has no open loan. A kit's
+components only ever move together at the LOAN boundary —
+`cascadeKitCheckout()`/`cascadeKitCheckin()` fire ONLY for a top-level
+loan (`parentLoanID IS NULL`) on an asset that currently has components,
+and `cascadeKitCheckin()` additionally prompts for a PER-COMPONENT return
+condition (a kit's individual pieces can come back in different states
+even though they went out together).
+
+**Stocktake `verifyStatus` lifecycle (#411).** `tblAssetStocktakes`
+(`status`: `open`→`closed`) owns a run; `tblAssetStocktakeItems`
+(`uq_aststi_stocktake_asset` — one row per asset per run, a re-scan is an
+UPDATE not a duplicate) tracks each asset through:
+
+- `pending` — expected (pre-populated from the run's location/category
+  scope at open time), not yet scanned.
+- `present` — scanned, at its recorded location.
+- `moved` — scanned, but at a DIFFERENT location (`foundLocationID`
+  records where).
+- `unexpected` — scanned during this run but wasn't in the original
+  expected set.
+- `missing` — closed out with the run (never scanned) — the ONLY status
+  a closed run can still show as unresolved.
+
+**GS1 Digital Link resolver + GEPIR config gating (#415, the FINAL Asset
+Tracker Phase 3 pass).** `Router::handleSpecialRoutes()` gained a THIRD
+prefix-matched block (after `e/{slug}` and `a/{token}`) recognising the
+three bare GS1 Digital Link path shapes Asset Tracker identifiers can
+carry — `01/{gtin}` (GTIN, optionally `/21/{serial}`), `8003/{grai}`
+(GRAI), `8004/{giai}` (GIAI) — each anchored-regex-matched and NOT a
+`tblRoutes` row, requiring `_apps/assets/dl.php` directly exactly like
+the `a/{token}` block requires `tag.php`. `dl.php` gates on
+`assets.digital_link_enabled` (a GLOBAL/host-site-merged setting read via
+`App::settings()`, since the resolver is deliberately cross-site — there
+is no session-selected site to scope a per-site override to), then calls
+`AssetRegister::resolveDigitalLink()`, which is ALSO deliberately global
+(no `Site::id()` filter — GS1 keys are globally unique) but excludes a
+confidential asset in the SQL `WHERE` clause itself (never a post-filter)
+so there is no code path that could ever hand back a confidential
+asset's token; an ambiguous match (>1 asset sharing a key) resolves to
+null identically to "not found". A hit is a plain 302 redirect to the
+asset's EXISTING `/a/{token}` public page — `dl.php` makes no further
+access decision of its own, `tag.php` owns everything past that point.
+
+GEPIR (Global Electronic Party Information Registry) verify is a
+SEPARATE, manager-only, session-gated action (`identifier-verify.php` →
+`AssetRegister::verifyIdentifier()`) — nothing to do with the public
+resolver above beyond sharing the word "GS1". It ALWAYS runs the local
+GS1 mod-10 check-digit first (`validateIdentifier()`, unchanged from
+Phase 1) and ONLY attempts an outbound GEPIR HTTP lookup when BOTH
+`assets.gepir_verify_enabled === 'true'` AND `assets.gepir_endpoint` is a
+non-empty `https://` URL — both off/empty by default (migration 161), so
+a fresh install never makes an outbound call until an admin explicitly
+configures a real endpoint. The outbound call itself
+(`AssetRegister::gepirLookup()`, private) is defensive-by-default: 5s
+timeout, TLS verification always on, no redirects followed, response
+size capped both via a `Range` request header and a hard `substr()`
+after retrieval. ANY GEPIR failure — feature off, no endpoint, network/
+timeout/parse error — falls back to the local check-digit result rather
+than failing the verify action; `isVerified`/`verifiedAt`/`verifyNote`
+(migration 161 columns on `tblAssetIdentifiers`) are the verify cache,
+and every verify audits as entityType `'identifier'`, action `'update'`
+(mirrors into the platform's generic audit trail like any other
+identifier edit).
+
 ---
 
 ## Troubleshooting

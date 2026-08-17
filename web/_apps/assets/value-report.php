@@ -14,14 +14,22 @@
  * panels on `item.php` are.
  *
  * "Current value" throughout this page PREFERS each asset's persisted
- * `tblAssets.currentValuePence` (written by the `#405` cron's
- * `AssetRegister::persistCurrentValues()`) and falls back to a live
- * `computeStraightLineValue()` estimate only when nothing has been
- * persisted yet — an asset that isn't computable at all (reducing-balance,
- * or a straight-line asset missing an input) is counted separately
+ * `tblAssets.currentValuePence` (written DAILY by the `#405` cron's
+ * `AssetRegister::persistCurrentValues()` call — widened by `#412` Phase 3
+ * Pass 2 to auto-recalculate BOTH straight-line AND reducing-balance
+ * assets, not straight-line only) and falls back to a live
+ * `computeCurrentValue()` estimate (same #412 dispatcher — straight-line
+ * or reducing-balance, by the asset's own `depreciationMethod`) only when
+ * nothing has been persisted yet — an asset that isn't computable by
+ * EITHER method (missing an input; for reducing-balance that includes a
+ * missing/zero salvage value, see `AssetRegister::
+ * computeReducingBalanceValue()`'s own doc) is counted separately
  * (`notValuedCount`) rather than folded into a total as if it were zero.
  * See `AssetRegister::valueSummaryForSite()`/`depreciationReportRows()`'s
- * own docs (class header point 12) for the full rule.
+ * own docs (class header point 12) for the full rule. Per-asset value
+ * TRENDS over time live on each asset's own `item.php` "Value history"
+ * panel (`#412`), fed by the same cron's daily `tblAssetValueHistory`
+ * snapshots — this register-wide report stays a point-in-time dashboard.
  *
  * CHARTS: server-rendered CSS-flex bars only (mirrors
  * `_apps/admin/reports/index.php`'s own convention) — no JS chart library,
@@ -45,9 +53,10 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   2.0.0
+ * @version   2.1.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/404
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/408
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/412
  * -----------------------------------------------------------------------------
  */
 

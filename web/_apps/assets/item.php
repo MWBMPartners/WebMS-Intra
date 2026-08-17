@@ -62,10 +62,25 @@
  * re-checks that same gate independently server-side, so a hidden control
  * is never the only thing stopping an unauthorised POST. The Depreciation
  * readout inside the "Purchase, warranty & depreciation" card
- * (`AssetRegister::computeStraightLineValue()`) is DISPLAY-ONLY and never
- * invents a value — it renders nothing when the asset's depreciation
- * method isn't 'straight-line' or any of purchaseCostPence/
- * usefulLifeMonths/purchaseDate is missing.
+ * (`AssetRegister::computeCurrentValue()`, #412 — dispatches to
+ * `computeStraightLineValue()`/`computeReducingBalanceValue()` by the
+ * asset's own `depreciationMethod`) is DISPLAY-ONLY and never invents a
+ * value — it renders nothing when the method is 'none'/unrecognised or
+ * either pure helper's own required inputs are missing (see each
+ * method's doc — a reducing-balance asset additionally requires a
+ * positive `salvageValuePence`, unlike straight-line).
+ *
+ * VALUE HISTORY panel (#412, Phase 3 Pass 2) — a reverse-chronological
+ * list of `tblAssetValueHistory` snapshots (`AssetRegister::
+ * valueHistory()`), only rendered when that call returns at least one
+ * row. Read-visible to any viewer who reaches this page at all, same
+ * convention as the Owners/Identifiers panels above — a book-value trend
+ * is not itself confidential beyond the page's own existing
+ * confidential-asset gate. Snapshots are written by the `#405` cron's
+ * `AssetRegister::persistCurrentValues()` call, one row per day the
+ * computed value actually CHANGED (see `recordValueSnapshot()`'s own
+ * doc for the write-on-change-only rule) — there is no add/edit control
+ * on this page, this panel is read-only history.
  *
  * IDENTIFIERS panel (#397) — same read-visible/edit-manager-gated split as
  * the Owners panel immediately above it (see that note below): the list
@@ -80,6 +95,21 @@
  * identifier TYPES (migration 159) are the only ones offered in the
  * add-form's dropdown — managing that vocabulary itself is intentionally
  * OUT of scope for #397 (no admin screen, no new migration this pass).
+ *
+ * DIGITAL LINK + VERIFY (#415, Phase 3 Pass 6 — FINAL) — two additions to
+ * the Identifiers panel above, both read-visible to any viewer reaching
+ * this page: (1) a GS1 Digital Link URI (`AssetRegister::
+ * digitalLinkUri()`) for every GTIN/GRAI/GIAI row, resolving via the
+ * Router's `01/`|`8003/`|`8004/` special-route block through
+ * `dl.php`/`AssetRegister::resolveDigitalLink()` to this SAME asset's
+ * `/a/{token}` public page; (2) the existing `isVerified` badge now also
+ * reflects a manager-run re-check (not just the original add-time
+ * structural pass), showing `verifiedAt`/`verifyNote` as subtext once
+ * one has actually run. The manager-only "Verify" button posts to
+ * `identifier-verify.php`, which runs `AssetRegister::verifyIdentifier()`
+ * — local GS1 mod-10 check-digit ALWAYS, then an optional GEPIR registry
+ * lookup only when `assets.gepir_verify_enabled`/`assets.gepir_endpoint`
+ * are configured (off by default) — see that method's own doc.
  *
  * OWNERS vs VAULT — two DIFFERENT visibility rules on this one page (#396):
  *   - The Owners panel's LIST is visible (read-only) to any logged-in
@@ -150,11 +180,25 @@
  * "under-insured" badge when `insuredValuePence` is below the existing
  * Depreciation card's `$estimatedCurrentValuePence` readout.
  *
+ * KIT / COMPONENTS panel (#413, Phase 3 Pass 3) — same read-visible/
+ * edit-manager-gated split as the Owners/Identifiers panels above: the
+ * component list (`AssetRegister::kitChildren()`) is visible to any viewer
+ * reaching this page; the Detach button on each row and the "Add
+ * component" picker (`AssetRegister::eligibleKitChildCandidates()`) are
+ * `$canManage`-only, mirrored server-side in kit-save.php. Only rendered
+ * at all when there's at least one component OR the viewer can manage
+ * them (an empty, non-manager-visible panel would just be noise). The
+ * Loans panel's own checkin `<details>` form additionally prompts for a
+ * per-component return condition, ONLY for a top-level loan
+ * (`parentLoanID IS NULL`) on an asset that has components — see
+ * `AssetRegister::cascadeKitCheckout()`/`cascadeKitCheckin()`'s own doc
+ * for the full kit-aware-loan mechanism this panel surfaces.
+ *
  * @package   Portal\Assets
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.6.0
+ * @version   1.9.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/393
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/394
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/396
@@ -166,6 +210,9 @@
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/408
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/409
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/410
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/412
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/413
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/415
  * -----------------------------------------------------------------------------
  */
 
@@ -240,6 +287,16 @@ if ($asset['parentAssetID'] !== null) {
         $parentAssetName = $paRow !== null ? (string) $paRow['name'] : null;
     }
 }
+
+// 🧰 Kit / components (#413, Phase 3 Pass 3) — this asset's own component
+// list (any viewer reaching this page, same read-visible convention as the
+// Owners/Identifiers panels below) and, manager-only, the picker of assets
+// that are ELIGIBLE to be added as a new component (kit-save.php's `attach`
+// action re-validates every one of AssetRegister::eligibleKitChildCandidates()'s
+// own eligibility rules from scratch regardless — this is a display-only
+// convenience list, never itself an authorisation boundary).
+$kitChildren = AssetRegister::kitChildren($assetId, $siteId);
+$kitCandidates = $canManage === true ? AssetRegister::eligibleKitChildCandidates($assetId, $siteId) : [];
 
 // 📎 Resources — split into "general" (any viewer who can see this asset)
 // and the confidential vault subset (ownership-agreement/insurance/legal —
@@ -499,14 +556,20 @@ if ($canManageMaintenance === true) {
     }
 }
 
-// 💷 Depreciation / value readout (#399) — straight-line only, DISPLAY
-// ONLY (see AssetRegister::computeStraightLineValue()'s own doc for why
-// reducing-balance + persisting tblAssets.currentValuePence are Phase-3
-// cron work, out of scope here). Returns null — never rendered, NEVER
-// invented — when the asset's depreciation fields aren't set up for a
-// computable estimate (method isn't 'straight-line', or purchaseCostPence/
-// usefulLifeMonths/purchaseDate is missing).
-$estimatedCurrentValuePence = AssetRegister::computeStraightLineValue($asset);
+// 💷 Depreciation / value readout (#399, widened #412) — DISPLAY ONLY,
+// dispatches to whichever pure estimator matches the asset's own
+// depreciationMethod (AssetRegister::computeCurrentValue() — see that
+// method's own doc). Returns null — never rendered, NEVER invented —
+// when the method is 'none'/unrecognised or the matching estimator's
+// own required inputs are missing (see computeStraightLineValue()/
+// computeReducingBalanceValue()'s docs for exactly which per method).
+$estimatedCurrentValuePence = AssetRegister::computeCurrentValue($asset);
+
+// 📈 Value history (#412) — persisted daily snapshots for the panel
+// further down. Read-visible to any viewer who reaches this page (see
+// file header's VALUE HISTORY panel note) — no privilege gate beyond the
+// page's own confidential-asset check above.
+$valueHistory = AssetRegister::valueHistory($assetId, $siteId);
 
 // 🔍 Found-reports summary (#401) — manager-only. A small "how many
 // public 'I found this' submissions has this asset received" surfacing
@@ -688,6 +751,7 @@ $nonce = htmlspecialchars(App::cspNonce(), ENT_QUOTES, 'UTF-8');
         <div class="col-md-3"><strong>Parent asset</strong><br>
             <?php if ($parentAssetName !== null): ?>
                 <a href="/assets/item?id=<?php echo (int) $asset['parentAssetID']; ?>"><?php echo htmlspecialchars($parentAssetName, ENT_QUOTES, 'UTF-8'); ?></a>
+                <br><small class="text-muted">Loaned and returned together with its parent kit.</small>
             <?php else: ?>
                 <span class="text-muted">—</span>
             <?php endif; ?>
@@ -713,14 +777,14 @@ $nonce = htmlspecialchars(App::cspNonce(), ENT_QUOTES, 'UTF-8');
         <?php if ($asset['warrantyDetails'] !== null && (string) $asset['warrantyDetails'] !== ''): ?>
             <div class="col-12"><strong>Warranty details</strong><br><?php echo htmlspecialchars((string) $asset['warrantyDetails'], ENT_QUOTES, 'UTF-8'); ?></div>
         <?php endif; ?>
-        <?php /* 💷 Depreciation / value readout (#399) — only shown once a
-                 depreciation method is actually configured on this asset
-                 (edit.php); "Estimated current value" only ever appears
-                 when AssetRegister::computeStraightLineValue() actually
+        <?php /* 💷 Depreciation / value readout (#399, widened #412) — only
+                 shown once a depreciation method is actually configured on
+                 this asset (edit.php); "Estimated current value" only ever
+                 appears when AssetRegister::computeCurrentValue() actually
                  returned a number — see this panel's PHP setup for why a
-                 non-computable case (reducing-balance, or a straight-line
-                 asset missing one of cost/life/purchase-date) NEVER
-                 invents a value here, it simply omits the line. */ ?>
+                 non-computable case (missing cost/life/purchase-date, or —
+                 reducing-balance only — a missing/zero salvage value)
+                 NEVER invents a value here, it simply omits the line. */ ?>
         <?php if ((string) $asset['depreciationMethod'] !== 'none'): ?>
             <div class="col-md-3">
                 <strong>Depreciation method</strong><br>
@@ -731,11 +795,142 @@ $nonce = htmlspecialchars(App::cspNonce(), ENT_QUOTES, 'UTF-8');
             <div class="col-md-3">
                 <strong>Estimated current value</strong><br>
                 <?php echo htmlspecialchars((string) $asset['currency'], ENT_QUOTES, 'UTF-8') . ' ' . number_format($estimatedCurrentValuePence / 100, 2); ?>
-                <br><small class="text-muted">Straight-line estimate, as of today &mdash; not a persisted valuation.</small>
+                <br><small class="text-muted"><?php echo htmlspecialchars(ucwords(str_replace('-', ' ', (string) $asset['depreciationMethod'])), ENT_QUOTES, 'UTF-8'); ?> estimate, as of today &mdash; not a persisted valuation.</small>
             </div>
         <?php endif; ?>
     </div>
 </div>
+
+<?php /* 📈 Value history (#412) — daily book-value snapshots persisted by
+         the #405 cron's AssetRegister::persistCurrentValues() call. Only
+         rendered when there's at least one recorded snapshot; read-visible
+         to any viewer who reaches this page (see file header's VALUE
+         HISTORY panel note). valueHistory() returns oldest→newest (the
+         natural order for a future trend chart) — reversed here for a
+         most-recent-first list, which reads better for a human. */ ?>
+<?php if (count($valueHistory) > 0): ?>
+<div class="card mb-3">
+    <div class="card-header"><h2 class="h5 mb-0"><i class="fa-solid fa-chart-line me-2"></i>Value history</h2></div>
+    <div class="card-body">
+        <p class="text-muted small">
+            A new snapshot is recorded only when the computed value actually changes
+            &mdash; a fully depreciated asset sitting at its salvage value won't grow a
+            new row every day. Most recent first.
+        </p>
+        <div class="portal-data-list">
+            <?php foreach (array_reverse($valueHistory) as $vh): ?>
+                <div class="portal-data-row align-items-center">
+                    <div class="col-5 col-md-3">
+                        <?php echo htmlspecialchars((string) $vh['valueDate'], ENT_QUOTES, 'UTF-8'); ?>
+                    </div>
+                    <div class="col-4 col-md-3">
+                        <?php echo htmlspecialchars((string) $asset['currency'], ENT_QUOTES, 'UTF-8') . ' ' . number_format(((int) $vh['currentValuePence']) / 100, 2); ?>
+                    </div>
+                    <div class="col-3 col-md-3">
+                        <span class="badge bg-secondary"><?php echo htmlspecialchars(ucwords(str_replace('-', ' ', (string) $vh['method'])), ENT_QUOTES, 'UTF-8'); ?></span>
+                    </div>
+                    <div class="col-12 col-md-3 text-md-end">
+                        <span class="badge bg-<?php echo $vh['source'] === 'manual' ? 'info' : 'light text-dark'; ?>">
+                            <i class="fa-solid <?php echo $vh['source'] === 'manual' ? 'fa-user-pen' : 'fa-robot'; ?> me-1"></i>
+                            <?php echo htmlspecialchars(ucwords((string) $vh['source']), ENT_QUOTES, 'UTF-8'); ?>
+                        </span>
+                    </div>
+                </div>
+            <?php endforeach; ?>
+        </div>
+    </div>
+</div>
+<?php endif; ?>
+
+<!-- 🧰 Kit / components (#413, Phase 3 Pass 3) — this asset's own component
+     list is visible to any viewer reaching this page (same read-visible
+     convention as the Owners/Identifiers panels further down); the Detach
+     button on each row and the "Add component" form are $canManage-only —
+     kit-save.php re-derives and re-checks that same gate independently
+     server-side, so a hidden control is never the only thing stopping an
+     unauthorised POST. Loaning THIS asset (when it has components) checks
+     the whole kit out together — see the Loans panel's own checkin-time
+     kit prompt further down, and AssetRegister::cascadeKitCheckout()/
+     cascadeKitCheckin()'s own doc for the full mechanism. -->
+<?php if (count($kitChildren) > 0 || $canManage === true): ?>
+<div class="card mb-3">
+    <div class="card-header"><h2 class="h5 mb-0"><i class="fa-solid fa-boxes-stacked me-2"></i>Kit / components</h2></div>
+    <div class="card-body">
+        <?php if (count($kitChildren) > 0): ?>
+            <p class="text-muted small">
+                Loaning this asset checks out the whole kit; checking it in returns the components too.
+            </p>
+            <div class="portal-data-list mb-3">
+                <?php foreach ($kitChildren as $kitChild): ?>
+                    <?php $kitChildId = (int) $kitChild['assetID']; ?>
+                    <div class="portal-data-row align-items-center">
+                        <div class="col-6 col-md-5">
+                            <a href="/assets/item?id=<?php echo $kitChildId; ?>">
+                                <?php echo htmlspecialchars((string) $kitChild['name'], ENT_QUOTES, 'UTF-8'); ?>
+                            </a>
+                            <?php if ($kitChild['assetTagCode'] !== null && (string) $kitChild['assetTagCode'] !== ''): ?>
+                                <br><small class="text-muted"><?php echo htmlspecialchars((string) $kitChild['assetTagCode'], ENT_QUOTES, 'UTF-8'); ?></small>
+                            <?php endif; ?>
+                        </div>
+                        <div class="col-3 col-md-4">
+                            <span class="badge bg-<?php echo htmlspecialchars($statusBadge[(string) $kitChild['status']] ?? 'secondary', ENT_QUOTES, 'UTF-8'); ?>">
+                                <?php echo htmlspecialchars(ucwords(str_replace('-', ' ', (string) $kitChild['status'])), ENT_QUOTES, 'UTF-8'); ?>
+                            </span>
+                        </div>
+                        <?php if ($canManage === true): ?>
+                        <div class="col-3 col-md-3 text-md-end">
+                            <form method="post" action="/assets/kit-save" class="d-inline"
+                                  data-confirm="Detach this component from the kit?" data-confirm-destructive="true">
+                                <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
+                                <input type="hidden" name="action" value="detach">
+                                <input type="hidden" name="childAssetID" value="<?php echo $kitChildId; ?>">
+                                <input type="hidden" name="parentAssetID" value="<?php echo $assetId; ?>">
+                                <button type="submit" class="btn btn-sm btn-outline-danger">
+                                    <i class="fa-solid fa-link-slash me-1"></i>Detach
+                                </button>
+                            </form>
+                        </div>
+                        <?php endif; ?>
+                    </div>
+                <?php endforeach; ?>
+            </div>
+        <?php else: ?>
+            <p class="text-muted">No components attached to this asset yet.</p>
+        <?php endif; ?>
+
+        <?php if ($canManage === true): ?>
+            <?php if (count($kitCandidates) > 0): ?>
+                <form method="post" action="/assets/kit-save" class="row g-2 align-items-end">
+                    <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
+                    <input type="hidden" name="action" value="attach">
+                    <input type="hidden" name="parentAssetID" value="<?php echo $assetId; ?>">
+                    <div class="col-auto">
+                        <label class="form-label small" for="kitChildAssetID">Add component</label>
+                        <select class="form-select form-select-sm" id="kitChildAssetID" name="childAssetID" required>
+                            <option value="">Select an asset…</option>
+                            <?php foreach ($kitCandidates as $candidate): ?>
+                                <option value="<?php echo (int) $candidate['assetID']; ?>">
+                                    <?php echo htmlspecialchars((string) $candidate['name'], ENT_QUOTES, 'UTF-8'); ?>
+                                    <?php if ($candidate['assetTagCode'] !== null && (string) $candidate['assetTagCode'] !== ''): ?>
+                                        (<?php echo htmlspecialchars((string) $candidate['assetTagCode'], ENT_QUOTES, 'UTF-8'); ?>)
+                                    <?php endif; ?>
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    <div class="col-auto">
+                        <button type="submit" class="btn btn-sm btn-outline-primary">
+                            <i class="fa-solid fa-plus me-1"></i>Add component
+                        </button>
+                    </div>
+                </form>
+            <?php else: ?>
+                <p class="text-muted small mb-0">No eligible assets to add.</p>
+            <?php endif; ?>
+        <?php endif; ?>
+    </div>
+</div>
+<?php endif; ?>
 
 <!-- 🔗 Public page & lost-and-found (#401) — manager-only: this panel
      shows/links the SECRET public token (whoever holds it reaches the
@@ -1149,6 +1344,40 @@ $nonce = htmlspecialchars(App::cspNonce(), ENT_QUOTES, 'UTF-8');
                                         </select>
                                         <label class="form-label small">Notes <span class="text-muted">(optional)</span></label>
                                         <input type="text" class="form-control form-control-sm mb-1" name="conditionInNotes" maxlength="500">
+                                        <?php
+                                        // 🧰 Kit cascade (#413) — a TOP-LEVEL loan (parentLoanID null)
+                                        // on an asset with components: prompt for a per-component return
+                                        // condition. Empty selection = "same as above", i.e. the parent's
+                                        // own conditionIn — AssetRegister::cascadeKitCheckin() already
+                                        // falls back to that when childCondition[] omits (or invalidates)
+                                        // a component. A CHILD loan (parentLoanID set) never shows this —
+                                        // it has no components of its own (kits are one level deep).
+                                        $kitChildLoans = [];
+                                        if ($loan['parentLoanID'] === null && count($kitChildren) > 0) {
+                                            $kitChildLoans = AssetRegister::activeKitChildLoans((int) $loan['loanID'], $siteId);
+                                        }
+                                        ?>
+                                        <?php if (count($kitChildLoans) > 0): ?>
+                                            <div class="border rounded p-2 mb-1 bg-body-tertiary">
+                                                <label class="form-label small mb-1">
+                                                    <i class="fa-solid fa-boxes-stacked me-1"></i>This is a kit &mdash;
+                                                    <?php echo count($kitChildLoans); ?> component(s) will be checked in too:
+                                                </label>
+                                                <?php foreach ($kitChildLoans as $kitChildLoan): ?>
+                                                    <div class="mb-1">
+                                                        <label class="form-label small mb-0">
+                                                            <?php echo htmlspecialchars((string) $kitChildLoan['assetName'], ENT_QUOTES, 'UTF-8'); ?>
+                                                        </label>
+                                                        <select class="form-select form-select-sm" name="childCondition[<?php echo (int) $kitChildLoan['assetID']; ?>]">
+                                                            <option value="">(same as above)</option>
+                                                            <?php foreach (AssetRegister::CONDITION_STATES as $cc): ?>
+                                                                <option value="<?php echo htmlspecialchars($cc, ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars(ucwords($cc), ENT_QUOTES, 'UTF-8'); ?></option>
+                                                            <?php endforeach; ?>
+                                                        </select>
+                                                    </div>
+                                                <?php endforeach; ?>
+                                            </div>
+                                        <?php endif; ?>
                                         <button type="submit" class="btn btn-sm btn-primary">Confirm check-in</button>
                                     </form>
                                 </details>
@@ -1815,6 +2044,23 @@ $nonce = htmlspecialchars(App::cspNonce(), ENT_QUOTES, 'UTF-8');
                 <h3 class="h6 text-muted mb-2"><?php echo htmlspecialchars($identCategoryLabel[$identCat], ENT_QUOTES, 'UTF-8'); ?></h3>
                 <div class="portal-data-list mb-3">
                     <?php foreach ($identifiersByCategory[$identCat] as $ident): ?>
+                        <?php
+                        // 🔗 Digital Link URI (#415) — null for every typeCode
+                        // outside the three GS1 keys the resolver understands
+                        // (GTIN/GRAI/GIAI); item.php simply omits the link for
+                        // anything else rather than rendering a misleading one.
+                        $identDlUri = AssetRegister::digitalLinkUri($ident);
+                        // ✅ Verify badge (#415) — colour-blind-safe: colour +
+                        // icon + VISIBLE TEXT, never colour alone. isVerified
+                        // now reflects EITHER the original add-time structural
+                        // check (addIdentifier()) OR a later manager-run
+                        // AssetRegister::verifyIdentifier() re-check
+                        // (check-digit + optional GEPIR) — verifiedAt/
+                        // verifyNote (set only once a verify has actually run)
+                        // distinguish "never checked" from "checked and passed/
+                        // failed" in the subtext below.
+                        $identHasVerifyRun = $ident['verifiedAt'] !== null && (string) $ident['verifiedAt'] !== '';
+                        ?>
                         <div class="portal-data-row align-items-center">
                             <div class="col-6 col-md-4">
                                 <?php echo htmlspecialchars((string) $ident['typeLabel'], ENT_QUOTES, 'UTF-8'); ?>
@@ -1822,7 +2068,16 @@ $nonce = htmlspecialchars(App::cspNonce(), ENT_QUOTES, 'UTF-8');
                                     <span class="badge bg-warning text-dark" title="Primary identifier for this asset"><i class="fa-solid fa-star"></i></span>
                                 <?php endif; ?>
                                 <?php if ((int) $ident['isVerified'] === 1): ?>
-                                    <span class="badge bg-success" title="Verified — format/check-digit confirmed"><i class="fa-solid fa-check"></i></span>
+                                    <span class="badge bg-success" title="Verified — format/check-digit confirmed<?php echo $identHasVerifyRun === true ? ' (last checked ' . htmlspecialchars(date('j M Y', strtotime((string) $ident['verifiedAt'])), ENT_QUOTES, 'UTF-8') . ')' : ''; ?>">
+                                        <i class="fa-solid fa-check me-1"></i>Verified
+                                    </span>
+                                <?php elseif ($identHasVerifyRun === true): ?>
+                                    <span class="badge bg-danger" title="Verification failed — last checked <?php echo htmlspecialchars(date('j M Y', strtotime((string) $ident['verifiedAt'])), ENT_QUOTES, 'UTF-8'); ?>">
+                                        <i class="fa-solid fa-triangle-exclamation me-1"></i>Unverified
+                                    </span>
+                                <?php endif; ?>
+                                <?php if ($identHasVerifyRun === true && $ident['verifyNote'] !== null && (string) $ident['verifyNote'] !== ''): ?>
+                                    <br><small class="text-muted"><?php echo htmlspecialchars((string) $ident['verifyNote'], ENT_QUOTES, 'UTF-8'); ?></small>
                                 <?php endif; ?>
                                 <?php if ($ident['subScheme'] !== null && (string) $ident['subScheme'] !== ''): ?>
                                     <br><small class="text-muted"><?php echo htmlspecialchars((string) $ident['subScheme'], ENT_QUOTES, 'UTF-8'); ?></small>
@@ -1833,9 +2088,31 @@ $nonce = htmlspecialchars(App::cspNonce(), ENT_QUOTES, 'UTF-8');
                             </div>
                             <div class="col-4 col-md-5">
                                 <code><?php echo htmlspecialchars((string) $ident['value'], ENT_QUOTES, 'UTF-8'); ?></code>
+                                <?php if ($identDlUri !== null): ?>
+                                    <!-- 🔗 GS1 Digital Link URI (#415) — resolves via the
+                                         Router's 01|8003|8004 special-route block, through
+                                         AssetRegister::resolveDigitalLink(), to THIS asset's
+                                         own /a/{token} public page. Display-only; never the
+                                         only path to that page. -->
+                                    <br><a href="<?php echo htmlspecialchars($identDlUri, ENT_QUOTES, 'UTF-8'); ?>" class="small text-muted text-break" target="_blank" rel="noopener noreferrer" title="GS1 Digital Link — opens this asset's public page">
+                                        <i class="fa-solid fa-link me-1"></i><?php echo htmlspecialchars($identDlUri, ENT_QUOTES, 'UTF-8'); ?>
+                                    </a>
+                                <?php endif; ?>
                             </div>
                             <div class="col-2 col-md-3 text-end">
                                 <?php if ($canManage === true): ?>
+                                    <!-- 🔍 Verify (#415) — AssetRegister::verifyIdentifier():
+                                         local GS1 mod-10 check-digit ALWAYS, then an optional
+                                         GEPIR lookup when assets.gepir_verify_enabled/
+                                         assets.gepir_endpoint are configured (off by default). -->
+                                    <form method="post" action="/assets/identifier-verify" class="d-inline">
+                                        <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
+                                        <input type="hidden" name="assetID" value="<?php echo $assetId; ?>">
+                                        <input type="hidden" name="identifierID" value="<?php echo (int) $ident['identifierID']; ?>">
+                                        <button type="submit" class="btn btn-sm btn-outline-primary" title="Verify — check digit + GEPIR">
+                                            <i class="fa-solid fa-magnifying-glass-arrow-right"></i>
+                                        </button>
+                                    </form>
                                     <?php if ((int) $ident['isPrimary'] !== 1): ?>
                                         <form method="post" action="/assets/identifiers-save" class="d-inline">
                                             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
