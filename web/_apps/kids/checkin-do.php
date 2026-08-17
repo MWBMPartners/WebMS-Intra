@@ -2,14 +2,25 @@
 // _apps/kids/checkin-do.php (#298)
 declare(strict_types=1);
 
+use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Logger;
+use Portal\Core\Router;
 use Portal\Core\Site;
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') { header('Location: /kids/checkin', true, 302); exit(); }
 
 Auth::ensureSession();
 Auth::requireLogin();
+
+// 🛡️ Safeguarding gate (#298 gap fix) — same role check as the checkin.php
+//     terminal it's posted from; without it any logged-in member could
+//     check in ANY child at the site by guessing/enumerating childID.
+if (App::isAdmin() === false && App::hasRole('kids_team') === false) {
+    Router::renderError(403);
+    return;
+}
+
 if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) { http_response_code(400); exit('Bad request'); }
 
 $childId  = (int) ($_POST['childID'] ?? 0);

@@ -11,7 +11,7 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   0.8.2
+ * @version   0.9.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/90
  * -----------------------------------------------------------------------------
  */
@@ -181,6 +181,17 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                             <i class="fa-solid fa-download"></i>
                         </a>
                         <?php if (App::isAdmin() === true): ?>
+                            <!-- ✏️ Edit metadata (#gap-fix D6) — opens the shared #docEditModal below,
+                                 populated from these data-* attributes; index.php previously exposed
+                                 only Download/Delete even though api/update.php already supported it. -->
+                            <button type="button" class="btn btn-sm btn-outline-secondary portal-doc-edit-btn" title="Edit"
+                                    data-doc-id="<?php echo (int) $doc['documentID']; ?>"
+                                    data-doc-title="<?php echo htmlspecialchars($doc['title'], ENT_QUOTES, 'UTF-8'); ?>"
+                                    data-doc-description="<?php echo htmlspecialchars((string) ($doc['description'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>"
+                                    data-doc-category-id="<?php echo $doc['categoryID'] !== null ? (int) $doc['categoryID'] : ''; ?>"
+                                    data-doc-published="<?php echo ((int) $doc['isPublished'] === 1) ? '1' : '0'; ?>">
+                                <i class="fa-solid fa-pen"></i>
+                            </button>
                             <form method="post" action="/documents/delete" class="d-inline" data-confirm="Delete this document?" data-confirm-destructive="true">
                                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
                                 <input type="hidden" name="documentID" value="<?php echo (int) $doc['documentID']; ?>">
@@ -194,6 +205,115 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <?php endforeach; ?>
         </div>
     <?php endforeach; ?>
+<?php endif; ?>
+
+<?php if (App::isAdmin() === true): ?>
+<!-- ✏️ Shared "Edit document" modal (#gap-fix D6). Populated per-row by
+     portal-doc-edit-btn's data-* attributes; submits JSON to the existing
+     dual-mode (bearer OR admin session + CSRF) api/documents/update.php via
+     window.Portal.fetch (portal.js — global on every page), so this reuses
+     the SAME title/description/categoryID/isPublished validation the REST
+     API already enforces rather than duplicating it in a new handler. -->
+<div class="modal fade" id="docEditModal" tabindex="-1" aria-labelledby="docEditModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-fullscreen-sm-down">
+        <div class="modal-content">
+            <form id="docEditForm">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="docEditModalLabel">Edit document</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <input type="hidden" id="docEditId" value="">
+                    <div class="mb-3">
+                        <label class="form-label" for="docEditTitle">Title</label>
+                        <input type="text" class="form-control" id="docEditTitle" maxlength="255" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label" for="docEditDescription">Description</label>
+                        <textarea class="form-control" id="docEditDescription" rows="3"></textarea>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label" for="docEditCategory">Category</label>
+                        <select class="form-select" id="docEditCategory">
+                            <option value="">— Uncategorised —</option>
+                            <?php foreach ($categories as $cat): ?>
+                                <option value="<?php echo (int) $cat['categoryID']; ?>">
+                                    <?php echo htmlspecialchars($cat['categoryName'], ENT_QUOTES, 'UTF-8'); ?>
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    <div class="form-check">
+                        <input type="checkbox" class="form-check-input" id="docEditPublished">
+                        <label class="form-check-label" for="docEditPublished">Published</label>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save changes</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    var modalEl = document.getElementById('docEditModal');
+    if (!modalEl || !window.bootstrap) {
+        return;
+    }
+    var modal = new bootstrap.Modal(modalEl);
+    var form  = document.getElementById('docEditForm');
+
+    // 🖱️ Open + populate the modal from the clicked row's data-* attributes.
+    document.querySelectorAll('.portal-doc-edit-btn').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            document.getElementById('docEditId').value = btn.getAttribute('data-doc-id') || '';
+            document.getElementById('docEditTitle').value = btn.getAttribute('data-doc-title') || '';
+            document.getElementById('docEditDescription').value = btn.getAttribute('data-doc-description') || '';
+            document.getElementById('docEditCategory').value = btn.getAttribute('data-doc-category-id') || '';
+            document.getElementById('docEditPublished').checked = btn.getAttribute('data-doc-published') === '1';
+            modal.show();
+        });
+    });
+
+    // 💾 Submit — JSON body via window.Portal.fetch (adds X-CSRF-Token from
+    // the page's csrf-token meta tag automatically; see portal.js).
+    form.addEventListener('submit', function (e) {
+        e.preventDefault();
+        var id = document.getElementById('docEditId').value;
+        if (!id) {
+            return;
+        }
+        var categoryVal = document.getElementById('docEditCategory').value;
+        var payload = {
+            title: document.getElementById('docEditTitle').value,
+            description: document.getElementById('docEditDescription').value,
+            categoryID: categoryVal === '' ? null : parseInt(categoryVal, 10),
+            isPublished: document.getElementById('docEditPublished').checked
+        };
+
+        window.Portal.fetch(
+            '/api/documents/update?id=' + encodeURIComponent(id),
+            { method: 'POST', body: payload },
+            function () {
+                if (window.Portal.toast) {
+                    window.Portal.toast('Document updated.', 'success');
+                }
+                window.location.reload();
+            },
+            function (message) {
+                if (window.Portal.toast) {
+                    window.Portal.toast('Update failed: ' + message, 'danger');
+                } else {
+                    window.alert('Update failed: ' + message);
+                }
+            }
+        );
+    });
+});
+</script>
 <?php endif; ?>
 
 <?php

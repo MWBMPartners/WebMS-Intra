@@ -15,7 +15,7 @@
  * @author     MWBM Partners Ltd (t/a MWservices)
  * @copyright  2025-2026 MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version    0.2.0
+ * @version    0.3.0
  * -----------------------------------------------------------------------------
  */
 
@@ -116,6 +116,19 @@ if ($waStmt !== false) {
 // 🔢 Count total login methods (for safety check display)
 $loginMethodCount = Auth::countLoginMethods($userId, $mysqli);
 
+// 🔐 Fetch TOTP two-factor authentication status (#B5a — was previously
+// wired up (setup.php / disable.php / verify.php all work) but nothing on
+// this page linked to them, so nobody could discover or manage 2FA).
+$totpEnabled = false;
+$totpStmt = $mysqli->prepare('SELECT totpEnabled FROM tblUsers WHERE userID = ? LIMIT 1');
+if ($totpStmt !== false) {
+    $totpStmt->bind_param('i', $userId);
+    $totpStmt->execute();
+    $totpRow = $totpStmt->get_result()->fetch_assoc();
+    $totpStmt->close();
+    $totpEnabled = ($totpRow !== null && (int) ($totpRow['totpEnabled'] ?? 0) === 1);
+}
+
 // 📋 Check if local account exists
 $hasLocalAccount = false;
 $laCheck = $mysqli->prepare('SELECT 1 FROM tblLocalAccounts WHERE userID = ? LIMIT 1');
@@ -175,6 +188,9 @@ if (isset($_GET['wa_deleted']) === true && $_GET['wa_deleted'] === '1') {
 if (isset($_GET['wa_registered']) === true && $_GET['wa_registered'] === '1') {
     $successMsg = 'Passkey registered successfully.';
 }
+if (isset($_GET['totp_disabled']) === true && $_GET['totp_disabled'] === '1') {
+    $successMsg = 'Two-factor authentication has been disabled.';
+}
 if (isset($_GET['error']) === true) {
     $errorMap = [
         'csrf'         => 'Invalid session token. Please try again.',
@@ -190,6 +206,7 @@ if (isset($_GET['error']) === true) {
         'unlink_csrf'  => 'Invalid session token. Please try again.',
         'wa_delete'    => 'Unable to remove that passkey.',
         'wa_csrf'      => 'Invalid session token. Please try again.',
+        'totp_nopw'    => 'Your account has no password set, so 2FA cannot be disabled this way. Contact an administrator.',
     ];
     $errorCode = $_GET['error'];
     $errorMsg  = $errorMap[$errorCode] ?? 'An error occurred.';
@@ -336,6 +353,50 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         <i class="fa-solid fa-key me-1"></i> Update Password
                     </button>
                 </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- ========================================================== -->
+    <!-- 🔐 Two-Factor Authentication Card (#B5a)                   -->
+    <!-- ========================================================== -->
+    <div class="col-12 col-lg-6">
+        <div class="card portal-card">
+            <div class="card-header">
+                <h5 class="card-title mb-0">
+                    <i class="fa-solid fa-shield-halved me-1"></i> Two-Factor Authentication
+                </h5>
+            </div>
+            <div class="card-body">
+                <?php if ($totpEnabled === true): ?>
+                    <p class="mb-3">
+                        <span class="badge bg-success"><i class="fa-solid fa-circle-check me-1"></i>Enabled</span>
+                        <span class="text-muted small ms-2">Your account requires a code from your authenticator app at sign-in.</span>
+                    </p>
+
+                    <!-- 🔓 Disable — requires password re-confirmation (#B5b) -->
+                    <form method="post" action="/auth/2fa/disable"
+                          data-confirm="Disable two-factor authentication? This removes an important layer of protection from your account."
+                          data-confirm-destructive="true">
+                        <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
+                        <div class="mb-3">
+                            <label for="totp_current_password" class="form-label">Confirm your password to disable</label>
+                            <input type="password" class="form-control" id="totp_current_password" name="current_password"
+                                   autocomplete="current-password" required>
+                        </div>
+                        <button type="submit" class="btn btn-outline-danger w-100">
+                            <i class="fa-solid fa-shield-halved me-1"></i> Disable Two-Factor Authentication
+                        </button>
+                    </form>
+                <?php else: ?>
+                    <p class="text-muted small">
+                        Two-factor authentication adds a second step at sign-in — a 6-digit code from an
+                        authenticator app — so a leaked password alone isn't enough to sign in as you.
+                    </p>
+                    <a href="/auth/2fa/setup" class="btn btn-sm btn-outline-primary">
+                        <i class="fa-solid fa-plus me-1"></i> Set Up Two-Factor Authentication
+                    </a>
+                <?php endif; ?>
             </div>
         </div>
     </div>

@@ -19,15 +19,37 @@ Auth::requireLogin();
 $db     = App::db();
 $siteId = Site::id();
 
-// Coordinator dropdown — users with the configured role + admins.
+// 👥 Coordinator dropdown — filtered to holders of the configured
+// visitors.coordinator_role (tblUserRoles/tblRoles join — same pattern as
+// PrayerChain::eligiblePartners()). Was previously read then silently
+// ignored, so every active user appeared regardless of role. An empty
+// setting falls back to the old "all active users" behaviour.
 $coordRole = (string) (App::settings()['visitors']['coordinator_role'] ?? 'visitor_coordinator');
 $coords    = [];
-$rs = $db->query("SELECT userID, fullName FROM tblUsers WHERE isActive = 1 ORDER BY fullName");
-if ($rs !== false) {
-    while ($r = $rs->fetch_assoc()) {
-        $coords[] = $r;
+if ($coordRole !== '') {
+    $stmt = $db->prepare(
+        'SELECT DISTINCT u.userID, u.fullName FROM tblUsers u '
+        . 'INNER JOIN tblUserRoles ur ON ur.userID = u.userID '
+        . 'INNER JOIN tblRoles r ON r.roleID = ur.roleID AND r.roleKey = ? '
+        . 'WHERE u.isActive = 1 ORDER BY u.fullName'
+    );
+    if ($stmt !== false) {
+        $stmt->bind_param('s', $coordRole);
+        $stmt->execute();
+        $rs = $stmt->get_result();
+        while ($r = $rs->fetch_assoc()) {
+            $coords[] = $r;
+        }
+        $stmt->close();
     }
-    $rs->free();
+} else {
+    $rs = $db->query("SELECT userID, fullName FROM tblUsers WHERE isActive = 1 ORDER BY fullName");
+    if ($rs !== false) {
+        while ($r = $rs->fetch_assoc()) {
+            $coords[] = $r;
+        }
+        $rs->free();
+    }
 }
 
 $pageTitle   = 'Add visitor';

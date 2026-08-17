@@ -64,7 +64,12 @@ $stmt = $mysqli->prepare(
     . 'FROM tblPrayerRequests pr '
     . 'LEFT JOIN tblUsers u ON u.userID = pr.submitterID '
     . 'LEFT JOIN tblUsers m ON m.userID = pr.moderatorID '
-    . 'WHERE pr.siteID = ? AND pr.requestID = ? LIMIT 1'
+    // 🛡️ kind = 'request' — without this a /prayer-requests/view?id= link
+    // to a Praise (#260) row (kind='praise') would render here, complete
+    // with the moderator "assign a prayer partner" card, which makes no
+    // sense on a gratitude/testimony post. Praise has its own read view at
+    // /praise (see _apps/praise/index.php).
+    . 'WHERE pr.siteID = ? AND pr.requestID = ? AND pr.kind = \'request\' LIMIT 1'
 );
 $req = null;
 if ($stmt !== false) {

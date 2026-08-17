@@ -27,8 +27,24 @@ if (is_readable($authCredsPath) === false) {
 
 require_once dirname(__DIR__) . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEPARATOR . 'bootstrap.php';
 
+use Portal\Core\Auth;
 use Portal\Core\Maintenance;
 use Portal\Core\Router;
+
+// 🔑 Start (or resume) the session BEFORE the maintenance gate below.
+//    Maintenance::currentUserCanBypass() → App::isAdmin() → App::user()
+//    reads $_SESSION, but only if session_status() === PHP_SESSION_ACTIVE
+//    (see App::user()) — and nothing upstream in bootstrap.php starts a
+//    session (it's started lazily by individual app pages via this same
+//    Auth::ensureSession() call). Without it here, a logged-in admin's
+//    session cookie is never read this early, App::user() caches a null
+//    "not logged in" result for the rest of the request (self::$userLoaded
+//    latches true on first call), and currentUserCanBypass() always
+//    returns false — so admins get the 503 page along with everyone else
+//    with no way to sign in and lift maintenance mode. ensureSession() is
+//    idempotent (no-ops if already active), so this can't double-start the
+//    session that app handlers start further down the line.
+Auth::ensureSession();
 
 // 🚧 Maintenance gate (#220).
 //    If portal.maintenance.active = '1' OR the installed_version is

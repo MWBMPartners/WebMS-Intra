@@ -22,7 +22,7 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   0.1.0
+ * @version   0.2.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra
  * -----------------------------------------------------------------------------
  */
@@ -411,6 +411,21 @@ class RateLimiter
         $remaining    = $expiryTime - time();
 
         return max(0, $remaining);
+    }
+
+    /**
+     * 🌐 Public accessor for the same CF / X-Forwarded-For / REMOTE_ADDR
+     * client-IP detection used internally by isBlocked() etc. Exposed so
+     * callers building their own generic-bucket keys (tooMany()/recordHit(),
+     * e.g. `_apps/auth/2fa/verify.php`'s per-user+IP TOTP throttle, #B3) get
+     * the exact same IP the rest of this class would use, instead of
+     * duplicating the proxy-header precedence logic at each call site.
+     *
+     * @return string Client IP address
+     */
+    public static function clientIp(): string
+    {
+        return self::getClientIp();
     }
 
     /**

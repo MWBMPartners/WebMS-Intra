@@ -52,11 +52,15 @@ $siteId      = Site::id();
 $moderatorId = ApiAuth::actorUserId();
 
 $db = App::db();
+// 🛡️ kind = 'request' — defense in depth so a bearer key or session with
+// prayer-requests:write scope can't flip a Praise (#260) row's status
+// through this prayer-requests-labelled endpoint (literal, not bound —
+// fixed constant, not user input).
 if ($status === 'answered') {
     $stmt = $db->prepare(
         'UPDATE tblPrayerRequests SET status = ?, testimony = ?, answeredAt = NOW(), '
         . 'moderatorID = ?, moderatedAt = NOW() '
-        . 'WHERE requestID = ? AND siteID = ?'
+        . 'WHERE requestID = ? AND siteID = ? AND kind = \'request\''
     );
     if ($stmt === false) {
         ApiResponse::error('Database error', 500);
@@ -65,7 +69,7 @@ if ($status === 'answered') {
 } else {
     $stmt = $db->prepare(
         'UPDATE tblPrayerRequests SET status = ?, moderatorID = ?, moderatedAt = NOW() '
-        . 'WHERE requestID = ? AND siteID = ?'
+        . 'WHERE requestID = ? AND siteID = ? AND kind = \'request\''
     );
     if ($stmt === false) {
         ApiResponse::error('Database error', 500);

@@ -11,7 +11,7 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   0.8.2
+ * @version   0.9.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/92
  * -----------------------------------------------------------------------------
  */
@@ -35,7 +35,7 @@ $userStmt = $mysqli->prepare('SELECT totpEnabled, emailAddress FROM tblUsers WHE
 if ($userStmt === false) {
     $_SESSION['flash_msg']  = t('error.database');
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /auth/account');
+    header('Location: /account');
     exit();
 }
 $userStmt->bind_param('i', $userId);
@@ -46,7 +46,7 @@ $userStmt->close();
 if ((int) ($user['totpEnabled'] ?? 0) === 1) {
     $_SESSION['flash_msg']  = 'Two-factor authentication is already enabled.';
     $_SESSION['flash_type'] = 'info';
-    header('Location: /auth/account');
+    header('Location: /account');
     exit();
 }
 
@@ -128,7 +128,7 @@ $backupCodes = $_SESSION['totp_backup_codes'] ?? [];
 // 📌 Page metadata
 $pageTitle   = 'Setup Two-Factor Authentication';
 $pageSection = 'account';
-$breadcrumbs = ['Dashboard' => '/', 'Account' => '/auth/account', '2FA Setup' => ''];
+$breadcrumbs = ['Dashboard' => '/', 'Account' => '/account', '2FA Setup' => ''];
 
 // 📄 Include shared header template
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
@@ -159,7 +159,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         </div>
     </div>
 
-    <a href="/auth/account" class="btn btn-primary">
+    <a href="/account" class="btn btn-primary">
         <i class="fa-solid fa-arrow-left me-1"></i>Back to Account
     </a>
     <?php unset($_SESSION['totp_backup_codes']); ?>

@@ -35,7 +35,11 @@ if (in_array($status, ['pending', 'active', 'answered', 'archived', 'all'], true
     $status = 'active';
 }
 
-$conditions = ['siteID = ?'];
+// 🛡️ kind = 'request' — this endpoint is the Prayer Requests API; Praise
+// (#260) shares tblPrayerRequests (kind='praise') but has no API surface
+// of its own, so it must never leak into this list literal-filtered here
+// (not bound — 'request' is a fixed constant, not user input).
+$conditions = ['siteID = ?', 'kind = \'request\''];
 $types      = 'i';
 $params     = [$siteId];
 
@@ -51,7 +55,9 @@ if ($status !== 'all') {
     $params[]     = $status;
 }
 
-$sql = 'SELECT requestID, submitterID, subject, body, visibility, status, isAnonymous, '
+// 📤 kind is included in the response (always 'request' here) so API
+// consumers get a self-describing row shape consistent with the DB schema.
+$sql = 'SELECT requestID, submitterID, subject, body, kind, visibility, status, isAnonymous, '
      . 'answeredAt, testimony, createdAt '
      . 'FROM tblPrayerRequests WHERE ' . implode(' AND ', $conditions) . ' '
      . 'ORDER BY createdAt DESC LIMIT 200';

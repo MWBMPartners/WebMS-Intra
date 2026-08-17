@@ -17,7 +17,7 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   0.3.0
+ * @version   0.4.0
  * -----------------------------------------------------------------------------
  */
 
@@ -357,6 +357,68 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 <a href="/settings" class="btn btn-outline-info w-100 d-flex flex-column align-items-center gap-1 py-3">
                     <i class="fa-solid fa-sliders fa-lg"></i>
                     <span class="small">Old Settings</span>
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 🔗 More Admin Screens — the AppRegistry marketplace + reporting/workflow/
+     compliance screens below have no other entry point in the app (they were
+     reachable only by typing the URL directly). Sectioned into its own card
+     so the primary Quick Links grid above stays short (#gap-fix D3). -->
+<div class="card mt-4">
+    <div class="card-header">
+        <h5 class="mb-0"><i class="fa-solid fa-ellipsis me-2"></i>More Admin Screens</h5>
+    </div>
+    <div class="card-body">
+        <div class="row g-3">
+            <div class="col-6 col-md-4 col-lg-2">
+                <a href="/admin/apps" class="btn btn-outline-secondary w-100 d-flex flex-column align-items-center gap-1 py-3">
+                    <i class="fa-solid fa-cubes fa-lg"></i>
+                    <span class="small">Apps</span>
+                </a>
+            </div>
+            <div class="col-6 col-md-4 col-lg-2">
+                <a href="/admin/reports" class="btn btn-outline-secondary w-100 d-flex flex-column align-items-center gap-1 py-3">
+                    <i class="fa-solid fa-chart-bar fa-lg"></i>
+                    <span class="small">Reports</span>
+                </a>
+            </div>
+            <div class="col-6 col-md-4 col-lg-2">
+                <a href="/admin/workflows" class="btn btn-outline-secondary w-100 d-flex flex-column align-items-center gap-1 py-3">
+                    <i class="fa-solid fa-diagram-project fa-lg"></i>
+                    <span class="small">Workflows</span>
+                </a>
+            </div>
+            <div class="col-6 col-md-4 col-lg-2">
+                <a href="/admin/audit" class="btn btn-outline-secondary w-100 d-flex flex-column align-items-center gap-1 py-3">
+                    <i class="fa-solid fa-shield-halved fa-lg"></i>
+                    <span class="small">Audit Trail</span>
+                </a>
+            </div>
+            <div class="col-6 col-md-4 col-lg-2">
+                <a href="/admin/sms" class="btn btn-outline-secondary w-100 d-flex flex-column align-items-center gap-1 py-3">
+                    <i class="fa-solid fa-comment-sms fa-lg"></i>
+                    <span class="small">SMS</span>
+                </a>
+            </div>
+            <div class="col-6 col-md-4 col-lg-2">
+                <a href="/admin/transcription" class="btn btn-outline-secondary w-100 d-flex flex-column align-items-center gap-1 py-3">
+                    <i class="fa-solid fa-closed-captioning fa-lg"></i>
+                    <span class="small">Transcription</span>
+                </a>
+            </div>
+            <div class="col-6 col-md-4 col-lg-2">
+                <a href="/admin/safeguarding/dbs" class="btn btn-outline-secondary w-100 d-flex flex-column align-items-center gap-1 py-3">
+                    <i class="fa-solid fa-user-shield fa-lg"></i>
+                    <span class="small">Safeguarding</span>
+                </a>
+            </div>
+            <div class="col-6 col-md-4 col-lg-2">
+                <a href="/admin/decision-cards" class="btn btn-outline-secondary w-100 d-flex flex-column align-items-center gap-1 py-3">
+                    <i class="fa-solid fa-hand-holding-heart fa-lg"></i>
+                    <span class="small">Decision Cards</span>
                 </a>
             </div>
         </div>

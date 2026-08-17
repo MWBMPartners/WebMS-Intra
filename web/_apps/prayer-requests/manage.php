@@ -67,7 +67,10 @@ $stmt = $mysqli->prepare(
     . 'FROM tblPrayerRequests pr '
     . 'LEFT JOIN tblUsers u ON u.userID = pr.submitterID '
     . 'LEFT JOIN tblUsers m ON m.userID = pr.moderatorID '
-    . 'WHERE pr.siteID = ? AND pr.status = ? '
+    // 🛡️ kind = 'request' — this queue moderates prayer requests only;
+    // Praise (#260) posts share tblPrayerRequests (kind='praise') but have
+    // no moderation queue of their own and must never surface here.
+    . 'WHERE pr.siteID = ? AND pr.kind = \'request\' AND pr.status = ? '
     . 'ORDER BY pr.createdAt DESC LIMIT 100'
 );
 if ($stmt !== false) {
@@ -84,7 +87,9 @@ if ($stmt !== false) {
 $counts = ['pending' => 0, 'active' => 0, 'answered' => 0, 'archived' => 0];
 $stmt = $mysqli->prepare(
     'SELECT status, COUNT(*) AS cnt FROM tblPrayerRequests '
-    . 'WHERE siteID = ? GROUP BY status'
+    // 🛡️ kind = 'request' — see WHY note above; keep the tab counters in
+    // sync with the queue itself.
+    . 'WHERE siteID = ? AND kind = \'request\' GROUP BY status'
 );
 if ($stmt !== false) {
     $stmt->bind_param('i', $siteId);

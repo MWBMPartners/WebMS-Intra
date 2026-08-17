@@ -72,7 +72,11 @@ if ($requestId <= 0 || $action === '') {
 // 🔍 Load the row (siteID-scoped — prevents cross-site tampering)
 $stmt = $mysqli->prepare(
     'SELECT requestID, status, visibility, assignedToUserID FROM tblPrayerRequests '
-    . 'WHERE siteID = ? AND requestID = ? LIMIT 1'
+    // 🛡️ kind = 'request' — defense in depth so this handler can never
+    // approve/archive/assign-a-partner-to a Praise (#260) row even if a
+    // request is forged with a praise post's requestID; the row simply
+    // won't be found and the action redirects away as a no-op.
+    . 'WHERE siteID = ? AND requestID = ? AND kind = \'request\' LIMIT 1'
 );
 $row = null;
 if ($stmt !== false) {
@@ -212,7 +216,9 @@ if ($updatePartnerNote === true) {
 }
 
 $sql = 'UPDATE tblPrayerRequests SET ' . implode(', ', $set)
-     . ' WHERE siteID = ? AND requestID = ? LIMIT 1';
+     // 🛡️ kind = 'request' — belt-and-braces alongside the load-check
+     // above (see WHY note there).
+     . ' WHERE siteID = ? AND requestID = ? AND kind = \'request\' LIMIT 1';
 $types   .= 'ii';
 $params[] = $siteId;
 $params[] = $requestId;

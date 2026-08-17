@@ -1,14 +1,28 @@
 <?php
 // Path: public_html/invites/accept.php  →  /auth/invite?token=...
 /**
- * Invite Onboarding — public acceptance page.
- *
+ * -----------------------------------------------------------------------------
+ * Invite Onboarding — public acceptance page 🎟️
+ * -----------------------------------------------------------------------------
  * GET  shows the self-registration form pre-filled with the invite's email.
  * POST creates a tblUsers + tblLocalAccount row, marks the invitation
  *      accepted, signs the user in, redirects to dashboard.
  *
+ * Security notes (#B6): password is checked against the admin-configured
+ * policy via Auth::validatePassword() (not a hardcoded length check); the
+ * session ID is regenerated before granting identity (fixation defence,
+ * matching every other login path on a public pre-auth page); the site
+ * context is set via Auth::initSessionSite() so multi-site invitees land
+ * in the invite's site rather than session key `site_id` that Site::id()
+ * never reads.
+ *
  * @package   Portal\Invites
+ * @author    MWBM Partners Ltd (t/a MWservices)
+ * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
+ * @license   All Rights Reserved
+ * @version   0.2.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/239
+ * -----------------------------------------------------------------------------
  */
 
 declare(strict_types=1);
@@ -70,14 +84,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $confirm  = (string) ($_POST['passwordConfirm'] ?? '');
         $username = trim((string) ($_POST['username'] ?? ''));
 
+        // 🔐 Password policy (#B6a). This was previously a hardcoded
+        // `strlen < 12` check that silently ignored whatever password
+        // policy an admin had configured (uppercase/lowercase/number/
+        // special-char requirements, a raised minimum, etc.) — the register
+        // and reset-password flows both go through Auth::validatePassword(),
+        // so this primary onboarding path needs to as well.
+        $pwCheck = ($password !== '') ? Auth::validatePassword($password) : ['valid' => false, 'errors' => ['Password is required.']];
+
         if ($name === '' || $username === '') {
             $flash = 'Name and username required.';
             $flashType = 'danger';
-        } elseif (strlen($password) < 12) {
-            $flash = 'Password must be at least 12 characters.';
-            $flashType = 'danger';
         } elseif ($password !== $confirm) {
             $flash = 'Passwords do not match.';
+            $flashType = 'danger';
+        } elseif ($pwCheck['valid'] === false) {
+            $flash = 'Password does not meet policy: ' . implode(' ', $pwCheck['errors']);
             $flashType = 'danger';
         } else {
             $db = App::db();
@@ -132,9 +154,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 $db->commit();
 
-                // Sign in (write session)
+                // 🔄 Regenerate the session ID before granting identity on
+                // this public, pre-auth page (#B6b) — session fixation
+                // defence, identical to every other place a session gets
+                // promoted to an authenticated one (Auth::loginLocal(),
+                // the OAuth callbacks, WebAuthn login).
+                // See: https://owasp.org/www-community/attacks/Session_fixation
+                session_regenerate_id(true);
+
+                // Sign in (write session). `active_site_id` — NOT `site_id`
+                // — is the key Site::id() actually reads (#B6c); the old
+                // key silently landed multi-site invitees in the wrong
+                // site on every request after signup. Auth::initSessionSite()
+                // is the same site-context initializer the password/SSO/
+                // WebAuthn login paths all call.
                 $_SESSION['user_id'] = $newUserId;
-                $_SESSION['site_id'] = (int) $invite['siteID'];
+                Auth::initSessionSite($newUserId, $db);
 
                 header('Location: /');
                 exit();
@@ -149,6 +184,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 $portalName = (string) (App::settings()['site']['name'] ?? 'the portal');
 $csrf = Auth::csrfToken();
+
+// 🔐 Reflect the SAME configured password policy the server enforces above
+// (#B6a) so the client-side hints never disagree with what the site
+// actually requires — a hardcoded "min 12" here would mislead an admin
+// who raised (or, on maxLength, could contradict) the real policy.
+$passwordPolicy = Auth::passwordPolicy();
 ?>
 <!doctype html>
 <html lang="en">
@@ -189,10 +230,17 @@ button{margin-top:1rem;padding:.625rem 1.25rem;background:var(--primary);color:#
         <input type="text" name="fullName" required maxlength="255">
         <label>Choose a username</label>
         <input type="text" name="username" required maxlength="50" pattern="[a-zA-Z0-9._\-]+">
-        <label>Password (min 12 chars)</label>
-        <input type="password" name="password" required minlength="12" autocomplete="new-password">
+        <label>Password (min <?php echo (int) $passwordPolicy['minLength']; ?> chars)</label>
+        <input type="password" name="password" required
+               minlength="<?php echo (int) $passwordPolicy['minLength']; ?>"
+               maxlength="<?php echo (int) $passwordPolicy['maxLength']; ?>"
+               autocomplete="new-password">
+        <p class="muted" style="margin:.25rem 0 0;"><?php echo htmlspecialchars(implode(' · ', $passwordPolicy['rules']), ENT_QUOTES, 'UTF-8'); ?></p>
         <label>Confirm password</label>
-        <input type="password" name="passwordConfirm" required minlength="12" autocomplete="new-password">
+        <input type="password" name="passwordConfirm" required
+               minlength="<?php echo (int) $passwordPolicy['minLength']; ?>"
+               maxlength="<?php echo (int) $passwordPolicy['maxLength']; ?>"
+               autocomplete="new-password">
         <button type="submit">Create my account</button>
     </form>
 </div>

@@ -14,7 +14,7 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   0.5.0
+ * @version   0.6.0
  * -----------------------------------------------------------------------------
  */
 
@@ -113,22 +113,52 @@ if ($action === 'auth_verify') {
                 $upd->close();
             }
 
+            $webauthnUserId = (int) $row['userID'];
+
             // 🔄 Create session
             session_regenerate_id(true);
 
-            $_SESSION['user_id']    = (int) $row['userID'];
+            $_SESSION['user_id']    = $webauthnUserId;
             $_SESSION['user_name']  = $row['fullName'];
             $_SESSION['user_email'] = $row['emailAddress'];
 
             // 🌐 Set active site ID for multi-site context
-            Auth::initSessionSite((int) $row['userID'], $mysqli);
-
-            Logger::activity('LoginWebAuthn', 'User logged in via passkey: ' . ($row['friendlyName'] ?? 'Passkey'));
+            Auth::initSessionSite($webauthnUserId, $mysqli);
 
             $redirect = $input['redirect'] ?? '/';
             if (str_starts_with($redirect, '/') === false || str_starts_with($redirect, '//') === true) {
                 $redirect = '/';
             }
+
+            // ------------------------------------------------------------
+            // 🔐 2FA gate (#B2)
+            // ------------------------------------------------------------
+            // 🛡️ This is the PRIMARY-login WebAuthn path — a passkey used
+            // to sign in from the logged-out /login page (auth_verify
+            // action above). It is NOT WebAuthn-as-2nd-factor: this
+            // codebase has no such flow — /auth/2fa/verify only accepts a
+            // TOTP code or a backup code, never a passkey assertion. A
+            // passkey therefore authenticates the SAME tier as a password
+            // ("something you have" standing in for "something you know"),
+            // so a 2FA-enrolled user must still clear the TOTP challenge
+            // afterwards — without this gate, passkey sign-in would be a
+            // silent full bypass of 2FA. Mirrors the password login path
+            // (`_apps/auth/login/index.php`) EXACTLY: same session keys
+            // (`2fa_user_id`, `login_redirect`), same unset() pair, same
+            // deviceIsTrusted() "remembered device" bypass. The response
+            // shape stays `{success, redirect}` — the login page's JS
+            // already just follows `redirect`, so no front-end change is
+            // needed to route it to the 2FA challenge instead of home.
+            if (Auth::userRequires2fa($webauthnUserId) === true && Auth::deviceIsTrusted($webauthnUserId) === false) {
+                $_SESSION['2fa_user_id']    = $webauthnUserId;
+                $_SESSION['login_redirect'] = $redirect;
+                unset($_SESSION['user_id'], $_SESSION['2fa_passed']);
+                Logger::activity('LoginWebAuthnPending2fa', 'Passkey login pending 2FA challenge: ' . ($row['friendlyName'] ?? 'Passkey'));
+                echo json_encode(['success' => true, 'redirect' => '/auth/2fa/verify']);
+                exit();
+            }
+
+            Logger::activity('LoginWebAuthn', 'User logged in via passkey: ' . ($row['friendlyName'] ?? 'Passkey'));
 
             echo json_encode(['success' => true, 'redirect' => $redirect]);
             exit();

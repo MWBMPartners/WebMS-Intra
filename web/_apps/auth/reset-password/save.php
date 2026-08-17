@@ -14,7 +14,7 @@
  * @author     MWBM Partners Ltd (t/a MWservices)
  * @copyright  2025-2026 MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version    0.2.0
+ * @version    0.3.0
  * -----------------------------------------------------------------------------
  */
 
@@ -169,6 +169,16 @@ try {
         $invalidateStmt->execute();
         $invalidateStmt->close();
     }
+
+    // 🔐 Revoke ALL trusted-device 2FA-bypass cookies for this user (#B4).
+    // A forgotten-password reset is precisely the "I suspect my account is
+    // compromised / I'm locked out" scenario — change-password.php already
+    // does this for the logged-in change-password flow; the reset flow is
+    // the higher-stakes twin of that and must not leave an attacker's
+    // "trust this device" cookie valid after the credential is rotated.
+    // Runs on the same $mysqli connection inside this transaction, so it
+    // either commits or rolls back together with the hash update above.
+    Auth::revokeAllTrustedDevices($userId);
 
     $mysqli->commit();
 

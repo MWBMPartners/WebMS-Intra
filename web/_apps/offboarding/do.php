@@ -1,10 +1,23 @@
 <?php
 // Path: public_html/offboarding/do.php
 /**
- * Offboarding — POST handler that performs revocation across multiple
- * tables in a transaction. Records per-step outcomes in tblOffboarding.stepsLog.
+ * -----------------------------------------------------------------------------
+ * Offboarding — Revocation Handler 🚪
+ * -----------------------------------------------------------------------------
+ * POST handler that performs revocation across multiple tables in a
+ * transaction. Records per-step outcomes in tblOffboarding.stepsLog.
+ *
+ * Also revokes tblLinkedAccounts (SSO links) and tblTrustedDevices
+ * (2FA-bypass cookies) (#B7a) so an offboarded user's stale SSO link or
+ * trusted-device cookie can't be used to sign back in, and so a later SSO
+ * sign-in attempt fails cleanly instead of crashing — see the matching
+ * inactive-account guard in Auth::callbackMS365()/callbackGoogle() (#B7b).
  *
  * @package   Portal\Offboarding
+ * @author    MWBM Partners Ltd (t/a MWservices)
+ * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
+ * @license   All Rights Reserved
+ * @version   0.2.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/240
  */
 
@@ -112,7 +125,28 @@ try {
         [$userId], 'i'
     );
 
-    // 7. Audit row.
+    // 7. Delete linked SSO accounts (#B7a). Without this, tblLinkedAccounts
+    //    rows survive deactivation — findUserByLink()/findUserByEmail() in
+    //    Auth::callbackMS365()/callbackGoogle() both filter `isActive = 1`,
+    //    so a later SSO sign-in from the offboarded person would fall
+    //    through to createUser() and crash on the tblUsers.emailAddress
+    //    UNIQUE key. A stale link is also a live re-entry surface on its
+    //    own. Mirrors the table this deletes from account/unlink.php.
+    $run('delete_linked_accounts',
+        'DELETE FROM tblLinkedAccounts WHERE userID = ?',
+        [$userId], 'i'
+    );
+
+    // 8. Revoke trusted-device 2FA-bypass cookies (#B7a). Same WHERE clause
+    //    as Auth::revokeAllTrustedDevices() — kept as an explicit $run()
+    //    step (rather than calling that helper) so the outcome is captured
+    //    in stepsLog like every other offboarding action.
+    $run('revoke_trusted_devices',
+        'UPDATE tblTrustedDevices SET revokedAt = NOW() WHERE userID = ? AND revokedAt IS NULL',
+        [$userId], 'i'
+    );
+
+    // 9. Audit row.
     $logJson = json_encode($stepsLog);
     $stmt = $db->prepare(
         'INSERT INTO tblOffboarding (userID, effectiveDate, reason, dataDisposition, offboardedByID, stepsLog) '

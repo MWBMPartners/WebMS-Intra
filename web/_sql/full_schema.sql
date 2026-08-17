@@ -182,7 +182,7 @@ CREATE TABLE IF NOT EXISTS `tblUsers` (
     `isAdmin`      TINYINT(1)   DEFAULT 0,
     `isRootAdmin`  TINYINT(1)   DEFAULT 0,
     `notifyPrefs`  JSON         DEFAULT NULL COMMENT 'User notification preferences (JSON: {emailDigest, expenseUpdates, eventReminders})',
-    `totpSecret`   VARCHAR(64)  DEFAULT NULL COMMENT 'Encrypted TOTP shared secret (from migration 032)',
+    `totpSecret`   VARCHAR(255) DEFAULT NULL COMMENT 'Encrypted TOTP shared secret (libsodium via encrypt_setting(); widened 64→255 in migration 165)',
     `totpEnabled`  TINYINT(1)   NOT NULL DEFAULT 0 COMMENT 'TOTP 2FA enabled flag (from migration 032)',
     `calendarToken` VARCHAR(64) DEFAULT NULL COMMENT 'iCal feed token (from migration 080)',
     -- 🕯️ Sabbath quiet-hours per-user override (from migration 070 / #231)
@@ -5065,6 +5065,31 @@ INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
     ('admin/integrations/cloudflare-stream/test', 'admin/integrations/cloudflare-stream/test.php', 1)
 ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 
+-- ── from 163_tours_api_route_fix.sql (gap fix D2) ──────────────────────────
+-- Enable flags for the tour-playback endpoints, relocated from the
+-- unreachable legacy `_apps/api/tours/{active,complete}.php` to the
+-- convention path `_apps/tours/api/{active,complete}.php` in this same
+-- change (same bug class as the migration-158 worship live-sync fix above —
+-- ApiRouter never consults tblRoutes for api/* paths). A fresh install must
+-- see these flags 'true' or /admin/tours' tours would 403 for everyone.
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'api.tours.active.enabled',   'true', 'true', 0),
+    (NULL, 'api.tours.complete.enabled', 'true', 'true', 0)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
+-- ── from 164_kids_care_prayer_gap_fixes.sql (C1-C4 data-governance fixes) ──
+-- Only C1 (Kids check-in/out terminal had no role gate) needs a seed row —
+-- the `kids_team` role, so an admin has something to grant at /admin/users
+-- once the PHP-side gate (App::isAdmin() || App::hasRole('kids_team')) is
+-- in place. WHERE NOT EXISTS idiom matches migrations 148 (prayer_team) /
+-- 159 (asset_manager). C2 (parent self-service edit/deactivate), C3
+-- (GdprEraser care-table catalogue entries) and C4 (praise/kind filtering)
+-- are pure-PHP fixes against already-existing columns/indexes — nothing to
+-- fold in here for those three.
+INSERT INTO `tblRoles` (`roleKey`, `roleName`)
+    SELECT 'kids_team', 'Kids Team'
+    WHERE NOT EXISTS (SELECT 1 FROM `tblRoles` WHERE `roleKey` = 'kids_team');
+
 
 -- =============================================================================
 -- Tables added in numbered migrations 105+ — appended for fresh-install parity.
@@ -6910,4 +6935,13 @@ INSERT INTO `tblMigrations` (`filename`) VALUES ('161_asset_tracker_phase3.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
 INSERT INTO `tblMigrations` (`filename`) VALUES ('162_asset_kiosk_pin.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('163_tours_api_route_fix.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('164_kids_care_prayer_gap_fixes.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('165_widen_totp_secret.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;
