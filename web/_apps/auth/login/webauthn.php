@@ -125,10 +125,13 @@ if ($action === 'auth_verify') {
             // 🌐 Set active site ID for multi-site context
             Auth::initSessionSite($webauthnUserId, $mysqli);
 
-            $redirect = $input['redirect'] ?? '/';
-            if (str_starts_with($redirect, '/') === false || str_starts_with($redirect, '//') === true) {
-                $redirect = '/';
-            }
+            // 🛡️ Route through Auth::safeRedirectUrl() (security-review
+            // follow-up) — the previous inline check missed backslash/scheme
+            // tricks that the shared helper rejects, so a value like
+            // "/\evil.com" (browsers normalise "/\" → "//") slipped through as
+            // a protocol-relative open redirect. The password + SSO paths
+            // already use safeRedirectUrl(); this brings WebAuthn to parity.
+            $redirect = Auth::safeRedirectUrl($input['redirect'] ?? '/');
 
             // ------------------------------------------------------------
             // 🔐 2FA gate (#B2)

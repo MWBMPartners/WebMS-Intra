@@ -55,8 +55,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $rateBucket = 'totp_verify:' . $pendingUserId . ':' . RateLimiter::clientIp();
     $rateMax    = 5;
     $rateWindow = 900; // 15 minutes — mirrors the login form's default window
-    if (RateLimiter::tooMany($rateBucket, $rateMax, $rateWindow) === true) {
-        $retryAfter = RateLimiter::retryAfter($rateBucket, $rateMax, $rateWindow);
+    // 🔒 IP-INDEPENDENT per-user tier (security-review follow-up). The client
+    // IP above is derived from spoofable proxy headers (CF-Connecting-IP /
+    // X-Forwarded-For), so an attacker holding the password could rotate that
+    // header to land in a fresh per-IP bucket every request and grind the code
+    // unthrottled. This second bucket is keyed on the pending userID ALONE, so
+    // it survives IP rotation and caps TOTAL guesses per user regardless of
+    // origin — the same per-username dimension the login limiter relies on.
+    // 15 / 30 min never punishes a fumbling legitimate user (a real TOTP/backup
+    // failure that often is vanishingly rare) but pins a rotating-IP attacker
+    // to ~720 guesses/day against a 10^6 space (infeasible), and TOTP's own
+    // 30-second rotation shrinks the effective window further.
+    $userBucket     = 'totp_verify_user:' . $pendingUserId;
+    $userRateMax    = 15;
+    $userRateWindow = 1800; // 30 minutes
+    if (RateLimiter::tooMany($rateBucket, $rateMax, $rateWindow) === true
+        || RateLimiter::tooMany($userBucket, $userRateMax, $userRateWindow) === true
+    ) {
+        $retryAfter = max(
+            RateLimiter::retryAfter($rateBucket, $rateMax, $rateWindow),
+            RateLimiter::retryAfter($userBucket, $userRateMax, $userRateWindow)
+        );
         $_SESSION['flash_msg']  = 'Too many attempts. Please try again in ' . (int) ceil($retryAfter / 60) . ' minute(s).';
         $_SESSION['flash_type'] = 'danger';
         header('Location: /auth/2fa/verify');
@@ -137,6 +156,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         // 🚦 Count this guess against the rate-limit bucket opened above
         // (#B3) — covers both TOTP and backup-code attempts.
         RateLimiter::recordHit($rateBucket, $rateWindow);
+        RateLimiter::recordHit($userBucket, $userRateWindow); // 🔒 per-user tier too
         Logger::activity('TotpVerifyFailed', 'Failed 2FA verification attempt', $pendingUserId);
         $_SESSION['flash_msg']  = 'Invalid code. Please try again.';
         $_SESSION['flash_type'] = 'danger';

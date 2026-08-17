@@ -1036,7 +1036,19 @@ class Auth
      */
     public static function decrypt(string $encoded): string
     {
-        return decrypt_setting($encoded);
+        // 🛡️ Fail SOFT (security-review follow-up). decrypt_setting() can
+        // THROW (e.g. SodiumException when a corrupt/truncated ciphertext
+        // decodes to fewer than the nonce length) rather than returning '',
+        // which would fatal a login flow mid-request. A stored secret is only
+        // ever written as valid ciphertext, so this only triggers on genuine
+        // DB corruption — return '' (treated by callers as "no/invalid
+        // secret") instead of a 500.
+        try {
+            return decrypt_setting($encoded);
+        } catch (\Throwable $e) {
+            error_log('Auth::decrypt() failed: ' . $e->getMessage());
+            return '';
+        }
     }
 
     /* ====================================================================== */
