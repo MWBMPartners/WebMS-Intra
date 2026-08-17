@@ -2,7 +2,7 @@
 // Path: _core/Barcode.php
 /**
  * -----------------------------------------------------------------------------
- * WebMS Intra — 1D barcode encoder (Code 128 / EAN-13 / UPC-A / ITF-14) 📊
+ * WebMS Intra — 1D barcode encoder (Code 128 / EAN-13 / EAN-8 / UPC-A / ITF-14) 📊
  * -----------------------------------------------------------------------------
  * Asset Tracker sub-issue #404 — the barcode counterpart to `Qr`/`QrEncoder`,
  * mirrored on the SAME class shape (`generate()` returns
@@ -11,11 +11,14 @@
  * the same way it already embeds a QR one (`Qr::generate(['format'=>'png'])`
  * → `data:{mime};base64,{b64}`).
  *
- * Supports four symbologies (`self::SYMBOLOGIES`):
+ * Supports five symbologies (`self::SYMBOLOGIES`):
  *   - `code128` — full ASCII (0-127) via auto Code Set A/B/C subset
  *     selection + mod-103 checksum. Used for `assetTagCode` (free text).
  *   - `ean13`   — 12 or 13 numeric digits (12 = check digit auto-computed
  *     and appended; 13 = supplied check digit validated).
+ *   - `ean8`    — 7 or 8 numeric digits (compact retail symbol). Left half
+ *     is all L-code, right half all R-code — no first-digit parity table
+ *     (see `ean8Modules()`). Shares the mod-10 check digit with the family.
  *   - `upca`    — 11 or 12 numeric digits. Encoded by prefixing a virtual
  *     leading `'0'` and delegating to the EAN-13 module builder — this is
  *     the same relationship real UPC-A/EAN-13 scanners rely on (a UPC-A
@@ -84,7 +87,7 @@ namespace Portal\Core;
 class Barcode
 {
     /** @var string[] Symbologies this class knows how to encode/render. */
-    public const SYMBOLOGIES = ['code128', 'ean13', 'upca', 'itf14'];
+    public const SYMBOLOGIES = ['code128', 'ean13', 'ean8', 'upca', 'itf14'];
 
     /**
      * Hard cap on the Code 128 payload length (bytes) — see class header's
@@ -208,7 +211,7 @@ class Barcode
     ];
 
     /** Digits required WITHOUT a check digit, per GS1-family symbology. */
-    private const GS1_BODY_LEN = ['ean13' => 12, 'upca' => 11, 'itf14' => 13];
+    private const GS1_BODY_LEN = ['ean13' => 12, 'ean8' => 7, 'upca' => 11, 'itf14' => 13];
 
     // #############################################################################
     // 🚀 PUBLIC ENTRY POINT
@@ -260,7 +263,7 @@ class Barcode
         // or null on a rejected value (never throws).
         $encoded = match ($symbology) {
             'code128' => self::encodeCode128($value),
-            'ean13', 'upca', 'itf14' => self::encodeGs1($symbology, $value),
+            'ean13', 'ean8', 'upca', 'itf14' => self::encodeGs1($symbology, $value),
             default => null,
         };
 
@@ -531,6 +534,12 @@ class Barcode
             return ['bits' => self::itfModules($digits), 'text' => $digits];
         }
 
+        // ean8 — 4 left digits ALL L-coded (no first-digit parity table, unlike
+        // EAN-13), centre guard, 4 right digits R-coded. See ean8Modules().
+        if ($kind === 'ean8') {
+            return ['bits' => self::ean8Modules($digits), 'text' => $digits];
+        }
+
         // ean13 / upca — UPC-A's digits become a virtual 13-digit EAN-13 by
         // prepending '0' (see class header + EAN_PARITY doc: parity[0] is
         // 'LLLLLL', so this never actually invokes G-code for a UPC-A
@@ -612,6 +621,33 @@ class Barcode
         $bits .= '01010'; // centre guard
         for ($i = 7; $i <= 12; $i++) {
             $bits .= self::eanR((int) $digits13[$i]);
+        }
+        $bits .= '101'; // end guard
+        return $bits;
+    }
+
+    /**
+     * Build the full EAN-8 module bit string (start guard, 4 left digits
+     * ALL L-coded, centre guard, 4 right digits ALL R-coded, end guard) for
+     * an already-validated 8-digit value.
+     *
+     * EAN-8 needs NO first-digit parity table (unlike EAN-13): its left half
+     * is always plain L-code and its right half always R-code — it is simply
+     * the right two thirds of an EAN-13 with a 4/4 split. Total width is the
+     * canonical 67 modules (3 + 4×7 + 5 + 4×7 + 3). The mod-10 check digit is
+     * shared with the EAN-13/UPC-A family via `gs1CheckDigit()` — that
+     * algorithm is anchored at the rightmost digit with weight 3 and so is
+     * length-agnostic (self-check: EAN-8 `9638507` → check digit `4`).
+     */
+    private static function ean8Modules(string $digits8): string
+    {
+        $bits = '101'; // start guard
+        for ($i = 0; $i <= 3; $i++) {
+            $bits .= self::EAN_L[(int) $digits8[$i]];
+        }
+        $bits .= '01010'; // centre guard
+        for ($i = 4; $i <= 7; $i++) {
+            $bits .= self::eanR((int) $digits8[$i]);
         }
         $bits .= '101'; // end guard
         return $bits;

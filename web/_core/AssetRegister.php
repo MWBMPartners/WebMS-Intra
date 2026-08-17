@@ -6844,13 +6844,14 @@ class AssetRegister
      *
      * @var string[]
      */
-    public const LABEL_SYMBOLOGIES = ['qr', 'code128', 'ean13', 'upca', 'itf14', 'qr+code128'];
+    public const LABEL_SYMBOLOGIES = ['qr', 'code128', 'ean13', 'ean8', 'upca', 'itf14', 'qr+code128'];
 
     /** @var array<string, string> Human labels for LABEL_SYMBOLOGIES, keyed the same — feeds edit.php's `<select>`. */
     public const LABEL_SYMBOLOGY_LABELS = [
         'qr'         => 'QR code (links to the public lost-and-found page)',
         'code128'    => 'Code 128 (asset tag code)',
         'ean13'      => 'EAN-13 (primary EAN-13 identifier)',
+        'ean8'       => 'EAN-8 (primary EAN-8 identifier)',
         'upca'       => 'UPC-A (primary UPC-A identifier)',
         'itf14'      => 'ITF-14 (primary ITF-14 identifier)',
         'qr+code128' => 'QR code + Code 128 (both)',
@@ -6864,7 +6865,7 @@ class AssetRegister
      *
      * @var string[]
      */
-    private const BARCODE_SYMBOLOGIES = ['code128', 'ean13', 'upca', 'itf14', 'qr+code128'];
+    private const BARCODE_SYMBOLOGIES = ['code128', 'ean13', 'ean8', 'upca', 'itf14', 'qr+code128'];
 
     /**
      * Maps a `LABEL_SYMBOLOGIES` GS1 value to the `tblAssetIdentifierTypes.typeCode`
@@ -6877,6 +6878,7 @@ class AssetRegister
      */
     private const GS1_IDENTIFIER_TYPE_CODES = [
         'ean13' => 'EAN-13',
+        'ean8'  => 'EAN-8',
         'upca'  => 'UPC-A',
         'itf14' => 'ITF-14',
     ];
@@ -6965,6 +6967,7 @@ class AssetRegister
              . '        WHERE i.assetID = a.assetID AND i.isPrimary = 1 '
              . "          AND i.typeCode = CASE a.labelSymbology "
              . "                             WHEN 'ean13' THEN 'EAN-13' "
+             . "                             WHEN 'ean8'  THEN 'EAN-8' "
              . "                             WHEN 'upca'  THEN 'UPC-A' "
              . "                             WHEN 'itf14' THEN 'ITF-14' "
              . '                             ELSE NULL END '
