@@ -586,6 +586,12 @@ class AssetRegister
     /** @var string[] tblAssetScanLog.scanContext (#404 Pass 2 / #410) */
     public const SCAN_CONTEXTS = ['public', 'internal'];
 
+    /** @var string[] tblAssetStocktakes.status (#411) */
+    public const STOCKTAKE_STATUSES = ['open', 'closed'];
+
+    /** @var string[] tblAssetStocktakeItems.verifyStatus (#411) */
+    public const STOCKTAKE_VERIFY_STATUSES = ['pending', 'present', 'missing', 'moved', 'unexpected'];
+
     /* ==========================================================================
      * 🔑 Public token
      * ======================================================================== */
@@ -825,14 +831,21 @@ class AssetRegister
     /**
      * Map tblAssetAudit.entityType → the real table Logger::audit() should
      * attribute create/update/delete rows to. Entities with no table of
-     * their own yet (label generation, stocktake, kiosk — all later sub-
-     * issues) are omitted on purpose; audit() simply skips the
-     * Logger::audit() call for those (the tblAssetAudit row above still
-     * captures the action either way). `'event-link'` USED to be one of
-     * those placeholders (see older revisions of this comment) — #409
-     * (Phase 2 Pass 2) gave it a real backing table
-     * (`tblAssetEventAssignments`, migration 160), so it is wired in below
-     * like every other entity with a table of its own.
+     * their own yet (label generation, kiosk — later sub-issues) are
+     * omitted on purpose; audit() simply skips the Logger::audit() call for
+     * those (the tblAssetAudit row above still captures the action either
+     * way). `'event-link'` USED to be one of those placeholders (see older
+     * revisions of this comment) — #409 (Phase 2 Pass 2) gave it a real
+     * backing table (`tblAssetEventAssignments`, migration 160), so it is
+     * wired in below like every other entity with a table of its own.
+     * `'stocktake'` was the same kind of placeholder until #411 (Phase 3
+     * Pass 4) gave it `tblAssetStocktakes` — wired in below too. Its
+     * per-scan child rows (`tblAssetStocktakeItems`) deliberately do NOT
+     * get their own entry: every scan audit call uses action `'scan'`
+     * (never create/update/delete), so this map is never consulted for
+     * them — see startStocktake()/recordStocktakeScan()/closeStocktake()'s
+     * own audit() calls for why that keeps the platform trail from being
+     * flooded by high-volume scan events.
      *
      * @var array<string, string>
      */
@@ -846,6 +859,7 @@ class AssetRegister
         'license'      => 'tblAssetLicenseAssignments',
         'found-report' => 'tblAssetFoundReports',
         'event-link'   => 'tblAssetEventAssignments',
+        'stocktake'    => 'tblAssetStocktakes',
     ];
 
     /**
@@ -8270,5 +8284,608 @@ class AssetRegister
         $stmt->close();
 
         return $rows;
+    }
+
+    /* ==========================================================================
+     * 📋 Stocktake / scan-to-verify (#411)
+     * ==========================================================================
+     * A stocktake "run" (`tblAssetStocktakes`) is opened against the whole
+     * site register or a location/category-scoped subset of it, pre-
+     * populating one `tblAssetStocktakeItems` row per expected asset
+     * (verifyStatus='pending'). A manager then scans assets — each scan
+     * either confirms an expected item ('present'/'moved') or records one
+     * that wasn't expected ('unexpected'); closing the run sweeps every
+     * still-'pending' row to 'missing'. See findByScanCode() for how a raw
+     * scanned string resolves to an asset, and recordStocktakeScan() for
+     * the present/moved/unexpected decision itself.
+     * ======================================================================== */
+
+    /**
+     * Open a new stocktake run for the current site, optionally scoped to
+     * one location and/or one category (either/both NULL = the whole
+     * site's register). Pre-populates `tblAssetStocktakeItems` with one
+     * 'pending' row per matching, non-deleted asset in a single
+     * INSERT…SELECT — see the file-header note above for the run's overall
+     * lifecycle.
+     *
+     * @return array{ok: bool, msg: string, stocktakeId: int}
+     */
+    public static function startStocktake(string $label, ?int $locationId, ?int $categoryId, int $actorUserId): array
+    {
+        $db     = App::db();
+        $siteId = Site::id();
+
+        // 📋 Label — required, ≤150 chars (matches the VARCHAR(150) column).
+        $label = trim($label);
+        if ($label === '' || mb_strlen($label) > 150) {
+            return ['ok' => false, 'msg' => 'A stocktake label is required (max 150 characters).', 'stocktakeId' => 0];
+        }
+
+        // 🔗 Optional scope FKs — must exist on THIS site, exactly like
+        // save.php's own "never trust a bare posted int" FK checks. Unlike
+        // save.php's silent-fallback-to-NULL convention, an invalid scope
+        // id here is a hard failure — a stocktake silently opening against
+        // the WRONG (or no) scope would be a much worse surprise than a
+        // stale category id on an asset edit form.
+        if ($locationId !== null && $locationId > 0) {
+            $chk = $db->prepare('SELECT 1 FROM tblAssetLocations WHERE locationID = ? AND siteID = ? LIMIT 1');
+            if ($chk === false) {
+                return ['ok' => false, 'msg' => 'Could not start the stocktake — please try again.', 'stocktakeId' => 0];
+            }
+            $chk->bind_param('ii', $locationId, $siteId);
+            $chk->execute();
+            $found = $chk->get_result()->fetch_assoc();
+            $chk->close();
+            if ($found === null) {
+                return ['ok' => false, 'msg' => 'The selected location was not found on this site.', 'stocktakeId' => 0];
+            }
+        } else {
+            $locationId = null;
+        }
+
+        if ($categoryId !== null && $categoryId > 0) {
+            $chk = $db->prepare('SELECT 1 FROM tblAssetCategories WHERE categoryID = ? AND siteID = ? LIMIT 1');
+            if ($chk === false) {
+                return ['ok' => false, 'msg' => 'Could not start the stocktake — please try again.', 'stocktakeId' => 0];
+            }
+            $chk->bind_param('ii', $categoryId, $siteId);
+            $chk->execute();
+            $found = $chk->get_result()->fetch_assoc();
+            $chk->close();
+            if ($found === null) {
+                return ['ok' => false, 'msg' => 'The selected category was not found on this site.', 'stocktakeId' => 0];
+            }
+        } else {
+            $categoryId = null;
+        }
+
+        // 💾 Transaction — "create the run" + "pre-populate its expected
+        // items" are one atomic unit: a run with zero expected items
+        // because the pre-populate step failed half-way would be a
+        // confusing, silently-wrong stocktake, not a loud failure.
+        App::beginTransaction();
+        $stocktakeId   = 0;
+        $expectedCount = 0;
+        try {
+            $ins = $db->prepare(
+                "INSERT INTO tblAssetStocktakes (siteID, label, status, locationID, categoryID, startedByID) "
+                . "VALUES (?, ?, 'open', ?, ?, ?)"
+            );
+            if ($ins === false) {
+                throw new \RuntimeException('Failed to prepare stocktake insert: ' . $db->error);
+            }
+            $ins->bind_param('isiii', $siteId, $label, $locationId, $categoryId, $actorUserId);
+            $ins->execute();
+            $stocktakeId = (int) $ins->insert_id;
+            $ins->close();
+
+            if ($stocktakeId <= 0) {
+                throw new \RuntimeException('Stocktake insert did not return an id.');
+            }
+
+            // 📦 Pre-populate expected items — dynamic WHERE built the same
+            // way listForSite() builds its own (siteID + isDeleted always,
+            // locationID/categoryID only when scoped).
+            $where  = ['siteID = ?', 'isDeleted = 0'];
+            $types  = 'i';
+            $params = [$siteId];
+            if ($locationId !== null) {
+                $where[]  = 'locationID = ?';
+                $types   .= 'i';
+                $params[] = $locationId;
+            }
+            if ($categoryId !== null) {
+                $where[]  = 'categoryID = ?';
+                $types   .= 'i';
+                $params[] = $categoryId;
+            }
+
+            $popSql = "INSERT INTO tblAssetStocktakeItems (stocktakeID, siteID, assetID, verifyStatus) "
+                    . "SELECT ?, siteID, assetID, 'pending' FROM tblAssets WHERE " . implode(' AND ', $where);
+            $popStmt = $db->prepare($popSql);
+            if ($popStmt === false) {
+                throw new \RuntimeException('Failed to prepare item pre-populate: ' . $db->error);
+            }
+            $popTypes  = 'i' . $types;
+            $popParams = array_merge([$stocktakeId], $params);
+            $popStmt->bind_param($popTypes, ...$popParams);
+            $popStmt->execute();
+            $expectedCount = $popStmt->affected_rows;
+            $popStmt->close();
+
+            App::commit();
+        } catch (\Throwable $e) {
+            App::rollback();
+            error_log('AssetRegister::startStocktake() failed: ' . $e->getMessage());
+            return ['ok' => false, 'msg' => 'Could not start the stocktake — please try again.', 'stocktakeId' => 0];
+        }
+
+        // 📜 Audit — action 'create' so this ALSO mirrors to the platform
+        // trail (see TABLE_FOR_ENTITY's doc comment) — opening a run is a
+        // low-volume, noteworthy event, unlike the individual scans below.
+        self::audit('stocktake', $stocktakeId, 0, 'create', null, [
+            'label'         => $label,
+            'locationID'    => $locationId,
+            'categoryID'    => $categoryId,
+            'expectedCount' => $expectedCount,
+        ]);
+
+        return ['ok' => true, 'msg' => 'Stocktake started — ' . $expectedCount . ' asset(s) expected.', 'stocktakeId' => $stocktakeId];
+    }
+
+    /**
+     * Resolve a raw scanned string to a site-scoped, non-deleted asset.
+     * Tries, in order, the FIRST match wins:
+     *   (a) exact `assetTagCode`
+     *   (b) exact `serialNumber`
+     *   (c) `publicToken` — a bare 32-char lowercase-hex token, OR a full
+     *       `/a/{token}` label URL (see labelPublicUrl()) from which the
+     *       token is extracted defensively (never interpolated — always a
+     *       bound parameter once found)
+     *   (d) an exact `tblAssetIdentifiers.value` match (GS1/RFID/barcode
+     *       identifiers — #393/#415), joined back to its (site-scoped,
+     *       non-deleted) asset
+     *
+     * Each probe is site-scoped and its own prepared statement, mirroring
+     * findByTagOrSerial()'s own "tag first, cheapest lookup first" shape.
+     *
+     * @return array<string, mixed>|null The full asset row (via self::get()
+     *         — so the caller always gets every column, not just the id
+     *         column each probe selected), or null when nothing matches.
+     */
+    public static function findByScanCode(int $siteId, string $code): ?array
+    {
+        $code = trim($code);
+        if ($code === '') {
+            return null;
+        }
+
+        $db = App::db();
+
+        // (a) assetTagCode — exact match.
+        $stmt = $db->prepare('SELECT assetID FROM tblAssets WHERE siteID = ? AND isDeleted = 0 AND assetTagCode = ? LIMIT 1');
+        if ($stmt !== false) {
+            $stmt->bind_param('is', $siteId, $code);
+            $stmt->execute();
+            $row = $stmt->get_result()->fetch_assoc();
+            $stmt->close();
+            if ($row !== null) {
+                return self::get((int) $row['assetID']);
+            }
+        }
+
+        // (b) serialNumber — exact match.
+        $stmt = $db->prepare('SELECT assetID FROM tblAssets WHERE siteID = ? AND isDeleted = 0 AND serialNumber = ? LIMIT 1');
+        if ($stmt !== false) {
+            $stmt->bind_param('is', $siteId, $code);
+            $stmt->execute();
+            $row = $stmt->get_result()->fetch_assoc();
+            $stmt->close();
+            if ($row !== null) {
+                return self::get((int) $row['assetID']);
+            }
+        }
+
+        // (c) publicToken — bare token or a full /a/{token} URL. The regex
+        // only ever EXTRACTS a candidate substring for a bound parameter
+        // below — the raw $code is never itself interpolated into SQL.
+        $token = null;
+        if (preg_match('/[a-f0-9]{32}/', strtolower($code), $m) === 1) {
+            $token = $m[0];
+        }
+        if ($token !== null) {
+            $stmt = $db->prepare('SELECT assetID FROM tblAssets WHERE siteID = ? AND isDeleted = 0 AND publicToken = ? LIMIT 1');
+            if ($stmt !== false) {
+                $stmt->bind_param('is', $siteId, $token);
+                $stmt->execute();
+                $row = $stmt->get_result()->fetch_assoc();
+                $stmt->close();
+                if ($row !== null) {
+                    return self::get((int) $row['assetID']);
+                }
+            }
+        }
+
+        // (d) tblAssetIdentifiers.value — exact match, site-scoped via a
+        // join back to its (non-deleted) asset.
+        $stmt = $db->prepare(
+            'SELECT i.assetID FROM tblAssetIdentifiers i '
+            . 'JOIN tblAssets a ON a.assetID = i.assetID AND a.isDeleted = 0 '
+            . 'WHERE i.siteID = ? AND a.siteID = ? AND i.value = ? LIMIT 1'
+        );
+        if ($stmt !== false) {
+            $stmt->bind_param('iis', $siteId, $siteId, $code);
+            $stmt->execute();
+            $row = $stmt->get_result()->fetch_assoc();
+            $stmt->close();
+            if ($row !== null) {
+                return self::get((int) $row['assetID']);
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Record one scan-to-verify result against an OPEN stocktake run.
+     * Resolves $code via findByScanCode(), then decides the outcome:
+     *   - Asset WAS expected (a `tblAssetStocktakeItems` row already
+     *     exists for this stocktake+asset): 'present' — or 'moved' when a
+     *     $foundLocationId is given AND differs from the asset's own
+     *     recorded `locationID`.
+     *   - Asset was NOT expected: 'unexpected' (foundLocationID recorded
+     *     verbatim, may be null).
+     * `uq_aststi_stocktake_asset` makes the UPSERT below an in-place
+     * update on a re-scan of the same asset within the same run, never a
+     * duplicate row.
+     *
+     * @return array{ok: bool, msg: string, verifyStatus?: string,
+     *         assetID?: int, assetName?: string, isConfidential?: bool}
+     */
+    public static function recordStocktakeScan(int $stocktakeId, string $code, ?int $foundLocationId, int $actorUserId): array
+    {
+        $db     = App::db();
+        $siteId = Site::id();
+
+        // 🔒 Must be an OPEN run on THIS site.
+        $stmt = $db->prepare("SELECT stocktakeID FROM tblAssetStocktakes WHERE stocktakeID = ? AND siteID = ? AND status = 'open' LIMIT 1");
+        if ($stmt === false) {
+            return ['ok' => false, 'msg' => 'Stocktake not found or already closed.'];
+        }
+        $stmt->bind_param('ii', $stocktakeId, $siteId);
+        $stmt->execute();
+        $found = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+        if ($found === null) {
+            return ['ok' => false, 'msg' => 'Stocktake not found or already closed.'];
+        }
+
+        $asset = self::findByScanCode($siteId, $code);
+        if ($asset === null) {
+            return ['ok' => false, 'msg' => 'Code not recognised on this site.'];
+        }
+        $assetId = (int) $asset['assetID'];
+
+        // 🔗 Optional found-location — validated same as startStocktake()'s
+        // scope FKs, but here an invalid id is a soft "treat as unset"
+        // rather than a hard failure (this is a fast-moving scan flow —
+        // failing the whole scan over a stale dropdown value would be a
+        // much worse UX than just not recording the found-location).
+        if ($foundLocationId !== null && $foundLocationId > 0) {
+            $chk = $db->prepare('SELECT 1 FROM tblAssetLocations WHERE locationID = ? AND siteID = ? LIMIT 1');
+            if ($chk !== false) {
+                $chk->bind_param('ii', $foundLocationId, $siteId);
+                $chk->execute();
+                $chkFound = $chk->get_result()->fetch_assoc();
+                $chk->close();
+                if ($chkFound === null) {
+                    $foundLocationId = null;
+                }
+            } else {
+                $foundLocationId = null;
+            }
+        } else {
+            $foundLocationId = null;
+        }
+
+        // 🔎 Was this asset already expected in this run?
+        $existsStmt = $db->prepare('SELECT itemID FROM tblAssetStocktakeItems WHERE stocktakeID = ? AND assetID = ? LIMIT 1');
+        if ($existsStmt === false) {
+            return ['ok' => false, 'msg' => 'Could not record the scan — please try again.'];
+        }
+        $existsStmt->bind_param('ii', $stocktakeId, $assetId);
+        $existsStmt->execute();
+        $existingItem = $existsStmt->get_result()->fetch_assoc();
+        $existsStmt->close();
+
+        $recordedLocationId = $asset['locationID'] !== null ? (int) $asset['locationID'] : null;
+
+        // -------------------------------------------------------------------
+        // 🧮 verifyStatus decision.
+        // -------------------------------------------------------------------
+        if ($existingItem !== null) {
+            if ($foundLocationId !== null && $foundLocationId !== $recordedLocationId) {
+                $verifyStatus          = 'moved';
+                $storedFoundLocationId = $foundLocationId;
+            } else {
+                $verifyStatus          = 'present';
+                $storedFoundLocationId = null;
+            }
+        } else {
+            $verifyStatus          = 'unexpected';
+            $storedFoundLocationId = $foundLocationId;
+        }
+
+        // 💾 UPSERT — uq_aststi_stocktake_asset makes a re-scan an in-place
+        // update rather than a second row.
+        $upsert = $db->prepare(
+            'INSERT INTO tblAssetStocktakeItems (stocktakeID, siteID, assetID, verifyStatus, scannedByID, scannedAt, foundLocationID) '
+            . 'VALUES (?, ?, ?, ?, ?, NOW(), ?) '
+            . 'ON DUPLICATE KEY UPDATE verifyStatus = VALUES(verifyStatus), scannedByID = VALUES(scannedByID), '
+            . 'scannedAt = VALUES(scannedAt), foundLocationID = VALUES(foundLocationID)'
+        );
+        if ($upsert === false) {
+            error_log('AssetRegister::recordStocktakeScan() prepare failed: ' . $db->error);
+            return ['ok' => false, 'msg' => 'Could not record the scan — please try again.'];
+        }
+        $upsert->bind_param('iiisii', $stocktakeId, $siteId, $assetId, $verifyStatus, $actorUserId, $storedFoundLocationId);
+        $ok = $upsert->execute();
+        $upsert->close();
+        if ($ok === false) {
+            return ['ok' => false, 'msg' => 'Could not record the scan — please try again.'];
+        }
+
+        // 📜 Audit — action 'scan' is NOT in ['create','update','delete'],
+        // so this writes ONLY tblAssetAudit, never the platform trail
+        // (deliberate — scans are high-volume, see TABLE_FOR_ENTITY's doc
+        // comment).
+        self::audit('stocktake', $stocktakeId, $assetId, 'scan', null, ['verifyStatus' => $verifyStatus]);
+
+        return [
+            'ok'             => true,
+            'msg'            => 'Scan recorded.',
+            'verifyStatus'   => $verifyStatus,
+            'assetID'        => $assetId,
+            'assetName'      => (string) $asset['name'],
+            'isConfidential' => (int) ($asset['isConfidential'] ?? 0) === 1,
+        ];
+    }
+
+    /**
+     * Close an open stocktake run: race-safe status flip (only succeeds if
+     * it was still 'open'), then sweep every still-'pending' item to
+     * 'missing' — anything never scanned this run is, by definition,
+     * missing.
+     *
+     * @return array{ok: bool, msg: string}
+     */
+    public static function closeStocktake(int $stocktakeId, int $actorUserId): array
+    {
+        $db     = App::db();
+        $siteId = Site::id();
+
+        App::beginTransaction();
+        $missingCount = 0;
+        try {
+            // 🏁 Race-safe — the `AND status = 'open'` guard means two
+            // concurrent "close" clicks can't both succeed (the second
+            // affects zero rows).
+            $upd = $db->prepare(
+                "UPDATE tblAssetStocktakes SET status = 'closed', closedByID = ?, closedAt = NOW() "
+                . " WHERE stocktakeID = ? AND siteID = ? AND status = 'open'"
+            );
+            if ($upd === false) {
+                throw new \RuntimeException('Failed to prepare stocktake close: ' . $db->error);
+            }
+            $upd->bind_param('iii', $actorUserId, $stocktakeId, $siteId);
+            $upd->execute();
+            $affected = $upd->affected_rows;
+            $upd->close();
+
+            if ($affected <= 0) {
+                App::rollback();
+                return ['ok' => false, 'msg' => 'Stocktake was already closed, or could not be found.'];
+            }
+
+            $missStmt = $db->prepare(
+                "UPDATE tblAssetStocktakeItems SET verifyStatus = 'missing' "
+                . " WHERE stocktakeID = ? AND siteID = ? AND verifyStatus = 'pending'"
+            );
+            if ($missStmt === false) {
+                throw new \RuntimeException('Failed to prepare missing-sweep: ' . $db->error);
+            }
+            $missStmt->bind_param('ii', $stocktakeId, $siteId);
+            $missStmt->execute();
+            $missingCount = $missStmt->affected_rows;
+            $missStmt->close();
+
+            App::commit();
+        } catch (\Throwable $e) {
+            App::rollback();
+            error_log('AssetRegister::closeStocktake() failed: ' . $e->getMessage());
+            return ['ok' => false, 'msg' => 'Could not close the stocktake — please try again.'];
+        }
+
+        // 📜 Audit — action 'update' so this ALSO mirrors to the platform
+        // trail (closing a run is low-volume, unlike the scans that fed
+        // into it).
+        self::audit(
+            'stocktake',
+            $stocktakeId,
+            0,
+            'update',
+            ['status' => 'open'],
+            ['status' => 'closed', 'missingCount' => $missingCount]
+        );
+
+        return ['ok' => true, 'msg' => 'Stocktake closed — ' . $missingCount . ' asset(s) marked missing.'];
+    }
+
+    /**
+     * List a site's stocktake runs (open + closed), newest-started first,
+     * each carrying its starter's/closer's full name, scope location/
+     * category names, and a total expected-item count.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public static function listStocktakes(int $siteId, ?string $status = null): array
+    {
+        $db = App::db();
+
+        $where  = ['st.siteID = ?'];
+        $types  = 'i';
+        $params = [$siteId];
+        if ($status !== null && in_array($status, self::STOCKTAKE_STATUSES, true) === true) {
+            $where[]  = 'st.status = ?';
+            $types   .= 's';
+            $params[] = $status;
+        }
+
+        $sql = 'SELECT st.*, '
+             . '       su.fullName AS startedByName, cu.fullName AS closedByName, '
+             . '       l.locationName, c.categoryName, '
+             . '       (SELECT COUNT(*) FROM tblAssetStocktakeItems i WHERE i.stocktakeID = st.stocktakeID) AS itemCount '
+             . 'FROM tblAssetStocktakes st '
+             . 'LEFT JOIN tblUsers su ON su.userID = st.startedByID '
+             . 'LEFT JOIN tblUsers cu ON cu.userID = st.closedByID '
+             . 'LEFT JOIN tblAssetLocations l ON l.locationID = st.locationID '
+             . 'LEFT JOIN tblAssetCategories c ON c.categoryID = st.categoryID '
+             . 'WHERE ' . implode(' AND ', $where) . ' '
+             . 'ORDER BY st.startedAt DESC';
+
+        $stmt = $db->prepare($sql);
+        if ($stmt === false) {
+            error_log('AssetRegister::listStocktakes() prepare failed: ' . $db->error);
+            return [];
+        }
+        $stmt->bind_param($types, ...$params);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        $rows = [];
+        while ($row = $result->fetch_assoc()) {
+            $rows[] = $row;
+        }
+        $stmt->close();
+        return $rows;
+    }
+
+    /**
+     * Fetch a single stocktake run, site-scoped, with the same starter/
+     * closer/scope names listStocktakes() carries. Null if missing or
+     * belonging to another site.
+     *
+     * @return array<string, mixed>|null
+     */
+    public static function getStocktake(int $stocktakeId, int $siteId): ?array
+    {
+        $db = App::db();
+        $stmt = $db->prepare(
+            'SELECT st.*, '
+            . '       su.fullName AS startedByName, cu.fullName AS closedByName, '
+            . '       l.locationName, c.categoryName '
+            . 'FROM tblAssetStocktakes st '
+            . 'LEFT JOIN tblUsers su ON su.userID = st.startedByID '
+            . 'LEFT JOIN tblUsers cu ON cu.userID = st.closedByID '
+            . 'LEFT JOIN tblAssetLocations l ON l.locationID = st.locationID '
+            . 'LEFT JOIN tblAssetCategories c ON c.categoryID = st.categoryID '
+            . 'WHERE st.stocktakeID = ? AND st.siteID = ? LIMIT 1'
+        );
+        if ($stmt === false) {
+            error_log('AssetRegister::getStocktake() prepare failed: ' . $db->error);
+            return null;
+        }
+        $stmt->bind_param('ii', $stocktakeId, $siteId);
+        $stmt->execute();
+        $row = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+        return $row !== false && $row !== null ? $row : null;
+    }
+
+    /**
+     * List one stocktake run's item rows — asset name/tag, recorded +
+     * found location names, and who/when scanned — optionally filtered to
+     * one verifyStatus. Ordered by verifyStatus then asset name, which
+     * naturally groups the list by outcome for the scan screen.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public static function stocktakeItems(int $stocktakeId, int $siteId, ?string $verifyStatus = null): array
+    {
+        $db = App::db();
+
+        $where  = ['i.stocktakeID = ?', 'i.siteID = ?'];
+        $types  = 'ii';
+        $params = [$stocktakeId, $siteId];
+        if ($verifyStatus !== null && in_array($verifyStatus, self::STOCKTAKE_VERIFY_STATUSES, true) === true) {
+            $where[]  = 'i.verifyStatus = ?';
+            $types   .= 's';
+            $params[] = $verifyStatus;
+        }
+
+        $sql = 'SELECT i.*, a.name AS assetName, a.assetTagCode, a.isConfidential, '
+             . '       rl.locationName AS recordedLocationName, fl.locationName AS foundLocationName, '
+             . '       su.fullName AS scannedByName '
+             . 'FROM tblAssetStocktakeItems i '
+             . 'JOIN tblAssets a ON a.assetID = i.assetID '
+             . 'LEFT JOIN tblAssetLocations rl ON rl.locationID = a.locationID '
+             . 'LEFT JOIN tblAssetLocations fl ON fl.locationID = i.foundLocationID '
+             . 'LEFT JOIN tblUsers su ON su.userID = i.scannedByID '
+             . 'WHERE ' . implode(' AND ', $where) . ' '
+             . 'ORDER BY i.verifyStatus ASC, a.name ASC';
+
+        $stmt = $db->prepare($sql);
+        if ($stmt === false) {
+            error_log('AssetRegister::stocktakeItems() prepare failed: ' . $db->error);
+            return [];
+        }
+        $stmt->bind_param($types, ...$params);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        $rows = [];
+        while ($row = $result->fetch_assoc()) {
+            $rows[] = $row;
+        }
+        $stmt->close();
+        return $rows;
+    }
+
+    /**
+     * Variance summary for one stocktake run — a count per verifyStatus
+     * (every status always present, 0 when there are no rows in it) plus
+     * a 'total' across all of them, via a single GROUP BY query.
+     *
+     * @return array{pending: int, present: int, missing: int, moved: int,
+     *         unexpected: int, total: int}
+     */
+    public static function stocktakeVariance(int $stocktakeId, int $siteId): array
+    {
+        $counts = array_fill_keys(self::STOCKTAKE_VERIFY_STATUSES, 0);
+
+        $db = App::db();
+        $stmt = $db->prepare(
+            'SELECT verifyStatus, COUNT(*) AS cnt FROM tblAssetStocktakeItems '
+            . 'WHERE stocktakeID = ? AND siteID = ? GROUP BY verifyStatus'
+        );
+        if ($stmt === false) {
+            error_log('AssetRegister::stocktakeVariance() prepare failed: ' . $db->error);
+            $counts['total'] = 0;
+            return $counts;
+        }
+        $stmt->bind_param('ii', $stocktakeId, $siteId);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        $total = 0;
+        while ($row = $result->fetch_assoc()) {
+            $status = (string) $row['verifyStatus'];
+            $cnt    = (int) $row['cnt'];
+            if (array_key_exists($status, $counts) === true) {
+                $counts[$status] = $cnt;
+            }
+            $total += $cnt;
+        }
+        $stmt->close();
+
+        $counts['total'] = $total;
+        return $counts;
     }
 }
