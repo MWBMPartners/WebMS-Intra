@@ -10,7 +10,7 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   0.8.2
+ * @version   0.8.3
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/94
  * -----------------------------------------------------------------------------
  */
@@ -85,6 +85,26 @@ if ($workflowId > 0) {
 // 📋 Add step if provided
 $stepName = trim($_POST['stepName'] ?? '');
 if ($stepName !== '' && $workflowId > 0) {
+    // 🛡️ $workflowId is unvalidated $_POST input — the create branch above
+    //     only trusts it when it just minted the ID itself; on the update
+    //     path (or if a forged value slips through a failed UPDATE) confirm
+    //     the workflow really belongs to this site before writing a step to
+    //     the (site-less) tblWorkflowSteps table.
+    $ownsWorkflow = false;
+    $ownStmt = $mysqli->prepare('SELECT 1 FROM tblWorkflows WHERE workflowID = ? AND siteID = ?');
+    if ($ownStmt !== false) {
+        $ownStmt->bind_param('ii', $workflowId, $siteId);
+        $ownStmt->execute();
+        $ownsWorkflow = ($ownStmt->get_result()->fetch_row() !== null);
+        $ownStmt->close();
+    }
+    if ($ownsWorkflow === false) {
+        $_SESSION['flash_msg']  = 'Workflow not found for this site.';
+        $_SESSION['flash_type'] = 'danger';
+        header('Location: /admin/workflows?edit=' . $workflowId);
+        exit();
+    }
+
     $stepType      = $_POST['stepType'] ?? 'approval';
     $assigneeType  = $_POST['assigneeType'] ?? 'role';
     $assigneeValue = trim($_POST['assigneeValue'] ?? '') !== '' ? trim($_POST['assigneeValue'] ?? '') : null;

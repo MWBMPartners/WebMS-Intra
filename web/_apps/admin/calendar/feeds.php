@@ -58,13 +58,13 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
                         <input type="hidden" name="feedID" value="<?php echo (int) $f['feedID']; ?>">
                         <input type="hidden" name="action" value="<?php echo (int) $f['isActive'] === 1 ? 'pause' : 'resume'; ?>">
-                        <button class="btn btn-sm btn-outline-secondary"><i class="fa-solid fa-<?php echo (int) $f['isActive'] === 1 ? 'pause' : 'play'; ?>"></i></button>
+                        <button class="btn btn-sm btn-outline-secondary" title="<?php echo (int) $f['isActive'] === 1 ? 'Pause feed' : 'Resume feed'; ?>" aria-label="<?php echo (int) $f['isActive'] === 1 ? 'Pause feed' : 'Resume feed'; ?>"><i class="fa-solid fa-<?php echo (int) $f['isActive'] === 1 ? 'pause' : 'play'; ?>" aria-hidden="true"></i></button>
                     </form>
                     <form method="post" action="/admin/calendar/feeds/save" class="d-inline">
                         <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
                         <input type="hidden" name="feedID" value="<?php echo (int) $f['feedID']; ?>">
                         <input type="hidden" name="action" value="remove">
-                        <button class="btn btn-sm btn-outline-danger" data-confirm="Delete feed and ALL its imported events?" data-confirm-destructive="true"><i class="fa-solid fa-xmark"></i></button>
+                        <button class="btn btn-sm btn-outline-danger" data-confirm="Delete feed and ALL its imported events?" data-confirm-destructive="true" title="Delete feed" aria-label="Delete feed"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>
                     </form>
                 </div>
             </div>

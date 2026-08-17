@@ -36,13 +36,22 @@ if ($rtStmt !== false) {
     $rs->free();
 }
 
+// Users for the assignee dropdown — scoped to this site's membership
+// (mirrors leadership/assign.php's user dropdown).
 $users = [];
-$rs = $db->query('SELECT userID, fullName FROM tblUsers WHERE isActive = 1 ORDER BY fullName');
-if ($rs !== false) {
+$uStmt = $db->prepare(
+    'SELECT u.userID, u.fullName FROM tblUsers u '
+    . 'INNER JOIN tblUserSites us ON us.userID = u.userID AND us.siteID = ? AND us.isActive = 1 '
+    . 'WHERE u.isActive = 1 ORDER BY u.fullName'
+);
+if ($uStmt !== false) {
+    $uStmt->bind_param('i', $siteId);
+    $uStmt->execute();
+    $rs = $uStmt->get_result();
     while ($r = $rs->fetch_assoc()) {
         $users[] = $r;
     }
-    $rs->free();
+    $uStmt->close();
 }
 
 $endDate = date('Y-m-d', strtotime('+12 weeks'));

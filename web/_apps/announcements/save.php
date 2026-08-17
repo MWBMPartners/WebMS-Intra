@@ -10,7 +10,7 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   0.8.2
+ * @version   0.8.3
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/89
  * -----------------------------------------------------------------------------
  */
@@ -48,8 +48,8 @@ $siteId = Site::id();
 $userId = (int) ($_SESSION['user_id'] ?? 0);
 
 $announcementId = (int) ($_POST['announcementID'] ?? 0);
-$title          = trim($_POST['title'] ?? '');
-$body           = trim($_POST['body'] ?? '');
+$title          = trim((string) ($_POST['title'] ?? ''));
+$body           = trim((string) ($_POST['body'] ?? ''));
 $priority       = $_POST['priority'] ?? 'normal';
 $isPinned       = isset($_POST['isPinned']) === true ? 1 : 0;
 $isPublished    = isset($_POST['isPublished']) === true ? 1 : 0;

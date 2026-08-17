@@ -14,7 +14,7 @@
  * @author     MWBM Partners Ltd (t/a MWservices)
  * @copyright  2025-2026 MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version    0.2.0
+ * @version    0.2.1
  * -----------------------------------------------------------------------------
  */
 
@@ -86,7 +86,7 @@ $policyItems = $policy['rules'];
 // -----------------------------------------------------------------------------
 ?>
 <!doctype html>
-<html lang="en" data-bs-theme="light">
+<html lang="<?php echo htmlspecialchars(\Portal\Core\I18n::locale(), ENT_QUOTES, 'UTF-8'); ?>" dir="<?php echo \Portal\Core\I18n::dir(); ?>" data-bs-theme="light">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">

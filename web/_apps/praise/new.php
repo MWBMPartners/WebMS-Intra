@@ -11,6 +11,7 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\Logger;
 use Portal\Core\Site;
 
 Auth::ensureSession();
@@ -45,7 +46,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && Auth::verifyCsrf($_POST['csrf_token
                 exit();
             }
         } catch (\Throwable $e) {
-            $flash = 'Could not save: ' . $e->getMessage();
+            // 🔐 Never surface the raw DB exception to the client — log it
+            // and only reflect the real message when debug mode is on.
+            Logger::errorPlatform('Praise', 'Error', 'PRAISE_SAVE_FAIL', $e->getMessage(), '');
+            $flash = 'Could not save: ' . (App::isDebug() === true ? $e->getMessage() : 'please try again.');
             $flashType = 'danger';
         }
     }

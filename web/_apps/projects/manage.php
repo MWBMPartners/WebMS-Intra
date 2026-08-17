@@ -76,12 +76,15 @@ if ($stmt !== false) {
 
 $givingCategories = [];
 try {
-    $rs = $db->query('SELECT categoryID, name FROM tblGivingCategory WHERE siteID = ' . (int) $siteId . ' AND isActive = 1 ORDER BY name');
-    if ($rs !== false) {
+    $stmt = $db->prepare('SELECT categoryID, name FROM tblGivingCategory WHERE siteID = ? AND isActive = 1 ORDER BY name');
+    if ($stmt !== false) {
+        $stmt->bind_param('i', $siteId);
+        $stmt->execute();
+        $rs = $stmt->get_result();
         while ($r = $rs->fetch_assoc()) {
             $givingCategories[] = $r;
         }
-        $rs->free();
+        $stmt->close();
     }
 } catch (\Throwable $ignored) {
     // Giving app not installed — leave empty.

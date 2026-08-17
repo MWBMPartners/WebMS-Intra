@@ -81,7 +81,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                             </div>
                         <?php elseif ($enrolled === true): ?>
                             <div class="progress mt-auto mb-2" style="height: .5rem;">
-                                <div class="progress-bar bg-success" style="width: <?php echo $progressPct; ?>%"></div>
+                                <div class="progress-bar bg-success" role="progressbar" style="width: <?php echo $progressPct; ?>%"
+                                     aria-valuenow="<?php echo $progressPct; ?>" aria-valuemin="0" aria-valuemax="100"></div>
                             </div>
                             <p class="small text-muted mb-2">Day <?php echo (int) $p['currentDay']; ?> of <?php echo (int) $p['totalDays']; ?></p>
                         <?php endif; ?>

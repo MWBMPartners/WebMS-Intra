@@ -16,7 +16,7 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.4.0
+ * @version   1.4.1
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/299
  * -----------------------------------------------------------------------------
  */
@@ -90,14 +90,23 @@ if ($stmt !== false) {
     $stmt->close();
 }
 
-// 📋 Active users (for the counter1 / counter2 selects)
+// 📋 Active users (for the counter1 / counter2 selects) — site-scoped, mirrors
+// assets/loan.php's counterparty picker (INNER JOIN tblUserSites) so counters
+// can't be picked from another tenant/site.
 $users = [];
-$r = $db->query('SELECT userID, fullName FROM tblUsers WHERE isActive = 1 ORDER BY fullName LIMIT 500');
-if ($r !== false) {
+$stmt = $db->prepare(
+    'SELECT u.userID, u.fullName FROM tblUsers u '
+    . 'INNER JOIN tblUserSites us ON us.userID = u.userID AND us.siteID = ? AND us.isActive = 1 '
+    . 'WHERE u.isActive = 1 ORDER BY u.fullName LIMIT 500'
+);
+if ($stmt !== false) {
+    $stmt->bind_param('i', $siteId);
+    $stmt->execute();
+    $r = $stmt->get_result();
     while ($u = $r->fetch_assoc()) {
         $users[] = $u;
     }
-    $r->free();
+    $stmt->close();
 }
 
 $statusClass = static function (string $status): string {

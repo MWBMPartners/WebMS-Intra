@@ -118,6 +118,40 @@
     }
 
     /**
+     * Initialise the dyslexia-friendly reading-mode toggle button(s).
+     * Two states (on / off). Persists in localStorage as 'portal-read'.
+     * The FOUC script in header.php applies the attribute before paint.
+     */
+    function initReadToggle() {
+        var html = document.documentElement;
+        function savedRead() {
+            return localStorage.getItem('portal-read') === 'on';
+        }
+        function apply(on) {
+            if (on) {
+                html.setAttribute('data-portal-read', 'on');
+            } else {
+                html.removeAttribute('data-portal-read');
+            }
+        }
+
+        var buttons = document.querySelectorAll('.portal-read-toggle');
+        for (var i = 0; i < buttons.length; i++) {
+            buttons[i].addEventListener('click', function () {
+                var next = !savedRead();
+                if (next) {
+                    localStorage.setItem('portal-read', 'on');
+                } else {
+                    localStorage.removeItem('portal-read');
+                }
+                apply(next);
+                updateReadIcons(next);
+            });
+        }
+        updateReadIcons(savedRead());
+    }
+
+    /**
      * Update theme toggle icons + aria labels to reflect the saved preference.
      * Saved preference is one of: 'light', 'dark', 'auto'.
      *
@@ -156,6 +190,24 @@
                 on
                     ? 'Colour-blind safe palette: on — click to turn off'
                     : 'Colour-blind safe palette: off — click to turn on'
+            );
+        }
+    }
+
+    /**
+     * Update reading-mode toggle icons + aria labels to reflect the state.
+     *
+     * @param {boolean} on - Whether dyslexia-friendly reading mode is enabled
+     */
+    function updateReadIcons(on) {
+        var buttons = document.querySelectorAll('.portal-read-toggle');
+        for (var i = 0; i < buttons.length; i++) {
+            buttons[i].setAttribute('aria-pressed', on ? 'true' : 'false');
+            buttons[i].setAttribute(
+                'title',
+                on
+                    ? 'Dyslexia-friendly reading mode: on — click to turn off'
+                    : 'Dyslexia-friendly reading mode: off — click to turn on'
             );
         }
     }
@@ -432,12 +484,14 @@
         document.addEventListener('DOMContentLoaded', function () {
             initThemeToggle();
             initCbToggle();
+            initReadToggle();
             initDropzones();
             initPasswordMeters();
         });
     } else {
         initThemeToggle();
         initCbToggle();
+        initReadToggle();
         initDropzones();
         initPasswordMeters();
     }

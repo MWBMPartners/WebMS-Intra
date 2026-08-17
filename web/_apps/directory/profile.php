@@ -29,13 +29,15 @@ if ($id <= 0) {
 
 $u = null;
 $stmt = $db->prepare(
-    'SELECT userID, fullName, emailAddress AS email, displayBio, displayPhone, displayAddress, displayPhoto, '
-    . '       visibilityName, visibilityRoles, visibilityEmail, visibilityPhone, visibilityAddress, '
-    . '       visibilityBio, visibilityPhoto '
-    . 'FROM tblUsers WHERE userID = ? LIMIT 1'
+    'SELECT u.userID, u.fullName, u.emailAddress AS email, u.displayBio, u.displayPhone, u.displayAddress, u.displayPhoto, '
+    . '       u.visibilityName, u.visibilityRoles, u.visibilityEmail, u.visibilityPhone, u.visibilityAddress, '
+    . '       u.visibilityBio, u.visibilityPhoto '
+    . 'FROM tblUsers u '
+    . 'INNER JOIN tblUserSites us ON us.userID = u.userID AND us.siteID = ? AND us.isActive = 1 '
+    . 'WHERE u.userID = ? LIMIT 1'
 );
 if ($stmt !== false) {
-    $stmt->bind_param('i', $id);
+    $stmt->bind_param('ii', $siteId, $id);
     $stmt->execute();
     $u = $stmt->get_result()->fetch_assoc();
     $stmt->close();

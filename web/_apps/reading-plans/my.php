@@ -59,7 +59,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 </div>
                 <div class="col-md-5">
                     <div class="progress" style="height: .5rem;">
-                        <div class="progress-bar bg-<?php echo $completed === true ? 'success' : 'primary'; ?>" style="width: <?php echo $pct; ?>%"></div>
+                        <div class="progress-bar bg-<?php echo $completed === true ? 'success' : 'primary'; ?>" role="progressbar" style="width: <?php echo $pct; ?>%"
+                             aria-valuenow="<?php echo $pct; ?>" aria-valuemin="0" aria-valuemax="100"></div>
                     </div>
                     <small class="text-muted">Day <?php echo (int) $e['currentDay']; ?> / <?php echo (int) $e['totalDays']; ?></small>
                 </div>

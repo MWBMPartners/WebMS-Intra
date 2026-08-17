@@ -77,6 +77,26 @@ try {
         if (in_array($sectionType, $validSections, true) === false) {
             $sectionType = 'other';
         }
+        // 🛡️ Validate presenterID against the same site-scoped set the
+        // edit-page dropdown is built from (security review) — without
+        // this, a crafted POST could attribute a section to ANY userID on
+        // ANY tenant, not just users active on this site.
+        if ($presenterID > 0) {
+            $presCheck = $db->prepare(
+                'SELECT 1 FROM tblUserSites WHERE userID = ? AND siteID = ? AND isActive = 1 LIMIT 1'
+            );
+            if ($presCheck !== false) {
+                $presCheck->bind_param('ii', $presenterID, $siteId);
+                $presCheck->execute();
+                $presValid = $presCheck->get_result()->fetch_row() !== null;
+                $presCheck->close();
+                if ($presValid === false) {
+                    $presenterID = 0;
+                }
+            } else {
+                $presenterID = 0;
+            }
+        }
         $pID = $presenterID > 0 ? $presenterID : null;
         $pT  = $presenterTxt !== '' ? $presenterTxt : null;
         $tt  = $title !== '' ? $title : null;

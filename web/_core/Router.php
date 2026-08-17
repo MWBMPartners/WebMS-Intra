@@ -445,7 +445,18 @@ class Router
                 500 => 'Server Error',
             ];
             $title = $titles[$code] ?? 'Error ' . $code;
-            echo '<!doctype html><html><head><title>' . $title . '</title></head>';
+            // ♿ Emit lang + dir so assistive tech announces this fallback page
+            //    correctly. Guarded because renderError() can fire in degraded
+            //    states — fall back to en/ltr if I18n isn't ready.
+            $lang = 'en';
+            $dir  = 'ltr';
+            if (class_exists(I18n::class) === true) {
+                $lang = I18n::locale();
+                $dir  = I18n::dir();
+            }
+            echo '<!doctype html><html lang="' . htmlspecialchars($lang, ENT_QUOTES, 'UTF-8')
+               . '" dir="' . htmlspecialchars($dir, ENT_QUOTES, 'UTF-8') . '">'
+               . '<head><meta charset="utf-8"><title>' . htmlspecialchars($title, ENT_QUOTES, 'UTF-8') . '</title></head>';
             echo '<body style="font-family:system-ui;text-align:center;padding:4rem;">';
             echo '<h1>' . $code . '</h1><p>' . htmlspecialchars($title, ENT_QUOTES, 'UTF-8') . '</p>';
             echo '<a href="/">Return to Portal</a></body></html>';

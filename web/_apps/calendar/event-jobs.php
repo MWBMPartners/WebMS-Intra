@@ -136,7 +136,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                             <input type="hidden" name="action" value="assign">
                             <input type="hidden" name="jobID" value="<?php echo $j['jobID']; ?>">
                             <input type="text" name="externalName" maxlength="120" placeholder="Assign volunteer" class="form-control form-control-sm" required>
-                            <button class="btn btn-primary btn-sm"><i class="fa-solid fa-plus"></i></button>
+                            <button class="btn btn-primary btn-sm" title="Add volunteer" aria-label="Add volunteer"><i class="fa-solid fa-plus" aria-hidden="true"></i></button>
                         </form>
                     </div>
                 </div>

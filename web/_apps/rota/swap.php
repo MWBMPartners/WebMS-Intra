@@ -69,11 +69,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && Auth::verifyCsrf($_POST['csrf_token
     }
 }
 
-// Other users (excluding self) for the dropdown
+// Other users (excluding self) for the dropdown — scoped to this site's
+// membership (mirrors leadership/assign.php's user dropdown).
 $users = [];
-$uStmt = $db->prepare('SELECT userID, fullName FROM tblUsers WHERE userID <> ? AND isActive = 1 ORDER BY fullName');
+$uStmt = $db->prepare(
+    'SELECT u.userID, u.fullName FROM tblUsers u '
+    . 'INNER JOIN tblUserSites us ON us.userID = u.userID AND us.siteID = ? AND us.isActive = 1 '
+    . 'WHERE u.userID <> ? AND u.isActive = 1 ORDER BY u.fullName'
+);
 if ($uStmt !== false) {
-    $uStmt->bind_param('i', $userId);
+    $uStmt->bind_param('ii', $siteId, $userId);
     $uStmt->execute();
     $rs = $uStmt->get_result();
     while ($r = $rs->fetch_assoc()) {

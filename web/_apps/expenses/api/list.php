@@ -23,7 +23,7 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   0.1.0
+ * @version   0.1.1
  * @link      https://github.com/MWBMPartners/WebMS-Intra
  * -----------------------------------------------------------------------------
  */
@@ -52,16 +52,24 @@ if ($status !== '' && in_array($status, $validStatuses, true) === false) {
 
 // 📊 Build the query dynamically based on filters
 $db     = App::db();
-$userId = (int) ($_SESSION['user_id'] ?? 0);
 $siteId = Site::id();
 $offset = ($page - 1) * $limit;
 
-// 🔍 Determine scope: own claims or all claims (admin only)
+// 🔍 Determine scope: own claims (session) or all claims (admin ?all=true,
+// or ANY bearer/API-key request). A bearer key carries no session — reading
+// $_SESSION['user_id'] under a bearer request always yielded 0, matching
+// zero rows. ApiAuth::actorUserId() is null in apikey mode by design (see
+// ApiAuth::actorUserId()), so a key request is scoped to its pinned site
+// only, exactly as delete.php reasons: "a key already operates within a
+// single site" — no separate per-user ownership scope applies.
+$isBearer = ApiAuth::source() === 'apikey';
+$userId   = $isBearer === false ? (ApiAuth::actorUserId() ?? 0) : 0;
+
 $whereClause = 'WHERE EC.userID = ? AND EC.siteID = ?';
 $params      = [$userId, $siteId];
 $types       = 'ii';
 
-if ($showAll === true && App::isAdmin() === true) {
+if ($isBearer === true || ($showAll === true && App::isAdmin() === true)) {
     $whereClause = 'WHERE EC.siteID = ?';
     $params      = [$siteId];
     $types       = 'i';

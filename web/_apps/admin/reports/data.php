@@ -10,7 +10,7 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   0.8.2
+ * @version   0.8.3
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/93
  * -----------------------------------------------------------------------------
  */
@@ -37,11 +37,14 @@ header('Content-Type: application/json');
 switch ($report) {
     case 'monthly_logins':
         $data = [];
+        // 🛡️ tblActivityLogs has no `createdAt` column — it's `timestamp`
+        //    (see full_schema.sql). The old column name made prepare()
+        //    fail, so this silently returned [] on every call.
         $stmt = $mysqli->prepare(
-            'SELECT DATE_FORMAT(createdAt, \'%Y-%m\') AS month, COUNT(*) AS cnt '
+            'SELECT DATE_FORMAT(`timestamp`, \'%Y-%m\') AS month, COUNT(*) AS cnt '
             . 'FROM tblActivityLogs WHERE activityType = \'Login\' '
             . 'AND (siteID = ? OR siteID IS NULL) '
-            . 'AND createdAt >= DATE_SUB(NOW(), INTERVAL 12 MONTH) '
+            . 'AND `timestamp` >= DATE_SUB(NOW(), INTERVAL 12 MONTH) '
             . 'GROUP BY month ORDER BY month'
         );
         if ($stmt !== false) {

@@ -11,7 +11,7 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   0.9.0
+ * @version   0.9.1
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/92
  * -----------------------------------------------------------------------------
  */
@@ -191,7 +191,7 @@ $pageTitle = 'Two-Factor Verification';
 // 📄 Minimal page (no nav — user not fully authenticated)
 ?>
 <!DOCTYPE html>
-<html lang="en" data-bs-theme="light">
+<html lang="<?php echo htmlspecialchars(\Portal\Core\I18n::locale(), ENT_QUOTES, 'UTF-8'); ?>" dir="<?php echo \Portal\Core\I18n::dir(); ?>" data-bs-theme="light">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -222,7 +222,8 @@ $pageTitle = 'Two-Factor Verification';
                     <form method="post" action="/auth/2fa/verify">
                         <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
                         <div class="mb-3">
-                            <input type="text" class="form-control form-control-lg text-center" name="code"
+                            <label for="code" class="form-label">Verification code</label>
+                            <input type="text" class="form-control form-control-lg text-center" id="code" name="code"
                                    maxlength="8" pattern="[A-Za-z0-9]{6,8}" inputmode="numeric"
                                    autocomplete="one-time-code" placeholder="000000" required autofocus>
                         </div>
@@ -252,7 +253,8 @@ $pageTitle = 'Two-Factor Verification';
                         <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
                         <input type="hidden" name="use_backup" value="1">
                         <div class="mb-2">
-                            <input type="text" class="form-control text-center" name="code"
+                            <label for="backup_code" class="form-label">Backup code</label>
+                            <input type="text" class="form-control text-center" id="backup_code" name="code"
                                    maxlength="8" placeholder="Backup code" required>
                         </div>
                         <button type="submit" class="btn btn-outline-secondary w-100 btn-sm">

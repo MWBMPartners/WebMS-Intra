@@ -12,7 +12,7 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   0.4.0
+ * @version   0.4.1
  * -----------------------------------------------------------------------------
  */
 
@@ -75,6 +75,27 @@ if ($totalAmt <= 0) {
 }
 
 $siteId = Site::id();
+
+// 🛡️ Site-scoped department check — mirror expenses/api/create.php:94-105 so
+// a claim can't be filed against another site's department (deptID is a
+// plain client-supplied int).
+$deptCheck = $mysqli->prepare('SELECT deptID FROM tblDepts WHERE deptID = ? AND siteID = ? LIMIT 1');
+if ($deptCheck === false) {
+    $_SESSION['flash_msg']  = 'Error saving claim. Please try again.';
+    $_SESSION['flash_type'] = 'danger';
+    header('Location: /expenses/submit');
+    exit();
+}
+$deptCheck->bind_param('ii', $deptID, $siteId);
+$deptCheck->execute();
+$deptExists = $deptCheck->get_result()->fetch_assoc() !== null;
+$deptCheck->close();
+if ($deptExists === false) {
+    $_SESSION['flash_msg']  = 'Selected department is not valid for this site.';
+    $_SESSION['flash_type'] = 'danger';
+    header('Location: /expenses/submit');
+    exit();
+}
 
 // 🔄 Wrap multi-table insert in a transaction for atomicity
 App::beginTransaction();

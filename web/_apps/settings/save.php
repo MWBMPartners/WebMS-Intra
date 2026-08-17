@@ -15,7 +15,7 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   0.3.0
+ * @version   0.3.1
  * -----------------------------------------------------------------------------
  */
 
@@ -75,14 +75,18 @@ $siteId = Site::id();
 
 if ($settingId > 0) {
     // ✏️ Update existing
-    $stmt = $mysqli->prepare('UPDATE tblSettings SET settingValue = ?, isSensitive = ?, updatedAt = NOW() WHERE settingID = ?');
+    // 🌐 Multi-site: scope the UPDATE the same way the INSERT and DELETE
+    //    (settings/index.php) branches do — a Site Admin may edit their own
+    //    site's row or an inherited global (siteID IS NULL) row, but never
+    //    another site's row, even by guessing/forging its settingID.
+    $stmt = $mysqli->prepare('UPDATE tblSettings SET settingValue = ?, isSensitive = ?, updatedAt = NOW() WHERE settingID = ? AND (siteID = ? OR siteID IS NULL)');
     if ($stmt === false) {
         $_SESSION['flash_msg']  = t('error.db_update_setting');
         $_SESSION['flash_type'] = 'danger';
         header('Location: /settings');
         exit();
     }
-    $stmt->bind_param('sii', $settingVal, $isSensitive, $settingId);
+    $stmt->bind_param('siii', $settingVal, $isSensitive, $settingId, $siteId);
     $stmt->execute();
     $stmt->close();
     Logger::activity('SettingsUpdate', 'Updated setting: ' . $settingKey, $_SESSION['user_id'] ?? null);

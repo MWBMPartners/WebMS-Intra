@@ -52,15 +52,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         header('Location: /photos/upload');
         exit();
     }
-    $mime = (string) $f['type'];
-    if (in_array($mime, ['image/jpeg', 'image/png', 'image/webp'], true) === false) {
+    // 🛡️ Never trust the client-declared MIME type ($f['type']) — finfo-sniff
+    // the real type from the uploaded bytes and derive the stored extension
+    // from THAT, mirroring documents/api/create.php's allowlist pattern.
+    $allowedMimeExt = [
+        'image/jpeg' => 'jpg',
+        'image/png'  => 'png',
+        'image/webp' => 'webp',
+    ];
+    $finfo = finfo_open(FILEINFO_MIME_TYPE);
+    $sniffedMime = $finfo !== false ? finfo_file($finfo, (string) $f['tmp_name']) : false;
+    if ($finfo !== false) {
+        finfo_close($finfo);
+    }
+    if ($sniffedMime === false || array_key_exists($sniffedMime, $allowedMimeExt) === false) {
         $_SESSION['flash_msg']  = 'Only JPEG / PNG / WebP accepted.';
         $_SESSION['flash_type'] = 'danger';
         header('Location: /photos/upload');
         exit();
     }
-    $ext = strtolower(pathinfo((string) $f['name'], PATHINFO_EXTENSION));
-    $name = 'q-' . date('Ymd_His') . '-' . bin2hex(random_bytes(6)) . ($ext !== '' ? '.' . $ext : '');
+    $mime = $sniffedMime;
+    $ext  = $allowedMimeExt[$sniffedMime];
+    $name = 'q-' . date('Ymd_His') . '-' . bin2hex(random_bytes(6)) . '.' . $ext;
     $dst  = Photos::queueDir() . DIRECTORY_SEPARATOR . $name;
     if (move_uploaded_file((string) $f['tmp_name'], $dst) === false) {
         $_SESSION['flash_msg']  = 'Could not save file.';

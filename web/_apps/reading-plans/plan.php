@@ -141,7 +141,8 @@ $progressPct = $enrollment !== null
                 <div class="card-body">
                     <h2 class="h5">Day <?php echo $todayDay; ?> of <?php echo (int) $plan['totalDays']; ?></h2>
                     <div class="progress mb-3" style="height: .5rem;">
-                        <div class="progress-bar bg-success" style="width: <?php echo $progressPct; ?>%"></div>
+                        <div class="progress-bar bg-success" role="progressbar" style="width: <?php echo $progressPct; ?>%"
+                             aria-valuenow="<?php echo $progressPct; ?>" aria-valuemin="0" aria-valuemax="100"></div>
                     </div>
                     <?php if ($day !== null): ?>
                         <p class="lead mb-2"><?php echo htmlspecialchars((string) $day['label'], ENT_QUOTES, 'UTF-8'); ?></p>

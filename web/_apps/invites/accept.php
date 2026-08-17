@@ -20,7 +20,7 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   0.2.0
+ * @version   0.2.1
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/239
  * -----------------------------------------------------------------------------
  */
@@ -29,6 +29,7 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\Logger;
 
 Auth::ensureSession();
 
@@ -175,7 +176,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 exit();
             } catch (\Throwable $e) {
                 $db->rollback();
-                $flash = 'Could not complete signup: ' . $e->getMessage();
+                // 🔐 Public pre-auth page — never reflect the raw exception
+                // message (table/column names on a duplicate-key, etc.) back
+                // to the client. Log it server-side and show a generic
+                // message instead, mirroring auth/reset-password/save.php.
+                Logger::errorPlatform('Invites', 'Error', 'INVITE_ACCEPT_FAIL', $e->getMessage(), '');
+                $flash = 'That username or email is already in use.';
                 $flashType = 'danger';
             }
         }

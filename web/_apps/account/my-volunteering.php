@@ -19,14 +19,13 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.0.0
+ * @version   1.0.1
  * @link      https://github.com/MWBMPartners/webMS-Intra/issues/342
  * -----------------------------------------------------------------------------
  */
 
 declare(strict_types=1);
 
-use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Site;
 

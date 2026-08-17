@@ -168,6 +168,7 @@ class Photos
             header('Content-Type: ' . $mime);
             header('Content-Length: ' . filesize($path));
             header('Cache-Control: private, max-age=3600');
+            header('X-Content-Type-Options: nosniff');
             readfile($path);
             return true;
         }
@@ -176,11 +177,13 @@ class Photos
         $img = self::loadGd($path, $mime);
         if ($img === null) {
             header('Content-Type: ' . $mime);
+            header('X-Content-Type-Options: nosniff');
             readfile($path);
             return true;
         }
         header('Content-Type: ' . $mime);
         header('Cache-Control: private, max-age=3600');
+        header('X-Content-Type-Options: nosniff');
         self::outputGd($img, $mime);
         imagedestroy($img);
         return true;

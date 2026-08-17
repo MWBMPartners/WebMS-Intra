@@ -27,7 +27,7 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.4.0
+ * @version   1.4.1
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/299
  * -----------------------------------------------------------------------------
  */
@@ -333,9 +333,15 @@ if ($action === 'envelope-add') {
     // resolution: a blank/unmatched name is anonymous, never guessed at).
     $giverIdParam = null;
     if ($giverId > 0) {
-        $stmt = $db->prepare('SELECT 1 FROM tblUsers WHERE userID = ? AND isActive = 1 LIMIT 1');
+        // 🛡️ Site-scoped (INNER JOIN tblUserSites) so a named envelope can't
+        // be attributed to another tenant/site's member.
+        $stmt = $db->prepare(
+            'SELECT 1 FROM tblUsers u '
+            . 'INNER JOIN tblUserSites us ON us.userID = u.userID AND us.siteID = ? AND us.isActive = 1 '
+            . 'WHERE u.userID = ? AND u.isActive = 1 LIMIT 1'
+        );
         if ($stmt !== false) {
-            $stmt->bind_param('i', $giverId);
+            $stmt->bind_param('ii', $siteId, $giverId);
             $stmt->execute();
             if ($stmt->get_result()->fetch_row() !== null) {
                 $giverIdParam = $giverId;

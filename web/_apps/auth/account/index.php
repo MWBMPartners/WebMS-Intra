@@ -15,7 +15,7 @@
  * @author     MWBM Partners Ltd (t/a MWservices)
  * @copyright  2025-2026 MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version    0.3.0
+ * @version    0.3.1
  * -----------------------------------------------------------------------------
  */
 
@@ -762,7 +762,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <h5 class="mb-0"><i class="fa-solid fa-bell me-2" aria-hidden="true"></i>Notification Preferences</h5>
     </div>
     <div class="card-body">
-        <form method="post" action="/auth/account/save">
+        <form method="post" action="/account/save">
             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
             <input type="hidden" name="action" value="update_notifications">
 

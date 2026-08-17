@@ -64,6 +64,25 @@ $siteId    = Site::id();
 $creatorId = ApiAuth::actorUserId();
 
 $db = App::db();
+
+// 🛡️ Validate role exists, is active, and belongs to this site (mirrors
+//     leadership/save.php:71-83) — previously only checked roleID > 0, so
+//     any positive integer (including another site's role) was accepted.
+$roleCheckStmt = $db->prepare(
+    'SELECT roleID FROM tblLeadershipRoles WHERE roleID = ? AND siteID = ? AND isActive = 1 LIMIT 1'
+);
+if ($roleCheckStmt === false) {
+    Logger::errorPlatform('MySQL', 'Error', 'API_LEADERSHIP_ASSIGN_ROLE_CHECK_PREP', $db->error, '');
+    ApiResponse::error('Database error', 500);
+}
+$roleCheckStmt->bind_param('ii', $roleId, $siteId);
+$roleCheckStmt->execute();
+$roleRow = $roleCheckStmt->get_result()->fetch_assoc();
+$roleCheckStmt->close();
+if ($roleRow === null) {
+    ApiResponse::error('Invalid roleID', 400);
+}
+
 $stmt = $db->prepare(
     'INSERT INTO tblLeadershipAssignments '
     . '(siteID, roleID, userID, personName, personEmail, startDate, endDate, notes, isActive, createdByID) '

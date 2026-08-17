@@ -82,7 +82,7 @@ $renderRow = function (array $r) use ($kindEmoji): string {
         $label = ucfirst((string) $r['kind']);
     }
     return '<div class="row py-1 border-bottom">'
-         . '<div class="col-md-3"><strong>' . htmlspecialchars(date('j M', strtotime(date('Y') . '-' . str_replace('-', '-', (string) $r['monthDay']))), ENT_QUOTES, 'UTF-8') . '</strong></div>'
+         . '<div class="col-md-3"><strong>' . htmlspecialchars(date('j M', strtotime(date('Y') . '-' . (string) $r['monthDay'])), ENT_QUOTES, 'UTF-8') . '</strong></div>'
          . '<div class="col-md-1">' . $emoji . '</div>'
          . '<div class="col-md-4">' . htmlspecialchars((string) $r['fullName'], ENT_QUOTES, 'UTF-8') . '</div>'
          . '<div class="col-md-4 text-muted small">' . htmlspecialchars($label . $year, ENT_QUOTES, 'UTF-8') . '</div>'

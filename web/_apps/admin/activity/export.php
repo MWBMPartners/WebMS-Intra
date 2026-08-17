@@ -8,7 +8,7 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present All Rights Reserved
  * @license   All Rights Reserved
- * @version   0.8.1
+ * @version   0.8.2
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/77
  */
 
@@ -46,19 +46,29 @@ if (Auth::verifyCsrf($_GET['csrf_token'] ?? '') === false) {
 $siteId = Site::id();
 
 // 📊 Query activity logs (capped at 5000 rows)
+// 🛡️ tblActivityLogs has no `action`/`detail`/`createdAt` columns — the
+//    real names are `activityType`, `activityDescription`, `timestamp`
+//    (see full_schema.sql). The old column names made prepare() return
+//    false, so the unguarded bind_param() below fatalled every export.
 $sql = "SELECT
             l.logID,
-            l.action,
-            l.detail,
-            l.createdAt  AS Timestamp,
+            l.activityType,
+            l.activityDescription,
+            l.timestamp  AS Timestamp,
             u.fullName   AS User
         FROM tblActivityLogs l
         LEFT JOIN tblUsers u ON u.userID = l.userID
         WHERE (l.siteID = ? OR l.siteID IS NULL)
-        ORDER BY l.createdAt DESC
+        ORDER BY l.timestamp DESC
         LIMIT 5000";
 
 $stmt = $db->prepare($sql);
+if ($stmt === false) {
+    $_SESSION['flash_msg']  = t('error.db_export_activity');
+    $_SESSION['flash_type'] = 'danger';
+    header('Location: /admin/activity');
+    exit();
+}
 $stmt->bind_param('i', $siteId);
 $stmt->execute();
 $result = $stmt->get_result();

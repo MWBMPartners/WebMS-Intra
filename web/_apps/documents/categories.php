@@ -10,7 +10,7 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   0.8.2
+ * @version   0.8.3
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/90
  * -----------------------------------------------------------------------------
  */
@@ -47,8 +47,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     $action     = $_POST['action'] ?? '';
     $categoryId = (int) ($_POST['categoryID'] ?? 0);
-    $catName    = trim($_POST['categoryName'] ?? '');
-    $catDesc    = trim($_POST['description'] ?? '');
+    $catName    = trim((string) ($_POST['categoryName'] ?? ''));
+    $catDesc    = trim((string) ($_POST['description'] ?? ''));
     $sortOrder  = (int) ($_POST['sortOrder'] ?? 0);
 
     if ($action === 'delete' && $categoryId > 0) {

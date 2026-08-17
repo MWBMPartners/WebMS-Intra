@@ -229,7 +229,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <div class="portal-card p-4 mb-4" id="personalisation">
     <h2 class="h4 mb-3"><i class="fa-solid fa-palette me-2 text-primary"></i>Personalisation (theme + accessibility)</h2>
 
-    <p>Two small buttons sit near your avatar in the navigation bar — one for theme, one for an accessibility-friendly colour palette. Both remember your preference per browser.</p>
+    <p>Three small buttons sit near your avatar in the navigation bar — one for theme, one for an accessibility-friendly colour palette, and one for a dyslexia-friendly reading mode. Each remembers your preference per browser.</p>
 
     <h5 class="mt-4 mb-3">Theme — light / dark / auto</h5>
 
@@ -286,10 +286,31 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
     <p class="small text-secondary mb-3">The button shows as tinted when the palette is active. Your site's brand colour is unaffected — only status colours change.</p>
 
+    <h5 class="mt-4 mb-3">Dyslexia-friendly reading mode</h5>
+
+    <p>The <i class="fa-solid fa-book-open-reader"></i> button turns on a reading mode designed to make text easier to follow for readers with dyslexia. It follows the British Dyslexia Association's style guidance:</p>
+
+    <div class="list-group list-group-flush mb-3 small">
+        <div class="list-group-item">
+            <strong>Clear sans-serif type</strong>
+            <span class="text-secondary"> — switches to a plain, evenly-weighted font (no web download; uses fonts already on your device)</span>
+        </div>
+        <div class="list-group-item">
+            <strong>More breathing room</strong>
+            <span class="text-secondary"> — wider spacing between letters and words, and taller line spacing</span>
+        </div>
+        <div class="list-group-item">
+            <strong>Left-aligned text</strong>
+            <span class="text-secondary"> — avoids the uneven gaps of justified paragraphs</span>
+        </div>
+    </div>
+
+    <p class="small text-secondary mb-3">The button shows as tinted when reading mode is active. It works alongside the theme and colour-blind settings — you can combine all three.</p>
+
     <div class="alert alert-info d-flex gap-2" role="alert">
         <i class="fa-solid fa-circle-info mt-1"></i>
         <div>
-            <strong>Note:</strong> Both preferences are stored per-browser. If you use multiple browsers or devices, you'll need to set them on each one separately.
+            <strong>Note:</strong> These preferences are stored per-browser. If you use multiple browsers or devices, you'll need to set them on each one separately.
         </div>
     </div>
 </div>
