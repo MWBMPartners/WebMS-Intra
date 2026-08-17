@@ -534,13 +534,27 @@ Components that convey state (badges, alerts, validation messages)
 should also use icons or text labels. The PR template's security
 checklist already mentions this for new UI work.
 
+### Dyslexia-friendly reading mode (#46)
+
+A third opt-in toggle (`localStorage.portal-read` = `on` / unset), applied
+as `<html data-portal-read="on">` and wired identically to the CB toggle
+(FOUC script → nav button → `portal.js` `initReadToggle()`). When enabled,
+`[data-portal-read="on"]` in `portal.css` swaps the body font to a clean
+system sans-serif stack (`Verdana, Tahoma, "Trebuchet MS", …` — no web font
+is fetched, so it stays CSP-safe and adds no network cost) and applies wider
+letter/word spacing, ~1.6–1.7 line height and left-aligned (never justified)
+body text. These choices follow the **British Dyslexia Association Style
+Guide (2023)**. It composes with the theme and CB toggles — all three can be
+on at once. The nav button uses the `fa-book-open-reader` icon; the help
+page `/help/getting-started` documents it for end users.
+
 ### Flow
 
 ```text
-localStorage  ──FOUC script──▶  <html data-bs-theme="..." data-portal-cb="...">
+localStorage  ──FOUC script──▶  <html data-bs-theme="..." data-portal-cb="..." data-portal-read="...">
                                        │
                                        ▼
-                              portal.css token overrides
+                              portal.css token / rule overrides
                                        │
                                        ▼
                               all components inherit
@@ -559,9 +573,10 @@ for `prefers-color-scheme` changes when in `auto` mode.
   localStorage and applying the attrs
 - `web/_core/templates/nav.php` — theme + CB toggle buttons
 - `web/public_html/assets/js/portal.js` — `initThemeToggle()` (cycles
-  light → dark → auto), `initCbToggle()` (on/off)
-- `web/_install/index.php` — installer mirrors all of the above inline
-  (it's standalone, can't load portal.css/portal.js)
+  light → dark → auto), `initCbToggle()` (on/off), `initReadToggle()` (on/off)
+- `web/_install/index.php` — installer mirrors the theme + CB controls inline
+  (it's standalone, can't load portal.css/portal.js; the reading-mode toggle
+  is portal-only for now)
 
 ---
 

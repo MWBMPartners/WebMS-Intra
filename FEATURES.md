@@ -135,9 +135,9 @@ Local + SSO + multi-factor sign-in.
 
 ---
 
-### 📅 Calendar — `/calendar/` ✅ + 🛠️
+### 📅 Calendar — `/calendar/` ✅
 
-Events, series, RSVP, exports, and (in flight) seven view modes.
+Events, series, RSVP, exports, and seven view modes.
 
 **Shipped:**
 - Event CRUD with hero images, location, all-day support, public/featured flags.
@@ -150,7 +150,7 @@ Events, series, RSVP, exports, and (in flight) seven view modes.
 - Crews (#343), volunteer job board (#344), multi-day attendance grid (#345), segment broadcast (#119), registrations (#347) — per-event coordinator tools at `/calendar/event/{crews,jobs,attendance,broadcast}` + `/admin/calendar/registrations`.
 - **Event Team Hub (#386 Phase 1)** — per-event staff/volunteer/organiser landing page at `/calendar/event/hub`, gathering the above tools plus a Resources list and a YouTube/Vimeo/Cloudflare Stream video grid. See the dedicated section below.
 
-**🛠️ In flight (PR #137 — closes #136):**
+**Shipped (PR #137, closed #136):**
 - Seven view modes — `/calendar?view=day|week|weekdays|weekend|month|year|list`.
 - Day / Week / Weekdays / Weekend share an hour-timeline renderer parametrised by column count.
 - Month view as a 7-column grid with up to 3 event pills per cell + "+ N more".
@@ -159,7 +159,7 @@ Events, series, RSVP, exports, and (in flight) seven view modes.
 - Last-used view persists in `localStorage`; admin sets `calendar.defaultView` (default `month`).
 - Events colour-coded by `tblEventCategories.color` (regex-validated server-side).
 
-**🛠️ In flight (PR #138 — stacked on #137):**
+**Shipped (PR #138):**
 - Per-month strap-line text under each month name on the year planner (`tblCalendarMonthThemes`).
 - `tblEventCategories.displayStyle` — `'background'` (default — tinted band) vs `'text'` (coloured text, no band) — matches how traditional planners flag Bank Holidays / Notable Days.
 - Admin pages: `/calendar/manage/types` (colour + style picker) and `/calendar/manage/month-themes`.
@@ -168,7 +168,7 @@ Events, series, RSVP, exports, and (in flight) seven view modes.
 - #97–#103: BookIT calendar-provider abstraction (7-PR series).
 - #128: New Order of Service planner with iHymns integration (gated on iHymns permission).
 
-**Tables:** `tblEvents`, `tblEventCategories`, `tblEventTypes`, `tblEventSeries`, `tblEventThemes`, `tblEventRecurrence`, `tblEventRsvps`, `tblCalendarMonthThemes` (🛠️)
+**Tables:** `tblEvents`, `tblEventCategories`, `tblEventTypes`, `tblEventSeries`, `tblEventThemes`, `tblEventRecurrence`, `tblEventRsvps`, `tblCalendarMonthThemes`
 **Settings:** `calendar.enabled`, `calendar.displayName`, `calendar.displayIcon`, `calendar.brandColor`, `calendar.defaultView`, `calendar.enablePublicView`, `calendar.allowRecurringEvents`
 
 ---
@@ -345,7 +345,7 @@ In-app documentation per app.
 | `/help/expenses` | Submit, statuses, receipts, withdrawal |
 | `/help/approvals` | For approvers |
 | `/help/treasury` | For treasury staff |
-| `/help/admin` | Settings, user roles, site branding, captcha config (🛠️ to add: calendar views) |
+| `/help/admin` | Settings, user roles, site branding, captcha config |
 | `/help/translations` | Language + i18n |
 | `/help/prayer-requests` | Prayer requests lifecycle, anonymous route, moderation |
 | `/help/faq` | Common questions |
@@ -385,6 +385,7 @@ Self-contained 6-step setup wizard (bootstrap-free).
 - `color-mix()` derivations with hex fallbacks (Chrome <111 / Safari <16.2 / Firefox <113).
 - Three theme modes: light / dark / auto via `prefers-color-scheme`.
 - CB-safe palette toggle (Wong, Nature Methods 2011).
+- Dyslexia-friendly reading-mode toggle (#46) — British Dyslexia Association style guide: clean system sans-serif (no web font fetched, CSP-safe), wider letter/word spacing, taller line height, left-aligned body text. Opt-in, persisted per-browser (`portal-read`), applied pre-paint by the header FOUC script. Sits beside the theme + CB toggles in the nav.
 - Per-site `Site::branding()` overrides `--portal-primary` and friends via inline style on `<html>`.
 - "Powered by WebMS Intra" attribution rule (Site::usesCustomBranding).
 - `<meta name="generator" content="WebMS Intra">` alongside footer attribution.
@@ -454,8 +455,8 @@ Latest additions:
 | 039 | Prayer Requests (#129) |
 | 040 | Multi-provider Captcha (#130) |
 | 041 | Password policy hardening (#132) |
-| 042 | Calendar `defaultView` setting (🛠️ #137) |
-| 043 | Calendar category colour + displayStyle, month themes (🛠️ #138) |
+| 042 | Calendar `defaultView` setting (#137) |
+| 043 | Calendar category colour + displayStyle, month themes (#138) |
 
 ---
 
@@ -463,8 +464,8 @@ Latest additions:
 
 | PR | Title | Status |
 | --- | --- | --- |
-| #137 | Calendar seven view modes (closes #136) | 🛠️ Open |
-| #138 | Calendar month themes + category display-style (stacked on #137) | 🛠️ Open |
+| #137 | Calendar seven view modes (closed #136) | ✅ Merged |
+| #138 | Calendar month themes + category display-style (stacked on #137) | ✅ Merged |
 
 When these merge, the 🛠️ markers above flip to ✅ without further edits to this file — language is already written in the past tense.
 
