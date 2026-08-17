@@ -24,7 +24,7 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   0.1.0
+ * @version   0.1.1
  * @link      https://github.com/MWBMPartners/WebMS-Intra
  * -----------------------------------------------------------------------------
  */
@@ -104,125 +104,6 @@ if ($env === false || $env === '') {
     }
 }
 define('PORTAL_ENV', $env);
-
-// 🏷️ Replace the default `X-Powered-By: PHP/8.x.y` response header with our
-// own branded value (matching the in-page "Powered by" attribution + the
-// <meta name="generator"> tag). The PHP default leaks the backend stack
-// AND the exact PHP version, useful only to attackers looking up CVEs.
-//
-// The actual header value depends on:
-//   - `branding.hidePoweredBy = 'true'`  → strip entirely (no brand reveal)
-//   - else  → "<product.name>/<portal version>"  where product.name comes from
-//             the settings row (set by the installer's organisation-type step)
-//             or falls back to PORTAL_PRODUCT_NAME_DEFAULT.
-//
-// $SETTINGS is read directly because App::init() runs later in bootstrap.
-// See: https://www.php.net/manual/en/function.header.php
-// See: web/_core/brand-defaults.php for the product brand layer (issue #296).
-if (function_exists('header_remove') === true) {
-    header_remove('X-Powered-By');
-}
-$hidePoweredBy = ($SETTINGS['branding']['hidePoweredBy'] ?? 'false') === 'true';
-if ($hidePoweredBy === false) {
-    // 📋 Resolve product name + version with full fallback chain.
-    //    The header() call refuses values with CRLF since PHP 5.1.2, so even
-    //    a malicious admin editing the setting cannot smuggle headers — the
-    //    call emits a warning and skips rather than including them.
-    $brandedName    = (string) ($SETTINGS['product']['name']    ?? PORTAL_PRODUCT_NAME_DEFAULT);
-    $brandedVersion = (string) ($SETTINGS['portal']['version']  ?? PORTAL_VERSION);
-    // 🧹 Replace whitespace in the brand name (e.g. "WebMS Intra" → "WebMS-Intra")
-    //    so the header parses as a single token. Header field values can contain
-    //    spaces in theory, but tokens (the de-facto X-Powered-By convention) cannot.
-    $brandedNameToken = (string) preg_replace('/\s+/', '-', trim($brandedName));
-    if ($brandedNameToken === '') {
-        $brandedNameToken = PORTAL_PRODUCT_NAME_DEFAULT;
-    }
-    header('X-Powered-By: ' . $brandedNameToken . '/' . $brandedVersion);
-}
-
-// 🛡️ Baseline security response headers (#160)
-// -----------------------------------------------------------------------------
-// Industry-standard defence-in-depth. All headers are unconditional except
-// HSTS (only sent when the request arrived over HTTPS, which is the case on
-// portal.millrdsdacambridge.uk via DreamHost's edge-redirect). Headers are
-// sent BEFORE any app handler so they apply to every response including
-// error pages and the maintenance gate.
-//
-// Each can be overridden via tblSettings (`portal.headers.<header_name>`).
-// Set the setting to an empty string to suppress the header for that key.
-if (headers_sent() === false) {
-    // 🔒 Strict-Transport-Security — only on HTTPS requests. NOT preloaded;
-    //    we want to retain the option to revert (see issue #160 caveats).
-    $isHttps = (isset($_SERVER['HTTPS']) === true && $_SERVER['HTTPS'] === 'on')
-            || (($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https');
-    if ($isHttps === true) {
-        $hsts = (string) ($SETTINGS['portal']['headers']['strict_transport_security']
-                       ?? 'max-age=31536000; includeSubDomains');
-        if ($hsts !== '') {
-            header('Strict-Transport-Security: ' . $hsts);
-        }
-    }
-
-    // 🔐 Permissions-Policy — disable APIs we don't use. Widening individual
-    //    permissions to `(self)` is a deliberate per-feature decision.
-    $perms = (string) ($SETTINGS['portal']['headers']['permissions_policy']
-                    ?? 'camera=(), microphone=(), geolocation=(), payment=(), '
-                     . 'usb=(), magnetometer=(), accelerometer=(), gyroscope=(), '
-                     . 'browsing-topics=(), interest-cohort=()');
-    if ($perms !== '') {
-        header('Permissions-Policy: ' . $perms);
-    }
-
-    // 🪟 COOP / CORP — cross-origin isolation (Spectre mitigation + resource
-    //    leak prevention). `same-origin` is the strictest sensible default.
-    $coop = (string) ($SETTINGS['portal']['headers']['coop'] ?? 'same-origin');
-    if ($coop !== '') {
-        header('Cross-Origin-Opener-Policy: ' . $coop);
-    }
-    $corp = (string) ($SETTINGS['portal']['headers']['corp'] ?? 'same-origin');
-    if ($corp !== '') {
-        header('Cross-Origin-Resource-Policy: ' . $corp);
-    }
-
-    // 📌 Referrer-Policy — limit what's sent to cross-origin links.
-    $referrer = (string) ($SETTINGS['portal']['headers']['referrer_policy']
-                       ?? 'strict-origin-when-cross-origin');
-    if ($referrer !== '') {
-        header('Referrer-Policy: ' . $referrer);
-    }
-
-    // 🛡️ X-Content-Type-Options — defeats MIME-sniffing attacks. Always on.
-    header('X-Content-Type-Options: nosniff');
-
-    // 🖼️ X-Frame-Options — block clickjacking via iframe embedding.
-    //    `SAMEORIGIN` allows our own iframes (e.g. the help app inside admin).
-    $xfo = (string) ($SETTINGS['portal']['headers']['x_frame_options'] ?? 'SAMEORIGIN');
-    if ($xfo !== '') {
-        header('X-Frame-Options: ' . $xfo);
-    }
-
-    // 🤖 X-Robots-Tag — intranet by default; per-site override (#247).
-    //    Mirrors the <meta name="robots"> logic from header.php so API
-    //    responses, redirects, and error pages that don't render the full
-    //    template still carry the correct policy.
-    //    Indexability is governed by the same `site.allowIndexing` +
-    //    `site.allowAiIndexing` settings as the meta tags so policy stays
-    //    consistent across HTML and non-HTML responses.
-    $allowIndex   = (string) ($SETTINGS['site']['allowIndexing']   ?? 'false') === 'true';
-    $allowAiIndex = (string) ($SETTINGS['site']['allowAiIndexing'] ?? 'false') === 'true';
-    $robotsParts  = [];
-    if ($allowIndex === false) {
-        $robotsParts[] = 'noindex';
-        $robotsParts[] = 'nofollow';
-    }
-    if ($allowAiIndex === false) {
-        $robotsParts[] = 'noai';
-        $robotsParts[] = 'noimageai';
-    }
-    if (count($robotsParts) > 0) {
-        header('X-Robots-Tag: ' . implode(', ', $robotsParts));
-    }
-}
 
 // 🛡️ PHP error display hardening
 // -----------------------------------------------------------------------------
@@ -497,6 +378,140 @@ try {
     }
 } catch (\mysqli_sql_exception $e) {
     error_log('[WebMS-Intra] CRITICAL: Settings load threw mysqli_sql_exception, continuing with empty settings: ' . $e->getMessage());
+}
+
+// 🏷️ ---------------------------------------------------------------------------
+// 6b. Security / SEO / branding response headers
+// -----------------------------------------------------------------------------
+// MOVED HERE (was originally emitted right after step 1, directory constants
+// — BEFORE $SETTINGS existed) because every `?? default` fallback below reads
+// $SETTINGS, which is only assigned starting at step 6 immediately above.
+// At the old location $SETTINGS was undefined, so every `??` fallback always
+// won: `branding.hidePoweredBy` was dead (X-Powered-By always sent), the
+// documented `portal.headers.*` overrides never applied, and — worst —
+// X-Robots-Tag ALWAYS sent `noindex, nofollow` even for a tenant that had
+// enabled indexing via `site.allowIndexing`, silently blocking SEO. Settings
+// are now fully loaded (including site-specific overrides — see step 6's own
+// comment) so these reads resolve real tenant configuration. Still runs
+// before Router::dispatch() / any app output, satisfying the "headers before
+// body" requirement the original placement was chasing.
+//
+// 🏷️ Replace the default `X-Powered-By: PHP/8.x.y` response header with our
+// own branded value (matching the in-page "Powered by" attribution + the
+// <meta name="generator"> tag). The PHP default leaks the backend stack
+// AND the exact PHP version, useful only to attackers looking up CVEs.
+//
+// The actual header value depends on:
+//   - `branding.hidePoweredBy = 'true'`  → strip entirely (no brand reveal)
+//   - else  → "<product.name>/<portal version>"  where product.name comes from
+//             the settings row (set by the installer's organisation-type step)
+//             or falls back to PORTAL_PRODUCT_NAME_DEFAULT.
+//
+// See: https://www.php.net/manual/en/function.header.php
+// See: web/_core/brand-defaults.php for the product brand layer (issue #296).
+if (function_exists('header_remove') === true) {
+    header_remove('X-Powered-By');
+}
+$hidePoweredBy = ($SETTINGS['branding']['hidePoweredBy'] ?? 'false') === 'true';
+if ($hidePoweredBy === false) {
+    // 📋 Resolve product name + version with full fallback chain.
+    //    The header() call refuses values with CRLF since PHP 5.1.2, so even
+    //    a malicious admin editing the setting cannot smuggle headers — the
+    //    call emits a warning and skips rather than including them.
+    $brandedName    = (string) ($SETTINGS['product']['name']    ?? PORTAL_PRODUCT_NAME_DEFAULT);
+    $brandedVersion = (string) ($SETTINGS['portal']['version']  ?? PORTAL_VERSION);
+    // 🧹 Replace whitespace in the brand name (e.g. "WebMS Intra" → "WebMS-Intra")
+    //    so the header parses as a single token. Header field values can contain
+    //    spaces in theory, but tokens (the de-facto X-Powered-By convention) cannot.
+    $brandedNameToken = (string) preg_replace('/\s+/', '-', trim($brandedName));
+    if ($brandedNameToken === '') {
+        $brandedNameToken = PORTAL_PRODUCT_NAME_DEFAULT;
+    }
+    header('X-Powered-By: ' . $brandedNameToken . '/' . $brandedVersion);
+}
+
+// 🛡️ Baseline security response headers (#160)
+// -----------------------------------------------------------------------------
+// Industry-standard defence-in-depth. All headers are unconditional except
+// HSTS (only sent when the request arrived over HTTPS, which is the case on
+// portal.millrdsdacambridge.uk via DreamHost's edge-redirect). Headers are
+// sent BEFORE any app handler so they apply to every response including
+// error pages and the maintenance gate.
+//
+// Each can be overridden via tblSettings (`portal.headers.<header_name>`).
+// Set the setting to an empty string to suppress the header for that key.
+if (headers_sent() === false) {
+    // 🔒 Strict-Transport-Security — only on HTTPS requests. NOT preloaded;
+    //    we want to retain the option to revert (see issue #160 caveats).
+    $isHttps = (isset($_SERVER['HTTPS']) === true && $_SERVER['HTTPS'] === 'on')
+            || (($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https');
+    if ($isHttps === true) {
+        $hsts = (string) ($SETTINGS['portal']['headers']['strict_transport_security']
+                       ?? 'max-age=31536000; includeSubDomains');
+        if ($hsts !== '') {
+            header('Strict-Transport-Security: ' . $hsts);
+        }
+    }
+
+    // 🔐 Permissions-Policy — disable APIs we don't use. Widening individual
+    //    permissions to `(self)` is a deliberate per-feature decision.
+    $perms = (string) ($SETTINGS['portal']['headers']['permissions_policy']
+                    ?? 'camera=(), microphone=(), geolocation=(), payment=(), '
+                     . 'usb=(), magnetometer=(), accelerometer=(), gyroscope=(), '
+                     . 'browsing-topics=(), interest-cohort=()');
+    if ($perms !== '') {
+        header('Permissions-Policy: ' . $perms);
+    }
+
+    // 🪟 COOP / CORP — cross-origin isolation (Spectre mitigation + resource
+    //    leak prevention). `same-origin` is the strictest sensible default.
+    $coop = (string) ($SETTINGS['portal']['headers']['coop'] ?? 'same-origin');
+    if ($coop !== '') {
+        header('Cross-Origin-Opener-Policy: ' . $coop);
+    }
+    $corp = (string) ($SETTINGS['portal']['headers']['corp'] ?? 'same-origin');
+    if ($corp !== '') {
+        header('Cross-Origin-Resource-Policy: ' . $corp);
+    }
+
+    // 📌 Referrer-Policy — limit what's sent to cross-origin links.
+    $referrer = (string) ($SETTINGS['portal']['headers']['referrer_policy']
+                       ?? 'strict-origin-when-cross-origin');
+    if ($referrer !== '') {
+        header('Referrer-Policy: ' . $referrer);
+    }
+
+    // 🛡️ X-Content-Type-Options — defeats MIME-sniffing attacks. Always on.
+    header('X-Content-Type-Options: nosniff');
+
+    // 🖼️ X-Frame-Options — block clickjacking via iframe embedding.
+    //    `SAMEORIGIN` allows our own iframes (e.g. the help app inside admin).
+    $xfo = (string) ($SETTINGS['portal']['headers']['x_frame_options'] ?? 'SAMEORIGIN');
+    if ($xfo !== '') {
+        header('X-Frame-Options: ' . $xfo);
+    }
+
+    // 🤖 X-Robots-Tag — intranet by default; per-site override (#247).
+    //    Mirrors the <meta name="robots"> logic from header.php so API
+    //    responses, redirects, and error pages that don't render the full
+    //    template still carry the correct policy.
+    //    Indexability is governed by the same `site.allowIndexing` +
+    //    `site.allowAiIndexing` settings as the meta tags so policy stays
+    //    consistent across HTML and non-HTML responses.
+    $allowIndex   = (string) ($SETTINGS['site']['allowIndexing']   ?? 'false') === 'true';
+    $allowAiIndex = (string) ($SETTINGS['site']['allowAiIndexing'] ?? 'false') === 'true';
+    $robotsParts  = [];
+    if ($allowIndex === false) {
+        $robotsParts[] = 'noindex';
+        $robotsParts[] = 'nofollow';
+    }
+    if ($allowAiIndex === false) {
+        $robotsParts[] = 'noai';
+        $robotsParts[] = 'noimageai';
+    }
+    if (count($robotsParts) > 0) {
+        header('X-Robots-Tag: ' . implode(', ', $robotsParts));
+    }
 }
 
 // 🕐 Update timezone to the configured value (overrides the UTC default above)

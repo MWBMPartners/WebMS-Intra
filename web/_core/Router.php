@@ -25,7 +25,7 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   0.1.0
+ * @version   0.1.1
  * @link      https://github.com/MWBMPartners/WebMS-Intra
  * -----------------------------------------------------------------------------
  */
@@ -50,14 +50,24 @@ class Router
         // 🌐 Extract and normalise the request path
         $path = self::extractPath();
 
-        // 📌 Store the current path for use by templates (e.g. nav highlighting)
-        if (defined('PORTAL_CURRENT_ROUTE') === false) {
-            define('PORTAL_CURRENT_ROUTE', $path);
-        }
-
-        // 🔀 Check hardcoded special routes first (these bypass tblRoutes)
+        // 🔀 Check hardcoded special routes first (these bypass tblRoutes).
+        //    Passed BY REFERENCE — the empty-path ('/') branch rewrites
+        //    $path to 'dashboard' and falls through (returns false) so the
+        //    lookup below can resolve it via tblRoutes. Previously $path was
+        //    a value parameter, so that rewrite only ever mutated a local
+        //    copy inside handleSpecialRoutes() and dispatch() kept looking
+        //    up the still-empty routeKey='' (never seeded) → 404 on every
+        //    site-root request. Reference param makes the rewrite land here.
         if (self::handleSpecialRoutes($path) === true) {
             return; // Special route handled and exited
+        }
+
+        // 📌 Store the current (possibly rewritten, e.g. '' → 'dashboard')
+        //    path for use by templates (e.g. nav highlighting). Defined
+        //    AFTER handleSpecialRoutes() so nav highlighting reflects the
+        //    resolved route rather than the raw empty path.
+        if (defined('PORTAL_CURRENT_ROUTE') === false) {
+            define('PORTAL_CURRENT_ROUTE', $path);
         }
 
         // 🔍 Look up route in the database
@@ -169,24 +179,21 @@ class Router
      * Handle hardcoded special routes that bypass tblRoutes.
      * Returns true if a special route was matched (and the response was sent).
      *
-     * @param string $path The normalised request path
+     * @param string $path The normalised request path, taken BY REFERENCE so
+     *                      the empty-path→'dashboard' rewrite below reaches
+     *                      dispatch()'s own $path instead of only mutating a
+     *                      local copy (fixes site-root 404 — A1).
      *
      * @return bool True if a special route was handled
      */
-    private static function handleSpecialRoutes(string $path): bool
+    private static function handleSpecialRoutes(string &$path): bool
     {
-        // 🏠 Empty path → dashboard (default home page)
+        // 🏠 Empty path → dashboard (default home page). Rewriting $path
+        //    here (by reference) then returning false lets dispatch()
+        //    fall through to the normal tblRoutes lookup using routeKey
+        //    'dashboard' — no dashboard-rendering logic duplicated here.
         if ($path === '') {
-            // Redirect to dashboard route which will be handled via tblRoutes
-            // This avoids duplicating the dashboard logic here
             $path = 'dashboard';
-            // Fall through to database route lookup by returning false
-            // and letting dispatch() continue with the 'dashboard' routeKey
-            if (defined('PORTAL_CURRENT_ROUTE') === true) {
-                // Redefine won't work, so we handle this in dispatch
-            }
-            // Actually, update the path and let it fall through to findRoute
-            $_SERVER['REQUEST_URI'] = '/dashboard';
             return false;
         }
 
