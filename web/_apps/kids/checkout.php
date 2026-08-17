@@ -2,12 +2,23 @@
 // _apps/kids/checkout.php — Staff terminal: scan/enter badge → check out (#298)
 declare(strict_types=1);
 
+use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Logger;
+use Portal\Core\Router;
 use Portal\Core\Site;
 
 Auth::ensureSession();
 Auth::requireLogin();
+
+// 🛡️ Safeguarding gate (#298 gap fix) — the checkout terminal resolves
+//     ANY badge code at the site to a child's full name + authorised
+//     pickup list, and releases the child on a typed name match, so it
+//     must be staff-only. Mirrors care/index.php's gate exactly.
+if (App::isAdmin() === false && App::hasRole('kids_team') === false) {
+    Router::renderError(403);
+    return;
+}
 
 $siteId = Site::id();
 $staffId = (int) ($_SESSION['user_id'] ?? 0);

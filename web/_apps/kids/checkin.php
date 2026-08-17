@@ -2,11 +2,22 @@
 // _apps/kids/checkin.php — Staff terminal: search + check in (#298)
 declare(strict_types=1);
 
+use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\Router;
 use Portal\Core\Site;
 
 Auth::ensureSession();
 Auth::requireLogin();
+
+// 🛡️ Safeguarding gate (#298 gap fix) — this staff terminal lists every
+//     child at the site by name, with allergy/medical flags and live
+//     check-in state, so it must NOT be reachable by any logged-in member.
+//     Mirrors care/index.php's gate exactly: kids_team role OR admin.
+if (App::isAdmin() === false && App::hasRole('kids_team') === false) {
+    Router::renderError(403);
+    return;
+}
 
 $siteId = Site::id();
 $q = mb_substr(trim((string) ($_GET['q'] ?? '')), 0, 80);

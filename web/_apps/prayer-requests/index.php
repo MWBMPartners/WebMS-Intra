@@ -50,7 +50,10 @@ $stmt = $mysqli->prepare(
     'SELECT requestID, subject, visibility, status, isAnonymous, '
     . 'answeredAt, createdAt '
     . 'FROM tblPrayerRequests '
-    . 'WHERE siteID = ? AND submitterID = ? '
+    // 🛡️ kind = 'request' — Praise (#260) shares this table with kind=
+    // 'praise'; without this filter a member's own praise posts would show
+    // up unlabelled in their "My Requests" list.
+    . "WHERE siteID = ? AND submitterID = ? AND kind = 'request' "
     . 'ORDER BY createdAt DESC LIMIT 20'
 );
 if ($stmt !== false) {
@@ -74,7 +77,9 @@ if ($congregationEnabled === true && $featureEnabled === true) {
         . 'u.fullName AS submitterFullName '
         . 'FROM tblPrayerRequests pr '
         . 'LEFT JOIN tblUsers u ON u.userID = pr.submitterID '
-        . 'WHERE pr.siteID = ? AND pr.visibility = \'congregation\' '
+        // 🛡️ kind = 'request' — keep the Praise app's posts (kind='praise')
+        // off the prayer feed; they have their own listing at /praise.
+        . 'WHERE pr.siteID = ? AND pr.kind = \'request\' AND pr.visibility = \'congregation\' '
         . 'AND pr.status IN (\'active\',\'answered\') '
         . 'ORDER BY pr.createdAt DESC LIMIT 25'
     );
@@ -96,7 +101,9 @@ $pendingCount = 0;
 if ($isMod === true) {
     $stmt = $mysqli->prepare(
         'SELECT COUNT(*) AS cnt FROM tblPrayerRequests '
-        . 'WHERE siteID = ? AND status = \'pending\''
+        // 🛡️ kind = 'request' — see WHY note above; praise posts never
+        // reach status='pending' in practice, but scope explicitly anyway.
+        . 'WHERE siteID = ? AND kind = \'request\' AND status = \'pending\''
     );
     if ($stmt !== false) {
         $stmt->bind_param('i', $siteId);

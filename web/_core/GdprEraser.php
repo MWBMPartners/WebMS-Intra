@@ -103,6 +103,42 @@ class GdprEraser
             // no separate catalogue entry is needed for `tblKidCheckins`.
             ['table' => 'tblKidProfiles',      'userCol' => 'parentUserID', 'action' => 'delete'],
 
+            // #257 Pastoral Care Register. personUserID is the case SUBJECT
+            // (the person being cared for) — anonymise rather than delete so
+            // pastoral/safeguarding continuity is preserved for the
+            // remaining team, matching tblPrayerRequests' "body preserved,
+            // PII blanked" convention immediately above. nullCols also blanks
+            // personName defensively even though the app never populates it
+            // while personUserID is set (see tblCareCase's column comment).
+            // openedByID is the STAFF author who logged the case — anonymise
+            // for authorship-attribution-detached, mirroring
+            // tblAnnouncements/tblEvents/tblRecording above.
+            //
+            // tblCareVisit.visitedByID and tblCareAccessLog.viewerID are
+            // BOTH NOT NULL with no ON DELETE SET NULL path (visitedByID
+            // is even FK'd ON DELETE RESTRICT), so neither column can be
+            // nulled by an UPDATE the way the nullable columns above can —
+            // same reasoning already applied throughout this catalogue to
+            // every other NOT NULL creator/actor column (e.g.
+            // tblAssetMaintenance.createdByID, tblAssetResources.uploadedByID
+            // are deliberately NOT catalogued either). tblCareVisit is left
+            // uncatalogued entirely: the visitor's attribution is detached
+            // indirectly once the final tblUsers step below tombstones their
+            // name/email, without needing to touch (or delete) the pastoral
+            // visit notes themselves — those stay attached to the
+            // (now-anonymised) case for institutional continuity.
+            // tblCareAccessLog is different: a "who viewed this case" audit
+            // row attributed to a since-erased viewer carries no independent
+            // value once that identity is gone (unlike the visit notes,
+            // which describe the CASE SUBJECT, not the viewer), so the rows
+            // for this erasure subject are hard-deleted — mirrors the
+            // tblAssetOwners/tblAssetKioskPins hard-delete precedent above.
+            // Deleting only WHERE viewerID = ? never touches other staff's
+            // access-log rows or the case/visit history itself.
+            ['table' => 'tblCareCase',       'userCol' => 'personUserID', 'action' => 'anonymise', 'nullCols' => ['personName'], 'reason' => 'case history retained for pastoral/safeguarding continuity; subject identity detached'],
+            ['table' => 'tblCareCase',       'userCol' => 'openedByID',   'action' => 'anonymise', 'nullCols' => [], 'reason' => 'authorship attribution detached'],
+            ['table' => 'tblCareAccessLog',  'userCol' => 'viewerID',     'action' => 'delete'],
+
             // #393 Asset Tracker. tblAssetFoundReports is deliberately
             // NOT catalogued here — it's filled by the public, anonymous
             // "I found this" form (reporterName/reporterContact are free

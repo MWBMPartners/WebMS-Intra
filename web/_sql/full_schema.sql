@@ -5065,6 +5065,31 @@ INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
     ('admin/integrations/cloudflare-stream/test', 'admin/integrations/cloudflare-stream/test.php', 1)
 ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 
+-- ── from 163_tours_api_route_fix.sql (gap fix D2) ──────────────────────────
+-- Enable flags for the tour-playback endpoints, relocated from the
+-- unreachable legacy `_apps/api/tours/{active,complete}.php` to the
+-- convention path `_apps/tours/api/{active,complete}.php` in this same
+-- change (same bug class as the migration-158 worship live-sync fix above —
+-- ApiRouter never consults tblRoutes for api/* paths). A fresh install must
+-- see these flags 'true' or /admin/tours' tours would 403 for everyone.
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'api.tours.active.enabled',   'true', 'true', 0),
+    (NULL, 'api.tours.complete.enabled', 'true', 'true', 0)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
+-- ── from 164_kids_care_prayer_gap_fixes.sql (C1-C4 data-governance fixes) ──
+-- Only C1 (Kids check-in/out terminal had no role gate) needs a seed row —
+-- the `kids_team` role, so an admin has something to grant at /admin/users
+-- once the PHP-side gate (App::isAdmin() || App::hasRole('kids_team')) is
+-- in place. WHERE NOT EXISTS idiom matches migrations 148 (prayer_team) /
+-- 159 (asset_manager). C2 (parent self-service edit/deactivate), C3
+-- (GdprEraser care-table catalogue entries) and C4 (praise/kind filtering)
+-- are pure-PHP fixes against already-existing columns/indexes — nothing to
+-- fold in here for those three.
+INSERT INTO `tblRoles` (`roleKey`, `roleName`)
+    SELECT 'kids_team', 'Kids Team'
+    WHERE NOT EXISTS (SELECT 1 FROM `tblRoles` WHERE `roleKey` = 'kids_team');
+
 
 -- =============================================================================
 -- Tables added in numbered migrations 105+ — appended for fresh-install parity.
@@ -6910,4 +6935,10 @@ INSERT INTO `tblMigrations` (`filename`) VALUES ('161_asset_tracker_phase3.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
 INSERT INTO `tblMigrations` (`filename`) VALUES ('162_asset_kiosk_pin.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('163_tours_api_route_fix.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('164_kids_care_prayer_gap_fixes.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;
