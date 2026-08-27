@@ -3597,6 +3597,21 @@ INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
     ('recordings.rss',     'recordings/feed.php',    1)
 ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 
+-- ── recordings/podcast + recordings/podcast-media (public podcast feed) ──
+-- Both PUBLIC (isProtected=0) — gated internally by recordings.podcast_token
+-- (Portal\Core\Recordings::podcastToken()), NOT by a session. That token is
+-- deliberately RUNTIME data (lazily generated on first use, encrypted at
+-- rest) and is NOT seeded here or by any migration — these route seeds are
+-- the only full_schema.sql edits this feature makes. podcast-media.php is
+-- the self-hosted-file enclosure endpoint the feed's <enclosure> URLs point
+-- at for filePath-only episodes (recordings/stream stays isProtected=1 and
+-- is untouched — podcast-media re-authenticates via the same podcast token
+-- instead of a session).
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('recordings/podcast',       'recordings/podcast.php',       0),
+    ('recordings/podcast-media', 'recordings/podcast-media.php', 0)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
 INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
     (NULL, 'recordings.enabled',        '0', '0', 0),
     (NULL, 'recordings.displayName',    'Recordings', 'Recordings', 0),
@@ -4605,6 +4620,18 @@ INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue
     (NULL, 'webhooks.maxRetries',  '5',     '5',     0)
 ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
 
+-- ── from 166_webhook_retry.sql (#324 v1.1) ──────────────────────────────
+-- webhooks.cron_token seeded EMPTY (isSensitive=1) -- same "admin must set
+-- a real token" convention as assets.cron_token/reminders.cron_token; an
+-- empty stored token ALWAYS 403s cron/webhook-retry.php.
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'webhooks.cron_token', '', '', 1)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('cron/webhook-retry', 'cron/webhook-retry.php', 0)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
 -- =============================================================================
 -- Migration 112: Events Calendar easy wins (#326 / #331 / #334 / #337 / #339)
 -- =============================================================================
@@ -5177,12 +5204,14 @@ CREATE TABLE IF NOT EXISTS `tblWebhookDeliveries` (
     `status`        ENUM('pending','delivered','failed','dead') NOT NULL DEFAULT 'pending',
     `attemptCount`  INT          NOT NULL DEFAULT 0,
     `lastAttemptAt` DATETIME     DEFAULT NULL,
+    `nextRetryAt`   DATETIME     DEFAULT NULL COMMENT 'Earliest time the async retry worker may re-attempt this delivery (exponential backoff, migration 166, #324 v1.1)',
     `responseCode`  INT          DEFAULT NULL,
     `responseSnippet` VARCHAR(500) DEFAULT NULL COMMENT 'first 500 chars of response body for debug',
     `createdAt`     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (`deliveryID`),
     KEY `idx_wd_webhook`  (`webhookID`, `status`),
     KEY `idx_wd_pending`  (`status`, `lastAttemptAt`),
+    KEY `idx_wd_retry`    (`status`, `nextRetryAt`),
     CONSTRAINT `fk_wd_webhook` FOREIGN KEY (`webhookID`) REFERENCES `tblWebhooks`(`webhookID`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
@@ -6944,4 +6973,7 @@ INSERT INTO `tblMigrations` (`filename`) VALUES ('164_kids_care_prayer_gap_fixes
 ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
 INSERT INTO `tblMigrations` (`filename`) VALUES ('165_widen_totp_secret.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('166_webhook_retry.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;

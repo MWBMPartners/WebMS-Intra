@@ -4,9 +4,17 @@
  * -----------------------------------------------------------------------------
  * Recordings library helpers 🎙
  * -----------------------------------------------------------------------------
- * RSS feed builder, range-aware streaming, and topic-tag bookkeeping.
+ * RSS feed builder, range-aware streaming, topic-tag bookkeeping, and the
+ * public podcast feed's per-site token (`podcastToken()`, used by both
+ * `recordings/podcast.php` — the feed itself — and `recordings/
+ * podcast-media.php` — the public, session-free enclosure endpoint for
+ * self-hosted episodes, re-authenticated via this same token).
  *
  * @package   Portal\Core
+ * @author    MWBM Partners Ltd (t/a MWservices)
+ * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
+ * @license   All Rights Reserved
+ * @version   1.1.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/264
  * -----------------------------------------------------------------------------
  */
@@ -180,6 +188,83 @@ class Recordings
             return sprintf('%d:%02d:%02d', $h, $m, $s);
         }
         return sprintf('%d:%02d', $m, $s);
+    }
+
+    /**
+     * Get-or-lazily-create this site's PUBLIC podcast feed token
+     * (`recordings/podcast.php`). Stored in `tblSettings` under
+     * `recordings.podcast_token`, siteID-scoped, `isSensitive = 1` —
+     * encrypted at rest via the same `encrypt_setting()`/`decrypt_setting()`
+     * pair every other secret in this table uses, so it round-trips
+     * through the EXISTING generic `/settings` editor (settings/save.php
+     * already encrypts/decrypts `isSensitive` values generically) without
+     * any bespoke admin UI. Deliberately NOT seeded by any migration or
+     * full_schema.sql — this is runtime data, generated the first time
+     * anything calls this method, unlike the `*.cron_token` settings this
+     * codebase seeds empty ahead of time.
+     *
+     * Never throws — a DB or encryption failure is caught and logged, and
+     * an empty string is returned so `recordings/podcast.php`'s own gate
+     * fails closed (an empty expected token never `hash_equals()`es a real
+     * request, whatever the caller supplied).
+     *
+     * @return string 64-char hex token, or '' on failure.
+     */
+    public static function podcastToken(int $siteId): string
+    {
+        if ($siteId <= 0) {
+            return '';
+        }
+
+        try {
+            $db = App::db();
+            $settingKey = 'recordings.podcast_token';
+
+            $stmt = $db->prepare(
+                'SELECT settingValue, isSensitive FROM tblSettings WHERE settingKey = ? AND siteID = ? LIMIT 1'
+            );
+            if ($stmt !== false) {
+                $stmt->bind_param('si', $settingKey, $siteId);
+                $stmt->execute();
+                $row = $stmt->get_result()->fetch_assoc();
+                $stmt->close();
+
+                if ($row !== null) {
+                    $raw = (string) ($row['settingValue'] ?? '');
+                    if ($raw !== '') {
+                        if ((int) $row['isSensitive'] === 1) {
+                            $plain = \decrypt_setting($raw);
+                            if ($plain !== '') {
+                                return $plain;
+                            }
+                        } else {
+                            return $raw;
+                        }
+                    }
+                }
+            }
+
+            // 🔑 Lazily generate — 32 random bytes / 64 hex chars, unguessable.
+            $token  = bin2hex(random_bytes(32));
+            $stored = \encrypt_setting($token);
+
+            $ins = $db->prepare(
+                'INSERT INTO tblSettings (siteID, settingKey, settingValue, defaultValue, isSensitive) '
+                . 'VALUES (?, ?, ?, ?, 1) '
+                . 'ON DUPLICATE KEY UPDATE settingValue = VALUES(settingValue)'
+            );
+            if ($ins !== false) {
+                $emptyDefault = '';
+                $ins->bind_param('isss', $siteId, $settingKey, $stored, $emptyDefault);
+                $ins->execute();
+                $ins->close();
+            }
+
+            return $token;
+        } catch (\Throwable $e) {
+            error_log('Recordings::podcastToken() failed: ' . $e->getMessage());
+            return '';
+        }
     }
 
     /**

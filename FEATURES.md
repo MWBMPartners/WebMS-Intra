@@ -732,6 +732,20 @@ Phase 2 (#404-#410, migration 160) followed on directly: label-PDF polish, scan-
 
 ---
 
+### Webhook async retry, RSVP waitlist promotion-on-cancel, public podcast feed (#324 v1.1 / #334 v1.1 / #264 v1.1, 2026-08-27)
+
+Three small, independent feature completions, each closing out a v1.1 follow-up its own parent feature's docs had reserved.
+
+| Item | Issue | Migration | Status |
+|---|---|---|---|
+| Outbound webhook async retry cron — new `WebhookDispatcher::retryDue()` sweeps `tblWebhookDeliveries` rows still `status='failed'`, re-delivering through the SAME `attemptDelivery()` private method `emit()`'s own first attempt uses; exponential backoff (base 60s × 2^attempts, capped ~6h) stamped into a new `nextRetryAt` column, dead-lettered (`status='dead'`) once `attemptCount` reaches `MAX_ATTEMPTS` (6). New `cron/webhook-retry.php`, token-gated exactly like every other `cron/*` endpoint (`webhooks.cron_token`, seeded empty) | #324 v1.1 | 166 | ✅ |
+| RSVP waitlist promotion-on-cancel — new `Portal\Core\Events::promoteFromWaitlist()` (transactional, row-locked, never throws); `calendar/rsvp.php` calls it after every write that frees a confirmed seat (switching to maybe/not_going, cancelling outright, or reducing `guestCount`), promoting the earliest-waitlisted RSVP(s) that now fit the freed capacity and emailing each promoted user. No schema change | #334 v1.1 | — | ✅ |
+| Public podcast feed — new `recordings/podcast.php`, no login required (unlike the existing session-gated `recordings/feed.php`), gated by a per-site unguessable `recordings.podcast_token` (lazily generated + encrypted in `tblSettings` via `Recordings::podcastToken()`, deliberately never seeded by a migration). RSS 2.0 + `xmlns:itunes` feed listing only `isPublished=1` recordings. Both `externalUrl`-backed AND self-hosted (`filePath`) episodes are podcast-app-reachable: self-hosted enclosures point at a new public `recordings/podcast-media.php` (Range-aware, `isProtected=0`, re-authenticates via the same podcast token rather than a session) instead of the login-gated `recordings/stream` | #264 v1.1 | — (both route seeds folded straight into `full_schema.sql`) | ✅ |
+
+**New files:** `web/_core/Events.php`, `web/_apps/recordings/podcast-media.php`. **New seeded setting:** `webhooks.cron_token` (migration 166, empty by default — admin must set a real value). **New runtime-only setting (never seeded):** `recordings.podcast_token`.
+
+---
+
 ## Audit scripts (`tools/audit-checks/`)
 
 CI-runnable static audits invoked from PHP-static-analysis workflow:

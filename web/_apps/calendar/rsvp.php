@@ -6,18 +6,29 @@
  * -----------------------------------------------------------------------------
  * Handles event RSVP submissions (going, maybe, not_going, cancel).
  *
+ * Waitlist promotion-on-cancel (#334 v1.1 follow-up): whenever this handler
+ * frees a confirmed seat — a confirmed 'going' RSVP switching to
+ * 'maybe'/'not_going', being cancelled outright, or reducing its
+ * guestCount — it calls `Portal\Core\Events::promoteFromWaitlist()`
+ * immediately after that write commits, so the earliest-waitlisted RSVP(s)
+ * that now fit are auto-confirmed and emailed. See that method's own doc
+ * for the full transactional/backoff contract; it NEVER throws, so a
+ * promotion failure can never break this handler's own redirect.
+ *
  * @package   Portal\Calendar
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   0.8.2
+ * @version   0.9.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/88
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/334
  * -----------------------------------------------------------------------------
  */
 
 declare(strict_types=1);
 
 use Portal\Core\Auth;
+use Portal\Core\Events;
 use Portal\Core\Logger;
 use Portal\Core\Site;
 
@@ -77,6 +88,23 @@ if ($event === null) {
 
 // 📋 Handle cancel (delete RSVP)
 if ($response === 'cancel') {
+    // 🔍 Was this a confirmed 'going' seat? Checked BEFORE the DELETE below
+    // so we know afterwards whether a slot was actually freed (#334 v1.1) —
+    // cancelling a 'maybe'/'not_going'/'waitlist' row never frees capacity.
+    $prevStmt = $mysqli->prepare(
+        'SELECT response, status FROM tblEventRSVPs WHERE eventID = ? AND userID = ? LIMIT 1'
+    );
+    $wasConfirmedGoing = false;
+    if ($prevStmt !== false) {
+        $prevStmt->bind_param('ii', $eventId, $userId);
+        $prevStmt->execute();
+        $prevRow = $prevStmt->get_result()->fetch_assoc();
+        $prevStmt->close();
+        $wasConfirmedGoing = $prevRow !== null
+            && (string) $prevRow['response'] === 'going'
+            && (string) $prevRow['status'] === 'confirmed';
+    }
+
     $delStmt = $mysqli->prepare('DELETE FROM tblEventRSVPs WHERE eventID = ? AND userID = ?');
     if ($delStmt !== false) {
         $delStmt->bind_param('ii', $eventId, $userId);
@@ -84,11 +112,36 @@ if ($response === 'cancel') {
         $delStmt->close();
     }
     Logger::activity('EventRSVPCancelled', 'Cancelled RSVP for: ' . $event['eventName'], $userId);
+
+    // 🎟️ Slot-freeing write — promote the earliest-waitlisted RSVP(s) that
+    // now fit. Called AFTER the DELETE above has committed; NEVER throws.
+    if ($wasConfirmedGoing === true) {
+        Events::promoteFromWaitlist($eventId);
+    }
+
     $_SESSION['flash_msg']  = 'RSVP cancelled.';
     $_SESSION['flash_type'] = 'info';
     header('Location: ' . $redirect);
     exit();
 }
+
+// 🔍 Snapshot this user's EXISTING RSVP (if any) before the upsert below
+// overwrites it — needed to tell whether this write frees a confirmed seat
+// (#334 v1.1 waitlist promotion-on-cancel).
+$prevStmt = $mysqli->prepare(
+    'SELECT response, status, guestCount FROM tblEventRSVPs WHERE eventID = ? AND userID = ? LIMIT 1'
+);
+$prevRow = null;
+if ($prevStmt !== false) {
+    $prevStmt->bind_param('ii', $eventId, $userId);
+    $prevStmt->execute();
+    $prevRow = $prevStmt->get_result()->fetch_assoc();
+    $prevStmt->close();
+}
+$wasConfirmedGoing = $prevRow !== null
+    && (string) $prevRow['response'] === 'going'
+    && (string) $prevRow['status'] === 'confirmed';
+$prevGuestCount = $prevRow !== null ? (int) $prevRow['guestCount'] : 0;
 
 // 🤝 Guest +N count (#334) — how many guests is the responder bringing?
 //     Clamped to a reasonable cap so a typo doesn't flood the waitlist.
@@ -115,8 +168,9 @@ if ($event['capacity'] !== null && $response === 'going') {
     $cap         = (int) $event['capacity'];
     if ($seatsTaken + $seatsWanted > $cap) {
         // 📋 Auto-waitlist instead of rejecting outright — user gets a slot when
-        //     someone above drops out. Chronological promotion happens in v1.1
-        //     (settings hook + cron will sweep waitlistedAt order).
+        //     someone above drops out. Chronological (waitlistedAt-ordered)
+        //     promotion is event-driven — see Events::promoteFromWaitlist()
+        //     calls below and the file header note (#334 v1.1).
         $rsvpStatus = 'waitlist';
         $waitlistFlash = ' Capacity reached — you are on the waitlist.';
     }
@@ -133,6 +187,19 @@ if ($stmt !== false) {
     $stmt->bind_param('iiisis', $eventId, $userId, $siteId, $response, $guestCount, $rsvpStatus);
     $stmt->execute();
     $stmt->close();
+}
+
+// 🎟️ Slot-freeing write — the user was a confirmed 'going' seat before
+// this upsert AND either stopped being one (now 'maybe'/'not_going', or
+// bumped back to 'waitlist') OR kept their seat but reduced guestCount.
+// Promote the earliest-waitlisted RSVP(s) that now fit. Called AFTER the
+// upsert above has committed; NEVER throws (#334 v1.1).
+if ($wasConfirmedGoing === true) {
+    $stillConfirmedGoing = ($response === 'going' && $rsvpStatus === 'confirmed');
+    $guestCountReduced   = $stillConfirmedGoing === true && $guestCount < $prevGuestCount;
+    if ($stillConfirmedGoing === false || $guestCountReduced === true) {
+        Events::promoteFromWaitlist($eventId);
+    }
 }
 
 $labels = ['going' => 'Going', 'maybe' => 'Maybe', 'not_going' => 'Not going'];
