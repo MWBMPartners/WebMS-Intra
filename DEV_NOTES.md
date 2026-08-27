@@ -2367,6 +2367,48 @@ returning a plain-text `OK {"sitesSwept":N,"inserted":{...}}` summary.
 
 ---
 
+### Webhooks setup
+
+`Portal\Core\WebhookDispatcher::emit()` (#324) POSTs a signed JSON payload to
+every active `tblWebhooks` row subscribed to an event, synchronously,
+inline with the triggering request. A non-2xx response (or a network
+failure) leaves the `tblWebhookDeliveries` row in `status = 'failed'` with
+`attemptCount` and a computed `nextRetryAt` rather than giving up —
+`WebhookDispatcher::retryDue()` (migration 166, #324 v1.1) is the
+cron-driven async retry worker that sweeps those rows back up.
+
+Same cron-token pattern as `reminders.cron_token` / `assets.cron_token` /
+`discipleship.cron_token`: the endpoint reads `?key=<value>`, compares it
+to `App::settings('webhooks.cron_token')` via `hash_equals()`, and 403s
+whenever the stored token is the empty string — migration 166 seeds
+`webhooks.cron_token` empty (`isSensitive = 1`), so the endpoint is inert
+until an admin sets a real value via `/admin/settings`. Point an external
+scheduler at (every 5-15 minutes is a reasonable interval — failed
+deliveries retry with exponential backoff, so a tighter interval mostly
+just wastes requests on rows not yet due):
+
+```
+*/10 * * * * curl -fsS "https://<your-portal-host>/cron/webhook-retry?key=<your-token>" >/dev/null
+```
+
+The route (`cron/webhook-retry`, migration 166) is seeded `isProtected = 0`
+— public but token-gated, exactly like every other `cron/*` route. Each
+run selects up to 100 `tblWebhookDeliveries` rows in `status = 'failed'`
+with `attemptCount < 6` (`WebhookDispatcher::MAX_ATTEMPTS`) whose
+`nextRetryAt` has elapsed (or was never set), oldest-`createdAt` first, and
+re-delivers each through the SAME `attemptDelivery()` private method
+`emit()`'s own initial attempt uses — no separate retry-vs-first-try
+signing/POST logic to drift apart. A delivery that keeps failing backs off
+exponentially (base 60s × 2^attempts, capped at 21600s / 6h) via
+`DATE_ADD(NOW(), INTERVAL ? SECOND)` computed in SQL (not PHP's own clock,
+so an app-server clock skew can never desync `nextRetryAt` from the DB's
+own `NOW()` retryDue()'s WHERE clause compares it against); once
+`attemptCount` reaches `MAX_ATTEMPTS` the row moves to the terminal
+`status = 'dead'` and is never retried again. Returns a plain-text
+`OK {"checked":N,"delivered":N,"failed":N,"dead":N}` summary.
+
+---
+
 ## Event Team Hub Phase 1 (#386)
 
 ### Architecture: extends the calendar app, not a new app
