@@ -5,8 +5,10 @@
  * Recordings library helpers 🎙
  * -----------------------------------------------------------------------------
  * RSS feed builder, range-aware streaming, topic-tag bookkeeping, and the
- * public podcast feed's per-site token (`podcastToken()`, used by
- * `recordings/podcast.php`).
+ * public podcast feed's per-site token (`podcastToken()`, used by both
+ * `recordings/podcast.php` — the feed itself — and `recordings/
+ * podcast-media.php` — the public, session-free enclosure endpoint for
+ * self-hosted episodes, re-authenticated via this same token).
  *
  * @package   Portal\Core
  * @author    MWBM Partners Ltd (t/a MWservices)

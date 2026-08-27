@@ -18,23 +18,18 @@
  * stream.php` and the existing (login-gated) `recordings/feed.php` already
  * gate on. Nothing role-restricted or unpublished is ever exposed here.
  *
- * ENCLOSURE REACHABILITY (KNOWN LIMITATION — see delivery report): an
- * episode backed by `externalUrl` (already a public URL) is linked
- * directly and is fully fetchable by any external podcast client. A
- * self-hosted episode (`filePath`, no externalUrl) is linked via
- * `/recordings/stream?id=…` — but that route is seeded `isProtected = 1`
- * in `tblRoutes`, so `Router::handleSpecialRoutes()` enforces
- * `Auth::requireLogin()` BEFORE `stream.php` even runs, regardless of
- * anything that file itself could check. An external podcast app (no
- * portal session) therefore cannot actually fetch a self-hosted
- * enclosure today — only externalUrl-backed episodes are truly
- * podcast-app-reachable. Flipping `recordings/stream` to public would
- * need its own migration + full_schema.sql edit (route protection is a
- * schema seed) and a matching in-file token/session gate — deliberately
- * left as a follow-up rather than folded into this pass, which scopes
- * full_schema.sql to the ONE new `recordings/podcast` route.
+ * ENCLOSURE REACHABILITY: an episode backed by `externalUrl` (already a
+ * public URL) is linked directly. A self-hosted episode (`filePath`, no
+ * externalUrl) is linked at `/recordings/podcast-media?id=…&token=…` —
+ * carrying this SAME feed token — rather than the login-gated
+ * `/recordings/stream` (which stays `isProtected = 1` and untouched;
+ * `Router::handleSpecialRoutes()` enforces `Auth::requireLogin()` BEFORE
+ * that file even runs, so an in-file bypass there could never work).
+ * `podcast-media.php` is a SEPARATE public route that re-authenticates via
+ * the podcast token instead of a session, so BOTH enclosure kinds are now
+ * genuinely fetchable by an external podcast client with no portal
+ * session at all.
  *
-
  * Emits RSS 2.0 + the iTunes podcast namespace (`xmlns:itunes`) —
  * `Content-Type: application/rss+xml; charset=utf-8`.
  *
@@ -42,7 +37,7 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.0.0
+ * @version   1.1.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/264
  * -----------------------------------------------------------------------------
  */
@@ -194,12 +189,11 @@ foreach ($items as $it) {
         // Already a public URL — used as-is.
         $enclosureUrl = $externalUrl;
     } elseif ($it['filePath'] !== null) {
-        // ⚠️ Login-gated at the Router level (recordings/stream is seeded
-        // isProtected=1) — included for feed completeness/consistency with
-        // recordings/feed.php's own listing, but see this file's header
-        // "KNOWN LIMITATION" note: an external podcast client without a
-        // portal session cannot actually fetch this enclosure today.
-        $enclosureUrl = $baseUrl . '/recordings/stream?id=' . $recordingId;
+        // 🔑 Self-hosted file — served via the PUBLIC podcast-media
+        // endpoint (re-authenticates with this SAME feed token, no session
+        // needed), not the login-gated /recordings/stream. See this file's
+        // header "ENCLOSURE REACHABILITY" note.
+        $enclosureUrl = $baseUrl . '/recordings/podcast-media?id=' . $recordingId . '&token=' . rawurlencode($expectedToken);
     } else {
         continue;
     }

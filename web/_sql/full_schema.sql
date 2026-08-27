@@ -3597,14 +3597,19 @@ INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
     ('recordings.rss',     'recordings/feed.php',    1)
 ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 
--- ── recordings/podcast (public podcast feed) ────────────────────────────
--- PUBLIC (isProtected=0) — gated internally by recordings.podcast_token
--- (Portal\Core\Recordings::podcastToken()), NOT by a session. That token
--- is deliberately RUNTIME data (lazily generated on first use, encrypted
--- at rest) and is NOT seeded here or by any migration — this route seed
--- is the only full_schema.sql edit this feature makes.
+-- ── recordings/podcast + recordings/podcast-media (public podcast feed) ──
+-- Both PUBLIC (isProtected=0) — gated internally by recordings.podcast_token
+-- (Portal\Core\Recordings::podcastToken()), NOT by a session. That token is
+-- deliberately RUNTIME data (lazily generated on first use, encrypted at
+-- rest) and is NOT seeded here or by any migration — these route seeds are
+-- the only full_schema.sql edits this feature makes. podcast-media.php is
+-- the self-hosted-file enclosure endpoint the feed's <enclosure> URLs point
+-- at for filePath-only episodes (recordings/stream stays isProtected=1 and
+-- is untouched — podcast-media re-authenticates via the same podcast token
+-- instead of a session).
 INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
-    ('recordings/podcast', 'recordings/podcast.php', 0)
+    ('recordings/podcast',       'recordings/podcast.php',       0),
+    ('recordings/podcast-media', 'recordings/podcast-media.php', 0)
 ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 
 INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
