@@ -8,6 +8,7 @@
  * (purpose=pledge, purposeRef=pledgeID).
  *
  * @package   Portal\Payments
+ * @version   1.0.1
  * @link      https://github.com/MWBMPartners/webMS-Intra/issues/268
  */
 
@@ -71,7 +72,76 @@ $purpose     = (string) ($_POST['purpose'] ?? 'other');
 $purposeRef  = trim((string) ($_POST['purposeRef'] ?? ''));
 $description = trim((string) ($_POST['description'] ?? '')) ?: 'Donation';
 
-$redirect = Payments::startCheckout($siteId, $userId, $amountPence, $currency, $description, $purpose, $purposeRef !== '' ? $purposeRef : null);
+// 🛡️ Purpose/purposeRef authorisation (IDOR + amount-forgery hardening).
+// `purposeRef` arrives as raw POST and, uncontrolled, becomes a free-form
+// foreign key that Payments::markPaymentSucceeded() acts on for the paying
+// user's benefit (e.g. purpose=pledge marks ANY pledgeID fulfilled for
+// whatever amount was POSTed). Validate against the CURRENT user + site
+// here, before the pending tblPayment row is ever created, so an invalid
+// or someone-else's-record reference can never reach startCheckout().
+$db = App::db();
+if ($purpose === 'pledge') {
+    $pledgeId = (int) $purposeRef;
+    $pledge   = null;
+    if ($pledgeId > 0) {
+        $stmt = $db->prepare(
+            'SELECT p.donorID, p.amountPence, pr.currency '
+            . 'FROM tblProjectPledge p INNER JOIN tblProject pr ON pr.projectID = p.projectID '
+            . 'WHERE p.pledgeID = ? AND pr.siteID = ? AND p.fulfilledAt IS NULL LIMIT 1'
+        );
+        if ($stmt !== false) {
+            $stmt->bind_param('ii', $pledgeId, $siteId);
+            $stmt->execute();
+            $pledge = $stmt->get_result()->fetch_assoc();
+            $stmt->close();
+        }
+    }
+    // Require the payer to BE the pledge's own donor — no ownership check
+    // upstream in Projects::fulfilPledge() means this is the only gate.
+    if ($pledge === null || $userId <= 0 || (int) ($pledge['donorID'] ?? 0) !== $userId) {
+        $_SESSION['flash_msg']  = "That pledge can't be paid.";
+        $_SESSION['flash_type'] = 'danger';
+        header('Location: ' . sanitizeReturnTo($_POST['return_to'] ?? '/'));
+        exit();
+    }
+    // Force the amount + currency to the pledge's own record — never trust
+    // the POSTed amount for a pledge (it would let an under-payment still
+    // fulfil the pledge in full).
+    $amountPence = (int) $pledge['amountPence'];
+    $currency    = (string) ($pledge['currency'] ?? $currency);
+    $purposeRef  = (string) $pledgeId;
+} elseif ($purpose === 'giving') {
+    $categoryId = (int) $purposeRef;
+    $category   = null;
+    if ($categoryId > 0) {
+        $stmt = $db->prepare(
+            'SELECT categoryID FROM tblGivingCategory WHERE categoryID = ? AND siteID = ? AND isActive = 1 LIMIT 1'
+        );
+        if ($stmt !== false) {
+            $stmt->bind_param('ii', $categoryId, $siteId);
+            $stmt->execute();
+            $category = $stmt->get_result()->fetch_assoc();
+            $stmt->close();
+        }
+    }
+    if ($category === null) {
+        $_SESSION['flash_msg']  = "That giving category can't be used.";
+        $_SESSION['flash_type'] = 'danger';
+        header('Location: ' . sanitizeReturnTo($_POST['return_to'] ?? '/'));
+        exit();
+    }
+    // The donation amount is the donor's own choice (subject to the
+    // min-amount check above) — only the category needs validating.
+    $purposeRef = (string) $categoryId;
+} else {
+    // membership/other/unrecognised — markPaymentSucceeded() has no side
+    // effect for these purposes, so never let an arbitrary purposeRef ride
+    // along on the pending row.
+    $purpose    = 'other';
+    $purposeRef = null;
+}
+
+$redirect = Payments::startCheckout($siteId, $userId, $amountPence, $currency, $description, $purpose, $purposeRef !== null && $purposeRef !== '' ? $purposeRef : null);
 if ($redirect === null || $redirect === '') {
     $_SESSION['flash_msg']  = 'Could not start checkout — provider may not be configured.';
     $_SESSION['flash_type'] = 'danger';
