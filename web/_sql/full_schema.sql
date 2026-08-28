@@ -3502,6 +3502,96 @@ ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
 INSERT INTO `tblMigrations` (`filename`) VALUES ('089_service_plans.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
+-- ── from 178_hymnal_lookup_public_oos.sql (gap #128 residual) ───────────────
+-- 📖 tblHymnals / tblHymnalEntries / tblHymnLookupCache — new, standalone
+-- (see full note + tblSongs relocation banner further down). Placed here,
+-- ahead of tblServicePlan/tblServicePlanItem, purely so tblSongs (below,
+-- relocated from its original migration-135 position) exists before
+-- tblServicePlanItem's songID FK needs it — "FK ordering respected" (file
+-- header guarantee); house precedent for reasoning about this exact
+-- ordering constraint: migration 173's header.
+CREATE TABLE IF NOT EXISTS `tblHymnals` (
+    `hymnalID`   INT          NOT NULL AUTO_INCREMENT,
+    `siteID`     INT          NOT NULL,
+    `code`       VARCHAR(20)  NOT NULL COMMENT 'Short code, e.g. CH, SDAH, MP',
+    `name`       VARCHAR(120) NOT NULL COMMENT 'Human-readable hymnal name',
+    `publisher`  VARCHAR(255) DEFAULT NULL,
+    `isActive`   TINYINT(1)   NOT NULL DEFAULT 1,
+    `createdAt`  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`hymnalID`),
+    UNIQUE KEY `uq_hymnal_site_code` (`siteID`, `code`),
+    KEY `idx_hymnal_site_active` (`siteID`, `isActive`),
+    CONSTRAINT `fk_hymnal_site` FOREIGN KEY (`siteID`) REFERENCES `tblSites`(`siteID`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+COMMENT='Gap #128 residual — hymn books known to a site (metadata index, no lyrics)';
+
+CREATE TABLE IF NOT EXISTS `tblHymnalEntries` (
+    `entryID`        INT          NOT NULL AUTO_INCREMENT,
+    `hymnalID`       INT          NOT NULL,
+    `number`         VARCHAR(20)  NOT NULL COMMENT 'Supports non-numeric suffixes, e.g. "256a"',
+    `numberSort`     INT          NOT NULL DEFAULT 0 COMMENT 'Numeric prefix of number, for ordering',
+    `title`          VARCHAR(255) NOT NULL,
+    `firstLine`      VARCHAR(255) DEFAULT NULL,
+    `author`         VARCHAR(255) DEFAULT NULL,
+    `tuneName`       VARCHAR(120) DEFAULT NULL,
+    `meter`          VARCHAR(40)  DEFAULT NULL,
+    `ccliNumber`     VARCHAR(40)  DEFAULT NULL,
+    `copyrightLine`  VARCHAR(500) DEFAULT NULL,
+    `sourceRef`      VARCHAR(255) DEFAULT NULL COMMENT 'External id/URL when sourced from a remote provider (e.g. iHymns)',
+    `createdAt`      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`entryID`),
+    UNIQUE KEY `uq_hymnalentry` (`hymnalID`, `number`),
+    KEY `idx_hymnalentry_sort` (`hymnalID`, `numberSort`),
+    FULLTEXT KEY `ft_hymnal_search` (`title`, `firstLine`, `author`, `tuneName`),
+    CONSTRAINT `fk_hymnalentry_hymnal` FOREIGN KEY (`hymnalID`) REFERENCES `tblHymnals`(`hymnalID`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+COMMENT='Gap #128 residual — hymn metadata only (number/title/tune/author/CCLI). No lyrics.';
+
+CREATE TABLE IF NOT EXISTS `tblHymnLookupCache` (
+    `cacheID`      INT          NOT NULL AUTO_INCREMENT,
+    `siteID`       INT          NOT NULL,
+    `queryHash`    CHAR(64)     NOT NULL COMMENT 'SHA-256 of the normalised query+hymnal',
+    `resultsJson`  MEDIUMTEXT   NOT NULL,
+    `fetchedAt`    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`cacheID`),
+    UNIQUE KEY `uq_hymncache` (`siteID`, `queryHash`),
+    KEY `idx_hymncache_fetched` (`fetchedAt`),
+    CONSTRAINT `fk_hymncache_site` FOREIGN KEY (`siteID`) REFERENCES `tblSites`(`siteID`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+COMMENT='Gap #128 residual — 24h cache of Tier-2 remote hymn-search results, never load-bearing';
+
+-- ── from 135_song_library.sql ────────────────────────────────────────────
+-- 🎵 RELOCATED here (originally created just before migration 136's tables,
+-- much later in this file) by migration 178 so tblServicePlanItem.songID
+-- (below) can carry its FK inline, per the file's "FK ordering respected"
+-- guarantee — see the relocation note left at the original position.
+-- hymnalCode/hymnNumber/tuneName (migration 178) folded inline.
+CREATE TABLE IF NOT EXISTS `tblSongs` (
+    `songID`         INT NOT NULL AUTO_INCREMENT,
+    `siteID`         INT NOT NULL,
+    `title`          VARCHAR(255) NOT NULL,
+    `author`         VARCHAR(255) DEFAULT NULL,
+    `ccliNumber`     VARCHAR(40)  DEFAULT NULL,
+    `copyrightLine`  VARCHAR(500) DEFAULT NULL COMMENT 'e.g. © 1995 Kingsway Thankyou Music',
+    `defaultKey`     VARCHAR(10)  DEFAULT NULL,
+    `defaultTempo`   VARCHAR(20)  DEFAULT NULL COMMENT 'BPM or descriptor',
+    `lyrics`         MEDIUMTEXT   DEFAULT NULL,
+    `tags`           VARCHAR(255) DEFAULT NULL COMMENT 'Comma-separated themes',
+    `hymnalCode`     VARCHAR(20)  DEFAULT NULL COMMENT 'Hymnal code this song was promoted from (gap #128, migration 178)',
+    `hymnNumber`     VARCHAR(20)  DEFAULT NULL COMMENT 'Hymn number within hymnalCode (gap #128, migration 178)',
+    `tuneName`       VARCHAR(120) DEFAULT NULL COMMENT 'Tune name, carried over from a promoted hymnal entry (gap #128, migration 178)',
+    `isActive`       TINYINT(1)   NOT NULL DEFAULT 1,
+    `createdByID`    INT DEFAULT NULL,
+    `createdAt`      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updatedAt`      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`songID`),
+    KEY `idx_song_site_title` (`siteID`, `title`),
+    KEY `idx_song_ccli`       (`ccliNumber`),
+    FULLTEXT KEY `ft_song_search` (`title`, `author`, `lyrics`),
+    CONSTRAINT `fk_song_site`    FOREIGN KEY (`siteID`)      REFERENCES `tblSites`(`siteID`) ON DELETE CASCADE,
+    CONSTRAINT `fk_song_creator` FOREIGN KEY (`createdByID`) REFERENCES `tblUsers`(`userID`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
 CREATE TABLE IF NOT EXISTS `tblServicePlan` (
     `planID`        INT          NOT NULL AUTO_INCREMENT,
     `siteID`        INT          NOT NULL DEFAULT 1,
@@ -3509,6 +3599,8 @@ CREATE TABLE IF NOT EXISTS `tblServicePlan` (
     `title`         VARCHAR(255) NOT NULL,
     `serviceDate`   DATE         NOT NULL,
     `status`        ENUM('draft','published','archived') NOT NULL DEFAULT 'draft',
+    `publicToken`   CHAR(32)     DEFAULT NULL COMMENT '32-hex public share token, bin2hex(random_bytes(16)) — mirrors tblAssets.publicToken (gap #128, migration 178)',
+    `isPublicShared` TINYINT(1)  NOT NULL DEFAULT 0 COMMENT 'Plan-level opt-in for the /os/{token} public view — OFF by default (gap #128, migration 178)',
     `preparedByID`  INT          DEFAULT NULL,
     `startedAt`     DATETIME     DEFAULT NULL COMMENT 'When the live runtime was started by an operator (#300, migration 110)',
     `closedAt`      DATETIME     DEFAULT NULL COMMENT 'When the live runtime was closed (the service ended)',
@@ -3517,6 +3609,7 @@ CREATE TABLE IF NOT EXISTS `tblServicePlan` (
     PRIMARY KEY (`planID`),
     KEY `idx_sp_site_date` (`siteID`, `serviceDate`),
     KEY `idx_sp_event` (`eventID`),
+    UNIQUE KEY `uq_sp_public_token` (`publicToken`),
     CONSTRAINT `fk_sp_site`     FOREIGN KEY (`siteID`)       REFERENCES `tblSites`(`siteID`),
     CONSTRAINT `fk_sp_event`    FOREIGN KEY (`eventID`)      REFERENCES `tblEvents`(`eventID`) ON DELETE SET NULL,
     CONSTRAINT `fk_sp_prepared` FOREIGN KEY (`preparedByID`) REFERENCES `tblUsers`(`userID`)   ON DELETE SET NULL
@@ -3528,14 +3621,17 @@ CREATE TABLE IF NOT EXISTS `tblServicePlanItem` (
     `sectionType`   ENUM('greeting','song','prayer','scripture','sermon','offering','communion','special_music','announcement','reading','other') NOT NULL DEFAULT 'other',
     `position`      INT          NOT NULL DEFAULT 0,
     `title`         VARCHAR(255) DEFAULT NULL,
+    `songID`        INT          DEFAULT NULL COMMENT 'Optional canonical song reference -> tblSongs.songID (gap #128, migration 178)',
     `presenterID`   INT          DEFAULT NULL,
     `presenterText` VARCHAR(255) DEFAULT NULL,
     `durationMin`   INT          DEFAULT NULL,
     `notes`         TEXT         DEFAULT NULL,
     PRIMARY KEY (`itemID`),
     KEY `idx_spi_plan_position` (`planID`, `position`),
+    KEY `idx_spi_song` (`songID`),
     CONSTRAINT `fk_spi_plan`      FOREIGN KEY (`planID`)      REFERENCES `tblServicePlan`(`planID`) ON DELETE CASCADE,
-    CONSTRAINT `fk_spi_presenter` FOREIGN KEY (`presenterID`) REFERENCES `tblUsers`(`userID`)      ON DELETE SET NULL
+    CONSTRAINT `fk_spi_presenter` FOREIGN KEY (`presenterID`) REFERENCES `tblUsers`(`userID`)      ON DELETE SET NULL,
+    CONSTRAINT `fk_spi_song`      FOREIGN KEY (`songID`)      REFERENCES `tblSongs`(`songID`)      ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
@@ -3551,6 +3647,29 @@ INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue
     (NULL, 'service_plans.enabled',     '0', '0', 0),
     (NULL, 'service_plans.displayName', 'Service Plans', 'Service Plans', 0),
     (NULL, 'service_plans.displayIcon', 'fa-solid fa-list-ol', 'fa-solid fa-list-ol', 0)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
+-- ── from 178_hymnal_lookup_public_oos.sql (gap #128 residual) ───────────────
+-- Route seeds for the hymnal admin page + the public-share toggle handler.
+-- `/os/{token}` itself is a Router special route (like `/a/{token}`) and is
+-- deliberately NOT seeded here — see Router.php.
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('admin/hymns',         'admin/hymns.php',         1),
+    ('admin/hymns/save',    'admin/hymns-save.php',    1),
+    ('service-plans/share', 'service-plans/share.php', 1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
+-- ⚙️ Settings seeds — remote hymn lookup + public Order-of-Service sharing
+-- both OFF by default; the ApiRouter gating flag for hymn-search is 'true'
+-- (the endpoint itself still requires a live session).
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'hymns.remote.enabled',                  'false', 'false', 0),
+    (NULL, 'hymns.remote.host',                     '',      '',      0),
+    (NULL, 'hymns.remote.baseUrl',                  '',      '',      0),
+    (NULL, 'hymns.remote.apiKey',                   '',      '',      1),
+    (NULL, 'hymns.remote.cacheTtl',                 '86400', '86400', 0),
+    (NULL, 'service_plans.public_share.enabled',    'false', 'false', 0),
+    (NULL, 'api.service-plans.hymn-search.enabled', 'true',  'true',  0)
 ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
 
 -- =============================================================================
@@ -5664,28 +5783,13 @@ CREATE TABLE IF NOT EXISTS `tblLivestreamSessions` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 -- ── from 135_song_library.sql ──────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS `tblSongs` (
-    `songID`         INT NOT NULL AUTO_INCREMENT,
-    `siteID`         INT NOT NULL,
-    `title`          VARCHAR(255) NOT NULL,
-    `author`         VARCHAR(255) DEFAULT NULL,
-    `ccliNumber`     VARCHAR(40)  DEFAULT NULL,
-    `copyrightLine`  VARCHAR(500) DEFAULT NULL COMMENT 'e.g. © 1995 Kingsway Thankyou Music',
-    `defaultKey`     VARCHAR(10)  DEFAULT NULL,
-    `defaultTempo`   VARCHAR(20)  DEFAULT NULL COMMENT 'BPM or descriptor',
-    `lyrics`         MEDIUMTEXT   DEFAULT NULL,
-    `tags`           VARCHAR(255) DEFAULT NULL COMMENT 'Comma-separated themes',
-    `isActive`       TINYINT(1)   NOT NULL DEFAULT 1,
-    `createdByID`    INT DEFAULT NULL,
-    `createdAt`      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    `updatedAt`      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    PRIMARY KEY (`songID`),
-    KEY `idx_song_site_title` (`siteID`, `title`),
-    KEY `idx_song_ccli`       (`ccliNumber`),
-    FULLTEXT KEY `ft_song_search` (`title`, `author`, `lyrics`),
-    CONSTRAINT `fk_song_site`    FOREIGN KEY (`siteID`)      REFERENCES `tblSites`(`siteID`) ON DELETE CASCADE,
-    CONSTRAINT `fk_song_creator` FOREIGN KEY (`createdByID`) REFERENCES `tblUsers`(`userID`) ON DELETE SET NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+-- 🎵 RELOCATED by migration 178 to just before tblServicePlan/
+-- tblServicePlanItem (SECTION 1, near tblHymnals) so tblServicePlanItem's
+-- new `songID` FK can fold inline instead of needing an out-of-order ALTER
+-- (this file has zero standalone ALTER statements by design — see migration
+-- 173's header for the same "FK ordering respected" reasoning). tblSongs
+-- itself is unchanged in content at its new location except for the three
+-- inline columns migration 178 adds (hymnalCode/hymnNumber/tuneName).
 
 -- ── from 136_kid_checkin.sql ──────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS `tblKidProfiles` (
@@ -7905,6 +8009,19 @@ INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
 ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 
 INSERT INTO `tblMigrations` (`filename`) VALUES ('177_web_push_sender.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- ── from 178_hymnal_lookup_public_oos.sql (gap #128 residual) ───────────────
+-- Hymnal lookup + public Order of Service — re-scoped #128 residual on top
+-- of service-plans (#262/#300) + Worship (#308/#355), which already cover
+-- everything else the issue asked for. tblHymnals/tblHymnalEntries/
+-- tblHymnLookupCache + the relocated tblSongs (with its 3 new columns) are
+-- folded inline near the top of SECTION 1 (see the banner just before
+-- tblServicePlan's CREATE); tblServicePlanItem.songID + tblServicePlan.
+-- publicToken/isPublicShared are folded inline into their own CREATEs; the
+-- 3 routes + 7 settings are folded into the service-plans seed block above.
+-- Nothing further to fold here except this migration's own self-record.
+INSERT INTO `tblMigrations` (`filename`) VALUES ('178_hymnal_lookup_public_oos.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
 -- ── from 179_event_venue_link.sql ────────────────────────────────────────────

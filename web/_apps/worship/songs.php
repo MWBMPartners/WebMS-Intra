@@ -15,16 +15,16 @@ $q      = mb_substr(trim((string) ($_GET['q'] ?? '')), 0, 80);
 $songs = [];
 if ($q !== '') {
     $stmt = $mysqli->prepare(
-        'SELECT songID, title, author, ccliNumber, defaultKey FROM tblSongs '
+        'SELECT songID, title, author, ccliNumber, defaultKey, hymnalCode, hymnNumber FROM tblSongs '
         . 'WHERE siteID = ? AND isActive = 1 AND ('
-        . '  title LIKE ? OR author LIKE ? OR lyrics LIKE ? OR ccliNumber LIKE ?'
+        . '  title LIKE ? OR author LIKE ? OR lyrics LIKE ? OR ccliNumber LIKE ? OR hymnalCode LIKE ? OR hymnNumber LIKE ?'
         . ') ORDER BY title LIMIT 200'
     );
     $needle = '%' . $q . '%';
-    $stmt->bind_param('issss', $siteId, $needle, $needle, $needle, $needle);
+    $stmt->bind_param('issssss', $siteId, $needle, $needle, $needle, $needle, $needle, $needle);
 } else {
     $stmt = $mysqli->prepare(
-        'SELECT songID, title, author, ccliNumber, defaultKey FROM tblSongs '
+        'SELECT songID, title, author, ccliNumber, defaultKey, hymnalCode, hymnNumber FROM tblSongs '
         . 'WHERE siteID = ? AND isActive = 1 ORDER BY title LIMIT 200'
     );
     $stmt->bind_param('i', $siteId);
@@ -65,6 +65,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     <?php endif; ?>
                 </div>
                 <div class="portal-data-row-aside small text-muted">
+                    <?php if (!empty($s['hymnalCode']) && !empty($s['hymnNumber'])): ?><span class="badge bg-info text-dark me-1"><?php echo htmlspecialchars((string) $s['hymnalCode'], ENT_QUOTES, 'UTF-8'); ?> <?php echo htmlspecialchars((string) $s['hymnNumber'], ENT_QUOTES, 'UTF-8'); ?></span><?php endif; ?>
                     <?php if (!empty($s['defaultKey'])): ?><span class="badge bg-secondary me-1">Key <?php echo htmlspecialchars((string) $s['defaultKey'], ENT_QUOTES, 'UTF-8'); ?></span><?php endif; ?>
                     <?php if (!empty($s['ccliNumber'])): ?>CCLI <?php echo htmlspecialchars((string) $s['ccliNumber'], ENT_QUOTES, 'UTF-8'); ?><?php endif; ?>
                 </div>

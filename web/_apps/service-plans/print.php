@@ -4,8 +4,16 @@
  * Service Plans — print-friendly view. The .print-view body class
  * triggers the existing print.css overrides (#241).
  *
+ * Gap #128 residual — `?version=leader|congregation` (default `leader`,
+ * so an existing bookmark/link with no `version` param renders BYTE-
+ * IDENTICALLY to before this change). `congregation` suppresses the
+ * `notes` block entirely (internal AV/tech cues never belong in front of
+ * the congregation) — everything else (order, titles, presenters,
+ * durations) is unchanged between the two variants.
+ *
  * @package   Portal\ServicePlans
  * @link      https://github.com/MWBMPartners/webMS-Intra/issues/262
+ * @link      https://github.com/MWBMPartners/webMS-Intra/issues/128
  */
 
 declare(strict_types=1);
@@ -18,9 +26,14 @@ use Portal\Core\Site;
 Auth::ensureSession();
 Auth::requireLogin();
 
-$db     = App::db();
-$siteId = Site::id();
-$id     = (int) ($_GET['id'] ?? 0);
+$db      = App::db();
+$siteId  = Site::id();
+$id      = (int) ($_GET['id'] ?? 0);
+$version = (string) ($_GET['version'] ?? 'leader');
+if ($version !== 'congregation') {
+    $version = 'leader'; // default, and the only other accepted value
+}
+$isCongregation = $version === 'congregation';
 
 $plan = null;
 $stmt = $db->prepare('SELECT * FROM tblServicePlan WHERE planID = ? AND siteID = ? LIMIT 1');
@@ -87,6 +100,9 @@ h1 { font-size: 1.5rem; margin-bottom: 0.25rem; }
 <div class="meta">
     <?php echo htmlspecialchars($portalName, ENT_QUOTES, 'UTF-8'); ?>
     &middot; <?php echo htmlspecialchars(date('l, j F Y', strtotime((string) $plan['serviceDate'])), ENT_QUOTES, 'UTF-8'); ?>
+    <?php if ($isCongregation === true): ?>
+        &middot; congregation copy
+    <?php endif; ?>
 </div>
 
 <?php foreach ($items as $idx => $it):
@@ -98,7 +114,13 @@ h1 { font-size: 1.5rem; margin-bottom: 0.25rem; }
     <div class="section">
         <div class="section-num"><?php echo $idx + 1; ?>.</div>
         <div class="section-body">
-            <div class="section-type"><?php echo htmlspecialchars($sectionLabel, ENT_QUOTES, 'UTF-8'); ?></div>
+            <?php if ($isCongregation === false): ?>
+                <!-- 🔒 Gap #128 — the internal sectionType tag ("Sermon",
+                     "Offering", …) is leader-only; the congregation copy
+                     keeps just numbering/title/presenter, matching a
+                     normal printed order-of-service bulletin. -->
+                <div class="section-type"><?php echo htmlspecialchars($sectionLabel, ENT_QUOTES, 'UTF-8'); ?></div>
+            <?php endif; ?>
             <?php if (($it['title'] ?? '') !== ''): ?>
                 <div class="section-title"><?php echo htmlspecialchars((string) $it['title'], ENT_QUOTES, 'UTF-8'); ?></div>
             <?php endif; ?>
@@ -112,7 +134,11 @@ h1 { font-size: 1.5rem; margin-bottom: 0.25rem; }
                     <?php endif; ?>
                 </div>
             <?php endif; ?>
-            <?php if (($it['notes'] ?? '') !== ''): ?>
+            <?php if ($isCongregation === false && ($it['notes'] ?? '') !== ''): ?>
+                <!-- 🔒 Gap #128 — leader-only. NEVER rendered when
+                     $isCongregation is true (congregation copy + the
+                     public /os/{token} view both must never show AV/tech
+                     cues to the congregation). -->
                 <div class="section-notes"><?php echo Markdown::render((string) $it['notes'], ['allow_links' => true]); ?></div>
             <?php endif; ?>
         </div>

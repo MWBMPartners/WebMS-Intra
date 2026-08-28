@@ -3759,6 +3759,179 @@ host allowlist (`push.endpointHostAllowlist`, admin-editable at
 `/admin/integrations/push`) is a suffix match against the endpoint's
 host. A new browser vendor's push service host is not a code change —
 just add it to the allowlist.
+## Hymnal lookup + public Order of Service (gap #128 residual, migration 178)
+
+### Re-scope verdict
+
+#128 ("Order of Service planner with iHymns integration") was filed
+2026-05-22, before service-plans (#262/#300) or the Worship Presentation
+Engine (#308/#355) existed. A 2026-08-28 architecture pass found both apps
+already cover ~90% of the issue's ask (item CRUD, reorder, presenters,
+durations, notes, templates, event linking, song library + CCLI log). This
+migration ships ONLY the residual — a local hymnal index, an optional
+default-off remote lookup, and a congregation-facing public view — all
+additive on the EXISTING `tblServicePlan`/`tblServicePlanItem`/`tblSongs`
+tables. **No new app, no third service-plan data model.**
+
+### Hymnal CSV import format
+
+`Portal\Core\Hymnal::importCsv()` (used by `/admin/hymns`'s per-hymnal
+import form) expects a header row with these column names, in ANY order
+(case-insensitive, matched by name — not by position):
+
+```
+number,title,firstLine,author,tuneName,meter,ccliNumber,copyrightLine
+```
+
+Only `number` and `title` are required — every other column may be
+omitted entirely or left blank per-row. `number` supports non-numeric
+suffixes (`"256a"`) — a leading numeric prefix is extracted into
+`numberSort` for ordering; a fully non-numeric number sorts as 0 (first).
+Upsert is keyed on `(hymnalID, number)` — **re-importing the same file (or
+an updated version of it) is idempotent**, never creating duplicates.
+Size-capped at `Hymnal::CSV_MAX_BYTES` (256 KB) / `Hymnal::CSV_MAX_ROWS`
+(5000 rows); a row missing `number` or `title` is skipped with a reported
+error rather than aborting the whole import. **Metadata only — the
+importer has no lyrics column and never will**: hymn lyrics carry
+copyright risk and stay hand-entered into `tblSongs.lyrics` under the
+church's own CCLI licence, exactly as before #128.
+
+### The iHymns Tier-2 contract (generic, provider-agnostic)
+
+No public API for the issue's linked `ihymns.co.uk` could be verified
+during planning (DNS/proxy blocked from the build sandbox; no public
+documentation found). Repo docs (`deploy.yml`, this file's own SFTP
+pipeline notes) suggest iHymns is an in-house MWBM/MWservices sibling
+deployment, not a third-party integration — so rather than block on an
+unverifiable API, `Portal\Core\Hymnal::searchRemote()` implements a
+**generic** HTTPS JSON client any owner-controlled endpoint can speak:
+
+```
+GET {baseUrl}/search?q={query}&limit={n}
+-> 200 {"results":[{"id":"…","hymnal":"CH","number":"256","title":"…",
+                     "firstLine":"…","author":"…","tune":"…","meter":"…",
+                     "url":"…"}]}
+```
+
+- `id` or `url` becomes `sourceRef` on a promoted `tblSongs` row (so a
+  remote hit needs no re-fetch once picked).
+- Only `title` is strictly required in a result; every other field is
+  optional and simply omitted/null when absent.
+- The client sends `Authorization: Bearer {apiKey}` when a key is
+  configured — no other auth scheme is supported in v1.
+
+**Ship decision:** default OFF (`hymns.remote.enabled = 'false'`) until an
+owner supplies a `baseUrl` + `host` and flips the flag — this is how the
+issue's "written permission from iHymns" acceptance criterion is honoured
+(record the confirmation, or "it's ours, self-granted" if owner-controlled,
+on #128 when flipping). Tier 0 (free-text) and Tier 1 (local index) work
+fully with zero configuration; Tier 2 is a pure enhancement layered on top
+that can be turned on/off at any time with zero code change.
+
+**SSRF hardening (mandatory, not optional even though the feature is
+default-off and admin-configured):**
+- https-only, re-checked at BOTH settings-save (`Hymnal::
+  validateRemoteConfig()`, called from `admin/hymns-save.php`) AND
+  request time (`Hymnal::searchRemote()`/`testRemoteConnection()`) —
+  belt-and-braces against a config row being edited directly or a future
+  code path bypassing the save-time check.
+- Single-host allowlist — `hymns.remote.host` must match the configured
+  `baseUrl`'s host EXACTLY (case-insensitive `strcasecmp`). No user- or
+  operator-supplied URL is ever fetched at query time; the ONLY thing a
+  search can hit is what an admin configured and saved.
+- IP-literal AND DNS-resolved private/reserved-range refusal
+  (`Hymnal::isPrivateOrReservedHost()` — `FILTER_VALIDATE_IP` with
+  `FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE`, plus a
+  `dns_get_record()` A/AAAA resolve-and-check when the host isn't already
+  an IP literal). **Documented residual:** DNS rebinding between this
+  check and curl's own connect is not fully mitigable on DreamHost shared
+  hosting (no pinned resolver) — accepted because the feature is
+  default-off, single-host, owner-configured, and GET-only.
+- `CURLOPT_FOLLOWLOCATION = false` — a 3xx from the provider is never
+  followed (a compromised/misconfigured provider can't redirect the
+  server anywhere else).
+- `CURLOPT_PROTOCOLS` / `CURLOPT_REDIR_PROTOCOLS` locked to
+  `CURLPROTO_HTTPS` — belt-and-braces alongside the `parse_url()` scheme
+  check.
+- `CURLOPT_CONNECTTIMEOUT = 3`, `CURLOPT_TIMEOUT = 5`.
+- Response body capped at ~512 KB via a `CURLOPT_WRITEFUNCTION` callback
+  that returns a short byte count once the cap is exceeded — curl treats
+  that as a transfer error and aborts, so an oversized/streaming response
+  can never be buffered in full.
+- JSON-only parse (`json_decode` with a depth limit) — any shape surprise
+  (non-array, missing `results`, wrong types) is treated as "no results",
+  never a fatal error.
+- 24h server-side cache (`tblHymnLookupCache`, `hymns.remote.cacheTtl`
+  default `86400`) keyed on `(siteID, SHA-256(query))` — a repeat search
+  never re-hits the remote host while cached, bounding worst-case outbound
+  call volume regardless of how often the picker is used.
+- **Never logged:** the API key is sent ONLY as a request header, stored
+  encrypted at rest (`isSensitive=1`, migration 178), and every
+  `Logger::errorPlatform()` call in `Hymnal.php` carries a generic message
+  (status code / curl errno only) — never the query string, the full URL,
+  or any header value.
+- Every failure mode (disabled, misconfigured, unreachable, timeout,
+  oversized, malformed JSON) degrades to `[]` and NEVER throws — the local
+  index's results always render regardless of remote provider health.
+
+### Public Order-of-Service share flow
+
+Mirrors the Asset Tracker's `/a/{token}` public-page pattern (#393/#395)
+almost exactly — same Router special-route shape, same uniform-404
+philosophy, same "no oracle" security reasoning:
+
+1. **Token.** `tblServicePlan.publicToken` — `CHAR(32)`,
+   `bin2hex(random_bytes(16))` (`Hymnal::generateShareToken()`), UNIQUE.
+   NULL on every plan until first enabled.
+2. **Enable/disable/rotate — `service-plans/share.php`.** CSRF'd POST,
+   session-gated (any logged-in user who can reach the plan's edit page —
+   same write ACL as everything else on `edit.php`; the plan's own
+   separate "tighten the write ACL" item, gap #128 OQ6, is intentionally
+   out of scope here). `enable` refuses up front (flash message, no state
+   change) unless the SITE-level `service_plans.public_share.enabled` flag
+   is `'true'` — enabling a plan's own sharing while the site has never
+   opted in would otherwise look like it worked but silently 404 forever,
+   which is a worse UX than an immediate clear refusal. `rotate` mints a
+   fresh token, immediately invalidating any previously shared link/QR
+   code (no state at the old token to "expire" — it's just no longer the
+   plan's `publicToken`, so the very next lookup 404s uniformly).
+3. **The public page — `service-plans/public.php`, reached via
+   `Router`'s `os/{token}` special-route block (cloned from `a/{token}`)
+   — NOT a tblRoutes row**, so it works even mid-migration/if tblRoutes
+   is unreachable, same rationale as every other Router special route on
+   that file.
+4. **Uniform 404, five gates, ALL must pass:** (1) token matches a real
+   `publicToken`, (2) `isPublicShared = 1`, (3) `status = 'published'`
+   (never draft/archived), (4) the PLAN'S OWN SITE has
+   `service_plans.public_share.enabled = 'true'`, (5) `service_plans.
+   enabled = '1'` for that site. Any single failure → the exact same
+   `Router::renderError(404)` as an unknown token — an attacker probing
+   32-hex tokens can never learn "wrong token" apart from "right token,
+   sharing off" from the response alone.
+5. **Tenant safety — the one thing this file must never get wrong.**
+   `public.php` is reached with NO active-site context: it's public,
+   unauthenticated, and the request's Host header may not even belong to
+   the token's own site on a multi-site install. So EVERY setting lookup
+   after the token resolves uses `App::settingForSite('…',
+   $plan['siteID'])` — **never** `Site::id()` or the bootstrap `$SETTINGS`
+   snapshot (which reflects the *request's* host-detected site, not
+   necessarily the *token's* site) — the exact same reasoning
+   `ApiRouter::resolveEnabledFlag()` already documents for a bearer
+   request pinned to a specific tenant.
+6. **Content model — congregation fields ONLY (decided defaults).**
+   Order/position, title, and **presenter name** (decided: yes — standard
+   on a printed order of service) render; internal `notes` (AV/tech cues)
+   are NEVER selected by the item query, let alone rendered — there is no
+   flag to accidentally flip, the column simply isn't in the `SELECT`.
+   The internal `sectionType` label ("Sermon", "Offering", …) is ALSO
+   deliberately omitted from both the public view and `print.php`'s new
+   `congregation` variant — a real printed bulletin doesn't tag every line
+   with its internal category, just number + title + presenter.
+7. **`print.php`'s `?version=leader|congregation`** reuses the exact same
+   `isCongregation` gate to suppress `notes` + the `sectionType` label;
+   `version` absent or anything other than `congregation` falls back to
+   `leader`, so every existing bookmark/link renders byte-identically to
+   before #128.
 
 ---
 
