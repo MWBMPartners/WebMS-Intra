@@ -44,6 +44,8 @@ $allowedKeys = [
     'prayerModeration',
     'accountSecurity',
     'givingStatements',
+    'taskReminders',
+    'rotaReminders',
 ];
 
 $incoming = $_POST['prefs'] ?? [];

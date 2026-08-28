@@ -11,6 +11,7 @@
  *   • Expense workflow updates (approver decisions, treasury, withdrawal)
  *   • Prayer-request moderation (for moderators)
  *   • Announcement notifications
+ *   • Task reminders / Rota duty reminders (gap #439, cron/user-reminders)
  *
  * Stored in tblUsers.notifyPrefs (JSON column from migration 026).
  *
@@ -82,6 +83,8 @@ $defaults = [
     'prayerModeration'      => true,
     'accountSecurity'       => true,
     'givingStatements'      => true,
+    'taskReminders'         => true,
+    'rotaReminders'         => true,
 ];
 foreach ($defaults as $k => $v) {
     if (array_key_exists($k, $prefs) === false) {
@@ -177,6 +180,14 @@ $switchRow = static function (string $key, string $label, string $helpText) use 
         <div class="card-header"><h2 class="h6 mb-0">Giving</h2></div>
         <div class="card-body">
             <?php echo $switchRow('givingStatements', 'Year-end giving statements', 'An annual statement of your recorded giving, emailed to you as a PDF.'); ?>
+        </div>
+    </div>
+
+    <div class="card shadow-sm mb-3">
+        <div class="card-header"><h2 class="h6 mb-0">Tasks &amp; Rota</h2></div>
+        <div class="card-body">
+            <?php echo $switchRow('taskReminders', 'Task reminders', 'Get notified when a task you\'re assigned to reaches its reminder time.'); ?>
+            <?php echo $switchRow('rotaReminders', 'Rota reminders', 'Get notified ahead of duties you\'re rostered on for.'); ?>
         </div>
     </div>
 

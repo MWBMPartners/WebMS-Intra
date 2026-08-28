@@ -3086,6 +3086,194 @@ filesystem-only `eraseGivingStatementFiles()` step: a rendered PDF is a
 name-bearing document with no retention duty once its subject is erased,
 even though the underlying ledger entries stay anonymised-in-place.
 
+### User reminders cron (#439, migration 171)
+
+Token in `user_reminders.cron_token`, seeded empty + `isSensitive = 1` — set
+a real value at `/admin/settings` before adding the crontab line, same
+empty-fails-closed pattern as every other cron token in this app. Add
+alongside the other cron lines — this one needs **15-minute** granularity
+(unlike the daily venue/asset sweeps) because the task family compares
+against a DATETIME the user picked deliberately:
+
+```
+*/15 * * * * curl -fsS "https://<your-portal-host>/cron/user-reminders?key=<your-token>" > /dev/null
+```
+
+The route (`cron/user-reminders`, migration 171) is seeded
+`isProtected = 0` — public but token-gated. It loops every distinct
+**active site** (not pre-filtered to "owns a candidate row" — with three
+unrelated families that pre-filter would be noisier than a few cheap empty
+result sets) and runs three families per site, each gated by its own
+per-site flag (`tasks.reminders_enabled` / `rota.reminders_enabled` /
+`milestones.digest_enabled`, all default ON, read via
+`App::settingForSite()` inside the loop):
+
+- **task-reminder** — `tblTasks.reminderDate <= NOW()`, capped to the last
+  `tasks.reminder_lookback_days` (default 7) so first activation on an
+  install with years of stale `reminderSent = 0` rows doesn't blast every
+  overdue task in one run. Dedupe is an atomic claim on the existing
+  `tblTasks.reminderSent` flag column (migration 036) — no new log table.
+  Honours the new `taskReminders` notification preference (default on).
+- **rota-slot** — `tblRotaSlot` rows due within
+  `rota.reminder_days_before` (default 3, migration 074) with
+  `reminderSentAt IS NULL`. One grouped email per assignee per run listing
+  every due duty; dedupe still claims each slot individually
+  (`reminderSentAt = NOW() WHERE reminderSentAt IS NULL`). Honours the new
+  `rotaReminders` notification preference (default on).
+- **milestone-digest** — once per day, 06:00-08:59 server time (matches
+  `cron/event-reminders.php`'s own day-of window). Sends today's
+  birthdays/anniversaries to the roles listed in
+  `milestones.digest_recipients` (migration 076) — **an empty recipients
+  CSV skips the site entirely** (explicit opt-in only; no silent fallback
+  to admins for birthday data). Dedupe uses the new generic
+  `tblUserReminderLog` table (`(refType, refID, dueDate)` unique key,
+  check-first + race-catch on the concurrent-run case) since
+  `tblUserMilestone` carries no sent-flag column of its own — the table is
+  deliberately generic so a future single-shot family (e.g. DBS expiry,
+  deferred) can reuse it with zero DDL.
+
+Also repaired in the same PR: `cron/event-reminders.php` was selecting
+`u.email` from `tblUsers` — the real column is `emailAddress` — so under
+this app's strict mysqli reporting the very first `prepare()` threw and the
+event-reminder cron 500'd on **every** invocation. Fixed to
+`u.emailAddress AS email` throughout; the three other `u.email` call sites
+found during this work (`calendar/event-broadcast-send.php`,
+`admin/calendar/coordinators.php`, `admin/safeguarding/dbs.php`) are
+tracked separately in #438, not touched here.
+
+## Service-Plans ↔ Worship additive bridge (gap #6, #442, migration 173)
+
+### The two-model situation
+
+Two independent "service plan" data models exist and always have —
+neither was ever aware of the other:
+
+| | Run-sheet builder (#262/#300) | Worship presentation (#308/#355) |
+|---|---|---|
+| Tables | `tblServicePlan` (SINGULAR) + `tblServicePlanItem` + `tblServicePlanMessages` | `tblServicePlans` (PLURAL) + `tblServicePlanItems` + `tblServicePlanState` + `tblCcliUsage` |
+| Born in | migration 089 (+110, +154) | migration 137 (+138, +139) |
+| Surface | `/service-plans` (login-only, no coordinator ACL) | `/worship` (admin-or-coordinator write ACL, driven by `eventID`) |
+| `eventID` | Schema-only — **no handler in `_apps/service-plans/` ever writes it** (write-dead since migration 089) | Live and ACL-bearing — `plan-save.php`'s `$gate` closure derives write access from it |
+
+Migration 154's own header calls the two "unrelated" — that stays true of
+the DATA (no merge, no rename, ever — see "Explicitly out of scope"
+below). Gap #6 adds ONE optional, additive cross-reference so a worship
+plan can declare which run-sheet it presents.
+
+### The bridge column
+
+`tblServicePlans.runSheetPlanID` INT NULL, UNIQUE (`uq_plans_runsheet`),
+`FOREIGN KEY … REFERENCES tblServicePlan(planID) ON DELETE SET NULL`
+(migration 173). NULL = unpaired — the state of every row that existed
+before this migration; nothing is backfilled in bulk.
+
+**Why the column lives on the worship side, not the run-sheet side:** in
+`full_schema.sql`, `tblServicePlan` (the run-sheet, migration 089) is
+created ~2,200 lines before `tblServicePlans` (the worship plan, migration
+137) — the FK folds inline into the child's CREATE, honouring the file's
+"FK ordering respected" guarantee. The reverse direction would need an
+out-of-order ALTER with zero precedent (every column added to an
+already-created table in this file is folded inline into that table's own
+CREATE, never a standalone ALTER — see migration 110's `startedAt`/
+`closedAt` on `tblServicePlan` itself, or 138's `displayToken` on
+`tblServicePlans`). This also means pairing only ever mutates a
+`tblServicePlans` row, so that app's stricter existing write-ACL governs
+pair/unpair for free — the ACL-free run-sheet model is never written by
+the bridge except the one guarded exception below.
+
+### Source-of-truth table (no field sync in v1 — Q4, decided)
+
+| Data | Owner | The other side shows… |
+|---|---|---|
+| Programme order, sections, presenters, durations, AV notes, serviceDate, print | Run-sheet (`tblServicePlan`) | a read-only summary |
+| Slides, canonical songs (`songID` → `tblSongs`), lyrics, projector state, displayToken, CCLI | Worship (`tblServicePlans`) | a read-only summary |
+| The pairing itself | `tblServicePlans.runSheetPlanID` — single physical record, no mirror column | resolved by reverse lookup (`ServicePlanLink::runSheetForWorshipPlan()`) |
+| Event binding | Worship's `eventID` is authoritative where both are set; the run-sheet's may be backfilled from it at pair time ONLY (never the reverse) | — |
+
+The two item representations are structurally incompatible — Model A uses
+a free-text `title` per section (`sectionType='song'` + "Hymn 256 — Amazing
+Grace"); Model B uses a canonical `songID` FK into `tblSongs`. Any
+automatic sync needs fuzzy title↔song matching with a real false-positive
+risk, so v1 ships zero sync — the counterpart panels are read-only
+visibility only. A one-shot, user-triggered "copy sections → slides"
+button is the deliberate v2 candidate.
+
+### Pairing invariants (`Portal\Core\ServicePlanLink`)
+
+All enforced in `ServicePlanLink::pair()`/`unpair()` — mechanism only, NOT
+the ACL decision (that's the caller's job, see below):
+
+1. **Same site (hard).** Every row is loaded `siteID = Site::id()`-scoped;
+   a foreign-tenant planID simply resolves to "not found", never a
+   mismatch that needs its own error path.
+2. **Same event (hard, when knowable).** Refused only when BOTH sides
+   declare an `eventID` AND they differ. Either side NULL (the run-sheet's
+   is NULL on every row today) always proceeds.
+3. **1:1 (hard).** A run-sheet already claimed by a DIFFERENT worship plan
+   is refused with a friendly flash naming the other plan. The UNIQUE key
+   is the concurrency backstop — a mysqli errno 1062 on the pairing UPDATE
+   is caught and turned into the same friendly refusal, never a fatal 500.
+   Re-pairing a worship plan's own existing link (or the same pair again)
+   is allowed — it's an overwrite of the row already being edited (Q6,
+   decided).
+4. **eventID backfill (soft, one-directional, NULL-only — Q1, decided:
+   yes).** At successful pair, if the run-sheet's `eventID IS NULL` and the
+   worship plan's is not, the run-sheet's dormant `eventID` is set from
+   it. **Never the reverse** — writing the worship side's `eventID` would
+   silently grant that event's coordinator write access to the plan
+   (`plan-save.php`'s `$gate` closure derives from it); that column is
+   ONLY ever set through the worship app's own explicit, authorised
+   `save-metadata` flow.
+5. **Unpair never touches the run-sheet row** — a prior eventID backfill
+   stays; it's true information about the run-sheet regardless of whether
+   the pairing that revealed it still exists.
+
+### ACL — who may pair/unpair
+
+Pairing mutates a `tblServicePlans` row, so `worship/plan-link.php` reuses
+that app's existing write gate **verbatim** (copied, not refactored out of
+`plan-save.php`): admin, OR `Auth::isCoordinatorOf($plan['eventID'])` when
+the plan is event-bound; free-floating template plans are admin-only. CSRF
+(`Auth::verifyCsrf`) + POST-only, matching `plan-save.php`'s own pattern.
+UI-level control visibility is cosmetic only:
+
+- **Worship editor panel** — controls show when the page's own `$canWrite`
+  is true (same variable the rest of `plan.php` already gates on).
+- **Run-sheet editor panel** — controls show for `App::isAdmin()` only
+  (Q2, decided). The run-sheet app has no coordinator concept to check
+  per-candidate without an extra query per row in the picker list; v1
+  keeps that side admin-only. Non-admins still SEE the read-only summary
+  when a pairing exists.
+
+The handler re-checks the real gate regardless of which page's UI a POST
+came from — a forged request bypassing the picker's visibility rule still
+hits the same 403.
+
+### Resilience — the venue-overlay precedent, again
+
+Both counterpart panels (`service-plans/edit.php`, `worship/plan.php`)
+follow the exact `calendar/index.php` venue-overlay pattern: guard the
+whole resolve behind `AppRegistry::isEnabled('<counterpart-slug>')`, then
+wrap the `ServicePlanLink` call in `try { … } catch (\Throwable $e) {
+error_log(...); $link = null; }`. This means a disabled counterpart app, a
+deploy where the migration hasn't landed yet (mysqli throws "unknown
+column" under this repo's strict reporting), or any other resolver
+exception leaves the panel silently empty — the page never breaks, and
+neither existing surface's own queries changed at all.
+
+### Explicitly out of scope (v2+ candidates)
+
+- Paired badges on the two list pages (`service-plans/index.php`,
+  `worship/plans.php`) — Q3, deferred; a 10-line follow-up (one extra LEFT
+  JOIN each).
+- Any field sync, in either direction — Q4, deferred; see the
+  source-of-truth table above.
+- Confidence-monitor (`live.php`/`confidence.php`) surfacing the worship
+  operator's current slide via the paired plan's `tblServicePlanState`.
+- Any rename or merge of the two confusingly-similar table names — never,
+  or only in a major version with a compatibility view. Permanently out of
+  scope for this gap item; the additive bridge is the whole point.
+
 ---
 
 Last updated: August 2026

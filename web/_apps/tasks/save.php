@@ -58,6 +58,15 @@ if ($title === '') {
     exit();
 }
 
+// 🔁 Reset reminderSent when the incoming reminderDate is in the future so
+//    an edited reminder re-fires (gap #439 write-path fix — previously an
+//    edited reminderDate never re-fired once reminderSent was already 1).
+//    NULL leaves the existing reminderSent value untouched via COALESCE.
+$reminderSentReset = null;
+if ($reminderDate !== null && strtotime($reminderDate) > time()) {
+    $reminderSentReset = 0;
+}
+
 $validPriorities = ['low', 'normal', 'high', 'urgent'];
 if (in_array($priority, $validPriorities, true) === false) {
     $priority = 'normal';
@@ -90,15 +99,15 @@ if ($taskId > 0) {
     $stmt = $mysqli->prepare(
         'UPDATE tblTasks SET title = ?, description = ?, priority = ?, dueDate = ?, '
         . 'assignedToID = ?, reminderDate = ?, isRecurring = ?, recurrenceType = ?, '
-        . 'recurrenceInterval = ?, recurrenceEndDate = ? '
+        . 'recurrenceInterval = ?, recurrenceEndDate = ?, reminderSent = COALESCE(?, reminderSent) '
         . 'WHERE taskID = ? AND siteID = ?'
     );
     if ($stmt !== false) {
         $stmt->bind_param(
-            'ssssisisisii',
+            'ssssisisisiii',
             $title, $description, $priority, $dueDate,
             $assignedToId, $reminderDate, $isRecurring, $recurrenceType,
-            $recurrenceInterval, $recurrenceEndDate, $taskId, $siteId
+            $recurrenceInterval, $recurrenceEndDate, $reminderSentReset, $taskId, $siteId
         );
         $stmt->execute();
         $stmt->close();

@@ -4835,6 +4835,7 @@ INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
     -- the reachable convention path _apps/worship/api/{state,advance}.php.
     -- 139_worship_phase3.sql
     ('worship/plan/reorder',                   'worship/plan-reorder.php',                1),
+    ('worship/plan/link',                      'worship/plan-link.php',                   1), -- migration 173
     ('admin/reports/ccli',                     'admin/reports/ccli.php',                  1),
     -- 140_host_console.sql (#317)
     ('admin/host-console',                     'admin/host-console/index.php',            1),
@@ -5657,6 +5658,7 @@ CREATE TABLE IF NOT EXISTS `tblServicePlans` (
     `planID`        INT          NOT NULL AUTO_INCREMENT,
     `siteID`        INT          NOT NULL,
     `eventID`       INT          DEFAULT NULL COMMENT 'Optional event binding; NULL = re-usable template',
+    `runSheetPlanID` INT         DEFAULT NULL COMMENT 'Optional 1:1 link to the programme run-sheet this plan presents — tblServicePlan.planID (gap #6, migration 173)',
     `name`          VARCHAR(120) NOT NULL,
     `notes`         VARCHAR(1000) DEFAULT NULL COMMENT 'Operator-only context notes shown on the editor',
     `isActive`      TINYINT(1)   NOT NULL DEFAULT 1,
@@ -5669,9 +5671,11 @@ CREATE TABLE IF NOT EXISTS `tblServicePlans` (
     KEY `idx_plan_site_active` (`siteID`, `isActive`, `updatedAt`),
     KEY `idx_plan_event`       (`eventID`),
     UNIQUE KEY `uq_plan_display_token` (`displayToken`),
-    CONSTRAINT `fk_plan_site`    FOREIGN KEY (`siteID`)      REFERENCES `tblSites`(`siteID`) ON DELETE CASCADE,
-    CONSTRAINT `fk_plan_event`   FOREIGN KEY (`eventID`)     REFERENCES `tblEvents`(`eventID`) ON DELETE SET NULL,
-    CONSTRAINT `fk_plan_creator` FOREIGN KEY (`createdByID`) REFERENCES `tblUsers`(`userID`)  ON DELETE SET NULL
+    UNIQUE KEY `uq_plans_runsheet`     (`runSheetPlanID`),
+    CONSTRAINT `fk_plan_site`      FOREIGN KEY (`siteID`)         REFERENCES `tblSites`(`siteID`) ON DELETE CASCADE,
+    CONSTRAINT `fk_plan_event`     FOREIGN KEY (`eventID`)        REFERENCES `tblEvents`(`eventID`) ON DELETE SET NULL,
+    CONSTRAINT `fk_plan_creator`   FOREIGN KEY (`createdByID`)    REFERENCES `tblUsers`(`userID`)  ON DELETE SET NULL,
+    CONSTRAINT `fk_plans_runsheet` FOREIGN KEY (`runSheetPlanID`) REFERENCES `tblServicePlan`(`planID`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 -- ── from 137_worship_service_plans.sql ──────────────────────────────────────────
@@ -7622,5 +7626,66 @@ ON DUPLICATE KEY UPDATE `filename` = `filename`;
 INSERT INTO `tblMigrations` (`filename`) VALUES ('170_venue_bookings.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
+-- ── from 171_user_reminders.sql ──────────────────────────────────────────────
+-- 🔔 tblUserReminderLog — generic single-shot reminder dedupe log. Mirrors
+-- tblAssetReminderLog/tblVenueReminderLog exactly in shape and philosophy:
+-- NO FKs by design (the log must survive row deletion of whatever it
+-- reminded about). `(refType, refID, dueDate)` is the dedupe key. `refType`
+-- is VARCHAR (not ENUM) so a future family (e.g. dbs-expiry) can reuse this
+-- same table with zero DDL — today's only writer is milestone-digest
+-- (refID = siteID). (#439)
+CREATE TABLE IF NOT EXISTS `tblUserReminderLog` (
+    `logID`          INT      NOT NULL AUTO_INCREMENT,
+    `siteID`         INT      NOT NULL COMMENT 'Attribution only — no FK by design, see table header',
+    `refType`        VARCHAR(30) NOT NULL COMMENT 'Today: milestone-digest. Reserved for future single-shot families (e.g. dbs-expiry) so they need zero DDL to join',
+    `refID`          INT      NOT NULL COMMENT 'No FK by design (log must survive row deletion). For milestone-digest: the siteID',
+    `dueDate`        DATE     NOT NULL COMMENT 'Digest date — part of the dedupe key so each day re-fires',
+    `recipientCount` INT      NOT NULL DEFAULT 0,
+    `sentAt`         DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`logID`),
+    UNIQUE KEY `uq_usrrem_ref` (`refType`, `refID`, `dueDate`),
+    KEY `idx_usrrem_site` (`siteID`, `sentAt`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+COMMENT='User reminders — generic single-shot dedupe log, no FKs by design (#439)';
+
+-- ⚙️ Settings seed — user_reminders.cron_token empty + isSensitive=1 (the
+-- endpoint is inert until an admin sets a token, same pattern as
+-- assets.cron_token/venues.cron_token). rota.reminder_days_before and
+-- milestones.digest_recipients already exist (migrations 074/076) and are
+-- deliberately NOT re-seeded here.
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'user_reminders.cron_token',    '', '',  1),
+    (NULL, 'user_reminders.enabled',       '1', '1', 0),
+    (NULL, 'tasks.reminders_enabled',      '1', '1', 0),
+    (NULL, 'tasks.reminder_lookback_days', '7', '7', 0),
+    (NULL, 'rota.reminders_enabled',       '1', '1', 0),
+    (NULL, 'milestones.digest_enabled',    '1', '1', 0)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
+-- 🗺️ Route seed — isProtected=0 (public but token-gated), matching
+-- cron/asset-reminders / cron/venue-reminders.
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('cron/user-reminders', 'cron/user-reminders.php', 0)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('171_user_reminders.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- ── from 172_giving_bulk_statements.sql (gap #4, #440) — actual table,
+-- settings, and route seeds are folded above (see the "from
+-- 172_giving_bulk_statements.sql" banner near tblGivingEntry); nothing
+-- further to fold here except this migration's own self-record.
 INSERT INTO `tblMigrations` (`filename`) VALUES ('172_giving_bulk_statements.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- ── from 173_worship_runsheet_link.sql ────────────────────────────────────────
+-- 🎶🔗 Gap #6 additive bridge (#442) — tblServicePlans.runSheetPlanID
+-- (nullable, UNIQUE, FK ON DELETE SET NULL -> tblServicePlan.planID) is
+-- folded inline into the tblServicePlans CREATE above (column after
+-- eventID, UNIQUE KEY uq_plans_runsheet beside uq_plan_display_token,
+-- CONSTRAINT fk_plans_runsheet after fk_plan_creator) and the
+-- worship/plan/link route is folded into the worship routes INSERT above
+-- (migrations 137-144 block) — nothing further to fold here except this
+-- migration's own self-record.
+INSERT INTO `tblMigrations` (`filename`) VALUES ('173_worship_runsheet_link.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;
