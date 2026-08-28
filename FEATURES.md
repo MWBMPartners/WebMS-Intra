@@ -457,7 +457,7 @@ Self-contained 6-step setup wizard (bootstrap-free).
 | Privacy / GDPR helpers | 🔜 (#47) |
 | 2FA TOTP available | ✅ (#92) |
 
-### 📍 Location & maps (#456 Chunk A) ✅ (foundation) / 🔜 (PII — Chunk B)
+### 📍 Location & maps (#456) ✅ (foundation + PII/GDPR)
 
 Full address + geocoordinates + what3words platform layer, shared as a
 cross-repo data-format CONTRACT with ProjectBookIT/ProjectEPass (identical
@@ -510,17 +510,39 @@ another repo, ever**.
   `locationName` field for backward compatibility), Event occurrence
   overrides (hand-entered `overrideGeoLat/overrideGeoLng/overrideW3W`,
   `NULL` = inherit the parent event), Resources, Asset Locations.
-- **Deliberately NOT touched in Chunk A** (PII — lands in a later Chunk B
-  PR together with its GDPR export/erasure wiring in the same commit):
-  `tblUsers`/Directory member coordinates + a dedicated `visibilityCoords`
-  tier, GiftAid/Salvation (text-only address capture via the shared
-  input partial, no coordinates). Kids/Care/Visitors are excluded
-  permanently (safeguarding apps, no consent mechanism).
-- Migration 180: `latitude/longitude/what3words/geocodedAt/geocodeSource`
-  on `tblVenues`/`tblResource`/`tblAssetLocations`; `overrideGeoLat/
-  overrideGeoLng/overrideW3W` on `tblEventOccurrenceOverrides`; new
-  `tblGeocodeCache`; 14 settings seeds (all default OFF/empty); 10 route
-  seeds. A fresh upgrade is a full no-op until an admin opts in.
+- **Chunk B — member PII + GDPR lockstep** (migration 181, `tblUsers`
+  ONLY: `latitude`/`longitude`/`what3words` + a dedicated
+  `visibilityCoords` ENUM tier, default `'private'`, INDEPENDENT of the
+  existing `visibilityAddress` — sharing address text never implies
+  consent to show a map pin). Deliberately NO `geocodedAt`/`geocodeSource`
+  on `tblUsers` — a member's own coordinates are NEVER auto-geocoded, only
+  hand-entered or set via their own explicit "Look up coordinates" click.
+  Capture on the owner edit surface (`directory/me.php`); display
+  (`directory/profile.php`) gates coords through a SEPARATE
+  `$can($u['visibilityCoords'])` check stricter than the address text: the
+  owner/admin sees full precision + the exact what3words, any other
+  permitted viewer sees coordinates coarsened to 3dp (~110m) with an
+  "Approximate location" badge and the what3words value suppressed
+  entirely (a 3m-precise W3W square cannot be meaningfully coarsened). The
+  pre-existing `$can()` "team tier behaves as private" quirk is inherited
+  verbatim. GDPR lockstep shipped in the SAME PR as the schema: the export
+  (`/account/data-export`) gained a `giftAidDeclarations` block (closed a
+  pre-existing gap — Gift Aid address PII was never exported at all); the
+  self-service delete path (`delete-confirm.php`) now also nulls
+  `displayAddress`/`displayPhone` (a separate pre-existing miss) plus the
+  four new columns; the admin erasure catalogue (`GdprEraser::
+  catalogue()`) extended to null the three PII coordinate/W3W columns.
+  GiftAid/Salvation reuse the shared input partial in TEXT-ONLY mode (no
+  coordinates, no new columns, no new erasure surface). Kids/Care/
+  Visitors remain permanently excluded (safeguarding apps, no consent
+  mechanism) — verified by a diff-level grep, zero references.
+- Migration 180 (Chunk A): `latitude/longitude/what3words/geocodedAt/
+  geocodeSource` on `tblVenues`/`tblResource`/`tblAssetLocations`;
+  `overrideGeoLat/overrideGeoLng/overrideW3W` on
+  `tblEventOccurrenceOverrides`; new `tblGeocodeCache`; 14 settings seeds
+  (all default OFF/empty); 10 route seeds. Migration 181 (Chunk B): four
+  columns on `tblUsers` only, no settings/route seeds. A fresh upgrade is
+  a full no-op until an admin opts in / a member sets their own coords.
 
 ### 🌍 Multi-site (Phase 10) ✅
 

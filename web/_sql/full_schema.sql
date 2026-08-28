@@ -192,12 +192,23 @@ CREATE TABLE IF NOT EXISTS `tblUsers` (
     `displayPhoto`   VARCHAR(500) DEFAULT NULL COMMENT 'Path under _uploads/ to profile photo',
     `displayPhone`   VARCHAR(50)  DEFAULT NULL,
     `displayAddress` VARCHAR(500) DEFAULT NULL,
+    -- 📍 Member home coordinates + what3words (from migration 181 / #456
+    -- Chunk B) — PRIVATE by default; NEVER auto-geocoded (no geocodedAt/
+    -- geocodeSource pair — set only by the member's own explicit "Look up
+    -- coordinates" action or hand entry, see directory/me.php).
+    `latitude`    DECIMAL(10,7) DEFAULT NULL COMMENT 'Member home coordinates — PRIVATE by default; see visibilityCoords (migration 181)',
+    `longitude`   DECIMAL(10,7) DEFAULT NULL,
+    `what3words`  VARCHAR(100)  DEFAULT NULL COMMENT 'what3words address',
     -- 🔒 Per-field directory visibility (from migration 079 / #261)
     `visibilityName`    ENUM('private','team','members','public') NOT NULL DEFAULT 'members',
     `visibilityRoles`   ENUM('private','team','members','public') NOT NULL DEFAULT 'members',
     `visibilityEmail`   ENUM('private','team','members','public') NOT NULL DEFAULT 'private',
     `visibilityPhone`   ENUM('private','team','members','public') NOT NULL DEFAULT 'private',
     `visibilityAddress` ENUM('private','team','members','public') NOT NULL DEFAULT 'private',
+    -- 🔒 Coordinate visibility — INDEPENDENT of visibilityAddress; consent
+    -- for address text never implies consent for a map pin (migration 181
+    -- / #456 Chunk B).
+    `visibilityCoords`  ENUM('private','team','members','public') NOT NULL DEFAULT 'private' COMMENT 'Coordinate visibility — INDEPENDENT of visibilityAddress; consent for address text never implies consent for a map pin (migration 181)',
     `visibilityBio`     ENUM('private','team','members','public') NOT NULL DEFAULT 'members',
     `visibilityPhoto`   ENUM('private','team','members','public') NOT NULL DEFAULT 'private',
     `createdAt`    DATETIME     DEFAULT CURRENT_TIMESTAMP,
@@ -7883,4 +7894,13 @@ INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
 ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 
 INSERT INTO `tblMigrations` (`filename`) VALUES ('180_location_geocoding.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- ── from 181_location_user_pii.sql (#456) ────────────────────────────────────
+-- Location / Geocoordinates / What3Words platform layer, Chunk B (member
+-- PII + GDPR lockstep). The four new tblUsers columns (latitude, longitude,
+-- what3words, visibilityCoords) are already folded inline into the CREATE
+-- TABLE tblUsers block above. No settings/route seeds — this block carries
+-- only the self-record.
+INSERT INTO `tblMigrations` (`filename`) VALUES ('181_location_user_pii.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;

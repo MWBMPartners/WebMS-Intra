@@ -3705,7 +3705,7 @@ Full step-by-step lives in `web/_apps/help/admin.php` (anchor
 
 ---
 
-## Location / Geocoordinates / What3Words platform — Chunk A (#456, migration 180)
+## Location / Geocoordinates / What3Words platform — Chunk A + B (#456, migrations 180-181)
 
 Cross-repo data-format CONTRACT shared with ProjectBookIT/ProjectEPass —
 **standalone principle**: every repo builds its own `GeoLocation`/
@@ -3811,8 +3811,109 @@ the convenience layer on top.
 `directory/profile.php`'s existing `$can()` visibility check treats the
 `team` tier as equivalent to `private` for non-admin viewers — a
 pre-existing platform behaviour, not something Chunk A/B changes.
-`visibilityCoords` (Chunk B) will inherit this quirk verbatim by design;
-fixing it is out of scope for this feature.
+`visibilityCoords` (Chunk B, shipped) is gated through the SAME `$can()`
+closure, so it inherits this quirk verbatim by construction; fixing it
+was out of scope for this feature.
+
+## Chunk B — member PII + GDPR lockstep (#456, migration 181)
+
+Migration 181 adds FOUR columns to `tblUsers` ONLY: `latitude`/
+`longitude`/`what3words` (member home coordinates, PRIVATE by default)
+and `visibilityCoords` (ENUM, default `'private'`). Deliberately **no
+`geocodedAt`/`geocodeSource` pair** — unlike the standard five-column
+block migration 180 added elsewhere, a member's own coordinates are
+NEVER auto-geocoded anywhere in this codebase (`geo.autoGeocode` never
+applies to `tblUsers`); provenance is always "the member themself" via
+either hand entry or their own explicit "Look up coordinates" click on
+`directory/me.php`, so a provenance column would carry no information.
+
+### `visibilityCoords` is INDEPENDENT of `visibilityAddress`
+
+A member sharing their address TEXT never implies consent to show a map
+PIN — a pin is strictly more precise (and more automatable to scrape at
+scale) than a postal address string. `directory/profile.php` therefore
+runs a SEPARATE `$can($u['visibilityCoords'])` check before rendering
+anything coordinate-shaped, entirely independent of the existing
+`$can($u['visibilityAddress'])` check for the address text `<dd>`. Both
+default `'private'`.
+
+### Non-owner coarsening + what3words suppression (the actual gate)
+
+`directory/profile.php`'s coords block (`portal_location_display()` call,
+gated by `$showCoordsBlock = $can($u['visibilityCoords']) && coords
+non-null`):
+
+- **Owner or admin** (`$isOwnerOrAdmin`): full DECIMAL(10,7) precision +
+  the exact what3words value.
+- **Any other viewer the tier permits**: coordinates pass through
+  `GeoLocation::coarsenCoords()` (round to 3dp, ≈110m) before rendering,
+  an "Approximate location" badge shows, the map renders an `L.circle`
+  (150m radius) instead of a precise marker (`data-approx="1"` — see
+  `location-map-assets.php`'s init script), and the what3words value is
+  **suppressed entirely** — never coarsened, because a what3words square
+  is ~3m×3m and cannot be meaningfully "rounded" the way a coordinate
+  pair can; showing it next to an "approximate" pin would silently
+  re-precise the whole point of coarsening.
+
+This coarsen-and-suppress logic lives in the SHARED
+`location-display.php` partial (`coarsen` config key) — Chunk B is the
+first (and, per the spec, only) caller that ever passes `coarsen: true`;
+every other Chunk A caller (Venues, Events, Resources) always shows full
+precision because none of those tables carry personal data.
+
+### GDPR lockstep — what changed and why
+
+Shipped in the SAME PR as the schema (house rule: never a PII column
+without its export/erasure wiring in the same commit):
+
+1. **Export** (`auth/account/data-export.php`) — `tblUsers`'s existing
+   `SELECT *` already re-exports the four new columns with zero code
+   change; the real, PRE-EXISTING gap this chunk closed was that Gift Aid
+   declarations (home address + postcode, HMRC-mandated) were never
+   exported for the declaring donor at all. New `giftAidDeclarations`
+   block, `WHERE donorID = ?`.
+2. **Self-service erasure** (`auth/account/delete-confirm.php`) — the
+   tblUsers anonymise `UPDATE` never nulled `displayAddress`/
+   `displayPhone` (a separate pre-existing miss, found while auditing
+   this column family) — both now null alongside the three new PII
+   columns; `visibilityCoords` resets to `'private'` defensively.
+3. **Admin erasure catalogue** (`Portal\Core\GdprEraser::catalogue()`) —
+   the final `tblUsers` entry's `nullCols` gained `latitude`/`longitude`/
+   `what3words`. `visibilityCoords` is a `NOT NULL` ENUM so it can't go
+   through the generic null-column mechanism — left untouched there is
+   harmless because with the coordinates already NULL there is nothing
+   left for any visibility tier to gate.
+4. **Round-trip proof** (manually traced, no local MySQL in this build
+   sandbox): a user with address+coords+W3W+a Gift Aid declaration
+   exports all four coordinate fields plus the declaration's address/
+   postcode; after erasure (either path) a re-`SELECT` of `tblUsers`
+   shows all three coordinate columns NULL, and the admin path's
+   `tblGiftAidDeclaration` DELETE (pre-existing catalogue entry, unchanged
+   this chunk) removes the declaration's address entirely.
+
+### GiftAid / Salvation — text-only partial reuse, deliberately no schema change
+
+Both apps reuse `location-input.php`'s "reduced names map" mode
+(`showCoords: false, showW3W: false`, `names` mapping only the fields
+each app already has) purely for UI/i18n consistency — mapped onto their
+EXISTING `address`/`postcode` POST field names, so `gad-save.php`/
+`card-save.php` needed zero changes. No `latitude`/`longitude`/
+`what3words` column was added to `tblGiftAidDeclaration` or
+`tblSalvationCards` — HMRC and pastoral follow-up need postal text, not a
+map pin, and no new column means no new erasure surface to wire.
+
+### Hard exclusion: Kids / Care / Visitors
+
+Per the locked decision (safeguarding data, no consent mechanism for a
+map pin), the shared partials are NEVER imported into `_apps/kids/`,
+`_apps/care/`, or `_apps/visitors/`, and no location column was added to
+`tblKidProfiles`/`tblCareCase`/`tblCareVisit`/`tblVisitor`. Verify on any
+future touch of this feature with:
+
+```bash
+git diff --stat -- web/_apps/kids web/_apps/care web/_apps/visitors   # must be empty
+git diff | grep -iE "tblKidProfiles|tblCareCase|tblCareVisit|tblVisitor" # must be empty
+```
 
 ---
 
