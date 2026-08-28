@@ -916,7 +916,7 @@
       },
       "UserCreate": {
         "type": "object",
-        "description": "Passwords are NEVER accepted here — the new account gets a random, unusable password hash and must go through the existing forgot-password flow to set a real one. `isAdmin` (portal-wide) is honoured in session mode only — a bearer key can never mint a portal admin, even with `users:write`; use `isSiteAdmin` (site-scoped) instead.",
+        "description": "Passwords are NEVER accepted here — the new account gets a random, unusable password hash and must go through the existing forgot-password flow to set a real one. `isAdmin` (portal-wide) is honoured in session mode only — a bearer key can never mint a portal admin, even with `users:write`; use `isSiteAdmin` (site-scoped) instead. #456 Chunk B: a member's Directory home coordinates/what3words (`latitude`/`longitude`/`what3words`/`visibilityCoords`, migration 181) are never readable or writable via this API in any mode — a deliberate safest-floor stance, since a bearer/session API caller has no per-viewer visibility-tier context to apply the member's own `visibilityCoords` gate against.",
         "required": [
           "emailAddress",
           "fullName"
@@ -947,7 +947,7 @@
       },
       "UserUpdate": {
         "type": "object",
-        "description": "Editable: fullName, isActive, isAdmin (session mode only), isSiteAdmin. Email address and password are excluded from v1 (silently ignored if present). A session caller can never deactivate their OWN account via this endpoint.",
+        "description": "Editable: fullName, isActive, isAdmin (session mode only), isSiteAdmin. Email address and password are excluded from v1 (silently ignored if present). A session caller can never deactivate their OWN account via this endpoint. Directory location fields are likewise excluded — see the `UserCreate` schema note (#456 Chunk B).",
         "properties": {
           "fullName": {
             "type": "string",

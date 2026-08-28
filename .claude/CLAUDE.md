@@ -63,7 +63,7 @@ infrastructure rather than apps).
 | care | `/care` | Confidential pastoral / wellbeing register with visit log; role-restricted, encrypted notes |
 | cop-live-chat | `/admin/live/chat` | Moderate viewer chat on livestream events (#313); viewer-facing chat widget served alongside the `/live` embed |
 | dashboard | `/dashboard` | Portal home with app cards and pinned announcements |
-| directory | `/directory` | Searchable member directory with opt-in per-field visibility |
+| directory | `/directory` | Searchable member directory with opt-in per-field visibility, incl. an independent `visibilityCoords` tier for an optional home map pin (#456 Chunk B) |
 | discipleship | `/discipleship` | Ordered formation pathways with per-member progress tracking, auto-completion from attendance/RSVPs, pastor roster (#303) |
 | documents | `/documents` | File library with categories |
 | expenses | `/expenses` | Submit, approve, treasury, withdraw, multi-approver, PDF, CSV |
@@ -156,6 +156,36 @@ Calendar/Events/Preaching Plan is ONE app ("Events") — `/calendar` covers view
 
 ## Recent ships (chronological)
 
+- **`claude/gap456-location-chunkB`** (branched off
+  `claude/gap456-location-chunkA`) — #456 Chunk B: the PII + GDPR half.
+  Migration 181 adds FOUR columns to `tblUsers` ONLY — `latitude`/
+  `longitude`/`what3words` (member home coordinates, PRIVATE by default,
+  NEVER auto-geocoded — no `geocodedAt`/`geocodeSource` pair) and
+  `visibilityCoords` (ENUM, default `'private'`, INDEPENDENT of the
+  existing `visibilityAddress`). Capture on the owner surface
+  (`directory/me.php`, per the spec — NOT `/account`); `directory/
+  save.php` validates the pair (10 → 14 bind_param placeholders).
+  `directory/profile.php` gates coords through a SEPARATE
+  `$can($u['visibilityCoords'])` check: owner/admin see full precision +
+  the exact what3words, any other permitted viewer sees coords coarsened
+  to 3dp (~110m, `GeoLocation::coarsenCoords()`) with an "Approximate
+  location" badge and the what3words value suppressed entirely (a
+  3m-precise W3W square can't be meaningfully coarsened). The pre-existing
+  `$can()` "team tier = private" quirk is inherited verbatim, not fixed.
+  GDPR lockstep in the SAME PR: `data-export.php` gained a
+  `giftAidDeclarations` block (closed a pre-existing gap — Gift Aid
+  address PII was never exported); `delete-confirm.php`'s tblUsers
+  anonymise UPDATE now also nulls `displayAddress`/`displayPhone` (a
+  separate pre-existing miss) plus the three new PII columns;
+  `GdprEraser::catalogue()`'s tblUsers `nullCols` extended with
+  `latitude`/`longitude`/`what3words`. GiftAid (`giving/gift-aid.php`) and
+  Salvation (`salvation/card.php`) reuse the shared `location-input`
+  partial in TEXT-ONLY "reduced names map" mode mapped onto their existing
+  `address`/`postcode` POST fields — no new columns, no new erasure
+  surface. Kids/Care/Visitors hard-excluded, verified by grep (zero
+  matches). `UserCreate`/`UserUpdate` API schemas document that member
+  coordinates/W3W are never readable or writable via the REST API in any
+  mode. All 11 audit checks green, `php -l` clean on every touched file.
 - **`claude/gap456-location-chunkA`** (branched off `alpha`) — #456 Chunk A:
   full address + geocoordinates + what3words platform layer (foundation,
   non-PII, interactive map — Chunk B lands the PII/GDPR half in a later

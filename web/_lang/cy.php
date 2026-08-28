@@ -143,4 +143,8 @@ return [
     'location.lookup_coords'   => 'Chwilio cyfesurynnau',
     'location.coords_approx'   => 'Lleoliad bras',
 
+    // ── #456 Chunk B — aelod-benodol PII (mudo 181) ────────────────────────
+    'location.visibility_coords'    => 'Lleoliad map (cyfesurynnau)',
+    'location.coords_privacy_hint'  => 'Mae pin map yn fwy manwl gywir na thestun eich cyfeiriad. Mae\'n aros yn breifat oni bai eich bod yn ei rannu\'n benodol.',
+
 ];

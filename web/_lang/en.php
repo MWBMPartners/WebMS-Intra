@@ -414,4 +414,8 @@ return [
     'location.map_attribution' => 'Map data © OpenStreetMap contributors',
     'location.coords_approx'   => 'Approximate location',
 
+    // ── #456 Chunk B — member PII visibility (migration 181) ──────────────
+    'location.visibility_coords'    => 'Map location (coordinates)',
+    'location.coords_privacy_hint'  => 'A map pin is more precise than your address text. It stays private unless you explicitly share it.',
+
 ];

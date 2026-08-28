@@ -203,8 +203,19 @@ class GdprEraser
             // tblLocalAccounts; SSO links live in tblLinkedAccounts — both
             // now hard-deleted above), so referencing them here made the
             // whole UPDATE fail to prepare and this final step never ran.
+            // 📍 #456 Chunk B — `displayPhone`/`latitude`/`longitude`/
+            // `what3words` (migration 181) added to nullCols alongside the
+            // pre-existing PII columns: the member's own map pin is exactly
+            // the kind of PII this final anonymise step exists to remove.
+            // `visibilityCoords` is a NOT NULL ENUM (default 'private') so
+            // it cannot be nulled via this generic mechanism — with lat/
+            // lng/what3words all NULL there is nothing left for that tier
+            // to gate, so leaving its value untouched here is harmless
+            // (delete-confirm.php's self-deletion path DOES reset it to
+            // 'private' defensively, since that path builds its own
+            // literal SET list rather than using this nullCols mechanism).
             ['table' => 'tblUsers', 'userCol' => 'userID', 'action' => 'anonymise',
-             'nullCols' => ['emailAddress','phoneNumber','displayAddress','locale','totpSecret'],
+             'nullCols' => ['emailAddress','phoneNumber','displayAddress','displayPhone','latitude','longitude','what3words','locale','totpSecret'],
              'overrides' => ['fullName' => self::TOMBSTONE_NAME, 'isActive' => 0],
              'reason' => 'user row retained for historical FK integrity; PII removed'],
         ];

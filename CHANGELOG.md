@@ -38,6 +38,46 @@
   this chunk (tblUsers/directory/GiftAid/Salvation land in a later Chunk
   B PR with the matching GDPR export/erasure wiring in the same commit).
   All 11 audit checks green, `php -l` clean on every touched file.
+- feat(location): #456 Chunk B — the PII + GDPR half of the location/
+  geocoding platform, branched off Chunk A. Migration 181 adds FOUR
+  columns to `tblUsers` ONLY: `latitude`/`longitude`/`what3words` (member
+  home coordinates, PRIVATE by default, NEVER auto-geocoded — no
+  `geocodedAt`/`geocodeSource` pair, set only by the member's own explicit
+  "Look up coordinates" action or hand entry) and `visibilityCoords`
+  (ENUM, default `'private'`, INDEPENDENT of the existing
+  `visibilityAddress` — sharing address text never implies consent to
+  show a map pin). Directory capture on the owner surface
+  (`directory/me.php`, NOT `/account`): compact coords/W3W trio under the
+  existing Address textarea + a `visibilityCoords` visibility row;
+  `directory/save.php` validates the pair via `GeoLocation::
+  validateCoords()`/`validateW3W()` (10 → 14 bind_param placeholders).
+  Directory display (`directory/profile.php`) gates coords through a
+  SEPARATE `$can($u['visibilityCoords'])` check, stricter than the
+  address text: the owner/admin always sees full precision + the exact
+  what3words; any other viewer permitted by the tier sees coordinates
+  coarsened to 3dp (~110m, `GeoLocation::coarsenCoords()`) with an
+  "Approximate location" badge, and the what3words value is suppressed
+  entirely (a 3m-precise W3W square cannot be meaningfully coarsened).
+  The pre-existing `$can()` "team tier behaves as private" quirk is
+  inherited verbatim, not fixed. GDPR lockstep shipped in the SAME PR:
+  `data-export.php` gained a `giftAidDeclarations` export block (closed a
+  pre-existing address-PII export gap — Gift Aid declarations were never
+  exported at all); `delete-confirm.php`'s tblUsers anonymise UPDATE now
+  also nulls `displayAddress`/`displayPhone` (a separate pre-existing
+  miss) plus the four new columns; `GdprEraser::catalogue()`'s tblUsers
+  `nullCols` extended with `latitude`/`longitude`/`what3words`. GiftAid
+  (`giving/gift-aid.php`) and Salvation (`salvation/card.php`) reuse the
+  Chunk A `location-input` partial in TEXT-ONLY "reduced names map" mode
+  (`showCoords`/`showW3W` both false) mapped onto their EXISTING
+  `address`/`postcode` POST fields — no new columns on
+  `tblGiftAidDeclaration`/`tblSalvationCards`, so no new erasure surface.
+  Kids/Care/Visitors are hard-excluded — zero diff touches those apps
+  (verified by grep). API surface (`UserCreate`/`UserUpdate` schemas)
+  documents that member coordinates/W3W are never readable or writable
+  via the REST API in any mode, regardless of visibility tier — a bearer/
+  session caller has no per-viewer tier context to apply the gate
+  against. All 11 audit checks green, `php -l` clean on every touched
+  file.
 - feat(mail): gap #234 — MS365 Graph email via an admin-configured shared
   mailbox, plus hardening of the whole `Mailer::sendViaGraph()` path. The
   portal already sent every email app-only through Microsoft Graph
