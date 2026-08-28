@@ -132,7 +132,19 @@ if ($itemStmt !== false) {
     $itemStmt->close();
 }
 
-$siteName  = (string) (Site::branding('name') ?? App::settingForSite('site.name', $planSiteId) ?? 'this organisation');
+// 🛡️ Tenant safety (see file header) — `Site::branding()` reflects the
+// REQUEST's host-detected site, which need not be the token's own site on
+// a multi-site install; the plan's own siteName is looked up directly by
+// `$planSiteId` instead, never via ambient site-resolution state.
+$siteNameRow = null;
+$siteStmt    = $db->prepare('SELECT siteName FROM tblSites WHERE siteID = ? LIMIT 1');
+if ($siteStmt !== false) {
+    $siteStmt->bind_param('i', $planSiteId);
+    $siteStmt->execute();
+    $siteNameRow = $siteStmt->get_result()->fetch_assoc();
+    $siteStmt->close();
+}
+$siteName  = (string) ($siteNameRow['siteName'] ?? App::settingForSite('site.name', $planSiteId) ?? 'this organisation');
 $brandName = method_exists(Site::class, 'productName') === true ? (string) Site::productName() : 'Portal';
 
 $planTitleSafe = htmlspecialchars((string) $plan['title'], ENT_QUOTES, 'UTF-8');
