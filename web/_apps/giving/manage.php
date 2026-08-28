@@ -120,6 +120,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <a href="/giving/categories" class="btn btn-outline-secondary btn-sm">Categories</a>
         <a href="/giving/reports" class="btn btn-outline-secondary btn-sm">Reports</a>
         <a href="/giving/hmrc-export?from=<?php echo urlencode($from); ?>&to=<?php echo urlencode($to); ?>" class="btn btn-outline-warning btn-sm"><i class="fa-solid fa-file-csv me-1"></i>HMRC CSV</a>
+        <a href="/giving/statements" class="btn btn-outline-primary btn-sm"><i class="fa-solid fa-file-invoice me-1"></i>Statements</a>
     </div>
 </div>
 

@@ -223,6 +223,13 @@ class GdprEraser
         foreach ($catalogue as $entry) {
             $any = self::processEntry($db, $requestId, $userId, $entry) || $any;
         }
+        // 🧾 Giving bulk statements (#440 Q5) — a filesystem-only sweep, not
+        // a catalogue entry: tblGivingStatementLog rows themselves stay
+        // (donorID is NOT NULL there, and the run-history/HMRC-adjacent
+        // audit trail is retained exactly like tblGivingEntry above), but
+        // the RENDERED PDF is a name-bearing document with no retention
+        // duty once its subject is erased, so the files are unlinked here.
+        $any = (self::eraseGivingStatementFiles($requestId, $userId) > 0) || $any;
         // Final status flip.
         $u = $db->prepare('UPDATE tblErasureRequest SET status = "completed", processedAt = NOW(), processedByID = ?, userID = NULL WHERE requestID = ?');
         if ($u !== false) {
@@ -378,6 +385,68 @@ class GdprEraser
             self::logAudit($db, $requestId, 'failed', $table, null, mb_substr($e->getMessage(), 0, 250));
             return false;
         }
+    }
+
+    /**
+     * Unlink every rendered giving-statement PDF for `$userId`, across
+     * every site (siteID is embedded in the directory, not the filename —
+     * see Portal\Core\Giving::renderStatementPdf()'s path convention), and
+     * (SEC-02) detach the raw `emailedTo` address from every
+     * `tblGivingStatementLog` row for this donor. The row ITSELF stays —
+     * amount/period is retained run-history/HMRC-adjacent audit trail,
+     * exactly like `tblGivingEntry`'s own "amounts kept, identity
+     * detached" convention (see the call site's comment in execute()) —
+     * only the PII columns (the file, then the mailed-to address) are
+     * removed. Not a catalogue() entry: `tblGivingStatementLog.donorID` is
+     * NOT NULL by design, so the generic anonymise/delete actions don't
+     * fit; this bespoke sweep does the file unlink AND the column-level
+     * PII scrub together as one #440 Q5 step.
+     *
+     * @return int Number of files removed plus statement-log rows that
+     *   had `emailedTo` detached (0 means there was nothing to erase).
+     */
+    private static function eraseGivingStatementFiles(int $requestId, int $userId): int
+    {
+        $db = App::db();
+
+        $removed = 0;
+        $base = PORTAL_ROOT . DIRECTORY_SEPARATOR . '_uploads' . DIRECTORY_SEPARATOR . 'giving'
+              . DIRECTORY_SEPARATOR . 'statements';
+        if (is_dir($base) === true) {
+            $pattern = $base . DIRECTORY_SEPARATOR . '*' . DIRECTORY_SEPARATOR . 'statement-' . $userId . '-*.pdf';
+            $matches = glob($pattern);
+            if ($matches !== false) {
+                foreach ($matches as $path) {
+                    if (@unlink($path) === true) {
+                        $removed++;
+                    }
+                }
+            }
+        }
+        if ($removed > 0) {
+            // Not a real table name — deliberately NOT `tblXxx`-shaped so
+            // check_php_table_refs.py doesn't need an allowlist entry for
+            // this filesystem-only sweep's audit label.
+            self::logAudit($db, $requestId, 'delete', 'GivingStatementPdfFiles', (string) $removed . ' file(s)', 'rendered statement PDFs have no retention duty once the subject is erased');
+        }
+
+        // 🔐 SEC-02 — the rendered PDF is gone above, but the raw mailed-to
+        // address still survives in `tblGivingStatementLog.emailedTo` even
+        // after erasure. Null it (prepared, donor-scoped) while keeping
+        // the row's totals/period for the run-history/audit trail.
+        $nulled = 0;
+        $stmt = $db->prepare('UPDATE tblGivingStatementLog SET emailedTo = NULL WHERE donorID = ?');
+        if ($stmt !== false) {
+            $stmt->bind_param('i', $userId);
+            $stmt->execute();
+            $nulled = $stmt->affected_rows;
+            $stmt->close();
+        }
+        if ($nulled > 0) {
+            self::logAudit($db, $requestId, 'anonymise', 'tblGivingStatementLog', (string) $nulled . ' rows', 'emailedTo PII detached; totals/period run-history retained (statement PDFs already unlinked above)');
+        }
+
+        return $removed + $nulled;
     }
 
     private static function logAudit(\mysqli $db, int $requestId, string $action, string $table, ?string $recordKey, string $details): void

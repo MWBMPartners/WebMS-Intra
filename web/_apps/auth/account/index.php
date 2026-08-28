@@ -141,9 +141,10 @@ if ($laCheck !== false) {
 
 // 🔔 Load notification preferences
 $notifyPrefs = [
-    'emailDigest'    => true,
-    'expenseUpdates' => true,
-    'eventReminders' => true,
+    'emailDigest'      => true,
+    'expenseUpdates'   => true,
+    'eventReminders'   => true,
+    'givingStatements' => true,
 ];
 $npStmt = $mysqli->prepare('SELECT notifyPrefs FROM tblUsers WHERE userID = ? LIMIT 1');
 if ($npStmt !== false) {

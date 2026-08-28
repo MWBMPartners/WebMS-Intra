@@ -66,7 +66,7 @@ infrastructure rather than apps).
 | discipleship | `/discipleship` | Ordered formation pathways with per-member progress tracking, auto-completion from attendance/RSVPs, pastor roster (#303) |
 | documents | `/documents` | File library with categories |
 | expenses | `/expenses` | Submit, approve, treasury, withdraw, multi-approver, PDF, CSV |
-| giving | `/giving` | Contributions log, Gift Aid capture, HMRC export, year-end statements; two-person offering count, pledge campaigns, bank reconciliation (#299) |
+| giving | `/giving` | Contributions log, Gift Aid capture, HMRC export, year-end statements (self-service + treasurer bulk batch generate/email, #440); two-person offering count, pledge campaigns, bank reconciliation (#299) |
 | help | `/help/*` | In-app guides (getting-started, expenses, calendar, prayer-requests, admin, faq, …) |
 | invites | `/invites` | Single-use invite links so new members self-register with role pre-assigned |
 | kids | `/kids/*` | Children's ministry check-in / check-out with 6-digit safeguarding badge codes (#298) |
@@ -153,6 +153,32 @@ Calendar/Events/Preaching Plan is ONE app ("Events") — `/calendar` covers view
 
 ## Recent ships (chronological)
 
+- **`claude/gap4-bulk-statements`** (this session, branched off `alpha`) —
+  gap #4: treasurer-only bulk year-end giving statements at
+  `/giving/statements` (#440). Generalised `Portal\Core\Giving::
+  renderStatementPdf()` to `(siteId, donorId, from, to, label)` so the
+  self-service page (`giving/my-statement.php`) and the new bulk batch
+  render through the exact same function — byte-identical output. Three
+  upgrades landed on that shared renderer: donor lookup is now site-scoped
+  (active membership OR giving history at the site — an `OR` of two
+  `EXISTS`, closing a latent cross-tenant render hole while still allowing
+  a treasurer to pull a departed donor's historical statement); a
+  Gift-Aid-eligible column + summary via correlated `EXISTS` (never a
+  JOIN, so overlapping declarations can't double-count, mirroring
+  `buildHmrcCsv()`'s own known hazard), deliberately with no projected 25%
+  reclaim figure; and the output path is now namespaced by
+  `{siteID}/{periodKey}`, fixing a cross-site filename overwrite the old
+  flat naming had. New `tblGivingStatementLog` (migration 172) is a
+  `UNIQUE(siteID, donorID, periodKey)` dedupe/audit log; generate/email
+  both cap at `giving.statements.batchPerRun` (default 25) per request
+  (Newsletter-dispatch pattern, re-trigger to continue), with an explicit
+  audit-logged "resend" override, ZIP download (`ZipArchive`, never a
+  combined PDF, degrades to per-row links), and an optional token-gated
+  `cron/giving-statements.php` sweeper (`giving.cron_token`, empty ⇒ 403
+  fail-closed). New `givingStatements` notifyPrefs opt-out (default on)
+  enforced at both queue and live-send time; `GdprEraser` now also
+  unlinks an erased donor's rendered statement PDFs from disk. All 11
+  audit checks green, `php -l` clean on every touched file.
 - **`claude/gap6-serviceplan-bridge`** (branched off `alpha`) — gap #6
   (#442): additive, non-destructive bridge between the two parallel
   "service plan" data models that never knew about each other — the
@@ -211,7 +237,7 @@ Calendar/Events/Preaching Plan is ONE app ("Events") — `/calendar` covers view
   this work are tracked separately in #438, not touched here. Migration
   171: new `tblUserReminderLog` table + six settings seeds + one route
   seed, zero ALTERs, folded into `full_schema.sql`.
-- **`claude/paypal-checkout`** (this session, branched off `alpha`) — gap #1:
+- **`claude/paypal-checkout`** (branched off `alpha`) — gap #1:
   PayPal Orders v2 fully wired into `Portal\Core\Payments` (create checkout,
   capture-on-return + `CHECKOUT.ORDER.APPROVED` webhook backstop for a payer
   who approves and never returns, verified webhooks via PayPal's own

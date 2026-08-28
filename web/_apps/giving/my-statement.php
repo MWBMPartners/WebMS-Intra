@@ -23,7 +23,13 @@ if ($year < 2000 || $year > 2100) {
     $year = (int) date('Y');
 }
 
-$path = Giving::renderStatementPdf($siteId, $userId, $year);
+// 📅 Self-service stays calendar-year-only; the bulk treasurer page (#440)
+// is where an arbitrary from/to range (e.g. a UK tax year) is available.
+// Both paths funnel through the SAME renderer, so this is just a year →
+// from/to/label mapping — the output bytes are identical either way.
+$from = $year . '-01-01';
+$to   = $year . '-12-31';
+$path = Giving::renderStatementPdf($siteId, $userId, $from, $to, (string) $year);
 if ($path === false || is_file($path) === false) {
     http_response_code(500);
     header('Content-Type: text/plain');

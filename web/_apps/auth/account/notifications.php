@@ -82,6 +82,7 @@ $defaults = [
     'announcementsNew'      => true,
     'prayerModeration'      => true,
     'accountSecurity'       => true,
+    'givingStatements'      => true,
     'taskReminders'         => true,
     'rotaReminders'         => true,
 ];
@@ -172,6 +173,13 @@ $switchRow = static function (string $key, string $label, string $helpText) use 
         <div class="card-body">
             <?php echo $switchRow('expenseStatusUpdates',  'Status updates on my claims', 'When an approver decides on a claim you submitted.'); ?>
             <?php echo $switchRow('expenseApproverNudges', 'Approver nudges',             'For approvers: when a claim is waiting on you.'); ?>
+        </div>
+    </div>
+
+    <div class="card shadow-sm mb-3">
+        <div class="card-header"><h2 class="h6 mb-0">Giving</h2></div>
+        <div class="card-body">
+            <?php echo $switchRow('givingStatements', 'Year-end giving statements', 'An annual statement of your recorded giving, emailed to you as a PDF.'); ?>
         </div>
     </div>
 
