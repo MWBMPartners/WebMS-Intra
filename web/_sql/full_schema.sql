@@ -7583,3 +7583,49 @@ ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
 INSERT INTO `tblMigrations` (`filename`) VALUES ('170_venue_bookings.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+
+-- ── from 171_user_reminders.sql ──────────────────────────────────────────────
+-- 🔔 tblUserReminderLog — generic single-shot reminder dedupe log. Mirrors
+-- tblAssetReminderLog/tblVenueReminderLog exactly in shape and philosophy:
+-- NO FKs by design (the log must survive row deletion of whatever it
+-- reminded about). `(refType, refID, dueDate)` is the dedupe key. `refType`
+-- is VARCHAR (not ENUM) so a future family (e.g. dbs-expiry) can reuse this
+-- same table with zero DDL — today's only writer is milestone-digest
+-- (refID = siteID). (#439)
+CREATE TABLE IF NOT EXISTS `tblUserReminderLog` (
+    `logID`          INT      NOT NULL AUTO_INCREMENT,
+    `siteID`         INT      NOT NULL COMMENT 'Attribution only — no FK by design, see table header',
+    `refType`        VARCHAR(30) NOT NULL COMMENT 'Today: milestone-digest. Reserved for future single-shot families (e.g. dbs-expiry) so they need zero DDL to join',
+    `refID`          INT      NOT NULL COMMENT 'No FK by design (log must survive row deletion). For milestone-digest: the siteID',
+    `dueDate`        DATE     NOT NULL COMMENT 'Digest date — part of the dedupe key so each day re-fires',
+    `recipientCount` INT      NOT NULL DEFAULT 0,
+    `sentAt`         DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`logID`),
+    UNIQUE KEY `uq_usrrem_ref` (`refType`, `refID`, `dueDate`),
+    KEY `idx_usrrem_site` (`siteID`, `sentAt`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+COMMENT='User reminders — generic single-shot dedupe log, no FKs by design (#439)';
+
+-- ⚙️ Settings seed — user_reminders.cron_token empty + isSensitive=1 (the
+-- endpoint is inert until an admin sets a token, same pattern as
+-- assets.cron_token/venues.cron_token). rota.reminder_days_before and
+-- milestones.digest_recipients already exist (migrations 074/076) and are
+-- deliberately NOT re-seeded here.
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'user_reminders.cron_token',    '', '',  1),
+    (NULL, 'user_reminders.enabled',       '1', '1', 0),
+    (NULL, 'tasks.reminders_enabled',      '1', '1', 0),
+    (NULL, 'tasks.reminder_lookback_days', '7', '7', 0),
+    (NULL, 'rota.reminders_enabled',       '1', '1', 0),
+    (NULL, 'milestones.digest_enabled',    '1', '1', 0)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
+-- 🗺️ Route seed — isProtected=0 (public but token-gated), matching
+-- cron/asset-reminders / cron/venue-reminders.
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('cron/user-reminders', 'cron/user-reminders.php', 0)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('171_user_reminders.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;

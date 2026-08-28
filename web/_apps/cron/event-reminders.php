@@ -44,10 +44,10 @@ $stats = ['24h' => 0, '1h' => 0, 'day' => 0];
 function sendReminderBatch(\mysqli $db, int $eventId, string $type, string $subject, string $bodyHtml): int
 {
     $stmt = $db->prepare(
-        'SELECT DISTINCT u.email, u.fullName FROM tblEventRSVPs r '
+        'SELECT DISTINCT u.emailAddress AS email, u.fullName FROM tblEventRSVPs r '
         . 'JOIN tblUsers u ON u.userID = r.userID '
         . 'WHERE r.eventID = ? AND r.response = "going" AND r.status = "confirmed" '
-        . '  AND u.email IS NOT NULL AND u.email != ""'
+        . '  AND u.emailAddress IS NOT NULL AND u.emailAddress != ""'
     );
     $stmt->bind_param('i', $eventId);
     $stmt->execute();
@@ -138,8 +138,8 @@ if ($hour >= 6 && $hour <= 8) {
 
         // 📧 Recipients: admins + coordinators.
         $r2 = $mysqli->prepare(
-            'SELECT DISTINCT u.email, u.fullName FROM tblUsers u '
-            . 'WHERE u.isActive = 1 AND u.email IS NOT NULL AND u.email != "" AND ('
+            'SELECT DISTINCT u.emailAddress AS email, u.fullName FROM tblUsers u '
+            . 'WHERE u.isActive = 1 AND u.emailAddress IS NOT NULL AND u.emailAddress != "" AND ('
             . '   u.userID IN (SELECT userID FROM tblEventCoordinators WHERE eventID = ? AND revokedAt IS NULL) '
             . '   OR u.isAdmin = 1'
             . ')'
