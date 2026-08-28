@@ -62,7 +62,7 @@ Foundational classes loaded by every request via `bootstrap.php`. All ✅.
 | `Site` | Multi-site context — detection, branding, per-site settings overrides; product-brand resolution helpers `productName()` / `productTagline()` / `productPublisher()` (#296) |
 | `AppRegistry` | Single source of truth for installable apps; powers `/admin/apps` toggle + Router enablement gating + industry filter (#255) |
 | `Captcha` | Provider-agnostic — Turnstile / reCAPTCHA v2+v3 / hCaptcha with admin-configurable priority |
-| `Mailer`, `MailerGoogle` | Microsoft Graph "SendAs" + Google Workspace SendAs |
+| `Mailer`, `MailerGoogle` | Microsoft Graph app-only send (direct or admin-configured shared mailbox, #234) + Google Workspace SendAs; every send logged to `tblEmailLog` |
 | `ExpenseMailer`, `ExpensePdf`, `Pdf` | Expense email notifier, PDF generator, dompdf wrapper |
 | `Logger` | Activity + error logging into `tblActivityLogs` / `tblErrors` |
 | `Migrator` | Web-based SQL migration runner |
@@ -967,6 +967,76 @@ existing behaviour when unpaired.
 MySQL-8-safe DDL (column + UNIQUE key + FK on `tblServicePlans`), one
 route seed (`worship/plan/link`), no new settings keys (gating rides on
 the existing `worship.enabled` / `service_plans.enabled`).
+
+---
+
+### MS365 Graph email via a shared mailbox (gap #234, migration 176)
+
+The portal already sent every email app-only through Microsoft Graph
+(`POST /users/{mail.defaultFromAddress}/sendMail`) — this gap item
+formalises and hardens that path rather than adding a new auth model: an
+explicit, admin-configured shared-mailbox identity, an explicit `from`
+object (with display name) in both modes, 401/429/403/404 error handling
+with an optional Google fallback, and a `tblEmailLog` audit trail
+(also closes the #230 dependency).
+
+- **Model chosen: app-only, application permission `Mail.Send`**, via
+  `POST /users/{sharedMailbox}/sendMail` — reuses `Mailer::accessToken()`
+  verbatim, zero new secrets. The issue body's delegated
+  `Mail.Send.Shared` refresh-token model is explicitly deferred (would add
+  an OAuth authorize/refresh surface, a new encrypted secret lifecycle,
+  and a dependency on a licensed "delegate" human account whose password/
+  MFA/offboarding events would silently kill portal mail).
+- **`Mailer::effectiveSender()`** — resolution order: (1) non-empty +
+  valid `mail.ms365.sharedMailbox` → the shared mailbox is both the URL
+  mailbox and the `from` address, display name from
+  `mail.ms365.sharedMailboxName` falling back to `mail.defaultFromName`;
+  (2) non-empty but invalid (hand-edited) → log once, fall through; (3)
+  empty (seeded default) → `mail.defaultFromAddress` exactly as before.
+  **Empty mailbox = feature off** — no separate enable toggle, so it's
+  impossible to half-configure toggle-on-but-empty-mailbox.
+- **Benign behaviour change:** the `from` object is now built in BOTH
+  modes, so `mail.defaultFromName` finally takes effect on the MS365 path
+  (previously unused there — only the Google path honoured it).
+  `sender` is intentionally never set (that's the delegated
+  send-on-behalf field, not app-only send-as).
+- **Error matrix:** 401 → clear cached token, retry once; 429 → bounded
+  single retry only when Graph's own `Retry-After` is ≤5s (never an
+  unbounded sleep inside a web request on shared hosting); 403/404 →
+  parse Graph's own `error.code` for a targeted admin hint instead of a
+  bare HTTP code; optional `mail.fallbackProvider='google'` (default `''`
+  = fail loudly) makes one fallback attempt via `MailerGoogle::send()`.
+- **`tblEmailLog`** (migration 176) — per-send audit row from BOTH
+  providers via the new `Mailer::logSend()` (public, called from
+  `sendViaGraph()` and from `MailerGoogle::send()`'s own success/failure
+  branches). Fail-soft (a logging exception never breaks a send).
+  Opportunistic retention prune (`mail.log.retentionDays`, default 90) on
+  ~1-in-50 writes — no new cron endpoint. `GdprEraser` gained a bespoke
+  step (not a `catalogue()` entry — `toRecipients` is a comma-joined
+  free-text list, not a single `userCol` FK) that scrubs an erased user's
+  address out of it, captured before the catalogue's own `tblUsers` step
+  nulls the address.
+- **Admin UI** (`/admin/integrations`) — Shared-Mailbox Sending
+  sub-section on the MS365 Graph API card (status, mode badge, last-send
+  indicator, CSRF'd save form → new `admin/integrations/ms365-mail-save.php`);
+  Send Test Email now calls the real `Mailer::send()` instead of
+  duplicating the token+sendMail cURL flow inline, closing the
+  test-vs-production drift risk permanently.
+- **Fold-in fix** — `/admin/integrations/email` was reading a dead
+  `email.provider`/`email.from` settings vocabulary (seeded, never
+  written by any save handler) and always reported "smtp"; now reports
+  the real `Mailer::provider()` + effective sender, plus a "Recent sends
+  (last 10)" `portal-data-list` from `tblEmailLog`.
+- **Security:** the shared mailbox is ADMIN-CONFIG ONLY — read
+  exclusively from `tblSettings` via `effectiveSender()`, written only by
+  the CSRF'd, admin-gated save handler; no request/user input reaches it.
+  No secret is ever logged (`tblEmailLog.errorDetail` holds only Graph's
+  own truncated `error.code`/`error.message`).
+
+**New files:** `web/_apps/admin/integrations/ms365-mail-save.php`.
+**Schema:** migration 176 — `tblEmailLog` (standard `CREATE TABLE IF NOT
+EXISTS`, no guard idiom needed for a new table), 5 non-sensitive settings
+seeds, 1 route seed, folded into `full_schema.sql`.
 
 ---
 

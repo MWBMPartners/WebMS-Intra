@@ -3522,4 +3522,187 @@ own authorisation surface) — v1 ships approve/reject/comment only.
 
 ---
 
+## MS365 Graph email via a shared mailbox (gap #234, migration 176)
+
+### What was already there vs what #234 actually needed
+
+`Mailer::sendViaGraph()` already did app-only client-credentials Graph
+auth and posted to `/v1.0/users/{mail.defaultFromAddress}/sendMail` — i.e.
+the portal was already sending through what is, mechanically, a shared
+mailbox. What the issue's acceptance criteria actually needed was
+**formalising and hardening** that path, not a new auth model: an
+explicit shared-mailbox identity separate from the general from-address,
+a `from` object in the payload (previously entirely absent — Graph
+derived the sender purely from the URL mailbox), proper 401/429/403/404
+handling, and a persisted send log. See
+`.claude/plans/gap-items/234-shared-mailbox-plan.md` for the full
+build-ready plan this session implemented from.
+
+### Model decision: app-only, NOT delegated (recorded per the issue's Q1)
+
+The issue body sketched a delegated `Mail.Send.Shared` model — a real
+licensed user's OAuth token with Exchange "Send As"/"Send on Behalf"
+permission on the shared mailbox. This was **deliberately not built**:
+
+- It requires an entirely new interactive OAuth authorize/refresh-token
+  flow, a new encrypted secret (the refresh token) with its own rotation
+  lifecycle, and a dependency on a real human account whose password
+  reset, MFA re-registration, or conditional-access policy change would
+  silently kill portal mail — precisely the failure class the #227-era
+  offboarding work exists to *cause* on purpose when a person leaves.
+- Application `Mail.Send` (what was already in place) already lets the
+  app send as any tenant mailbox with **zero new secrets** — it reuses
+  `Mailer::accessToken()` verbatim. The "it's too broad" objection is
+  answered by an **Application Access Policy** (or its RBAC-for-
+  Applications successor) scoping the app to just the shared mailbox —
+  see the runbook in `web/_apps/help/admin.php#ms365-shared-mailbox`.
+- `sender` (the Graph field for send-on-behalf) is therefore never set
+  anywhere on this path — only `from` is, which is what app-only send-as
+  actually uses.
+
+If a tenant ever refuses to grant application `Mail.Send` even with an
+Application Access Policy, the delegated model remains a well-scoped
+follow-up issue — nothing in this design blocks adding it later as a
+second sub-mode alongside the shared-mailbox one.
+
+### `effectiveSender()` — the one place the send identity is resolved
+
+`Mailer::effectiveSender()` (private) is the single resolution point,
+called only from inside `sendViaGraph()`:
+
+1. `mail.ms365.sharedMailbox` non-empty AND `FILTER_VALIDATE_EMAIL`s →
+   that address is BOTH the URL mailbox and the `from` address; display
+   name from `mail.ms365.sharedMailboxName`, falling back to
+   `mail.defaultFromName`.
+2. Non-empty but invalid (someone hand-edited it via the generic
+   `/admin/settings` editor, bypassing the save handler's own
+   `FILTER_VALIDATE_EMAIL` check) — log `BAD_SHARED_MAILBOX` once via
+   `Logger::errorPlatform()` and fall through to rule 3, so a typo can
+   never take portal mail down entirely.
+3. Empty (the seeded default) — `mail.defaultFromAddress`, byte-for-byte
+   the pre-#234 behaviour. Returns `null` when that's empty too, and the
+   caller throws `RuntimeException('From address missing')` exactly as
+   before.
+
+**Security-critical property:** `effectiveSender()` reads `$SETTINGS`
+only — nothing on this path ever touches `$_POST`/`$_GET`. The ONLY
+writer of `mail.ms365.sharedMailbox` is the CSRF'd, admin-gated
+`admin/integrations/ms365-mail-save.php` handler. Grep-verify at any
+future touch of this code: `grep -rn "ms365.*sharedMailbox" web/_apps/`
+should show exactly one write site.
+
+### Why the `from` object is added in BOTH modes (a deliberate, benign behaviour change)
+
+Before #234, `Mailer.php`'s Graph payload had NO `from`/`sender` key at
+all — Graph derived the sender purely from the URL mailbox, and
+`mail.defaultFromName` was silently unused on the MS365 path (only the
+Google path, `MailerGoogle.php:149`-ish, ever honoured it). Adding
+`message.from` in the legacy/direct mode too — not just the new
+shared-mailbox mode — means `mail.defaultFromName` finally takes effect
+everywhere. This is flagged explicitly in the CHANGELOG as a visible-but-
+benign change: recipients now see whatever display name is configured,
+where before they saw the mailbox's own Exchange display name.
+
+### Error matrix — why each threshold is what it is
+
+| Condition | Behaviour | Why |
+| --- | --- | --- |
+| 401 | Clear `self::$token`, retry once | The static per-request token cache can outlive the token's actual server-side validity (revocation, secret rotation) — one fresh-token retry costs nothing and fixes the common case. A second 401 falls through to the fail path — never loop. |
+| 429 | Read `Retry-After`; retry once ONLY if ≤5s | This runs synchronously inside a web request on **shared hosting** — an unbounded or long sleep would hold a PHP-FPM worker hostage. A short bounded wait is worth it; anything longer fails the same as any other error and relies on the caller's own retry/queue semantics (or a human re-clicking Send Test Email). |
+| 403 `ErrorAccessDenied` / 404 `ErrorInvalidUser`\|`ErrorItemNotFound` | Parse Graph's own `error.code`, surface it | These almost always mean "mailbox outside the Application Access Policy scope", "mailbox deleted", or "consent missing" — a bare HTTP code tells the admin nothing; Graph's own machine-readable code tells them exactly what to check in the runbook. |
+| 5xx / cURL failure | Fail path, no special retry | Graph outages are Microsoft's problem, not a shape this codebase should paper over with more retries on shared hosting. |
+| Any failure, `mail.fallbackProvider==='google'` | One attempt via `MailerGoogle::send()` | Opt-in only (default `''`) — a silent provider failover changes the visible sending identity, which can break SPF/DKIM/DMARC alignment for anyone actually checking headers. An admin has to choose this explicitly. |
+
+### `tblEmailLog` — shared by both providers, fail-soft by design
+
+`Mailer::logSend()` is `public` (not `private`) specifically so
+`MailerGoogle::send()` can call it directly on its own success/failure
+branches — there is deliberately no per-provider duplicate of this
+table or its writer. The whole method body is wrapped in try/catch with
+`error_log()` on failure: a logging bug must never be the reason a real
+send that already happened (or already definitively failed) throws an
+uncaught exception back up through the caller. Retention (`mail.log.
+retentionDays`, default 90) is pruned opportunistically on roughly
+1-in-50 writes (`random_int(1, 50) === 1`) — the same "no dedicated cron
+needed" trick used elsewhere in this codebase for low-stakes housekeeping.
+
+`toRecipients` is a comma-joined free-text column, not a normalised
+per-recipient table — deliberately, since this is an audit trail, not a
+queryable-by-recipient index; the 10-row "Recent sends" admin list and
+GDPR erasure (below) are the only two consumers and neither needs it
+normalised.
+
+### GDPR erasure — why this is a bespoke step, not a `catalogue()` entry
+
+`GdprEraser::catalogue()`'s generic delete/anonymise actions are built
+around ONE `userCol` FK per table. `tblEmailLog.toRecipients` is a
+comma-joined address LIST — a single send can name several recipients,
+and the column holds free-text addresses, not a `userID`. So instead of
+a catalogue entry, `GdprEraser::eraseEmailLogRecipients()` does a
+targeted `REPLACE(toRecipients, ?, '[erased]') WHERE toRecipients LIKE
+?` — the row, provider, status, subject, and httpCode all stay (this is
+an audit trail of SENDS, not of the recipient), only the address itself
+is detached. This mirrors the `eraseGivingStatementFiles()` /
+`tblGivingStatementLog.emailedTo` precedent immediately above it in
+`GdprEraser.php` (#440 Q5) — "PII column scrubbed, row + other columns
+retained for the audit trail".
+
+The address has to be captured at the TOP of `execute()`, before the
+catalogue is walked — the catalogue's own LAST entry anonymises
+`tblUsers.emailAddress` to NULL, so by the time a bespoke post-catalogue
+step (like the Giving-statements sweep) runs, the address is already
+gone. `execute()` now does a plain `SELECT emailAddress FROM tblUsers
+WHERE userID = ?` up front and threads that string through to the new
+sweep at the same point the Giving-statements sweep already runs.
+
+### Admin UI — closing the test/production drift permanently
+
+`admin/integrations/index.php`'s "Send Test Email" button used to
+duplicate the ENTIRE token-acquisition + sendMail cURL flow inline
+(~150 lines) rather than calling `Mailer::send()`. That meant the test
+could stay green while the real path silently drifted — exactly the kind
+of gap #234's own audit surfaced. `sendTestEmail()` now calls
+`\Portal\Core\Mailer::send()` directly and reads back the just-written
+`tblEmailLog` row for its diagnostic detail (provider/httpCode/
+errorCode/errorDetail) — whatever this button proves now also proves the
+real send path, shared-mailbox mode included. The standalone "Test Token
+Acquisition" button keeps its own separate inline flow deliberately — it
+tests ONLY credential validity, a genuinely different diagnostic that
+doesn't attempt a send.
+
+### Fold-in fix — the dead `email.*` settings vocabulary
+
+`admin/integrations/email.php` (#230's deliverability page) was reading
+`email.provider` / `email.from` — settings seeded in `full_schema.sql`
+but never written by any save handler anywhere in the codebase — so it
+permanently reported "smtp" regardless of what was actually configured.
+Fixed to read `Mailer::provider()` + the same effective-sender
+resolution order as `effectiveSender()` (duplicated as a 5-line
+display-only mirror, since `effectiveSender()` itself is `private` to
+`Mailer`). The two dead `email.*` seed rows are left in place
+deliberately — removing a seed needs its own cleanup migration, which is
+out of scope here and not worth it for two harmless unread rows.
+
+### Owner runbook (Azure AD / Microsoft 365 admin)
+
+Full step-by-step lives in `web/_apps/help/admin.php` (anchor
+`#ms365-shared-mailbox`) and is linked from `/admin/integrations`. Summary:
+
+1. Create/identify the shared mailbox in the M365 admin centre — no
+   licence needed.
+2. Confirm the existing app-wide registration already has Application
+   `Mail.Send` with admin consent (if portal email already works today,
+   this is already done).
+3. **Recommended:** scope it with `New-ApplicationAccessPolicy` (legacy
+   but functional) or RBAC for Applications (successor) — otherwise the
+   app token can send as any tenant mailbox, not just the configured one.
+4. Set the shared mailbox + display name at `/admin/integrations` → Save
+   → Send Test Email.
+5. Deliverability note: mail leaves via Microsoft's own infrastructure,
+   so the tenant's standard SPF/DKIM/DMARC records (not the web server's
+   IP reputation) are what need to be correct — the Email Deliverability
+   page's DNS probe checks them against the effective sender's domain.
+
+---
+
 Last updated: August 2026

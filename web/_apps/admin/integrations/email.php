@@ -5,15 +5,18 @@
  * Admin — Email Deliverability 📧
  * -----------------------------------------------------------------------------
  * Active provider summary, test-send, and SPF/DKIM/DMARC DNS check for the
- * configured sender domain. Pairs with #234 (MS365 Graph delegate sending)
- * and #229 (Critical alerting).
+ * configured sender domain. Pairs with #234 (MS365 Graph shared-mailbox
+ * sending) and #229 (Critical alerting). Active provider + effective
+ * sender now read from Mailer::provider() / the real mail.* settings
+ * (was reading dead email.provider/email.from keys — #234 fold-in fix);
+ * recent-sends list added from the new tblEmailLog audit trail.
  *
  * @package   Portal\Admin
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.0.0
- * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/230
+ * @version   1.1.0
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/234
  * -----------------------------------------------------------------------------
  */
 
@@ -21,6 +24,7 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\Mailer;
 
 Auth::ensureSession();
 Auth::requireLogin();
@@ -32,9 +36,22 @@ if (App::isAdmin() === false) {
 $flash     = '';
 $flashType = 'info';
 $settings  = App::settings();
-$activeProvider = (string) ($settings['email']['provider'] ?? 'smtp');
-$senderEmail    = (string) ($settings['email']['from'] ?? '');
-$senderDomain   = '';
+
+// 🩹 #234 fold-in fix — `email.provider` / `email.from` are a DEAD settings
+// vocabulary (seeded but never written by any save handler in this
+// codebase), so this page used to always report "smtp" while the portal
+// actually sends via Microsoft Graph or the Gmail API. Report the REAL
+// active provider + effective sender instead — mirrors
+// Mailer::effectiveSender()'s resolution order (display-only here; the
+// real resolution lives in _core/Mailer.php).
+$activeProvider = Mailer::provider();
+if ($activeProvider === 'google') {
+    $senderEmail = (string) ($settings['mail']['google']['delegateUser'] ?? '');
+} else {
+    $sharedMailbox = trim((string) ($settings['mail']['ms365']['sharedMailbox'] ?? ''));
+    $senderEmail   = $sharedMailbox !== '' ? $sharedMailbox : (string) ($settings['mail']['defaultFromAddress'] ?? '');
+}
+$senderDomain = '';
 if ($senderEmail !== '' && str_contains($senderEmail, '@')) {
     $senderDomain = substr($senderEmail, strpos($senderEmail, '@') + 1);
 }
@@ -133,6 +150,23 @@ if ($senderDomain !== '') {
     ];
 }
 
+// 📜 #234 — recent tblEmailLog rows (both providers) for the audit-trail
+// list below. Global mail settings, so no site filter — matches the
+// existing pattern for the mail integration cards on this page.
+$recentSends = [];
+$rsStmt = $mysqli->prepare(
+    'SELECT provider, fromAddress, toRecipients, subject, status, httpCode, errorCode, sentAt ' .
+    'FROM tblEmailLog ORDER BY emailLogID DESC LIMIT 10'
+);
+if ($rsStmt !== false) {
+    $rsStmt->execute();
+    $rsResult = $rsStmt->get_result();
+    while ($row = $rsResult->fetch_assoc()) {
+        $recentSends[] = $row;
+    }
+    $rsStmt->close();
+}
+
 $pageTitle   = 'Email Deliverability';
 $pageSection = 'admin';
 $breadcrumbs = ['Dashboard' => '/', 'Admin' => '/admin', 'Integrations' => '/admin/integrations', 'Email' => ''];
@@ -157,11 +191,14 @@ $csrf = Auth::csrfToken();
         <div class="card h-100">
             <div class="card-body">
                 <h2 class="h5">Active provider</h2>
-                <p class="mb-1"><strong><?php echo htmlspecialchars($activeProvider, ENT_QUOTES, 'UTF-8'); ?></strong></p>
+                <p class="mb-1"><strong><?php echo htmlspecialchars(strtoupper($activeProvider), ENT_QUOTES, 'UTF-8'); ?></strong></p>
                 <p class="small text-muted mb-0">
                     From: <code><?php echo htmlspecialchars($senderEmail !== '' ? $senderEmail : '(not configured)', ENT_QUOTES, 'UTF-8'); ?></code>
                 </p>
-                <p class="small text-muted mt-2 mb-0">Change at <code>email.provider</code> / <code>email.from</code> in <a href="/admin/settings">/admin/settings</a>.</p>
+                <p class="small text-muted mt-2 mb-0">
+                    Change the mail provider at <code>mail.provider</code> in <a href="/admin/settings">/admin/settings</a>,
+                    or the shared-mailbox identity at <a href="/admin/integrations">/admin/integrations</a> (#234).
+                </p>
             </div>
         </div>
     </div>
@@ -210,6 +247,40 @@ $csrf = Auth::csrfToken();
             </table>
             </div>
             <p class="small text-muted mb-0">Missing SPF/DKIM/DMARC causes mail to land in spam. DreamHost docs cover the SPF and DKIM records to add for shared hosting.</p>
+        <?php endif; ?>
+    </div>
+</div>
+
+<!-- 📜 #234 — recent sends, both providers. House rule: no <table> for data
+     display (portal-data-list); the DNS table above predates that rule. -->
+<div class="card mt-3">
+    <div class="card-body">
+        <h2 class="h5">Recent sends (last 10)</h2>
+        <?php if (count($recentSends) === 0): ?>
+            <p class="small text-muted mb-0">No sends logged yet.</p>
+        <?php else: ?>
+            <div class="portal-data-list">
+                <?php foreach ($recentSends as $row): ?>
+                    <div class="portal-data-row">
+                        <div class="col-12 col-md-2">
+                            <span class="badge bg-<?php echo ((string) $row['status'] === 'sent') ? 'success' : 'danger'; ?>">
+                                <?php echo htmlspecialchars(strtoupper((string) $row['status']), ENT_QUOTES, 'UTF-8'); ?>
+                            </span>
+                        </div>
+                        <div class="col-12 col-md-2 small text-muted"><?php echo htmlspecialchars((string) $row['provider'], ENT_QUOTES, 'UTF-8'); ?></div>
+                        <div class="col-12 col-md-3 small text-truncate" title="<?php echo htmlspecialchars((string) $row['toRecipients'], ENT_QUOTES, 'UTF-8'); ?>">
+                            <?php echo htmlspecialchars((string) $row['toRecipients'], ENT_QUOTES, 'UTF-8'); ?>
+                        </div>
+                        <div class="col-12 col-md-3 small text-truncate"><?php echo htmlspecialchars((string) $row['subject'], ENT_QUOTES, 'UTF-8'); ?></div>
+                        <div class="col-12 col-md-2 small text-muted">
+                            <?php echo htmlspecialchars((string) $row['sentAt'], ENT_QUOTES, 'UTF-8'); ?>
+                            <?php if ((string) $row['status'] === 'failed' && (string) $row['errorCode'] !== ''): ?>
+                                <br><code class="small"><?php echo htmlspecialchars((string) $row['errorCode'], ENT_QUOTES, 'UTF-8'); ?></code>
+                            <?php endif; ?>
+                        </div>
+                    </div>
+                <?php endforeach; ?>
+            </div>
         <?php endif; ?>
     </div>
 </div>
