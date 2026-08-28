@@ -33,7 +33,9 @@ use Portal\Core\Site;
 /**
  * 🛡️ Open-redirect guard for the POST-supplied `return_to` value. Mirrors
  * assets/event-assign.php's safe-redirect rule: reject protocol-relative
- * (`//`), absolute-URL (`://`), or non-rooted values; fall back to `/`.
+ * (`//`), absolute-URL (`://`), backslash (`/\` — browsers normalise `\`
+ * to `/`, so `/\evil.com` resolves as protocol-relative `//evil.com`), or
+ * non-rooted values; fall back to `/`.
  *
  * @param mixed $raw Raw POST value.
  *
@@ -45,6 +47,7 @@ function sanitizeReturnTo(mixed $raw): string
     if ($value === ''
         || str_starts_with($value, '//') === true
         || str_contains($value, '://') === true
+        || str_contains($value, '\\') === true
         || str_starts_with($value, '/') === false
     ) {
         return '/';
