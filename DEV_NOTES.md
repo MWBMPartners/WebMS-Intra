@@ -458,8 +458,9 @@ By design, these surfaces stay as `WebMS Intra` regardless of preset:
   for operators reading logs, not user-facing brand.
 - `robots.txt` — comment header is brand-neutral so the static file
   can be served without going through a PHP controller.
-- `openapi.json` `info.title` — developer-facing surface; brand-aware
-  conversion deferred to a v1.x follow-up (see below).
+- ~~`openapi.json` `info.title`~~ — no longer true: this now IS
+  brand-aware via `openapi.php` + `api-spec.json` (#307, see "Deferred
+  follow-ups" item 2 below).
 
 ### Deferred follow-ups from the brand-layer PR (#297)
 
