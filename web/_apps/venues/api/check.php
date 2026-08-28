@@ -19,9 +19,9 @@
  * Params: `start`, `end` (both `Y-m-d\TH:i` wall-clock — the exact shape a
  * `datetime-local` input posts, and what `calendar/manage/save.php` stores
  * verbatim into `tblEvents`), `tz` (IANA string, default `Europe/London`),
- * `venueID` (optional int). WALL-CLOCK RULE (see `Venues.php`'s own class
- * header): these strings are passed straight through to
- * `Venues::classifyEventCoverage()` as the pseudo-event's
+ * `venueID` (optional int), `roomID` (optional int, #436). WALL-CLOCK RULE
+ * (see `Venues.php`'s own class header): these strings are passed straight
+ * through to `Venues::classifyEventCoverage()` as the pseudo-event's
  * startDateTime/endDateTime/timezone — never converted to UTC here or
  * anywhere downstream.
  *
@@ -33,12 +33,22 @@
  * falls back to the `venues.calendar_default_venue` setting, which is
  * '0' (⇒ also dormant) until an admin configures one.
  *
+ * `roomID` resolution (#436): an explicit positive `roomID` is passed
+ * straight through, unvalidated here. `classifyEventCoverage()`
+ * re-validates it against the resolved venue+site itself (via the private
+ * `validateRoomForVenue()`) and silently degrades to venue-level coverage
+ * for anything that doesn't resolve — same "no existence oracle"
+ * philosophy as the venueID paragraph above, so this handler does not
+ * duplicate that check either. Omitted/zero ⇒ venue-level coverage
+ * (today's exact behaviour).
+ *
  * @package   Portal\Venues\Api
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2026-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.0.0
+ * @version   1.1.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/429
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/436
  * -----------------------------------------------------------------------------
  */
 
@@ -90,12 +100,18 @@ try {
 $venueIdParam = (int) ($_GET['venueID'] ?? 0);
 $venueId = $venueIdParam > 0 ? $venueIdParam : (int) Settings::get('venues.calendar_default_venue', '0');
 
+// 🚪 #436 — optional room narrowing. Re-validated inside
+// classifyEventCoverage() itself (site+venue scoped) — no duplicate check
+// here, same philosophy as venueID above.
+$roomIdParam = (int) ($_GET['roomID'] ?? 0);
+$roomId = $roomIdParam > 0 ? $roomIdParam : null;
+
 $event = [
     'startDateTime' => $startRaw,
     'endDateTime'   => $endRaw !== '' ? $endRaw : null,
     'timezone'      => $tzRaw,
 ];
 
-$result = Venues::classifyEventCoverage($event, $venueId);
+$result = Venues::classifyEventCoverage($event, $venueId, $roomId);
 
 ApiResponse::success($result);

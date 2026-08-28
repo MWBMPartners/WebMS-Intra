@@ -24,7 +24,7 @@ web/                <- ALL deployable files (synced to server via SFTP)
                        app's PHP handlers live here; Router resolves
                        tblRoutes.targetFile against PORTAL_APPS = _apps/.
   _vendor/simplejwt/<- Vendored RS256 JWT verifier
-  _sql/             <- Numbered SQL migrations (000-174 + full_schema.sql)
+  _sql/             <- Numbered SQL migrations (000-179 + full_schema.sql)
   _lang/            <- I18n translation files (en.php, cy.php, …)
   _install/         <- Standalone 6-step installation wizard (bootstrap-free)
   public_html/      <- Web root: ONLY the front controller + static assets +
@@ -94,7 +94,7 @@ infrastructure rather than apps).
 | tasks | `/tasks` | Reminders / task list |
 | transcription | `/admin/transcription` | Auto-transcribe Recordings via Whisper / AssemblyAI / local whisper.cpp; full-text search |
 | translation | `/admin/translation` | Auto-translate user content via Anthropic / OpenAI / Google / DeepL / LibreTranslate, cached after first translate |
-| venues | `/venues` | Tenant-side venue-hire register — schedule of agreed bookings of a rented building, configurable statuses/usage types, recurring generator, XLSX import, calendar overlay + "is it booked?" warnings, hire agreements + renewal reminders, payable invoice/payment ledger (#429) |
+| venues | `/venues` | Tenant-side venue-hire register — schedule of agreed bookings of a rented building, configurable statuses/usage types, recurring generator, XLSX import, calendar overlay + "is it booked?" warnings, hire agreements + renewal reminders, payable invoice/payment ledger (#429); persisted per-event venue/room links + room-aware coverage verdicts (#436) |
 | visitors | `/visitors` | First-time visitor capture with follow-up cadence + kanban workflow |
 | worship | `/worship/*` | Live presentation layer for Service Plans — operator console, public projector display, song library + CCLI usage log (#308) |
 | zoom | `/admin/integrations/zoom` | OAuth Zoom integration: create meetings from calendar events, auto-link recordings via webhook |
@@ -189,6 +189,40 @@ Calendar/Events/Preaching Plan is ONE app ("Events") — `/calendar` covers view
   columns (dead-subscription pruning), settings seeds, 4 route seeds, no
   new tables (reuses `tblUserReminderLog` / `tblEventReminderLog` for
   dedupe). All 11 audit checks green, `php -l` clean on every touched file.
+- **`claude/gap436-venue-coverage`** (branched off `alpha`) — gap #436:
+  additive follow-up to the shipped Venue Bookings app (#429, migration
+  170) and the wall-clock fix (#435). `tblEvents` gains two optional
+  nullable columns, `venueID`/`roomID` (migration 179, FKs
+  `ON DELETE SET NULL`) — the calendar manage form's venue picker upgrades
+  from a transient advisory-only check into a **persisted** link, with a
+  cascading room `<select>` (disabled, not hidden, when the venue has no
+  rooms). `Venues::classifyEventCoverage()` gains an optional trailing
+  `?int $roomId = null` — when set, per-day booking rows are filtered to
+  `roomID IS NULL OR roomID = $roomId` (a whole-venue booking still covers
+  every room) before the untouched wall-clock day-cascade runs, and a new
+  `COVERAGE_ROOM_NOT_COVERED` verdict (severity danger) fires when the room
+  itself is uncovered but the venue has a confirmed bookable hire for a
+  *different* room that day; null `$roomId` (both pre-#436 call sites)
+  reproduces today's output bit-for-bit, and an unresolvable room silently
+  degrades to venue-level coverage (no existence oracle). New public
+  `Venues::getRoom()` accessor. `calendar/manage/save.php` validates and
+  persists both links site+venue-scoped (`Venues::getVenue()`/`getRoom()`)
+  on create/update — invalid/foreign posts silently NULL, never a
+  save-blocking error — and OMITS the columns from the UPDATE entirely
+  when the Venues app is disabled/absent/throws, so a toggle can never
+  wipe an existing link; an event can only ever link its own site's
+  venue/room. `full_schema.sql` folds the two columns + KEY indexes inline
+  into `tblEvents`' CREATE but deliberately leaves the two FKs out
+  (`tblEvents` is created thousands of lines before `tblVenues`/
+  `tblVenueRooms` in that file — see DEV_NOTES.md's new "full_schema.sql
+  fold pattern" subsection) — migration 179's guarded `ADD CONSTRAINT`
+  blocks add both FKs on replay instead. Also fixed in this PR: the
+  event-form's live "is it booked?" JS posted `startDateTime`/
+  `endDateTime`/`timezone` while `venues/api/check.php` has always read
+  `start`/`end`/`tz` — every live check silently 400'd since #429 shipped;
+  canonicalised on `check.php`'s existing contract and fixed the JS to
+  match, adding `roomID`. All 10 audit checks green, `php -l` clean on
+  every touched file.
 - **`claude/gap456-location-chunkB`** (branched off
   `claude/gap456-location-chunkA`) — #456 Chunk B: the PII + GDPR half.
   Migration 181 adds FOUR columns to `tblUsers` ONLY — `latitude`/

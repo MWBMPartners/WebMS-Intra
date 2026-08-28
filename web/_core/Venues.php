@@ -17,9 +17,11 @@
  * IANA zones are equal there is NO conversion at all; UTC is never involved.
  * Never "fix" bookings or events into UTC.
  *
- * ROOM-AWARE COVERAGE (Q12 follow-up note): classifyEventCoverage() rule (b)
- * must tighten to room-aware coverage (b.roomID IS NULL OR b.roomID =
- * event.roomID) if events ever gain room placement.
+ * ROOM-AWARE COVERAGE (#436, implemented): classifyEventCoverage() takes an
+ * optional trailing $roomId — when set, per-day booking rows are filtered
+ * to (b.roomID IS NULL OR b.roomID = event.roomID) before the day-cascade
+ * runs; a whole-venue booking (roomID NULL) still covers every room. Null
+ * $roomId (both pre-#436 call sites) reproduces the exact prior behaviour.
  *
  * AUDIT FUNNEL: Every mutation funnels through self::audit() ->
  * Logger::audit() -> tblAuditTrail; bulk ops write ONE summary row.
@@ -32,8 +34,9 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2026-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.0.0
+ * @version   1.1.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/429
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/436
  * -----------------------------------------------------------------------------
  */
 
@@ -93,17 +96,26 @@ class Venues
      * worst-first precedence array — pick the FIRST classification present,
      * never derive order from COVERAGE_SEVERITY (that map is display-only).
      * ======================================================================== */
-    public const COVERAGE_UNAVAILABLE   = 'unavailable';
-    public const COVERAGE_NO_BOOKING    = 'no-booking';
-    public const COVERAGE_OUTSIDE_HOURS = 'outside-hours';
-    public const COVERAGE_UNCONFIRMED   = 'unconfirmed';
-    public const COVERAGE_CLOSED        = 'closed';
-    public const COVERAGE_CONFIRMED     = 'confirmed';
+    public const COVERAGE_UNAVAILABLE    = 'unavailable';
+    public const COVERAGE_NO_BOOKING     = 'no-booking';
+    /** #436 — room-aware verdict: the venue has a confirmed bookable hire that day, but NOT for the requested room. Only reachable when classifyEventCoverage() is called with a non-null $roomId. */
+    public const COVERAGE_ROOM_NOT_COVERED = 'room-not-covered';
+    public const COVERAGE_OUTSIDE_HOURS  = 'outside-hours';
+    public const COVERAGE_UNCONFIRMED    = 'unconfirmed';
+    public const COVERAGE_CLOSED         = 'closed';
+    public const COVERAGE_CONFIRMED      = 'confirmed';
 
-    /** Worst-first order — the event's overall classification is the first of these present across its days. */
+    /**
+     * Worst-first order — the event's overall classification is the first
+     * of these present across its days. COVERAGE_ROOM_NOT_COVERED sits
+     * immediately after COVERAGE_NO_BOOKING (#436) — it is unreachable
+     * when $roomId is null, so this insertion cannot affect any existing
+     * (roomless) call's ordering.
+     */
     private const WORST_ORDER = [
         self::COVERAGE_UNAVAILABLE,
         self::COVERAGE_NO_BOOKING,
+        self::COVERAGE_ROOM_NOT_COVERED,
         self::COVERAGE_OUTSIDE_HOURS,
         self::COVERAGE_UNCONFIRMED,
         self::COVERAGE_CLOSED,
@@ -111,12 +123,13 @@ class Venues
     ];
 
     public const COVERAGE_SEVERITY = [
-        self::COVERAGE_UNAVAILABLE   => 'danger',
-        self::COVERAGE_NO_BOOKING    => 'danger',
-        self::COVERAGE_OUTSIDE_HOURS => 'warning',
-        self::COVERAGE_UNCONFIRMED   => 'warning',
-        self::COVERAGE_CLOSED        => 'warning',
-        self::COVERAGE_CONFIRMED     => 'success',
+        self::COVERAGE_UNAVAILABLE      => 'danger',
+        self::COVERAGE_NO_BOOKING       => 'danger',
+        self::COVERAGE_ROOM_NOT_COVERED => 'danger',
+        self::COVERAGE_OUTSIDE_HOURS    => 'warning',
+        self::COVERAGE_UNCONFIRMED      => 'warning',
+        self::COVERAGE_CLOSED           => 'warning',
+        self::COVERAGE_CONFIRMED        => 'success',
     ];
 
     /** Colour fallback when tblVenueStatuses.color IS NULL, keyed by statusCategory. */
@@ -3449,10 +3462,20 @@ class Venues
      * columns verbatim (startDateTime/endDateTime/timezone) — never
      * pre-converted by the caller.
      *
+     * $roomId (#436, optional) narrows coverage to one room of the venue:
+     * per-day booking rows are filtered to (roomID IS NULL OR roomID =
+     * $roomId) before the day-cascade below — a whole-venue booking still
+     * covers every room, but a booking scoped to a DIFFERENT room no
+     * longer counts. Omitted/null reproduces today's venue-wide behaviour
+     * bit-for-bit (both pre-#436 call sites never pass it). An unresolvable
+     * $roomId (wrong venue/site, deleted, <= 0) silently degrades to
+     * venue-level coverage — same "no existence oracle" philosophy as the
+     * venue-missing sentinel below.
+     *
      * @param array{startDateTime: string, endDateTime?: ?string, timezone?: ?string} $event
-     * @return array{classification: string, severity: string, message: string, perDay: array<int, array<string, mixed>>, dataConflict: bool}
+     * @return array{classification: string, severity: string, message: string, perDay: array<int, array<string, mixed>>, dataConflict: bool, roomID: ?int}
      */
-    public static function classifyEventCoverage(array $event, int $venueId): array
+    public static function classifyEventCoverage(array $event, int $venueId, ?int $roomId = null): array
     {
         $venue = self::getVenue($venueId, Site::id());
         if ($venue === null) {
@@ -3465,7 +3488,22 @@ class Venues
                 'message' => I18n::t('venues.coverage.venue_missing'),
                 'perDay' => [],
                 'dataConflict' => false,
+                'roomID' => null,
             ];
+        }
+
+        // 🚪 #436 — resolve+re-validate the room server-side (site+venue
+        // scoped, via the same private helper save.php's link-persistence
+        // guard uses through the public getRoom() mirror). Unresolvable ⇒
+        // degrade silently to venue-level coverage, exactly today's output.
+        $room = null;
+        if ($roomId !== null && $roomId > 0) {
+            $room = self::validateRoomForVenue($roomId, $venueId, Site::id());
+            if ($room === null) {
+                $roomId = null;
+            }
+        } else {
+            $roomId = null;
         }
 
         try {
@@ -3502,6 +3540,7 @@ class Venues
                 'message' => I18n::t('venues.coverage.no_booking', ['venue' => $venue['venueName'], 'date' => '']),
                 'perDay' => [],
                 'dataConflict' => false,
+                'roomID' => $roomId,
             ];
         }
         if ($end <= $start) {
@@ -3530,6 +3569,19 @@ class Venues
             $ls = $isFirst ? $start->format('H:i:s') : '00:00:00';
             $le = $isLast ? $end->format('H:i:s') : '24:00:00';
             $rows = $days[$date] ?? [];
+
+            // 🚪 #436 — room-aware filter. $allRows stays UNFILTERED (kept
+            // for the room-not-covered probe below); $rows narrows to rows
+            // that apply to this room — a whole-venue booking (roomID
+            // NULL) still covers every room, but a row scoped to a
+            // DIFFERENT room (including its own unavailable/closed rows)
+            // never counts for this one. No-op when $roomId is null.
+            $allRows = $rows;
+            if ($roomId !== null) {
+                $rows = array_values(array_filter($rows, static function (array $r) use ($roomId): bool {
+                    return $r['roomID'] === null || (int) $r['roomID'] === $roomId;
+                }));
+            }
 
             $classification = self::COVERAGE_NO_BOOKING;
             $matchedRows = [];
@@ -3564,6 +3616,16 @@ class Venues
             } elseif (count($unconfirmedRows) > 0) {
                 $classification = self::COVERAGE_UNCONFIRMED;
                 $matchedRows = $unconfirmedRows;
+            } elseif ($roomId !== null && count(array_values(array_filter($allRows, static fn (array $r): bool => (int) $r['countsAsConfirmed'] === 1 && (int) $r['isBookable'] === 1))) > 0) {
+                // 🚪 #436 — this room has no cover of any kind, but the
+                // venue DOES have a confirmed bookable hire that day (for
+                // some OTHER room) — the precise "booked, but not for your
+                // room" warning. If the unfiltered set only has
+                // unconfirmed/closed/rejected rows for other rooms, plain
+                // no-booking below stands (accurate: nothing confirmed
+                // anywhere that day).
+                $classification = self::COVERAGE_ROOM_NOT_COVERED;
+                $matchedRows = array_values(array_filter($allRows, static fn (array $r): bool => (int) $r['countsAsConfirmed'] === 1 && (int) $r['isBookable'] === 1));
             } else {
                 $classification = self::COVERAGE_NO_BOOKING;
                 $matchedRows = array_values(array_filter($rows, static fn (array $r): bool => (string) $r['statusCategory'] === 'rejected'));
@@ -3593,6 +3655,11 @@ class Venues
             'date' => $firstDate,
             'window' => $start->format('H:i') . "\u{2013}" . $end->format('H:i'),
         ];
+        if ($room !== null) {
+            // #436 — additive: only venues.coverage.room_not_covered
+            // actually references :room; every other message is untouched.
+            $context['room'] = (string) $room['roomName'];
+        }
         $message = self::coverageMessage($overall, $context);
         if (count($dates) > 1) {
             $message = I18n::t('venues.coverage.multi_day_worst', ['count' => count($dates), 'message' => $message]) . $truncatedNote;
@@ -3604,6 +3671,7 @@ class Venues
             'message' => $message,
             'perDay' => $perDay,
             'dataConflict' => $dataConflict,
+            'roomID' => $roomId,
         ];
     }
 
@@ -3616,6 +3684,7 @@ class Venues
         $params = [
             'venue' => (string) ($context['venue'] ?? ''),
             'date' => (string) ($context['date'] ?? ''),
+            'room' => (string) ($context['room'] ?? ''),
             'window' => (string) ($context['window'] ?? ''),
             'status' => (string) ($context['status'] ?? ''),
         ];
@@ -3976,6 +4045,21 @@ class Venues
             return null;
         }
         return $row;
+    }
+
+    /**
+     * Site+venue-scoped room fetch — the public mirror of getVenue()
+     * (Venues.php:383), for callers outside this class (#436 —
+     * calendar/manage/save.php's link-persistence guard needs this;
+     * validateRoomForVenue() below is private). One-liner delegation so
+     * there is a single SQL definition. Deliberately does NOT require
+     * isActive=1 — matching saveBooking()'s own room rule, so an event
+     * keeps a room link even after that room is later deactivated; the
+     * *picker* (calendar/manage/index.php) lists active rooms only.
+     */
+    public static function getRoom(int $roomId, int $venueId, int $siteId): ?array
+    {
+        return self::validateRoomForVenue($roomId, $venueId, $siteId);
     }
 
     private static function validateRoomForVenue(int $roomId, int $venueId, int $siteId): ?array
