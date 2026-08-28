@@ -4,6 +4,10 @@
  * Giving — my contributions. Logged-in member sees their own entries.
  *
  * @package   Portal\Giving
+ * @author    MWBM Partners Ltd (t/a MWservices)
+ * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
+ * @license   All Rights Reserved
+ * @version   1.1.0
  * @link      https://github.com/MWBMPartners/webMS-Intra/issues/266
  */
 
@@ -50,6 +54,10 @@ foreach ($entries as $e) {
 
 $hasDeclaration = Giving::hasActiveDeclaration($siteId, $userId, date('Y-m-d'));
 
+// 💳 "Give online" entry point (#268) — only shown once the Payments app
+// has a provider actually enabled; hidden (not a dead link) otherwise.
+$paymentsEnabled = (string) (App::settings()['payments']['enabled'] ?? '0') === '1';
+
 $pageTitle   = 'My Giving';
 $pageSection = 'giving';
 $breadcrumbs = ['Dashboard' => '/', 'Giving' => ''];
@@ -62,6 +70,9 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <p class="text-secondary mb-0">Your contribution history. <?php echo (int) $year; ?> total: <strong><?php echo htmlspecialchars(Giving::formatAmount($ytdTotal, $currency), ENT_QUOTES, 'UTF-8'); ?></strong></p>
     </div>
     <div class="d-flex gap-2">
+        <?php if ($paymentsEnabled === true): ?>
+            <a href="/giving/give" class="btn btn-success btn-sm"><i class="fa-solid fa-heart me-1"></i>Give online</a>
+        <?php endif; ?>
         <a href="/giving/campaigns" class="btn btn-outline-secondary btn-sm"><i class="fa-solid fa-bullseye me-1"></i>Campaigns</a>
         <a href="/giving/my-statement" class="btn btn-outline-secondary btn-sm"><i class="fa-solid fa-file-pdf me-1"></i>Year-end statement</a>
         <a href="/giving/gift-aid" class="btn btn-outline-<?php echo $hasDeclaration === true ? 'success' : 'warning'; ?> btn-sm">

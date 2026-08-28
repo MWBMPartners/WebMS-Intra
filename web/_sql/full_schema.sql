@@ -3913,6 +3913,7 @@ CREATE TABLE IF NOT EXISTS `tblGiftAidDeclaration` (
 
 INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
     ('giving',              'giving/index.php',         1),
+    ('giving/give',         'giving/give.php',          1),
     ('giving/manage',       'giving/manage.php',        1),
     ('giving/entry-save',   'giving/entry-save.php',    1),
     ('giving/entry-delete', 'giving/entry-delete.php',  1),
@@ -4160,8 +4161,15 @@ INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue
     (NULL, 'payments.stripe.publishable','', '', 0),
     (NULL, 'payments.stripe.secret',     '', '', 1),
     (NULL, 'payments.stripe.webhookSecret','', '', 1),
-    (NULL, 'payments.paypal.clientId',   '', '', 0),
+    -- 🟡 PayPal (migration 167, gap #1) — clientId isSensitive is `1` here
+    -- (a fresh install starts blank, so no decrypt_setting()-on-plaintext
+    -- hazard); migration 167's predicate-guarded UPDATE brings an
+    -- already-deployed site holding a plaintext value up to the same state
+    -- once its value is re-saved via the admin UI.
+    (NULL, 'payments.paypal.clientId',   '', '', 1),
     (NULL, 'payments.paypal.secret',     '', '', 1),
+    (NULL, 'payments.paypal.webhookId',  '', '', 0),
+    (NULL, 'payments.paypal.mode',       'sandbox', 'sandbox', 0),
     (NULL, 'payments.gocardless.token',  '', '', 1),
     (NULL, 'payments.gocardless.webhookSecret','', '', 1)
 ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
@@ -6976,4 +6984,7 @@ INSERT INTO `tblMigrations` (`filename`) VALUES ('165_widen_totp_secret.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
 INSERT INTO `tblMigrations` (`filename`) VALUES ('166_webhook_retry.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('167_paypal_checkout.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;

@@ -1,10 +1,18 @@
 <?php
 // Path: public_html/payments/return.php
 /**
- * Payments — Stripe success/cancel landing page. The authoritative status
- * change happens via webhook; this page just shows a friendly outcome.
+ * Payments — provider success/cancel landing page. Stripe stays webhook-
+ * authoritative (unchanged). For PayPal, `intent=CAPTURE` orders are NOT
+ * charged at approval — Payments::finalizeReturn() makes the explicit
+ * capture call here, on the fastest path back from the provider (the
+ * CHECKOUT.ORDER.APPROVED webhook is the backstop for a payer who approves
+ * and never returns).
  *
  * @package   Portal\Payments
+ * @author    MWBM Partners Ltd (t/a MWservices)
+ * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
+ * @license   All Rights Reserved
+ * @version   1.1.0
  * @link      https://github.com/MWBMPartners/webMS-Intra/issues/268
  */
 
@@ -12,6 +20,7 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\Payments;
 use Portal\Core\Site;
 
 Auth::ensureSession();
@@ -27,14 +36,27 @@ $result    = (string) ($_GET['result'] ?? '');
 // (not just the site) so this landing page can't disclose another user's
 // amount/purpose. A mismatched payment simply falls through to the generic
 // "no $payment" branches below (no amount shown, "Return home" link only).
+// The PayPal order id / `token` / `PayerID` query params PayPal appends to
+// the redirect are deliberately NEVER read here (S3) — the order to act on
+// always comes from the DB row's own providerRef, inside finalizeReturn().
 $payment = null;
 if ($paymentId > 0) {
-    $stmt = $db->prepare('SELECT amountPence, currency, status, purpose, purposeRef FROM tblPayment WHERE paymentID = ? AND siteID = ? AND userID = ? LIMIT 1');
+    $stmt = $db->prepare('SELECT provider, amountPence, currency, status, purpose, purposeRef FROM tblPayment WHERE paymentID = ? AND siteID = ? AND userID = ? LIMIT 1');
     if ($stmt !== false) {
         $stmt->bind_param('iii', $paymentId, $siteId, $userId);
         $stmt->execute();
         $payment = $stmt->get_result()->fetch_assoc();
         $stmt->close();
+    }
+}
+
+// 🟡 PayPal capture-on-return. No-op for Stripe (still webhook-
+// authoritative) and re-checks the siteID+userID scoping itself — never
+// trusts this page's own SELECT above.
+if ($payment !== null) {
+    $freshStatus = Payments::finalizeReturn($paymentId, $siteId, $userId, $result);
+    if ($freshStatus !== null) {
+        $payment['status'] = $freshStatus;
     }
 }
 
@@ -44,8 +66,26 @@ $breadcrumbs = ['Dashboard' => '/', 'Payment' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 
+<?php
+// 🛡️ These two new states are scoped to PayPal ONLY (zero behaviour change
+// for Stripe, which is still webhook-authoritative and — per the ORIGINAL
+// comment this page always carried — routinely still shows `status =
+// 'pending'` at this exact moment because its webhook hasn't landed yet;
+// gating on provider keeps that pre-existing "always say thank you on
+// result=ok" behaviour for Stripe completely untouched).
+$isPaypalPending = $payment !== null && (string) $payment['provider'] === 'paypal' && (string) $payment['status'] === 'pending';
+$isPaypalFailed  = $payment !== null && (string) $payment['provider'] === 'paypal' && (string) $payment['status'] === 'failed';
+?>
 <div class="text-center py-5">
-    <?php if ($result === 'ok'): ?>
+    <?php if ($result === 'ok' && $isPaypalPending === true): ?>
+        <i class="fa-solid fa-clock text-warning" style="font-size:64px;"></i>
+        <h1 class="mt-3">Payment is still being confirmed</h1>
+        <p class="text-muted">You'll receive a receipt once it completes — this can take a minute.</p>
+    <?php elseif ($result === 'ok' && $isPaypalFailed === true): ?>
+        <i class="fa-solid fa-circle-exclamation text-danger" style="font-size:64px;"></i>
+        <h1 class="mt-3">We couldn't confirm this payment</h1>
+        <p class="text-muted">No giving/pledge record was created. Please try again, or contact the office if you were charged.</p>
+    <?php elseif ($result === 'ok'): ?>
         <i class="fa-solid fa-circle-check text-success" style="font-size:64px;"></i>
         <h1 class="mt-3">Thank you</h1>
         <?php if ($payment !== null): ?>

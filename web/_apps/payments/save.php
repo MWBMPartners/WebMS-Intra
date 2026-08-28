@@ -4,6 +4,10 @@
  * Payments — provider configuration save.
  *
  * @package   Portal\Payments
+ * @author    MWBM Partners Ltd (t/a MWservices)
+ * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
+ * @license   All Rights Reserved
+ * @version   1.1.0
  * @link      https://github.com/MWBMPartners/webMS-Intra/issues/268
  */
 
@@ -81,7 +85,24 @@ if ($stWh !== '') {
     $upsert($db, 'payments.stripe.webhookSecret', $stWh, true);
 }
 
-$upsert($db, 'payments.paypal.clientId', trim((string) ($_POST['pp_client'] ?? '')), false);
+$ppMode = (string) ($_POST['pp_mode'] ?? 'sandbox');
+if (in_array($ppMode, ['sandbox','live'], true) === false) {
+    $ppMode = 'sandbox';
+}
+$upsert($db, 'payments.paypal.mode', $ppMode, false);
+
+// Clearing the webhook ID is a legitimate admin action (disables PayPal
+// webhook verification until it's set again) — write unconditionally.
+$upsert($db, 'payments.paypal.webhookId', trim((string) ($_POST['pp_webhook_id'] ?? '')), false);
+
+// 🔐 Sensitive keep-if-blank pattern (mirrors pp_secret below) — PayPal
+// treats client ids as public identifiers, but the gap-item directive
+// calls for encrypting it at rest as defence in depth (migration 167
+// flips isSensitive 0→1 for any site that hasn't already saved one).
+$ppClient = trim((string) ($_POST['pp_client'] ?? ''));
+if ($ppClient !== '') {
+    $upsert($db, 'payments.paypal.clientId', $ppClient, true);
+}
 $ppSec = trim((string) ($_POST['pp_secret'] ?? ''));
 if ($ppSec !== '') {
     $upsert($db, 'payments.paypal.secret', $ppSec, true);

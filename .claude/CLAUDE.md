@@ -24,7 +24,7 @@ web/                <- ALL deployable files (synced to server via SFTP)
                        app's PHP handlers live here; Router resolves
                        tblRoutes.targetFile against PORTAL_APPS = _apps/.
   _vendor/simplejwt/<- Vendored RS256 JWT verifier
-  _sql/             <- Numbered SQL migrations (000-158 + full_schema.sql)
+  _sql/             <- Numbered SQL migrations (000-167 + full_schema.sql)
   _lang/            <- I18n translation files (en.php, cy.php, …)
   _install/         <- Standalone 6-step installation wizard (bootstrap-free)
   public_html/      <- Web root: ONLY the front controller + static assets +
@@ -76,7 +76,7 @@ infrastructure rather than apps).
 | newsletter | `/newsletter` | Compose, schedule, send branded HTML newsletters (internal sender; MailerMatt adapter slot reserved) |
 | noticeboard | `/noticeboard` | Visual poster wall (Canva embeds, image/video/text posters, weekday recurrence, QR share) (#360, #363) |
 | offboarding | `/offboarding` | One-click revocation when a volunteer/staff member leaves: sessions, credentials, roles, leadership |
-| payments | `/payments` | Pluggable payment processor (Stripe live; PayPal/GoCardless adapters reserved), feeds Giving + Projects |
+| payments | `/payments` | Pluggable payment processor (Stripe + PayPal live; GoCardless adapter reserved); `/giving/give` + Projects "Pay now" checkout UI; feeds Giving + Projects |
 | photos | `/photos` | Photo gallery, moderation queue, tiered role-based visibility, EXIF-aware serving |
 | praise | `/praise` | Share gratitude / answered prayers / celebrations — counterpart to Prayer Requests |
 | prayer-requests | `/prayer-requests` | Logged-in + anonymous public submission, moderation, lifecycle, prayer-chain assignment (#311) |
@@ -152,6 +152,33 @@ Calendar/Events/Preaching Plan is ONE app ("Events") — `/calendar` covers view
 
 ## Recent ships (chronological)
 
+- **`claude/paypal-checkout`** (this session, branched off `alpha`) — gap #1:
+  PayPal Orders v2 fully wired into `Portal\Core\Payments` (create checkout,
+  capture-on-return + `CHECKOUT.ORDER.APPROVED` webhook backstop for a payer
+  who approves and never returns, verified webhooks via PayPal's own
+  verify-webhook-signature API, refunds by capture id) plus the previously-
+  missing user-facing checkout UI (new `giving/give.php` "Give online" page,
+  Projects `my-pledges.php` "Pay now"). The S1 amount/currency integrity
+  gate now lives INSIDE `markPaymentSucceeded()` itself (signature gained
+  `?int $observedAmountPence, ?string $observedCurrency`) — every PayPal
+  success path (return capture, 422 `ORDER_ALREADY_CAPTURED` reconcile,
+  verified `PAYMENT.CAPTURE.COMPLETED`) asserts the captured amount+
+  currency against the pending row before any Giving/Projects fan-out, and
+  a mismatch marks the row `failed` + logs `PaymentIntegrityFail` instead.
+  The status transition is now a single atomic
+  `UPDATE … WHERE status = "pending"` gated on `affected_rows === 1`,
+  closing the return-path-vs-webhook race (and incidentally Stripe's own
+  two-event race too — Stripe call sites keep passing null observed values
+  unchanged, upgrading them is a follow-up). `checkout.php` (already
+  #430-hardened for pledge/giving/else purpose validation) gained the two
+  remaining §6.3 pieces: a £10,000 online-giving ceiling
+  (`GIVING_MAX_AMOUNT_PENCE`) and server-built descriptions
+  (`'Giving — {category}'` / `'Pledge — {project}'`) — the POSTed
+  `description` field is removed from the flow entirely. Migration 167
+  (seeds only, no DDL): `payments.paypal.{webhookId,mode}`, `clientId`
+  flipped to encrypted-at-rest (predicate-guarded — only where still
+  empty, since `decrypt_setting()` returns `''` for a plaintext value), and
+  the new `giving/give` route.
 - **PR #372** (accumulating, draft, `claude/alpha-enhancements` → `alpha`) — a
   discovery-pass fold-in batch on top of #386/#387 (migrations 155-157):
   #373 ApiRouter half — `ApiRouter.php` never got the `global $mysqli,

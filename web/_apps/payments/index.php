@@ -4,6 +4,10 @@
  * Admin — Payments configuration + reconciliation report.
  *
  * @package   Portal\Payments
+ * @author    MWBM Partners Ltd (t/a MWservices)
+ * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
+ * @license   All Rights Reserved
+ * @version   1.1.0
  * @link      https://github.com/MWBMPartners/webMS-Intra/issues/268
  */
 
@@ -32,8 +36,13 @@ $currency = (string) ($settings['currency'] ?? 'GBP');
 $stripePub  = (string) ($settings['stripe']['publishable'] ?? '');
 $hasStSec   = ((string) ($settings['stripe']['secret'] ?? '')) !== '';
 $hasStWh    = ((string) ($settings['stripe']['webhookSecret'] ?? '')) !== '';
-$ppClient   = (string) ($settings['paypal']['clientId'] ?? '');
-$hasPpSec   = ((string) ($settings['paypal']['secret'] ?? '')) !== '';
+$hasPpClient = ((string) ($settings['paypal']['clientId'] ?? '')) !== '';
+$hasPpSec    = ((string) ($settings['paypal']['secret'] ?? '')) !== '';
+$ppMode      = (string) ($settings['paypal']['mode'] ?? 'sandbox');
+if (in_array($ppMode, ['sandbox','live'], true) === false) {
+    $ppMode = 'sandbox';
+}
+$ppWebhookId = (string) ($settings['paypal']['webhookId'] ?? '');
 $hasGcTok   = ((string) ($settings['gocardless']['token'] ?? '')) !== '';
 
 // Reconciliation snapshot for the current month.
@@ -105,7 +114,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 <label class="form-label">Provider</label>
                 <select class="form-select" name="provider">
                     <option value="stripe"     <?php echo $provider === 'stripe'     ? 'selected' : ''; ?>>Stripe</option>
-                    <option value="paypal"     <?php echo $provider === 'paypal'     ? 'selected' : ''; ?>>PayPal (follow-up)</option>
+                    <option value="paypal"     <?php echo $provider === 'paypal'     ? 'selected' : ''; ?>>PayPal</option>
                     <option value="gocardless" <?php echo $provider === 'gocardless' ? 'selected' : ''; ?>>GoCardless (follow-up)</option>
                 </select>
             </div>
@@ -139,11 +148,23 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 <small class="text-muted">Webhook URL: <code><?php echo htmlspecialchars((($_SERVER['HTTPS'] ?? '') !== '' ? 'https' : 'http') . '://' . ($_SERVER['HTTP_HOST'] ?? '') . '/payments/webhook?provider=stripe', ENT_QUOTES, 'UTF-8'); ?></code></small>
             </div>
             <div class="col-md-3">
-                <h6 class="text-muted">PayPal <span class="badge bg-secondary">follow-up</span></h6>
-                <label class="form-label small">Client ID</label>
-                <input type="text" class="form-control form-control-sm" name="pp_client" value="<?php echo htmlspecialchars($ppClient, ENT_QUOTES, 'UTF-8'); ?>">
+                <h6 class="text-muted">PayPal</h6>
+                <label class="form-label small">Mode</label>
+                <select class="form-select form-select-sm" name="pp_mode">
+                    <option value="sandbox" <?php echo $ppMode === 'sandbox' ? 'selected' : ''; ?>>Sandbox</option>
+                    <option value="live"    <?php echo $ppMode === 'live'    ? 'selected' : ''; ?>>Live</option>
+                </select>
+                <?php if ($ppMode === 'live' && $testMode === true): ?>
+                    <small class="text-warning d-block mt-1"><i class="fa-solid fa-triangle-exclamation me-1"></i>Mode is Live while Test mode is on.</small>
+                <?php endif; ?>
+                <label class="form-label small mt-2">Client ID <?php echo $hasPpClient === true ? '<span class="badge bg-success">set</span>' : ''; ?></label>
+                <input type="password" class="form-control form-control-sm" name="pp_client" placeholder="<?php echo $hasPpClient === true ? 'Leave blank to keep' : ''; ?>" autocomplete="off">
                 <label class="form-label small mt-2">Secret <?php echo $hasPpSec === true ? '<span class="badge bg-success">set</span>' : ''; ?></label>
                 <input type="password" class="form-control form-control-sm" name="pp_secret" placeholder="<?php echo $hasPpSec === true ? 'Leave blank to keep' : ''; ?>" autocomplete="off">
+                <label class="form-label small mt-2">Webhook ID <?php echo $ppWebhookId !== '' ? '<span class="badge bg-success">set</span>' : ''; ?></label>
+                <input type="text" class="form-control form-control-sm" name="pp_webhook_id" value="<?php echo htmlspecialchars($ppWebhookId, ENT_QUOTES, 'UTF-8'); ?>">
+                <small class="text-muted d-block mt-1">Webhook URL: <code><?php echo htmlspecialchars((($_SERVER['HTTPS'] ?? '') !== '' ? 'https' : 'http') . '://' . ($_SERVER['HTTP_HOST'] ?? '') . '/payments/webhook?provider=paypal', ENT_QUOTES, 'UTF-8'); ?></code></small>
+                <small class="text-muted d-block">Subscribe to: <code>CHECKOUT.ORDER.APPROVED</code>, <code>PAYMENT.CAPTURE.COMPLETED</code>, <code>PAYMENT.CAPTURE.REFUNDED</code></small>
             </div>
             <div class="col-md-3">
                 <h6 class="text-muted">GoCardless <span class="badge bg-secondary">follow-up</span></h6>

@@ -2,6 +2,34 @@
 
 
 ## [1.4.0] - 2026-07-22 (alpha)
+- feat(payments): gap #1 — PayPal Orders v2 adapter fully wired into
+  `Portal\Core\Payments` (create checkout, capture-on-return +
+  `CHECKOUT.ORDER.APPROVED` webhook backstop, verified webhooks via
+  PayPal's own verify-webhook-signature API, refunds by capture id), plus
+  the previously-missing user-facing checkout UI: `giving/give.php` ("Give
+  online") and a "Pay now" form on `projects/my-pledges.php` (hidden when
+  the pledge's project currency doesn't match `payments.currency`). The
+  security-critical control is a single choke point:
+  `Payments::markPaymentSucceeded()` gained `?int $observedAmountPence,
+  ?string $observedCurrency` — every PayPal success path asserts the
+  captured amount+currency EXACTLY against the pending row before any
+  Giving/Projects fan-out, marking the row `failed` with
+  `errorMsg='amount-mismatch…'` and logging `PaymentIntegrityFail` on any
+  mismatch instead of booking the wrong amount. The status transition is
+  now a single atomic `UPDATE … WHERE status = "pending"` gated on
+  `affected_rows === 1`, closing the return-path-vs-webhook race (Stripe
+  keeps passing null observed values unchanged — extending the same gate
+  to Stripe is a follow-up). `checkout.php` (already hardened by #430 for
+  purpose/purposeRef validation) gained the two remaining pieces: a
+  £10,000 ceiling on self-service online giving (`GIVING_MAX_AMOUNT_PENCE`)
+  and server-built order descriptions (`'Giving — {category}'` /
+  `'Pledge — {project}'`) — the POSTed `description` field is removed
+  from the flow entirely, closing a provider-page text-injection vector.
+  Migration 167 (seeds only): `payments.paypal.webhookId` /
+  `payments.paypal.mode`, `payments.paypal.clientId` flipped to
+  encrypted-at-rest (predicate-guarded — only where still empty, since
+  `decrypt_setting()` returns `''` on a plaintext value), and the new
+  `giving/give` route.
 - fix(api): #373 (ApiRouter half) — `ApiRouter::dispatch()` and
   `dispatchV1()` included handler files in static-method scope with no
   `global $mysqli, $SETTINGS;` import, so any legacy handler reading the
