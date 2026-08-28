@@ -2,6 +2,48 @@
 
 
 ## [Unreleased] (alpha)
+- feat(pwa): #141 residual + #306 — the two remaining PWA install-prompt
+  pieces (Web Push itself already shipped as #322) plus starter sub-brand
+  artwork. **#141**: a self-hosted `assets/js/pwa-install.js` captures
+  `beforeinstallprompt`, calls `event.preventDefault()` to suppress the
+  browser's own mini-infobar, and reveals a dismissible bottom-sheet banner
+  (`#portal-install-prompt`, footer.php — same visual pattern as the
+  existing cookie-consent banner) with a brand-aware "Install {product
+  name}" heading; a dismissal is remembered in localStorage for 30 days,
+  an actual install is remembered permanently via `appinstalled`, and
+  both reads/writes are try/catched (private browsing never throws).
+  `manifest.php` gains a brand-aware `shortcuts[]` array (Dashboard /
+  Calendar / Giving / Prayer Requests) filtered through
+  `AppRegistry::isEnabled()` — a disabled app's shortcut is silently
+  dropped, and any `AppRegistry` exception fails CLOSED (shortcut
+  omitted) so a manifest fetch can never break. `header.php` gains the
+  missing iOS/PWA meta trio: brand-aware `apple-mobile-web-app-title`
+  (was absent — iOS would have captioned every install "Portal"
+  regardless of brand) plus the standard-track `mobile-web-app-capable`
+  twin of the existing `apple-mobile-web-app-capable` tag (icon,
+  status-bar-style, and manifest link were already present from earlier
+  PWA work). Push notifications, VAPID, and the offline shell were
+  already fully shipped by #322 — not touched here.
+  **#306**: functional starter SVG brand kits (`icon.svg` /
+  `icon-192.svg` / `icon-512.svg` / `logo.svg`) for the four presets that
+  previously fell back to the generic WebMS-Intra assets —
+  `assets/images/brandkit/assets/{schoolms,charityms,communityms,businessms}/`
+  — each a distinct geometric emblem (mortarboard, heart, interlocking
+  rings, ascending bar chart) on the same indigo tile + gradient tokens
+  as the WebMS/ChurchMS kits, so all six presets read as one family.
+  `logo.svg`'s wordmark line is set in a local system-font stack (no
+  outlined vector glyphs, no external font/network reference) — a
+  designer pass to match the WebMS/ChurchMS outlined-vector treatment is
+  recommended before any of these four presets ships to a real customer
+  (documented in each `logo.svg`'s own `<desc>` and in `brand-defaults.php`
+  comments). `brand-defaults.php`'s four stub presets now point
+  `assetFolder` at their new kits instead of falling back to
+  `webms-intra`; the installer's Step 1.5 copy and code comment updated
+  to match (icon/PWA-manifest SVGs ship; the installer's PNG/.ico favicon
+  variants for these four presets do not — those `<link>` tags 404
+  harmlessly in browsers without SVG-favicon support). No migration in
+  either half. All 10 audit checks green, `php -l` clean on every touched
+  PHP file, all 16 new SVGs well-formed XML.
 - feat(push): #322 — Web Push notifications ("we're live now" + service
   reminders). Migration 111 shipped `tblPushSubscriptions` + the VAPID
   settings keys, but the subscribe/unsubscribe handlers sat at
