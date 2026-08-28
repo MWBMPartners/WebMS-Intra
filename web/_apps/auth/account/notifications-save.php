@@ -43,6 +43,7 @@ $allowedKeys = [
     'announcementsNew',
     'prayerModeration',
     'accountSecurity',
+    'givingStatements',
 ];
 
 $incoming = $_POST['prefs'] ?? [];

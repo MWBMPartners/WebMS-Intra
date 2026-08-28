@@ -513,7 +513,7 @@ setting seeds.
 | Recordings (RSS podcast feed + HTTP Range streaming + FULLTEXT search) | #264 | 091 | ✅ |
 | Zoom (OAuth, meeting creation from calendar, webhook HMAC) | #274 | 092 | ✅ |
 | Newsletter (composer with auto-pulled content blocks, provider abstraction → MailerMatt slot) | #269 | 093 | ✅ |
-| Giving (tithe log, Gift Aid digital declaration, HMRC schedule CSV, year-end PDF; online give-online checkout added later, see "PayPal payment adapter" section below) | #266 | 094 | ✅ |
+| Giving (tithe log, Gift Aid digital declaration, HMRC schedule CSV, year-end PDF; online give-online checkout added later, see "PayPal payment adapter" section below; treasurer bulk year-end statements added later, see "Giving — Bulk year-end statements" section below) | #266 | 094 | ✅ |
 | SMS (Twilio + MessageBird + SigV4-signed AWS SNS; verification + per-category opt-in + Sabbath quiet hours) | #272 | 095 | ✅ |
 | Projects (public fundraising page, pledge thermometer, captcha-gated anonymous pledges; member "Pay now" pledge checkout added later, see "PayPal payment adapter" section below) | #267 | 096 | ✅ |
 | Payments (Stripe Checkout + PayPal Orders v2 + v1 HMAC/verified webhooks + refund; side-effects into Giving/Projects — PayPal + online checkout UI added later, see "PayPal payment adapter" section below) | #268 | 097 | ✅ |
@@ -603,6 +603,24 @@ webhook for recurring giving remains a not-started #299 sub-feature.
 | CSV import (`/giving/reconcile/import`) — header-NAME column mapping (never positional) against a UK-bank alias table, with a manual mapping screen when auto-detection can't resolve every required column; SHA-256 `fileHash` + `UNIQUE(siteID, fileHash)` blocks duplicate imports; a non-empty credit that fails amount/date parsing fails the WHOLE upload (no partial imports) | #299 | 152 | ✅ |
 | Matching — exact-amount, window-based (`giving.reconcile.toleranceDays`, default 5 days) with two nullable FKs on `tblBankTxns`: `matchedEntryID` (1:1 gift match) or `matchedCountSessionID` (whole offering-count deposit); 2+ equal-amount in-window candidates is always left unmatched, never guessed; count-close's gift-log rows (`reference LIKE 'Count #%'`) excluded from entry-matching to avoid double-counting against their deposit | #299 | 152 | ✅ |
 | UI: `/giving/reconcile` (imports dashboard + site-wide unmatched summary), `/giving/reconcile/view` (matched/unmatched/ignored lists, inline match-suggestion mini-forms, two-way "gift log not in this statement" gap panel with in-transit-vs-missing badges), `/giving/reconcile/match` (manual match/unmatch/ignore/rematch/delete-import) — gated by `Portal\Core\Giving::canManage()`; "Count"/"Reconcile" nav buttons added to `giving/manage.php` | #299 | 152 | ✅ |
+
+---
+
+### Giving — Bulk year-end statements (gap #4, #440, 2026-08-28)
+
+Treasurer-only batch generate + email of year-end giving statements at
+`/giving/statements`, reusing (and hardening) the self-service PDF
+renderer so both paths emit byte-identical output — see DEV_NOTES.md
+"Giving — Bulk year-end statements" for the full design rationale.
+
+| Item | Issue | Migration | Status |
+|---|---|---|---|
+| `Giving::renderStatementPdf()` generalised to `(siteId, donorId, from, to, label)` — site-scoped donor lookup (active membership OR giving history at the site, closing a latent cross-tenant render hole), Gift-Aid-eligible column + summary (EXISTS, never a JOIN — no double-count), output path namespaced by `{siteID}/{periodKey}` (fixes a cross-site filename overwrite); `giving/my-statement.php` is the only other caller and now maps its `?year=` into the same call | #440 | 172 | ✅ |
+| `tblGivingStatementLog` — one row per `(siteID, donorID, periodKey)`, `UNIQUE`-keyed dedupe/audit log (`pdfPath`/`queuedAt`/`emailedAt`/`emailedTo`/`errorMsg`) | #440 | 172 | ✅ |
+| Batch generate (`/giving/statements-generate`, POST) + batch email (`/giving/statements-email`, POST) — capped at `giving.statements.batchPerRun` (default 25) per invocation, Newsletter-dispatch pattern, re-trigger to continue; explicit audit-logged "resend to already-emailed donors" override; per-row manual-only "retry" clears a stuck `errorMsg` | #440 | 172 | ✅ |
+| ZIP download (`/giving/statements-download`, GET) — `ZipArchive` bundle of the period's generated PDFs (never a combined PDF), degrades to per-row PDF links when `ZipArchive` is unavailable; per-donor single-PDF download also served from this route | #440 | 172 | ✅ |
+| Optional token-gated sweeper `cron/giving-statements.php` (`giving.cron_token`, empty ⇒ 403 fail-closed) — sweeps queued-but-unsent rows across every site for a larger donor list that would otherwise need many manual re-triggers | #440 | 172 | ✅ |
+| `givingStatements` notifyPrefs opt-out (default on) — enforced at both queue and live send time; GDPR erasure additionally unlinks the erased donor's rendered statement PDF files from disk (`GdprEraser::eraseGivingStatementFiles()`) | #440 | 172 | ✅ |
 
 ---
 

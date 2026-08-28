@@ -223,6 +223,13 @@ class GdprEraser
         foreach ($catalogue as $entry) {
             $any = self::processEntry($db, $requestId, $userId, $entry) || $any;
         }
+        // 🧾 Giving bulk statements (#440 Q5) — a filesystem-only sweep, not
+        // a catalogue entry: tblGivingStatementLog rows themselves stay
+        // (donorID is NOT NULL there, and the run-history/HMRC-adjacent
+        // audit trail is retained exactly like tblGivingEntry above), but
+        // the RENDERED PDF is a name-bearing document with no retention
+        // duty once its subject is erased, so the files are unlinked here.
+        $any = (self::eraseGivingStatementFiles($requestId, $userId) > 0) || $any;
         // Final status flip.
         $u = $db->prepare('UPDATE tblErasureRequest SET status = "completed", processedAt = NOW(), processedByID = ?, userID = NULL WHERE requestID = ?');
         if ($u !== false) {
@@ -378,6 +385,43 @@ class GdprEraser
             self::logAudit($db, $requestId, 'failed', $table, null, mb_substr($e->getMessage(), 0, 250));
             return false;
         }
+    }
+
+    /**
+     * Unlink every rendered giving-statement PDF for `$userId`, across
+     * every site (siteID is embedded in the directory, not the filename —
+     * see Portal\Core\Giving::renderStatementPdf()'s path convention).
+     * `tblGivingStatementLog` rows are left untouched (see the call site's
+     * comment in execute()); this is a filesystem-only sweep (#440 Q5).
+     *
+     * @return int Number of files actually removed.
+     */
+    private static function eraseGivingStatementFiles(int $requestId, int $userId): int
+    {
+        $base = PORTAL_ROOT . DIRECTORY_SEPARATOR . '_uploads' . DIRECTORY_SEPARATOR . 'giving'
+              . DIRECTORY_SEPARATOR . 'statements';
+        if (is_dir($base) === false) {
+            return 0;
+        }
+        $pattern = $base . DIRECTORY_SEPARATOR . '*' . DIRECTORY_SEPARATOR . 'statement-' . $userId . '-*.pdf';
+        $matches = glob($pattern);
+        if ($matches === false || count($matches) === 0) {
+            return 0;
+        }
+        $removed = 0;
+        foreach ($matches as $path) {
+            if (@unlink($path) === true) {
+                $removed++;
+            }
+        }
+        if ($removed > 0) {
+            $db = App::db();
+            // Not a real table name — deliberately NOT `tblXxx`-shaped so
+            // check_php_table_refs.py doesn't need an allowlist entry for
+            // this filesystem-only sweep's audit label.
+            self::logAudit($db, $requestId, 'delete', 'GivingStatementPdfFiles', (string) $removed . ' file(s)', 'rendered statement PDFs have no retention duty once the subject is erased');
+        }
+        return $removed;
     }
 
     private static function logAudit(\mysqli $db, int $requestId, string $action, string $table, ?string $recordKey, string $details): void

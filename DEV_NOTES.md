@@ -2970,6 +2970,122 @@ bookings, agreement renewals, invoices due) with a `(refType, refID,
 dueDate)` dedupe key so a re-scheduled item naturally re-reminds without
 spamming on every run.
 
+## Giving — Bulk year-end statements (gap #4, #440)
+
+Treasurer-only "Annual statements" page at `/giving/statements`: pick a
+period (calendar year default, free from/to fields, one-click UK-tax-year
+preset), preview per-donor totals + Gift Aid eligible sums, then generate
+PDFs, download them all as a ZIP, or email each donor their own statement.
+
+### Renderer reuse (the whole point of this feature)
+
+`Portal\Core\Giving::renderStatementPdf(int $siteId, int $donorId, string
+$fromDate, string $toDate, string $periodLabel): string|false` is the
+SAME function called by both the self-service page (`giving/my-
+statement.php`) and the bulk batch (`giving/statements-generate.php`) —
+their output is byte-identical by construction, not by convention. Three
+deliberate upgrades landed on this shared function (so both callers get
+them for free):
+
+1. **Donor lookup is site-scoped** — a donor renders only if they are a
+   currently-active member of `$siteId` OR have at least one giving entry
+   recorded under `$siteId` (an `OR` of two `EXISTS` clauses, not a plain
+   `INNER JOIN tblUserSites`). The first arm is the normal case (including
+   a member who has never given, which the old — unscoped — query also
+   allowed); the second arm lets a treasurer pull a single historical
+   statement for a donor who has since left the site without reopening
+   the original "any userID renders for any site" hole. A donor matching
+   neither arm can never render, regardless of which site's treasurer
+   asks.
+2. **Gift Aid eligible column + summary** — per-entry eligibility via the
+   existing declaration-window rule (`validFrom <= donatedAt AND (validTo
+   IS NULL OR validTo >= donatedAt) AND status = 'active'`), computed with
+   a correlated `EXISTS`, never a `JOIN` against `tblGiftAidDeclaration` —
+   an overlapping pair of active declarations can never double-count a
+   single entry, mirroring `buildHmrcCsv()`'s own known JOIN hazard.
+   Statement shows "Total given" and "of which Gift Aid eligible"
+   — deliberately **no** projected 25% reclaim figure; that belongs to the
+   charity's own HMRC CSV claim, not a donor-facing estimate.
+3. **Output path namespaced by siteID + periodKey** —
+   `_uploads/giving/statements/{siteID}/statement-{donorID}-{periodKey}.pdf`
+   (`periodKey` = `Giving::statementPeriodKey()`, `"{from}_{to}"`). Fixes
+   the old flat `statement-{donor}-{year}.pdf` naming, which let the same
+   donor in two sites overwrite one file with the other site's data.
+
+### Batching (Newsletter dispatch pattern, copied deliberately)
+
+DreamHost shared FastCGI can kill a long-running request regardless of
+`set_time_limit()` (`admin/maintenance/offsite-backup-run.php` documents
+this in its own header). `Giving::renderStatementBatch()` and the email
+handler both cap their own work at `giving.statements.batchPerRun`
+(default 25) per invocation — exactly `Newsletter::dispatch()`'s
+`newsletter.batchPerHour` shape. Re-POST the same form ("Generate
+statements" / "Email statements") to continue a larger run; the flash
+message tells you how many remain.
+
+### Dedupe / sent-log
+
+One `tblGivingStatementLog` row per `(siteID, donorID, periodKey)`
+(`UNIQUE` key) — the row IS the run state: `pdfPath` set = rendered,
+`queuedAt` set = an email run has started, `emailedAt` set = sent (the
+dedupe fence — every email selector adds `emailedAt IS NULL`, so a
+completed row can never be re-picked without the explicit "Resend to
+already-emailed donors" checkbox, which clears `emailedAt`/`errorMsg`
+first and is audit-logged as `GivingStatementsResend`). `errorMsg` set on
+a failed generate or send is never auto-retried — the preview page's
+per-row "Retry" link (routes back through `statements-generate.php` with
+`action=retry`) just clears it, re-entering the row into the normal next
+batch.
+
+### Opt-out
+
+New `notifyPrefs` key `givingStatements` (default **on**, like every
+other key) — whitelisted in `auth/account/notifications-save.php`, a
+switch on `/account/notifications`. Enforced at BOTH queue time (the
+preview page's "opted out" badge, and the email handler's queue-eligible
+selector reads it indirectly via `Giving::sendStatementEmail()`) AND send
+time (`Giving::sendStatementEmail()` re-decodes `notifyPrefs` fresh from
+`tblUsers` immediately before sending — never trusts whatever was true
+when the row was queued).
+
+### Attachment integrity
+
+`Mailer::attach()` silently DROPS any file over 4 MB rather than erroring
+— a statement PDF is tens of KB, but `Giving::sendStatementEmail()` still
+checks `filesize()` explicitly and marks the row `errorMsg = 'pdf-too-
+large'` rather than ever letting a bodiless email go out.
+
+### Optional cron sweeper
+
+```
+https://<your-portal-host>/cron/giving-statements?key=<your-token>   (every 15 min)
+```
+
+Token in `giving.cron_token`, seeded empty — the endpoint is inert until
+an admin sets a real value (same pattern as `venues.cron_token` /
+`assets.cron_token` / `discipleship.cron_token`). Unlike the venue/asset
+reminder crons, this one is NOT required for a typical site — the
+interactive "Email statements" button finishes a modest donor list in one
+or two clicks. It exists for a larger site whose queue would otherwise
+need many manual re-triggers: it sweeps every site's queued-but-unsent
+rows in one pass (`giving.statements.batchPerRun × 4` per invocation),
+calling `Site::forceContext()` per row purely so error logging attributes
+correctly, and reading per-site settings (`giving.charityName` etc.) via
+`App::settingForSite()` rather than the frozen `$SETTINGS` bootstrap
+snapshot — the same cross-site-loop correctness rule `cron/venue-
+reminders.php`'s header documents.
+
+### GDPR erasure
+
+`tblGivingStatementLog` rows are left alone by an erasure (donorID is
+`NOT NULL` there, and the run history is retained like `tblGivingEntry`'s
+own HMRC-adjacent 6-year rationale) — but `GdprEraser::execute()` now
+also unlinks the erased user's rendered statement PDF files from disk
+(`_uploads/giving/statements/*/statement-{userID}-*.pdf`) via a small,
+filesystem-only `eraseGivingStatementFiles()` step: a rendered PDF is a
+name-bearing document with no retention duty once its subject is erased,
+even though the underlying ledger entries stay anonymised-in-place.
+
 ---
 
 Last updated: August 2026

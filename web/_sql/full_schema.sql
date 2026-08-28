@@ -3911,19 +3911,54 @@ CREATE TABLE IF NOT EXISTS `tblGiftAidDeclaration` (
     CONSTRAINT `fk_gad_donor` FOREIGN KEY (`donorID`) REFERENCES `tblUsers`(`userID`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
+-- ── from 172_giving_bulk_statements.sql (gap #4, #440) — bulk year-end
+-- statements dedupe/audit log. See that migration's header for the full
+-- column-by-column rationale.
+CREATE TABLE IF NOT EXISTS `tblGivingStatementLog` (
+    `logID`        INT          NOT NULL AUTO_INCREMENT,
+    `siteID`       INT          NOT NULL DEFAULT 1,
+    `donorID`      INT          NOT NULL,
+    `periodKey`    VARCHAR(30)  NOT NULL COMMENT 'fromDate_toDate — Giving::statementPeriodKey()',
+    `fromDate`     DATE         NOT NULL,
+    `toDate`       DATE         NOT NULL,
+    `totalPence`   INT          NOT NULL DEFAULT 0,
+    `giftAidPence` INT          NOT NULL DEFAULT 0,
+    `pdfPath`      VARCHAR(500) DEFAULT NULL COMMENT 'NULL until generated',
+    `queuedAt`     DATETIME     DEFAULT NULL COMMENT 'Set when treasurer starts an email run; cron sweeps queued rows',
+    `emailedAt`    DATETIME     DEFAULT NULL COMMENT 'Dedupe fence: re-runs skip rows with this set',
+    `emailedTo`    VARCHAR(255) DEFAULT NULL COMMENT 'Address actually mailed (audit)',
+    `errorMsg`     VARCHAR(255) DEFAULT NULL,
+    `createdByID`  INT          DEFAULT NULL,
+    `createdAt`    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updatedAt`    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`logID`),
+    UNIQUE KEY `uq_gsl_site_donor_period` (`siteID`, `donorID`, `periodKey`),
+    KEY `idx_gsl_site_period` (`siteID`, `periodKey`),
+    KEY `idx_gsl_queue` (`queuedAt`, `emailedAt`),
+    CONSTRAINT `fk_gsl_site`    FOREIGN KEY (`siteID`)      REFERENCES `tblSites`(`siteID`),
+    CONSTRAINT `fk_gsl_donor`   FOREIGN KEY (`donorID`)     REFERENCES `tblUsers`(`userID`) ON DELETE CASCADE,
+    CONSTRAINT `fk_gsl_creator` FOREIGN KEY (`createdByID`) REFERENCES `tblUsers`(`userID`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+COMMENT='Giving — bulk year-end statement generate/email log + dedupe (gap #4, #440)';
+
 INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
-    ('giving',              'giving/index.php',         1),
-    ('giving/give',         'giving/give.php',          1),
-    ('giving/manage',       'giving/manage.php',        1),
-    ('giving/entry-save',   'giving/entry-save.php',    1),
-    ('giving/entry-delete', 'giving/entry-delete.php',  1),
-    ('giving/categories',   'giving/categories.php',    1),
-    ('giving/cat-save',     'giving/cat-save.php',      1),
-    ('giving/gift-aid',     'giving/gift-aid.php',      1),
-    ('giving/gad-save',     'giving/gad-save.php',      1),
-    ('giving/my-statement', 'giving/my-statement.php',  1),
-    ('giving/reports',      'giving/reports.php',       1),
-    ('giving/hmrc-export',  'giving/hmrc-export.php',   1)
+    ('giving',                     'giving/index.php',               1),
+    ('giving/give',                'giving/give.php',                1),
+    ('giving/manage',              'giving/manage.php',              1),
+    ('giving/entry-save',          'giving/entry-save.php',          1),
+    ('giving/entry-delete',        'giving/entry-delete.php',        1),
+    ('giving/categories',          'giving/categories.php',          1),
+    ('giving/cat-save',            'giving/cat-save.php',            1),
+    ('giving/gift-aid',            'giving/gift-aid.php',            1),
+    ('giving/gad-save',            'giving/gad-save.php',            1),
+    ('giving/my-statement',        'giving/my-statement.php',        1),
+    ('giving/reports',             'giving/reports.php',             1),
+    ('giving/hmrc-export',         'giving/hmrc-export.php',         1),
+    ('giving/statements',          'giving/statements.php',          1),
+    ('giving/statements-generate', 'giving/statements-generate.php', 1),
+    ('giving/statements-email',    'giving/statements-email.php',    1),
+    ('giving/statements-download', 'giving/statements-download.php', 1),
+    ('cron/giving-statements',     'cron/giving-statements.php',     0)
 ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 
 INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
@@ -3933,7 +3968,10 @@ INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue
     (NULL, 'giving.currency',    'GBP', 'GBP', 0),
     (NULL, 'giving.charityName', '', '', 0),
     (NULL, 'giving.charityNumber','', '', 0),
-    (NULL, 'giving.hmrcRef',     '', '', 0)
+    (NULL, 'giving.hmrcRef',     '', '', 0),
+    (NULL, 'giving.statements.batchPerRun',  '25', '25', 0),
+    (NULL, 'giving.statements.emailSubject', 'Your {year} giving statement', 'Your {year} giving statement', 0),
+    (NULL, 'giving.cron_token',              '', '', 1)
 ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
 
 -- =============================================================================
@@ -7582,4 +7620,7 @@ INSERT INTO `tblMigrations` (`filename`) VALUES ('167_paypal_checkout.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
 INSERT INTO `tblMigrations` (`filename`) VALUES ('170_venue_bookings.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('172_giving_bulk_statements.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;

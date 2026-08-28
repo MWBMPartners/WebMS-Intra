@@ -2,6 +2,33 @@
 
 
 ## [1.4.0] - 2026-07-22 (alpha)
+- feat(giving): gap #4 — bulk year-end statements (#440). Treasurer-only
+  batch generate + email at `/giving/statements`, built by generalising
+  `Portal\Core\Giving::renderStatementPdf()` to `(siteId, donorId, from,
+  to, label)` so it is the SAME function called by both the self-service
+  page (`giving/my-statement.php`) and the new bulk path — byte-identical
+  output by construction. Three deliberate upgrades landed on that shared
+  renderer: (1) the donor lookup is now site-scoped (active membership OR
+  giving history at the site — an `OR` of two `EXISTS` clauses, closing a
+  latent "any userID renders for any site" hole while still letting a
+  treasurer pull a statement for a donor who has since left the site);
+  (2) a Gift-Aid-eligible column + summary, computed with a correlated
+  `EXISTS` (never a JOIN, so overlapping declarations can't double-count
+  — mirrors `buildHmrcCsv()`'s own known hazard) and deliberately showing
+  no projected 25% reclaim figure; (3) the output path is now namespaced
+  by `{siteID}/{periodKey}`, fixing a cross-site filename overwrite the
+  old flat `statement-{donor}-{year}.pdf` naming had. New
+  `tblGivingStatementLog` (migration 172) is a `UNIQUE(siteID, donorID,
+  periodKey)` dedupe/audit log — batches cap at
+  `giving.statements.batchPerRun` (default 25) per request (Newsletter-
+  dispatch pattern, re-trigger to continue), a "resend to already-emailed
+  donors" override is explicit and audit-logged, ZIP download
+  (`ZipArchive`, never a combined PDF) degrades to per-row links when
+  unavailable, and an optional token-gated `cron/giving-statements.php`
+  sweeps a larger queue unattended (`giving.cron_token`, empty ⇒ 403
+  fail-closed). New `givingStatements` notifyPrefs opt-out (default on),
+  enforced at both queue and live-send time; `GdprEraser` now also
+  unlinks an erased donor's rendered statement PDFs from disk.
 - feat(payments): gap #1 — PayPal Orders v2 adapter fully wired into
   `Portal\Core\Payments` (create checkout, capture-on-return +
   `CHECKOUT.ORDER.APPROVED` webhook backstop, verified webhooks via
