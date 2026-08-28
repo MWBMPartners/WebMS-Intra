@@ -166,7 +166,6 @@ Events, series, RSVP, exports, and seven view modes.
 
 **🔜 Open issues:**
 - #97–#103: BookIT calendar-provider abstraction (7-PR series).
-- #128: New Order of Service planner with iHymns integration (gated on iHymns permission).
 
 **Tables:** `tblEvents`, `tblEventCategories`, `tblEventTypes`, `tblEventSeries`, `tblEventThemes`, `tblEventRecurrence`, `tblEventRsvps`, `tblCalendarMonthThemes`
 **Settings:** `calendar.enabled`, `calendar.displayName`, `calendar.displayIcon`, `calendar.brandColor`, `calendar.defaultView`, `calendar.enablePublicView`, `calendar.allowRecurringEvents`
@@ -522,7 +521,6 @@ When these merge, the 🛠️ markers above flip to ✅ without further edits to
 | Issue | Scope |
 | --- | --- |
 | #127 | WordPress Multisite integration — design + phased implementation (3–4 weeks) |
-| #128 | Order of Service planner app + iHymns integration (gated on iHymns permission) |
 | #97–#103 | BookIT calendar-provider abstraction (7-PR series) |
 | #47 | Privacy & GDPR compliance helpers |
 | #40 | Payment integration prep |
@@ -967,6 +965,95 @@ existing behaviour when unpaired.
 MySQL-8-safe DDL (column + UNIQUE key + FK on `tblServicePlans`), one
 route seed (`worship/plan/link`), no new settings keys (gating rides on
 the existing `worship.enabled` / `service_plans.enabled`).
+
+---
+
+### Hymnal lookup + public Order of Service (gap #128 residual, migration 178) ✅
+
+Re-scope of #128 ("Order of Service planner with iHymns integration") — a
+2026-08-28 architecture pass found service-plans (#262/#300) + the Worship
+Presentation Engine (#308/#355) already shipped ~90% of what the issue
+asked for (item CRUD, reorder, presenters, durations, notes, templates,
+event linking, song library + CCLI). This ships ONLY the residual, all
+additive on the EXISTING `tblServicePlan`/`tblServicePlanItem`/`tblSongs`
+tables — **no new app, no third service-plan data model.**
+
+- **R1 — Local hymnal index (`/admin/hymns`).** New `tblHymnals` +
+  `tblHymnalEntries` — one hymn book per site, multi-hymnal by design
+  (SDA Hymnal, Mission Praise, … are just rows). Entries are METADATA
+  ONLY — number, title, first line, author, tune, meter, CCLI number,
+  copyright line — **never lyrics** (copyright risk; lyrics stay
+  hand-entered in the Worship Song Library under the church's own CCLI
+  licence, unchanged). Manual entry + CSV import
+  (`number,title,firstLine,author,tuneName,meter,ccliNumber,copyrightLine`
+  — only `number`/`title` required, upsert on hymn number so a re-import
+  is idempotent). `Portal\Core\Hymnal::searchLocal()` — FULLTEXT + numeric
+  hymn-number prefix matching.
+- **R2 — Remote ("iHymns") lookup, Tier 2, default OFF.** No public
+  iHymns API is documented (the issue's linked domain is unreachable from
+  this build sandbox); repo docs (`deploy.yml`, `DEV_NOTES.md`) suggest
+  iHymns is an in-house sibling deployment. Shipped as a **generic**
+  HTTPS JSON client (`Hymnal::searchRemote()`) an owner can point at any
+  endpoint speaking a documented `GET {baseUrl}/search?q=…` contract (see
+  DEV_NOTES.md) — default OFF (`hymns.remote.enabled = 'false'`) until an
+  admin supplies + confirms a host. SSRF-hardened: https-only + single-
+  host allowlist (refused at both settings-save and request time),
+  private/reserved-IP refusal (IP literal AND DNS-resolved), no redirect
+  following, HTTPS-only curl protocols, 3s connect / 5s total timeout, a
+  ~512 KB response cap, JSON-only parsing, and a 24h server-side cache
+  (`tblHymnLookupCache`) so a repeat query never re-hits the remote host.
+  ANY failure (disabled, misconfigured, timeout, malformed) degrades
+  silently to local-only results — never blocking, never throwing. The
+  API key is encrypted at rest and never logged or echoed to the client.
+- **Picker endpoint.** New session-authenticated
+  `service-plans/api/hymn-search.php` (ApiRouter convention path, gated
+  by `api.service-plans.hymn-search.enabled` — NOT a tblRoutes row, per
+  the standing ApiRouter trap) merges local-hymnal + song-library +
+  (when enabled) remote results for a typeahead on the run-sheet editor's
+  song rows. Progressive enhancement — with JS disabled the `title` field
+  is a plain text input exactly as before.
+- **R3 — Congregation-facing public Order of Service.** New
+  `tblServicePlan.publicToken` (mirrors `tblAssets.publicToken`) +
+  `isPublicShared`. A Router special route `/os/{token}` (cloned from
+  `/a/{token}`) → `service-plans/public.php` renders order/titles/hymns/
+  **presenter names** (decided default: yes) — internal AV/tech `notes`
+  are NEVER queried, let alone rendered. Uniform 404 for an unknown
+  token, an unshared/unpublished plan, the site-level switch off, or the
+  app disabled — no oracle distinguishing any of those from each other.
+  **OFF by default** at both the site level
+  (`service_plans.public_share.enabled = 'false'`) and the plan level
+  (`isPublicShared` defaults to 0 on every plan, existing and new). New
+  CSRF'd `service-plans/share.php` (enable / disable / rotate the token)
+  plus a QR code via the existing `/qr.php` utility. `print.php` gains
+  `?version=leader|congregation` (default `leader` — byte-identical to
+  before #128) — the congregation variant additionally suppresses the
+  internal sectionType tag, matching a normal printed bulletin.
+- **R4 — Glue.** Nullable `tblServicePlanItem.songID` FK → `tblSongs`
+  (`ON DELETE SET NULL`). Picking a hymnal/remote result auto-promotes it
+  into `tblSongs` (default: yes — check-first upsert on
+  `(siteID, hymnalCode, hymnNumber)`, metadata only) and links the item;
+  picking an already-canonical song-library result links directly. Free-
+  text `title` remains the universal, always-working fallback — every
+  pre-existing item has `songID` NULL and renders unchanged. `tblSongs`
+  gains `hymnalCode`/`hymnNumber`/`tuneName`, surfaced in
+  `worship/song.php`/`songs.php` so "when did we last sing hymn X" works
+  across BOTH the run-sheet and the Worship CCLI log.
+- **Explicitly not built (per the plan's decided defaults):** no
+  `sectionType` ENUM widen for benediction/children's-story (`other`/
+  `prayer` + free title already covers it); no dompdf PDF export (print
+  CSS covers both variants); no change to the run-sheet's existing
+  any-logged-in-user write ACL (tracked separately).
+
+**New files:** `web/_core/Hymnal.php`, `web/_apps/admin/hymns.php`,
+`web/_apps/admin/hymns-save.php`,
+`web/_apps/service-plans/api/hymn-search.php`,
+`web/_apps/service-plans/share.php`, `web/_apps/service-plans/public.php`.
+**Schema:** migration 178 — 3 new tables (`tblHymnals`,
+`tblHymnalEntries`, `tblHymnLookupCache`), guarded ADD COLUMN on
+`tblSongs` (×3), `tblServicePlanItem` (`songID` + key + FK), and
+`tblServicePlan` (`publicToken` + `isPublicShared` + unique key); 3 route
+seeds; 7 settings seeds (incl. the `api.service-plans.hymn-search.enabled`
+ApiRouter flag). All 11 audit checks green, `php -l` clean.
 
 ---
 

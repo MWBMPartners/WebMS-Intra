@@ -2,6 +2,49 @@
 
 
 ## [Unreleased] (alpha)
+- feat(service-plans): gap #128 residual — hymnal lookup + public Order of
+  Service (migration 178). #128 ("Order of Service planner with iHymns
+  integration") was re-scoped: service-plans (#262/#300) + the Worship
+  Presentation Engine (#308/#355) already covered item CRUD, reorder,
+  presenters, durations, notes, templates, and the song/CCLI library — this
+  ships ONLY the genuine residual, additively, on the existing tables (no
+  third service-plan model, no new app). **R1 — local hymnal index:** new
+  `tblHymnals` + `tblHymnalEntries` (metadata only — number/title/tune/
+  author/CCLI/copyright, NEVER lyrics), searched via new
+  `Portal\Core\Hymnal::searchLocal()`; admin CRUD + CSV import at
+  `/admin/hymns` (multi-hymnal, upsert on hymn number, idempotent
+  re-import). **R2 — remote ("iHymns") lookup, Tier 2, default OFF:** a
+  generic HTTPS JSON client (`Hymnal::searchRemote()`) behind
+  `hymns.remote.enabled = 'false'` — https-only, single-host allowlist,
+  private/reserved-IP refusal (both at save and at request time),
+  `CURLOPT_FOLLOWLOCATION=false`, HTTPS-only protocols, 3s/5s timeouts, a
+  ~512 KB response cap, JSON-only parsing, and a 24h server-side cache
+  (`tblHymnLookupCache`) — ANY failure degrades silently to local-only
+  results; the API key is encrypted at rest and never logged. New
+  session-authenticated `service-plans/api/hymn-search.php` (ApiRouter
+  convention path, gated by `api.service-plans.hymn-search.enabled`, NOT a
+  tblRoutes row per the ApiRouter trap) merges local hymnal + song-library +
+  remote results for the run-sheet editor's typeahead picker. **R3 —
+  congregation-facing public Order of Service:** new `tblServicePlan.
+  publicToken`/`isPublicShared` (mirrors `tblAssets.publicToken`) + a
+  Router special route `/os/{token}` (cloned from `/a/{token}`) →
+  `service-plans/public.php` — congregation fields only (order, titles,
+  presenter names), internal AV/tech `notes` NEVER queried let alone
+  rendered, `noindex`, uniform 404 for unknown/unshared/unpublished/
+  disabled tokens (no oracle), OFF by default at both site
+  (`service_plans.public_share.enabled = 'false'`) and plan level; new
+  CSRF'd `service-plans/share.php` (enable/disable/rotate) + a QR code via
+  the existing `/qr.php` utility. `print.php` gains `?version=leader|
+  congregation` (default `leader`, byte-identical to before) — the
+  congregation variant suppresses `notes` and the internal sectionType tag.
+  **R4 (glue):** nullable `tblServicePlanItem.songID` FK → `tblSongs`
+  (`ON DELETE SET NULL`) — picking a hymn/song auto-promotes it into
+  `tblSongs` (check-first upsert, metadata only) and links it, so run-sheet
+  items and the Worship CCLI log share one canonical song entity; free-text
+  `title` remains the universal fallback (every existing item has `songID`
+  NULL and renders unchanged). `tblSongs` gains `hymnalCode`/`hymnNumber`/
+  `tuneName`, surfaced in `worship/song.php`/`songs.php`. All 11 audit
+  checks green, `php -l` clean on every touched file.
 - feat(workflow): gap #7 (#443) — Workflow Execution Engine +
   generic `/approvals` inbox. Migration 034 shipped four workflow tables
   and an admin definition CRUD, but no code anywhere started, advanced,

@@ -35,25 +35,34 @@ $copyright = mb_substr(trim((string) ($_POST['copyrightLine'] ?? '')), 0, 500);
 $key       = mb_substr(trim((string) ($_POST['defaultKey'] ?? '')),    0, 10);
 $tempo     = mb_substr(trim((string) ($_POST['defaultTempo'] ?? '')),  0, 20);
 $tags      = mb_substr(trim((string) ($_POST['tags'] ?? '')),          0, 255);
+// 🎵 Gap #128 residual — hymnal identity fields (hand-editable here, or
+// auto-populated by Portal\Core\Hymnal::promoteToSong() when a hymn is
+// promoted from the Service Plans picker).
+$hymnalCodeIn = mb_substr(trim((string) ($_POST['hymnalCode'] ?? '')), 0, 20);
+$hymnNumberIn = mb_substr(trim((string) ($_POST['hymnNumber'] ?? '')), 0, 20);
+$tuneIn       = mb_substr(trim((string) ($_POST['tuneName'] ?? '')),   0, 120);
+$hymnalCode   = $hymnalCodeIn !== '' ? $hymnalCodeIn : null;
+$hymnNumber   = $hymnNumberIn !== '' ? $hymnNumberIn : null;
+$tune         = $tuneIn !== '' ? $tuneIn : null;
 $lyrics    = (string) ($_POST['lyrics'] ?? '');
 if (mb_strlen($lyrics) > 50000) { $lyrics = mb_substr($lyrics, 0, 50000); }
 
 if ($songId === 0) {
     $stmt = $mysqli->prepare(
-        'INSERT INTO tblSongs (siteID, title, author, ccliNumber, copyrightLine, defaultKey, defaultTempo, lyrics, tags, createdByID) '
-        . 'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        'INSERT INTO tblSongs (siteID, title, author, ccliNumber, copyrightLine, defaultKey, defaultTempo, lyrics, tags, hymnalCode, hymnNumber, tuneName, createdByID) '
+        . 'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
     );
-    $stmt->bind_param('issssssssi', $siteId, $title, $author, $ccli, $copyright, $key, $tempo, $lyrics, $tags, $userId);
+    $stmt->bind_param('isssssssssssi', $siteId, $title, $author, $ccli, $copyright, $key, $tempo, $lyrics, $tags, $hymnalCode, $hymnNumber, $tune, $userId);
     $stmt->execute();
     $songId = (int) $stmt->insert_id;
     $stmt->close();
     Logger::activity('SongCreated', 'Song #' . $songId . ' "' . $title . '"');
 } else {
     $stmt = $mysqli->prepare(
-        'UPDATE tblSongs SET title=?, author=?, ccliNumber=?, copyrightLine=?, defaultKey=?, defaultTempo=?, lyrics=?, tags=? '
+        'UPDATE tblSongs SET title=?, author=?, ccliNumber=?, copyrightLine=?, defaultKey=?, defaultTempo=?, lyrics=?, tags=?, hymnalCode=?, hymnNumber=?, tuneName=? '
         . 'WHERE songID=? AND siteID=?'
     );
-    $stmt->bind_param('ssssssssii', $title, $author, $ccli, $copyright, $key, $tempo, $lyrics, $tags, $songId, $siteId);
+    $stmt->bind_param('sssssssssssii', $title, $author, $ccli, $copyright, $key, $tempo, $lyrics, $tags, $hymnalCode, $hymnNumber, $tune, $songId, $siteId);
     $stmt->execute();
     $stmt->close();
     Logger::activity('SongUpdated', 'Song #' . $songId);

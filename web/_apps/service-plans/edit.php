@@ -64,7 +64,7 @@ if (AppRegistry::isEnabled('worship') === true) {
 
 $items = [];
 $stmt = $db->prepare(
-    'SELECT i.itemID, i.sectionType, i.position, i.title, i.presenterID, i.presenterText, '
+    'SELECT i.itemID, i.sectionType, i.position, i.title, i.songID, i.presenterID, i.presenterText, '
     . '       i.durationMin, i.notes, u.fullName AS presenterName '
     . 'FROM tblServicePlanItem i LEFT JOIN tblUsers u ON u.userID = i.presenterID '
     . 'WHERE i.planID = ? ORDER BY i.position, i.itemID'
@@ -111,6 +111,20 @@ $flashMsg  = $_SESSION['flash_msg']  ?? '';
 $flashType = $_SESSION['flash_type'] ?? '';
 unset($_SESSION['flash_msg'], $_SESSION['flash_type']);
 
+// -----------------------------------------------------------------------------
+// 🔗 Gap #128 residual — public Order-of-Service share panel state. Site-
+// level kill-switch read from the normal bootstrap $SETTINGS snapshot (this
+// is an authenticated, in-app page for THIS site — unlike public.php, which
+// must never trust that snapshot for a token belonging to a different site).
+// -----------------------------------------------------------------------------
+$publicShareSiteOn = (string) (App::settings('service_plans.public_share.enabled') ?? 'false') === 'true';
+$isPlanShared      = (int) ($plan['isPublicShared'] ?? 0) === 1;
+$publicToken       = (string) ($plan['publicToken'] ?? '');
+// 🔗 Absolute-URL convention (invites/save.php precedent) — site.url with a
+// scheme+host fallback, since a QR code needs an absolute address.
+$siteBaseUrl = rtrim((string) (App::settings('site.url') ?? ('https://' . ($_SERVER['HTTP_HOST'] ?? ''))), '/');
+$publicUrl   = $publicToken !== '' ? ($siteBaseUrl . '/os/' . $publicToken) : '';
+
 $sectionTypes = [
     'greeting'       => 'Greeting / Welcome',
     'song'           => 'Song / Hymn',
@@ -135,8 +149,11 @@ $sectionTypes = [
         </p>
     </div>
     <div>
-        <a href="/service-plans/print?id=<?php echo $id; ?>" target="_blank" class="btn btn-outline-secondary btn-sm">
-            <i class="fa-solid fa-print me-1"></i>Print
+        <a href="/service-plans/print?id=<?php echo $id; ?>&version=leader" target="_blank" class="btn btn-outline-secondary btn-sm">
+            <i class="fa-solid fa-print me-1"></i>Print (leader)
+        </a>
+        <a href="/service-plans/print?id=<?php echo $id; ?>&version=congregation" target="_blank" class="btn btn-outline-secondary btn-sm">
+            <i class="fa-solid fa-print me-1"></i>Print (congregation)
         </a>
         <a href="/service-plans" class="btn btn-outline-secondary btn-sm">&larr; Back</a>
     </div>
@@ -172,6 +189,50 @@ $sectionTypes = [
                 <button type="submit" class="btn btn-primary btn-sm w-100">Save</button>
             </div>
         </form>
+    </div>
+</div>
+
+<!-- ═══════════════ Gap #128 residual — public Order of Service share panel ═══════════════ -->
+<div class="card mb-3">
+    <div class="card-body">
+        <h2 class="h5"><i class="fa-solid fa-share-nodes me-1 text-primary"></i>Public Order of Service</h2>
+        <?php if ($publicShareSiteOn === false): ?>
+            <p class="text-muted small mb-0">
+                Public sharing is turned off for this site.
+                <?php if (App::isAdmin() === true): ?>
+                    An admin can enable it at <a href="/admin/hymns">/admin/hymns</a>.
+                <?php endif; ?>
+            </p>
+        <?php elseif ($isPlanShared === true): ?>
+            <p class="small mb-2">Anyone with this link can view a read-only order of service — presenter names shown, no internal notes.</p>
+            <div class="input-group input-group-sm mb-2" style="max-width: 480px;">
+                <input type="text" class="form-control" readonly value="<?php echo htmlspecialchars($publicUrl, ENT_QUOTES, 'UTF-8'); ?>" onclick="this.select();">
+                <a href="<?php echo htmlspecialchars($publicUrl, ENT_QUOTES, 'UTF-8'); ?>" target="_blank" rel="noopener noreferrer" class="btn btn-outline-secondary"><i class="fa-solid fa-arrow-up-right-from-square"></i></a>
+            </div>
+            <img src="/qr.php?content=<?php echo urlencode($publicUrl); ?>&amp;size=160" width="160" height="160" alt="QR code for the public Order of Service" class="mb-2 border rounded">
+            <div class="d-flex gap-2">
+                <form method="post" action="/service-plans/share">
+                    <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
+                    <input type="hidden" name="planID" value="<?php echo $id; ?>">
+                    <input type="hidden" name="action" value="rotate">
+                    <button type="submit" class="btn btn-sm btn-outline-secondary" data-confirm="Rotate the link? The old link/QR code will stop working." data-confirm-destructive="true"><i class="fa-solid fa-rotate me-1"></i>Rotate link</button>
+                </form>
+                <form method="post" action="/service-plans/share">
+                    <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
+                    <input type="hidden" name="planID" value="<?php echo $id; ?>">
+                    <input type="hidden" name="action" value="disable">
+                    <button type="submit" class="btn btn-sm btn-outline-danger"><i class="fa-solid fa-lock me-1"></i>Turn off sharing</button>
+                </form>
+            </div>
+        <?php else: ?>
+            <p class="text-muted small">Not shared. Enabling renders only the order/titles/hymns/presenter names — internal notes are never shown, and it only becomes visible once this plan's status is "published".</p>
+            <form method="post" action="/service-plans/share">
+                <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
+                <input type="hidden" name="planID" value="<?php echo $id; ?>">
+                <input type="hidden" name="action" value="enable">
+                <button type="submit" class="btn btn-sm btn-primary"><i class="fa-solid fa-share-nodes me-1"></i>Enable public sharing</button>
+            </form>
+        <?php endif; ?>
     </div>
 </div>
 
@@ -294,8 +355,21 @@ $sectionTypes = [
                             <?php endforeach; ?>
                         </select>
                     </div>
-                    <div class="col-md-3">
-                        <input type="text" name="title" class="form-control form-control-sm" maxlength="255" value="<?php echo htmlspecialchars((string) ($it['title'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>" placeholder="Title">
+                    <div class="col-md-3 position-relative hymn-picker">
+                        <input type="text" name="title" class="form-control form-control-sm" maxlength="255" value="<?php echo htmlspecialchars((string) ($it['title'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>" placeholder="Title (or search a hymn/song below)">
+                        <!-- 🎵 Gap #128 residual — hymn/song picker. Hidden fields carry
+                             either an already-canonical songID or a fresh pick's metadata
+                             for item-save.php to auto-promote (see that file's header). -->
+                        <input type="hidden" name="songID" value="<?php echo (int) ($it['songID'] ?? 0); ?>">
+                        <input type="hidden" name="pickTitle" value="">
+                        <input type="hidden" name="pickAuthor" value="">
+                        <input type="hidden" name="pickCcli" value="">
+                        <input type="hidden" name="pickCopyright" value="">
+                        <input type="hidden" name="pickHymnalCode" value="">
+                        <input type="hidden" name="pickHymnalNumber" value="">
+                        <input type="hidden" name="pickTune" value="">
+                        <input type="text" class="form-control form-control-sm mt-1 hymn-search-input" placeholder="🔎 Search hymn/song…" autocomplete="off">
+                        <div class="list-group hymn-search-results position-absolute w-100" style="z-index:20; max-height:220px; overflow-y:auto; display:none;"></div>
                     </div>
                     <div class="col-md-2">
                         <select name="presenterID" class="form-select form-select-sm">
@@ -343,8 +417,18 @@ $sectionTypes = [
                     <?php endforeach; ?>
                 </select>
             </div>
-            <div class="col-md-6">
+            <div class="col-md-6 position-relative hymn-picker">
                 <input type="text" name="title" class="form-control form-control-sm" maxlength="255" placeholder="Title (e.g. Hymn 256 — Amazing Grace)">
+                <input type="hidden" name="songID" value="0">
+                <input type="hidden" name="pickTitle" value="">
+                <input type="hidden" name="pickAuthor" value="">
+                <input type="hidden" name="pickCcli" value="">
+                <input type="hidden" name="pickCopyright" value="">
+                <input type="hidden" name="pickHymnalCode" value="">
+                <input type="hidden" name="pickHymnalNumber" value="">
+                <input type="hidden" name="pickTune" value="">
+                <input type="text" class="form-control form-control-sm mt-1 hymn-search-input" placeholder="🔎 Search hymn/song…" autocomplete="off">
+                <div class="list-group hymn-search-results position-absolute w-100" style="z-index:20; max-height:220px; overflow-y:auto; display:none;"></div>
             </div>
             <div class="col-md-3">
                 <button type="submit" class="btn btn-primary btn-sm w-100"><i class="fa-solid fa-plus me-1"></i>Add section</button>
@@ -352,5 +436,113 @@ $sectionTypes = [
         </form>
     </div>
 </div>
+
+<script>
+// -----------------------------------------------------------------------
+// 🎵 Gap #128 residual — hymn/song picker typeahead. Progressive
+// enhancement only: with JS disabled or the fetch failing, `title` stays a
+// plain text input exactly as before #128 — nothing regresses.
+// -----------------------------------------------------------------------
+(function () {
+    'use strict';
+
+    function debounce(fn, ms) {
+        var t;
+        return function () {
+            var ctx = this, args = arguments;
+            clearTimeout(t);
+            t = setTimeout(function () { fn.apply(ctx, args); }, ms);
+        };
+    }
+
+    function wireHymnPicker(root) {
+        var input = root.querySelector('.hymn-search-input');
+        var list  = root.querySelector('.hymn-search-results');
+        var form  = root.closest('form');
+        if (!input || !list || !form) {
+            return;
+        }
+
+        function setField(name, val) {
+            var el = form.querySelector('[name="' + name + '"]');
+            if (el) {
+                el.value = val || '';
+            }
+        }
+
+        function clearPick() {
+            ['pickTitle', 'pickAuthor', 'pickCcli', 'pickCopyright', 'pickHymnalCode', 'pickHymnalNumber', 'pickTune'].forEach(function (n) {
+                setField(n, '');
+            });
+        }
+
+        function pick(item) {
+            list.style.display = 'none';
+            list.innerHTML = '';
+            input.value = '';
+            clearPick();
+            setField('songID', '0');
+
+            var titleField = form.querySelector('[name="title"]');
+            if (item.source === 'song') {
+                if (titleField) { titleField.value = item.title || ''; }
+                setField('songID', String(item.songID || 0));
+                return;
+            }
+
+            var label = (item.hymnalCode ? item.hymnalCode + ' ' : '') + (item.number ? item.number + ' — ' : '') + (item.title || '');
+            if (titleField) { titleField.value = label; }
+            setField('pickTitle', item.title || '');
+            setField('pickAuthor', item.author || '');
+            setField('pickCcli', item.ccliNumber || '');
+            setField('pickCopyright', item.copyrightLine || '');
+            setField('pickHymnalCode', item.hymnalCode || '');
+            setField('pickHymnalNumber', item.number || '');
+            setField('pickTune', item.tuneName || '');
+        }
+
+        var doSearch = debounce(function () {
+            var q = input.value.trim();
+            if (q.length < 2) {
+                list.style.display = 'none';
+                list.innerHTML = '';
+                return;
+            }
+            fetch('/api/service-plans/hymn-search?q=' + encodeURIComponent(q) + '&limit=12', { credentials: 'same-origin' })
+                .then(function (r) { return r.json(); })
+                .then(function (json) {
+                    var results = (json && json.data && json.data.results) || [];
+                    list.innerHTML = '';
+                    if (results.length === 0) {
+                        list.style.display = 'none';
+                        return;
+                    }
+                    results.forEach(function (item) {
+                        var badge = item.source === 'hymnal' ? 'Hymnal' : (item.source === 'remote' ? 'iHymns' : 'Song library');
+                        var btn = document.createElement('button');
+                        btn.type = 'button';
+                        btn.className = 'list-group-item list-group-item-action small py-1';
+                        btn.textContent = '[' + badge + '] ' + (item.number ? item.number + ' — ' : '') + (item.title || '') + (item.author ? ' (' + item.author + ')' : '');
+                        btn.addEventListener('click', function () { pick(item); });
+                        list.appendChild(btn);
+                    });
+                    list.style.display = 'block';
+                })
+                .catch(function () {
+                    list.style.display = 'none';
+                });
+        }, 300);
+
+        input.addEventListener('input', doSearch);
+        document.addEventListener('click', function (e) {
+            if (!root.contains(e.target)) {
+                list.style.display = 'none';
+            }
+        });
+    }
+
+    document.querySelectorAll('.hymn-picker').forEach(wireHymnPicker);
+})();
+</script>
 
 <?php require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'footer.php'; ?>

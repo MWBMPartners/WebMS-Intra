@@ -11,6 +11,7 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\Hymnal;
 use Portal\Core\Site;
 
 Auth::ensureSession();
@@ -24,6 +25,54 @@ $db     = App::db();
 $siteId = Site::id();
 $planId = (int) ($_POST['planID'] ?? 0);
 $action = (string) ($_POST['action'] ?? '');
+$userId = (int) ($_SESSION['user_id'] ?? 0);
+
+// -----------------------------------------------------------------------
+// 🎵 Gap #128 residual — resolve an optional canonical song link for this
+// item. Two POST shapes, mutually exclusive:
+//   pickTitle (+ pickAuthor/pickCcli/pickCopyright/pickHymnalCode/
+//   pickHymnalNumber/pickTune) — the hymn picker's JS filled these when the
+//   operator chose a hymnal-index or remote-provider result that ISN'T yet
+//   a canonical tblSongs row. Auto-promotes it (default: yes, per plan)
+//   via Hymnal::promoteToSong() and links the returned songID.
+//   songID — the operator chose an ALREADY-canonical song-library result
+//   (or this is re-saving an item that already carries a link). Re-
+//   validated against THIS site's tblSongs before use — a crafted
+//   cross-site songID is silently dropped to NULL, never an error, mirror
+//   of the presenterID site-scope validation just below.
+// Both paths degrade to NULL on any problem — free-text `title` remains
+// the universal, always-working fallback (unchanged from before #128).
+// -----------------------------------------------------------------------
+$resolveSongId = static function () use ($db, $siteId, $userId): ?int {
+    $pickTitle = trim((string) ($_POST['pickTitle'] ?? ''));
+    if ($pickTitle !== '') {
+        $entry = [
+            'title'         => $pickTitle,
+            'author'        => (string) ($_POST['pickAuthor'] ?? ''),
+            'ccliNumber'    => (string) ($_POST['pickCcli'] ?? ''),
+            'copyrightLine' => (string) ($_POST['pickCopyright'] ?? ''),
+            'hymnalCode'    => (string) ($_POST['pickHymnalCode'] ?? ''),
+            'hymnNumber'    => (string) ($_POST['pickHymnalNumber'] ?? ''),
+            'tuneName'      => (string) ($_POST['pickTune'] ?? ''),
+        ];
+        $newId = Hymnal::promoteToSong($siteId, $entry, $userId > 0 ? $userId : null);
+        return $newId > 0 ? $newId : null;
+    }
+
+    $songId = (int) ($_POST['songID'] ?? 0);
+    if ($songId <= 0) {
+        return null;
+    }
+    $stmt = $db->prepare('SELECT 1 FROM tblSongs WHERE songID = ? AND siteID = ? LIMIT 1');
+    if ($stmt === false) {
+        return null;
+    }
+    $stmt->bind_param('ii', $songId, $siteId);
+    $stmt->execute();
+    $valid = $stmt->get_result()->fetch_row() !== null;
+    $stmt->close();
+    return $valid === true ? $songId : null;
+};
 
 // Confirm plan ownership / site scope.
 $stmt = $db->prepare('SELECT 1 FROM tblServicePlan WHERE planID = ? AND siteID = ? LIMIT 1');
@@ -57,12 +106,13 @@ try {
             $next = (int) ($row['next'] ?? 1);
             $nextStmt->close();
         }
+        $songId = $resolveSongId();
         $stmt = $db->prepare(
-            'INSERT INTO tblServicePlanItem (planID, sectionType, position, title) VALUES (?, ?, ?, ?)'
+            'INSERT INTO tblServicePlanItem (planID, sectionType, position, title, songID) VALUES (?, ?, ?, ?, ?)'
         );
         if ($stmt !== false) {
             $titleVal = $title !== '' ? $title : null;
-            $stmt->bind_param('isis', $planId, $sectionType, $next, $titleVal);
+            $stmt->bind_param('isisi', $planId, $sectionType, $next, $titleVal, $songId);
             $stmt->execute();
             $stmt->close();
         }
@@ -97,17 +147,18 @@ try {
                 $presenterID = 0;
             }
         }
-        $pID = $presenterID > 0 ? $presenterID : null;
-        $pT  = $presenterTxt !== '' ? $presenterTxt : null;
-        $tt  = $title !== '' ? $title : null;
-        $dur = $duration > 0 ? $duration : null;
-        $nt  = $notes !== '' ? $notes : null;
+        $pID    = $presenterID > 0 ? $presenterID : null;
+        $pT     = $presenterTxt !== '' ? $presenterTxt : null;
+        $tt     = $title !== '' ? $title : null;
+        $dur    = $duration > 0 ? $duration : null;
+        $nt     = $notes !== '' ? $notes : null;
+        $songId = $resolveSongId();
         $stmt = $db->prepare(
-            'UPDATE tblServicePlanItem SET sectionType = ?, title = ?, presenterID = ?, '
+            'UPDATE tblServicePlanItem SET sectionType = ?, title = ?, songID = ?, presenterID = ?, '
             . 'presenterText = ?, durationMin = ?, notes = ? WHERE itemID = ? AND planID = ?'
         );
         if ($stmt !== false) {
-            $stmt->bind_param('ssisisii', $sectionType, $tt, $pID, $pT, $dur, $nt, $itemId, $planId);
+            $stmt->bind_param('ssiisisii', $sectionType, $tt, $songId, $pID, $pT, $dur, $nt, $itemId, $planId);
             $stmt->execute();
             $stmt->close();
         }
