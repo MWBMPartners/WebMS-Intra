@@ -564,6 +564,17 @@ Post-1.3.0 Phase-1 ships. Brand font + worship engine landed first; the rest is 
 - Page-scoped CSP extension mechanism in `_core/templates/header.php` (`$cspImgExtra` / `$cspMediaExtra` / `$cspFrameExtra`) — widens img/media/frame directives on the /noticeboard page only. Global CSP unchanged.
 - Security hardening: cross-site poster write guard on save (foreign posterIDs insert as new); URL scheme allowlist on `link` / `image` / `thumb` (http(s):// or root-relative only); Canva URL pinned to `www.canva.com`; QR endpoint pins to current host via strict parse_url + honours encoder's ~250-char ceiling; `Qr::pngBytes()`→`Qr::generate()` fatal fixed; `save.php` bind_param arity 20→21 fatal fixed.
 
+### Added — Venue Bookings app (#429)
+- New `/venues` marketplace app (migration 170, 15 tables): tenant-side hire
+  schedule for rented buildings — per-date bookings, per-venue usage types
+  with effective-dated default hours, per-site configurable statuses with
+  countsAsConfirmed flags, multi-day groups + recurring generator with
+  duplicate-skip, native XLSX/CSV import wizard (Mill Road workbook shape),
+  hire agreements with renewal reminders, payable invoice + payment ledger,
+  calendar overlay + "is it booked?" event warnings, CSV/PDF exports,
+  `venue_manager` role, token-gated reminders cron, GDPR eraser/export
+  coverage, `/help/venues` guide.
+
 ## [1.3.0] - 2026-06-19 (main)
 
 PR #340 — events platform overhaul + COP + ChurchMS verticals + ops hygiene. **36 issues across 39 commits in one consolidated PR.** The Multi-brand product layer section originally drafted for 1.2.0 (see further down) shipped as part of this release.

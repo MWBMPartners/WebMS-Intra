@@ -6,7 +6,16 @@
  * -----------------------------------------------------------------------------
  * Shared form fields for creating and editing events. Included by both the
  * create and edit sections of manage/index.php. Expects $editEvent to be
- * set (or null for create mode), and $categories, $eventTypes, $seriesList.
+ * set (or null for create mode), and $categories, $eventTypes, $seriesList,
+ * $defaultVenueId, $venueOptions.
+ *
+ * 🏛️ Venue Bookings (#429) Surface A: when $venueOptions is non-empty
+ * (manage/index.php's guarded venues integration), renders an advisory
+ * "External Venue" picker + a hidden alert div wired to a debounced fetch
+ * against /api/venues/check. This is a TRANSIENT UI helper only — tblEvents
+ * has no venueID column, so nothing here is persisted; it exists purely to
+ * warn an admin, before they save, whether the picked venue is actually
+ * booked/confirmed/closed/unavailable for the chosen date/time.
  *
  * @package   Portal\Calendar
  * @author    MWBM Partners Ltd (t/a MWservices)
@@ -18,9 +27,17 @@
 
 declare(strict_types=1);
 
+use Portal\Core\I18n;
+
 // 📌 Extract values for pre-population (edit mode)
 $ev = $editEvent ?? [];
 $isEdit = $editEvent !== null;
+
+// 🏛️ Venue Bookings (#429) — set by manage/index.php's guarded block;
+// defensive fallback keeps this partial safe if ever included elsewhere.
+$venueOptions   = $venueOptions   ?? [];
+$defaultVenueId = $defaultVenueId ?? 0;
+$hasVenueCheck  = count($venueOptions) > 0;
 ?>
 
 <div class="row g-3">
@@ -256,4 +273,131 @@ $isEdit = $editEvent !== null;
             <label class="form-check-label" for="isFeatured-<?php echo $isEdit ? 'edit' : 'new'; ?>">Featured</label>
         </div>
     </div>
+
+    <?php if ($hasVenueCheck === true): ?>
+    <!-- 🏛️ Venue Bookings (#429) Surface A — advisory "is it booked?" check.
+         TRANSIENT: venueID is never saved to tblEvents; it only drives the
+         client-side fetch below and Surface B's post-save flash check. -->
+    <div class="col-12 mt-4">
+        <h6 class="text-muted text-uppercase"><i class="fa-solid fa-building-columns me-1"></i>
+            <?php echo htmlspecialchars(I18n::t('venues.check.heading'), ENT_QUOTES, 'UTF-8'); ?>
+        </h6>
+        <hr class="mt-0">
+    </div>
+
+    <div class="col-12 col-md-6">
+        <label class="form-label" for="venueCheckSelect-<?php echo $isEdit ? 'edit' : 'new'; ?>">
+            <?php echo htmlspecialchars(I18n::t('venues.check.select_label'), ENT_QUOTES, 'UTF-8'); ?>
+        </label>
+        <select class="form-select" name="venueID" id="venueCheckSelect-<?php echo $isEdit ? 'edit' : 'new'; ?>">
+            <option value="0"><?php echo htmlspecialchars(I18n::t('venues.check.select_placeholder'), ENT_QUOTES, 'UTF-8'); ?></option>
+            <?php foreach ($venueOptions as $v): ?>
+                <option value="<?php echo (int) $v['venueID']; ?>"
+                    <?php echo ($defaultVenueId === (int) $v['venueID']) ? 'selected' : ''; ?>>
+                    <?php echo htmlspecialchars((string) $v['venueName'], ENT_QUOTES, 'UTF-8'); ?>
+                </option>
+            <?php endforeach; ?>
+        </select>
+        <div class="form-text"><?php echo htmlspecialchars(I18n::t('venues.check.help_text'), ENT_QUOTES, 'UTF-8'); ?></div>
+    </div>
+
+    <div class="col-12 col-md-6 d-flex align-items-end">
+        <div id="venueCheckAlert-<?php echo $isEdit ? 'edit' : 'new'; ?>" class="alert d-none mb-0 w-100" role="status" aria-live="polite"></div>
+    </div>
+
+    <script>
+    (function () {
+        // 🏛️ Venue Bookings (#429) Surface A — debounced "is it booked?"
+        // check. Silent no-op on ANY failure (network error, app disabled,
+        // aborted request) — this is a pre-save advisory, it must never
+        // block or interfere with the form itself.
+        var idSuffix   = <?php echo json_encode($isEdit ? 'edit' : 'new'); ?>;
+        var select     = document.getElementById('venueCheckSelect-' + idSuffix);
+        var alertBox   = document.getElementById('venueCheckAlert-' + idSuffix);
+        if (select === null || alertBox === null) { return; }
+
+        var form = select.closest('form');
+        if (form === null) { return; }
+
+        var startInput = form.querySelector('[name="startDateTime"]');
+        var endInput   = form.querySelector('[name="endDateTime"]');
+        var tzInput    = form.querySelector('[name="timezone"]');
+
+        var debounceTimer   = null;
+        var currentController = null;
+
+        function hideAlert() {
+            alertBox.classList.add('d-none');
+            alertBox.classList.remove('alert-danger', 'alert-warning', 'alert-success');
+            alertBox.textContent = '';
+        }
+
+        function runCheck() {
+            var venueId  = parseInt(select.value, 10) || 0;
+            var startVal = startInput !== null ? startInput.value : '';
+            if (venueId <= 0 || startVal === '') {
+                hideAlert();
+                return;
+            }
+
+            var params = new URLSearchParams();
+            params.set('venueID', String(venueId));
+            params.set('startDateTime', startVal);
+            if (endInput !== null && endInput.value !== '') {
+                params.set('endDateTime', endInput.value);
+            }
+            if (tzInput !== null && tzInput.value !== '') {
+                params.set('timezone', tzInput.value);
+            }
+
+            if (currentController !== null && typeof currentController.abort === 'function') {
+                currentController.abort();
+            }
+            currentController = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+
+            fetch('/api/venues/check?' + params.toString(), {
+                method: 'GET',
+                credentials: 'same-origin',
+                signal: currentController !== null ? currentController.signal : undefined
+            }).then(function (resp) {
+                if (resp.ok === false) {
+                    throw new Error('venue check failed');
+                }
+                return resp.json();
+            }).then(function (data) {
+                var message = (data && typeof data.message === 'string') ? data.message : '';
+                if (message === '') {
+                    hideAlert();
+                    return;
+                }
+                var severity = (data && typeof data.severity === 'string') ? data.severity : 'warning';
+                var cssClass = 'alert-warning';
+                if (severity === 'success') { cssClass = 'alert-success'; }
+                else if (severity === 'danger') { cssClass = 'alert-danger'; }
+
+                alertBox.classList.remove('d-none', 'alert-danger', 'alert-warning', 'alert-success');
+                alertBox.classList.add(cssClass);
+                // 🛡️ Assigned via the safe DOM text property only, never the
+                // unsafe HTML-parsing one — defence in depth even though the
+                // message is server-built.
+                alertBox.textContent = message;
+            }).catch(function () {
+                hideAlert();
+            });
+        }
+
+        function scheduleCheck() {
+            if (debounceTimer !== null) {
+                window.clearTimeout(debounceTimer);
+            }
+            debounceTimer = window.setTimeout(runCheck, 500);
+        }
+
+        select.addEventListener('change', scheduleCheck);
+        if (startInput !== null) { startInput.addEventListener('change', scheduleCheck); }
+        if (endInput   !== null) { endInput.addEventListener('change', scheduleCheck); }
+        if (tzInput    !== null) { tzInput.addEventListener('change', scheduleCheck); }
+    })();
+    </script>
+    <?php endif; ?>
 </div>
