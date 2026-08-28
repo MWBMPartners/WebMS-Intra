@@ -3621,6 +3621,144 @@ own authorisation surface) — v1 ships approve/reject/comment only.
 
 ---
 
+## Web Push setup (#322)
+
+`Portal\Core\WebPush` (`web/_core/WebPush.php`) sends VAPID (RFC 8292)
+signed, RFC 8291 aes128gcm-encrypted browser push notifications for "we're
+live now" and upcoming-service reminders. Migration 111 seeded the
+`push.*` settings keys empty; migration 177 seeded everything else
+(TTLs, auto-notify toggles, the SSRF host allowlist, the two
+`api.push.*.enabled` ApiRouter flags, four route rows) — **no key
+material**. The feature is **INERT** on every fresh install until an
+owner completes the three steps below; `WebPush::isConfigured()` gates
+every send path, the client subscribe UI, and both cron jobs, so an
+unconfigured install's cron runs are cheap, harmless no-ops.
+
+### 1. Generate or import a VAPID key pair
+
+At `/admin/integrations/push`, either:
+
+- Click **"Generate new key pair"** — one click, no OpenSSL needed. The
+  private key is sodium-encrypted at rest via the house
+  `encrypt_setting()` helper and is **never** re-displayed once saved
+  (the page shows only a "configured ✔" badge and an 8-hex fingerprint of
+  the *public* key — the private key precedent set by
+  `admin/integrations/cloudflare-stream`'s signing key).
+- Or generate a key pair yourself and paste it into the **"Import"** box.
+  Either a full PEM:
+
+  ```sh
+  openssl ecparam -name prime256v1 -genkey -noout -out vapid.pem
+  cat vapid.pem   # paste the WHOLE file contents into the import box
+  ```
+
+  or the bare base64url 32-byte private scalar some tools (e.g. the
+  `web-push` npm CLI's `generate-vapid-keys`) export standalone —
+  `WebPush::importPrivateKey()` accepts either shape and derives the
+  matching public key itself (validated in `tools/webpush-selftest.php`:
+  ext-openssl reconstructs the public point from the private scalar alone
+  at parse time, so no explicit public-key DER field is needed).
+
+Then set a **contact** (`mailto:` or `https:` — RFC 8292 §2.1 requires
+one; a push service uses it to reach you if this install starts
+misbehaving) and tick **"Enable Web Push"**.
+
+**Regenerating breaks existing subscriptions.** A real push service
+validates that the sender's VAPID public key matches the one the
+browser's `pushManager.subscribe()` call used — clicking "Generate" again
+is a fresh start, not a rotation. Existing subscribers silently stop
+receiving pushes until they revisit the portal and re-subscribe (the
+`/account/notifications` and `/live` opt-in widgets re-run
+`getSubscription()` on every page load, so this self-heals the next time
+each subscriber's browser is online — there's no need to chase anyone
+down).
+
+### 2. Point the crontabs at the two push endpoints
+
+| Endpoint | Cadence | Token setting |
+| --- | --- | --- |
+| `cron/push-golive?key=<token>` | every 5 minutes | `push.cron_token` |
+| `cron/event-reminders?key=<token>` | every 15 minutes (already required for #329; Web Push now rides its 1h window) | `reminders.cron_token` |
+
+Both tokens seed empty + `isSensitive=1` — set a real value at
+`/admin/settings` (or paste one at `/admin/integrations/push` if a future
+build adds that field) or the endpoint 403s forever (empty-fails-closed,
+the six-of-six `cron/*` convention). `push.cron_token` is DEDICATED —
+don't reuse `reminders.cron_token` — so the two endpoints can be rotated
+independently.
+
+`cron/push-golive.php` only does anything when its own settings are ALSO
+turned on (both default OFF): `push.golive.auto` (auto-detect a schedule
+window opening, deduped once per channel per day via
+`tblUserReminderLog`) and `push.reminders.broadcast` (anonymous "starting
+soon" broadcast to the whole `reminders` channel when the next scheduled
+stream is within 60 minutes). The PRIMARY go-live trigger doesn't need
+this cron at all — it's the manual **"Send 'We're live' notification"**
+button on `/admin/livestream` and the Host Console, which fires
+synchronously the moment an admin clicks it.
+
+A channel with two separate live windows in one day needs the manual
+button for the second window — the auto-detect dedupe key is
+`(refType='push-golive', refID=channelID, dueDate=today)`, once per
+CHANNEL per DAY by design (issue #322's decided default; revisit only if
+a real site genuinely runs two auto-notified streams in a single day).
+
+### 3. Verify it end-to-end
+
+1. `/admin/integrations/push` → the banner should flip from amber
+   ("Inert") to green ("Configured and active") once steps 1-2 are done.
+2. `/account/notifications` (or `/live`) in Chrome/Firefox → the "Push
+   notifications" card renders a working "Enable notifications on this
+   device" button (it stays hidden entirely, with no button at all, while
+   `WebPush::publicKey()` returns `''`) → click it, grant the browser
+   permission prompt → a row appears in `tblPushSubscriptions` with the
+   correct `siteID`/`userID`/`channels`.
+3. `/admin/integrations/push` → **"Send test notification to my
+   devices"** → a notification should arrive on that device within a few
+   seconds; clicking it focuses an existing portal tab (or opens one) at
+   the notification's target URL.
+4. `/admin/livestream` with a channel currently inside its scheduled
+   window → **"Send 'We're live' notification"** → the button is disabled
+   with a tooltip explaining why whenever Web Push is unconfigured OR no
+   channel is currently live.
+5. Prune check: subscribe, then revoke notification permission for the
+   site in the browser's own site settings, then send another test/live
+   push → the push service returns 404/410 → the subscription row flips
+   `isActive=0` + `lastHttpStatus` records the code → the admin page's
+   subscription counts update on next load.
+
+### Troubleshooting
+
+**"401" / "403" from the push service, every single send** — almost
+always one of two causes, both guarded by `tools/webpush-selftest.php`
+(run it — `php tools/webpush-selftest.php` — before chasing anything
+else):
+
+- **Clock skew.** The VAPID JWT's `exp` claim is `now + 12h`; if the
+  server's clock is badly wrong, every JWT looks expired (or not-yet-valid)
+  to the push service. Check `date` on the server.
+- **A broken DER→JOSE conversion.** `openssl_sign()` returns a DER
+  `ECDSA-Sig-Value`; RFC 7518 §3.4 requires the JWS signature to be the
+  RAW 64-byte `R‖S` concatenation instead. Shipping the DER bytes
+  unconverted is THE classic implementer mistake for this exact protocol
+  — every push service just returns 401/403 with zero diagnostic detail,
+  because from its side the signature simply doesn't verify. If
+  `tools/webpush-selftest.php` still passes after a refactor, this class
+  of bug is ruled out; if it starts failing, this is almost certainly why.
+
+**Nothing happens when I click "Enable notifications" on `/account/notifications`**
+— open devtools → Application → Service Workers and confirm `/sw.js` is
+registered and activated (footer.php registers it on every page load);
+`push-subscribe.js` requires an active service worker registration before
+it can call `pushManager.subscribe()`. Also check `Notification.permission`
+isn't already `'denied'` from an earlier browser-level block — the widget
+shows "Blocked in browser settings" in that case rather than a button.
+
+**A legitimate push endpoint gets rejected at subscribe time** — the SSRF
+host allowlist (`push.endpointHostAllowlist`, admin-editable at
+`/admin/integrations/push`) is a suffix match against the endpoint's
+host. A new browser vendor's push service host is not a code change —
+just add it to the allowlist.
 ## Hymnal lookup + public Order of Service (gap #128 residual, migration 178)
 
 ### Re-scope verdict

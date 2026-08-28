@@ -72,7 +72,7 @@ infrastructure rather than apps).
 | invites | `/invites` | Single-use invite links so new members self-register with role pre-assigned |
 | kids | `/kids/*` | Children's ministry check-in / check-out with 6-digit safeguarding badge codes (#298) |
 | leadership | `/leadership` | Roles + assignments + history + CSV |
-| livestream | `/live` | Embed YouTube / Vimeo / Twitch / Facebook livestreams with countdown + session analytics |
+| livestream | `/live` | Embed YouTube / Vimeo / Twitch / Facebook livestreams with countdown + session analytics; Web Push "we're live now" + service-reminder browser notifications (#322) |
 | milestones | `/milestones` | Birthdays, anniversaries, joining dates with daily digest for designated roles |
 | newsletter | `/newsletter` | Compose, schedule, send branded HTML newsletters (internal sender; MailerMatt adapter slot reserved) |
 | noticeboard | `/noticeboard` | Visual poster wall (Canva embeds, image/video/text posters, weekday recurrence, QR share) (#360, #363) |
@@ -156,6 +156,39 @@ Calendar/Events/Preaching Plan is ONE app ("Events") — `/calendar` covers view
 
 ## Recent ships (chronological)
 
+- **`claude/gap322-webpush`** (branched off `alpha`) — issue #322: Web Push
+  notifications ("we're live now" + service-reminder channels). Migration
+  111 shipped `tblPushSubscriptions` + the four `push.vapid*`/
+  `push.contact`/`push.enabled` settings, but the subscribe/unsubscribe
+  handlers sat at `_apps/api/push/*` — a path ApiRouter never resolves
+  (same routing trap already fixed for worship/livestream in #372/#373) —
+  and NO sender existed anywhere. This ships the whole loop:
+  `Portal\Core\WebPush` (VAPID ES256 JWT with the mandatory DER→JOSE
+  signature conversion, RFC 8291 aes128gcm payload encryption via a fresh
+  ephemeral P-256 keypair per message + triple `hash_hkdf()`, RFC 8030
+  delivery with TTL/Urgency/Topic); a committed crypto self-test
+  (`tools/webpush-selftest.php`, no DB/network, exercises the real private
+  methods via reflection) that PASSES; relocated
+  `_apps/push/api/{subscribe,unsubscribe}.php` + the two
+  `api.push.*.enabled` flags migration 177 seeds; SSRF-guarded endpoint
+  validation (https-only, no IP-literal/local host, admin-editable
+  host-suffix allowlist) enforced at BOTH subscribe and send time; the
+  VAPID private key sodium-encrypted at rest, never redisplayed, never
+  sent to the client; client subscribe UI (`assets/js/push-subscribe.js`)
+  + new `sw.js` `push`/`notificationclick` handlers; the "we're live now"
+  manual admin button (`/admin/livestream` + Host Console) plus a
+  default-OFF auto-detect cron (`cron/push-golive.php`, dedupe once per
+  channel per day) and a default-OFF anonymous "starting soon" broadcast;
+  a Web Push companion to `cron/event-reminders.php`'s 1h window (same
+  dedupe claim as the email send); `/admin/integrations/push` config page
+  (generate-or-paste keys, TTLs, toggles, per-channel subscription counts,
+  test-send); GdprEraser + offboarding coverage of `tblPushSubscriptions`.
+  INERT until an admin sets VAPID keys (`WebPush::isConfigured()` gates
+  every send path). Migration 177 (renumbered from 175 — #423's UPC-E took
+  175, #234's shared-mailbox took 176): 3 additive `tblPushSubscriptions`
+  columns (dead-subscription pruning), settings seeds, 4 route seeds, no
+  new tables (reuses `tblUserReminderLog` / `tblEventReminderLog` for
+  dedupe). All 11 audit checks green, `php -l` clean on every touched file.
 - **`claude/gap128-oos`** (branched off `alpha`) — gap #128 residual
   (re-scoped #128 "Order of Service planner with iHymns integration"):
   service-plans (#262/#300) + Worship (#308/#355) already covered

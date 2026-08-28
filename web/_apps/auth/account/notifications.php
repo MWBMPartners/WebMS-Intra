@@ -13,6 +13,10 @@
  *   • Announcement notifications
  *   • Task reminders / Rota duty reminders (gap #439, cron/user-reminders)
  *   • Workflow approval requests (#443, Portal\Core\Workflow)
+ *   • Web Push master prefs (#322) — pushLivestream / pushServiceReminders.
+ *     These gate the NOTIFICATION content only; per-DEVICE opt-in (which
+ *     browsers actually receive a push at all) is the separate
+ *     `[data-push-optin]` widget below, backed by Portal\Core\WebPush.
  *
  * Stored in tblUsers.notifyPrefs (JSON column from migration 026).
  *
@@ -31,6 +35,7 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\WebPush;
 
 Auth::ensureSession();
 Auth::requireLogin();
@@ -87,6 +92,8 @@ $defaults = [
     'taskReminders'         => true,
     'rotaReminders'         => true,
     'approvalRequests'      => true,
+    'pushLivestream'        => true,
+    'pushServiceReminders'  => true,
 ];
 foreach ($defaults as $k => $v) {
     if (array_key_exists($k, $prefs) === false) {
@@ -193,6 +200,32 @@ $switchRow = static function (string $key, string $label, string $helpText) use 
         </div>
     </div>
 
+    <?php $pushPublicKey = WebPush::publicKey(); ?>
+    <div class="card shadow-sm mb-3">
+        <div class="card-header"><h2 class="h6 mb-0">Push notifications</h2></div>
+        <div class="card-body">
+            <?php if ($pushPublicKey === ''): ?>
+                <p class="small text-muted mb-0">
+                    <i class="fa-solid fa-circle-info me-1"></i>
+                    Browser push notifications are not configured on this site yet.
+                </p>
+            <?php else: ?>
+                <?php echo $switchRow('pushLivestream', 'We\'re live now', 'Notify me when a livestream starts (if I\'ve enabled notifications on this device below).'); ?>
+                <?php echo $switchRow('pushServiceReminders', 'Service reminders', 'Notify me shortly before a service I\'ve RSVP\'d to starts.'); ?>
+                <div class="pt-3">
+                    <p class="small text-muted mb-2">
+                        These preferences control WHAT you're notified about. Whether THIS device
+                        actually receives push notifications at all is a separate, per-device
+                        browser permission:
+                    </p>
+                    <div data-push-optin
+                         data-vapid-key="<?php echo htmlspecialchars($pushPublicKey, ENT_QUOTES, 'UTF-8'); ?>"
+                         data-channels="livestream,reminders"></div>
+                </div>
+            <?php endif; ?>
+        </div>
+    </div>
+
     <div class="card shadow-sm mb-3">
         <div class="card-header"><h2 class="h6 mb-0">Approvals</h2></div>
         <div class="card-body">
@@ -242,4 +275,7 @@ $switchRow = static function (string $key, string $label, string $helpText) use 
     <a href="/account" class="btn btn-outline-secondary">Cancel</a>
 </form>
 
+<?php if ($pushPublicKey !== ''): ?>
+<script src="/assets/js/push-subscribe.js" defer></script>
+<?php endif; ?>
 <?php require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'footer.php'; ?>

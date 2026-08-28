@@ -39,6 +39,7 @@ use Portal\Core\Mailer;
 use Portal\Core\MailerGoogle;
 use Portal\Core\Router;
 use Portal\Core\Site;
+use Portal\Core\WebPush;
 
 // 📌 Page metadata
 $pageTitle   = 'Integration Diagnostics';
@@ -786,6 +787,32 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         </p>
         <a href="/admin/integrations/webhooks" class="btn btn-outline-primary btn-sm">
             <i class="fa-solid fa-arrow-right me-1" aria-hidden="true"></i>Manage Webhooks
+        </a>
+    </div>
+</div>
+
+<!-- ====================================================================== -->
+<!-- 8️⃣ Web Push — "We're live now" + service reminders (#322)              -->
+<!-- ====================================================================== -->
+<div class="card mb-4">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <h5 class="mb-0"><i class="fa-solid fa-bell me-2" aria-hidden="true"></i>Web Push</h5>
+        <?php
+        $pushConfigured = WebPush::isConfigured();
+        ?>
+        <?php if ($pushConfigured === true): ?>
+            <span class="badge bg-success"><i class="fa-solid fa-circle-check me-1" aria-hidden="true"></i>Configured</span>
+        <?php else: ?>
+            <span class="badge bg-secondary"><i class="fa-solid fa-circle-minus me-1" aria-hidden="true"></i>Inert — not configured</span>
+        <?php endif; ?>
+    </div>
+    <div class="card-body">
+        <p class="text-secondary small mb-3">
+            Browser push notifications for "we're live now" and upcoming-service reminders — VAPID
+            (RFC 8292) signed, RFC 8291 end-to-end encrypted. No third-party account needed.
+        </p>
+        <a href="/admin/integrations/push" class="btn btn-outline-primary btn-sm">
+            <i class="fa-solid fa-arrow-right me-1" aria-hidden="true"></i>Manage Web Push
         </a>
     </div>
 </div>

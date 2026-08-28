@@ -14,8 +14,11 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\Livestream;
+use Portal\Core\RateLimiter;
 use Portal\Core\Router;
 use Portal\Core\Site;
+use Portal\Core\WebPush;
 
 Auth::ensureSession();
 Auth::requireLogin();
@@ -125,6 +128,54 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $stmt->close();
             }
         }
+    } elseif ($action === 'notify_live') {
+        // 📣 "We're live now" manual push (#322) — the PRIMARY, deterministic
+        // go-live trigger. Also postable from the Host Console (which passes
+        // an eventID so the push URL binds the live/chat widget to that event).
+        if (WebPush::isConfigured() === false) {
+            $_SESSION['flash_msg']  = 'Web Push is not configured yet — set it up at /admin/integrations/push first.';
+            $_SESSION['flash_type'] = 'danger';
+        } elseif (RateLimiter::tooMany('pushgolive:' . $siteId, 3, 900) === true) {
+            $_SESSION['flash_msg']  = 'Too many "we\'re live" pushes sent recently for this site — try again shortly.';
+            $_SESSION['flash_type'] = 'warning';
+        } else {
+            $liveNow = Livestream::currentlyLive($siteId);
+            if ($liveNow === null) {
+                $_SESSION['flash_msg']  = 'No channel is currently scheduled live — nothing to notify.';
+                $_SESSION['flash_type'] = 'warning';
+            } else {
+                $eventId  = (int) ($_POST['eventID'] ?? 0);
+                $liveUrl  = $eventId > 0 ? '/live?eventID=' . $eventId : '/live';
+                $ttl      = (int) (App::settings('push.ttl.golive') ?? '900');
+                $siteName = (string) (App::settings('site.name') ?? 'Portal');
+                $stats = WebPush::sendToChannel(
+                    $siteId,
+                    'livestream',
+                    [
+                        'title' => $siteName . ' is live now',
+                        'body'  => (string) $liveNow['name'],
+                        'url'   => $liveUrl,
+                        'tag'   => 'golive',
+                    ],
+                    $ttl,
+                    'high',
+                    'golive' . $siteId,
+                    'pushLivestream'
+                );
+                RateLimiter::recordHit('pushgolive:' . $siteId, 900);
+                $_SESSION['flash_msg']  = 'Push sent — ' . $stats['sent'] . ' delivered, ' . $stats['failed'] . ' failed, ' . $stats['pruned'] . ' pruned.';
+                $_SESSION['flash_type'] = $stats['sent'] > 0 ? 'success' : 'warning';
+            }
+        }
+
+        // 🔁 Return to wherever the button was posted from — Host Console's
+        // "We're live" button lives on a per-event page and should stay
+        // there; the allowlist keeps this from ever being an open redirect.
+        $returnTo = (string) ($_POST['returnTo'] ?? '');
+        if ($returnTo !== '' && preg_match('#^/admin/host-console/event\?id=\d+$#', $returnTo) === 1) {
+            header('Location: ' . $returnTo);
+            exit();
+        }
     }
 
     header('Location: /admin/livestream');
@@ -159,18 +210,44 @@ if (count($channels) > 0) {
 $dayNames = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 $csrf     = Auth::csrfToken();
 
+// 🔔 "We're live now" push (#322) — only offered when Web Push is
+// configured AND a channel is currently in its scheduled window.
+$pushConfigured = WebPush::isConfigured();
+$currentlyLive  = Livestream::currentlyLive($siteId);
+
+$flashMsg  = $_SESSION['flash_msg']  ?? '';
+$flashType = $_SESSION['flash_type'] ?? '';
+unset($_SESSION['flash_msg'], $_SESSION['flash_type']);
+
 $pageTitle   = 'Livestream';
 $pageSection = 'admin';
 $breadcrumbs = ['Dashboard' => '/', 'Admin' => '/admin', 'Livestream' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 
-<div class="d-flex justify-content-between align-items-center mb-4">
+<?php if ($flashMsg !== ''): ?>
+    <div class="alert alert-<?php echo htmlspecialchars($flashType !== '' ? $flashType : 'info', ENT_QUOTES, 'UTF-8'); ?>">
+        <?php echo htmlspecialchars($flashMsg, ENT_QUOTES, 'UTF-8'); ?>
+    </div>
+<?php endif; ?>
+
+<div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
     <div>
         <h1 class="mb-1"><i class="fa-solid fa-tower-broadcast me-2"></i>Livestream</h1>
         <p class="text-secondary mb-0">Channels and weekly schedule for the live embed.</p>
     </div>
-    <a href="/live" class="btn btn-outline-secondary btn-sm" target="_blank"><i class="fa-solid fa-arrow-up-right-from-square me-1"></i>Open live page</a>
+    <div class="d-flex gap-2">
+        <form method="post" class="d-inline">
+            <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
+            <input type="hidden" name="action" value="notify_live">
+            <button type="submit" class="btn btn-primary btn-sm"
+                    <?php echo ($pushConfigured === false || $currentlyLive === null) ? 'disabled' : ''; ?>
+                    title="<?php echo $pushConfigured === false ? 'Configure Web Push at /admin/integrations/push first' : ($currentlyLive === null ? 'No channel is currently in its scheduled live window' : 'Send a push to everyone subscribed to the livestream channel'); ?>">
+                <i class="fa-solid fa-bullhorn me-1"></i>Send "We're live" notification
+            </button>
+        </form>
+        <a href="/live" class="btn btn-outline-secondary btn-sm" target="_blank"><i class="fa-solid fa-arrow-up-right-from-square me-1"></i>Open live page</a>
+    </div>
 </div>
 
 <div class="card mb-4">
