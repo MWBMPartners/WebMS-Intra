@@ -71,6 +71,15 @@ $eventColor = static function (array $ev): string {
 };
 
 $today = (new DateTimeImmutable('today'))->format('Y-m-d');
+
+// 🏛️ Venue Bookings (#429) — $venueOverlay is set by the router ([] when
+// the app is disabled/absent/throwing). Only require the strip renderer
+// when there is actually something to show, so a disabled/empty overlay
+// never emits so much as the scoped CSS (byte-identical output).
+$hasVenueOverlay = count($venueOverlay ?? []) > 0;
+if ($hasVenueOverlay === true) {
+    require_once __DIR__ . DIRECTORY_SEPARATOR . '_venue_strip.php';
+}
 ?>
 
 <div class="portal-cal-month">
@@ -101,6 +110,9 @@ $today = (new DateTimeImmutable('today'))->format('Y-m-d');
                     </a>
                     <?php if ($isToday === true): ?>
                         <span class="badge bg-primary ms-1">Today</span>
+                    <?php endif; ?>
+                    <?php if ($hasVenueOverlay === true): ?>
+                        <?php echo render_venue_strip($venueOverlay[$k] ?? []); ?>
                     <?php endif; ?>
                 </div>
 

@@ -18,6 +18,9 @@ Thumbs.db
 
 # Claude Code per-instance settings (enabled plugins etc — per-machine, not repo config)
 .claude/settings.json
+
+# Claude Code isolated agent worktrees (transient build sandboxes, never committed)
+.claude/worktrees/
 .claude/settings.local.json
 
 # Secrets and credentials (NEVER commit these)

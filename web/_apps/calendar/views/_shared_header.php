@@ -23,6 +23,17 @@
 
 declare(strict_types=1);
 
+use Portal\Core\I18n;
+
+// 🏛️ Venue Bookings (#429) — $venueOverlay is set by the router ([] when
+// the app is disabled/absent/throwing). Only require the strip renderer
+// when there is actually something to show, so a disabled/empty overlay
+// never emits so much as the scoped CSS (byte-identical output).
+$hasVenueOverlay = count($venueOverlay ?? []) > 0;
+if ($hasVenueOverlay === true) {
+    require_once __DIR__ . DIRECTORY_SEPARATOR . '_venue_strip.php';
+}
+
 // 🏷️ Build a human-readable range title per view
 $rangeTitle = '';
 switch ($view) {
@@ -137,6 +148,30 @@ $viewMeta = [
                        value="<?php echo htmlspecialchars($cursor->format('Y-m-d'), ENT_QUOTES, 'UTF-8'); ?>"
                        onchange="this.form.submit()">
             </form>
+        </div>
+    <?php endif; ?>
+
+    <!-- 🏛️ Venue Bookings (#429) — 4-swatch key, shown only when this
+         view's $venueOverlay actually has bookings to explain. -->
+    <?php if ($hasVenueOverlay === true): ?>
+        <div class="portal-venue-legend d-flex flex-wrap gap-3 align-items-center small text-muted mb-2">
+            <strong class="me-1"><?php echo htmlspecialchars(I18n::t('venues.legend.heading'), ENT_QUOTES, 'UTF-8'); ?></strong>
+            <span>
+                <span class="portal-venue-chip is-confirmed" style="--venue-color:#198754;"><i class="fa-solid fa-door-open" aria-hidden="true"></i></span>
+                <?php echo htmlspecialchars(I18n::t('venues.legend.confirmed'), ENT_QUOTES, 'UTF-8'); ?>
+            </span>
+            <span>
+                <span class="portal-venue-chip is-tentative" style="--venue-color:#ffc107;"><i class="fa-solid fa-clock" aria-hidden="true"></i></span>
+                <?php echo htmlspecialchars(I18n::t('venues.legend.tentative'), ENT_QUOTES, 'UTF-8'); ?>
+            </span>
+            <span>
+                <span class="portal-venue-chip is-closed" style="--venue-color:#6c757d;"><i class="fa-solid fa-door-closed" aria-hidden="true"></i></span>
+                <?php echo htmlspecialchars(I18n::t('venues.legend.closed'), ENT_QUOTES, 'UTF-8'); ?>
+            </span>
+            <span>
+                <span class="portal-venue-chip is-unavailable" style="--venue-color:#dc3545;"><i class="fa-solid fa-ban" aria-hidden="true"></i></span>
+                <?php echo htmlspecialchars(I18n::t('venues.legend.unavailable'), ENT_QUOTES, 'UTF-8'); ?>
+            </span>
         </div>
     <?php endif; ?>
 

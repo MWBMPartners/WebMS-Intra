@@ -21,4 +21,5 @@ for ($i = 0; $i < 7; $i++) {
     $days[] = $rangeStart->modify('+' . $i . ' days');
 }
 
-echo render_day_columns($days, $events);
+// 🏛️ $venueOverlay (#429) — set by the router; [] when disabled/absent/throwing.
+echo render_day_columns($days, $events, $venueOverlay ?? []);
