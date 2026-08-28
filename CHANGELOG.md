@@ -2,6 +2,69 @@
 
 
 ## [Unreleased] (alpha)
+- feat(reports): #156 — Reports Builder: a whitelist-driven custom report
+  builder alongside the existing #93 fixed dashboards, built entirely
+  around an injection-safe registry architecture. `Portal\Core\
+  ReportRegistry` is a PHP-code-only whitelist — six v1 sources (users,
+  events, attendance, expenses, giving, tasks), each with a registry-owned
+  table/alias/tenant-scope expression/curated JOINs and a closed
+  per-column whitelist (expr/type/role-gates/allowed-aggregations); closed
+  keyed sets for operators (`= != < > <= >= IN BETWEEN LIKE NOT LIKE` +
+  `IS [NOT] NULL`), aggregations, and date-bucket transforms. Care, kids,
+  safeguarding, prayer-requests, auth/credentials, settings, and API-key
+  tables are structurally absent — `ReportRegistry::assertSelfConsistent()`
+  hard-fails if a future edit ever references one of those domains,
+  belt-and-braces against drift. `Portal\Core\ReportBuilder::compile()` is
+  the ONE place report SQL is ever assembled: every identifier reaches the
+  SQL string only via strict `array_key_exists()`/`in_array(...,true)`
+  lookup against the registry — never concatenated from request input —
+  and every value is bound via `bind_param()` with a lockstep-built types
+  string plus an explicit `strlen()===count()` assert. `siteID = ?` from
+  `Site::id()` is force-injected FIRST, outside the user-filter
+  parentheses, so no `OR` in a filter row can ever bypass tenancy. Column
+  gates (a `tblRoles.roleKey`, `@siteAdmin`, or `@rootAdmin`) apply
+  identically in SELECT and WHERE — filtering on a column your role can't
+  see is refused exactly like selecting it, closing the filter-as-oracle
+  leak; financial totals need Treasurer/Site Admin, Giving donor identity
+  needs Treasurer strictly (A8), member email needs Site Admin (A6). A
+  saved definition (`tblReportDefinitions.definition`, JSON) is
+  re-validated against the registry on EVERY run, so a hand-edited DB row
+  fails closed rather than compiling stale/malicious SQL. Builder UI:
+  column checkboxes + a drag-reorderable chip row (`Asset::sortableJs()`,
+  the #156 "drag-and-drop" ask), repeatable filter rows joined by a single
+  AND/OR toggle (A2 — nested groups deferred), optional group-by +
+  aggregates, an AJAX preview endpoint (`preview.php`, session-authed,
+  outside `api/*` — the `geo/` AJAX-proxy precedent), paginated run +
+  CSV export (`CsvExporter`), and a bar/line chart on grouped results via
+  a new SRI-pinned `Asset::chartJs()` (Chart.js 4.4.4, jsdelivr — hash
+  independently re-derived from the npm registry tarball's
+  `dist/chart.umd.js`, the location-chunkA Leaflet precedent, since
+  jsdelivr itself was unreachable from the build sandbox). `isShared`
+  reports are visible to this site's admins (A5 — never truly public,
+  the whole area stays admin-gated); manage rights (edit/delete) are
+  author-or-site-admin. Migration 184: `tblReportDefinitions` (DEVIATION
+  from #156's literal `tblReports` wording — A4, documented in the
+  migration header), 3 settings seeds (`reports.enabled` seeded ON so the
+  pre-existing #93 dashboards survive the upgrade unchanged — A7 — plus
+  the two per-site row-cap guardrails), 8 route seeds (7 builder routes,
+  all `isProtected=1`, no `api/*` rows; 1 `/help/reports` guide route).
+  New AppRegistry entry (`reports`, slug folds BOTH the #93 dashboards and
+  the new builder under one toggle). GDPR lockstep in the same PR:
+  `GdprEraser::catalogue()` anonymises `tblReportDefinitions.createdByID`/
+  `updatedByID` (authorship attribution detached, definition retained —
+  it's query metadata, not personal data about anyone but its author);
+  `data-export.php` gains a `reportDefinitions` block. A committed,
+  dependency-free red-team self-test
+  (`tools/report-builder-selftest.php`) exercises the real
+  `ReportRegistry`/`ReportBuilder` classes (no DB, no network) — asserts
+  registry self-consistency, a benign definition compiles with the tenant
+  scope providably first, and 15 hostile/malformed definitions (SQL-
+  injection-shaped source/column/operator/conjunction/sort-direction
+  strings, oversized `IN` lists, arity mismatches, gated-column probes
+  with no session, a stale format version) each throw
+  `InvalidArgumentException` before any SQL string exists — all pass. All
+  11 audit checks green, `php -l` clean on every touched file, `node
+  --check` clean on the new JS.
 - feat(pwa): #141 residual + #306 — the two remaining PWA install-prompt
   pieces (Web Push itself already shipped as #322) plus starter sub-brand
   artwork. **#141**: a self-hosted `assets/js/pwa-install.js` captures

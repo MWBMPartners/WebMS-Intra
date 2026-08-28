@@ -53,6 +53,9 @@ class Asset
     /** @var string Swagger UI version — interactive API explorer at /api-docs */
     private const SWAGGER_VERSION = '5.17.14';
 
+    /** @var string Chart.js version — bar/line charts on the Reports Builder (#156) */
+    private const CHARTJS_VERSION = '4.4.4';
+
     // 🔐 ---------------------------------------------------------------------------
     // SRI integrity hashes – regenerate whenever the library version changes
     //
@@ -83,6 +86,28 @@ class Asset
     /** @var string SRI hash for SortableJS 1.15.2 (jsdelivr CDN) */
     private const SORTABLE_JS_INTEGRITY =
         'sha384-BSxuMLxX+FCbTdYec3TbXlnMGEEM2QXTFdtDaveen71o+jswm2J36+xFqp8k4VHM';
+
+    /**
+     * @var string SRI hash for Chart.js 4.4.4 dist/chart.umd.js (jsdelivr
+     * CDN). Deliberately the UNMINIFIED UMD build, not `chart.umd.min.js` —
+     * the 4.x npm package ships no pre-minified UMD file at all (verified
+     * by inspecting the extracted tarball's dist/ listing), and jsdelivr's
+     * on-the-fly ".min.js" minification pipeline would make the served
+     * bytes NOT independently reproducible from the npm tarball. Hash
+     * derived exactly like every other CDN asset in this file when
+     * jsdelivr itself is unreachable from the build sandbox (location-
+     * chunkA Leaflet / #456 precedent): downloaded the real npm tarball
+     * (registry.npmjs.org, which IS reachable) and hashed
+     * dist/chart.umd.js directly —
+     *   curl -sL https://registry.npmjs.org/chart.js/-/chart.js-4.4.4.tgz
+     *     | tar -xzO package/dist/chart.umd.js
+     *     | openssl dgst -sha384 -binary | openssl base64 -A
+     * — since jsdelivr's npm CDN serves package files byte-identical to
+     * the published tarball at their real path, this hash matches what
+     * https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.js serves.
+     */
+    private const CHARTJS_INTEGRITY =
+        'sha384-G436+Z2nlA8+PNoeRvWdxKbvOf8E/y+lYxqht2iBwNHTQDV5CJr3+AGVj8fGZi5t';
 
     /** @var string SRI hash for swagger-ui 5.17.14 swagger-ui.css (jsdelivr CDN) */
     private const SWAGGER_CSS_INTEGRITY =
@@ -151,6 +176,10 @@ class Asset
     /** @var string CDN URL for SortableJS */
     private const CDN_SORTABLE_JS =
         'https://cdn.jsdelivr.net/npm/sortablejs@' . self::SORTABLE_VERSION . '/Sortable.min.js';
+
+    /** @var string CDN URL for Chart.js — unminified UMD build, see CHARTJS_INTEGRITY doc comment */
+    private const CDN_CHARTJS =
+        'https://cdn.jsdelivr.net/npm/chart.js@' . self::CHARTJS_VERSION . '/dist/chart.umd.js';
 
     /** @var string CDN URL for Swagger UI CSS */
     private const CDN_SWAGGER_CSS =
@@ -369,6 +398,20 @@ class Asset
     public static function sortableJs(): string
     {
         return self::js(self::CDN_SORTABLE_JS, '', self::SORTABLE_JS_INTEGRITY, 'Sortable');
+    }
+
+    /**
+     * Chart.js 4.4.4 via jsdelivr CDN. Used by the Reports Builder (#156)
+     * for the bar/line chart on a grouped report's run page. No local
+     * fallback today (same posture as sortableJs() above) — a CDN failure
+     * degrades to no chart, not a broken page (run.php still renders the
+     * data as a portal-data-list table regardless of chart load success).
+     *
+     * @return string HTML <script> tag
+     */
+    public static function chartJs(): string
+    {
+        return self::js(self::CDN_CHARTJS, '', self::CHARTJS_INTEGRITY, 'Chart');
     }
 
     /**

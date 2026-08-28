@@ -152,6 +152,14 @@ $payload = [
             'SELECT declarationID, siteID, status, validFrom, validTo, address, postcode, acceptedAt, createdAt '
             . 'FROM tblGiftAidDeclaration WHERE donorID = ?'
         ),
+        // 📊 Reports Builder (#156) — definitions the subject authored.
+        // `definition` (the registry-keys-only JSON) is included too: it
+        // is the report's structure (source/columns/filters), not a
+        // results snapshot — report OUTPUT is never stored anywhere.
+        'reportDefinitions' => $fetchUserRows(
+            'SELECT reportID, siteID, reportName, description, sourceKey, definition, isShared, lastRunAt, runCount, createdAt '
+            . 'FROM tblReportDefinitions WHERE createdByID = ?'
+        ),
         // 🙏 Salvation decision cards (tblSalvationCards) are DELIBERATELY
         // NOT exported here: the public decision-card form has no userID
         // FK at all (fullName/email/phone/address are free-text fields

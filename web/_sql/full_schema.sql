@@ -8106,3 +8106,52 @@ ON DUPLICATE KEY UPDATE `filename` = `filename`;
 -- only the self-record.
 INSERT INTO `tblMigrations` (`filename`) VALUES ('181_location_user_pii.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- ── from 184_reports_builder.sql (#156) ──────────────────────────────────────
+-- Reports Builder — saved report definitions. A saved report is a
+-- STRUCTURED DEFINITION (registry keys + literal filter values), never
+-- SQL — see Portal\Core\ReportRegistry / Portal\Core\ReportBuilder.
+-- DEVIATION from issue #156's literal wording: uses `tblReportDefinitions`
+-- rather than the issue's `tblReports` (never existed in any prior
+-- migration, generically collision-prone) — see 184's own header (A4).
+CREATE TABLE IF NOT EXISTS `tblReportDefinitions` (
+    `reportID`    INT          NOT NULL AUTO_INCREMENT,
+    `siteID`      INT          NOT NULL DEFAULT 1 COMMENT 'FK to tblSites.siteID, owning tenant; a report never spans sites',
+    `reportName`  VARCHAR(150) NOT NULL,
+    `description` VARCHAR(500) DEFAULT NULL,
+    `sourceKey`   VARCHAR(50)  NOT NULL COMMENT 'ReportRegistry source key (denormalised from definition for listing); validated in PHP, never interpolated into SQL',
+    `definition`  JSON         NOT NULL COMMENT 'Structured report definition: registry keys + bound filter values ONLY. No SQL fragments. Re-validated against the PHP whitelist registry on every run (#156)',
+    `isShared`    TINYINT(1)   NOT NULL DEFAULT 0 COMMENT '1 = visible to every site admin of this site; 0 = author only',
+    `createdByID` INT          DEFAULT NULL COMMENT 'FK to tblUsers; nulled by GdprEraser (authorship attribution detached)',
+    `updatedByID` INT          DEFAULT NULL,
+    `lastRunAt`   DATETIME     DEFAULT NULL,
+    `runCount`    INT          NOT NULL DEFAULT 0,
+    `createdAt`   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updatedAt`   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`reportID`),
+    KEY `idx_reportdef_site`  (`siteID`, `isShared`),
+    KEY `idx_reportdef_owner` (`createdByID`),
+    CONSTRAINT `fk_reportdef_site` FOREIGN KEY (`siteID`) REFERENCES `tblSites` (`siteID`) ON DELETE CASCADE,
+    CONSTRAINT `fk_reportdef_creator` FOREIGN KEY (`createdByID`) REFERENCES `tblUsers` (`userID`) ON DELETE SET NULL,
+    CONSTRAINT `fk_reportdef_updater` FOREIGN KEY (`updatedByID`) REFERENCES `tblUsers` (`userID`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'reports.enabled',          'true',  'true',  0),
+    (NULL, 'reports.builder.maxRows',  '10000', '10000', 0),
+    (NULL, 'reports.builder.pageSize', '50',    '50',    0)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('admin/reports/builder',         'admin/reports/builder/index.php',   1),
+    ('admin/reports/builder/edit',    'admin/reports/builder/edit.php',    1),
+    ('admin/reports/builder/save',    'admin/reports/builder/save.php',    1),
+    ('admin/reports/builder/preview', 'admin/reports/builder/preview.php', 1),
+    ('admin/reports/builder/run',     'admin/reports/builder/run.php',     1),
+    ('admin/reports/builder/export',  'admin/reports/builder/export.php',  1),
+    ('admin/reports/builder/delete',  'admin/reports/builder/delete.php',  1),
+    ('help/reports',                  'help/reports.php',                  0)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('184_reports_builder.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;

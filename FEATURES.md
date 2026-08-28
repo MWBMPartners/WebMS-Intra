@@ -109,9 +109,59 @@ Central operations hub for admins / site admins.
 | `/admin/integrations` | Live integration diagnostics (MS365 OAuth/Graph, Google OAuth/Gmail) |
 | `/admin/sites` | Umbrella admin: site CRUD + per-site user management |
 | `/admin/workflows` | Configurable workflow definition CRUD (#94) — step delete/isActive/autoAction (#443); the running engine is the `/approvals` app below |
-| `/admin/reports` | Reporting / analytics dashboard (#93) |
+| `/admin/reports` | Reporting / analytics dashboard (#93) + custom report builder (#156, see subsection below) |
 | `/admin/captcha` | **Multi-provider captcha config — drag-and-drop priority + per-provider keys (#130)** |
 | `/settings` | Generic dot-notation settings editor |
+
+---
+
+### 📊🔒 Reports Builder — `/admin/reports/builder/` ✅ (#156)
+
+Custom report builder alongside the fixed #93 dashboards, built around an
+**injection-safe whitelist architecture** — a saved report is a
+**definition** (registry keys + literal filter values), never SQL, never a
+stored siteID. See DEV_NOTES.md → "Report registry — adding a data source
+safely" for the extension guide.
+
+- **Six v1 data sources**, each a PHP-code registry entry
+  (`Portal\Core\ReportRegistry`) with a curated table/alias/tenant-scope
+  expression/JOINs and a closed per-column whitelist: **Members**,
+  **Events**, **Attendance**, **Expense claims**, **Giving**, **Tasks**.
+  Care, kids, safeguarding, prayer requests, auth/credentials, settings,
+  and API keys are **structurally absent** — not hidden, not gated, simply
+  not in the registry — and `ReportRegistry::assertSelfConsistent()`
+  hard-fails if a future edit ever sneaks one of those domains in.
+- **Closed, keyed vocabularies** for operators (`= != < > <= >= IN BETWEEN
+  LIKE NOT LIKE` plus `IS [NOT] NULL`), aggregations (count/distinct
+  count/sum/avg/min/max), and date-bucket transforms (day/month/year) —
+  nothing outside these sets can ever reach a SQL string.
+- **Role-gated columns** — financial totals (expense/giving amounts)
+  require Treasurer or Site Admin; donor identity on Giving reports
+  requires Treasurer strictly; member email requires Site Admin. Gates
+  apply identically in SELECT and WHERE, so filtering on a column you
+  can't see is refused exactly like selecting it (blocks the
+  filter-as-oracle leak).
+- **`Portal\Core\ReportBuilder::compile()`** is the ONE place report SQL
+  is assembled — every identifier reaches the SQL string only via strict
+  key lookup against the registry; every value is bound via
+  `bind_param()` with a lockstep types string; `siteID = ?` is
+  force-injected first, outside the user-filter parentheses, so an `OR`
+  filter can never bypass tenancy. A saved definition is re-validated
+  against the registry on every run — a hand-edited DB row fails closed.
+- **Builder UI** — column checkboxes + a drag-reorderable chip row
+  (`Asset::sortableJs()`), repeatable filter rows with a single AND/OR
+  toggle (nested groups deferred), optional group-by + aggregates, an
+  AJAX preview (first 25 rows), and a bar/line chart on grouped results
+  (`Asset::chartJs()`, SRI-pinned Chart.js via jsdelivr).
+- **Saved reports** — name/description, an `isShared` flag (visible to
+  this site's admins; still never member-visible), run count/last-run
+  tracking, CSV export (`CsvExporter`, CWE-1236 formula-cell guard
+  already handled there).
+- Scheduling/emailed reports are explicitly OUT of scope for #156.
+
+**Tables:** `tblReportDefinitions`
+**Settings:** `reports.enabled`, `reports.builder.maxRows`, `reports.builder.pageSize`
+**AppRegistry slug:** `reports` (folds the pre-existing #93 dashboards under the same toggle, seeded ON)
 
 ---
 

@@ -386,6 +386,12 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 </a>
             </div>
             <div class="col-6 col-md-4 col-lg-2">
+                <a href="/admin/reports/builder" class="btn btn-outline-secondary w-100 d-flex flex-column align-items-center gap-1 py-3">
+                    <i class="fa-solid fa-table-list fa-lg"></i>
+                    <span class="small">Report Builder</span>
+                </a>
+            </div>
+            <div class="col-6 col-md-4 col-lg-2">
                 <a href="/admin/workflows" class="btn btn-outline-secondary w-100 d-flex flex-column align-items-center gap-1 py-3">
                     <i class="fa-solid fa-diagram-project fa-lg"></i>
                     <span class="small">Workflows</span>
