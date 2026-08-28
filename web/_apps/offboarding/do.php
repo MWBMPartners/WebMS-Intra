@@ -119,6 +119,16 @@ try {
         [$effective, $userId], 'si'
     );
 
+    // 5a. End Small Groups memberships (#150) — a group leadership is
+    //     exactly the kind of standing access offboarding exists to
+    //     revoke. Ends both active AND pending (an outstanding join
+    //     request a leaver never followed up on should not linger either).
+    //     History is retained (status='ended'), never deleted.
+    $run('end_small_group_memberships',
+        "UPDATE tblSmallGroupMembers SET status = 'ended', endedAt = ? WHERE userID = ? AND status IN ('active','pending')",
+        [$effective, $userId], 'si'
+    );
+
     // 6. Remove user role assignments.
     $run('delete_user_roles',
         'DELETE FROM tblUserRoles WHERE userID = ?',

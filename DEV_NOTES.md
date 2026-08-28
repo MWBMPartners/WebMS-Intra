@@ -1133,6 +1133,40 @@ up-to-date schema:
   uq_filename`) needs `ON DUPLICATE KEY UPDATE`, `INSERT IGNORE`, or a `WHERE NOT
   EXISTS` guard, or it fails with ERROR 1062 on replay.
 
+### `check_sql_columns.py` false positive: a table name embedding a bare SQL keyword + a short alias (#150)
+
+`tools/audit-checks/check_sql_columns.py`'s `SELECT_RE` locates a query's table
+name with `FROM\s+\`?(tbl\w+)\`?\s*(?:WHERE|ORDER|GROUP|LIMIT|;|…|\s+(?:LEFT|
+INNER|RIGHT|OUTER|JOIN))` — it requires the greedy `\w+` table-name capture to
+be *immediately* followed (mod whitespace) by one of those bare keywords. When
+the SQL text instead puts a short **alias** right after the table name (e.g.
+`FROM tblSmallGroupMembers m INNER JOIN …`), the full-length match fails and
+the regex engine backtracks the `\w+` capture shorter and shorter — and if the
+table name happens to **contain one of those keywords as a bare substring**
+(`tblSmallGroup*` all contain "Group"), the backtrack eventually lands on
+`tblSmall` + `Group…`, which matches the literal `GROUP` alternative (no word
+boundary required) and stops there. The checker then reports the truncated,
+unregistered `tblSmall` as an "unknown table", even though the real table
+(`tblSmallGroupMembers`) is correctly defined in `full_schema.sql`. This is
+NOT a real defect in the SQL — verified by hand-tracing the regex and
+confirmed empirically (`python3 -c '...'` against the exact pattern).
+
+**Workaround** (no audit-script change needed): never put a short alias
+*immediately* after `FROM tblKeywordEmbeddingTable` — either drop the alias
+entirely and qualify columns with the full table name (`tblSmallGroupMembers.
+userID`), or reorder the join so the keyword-embedding table is introduced via
+`JOIN` instead of being the primary `FROM` target (the checker's regex is
+strictly `FROM`-anchored — it never inspects text after `JOIN`, so an alias on
+a *joined* table, however named, is invisible to it and always safe). Both
+forms are semantically identical to the aliased original; MySQL still returns
+the column under its own unqualified name either way. See
+`web/_core/SmallGroups.php` (`listGroups()`, `groupsFor()`, `membersOf()`,
+`pushHeadcountToAttendance()`, `attendanceStats()`) and
+`web/_apps/auth/account/data-export.php`'s `smallGroupMemberships`/
+`smallGroupAttendance` blocks for worked examples. Will recur for any future
+table whose name embeds `GROUP`/`ORDER`/`LIMIT`/`WHERE` as a bare substring
+right after `tbl` — check new table names against this before aliasing them.
+
 ---
 
 ## File Structure Quick Reference
