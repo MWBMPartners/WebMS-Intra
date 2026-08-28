@@ -26,6 +26,9 @@
  *   tblVenueImportBatches (CSV/XLSX import batches you uploaded — #429)
  *   tblGiftAidDeclaration (your Gift Aid declarations — address/postcode/
  *                          status/dates — #456 Chunk B)
+ *   tblFormResponses      (your Forms Builder responses — internal channel
+ *                          only, public/anonymous responses have no
+ *                          submitterID to match — #153)
  *
  * Sensitive fields (password hashes, TOTP secret, tokenHash etc.) are
  * EXCLUDED — exporting them would be a security regression, not a feature.
@@ -151,6 +154,15 @@ $payload = [
         'giftAidDeclarations' => $fetchUserRows(
             'SELECT declarationID, siteID, status, validFrom, validTo, address, postcode, acceptedAt, createdAt '
             . 'FROM tblGiftAidDeclaration WHERE donorID = ?'
+        ),
+        // 🧾 Forms Builder (#153) — export↔erasure parity with the
+        // GdprEraser::catalogue() 'tblFormResponses' entry added alongside
+        // this block. Public (anonymous) responses carry no submitterID and
+        // so are never included here — same reasoning as the salvation
+        // decision-card note immediately below.
+        'formResponses' => $fetchUserRows(
+            'SELECT responseID, formID, siteID, channel, answersJson, status, createdAt '
+            . 'FROM tblFormResponses WHERE submitterID = ?'
         ),
         // 👥 Small Groups (#150) — export↔erasure parity with the six
         // GdprEraser::catalogue() entries added alongside this block.

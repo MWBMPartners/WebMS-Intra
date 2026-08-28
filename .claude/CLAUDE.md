@@ -67,6 +67,7 @@ infrastructure rather than apps).
 | discipleship | `/discipleship` | Ordered formation pathways with per-member progress tracking, auto-completion from attendance/RSVPs, pastor roster (#303) |
 | documents | `/documents` | File library with categories |
 | expenses | `/expenses` | Submit, approve, treasury, withdraw, multi-approver, PDF, CSV |
+| forms | `/forms` | Generic form designer — admin-built fields, internal + optional public (`/f/{token}`) fill, response review/CSV export; `Portal\Core\FormEngine` is the reusable injection-safety boundary (#153) |
 | giving | `/giving` | Contributions log, Gift Aid capture, HMRC export, year-end statements (self-service + treasurer bulk batch generate/email, #440); two-person offering count, pledge campaigns, bank reconciliation (#299) |
 | help | `/help/*` | In-app guides (getting-started, expenses, calendar, prayer-requests, admin, faq, …) |
 | invites | `/invites` | Single-use invite links so new members self-register with role pre-assigned |
@@ -157,6 +158,42 @@ Calendar/Events/Preaching Plan is ONE app ("Events") — `/calendar` covers view
 
 ## Recent ships (chronological)
 
+- **`claude/backlog153-forms`** (branched off `alpha`) — issue #153: new
+  Forms Builder app at `/forms` (`web/_apps/forms/`, 16 pages/handlers) +
+  `Portal\Core\FormEngine` — the single injection-safety boundary for a
+  12-type field registry (`FormEngine::FIELD_TYPES` — a PHP whitelist, NOT a
+  SQL ENUM, so adding a type is code-only, never a migration), a whitelist
+  config sanitiser (`sanitiseConfig()` — `configJson` is DATA, re-sanitised
+  on every read AND write), an escaped-everything renderer
+  (`f_{fieldID}` server-integer field names; choice fields submit
+  bounds-checked integer indexes, never raw option text), per-type
+  server-side validators, and immutable `answersJson` snapshot persistence
+  (`{fieldKey:{label,type,value}}`, survives later field edits/deletes).
+  Admins build/publish forms at `/forms/edit` + `/forms/manage`; members
+  fill published internal/both forms at `/forms/fill`; an OPTIONAL public
+  link `/f/{token}` is a Router special route (cloned from service-plans'
+  `/os/{token}`), default OFF (`forms.allowPublic='false'`), six-gate
+  uniform-404 scoped to the FORM's own siteID throughout (never ambient
+  `Site::id()` — no active-site context on a public route). Public POST:
+  honeypot → CSRF → `Captcha::verify()` → `RateLimiter` (fake-success on
+  `isBlocked()`) → 5/15min per-IP bucket (`prayer-requests/anonymous-save
+  .php` + `assets/found-save.php` precedent). Responses reviewed/exported
+  admin-only at `/forms/responses` (CSV via `FormEngine::csvRows()` +
+  `CsvExporter`). GDPR lockstep in the SAME PR: `GdprEraser::catalogue()`
+  hard-deletes a member's responses by `submitterID`;
+  `auth/account/data-export.php` gained a matching `formResponses` block —
+  a public (anonymous) response carries no `submitterID` and sits outside
+  both by design (salvation decision-card precedent), documented in
+  `/help/forms` + DEV_NOTES. Three residual defaults applied per the build
+  spec (owner sign-off deferred, minimal-safe choice made): the
+  display-only `heading` field type is included; NO per-role fill
+  restriction in v1 (any signed-in site member may fill a published
+  internal/both form); public-response retention = **keep indefinitely**
+  in v1, with a `forms.responseRetentionDays` settings stub (seeded `'0'`
+  = forever) for a future auto-purge cron. Migration 182: 3 new tables
+  (`tblForms`/`tblFormFields`/`tblFormResponses`), 3 settings seeds, 15
+  route seeds (13 protected + 2 public, no `api/*` rows — ApiRouter trap).
+  All 11 audit checks green, `php -l` clean on every touched file.
 - **`claude/backlog150-groups`** (branched off `alpha`) — issue #150: new
   Small Groups app (`web/_apps/small-groups/`, slug `small-groups`) —
   groups/classes register for Sabbath School classes, home groups, Bible

@@ -2,6 +2,36 @@
 
 
 ## [Unreleased] (alpha)
+- feat(forms): #153 — Forms Builder app. New `web/_apps/forms/` (16 pages/
+  handlers) + `Portal\Core\FormEngine` — the single injection-safety
+  boundary for a 12-type field registry (text/textarea/email/phone/number/
+  date/time/select/radio/checkboxes/checkbox/heading), a whitelist config
+  sanitiser (`sanitiseConfig()` — `configJson` is DATA, never SQL, never
+  trusted raw even on read), an escaped-everything renderer (`f_{fieldID}`
+  server-integer field names; choice options submit as bounds-checked
+  integer indexes, never raw option text), per-type server-side validators,
+  and immutable `answersJson` snapshot persistence (`{fieldKey: {label,
+  type, value}}` — survives later field edits/deletes without corrupting
+  history). Admins build a form (title/description/audience/window) and its
+  fields at `/forms/edit`, publish/close/rotate its link from
+  `/forms/manage`; members fill published internal/both forms at
+  `/forms/fill`; a public link `/f/{token}` (Router special route, cloned
+  from service-plans' `/os/{token}`) is default OFF
+  (`forms.allowPublic='false'`) and six-gate uniform-404s exactly like its
+  precedent, scoped to the FORM's own siteID throughout (never ambient
+  `Site::id()`). Public POST layers honeypot → CSRF → `Captcha::verify()` →
+  `RateLimiter` (fake-success on `isBlocked()`) → a 5/15min per-IP bucket.
+  Responses reviewed/exported at `/forms/responses` (admin-only,
+  new/reviewed tabs, CSV export via `FormEngine::csvRows()` +
+  `CsvExporter`). GDPR lockstep in this PR: `GdprEraser::catalogue()` hard-
+  deletes a user's responses by `submitterID`; `auth/account/data-export.php`
+  gained a matching `formResponses` block — public (anonymous) responses
+  carry no `submitterID` and so sit outside both by design (documented in
+  `/help/forms` + DEV_NOTES). Migration 182: 3 new tables (`tblForms`,
+  `tblFormFields`, `tblFormResponses`), 3 settings seeds (`forms.enabled`,
+  `forms.allowPublic`, `forms.responseRetentionDays` stub), 15 route seeds
+  (13 protected + 2 public — no `api/*` rows, ApiRouter trap). All 11 audit
+  checks green, `php -l` clean on every touched file.
 - feat(small-groups): #150 — new Small Groups app (groups/classes register:
   Sabbath School classes, home groups, Bible studies). Roster with
   leader/co-leader/member roles, optional self-service join requests

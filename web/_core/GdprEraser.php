@@ -62,6 +62,15 @@ class GdprEraser
             ['table' => 'tblEvents',           'userCol' => 'createdByID',  'action' => 'anonymise', 'nullCols' => [], 'reason' => 'authorship attribution detached'],
             ['table' => 'tblRecording',        'userCol' => 'uploadedByID', 'action' => 'anonymise', 'nullCols' => [], 'reason' => 'authorship attribution detached'],
 
+            // 📝 Forms Builder (#153) — a response's answersJson is arbitrary
+            // free-text and may contain any PII the form asked for; hard DELETE is
+            // the only default-safe action (no per-column blanking can know which
+            // answers are personal). Public (anonymous) responses carry no
+            // submitterID at all, so they are outside this catalogue entry's
+            // reach by design — see FormEngine's file header + help/forms.php's
+            // "Privacy Note" section.
+            ['table' => 'tblFormResponses',    'userCol' => 'submitterID',  'action' => 'delete'],
+
             // Sessions / tokens / personal devices — hard delete.
             // NOTE: PHP's own session store is file-based, not a DB table
             // (there never was a `tblSessions` row to erase).
