@@ -52,7 +52,7 @@ if ($event === null) {
 
 $coords = [];
 $stmt = $mysqli->prepare(
-    'SELECT ec.coordinatorID, ec.userID, ec.grantedAt, u.fullName, u.email '
+    'SELECT ec.coordinatorID, ec.userID, ec.grantedAt, u.fullName, u.emailAddress AS email '
     . 'FROM tblEventCoordinators ec '
     . 'JOIN tblUsers u ON u.userID = ec.userID '
     . 'WHERE ec.eventID = ? AND ec.revokedAt IS NULL '

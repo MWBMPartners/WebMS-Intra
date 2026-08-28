@@ -2924,19 +2924,29 @@ Proper multi-currency checkout is a separate, larger issue.
 
 `tblVenueBookings` times are wall-clock VENUE-local (`DATE` + `TIME`, never
 converted to UTC — a 09:30 hire stays 09:30 across DST). `tblEvents`
-datetimes are wall-clock EVENT-local in `timezone`/`eventTimezone` (their
-column comment claiming UTC is a known doc bug — see the follow-up issue
-below). `Venues::classifyEventCoverage()` therefore compares wall-clock to
+datetimes are wall-clock EVENT-local in `timezone`/`eventTimezone`.
+`Venues::classifyEventCoverage()` therefore compares wall-clock to
 wall-clock: identical IANA zones ⇒ direct comparison, NO conversion;
 differing zones ⇒ convert event-zone → venue-zone via `DateTimeImmutable`.
 UTC never appears in this path. Never "fix" either store to UTC.
 
-**Follow-up issue (filed at ship time, not yet actioned):** `tblEvents.
-*DateTime` column comments say "stored in UTC" — that's wrong. Events are
-stored wall-clock event-local (proof: `calendar/manage/save.php` binds the
-raw POST value verbatim; `calendar/event.php` reads it back in the event's
-own zone; `Ical.php` emits a `TZID`, never a trailing `Z`). The comments
-need reconciling project-wide; storage itself must NOT change.
+**Follow-up issue #435 (fixed):** `tblEvents.*DateTime` column comments used
+to say "stored in UTC" — that was wrong. Events are stored wall-clock
+event-local (proof: `calendar/manage/save.php` binds the raw POST value
+verbatim; `calendar/event.php` reads it back in the event's own zone;
+`Ical.php` emits a `TZID`, never a trailing `Z`). Corrected the `startDateTime`/
+`endDateTime` `COMMENT`s in `full_schema.sql` and their source migration
+(`008_calendar_events_schema.sql`) to `'... wall-clock local (venue/site
+local); NOT UTC'` — documentation only, no data change, no rebuild
+migration (see "Datetime handling" note below).
+
+### Datetime handling (#435)
+
+`tblEvents.*DateTime` (and every other wall-clock date/time column in this
+codebase — `tblVenueBookings`, etc.) store **wall-clock local** (venue/site
+local), **NOT UTC**. Compare wall-clock-to-wall-clock; convert only across
+differing IANA zones (`DateTimeImmutable`), never to/from UTC as an
+intermediate step.
 
 ### Native XLSX parser caps (no Composer)
 

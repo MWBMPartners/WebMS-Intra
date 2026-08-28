@@ -61,35 +61,35 @@ $params = [];
 $types  = '';
 
 if ($segment === 'all-rsvps') {
-    $query = 'SELECT DISTINCT u.email, u.fullName FROM tblEventRSVPs r '
+    $query = 'SELECT DISTINCT u.emailAddress AS email, u.fullName FROM tblEventRSVPs r '
            . 'JOIN tblUsers u ON u.userID = r.userID '
            . 'WHERE r.eventID = ? AND r.response = "going" AND r.status = "confirmed" '
-           . '  AND u.email IS NOT NULL AND u.email != ""';
+           . '  AND u.emailAddress IS NOT NULL AND u.emailAddress != ""';
     $params = [$eventId]; $types = 'i';
 } elseif ($segment === 'all-volunteers') {
-    $query = 'SELECT DISTINCT u.email, u.fullName FROM tblEventCrewMembers m '
+    $query = 'SELECT DISTINCT u.emailAddress AS email, u.fullName FROM tblEventCrewMembers m '
            . 'JOIN tblEventCrews c ON c.crewID = m.crewID '
            . 'JOIN tblUsers u ON u.userID = m.userID '
-           . 'WHERE c.eventID = ? AND u.email IS NOT NULL AND u.email != "" '
+           . 'WHERE c.eventID = ? AND u.emailAddress IS NOT NULL AND u.emailAddress != "" '
            . 'UNION '
-           . 'SELECT DISTINCT u.email, u.fullName FROM tblEventJobAssignments a '
+           . 'SELECT DISTINCT u.emailAddress AS email, u.fullName FROM tblEventJobAssignments a '
            . 'JOIN tblEventJobs j ON j.jobID = a.jobID '
            . 'JOIN tblUsers u ON u.userID = a.userID '
-           . 'WHERE j.eventID = ? AND u.email IS NOT NULL AND u.email != ""';
+           . 'WHERE j.eventID = ? AND u.emailAddress IS NOT NULL AND u.emailAddress != ""';
     $params = [$eventId, $eventId]; $types = 'ii';
 } elseif (preg_match('/^crew:(\d+)$/', $segment, $m) === 1) {
     $crewId = (int) $m[1];
-    $query = 'SELECT DISTINCT u.email, u.fullName FROM tblEventCrewMembers cm '
+    $query = 'SELECT DISTINCT u.emailAddress AS email, u.fullName FROM tblEventCrewMembers cm '
            . 'JOIN tblEventCrews c ON c.crewID = cm.crewID '
            . 'JOIN tblUsers u ON u.userID = cm.userID '
-           . 'WHERE c.eventID = ? AND cm.crewID = ? AND u.email IS NOT NULL AND u.email != ""';
+           . 'WHERE c.eventID = ? AND cm.crewID = ? AND u.emailAddress IS NOT NULL AND u.emailAddress != ""';
     $params = [$eventId, $crewId]; $types = 'ii';
 } elseif (preg_match('/^job:(\d+)$/', $segment, $m) === 1) {
     $jobId = (int) $m[1];
-    $query = 'SELECT DISTINCT u.email, u.fullName FROM tblEventJobAssignments a '
+    $query = 'SELECT DISTINCT u.emailAddress AS email, u.fullName FROM tblEventJobAssignments a '
            . 'JOIN tblEventJobs j ON j.jobID = a.jobID '
            . 'JOIN tblUsers u ON u.userID = a.userID '
-           . 'WHERE j.eventID = ? AND a.jobID = ? AND u.email IS NOT NULL AND u.email != ""';
+           . 'WHERE j.eventID = ? AND a.jobID = ? AND u.emailAddress IS NOT NULL AND u.emailAddress != ""';
     $params = [$eventId, $jobId]; $types = 'ii';
 }
 

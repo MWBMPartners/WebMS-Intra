@@ -123,8 +123,8 @@ CREATE TABLE IF NOT EXISTS `tblEvents` (
     `eventName`     VARCHAR(255) NOT NULL,
     `eventSlug`     VARCHAR(200) NOT NULL COMMENT 'URL-safe slug for direct linking',
     `description`   TEXT         DEFAULT NULL,
-    `startDateTime` DATETIME     NOT NULL COMMENT 'Event start (stored in UTC)',
-    `endDateTime`   DATETIME     DEFAULT NULL COMMENT 'Event end (stored in UTC)',
+    `startDateTime` DATETIME     NOT NULL COMMENT 'Event start — wall-clock local (venue/site local); NOT UTC',
+    `endDateTime`   DATETIME     DEFAULT NULL COMMENT 'Event end — wall-clock local (venue/site local); NOT UTC',
     `timezone`      VARCHAR(50)  NOT NULL DEFAULT 'Europe/London',
     `isAllDay`      TINYINT(1)   NOT NULL DEFAULT 0,
 
