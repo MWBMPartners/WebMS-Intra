@@ -3705,4 +3705,115 @@ Full step-by-step lives in `web/_apps/help/admin.php` (anchor
 
 ---
 
+## Location / Geocoordinates / What3Words platform — Chunk A (#456, migration 180)
+
+Cross-repo data-format CONTRACT shared with ProjectBookIT/ProjectEPass —
+**standalone principle**: every repo builds its own `GeoLocation`/
+`What3Words`/`Geocoder` classes and reads its own settings; no repo ever
+calls another at runtime for a geo function. The CONTRACT is a shape
+agreement only (column types, the canonical `location` JSON wire object,
+what3words canonical form) — see the class docblocks in `_core/
+GeoLocation.php` / `What3Words.php` / `Geocoder.php` for the full contract
+text.
+
+### What3Words key-in-query-string security note
+
+Unlike every other Bearer-style adapter in this codebase (Zoom,
+CloudflareStream), the what3words v3 API takes its API key as a
+**query-string parameter** (`?key=…`), never a header. `What3Words::
+request()` is the ONLY place `w3w.apiKey` is read; the key is appended via
+`http_build_query()` (rawurlencoded exactly once, never concatenated raw)
+and the `$url` local variable that embeds it must NEVER appear in a
+`Logger::errorPlatform()` call, an exception message, or a return value —
+every failure log line carries only `path=… httpCode=…`. Grep-audit gate:
+`grep -rn "w3w.apiKey\|geo.google.apiKey"` across `web/_apps` + `web/_core`
+should show it ONLY in the two adapters (`What3Words.php`, `Geocoder.php`)
+and the two admin integration pages (index + save) — nowhere else, ever.
+
+### Nominatim usage policy compliance
+
+`Geocoder`'s Nominatim leg is built to comply with OSM's usage policy from
+the first commit, not bolted on later:
+
+1. **Descriptive User-Agent** — `Site::productName() . '/' . PORTAL_VERSION
+   . ' (' . $contact . ')'`, where `$contact` resolves `privacy.
+   contactEmail` → `mail.defaultFromAddress` → the literal `'admin contact
+   unset'`. Sent via `CURLOPT_USERAGENT`.
+2. **≤1 request/second throttle** — the last-call timestamp is persisted
+   in the `geo.nominatim.lastCallAt` setting (global, `siteID IS NULL`);
+   `Geocoder::throttle()` `usleep()`s the remainder up to a hard cap of
+   1.2s (bounded — at most one geocode call happens per request, so this
+   never compounds into a slow page).
+3. **Cache-once** — `tblGeocodeCache` (global, no `siteID` — an address
+   geocodes identically for every tenant) caches only successes; a given
+   address/coordinate pair hits Nominatim at most once, ever.
+4. **Attribution** — `location.map_attribution` ("Map data © OpenStreetMap
+   contributors") is rendered in every Leaflet tile layer's `attribution`
+   option by `location-map-assets.php`'s init script.
+
+Both `What3Words` and `Geocoder` are entirely best-effort: every public
+method returns `null`/`[]`/`false` on any failure and never throws, and
+both API-enable flags (`w3w.enabled`, `geo.autoGeocode`) default OFF so a
+fresh upgrade fires zero network calls until an admin opts in.
+
+### Leaflet 1.9.4 SRI — verification method + upgrade procedure
+
+The two Leaflet CDN tags live in `web/_core/partials/location-map-assets.php`
+as literal `<link>`/`<script>` tags (not routed through `Asset.php`'s
+helper pattern — this partial is self-contained by design per the feature
+spec) with `integrity=` + `crossorigin="anonymous"`, matching what
+`check_cdn_sri.py` requires.
+
+**How the hashes were verified (no live fetch of jsdelivr was possible from
+the build sandbox — its outbound proxy blocked it):** the exact `leaflet@
+1.9.4` npm tarball was fetched from `registry.npmjs.org` (jsdelivr's `/npm/`
+CDN mirrors the published npm tarball byte-for-byte — this is documented
+jsdelivr behaviour, not an assumption), `dist/leaflet.js` and `dist/
+leaflet.css` were extracted, and both sha384 AND sha256 digests were
+independently recomputed and compared against the values already pinned in
+the feature's build spec. All four matched exactly:
+
+```bash
+curl -sS -o leaflet-1.9.4.tgz https://registry.npmjs.org/leaflet/-/leaflet-1.9.4.tgz
+tar -xzf leaflet-1.9.4.tgz package/dist/leaflet.js package/dist/leaflet.css
+openssl dgst -sha384 -binary package/dist/leaflet.js  | openssl base64 -A   # -> cxOPjt7s7Iz04uaHJceBmS+qpjv2JkIHNVcuOrM+YHwZOmJGBXI00mdUXEq65HTH
+openssl dgst -sha384 -binary package/dist/leaflet.css | openssl base64 -A   # -> sHL9NAb7lN7rfvG5lfHpm643Xkcjzp4jFvuavGOndn6pjVqS6ny56CAt3nsEVT4H
+```
+
+**On any future Leaflet version bump:** re-run the same fetch-and-hash
+procedure against the new version's tarball, update both `src`/`href` URLs
+AND both `integrity=` attributes in `location-map-assets.php` together
+(mismatched pairs silently break the map with no console hint beyond a
+blocked-resource CSP-adjacent network error), and re-run `python3 tools/
+audit-checks/check_cdn_sri.py --strict`.
+
+**CSP:** `script-src`/`style-src` already allow `https://cdn.jsdelivr.net`
+(header.php's hard-coded policy) — no header.php edit was needed. Tiles
+need the page to set `$cspImgExtra = 'https://*.tile.openstreetmap.org';`
+BEFORE requiring `header.php` (the existing #386 page-scoped CSP-widening
+pattern). Leaflet's default marker PNG icons resolve relative to the CSS
+URL (jsdelivr) — NOT covered by `img-src` — so the init script builds an
+inline SVG `L.divIcon` marker instead of loading Leaflet's default icons,
+keeping `img-src` limited to just the tile host.
+
+### `w3w.enabled` semantics (locked decision)
+
+The flag gates ONLY the What3Words API adapter (autosuggest, validation,
+lat/lng↔W3W conversion) — the `///word.word.word` input field is ALWAYS
+rendered by `location-input.php` regardless of this setting, and a typed
+value is always stored and displayed with a working `///` link. This is
+the "stored-field fallback" the whole feature is built around: turning the
+API off never removes functionality that already existed, it only removes
+the convenience layer on top.
+
+### Directory `$can()` "team tier = private" quirk (inherited verbatim)
+
+`directory/profile.php`'s existing `$can()` visibility check treats the
+`team` tier as equivalent to `private` for non-admin viewers — a
+pre-existing platform behaviour, not something Chunk A/B changes.
+`visibilityCoords` (Chunk B) will inherit this quirk verbatim by design;
+fixing it is out of scope for this feature.
+
+---
+
 Last updated: August 2026

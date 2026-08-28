@@ -26,6 +26,9 @@ use Portal\Core\Router;
 use Portal\Core\Site;
 use Portal\Core\Venues;
 
+require_once PORTAL_CORE . DIRECTORY_SEPARATOR . 'partials' . DIRECTORY_SEPARATOR . 'location-display.php';
+require_once PORTAL_CORE . DIRECTORY_SEPARATOR . 'partials' . DIRECTORY_SEPARATOR . 'location-map-assets.php';
+
 Auth::ensureSession();
 Auth::requireLogin();
 
@@ -38,6 +41,13 @@ $venue   = Venues::getVenue($venueId, $siteId);
 if ($venue === null) {
     Router::renderError(404);
     return;
+}
+
+// 🗺️ #456 Chunk A — page-scoped CSP widening for OSM tiles, ONLY when the
+// venue has coordinates to show on a map (#386 precedent). Must be set
+// BEFORE header.php is required.
+if ($venue['latitude'] !== null && $venue['longitude'] !== null) {
+    $cspImgExtra = 'https://*.tile.openstreetmap.org';
 }
 
 $rooms      = Venues::listRooms($venueId, $siteId, false);
@@ -87,6 +97,13 @@ $esc = static fn (mixed $s): string => htmlspecialchars((string) $s, ENT_QUOTES,
                     echo count($addrParts) > 0 ? $esc(implode(', ', $addrParts)) : '—';
                     ?>
                 </p>
+                <?php portal_location_display([
+                    'lat'     => $venue['latitude'] !== null ? (float) $venue['latitude'] : null,
+                    'lng'     => $venue['longitude'] !== null ? (float) $venue['longitude'] : null,
+                    'w3w'     => $venue['what3words'] ?? null,
+                    'showMap' => true,
+                    'mapId'   => 'venueMap',
+                ]); ?>
                 <p class="mb-1"><strong>Timezone:</strong> <?php echo $esc($venue['timezone']); ?></p>
                 <p class="mb-1"><strong>Landlord:</strong> <?php echo $esc($venue['landlordName'] ?? '—'); ?></p>
                 <p class="mb-1"><strong>Caretaker:</strong>
@@ -215,4 +232,6 @@ $esc = static fn (mixed $s): string => htmlspecialchars((string) $s, ENT_QUOTES,
     </div>
 </div>
 
-<?php require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'footer.php'; ?>
+<?php
+portal_location_map_assets(\Portal\Core\App::cspNonce());
+require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'footer.php';

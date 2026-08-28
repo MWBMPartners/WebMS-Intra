@@ -25,8 +25,11 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\AssetRegister;
 use Portal\Core\Auth;
+use Portal\Core\GeoLocation;
 use Portal\Core\Router;
 use Portal\Core\Site;
+
+require_once PORTAL_CORE . DIRECTORY_SEPARATOR . 'partials' . DIRECTORY_SEPARATOR . 'location-input.php';
 
 Auth::ensureSession();
 Auth::requireLogin();
@@ -135,6 +138,15 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     <?php endforeach; ?>
                 </select>
             </div>
+            <?php portal_location_input([
+                'values' => [
+                    'lat' => $editLocation !== null ? ($editLocation['latitude'] ?? '') : '',
+                    'lng' => $editLocation !== null ? ($editLocation['longitude'] ?? '') : '',
+                    'w3w' => $editLocation !== null ? ($editLocation['what3words'] ?? '') : '',
+                ],
+                'showAddress' => false,
+                'compact'     => true,
+            ]); ?>
             <div class="col-md-2">
                 <button type="submit" class="btn btn-primary btn-sm w-100">
                     <i class="fa-solid fa-<?php echo $editLocation !== null ? 'check' : 'plus'; ?> me-1"></i><?php echo $editLocation !== null ? 'Update' : 'Add'; ?>
@@ -167,7 +179,19 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 <div class="col-3 small text-muted">
                     <?php echo $parentId > 0 && isset($locationNames[$parentId]) === true ? htmlspecialchars($locationNames[$parentId], ENT_QUOTES, 'UTF-8') : '—'; ?>
                 </div>
-                <div class="col-2 small text-muted"><?php echo htmlspecialchars((string) ($loc['details'] ?? '—'), ENT_QUOTES, 'UTF-8'); ?></div>
+                <div class="col-2 small text-muted">
+                    <?php echo htmlspecialchars((string) ($loc['details'] ?? '—'), ENT_QUOTES, 'UTF-8'); ?>
+                    <?php
+                    $locLinks = GeoLocation::mapLinks([
+                        'lat' => $loc['latitude'] !== null ? (float) $loc['latitude'] : null,
+                        'lng' => $loc['longitude'] !== null ? (float) $loc['longitude'] : null,
+                        'w3w' => $loc['what3words'] ?? null,
+                    ]);
+                    ?>
+                    <?php if ($locLinks['osm'] !== null): ?>
+                        <a href="<?php echo htmlspecialchars($locLinks['osm'], ENT_QUOTES, 'UTF-8'); ?>" target="_blank" rel="noopener" title="View on map">📍</a>
+                    <?php endif; ?>
+                </div>
                 <div class="col-4 text-end">
                     <a href="/assets/locations?edit=<?php echo (int) $loc['locationID']; ?>" class="btn btn-sm btn-outline-secondary" title="Edit">
                         <i class="fa-solid fa-pen"></i>

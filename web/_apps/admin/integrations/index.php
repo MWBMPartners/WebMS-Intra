@@ -714,6 +714,59 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 </div>
 
 <!-- ====================================================================== -->
+<!-- 6️⃣b what3words — Location addressing (#456)                            -->
+<!-- ====================================================================== -->
+<div class="card mb-4">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <h5 class="mb-0"><i class="fa-solid fa-location-crosshairs me-2" aria-hidden="true"></i>what3words</h5>
+        <?php
+        $w3wEnabled = ((string) (App::settings('w3w.enabled') ?? 'false')) === 'true';
+        ?>
+        <?php if ($w3wEnabled === true): ?>
+            <span class="badge bg-success"><i class="fa-solid fa-circle-check me-1" aria-hidden="true"></i>Enabled</span>
+        <?php else: ?>
+            <span class="badge bg-secondary"><i class="fa-solid fa-circle-minus me-1" aria-hidden="true"></i>Disabled (manual entry always works)</span>
+        <?php endif; ?>
+    </div>
+    <div class="card-body">
+        <p class="text-secondary small mb-3">
+            Address a 3m square with three simple words. The <code>///word.word.word</code> field is
+            always available for manual entry across Events, Venues, Resources and Asset Locations —
+            this integration adds validation, coordinate conversion, and typing autosuggest.
+        </p>
+        <a href="/admin/integrations/what3words" class="btn btn-outline-primary btn-sm">
+            <i class="fa-solid fa-arrow-right me-1" aria-hidden="true"></i>Manage what3words
+        </a>
+    </div>
+</div>
+
+<!-- ====================================================================== -->
+<!-- 6️⃣c Geocoding — Address ↔ coordinates (#456)                          -->
+<!-- ====================================================================== -->
+<div class="card mb-4">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <h5 class="mb-0"><i class="fa-solid fa-earth-europe me-2" aria-hidden="true"></i>Geocoding</h5>
+        <?php
+        $geoHasKey = ((string) (App::settings('geo.google.apiKey') ?? '')) !== '';
+        ?>
+        <?php if ($geoHasKey === true): ?>
+            <span class="badge bg-success"><i class="fa-solid fa-circle-check me-1" aria-hidden="true"></i>Google configured</span>
+        <?php else: ?>
+            <span class="badge bg-secondary"><i class="fa-solid fa-circle-minus me-1" aria-hidden="true"></i>Nominatim only</span>
+        <?php endif; ?>
+    </div>
+    <div class="card-body">
+        <p class="text-secondary small mb-3">
+            Address <i class="fa-solid fa-arrows-left-right"></i> coordinates. Google when a key is set,
+            otherwise OpenStreetMap Nominatim — throttled and cached, one request per second.
+        </p>
+        <a href="/admin/integrations/geocoding" class="btn btn-outline-primary btn-sm">
+            <i class="fa-solid fa-arrow-right me-1" aria-hidden="true"></i>Manage Geocoding
+        </a>
+    </div>
+</div>
+
+<!-- ====================================================================== -->
 <!-- 7️⃣ Webhooks — Outbound Event Notifications (#324)                      -->
 <!-- ====================================================================== -->
 <div class="card mb-4">

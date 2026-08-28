@@ -457,6 +457,71 @@ Self-contained 6-step setup wizard (bootstrap-free).
 | Privacy / GDPR helpers | 🔜 (#47) |
 | 2FA TOTP available | ✅ (#92) |
 
+### 📍 Location & maps (#456 Chunk A) ✅ (foundation) / 🔜 (PII — Chunk B)
+
+Full address + geocoordinates + what3words platform layer, shared as a
+cross-repo data-format CONTRACT with ProjectBookIT/ProjectEPass (identical
+column shapes, canonical `location` JSON wire object, what3words canonical
+form) — but each repo is fully standalone: **no runtime dependency on
+another repo, ever**.
+
+- `Portal\Core\GeoLocation` — address normalise/format (mirrors
+  `Venues::saveVenue()`'s rules exactly), DECIMAL(10,7) coordinate
+  validation/coarsening, what3words canonicalisation (`word.word.word`,
+  no leading `///`, Unicode-aware), map link-outs (Directions / OSM /
+  `///w3w`), and the `toLocationObject()`/`fromLocationObject()` wire
+  serializer. Pure value/service class — zero network.
+- `Portal\Core\What3Words` — v3 API client (`convertTo3wa`,
+  `convertToCoordinates`, server-proxied `autosuggest`, `testConnection`).
+  Key passed as a query-string param, never logged. Default OFF
+  (`w3w.enabled`) — the flag gates ONLY the API; the `///word.word.word`
+  input field is always present as a manual-entry fallback.
+- `Portal\Core\Geocoder` — Google primary → OpenStreetMap Nominatim
+  fallback, forward + reverse. Nominatim policy compliance built in:
+  descriptive User-Agent, ≤1 request/second throttle (persisted
+  `geo.nominatim.lastCallAt`), and a `tblGeocodeCache` result cache (an
+  address geocodes once, ever). `geo.autoGeocode` default OFF; a manual
+  "Look up coordinates" action always works regardless.
+- Interactive map: Leaflet 1.9.4 from `cdn.jsdelivr.net` with SRI (hashes
+  independently re-derived from the npm registry tarball and matched
+  exactly — see DEV_NOTES for the verification method + upgrade
+  procedure). Inline SVG marker icon (no external icon assets needed —
+  keeps `img-src` limited to the OSM tile host). Tiles via the existing
+  per-page `$cspImgExtra` CSP hook, set only on pages that will render a
+  map with coordinates present.
+- Three new shared partials (`web/_core/partials/` — first in the
+  codebase): `location-display.php` (label + address + link row + map),
+  `location-input.php` (address/coords/W3W fields, configurable field
+  names for legacy columns, optional lookup button + W3W autosuggest),
+  `location-map-assets.php` (the Leaflet tags + one nonce'd init script,
+  included once per map-bearing page).
+- Admin pages: `/admin/integrations/what3words`,
+  `/admin/integrations/geocoding` (both with a "Test connection" action),
+  `/admin/settings/organisation` (site-HQ address, nine `org.*` settings —
+  the `portal.sabbath.location_lat/lng` precedent).
+- Two session-authed AJAX proxies (`/geo/w3w-suggest`, `/geo/lookup`) —
+  deliberately outside `api/*` so the browser never sees either API key.
+- **Wired into (Chunk A, non-PII):** Venues (structured address +
+  coords/W3W + interactive map on the detail page), Events (existing
+  `locationGeoLat/locationGeoLng/locationW3W` columns now validated on
+  save with a W3W dual-mode verify/fill, JSON-LD `geo`, interactive map on
+  the event page, canonical `location` object additively emitted by the
+  events REST API's create/update/list/detail — kept alongside the legacy
+  `locationName` field for backward compatibility), Event occurrence
+  overrides (hand-entered `overrideGeoLat/overrideGeoLng/overrideW3W`,
+  `NULL` = inherit the parent event), Resources, Asset Locations.
+- **Deliberately NOT touched in Chunk A** (PII — lands in a later Chunk B
+  PR together with its GDPR export/erasure wiring in the same commit):
+  `tblUsers`/Directory member coordinates + a dedicated `visibilityCoords`
+  tier, GiftAid/Salvation (text-only address capture via the shared
+  input partial, no coordinates). Kids/Care/Visitors are excluded
+  permanently (safeguarding apps, no consent mechanism).
+- Migration 180: `latitude/longitude/what3words/geocodedAt/geocodeSource`
+  on `tblVenues`/`tblResource`/`tblAssetLocations`; `overrideGeoLat/
+  overrideGeoLng/overrideW3W` on `tblEventOccurrenceOverrides`; new
+  `tblGeocodeCache`; 14 settings seeds (all default OFF/empty); 10 route
+  seeds. A fresh upgrade is a full no-op until an admin opts in.
+
 ### 🌍 Multi-site (Phase 10) ✅
 
 - Umbrella → sites → users with 4-tier permission hierarchy (Umbrella / Site Root / Site Admin / Legacy).

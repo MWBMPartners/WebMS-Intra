@@ -3417,6 +3417,12 @@ CREATE TABLE IF NOT EXISTS `tblResource` (
     `category`          ENUM('room','equipment','vehicle','other') NOT NULL DEFAULT 'room',
     `capacity`          INT          DEFAULT NULL,
     `location`          VARCHAR(255) DEFAULT NULL,
+    -- 📍 from 180_location_geocoding.sql (#456) — standard location block
+    `latitude`          DECIMAL(10,7) DEFAULT NULL,
+    `longitude`         DECIMAL(10,7) DEFAULT NULL,
+    `what3words`        VARCHAR(100)  DEFAULT NULL COMMENT 'what3words address',
+    `geocodedAt`        DATETIME      DEFAULT NULL COMMENT 'When lat/lng last set by the Geocoder (migration 180)',
+    `geocodeSource`     VARCHAR(20)   DEFAULT NULL COMMENT 'google, nominatim, manual or w3w',
     `requiresApproval`  TINYINT(1)   NOT NULL DEFAULT 0,
     `hourlyRatePence`   INT          DEFAULT NULL,
     `bufferMinutes`     INT          NOT NULL DEFAULT 0,
@@ -5521,6 +5527,10 @@ CREATE TABLE IF NOT EXISTS `tblEventOccurrenceOverrides` (
     `overrideStartTime` TIME         DEFAULT NULL COMMENT 'NULL = inherit series time',
     `overrideEndTime`   TIME         DEFAULT NULL,
     `overrideLocation`  VARCHAR(255) DEFAULT NULL,
+    -- 📍 from 180_location_geocoding.sql (#456) — hand-entered only, NULL = inherit parent event
+    `overrideGeoLat`    DECIMAL(10,7) DEFAULT NULL COMMENT 'NULL = inherit parent event coords',
+    `overrideGeoLng`    DECIMAL(10,7) DEFAULT NULL COMMENT 'NULL = inherit parent event coords',
+    `overrideW3W`       VARCHAR(100)  DEFAULT NULL COMMENT 'what3words override — NULL = inherit',
     `notes`             VARCHAR(1000) DEFAULT NULL,
     `createdByID`       INT          DEFAULT NULL,
     `createdAt`         DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -6234,6 +6244,12 @@ CREATE TABLE IF NOT EXISTS `tblAssetLocations` (
     `siteID`           INT          NOT NULL DEFAULT 1,
     `locationName`     VARCHAR(150) NOT NULL,
     `details`          VARCHAR(500) DEFAULT NULL,
+    -- 📍 from 180_location_geocoding.sql (#456) — standard location block
+    `latitude`         DECIMAL(10,7) DEFAULT NULL,
+    `longitude`        DECIMAL(10,7) DEFAULT NULL,
+    `what3words`       VARCHAR(100)  DEFAULT NULL COMMENT 'what3words address',
+    `geocodedAt`       DATETIME      DEFAULT NULL COMMENT 'When lat/lng last set by the Geocoder (migration 180)',
+    `geocodeSource`    VARCHAR(20)   DEFAULT NULL COMMENT 'google, nominatim, manual or w3w',
     `parentLocationID` INT          DEFAULT NULL COMMENT 'Self-FK — nested locations',
     `isActive`         TINYINT(1)   NOT NULL DEFAULT 1,
     PRIMARY KEY (`locationID`),
@@ -6846,6 +6862,12 @@ CREATE TABLE IF NOT EXISTS `tblVenues` (
     `region`         VARCHAR(100) DEFAULT NULL COMMENT 'County / state / province',
     `postcode`       VARCHAR(20)  DEFAULT NULL,
     `countryCode`    CHAR(2)      NOT NULL DEFAULT 'GB' COMMENT 'ISO 3166-1 alpha-2',
+    -- 📍 from 180_location_geocoding.sql (#456) — standard location block
+    `latitude`       DECIMAL(10,7) DEFAULT NULL,
+    `longitude`      DECIMAL(10,7) DEFAULT NULL,
+    `what3words`     VARCHAR(100)  DEFAULT NULL COMMENT 'what3words address',
+    `geocodedAt`     DATETIME      DEFAULT NULL COMMENT 'When lat/lng last set by the Geocoder (migration 180)',
+    `geocodeSource`  VARCHAR(20)   DEFAULT NULL COMMENT 'google, nominatim, manual or w3w',
     `timezone`       VARCHAR(64)  NOT NULL DEFAULT 'Europe/London' COMMENT 'IANA timezone — booking dates/times are wall-clock LOCAL to the venue (§8.4); mirrors tblEvents.eventTimezone style',
     `caretakerName`  VARCHAR(150) DEFAULT NULL COMMENT 'On-site contact for access/keys, when different from the landlord org contact',
     `caretakerPhone` VARCHAR(50)  DEFAULT NULL,
@@ -7802,4 +7824,63 @@ INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
 ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 
 INSERT INTO `tblMigrations` (`filename`) VALUES ('176_ms365_shared_mailbox.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- ── from 180_location_geocoding.sql (#456) ───────────────────────────────────
+-- Location / Geocoordinates / What3Words platform layer, Chunk A. The five
+-- standard location columns on tblVenues/tblResource/tblAssetLocations and
+-- the three overrideGeoLat/overrideGeoLng/overrideW3W columns on
+-- tblEventOccurrenceOverrides are already folded inline into their CREATE
+-- TABLE blocks above. This block carries tblGeocodeCache (a global geocode
+-- result cache — never PII, never tenant-scoped), the 14 settings seeds,
+-- the 10 route seeds, and the self-record.
+CREATE TABLE IF NOT EXISTS `tblGeocodeCache` (
+    `cacheID`     INT           NOT NULL AUTO_INCREMENT,
+    `queryHash`   CHAR(64)      NOT NULL COMMENT 'sha256(direction | lowercased query text)',
+    `direction`   ENUM('forward','reverse') NOT NULL DEFAULT 'forward',
+    `queryText`   VARCHAR(500)  NOT NULL,
+    `latitude`    DECIMAL(10,7) DEFAULT NULL,
+    `longitude`   DECIMAL(10,7) DEFAULT NULL,
+    `formatted`   VARCHAR(500)  DEFAULT NULL COMMENT 'Provider display/formatted address',
+    `provider`    VARCHAR(20)   NOT NULL COMMENT 'google or nominatim',
+    `hitCount`    INT           NOT NULL DEFAULT 1,
+    `createdAt`   DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `lastUsedAt`  DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`cacheID`),
+    UNIQUE KEY `uq_geoc_hash` (`queryHash`),
+    KEY `idx_geoc_lastused` (`lastUsedAt`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+COMMENT='Geocoder result cache — an address geocodes once (Nominatim policy) (migration 180)';
+
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'w3w.enabled',              'false', 'false', 0),
+    (NULL, 'w3w.apiKey',               '',      '',      1),
+    (NULL, 'geo.google.apiKey',        '',      '',      1),
+    (NULL, 'geo.autoGeocode',          'false', 'false', 0),
+    (NULL, 'geo.nominatim.lastCallAt', '',      '',      0),
+    (NULL, 'org.address.line1',        '',      '',      0),
+    (NULL, 'org.address.line2',        '',      '',      0),
+    (NULL, 'org.address.city',         '',      '',      0),
+    (NULL, 'org.address.region',       '',      '',      0),
+    (NULL, 'org.address.postcode',     '',      '',      0),
+    (NULL, 'org.address.countryCode',  'GB',    'GB',    0),
+    (NULL, 'org.latitude',             '',      '',      0),
+    (NULL, 'org.longitude',            '',      '',      0),
+    (NULL, 'org.what3words',           '',      '',      0)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('admin/integrations/what3words',      'admin/integrations/what3words/index.php', 1),
+    ('admin/integrations/what3words/save', 'admin/integrations/what3words/save.php',  1),
+    ('admin/integrations/what3words/test', 'admin/integrations/what3words/test.php',  1),
+    ('admin/integrations/geocoding',       'admin/integrations/geocoding/index.php',  1),
+    ('admin/integrations/geocoding/save',  'admin/integrations/geocoding/save.php',   1),
+    ('admin/integrations/geocoding/test',  'admin/integrations/geocoding/test.php',   1),
+    ('admin/settings/organisation',        'admin/settings/organisation/index.php',   1),
+    ('admin/settings/organisation/save',   'admin/settings/organisation/save.php',    1),
+    ('geo/w3w-suggest',                    'geo/w3w-suggest.php',                     1),
+    ('geo/lookup',                         'geo/lookup.php',                          1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('180_location_geocoding.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;

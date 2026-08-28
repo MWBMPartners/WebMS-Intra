@@ -20,10 +20,13 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\AppRegistry;
 use Portal\Core\Auth;
+use Portal\Core\Geocoder;
+use Portal\Core\GeoLocation;
 use Portal\Core\Logger;
 use Portal\Core\Router;
 use Portal\Core\Site;
 use Portal\Core\Venues;
+use Portal\Core\What3Words;
 
 // 🛡️ Admin access check
 if (App::isAdmin() === false) {
@@ -68,9 +71,50 @@ $locationAddress = trim($_POST['locationAddress'] ?? '');
 $locationWebURL  = trim($_POST['locationWebURL'] ?? '');
 $locationPhone   = trim($_POST['locationPhone'] ?? '');
 $locationEmail   = trim($_POST['locationEmail'] ?? '');
-$locationGeoLat  = ($_POST['locationGeoLat'] ?? '') !== '' ? (float) $_POST['locationGeoLat'] : null;
-$locationGeoLng  = ($_POST['locationGeoLng'] ?? '') !== '' ? (float) $_POST['locationGeoLng'] : null;
-$locationW3W     = trim($_POST['locationW3W'] ?? '');
+
+// 📍 #456 Chunk A — validated via GeoLocation (out-of-range coords ⇒ null,
+// never a silent bad store); a non-empty invalid W3W is rejected with a
+// flash + redirect BEFORE anything is saved (nothing else in this handler
+// has side effects yet at this point).
+$geoCoords = GeoLocation::validateCoords($_POST['locationGeoLat'] ?? null, $_POST['locationGeoLng'] ?? null);
+$locationGeoLat = $geoCoords['lat'] ?? null;
+$locationGeoLng = $geoCoords['lng'] ?? null;
+
+$locationW3WRaw = trim($_POST['locationW3W'] ?? '');
+$locationW3W = '';
+if ($locationW3WRaw !== '') {
+    $validatedW3W = GeoLocation::validateW3W($locationW3WRaw);
+    if ($validatedW3W === null) {
+        $_SESSION['flash_msg']  = t('location.w3w_invalid');
+        $_SESSION['flash_type'] = 'danger';
+        header('Location: /calendar/manage');
+        exit();
+    }
+    $locationW3W = $validatedW3W;
+}
+
+$geoWarning = null;
+if ($locationW3W !== '' && What3Words::isConfigured() === true) {
+    $verifiedCoords = What3Words::convertToCoordinates($locationW3W);
+    if ($verifiedCoords !== null) {
+        if ($locationGeoLat === null || $locationGeoLng === null) {
+            $locationGeoLat = $verifiedCoords['lat'];
+            $locationGeoLng = $verifiedCoords['lng'];
+        }
+    } else {
+        // ⚠️ Verification failure is a warning, never a rejection — the
+        // save still succeeds with the stored string.
+        $geoWarning = t('location.w3w_unverified');
+    }
+}
+
+if (($locationGeoLat === null || $locationGeoLng === null) && Geocoder::autoEnabled() === true && $locationAddress !== '') {
+    $geocoded = Geocoder::forward($locationAddress);
+    if ($geocoded !== null) {
+        $locationGeoLat = $geocoded['lat'];
+        $locationGeoLng = $geocoded['lng'];
+    }
+}
 
 // 🏢 Organisation fields
 $hostOrgName = trim($_POST['hostOrgName'] ?? '');
@@ -261,7 +305,7 @@ if ($action === 'create') {
 
     Logger::activity('EventCreated', 'Created event: ' . $eventName . ' (ID:' . $newEventId . ')', $userId);
 
-    $_SESSION['flash_msg']  = 'Event "' . $eventName . '" created successfully.';
+    $_SESSION['flash_msg']  = 'Event "' . $eventName . '" created successfully.' . ($geoWarning !== null ? ' ' . $geoWarning : '');
     $_SESSION['flash_type'] = 'success';
     $appendVenueCoverageFlash($startDateTime, $endDt, $timezone);
     header('Location: /calendar/manage');
@@ -333,7 +377,7 @@ if ($action === 'update') {
 
     Logger::activity('EventUpdated', 'Updated event #' . $eventID . ': ' . $eventName, $userId);
 
-    $_SESSION['flash_msg']  = 'Event "' . $eventName . '" updated successfully.';
+    $_SESSION['flash_msg']  = 'Event "' . $eventName . '" updated successfully.' . ($geoWarning !== null ? ' ' . $geoWarning : '');
     $_SESSION['flash_type'] = 'success';
     $appendVenueCoverageFlash($startDateTime, $endDt, $timezone);
     header('Location: /calendar/manage');

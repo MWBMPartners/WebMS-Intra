@@ -19,7 +19,7 @@ Internal portal platform (PHP 8.5, backward-compatible with 8.4, MySQL 8.0, Boot
 ```
 repo root/          <- NOT deployed (docs, CI/CD only)
 web/                <- ALL deployable files (synced to server via SFTP)
-  _core/            <- Framework classes (Portal\Core namespace, 64 classes)
+  _core/            <- Framework classes (Portal\Core namespace, 67 classes)
   _apps/            <- App controllers — outside the webroot (#159). Every
                        app's PHP handlers live here; Router resolves
                        tblRoutes.targetFile against PORTAL_APPS = _apps/.
@@ -112,7 +112,9 @@ handlers backing the `api` app's events/users resources), `live/` +
 of `livestream`/`cop-live-chat` above), `privacy/` (GDPR consent banner +
 policy pages, public, tied to Auth), `widget/` (public embeddable
 countdown/calendar widgets for external sites), `qr.php` (shared QR-code
-generator utility used by Noticeboard/Visitors/etc).
+generator utility used by Noticeboard/Visitors/etc), `geo/` (session-authed
+AJAX proxies — `w3w-suggest`/`lookup` — backing the shared location
+partials' "Look up coordinates" button + W3W autosuggest, #456).
 
 Calendar/Events/Preaching Plan is ONE app ("Events") — `/calendar` covers viewing/listing/subscribing; the manage UI handles preaching-plan/worship event types and series.
 
@@ -154,6 +156,44 @@ Calendar/Events/Preaching Plan is ONE app ("Events") — `/calendar` covers view
 
 ## Recent ships (chronological)
 
+- **`claude/gap456-location-chunkA`** (branched off `alpha`) — #456 Chunk A:
+  full address + geocoordinates + what3words platform layer (foundation,
+  non-PII, interactive map — Chunk B lands the PII/GDPR half in a later
+  PR off this branch). Cross-repo data-format CONTRACT with
+  ProjectBookIT/ProjectEPass (identical column shapes, canonical
+  `location` JSON wire object, what3words canonical form) but fully
+  standalone — zero runtime dependency on either repo. New
+  `Portal\Core\GeoLocation` (address normalise/format mirroring
+  `Venues::saveVenue()`, DECIMAL(10,7) coord validation, W3W
+  canonicalisation, map link-outs, `toLocationObject()`/
+  `fromLocationObject()` serializer), `Portal\Core\What3Words` (v3 API
+  client — key in the QUERY STRING not a header, unlike every other
+  Bearer adapter in this codebase; never logged; default OFF via
+  `w3w.enabled`, which gates ONLY the API — the `///word.word.word` input
+  is always present as a stored-field fallback), `Portal\Core\Geocoder`
+  (Google primary → Nominatim/OSM fallback, policy-compliant User-Agent +
+  ≤1 rps throttle + `tblGeocodeCache`, `geo.autoGeocode` default OFF,
+  every method best-effort/never-throws). Three new shared partials —
+  first in the codebase at `web/_core/partials/`:
+  `location-display.php`/`location-input.php`/`location-map-assets.php`
+  (pinned Leaflet 1.9.4 from cdn.jsdelivr.net with SRI — hashes verified
+  by independently re-deriving them from the npm registry tarball, since
+  jsdelivr itself was unreachable from the build sandbox; all four
+  sha384/sha256 digests matched the build spec exactly). New admin pages
+  (`/admin/integrations/{what3words,geocoding}`,
+  `/admin/settings/organisation`) + two session-authed AJAX proxies
+  (`/geo/w3w-suggest`, `/geo/lookup`) outside `api/*`. Wired into Venues,
+  Events (existing `locationGeoLat/locationGeoLng/locationW3W` columns
+  now validated + JSON-LD `geo` + interactive map + canonical `location`
+  object additively emitted by the events REST API create/update/list/
+  detail), Event occurrence overrides (`overrideGeoLat/overrideGeoLng/
+  overrideW3W`, hand-entered, NULL = inherit), Resources, Asset Locations.
+  Migration 180: five-column location block on
+  `tblVenues`/`tblResource`/`tblAssetLocations`, three override columns on
+  `tblEventOccurrenceOverrides`, new `tblGeocodeCache`, 14 settings seeds
+  (all default OFF/empty), 10 route seeds — upgrade is a full no-op. No
+  PII table touched (tblUsers/directory/GiftAid/Salvation are Chunk B).
+  All 11 audit checks green, `php -l` clean on every touched file.
 - **`claude/gap234-shared-mailbox`** (branched off `alpha`) — gap #234:
   MS365 Graph email via an admin-configured shared mailbox, formalising
   and hardening the app-only `Mailer::sendViaGraph()` path already in

@@ -10,6 +10,7 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\GeoLocation;
 use Portal\Core\Logger;
 use Portal\Core\Site;
 
@@ -54,22 +55,46 @@ if ($action === 'add') {
     if ($startT !== '' && preg_match('/^\d{2}:\d{2}(:\d{2})?$/', $startT) !== 1) { $startT = ''; }
     if ($endT   !== '' && preg_match('/^\d{2}:\d{2}(:\d{2})?$/', $endT)   !== 1) { $endT   = ''; }
 
+    // 📍 #456 Chunk A — hand-entered only, NULL = inherit the parent
+    // event's own coords/W3W. Invalid non-empty W3W is rejected here
+    // (nothing else in this handler has side effects yet).
+    $overrideCoords = GeoLocation::validateCoords($_POST['overrideGeoLat'] ?? null, $_POST['overrideGeoLng'] ?? null);
+    $overrideW3WRaw = trim((string) ($_POST['overrideW3W'] ?? ''));
+    $overrideW3W = null;
+    if ($overrideW3WRaw !== '') {
+        $overrideW3W = GeoLocation::validateW3W($overrideW3WRaw);
+        if ($overrideW3W === null) {
+            $_SESSION['flash_msg']  = t('location.w3w_invalid');
+            $_SESSION['flash_type'] = 'danger';
+            header('Location: ' . $redirect, true, 302); exit();
+        }
+    }
+
     $cancelled = $mode === 'cancel' ? 1 : 0;
     $nameArg   = $name !== ''   ? $name   : null;
     $locArg    = $loc !== ''    ? $loc    : null;
     $notesArg  = $notes !== ''  ? $notes  : null;
     $startArg  = $startT !== '' ? $startT : null;
     $endArg    = $endT !== ''   ? $endT   : null;
+    $overrideLatArg = $overrideCoords['lat'] ?? null;
+    $overrideLngArg = $overrideCoords['lng'] ?? null;
 
     $stmt = $mysqli->prepare(
         'INSERT INTO tblEventOccurrenceOverrides '
-        . '(eventID, occurrenceDate, isCancelled, overrideName, overrideStartTime, overrideEndTime, overrideLocation, notes, createdByID) '
-        . 'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) '
+        . '(eventID, occurrenceDate, isCancelled, overrideName, overrideStartTime, overrideEndTime, overrideLocation, '
+        . 'overrideGeoLat, overrideGeoLng, overrideW3W, notes, createdByID) '
+        . 'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) '
         . 'ON DUPLICATE KEY UPDATE isCancelled = VALUES(isCancelled), overrideName = VALUES(overrideName), '
         . '                       overrideStartTime = VALUES(overrideStartTime), overrideEndTime = VALUES(overrideEndTime), '
-        . '                       overrideLocation = VALUES(overrideLocation), notes = VALUES(notes)'
+        . '                       overrideLocation = VALUES(overrideLocation), overrideGeoLat = VALUES(overrideGeoLat), '
+        . '                       overrideGeoLng = VALUES(overrideGeoLng), overrideW3W = VALUES(overrideW3W), notes = VALUES(notes)'
     );
-    $stmt->bind_param('isisssssi', $eventId, $date, $cancelled, $nameArg, $startArg, $endArg, $locArg, $notesArg, $userId);
+    // 📍 #456 Chunk A: 9 -> 12 placeholders/vars (+overrideGeoLat[d], +overrideGeoLng[d], +overrideW3W[s]).
+    $stmt->bind_param(
+        'isissssddssi',
+        $eventId, $date, $cancelled, $nameArg, $startArg, $endArg, $locArg,
+        $overrideLatArg, $overrideLngArg, $overrideW3W, $notesArg, $userId
+    );
     $stmt->execute();
     $stmt->close();
     Logger::activity('EventOccurrenceOverride', 'Event #' . $eventId . ' date=' . $date . ' cancelled=' . $cancelled);

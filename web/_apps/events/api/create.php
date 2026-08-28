@@ -32,6 +32,7 @@ declare(strict_types=1);
 use Portal\Core\ApiAuth;
 use Portal\Core\ApiResponse;
 use Portal\Core\App;
+use Portal\Core\GeoLocation;
 use Portal\Core\Logger;
 use Portal\Core\Site;
 
@@ -77,6 +78,30 @@ $typeId     = isset($body['typeID']) === true && $body['typeID'] !== null && $bo
     ? (int) $body['typeID'] : null;
 $description = (string) ($body['description'] ?? '');
 
+// 📍 #456 Chunk A — optional location fields, additive to the create
+// contract. Coords validated pair-or-null; W3W regex-validated (422-style
+// error on an invalid non-empty value — never silently dropped).
+$locationAddress = isset($body['locationAddress']) === true ? mb_substr((string) $body['locationAddress'], 0, 65000) : null;
+$locationWebURL  = isset($body['locationWebURL']) === true ? mb_substr((string) $body['locationWebURL'], 0, 500) : null;
+$locationPhone   = isset($body['locationPhone']) === true ? mb_substr((string) $body['locationPhone'], 0, 50) : null;
+$locationEmail   = isset($body['locationEmail']) === true ? mb_substr((string) $body['locationEmail'], 0, 255) : null;
+
+$geoCoords = GeoLocation::validateCoords($body['locationGeoLat'] ?? null, $body['locationGeoLng'] ?? null);
+if (($body['locationGeoLat'] ?? null) !== null && ($body['locationGeoLng'] ?? null) !== null && $geoCoords === null) {
+    ApiResponse::error('locationGeoLat/locationGeoLng must be a valid coordinate pair', 422);
+}
+$locationGeoLat = $geoCoords['lat'] ?? null;
+$locationGeoLng = $geoCoords['lng'] ?? null;
+
+$locationW3W = null;
+$w3wRaw = trim((string) ($body['locationW3W'] ?? ''));
+if ($w3wRaw !== '') {
+    $locationW3W = GeoLocation::validateW3W($w3wRaw);
+    if ($locationW3W === null) {
+        ApiResponse::error('locationW3W is not a valid what3words address (word.word.word)', 422);
+    }
+}
+
 // 🐢 Slug from name (server-side; truncated to 100 chars to fit the column)
 $slug = strtolower(trim(preg_replace('/[^a-zA-Z0-9]+/', '-', $eventName), '-'));
 $slug = substr($slug !== '' ? $slug : 'event-' . bin2hex(random_bytes(4)), 0, 100);
@@ -90,18 +115,22 @@ $db = App::db();
 $stmt = $db->prepare(
     'INSERT INTO tblEvents '
     . '(siteID, eventName, eventSlug, description, startDateTime, endDateTime, '
-    . 'isAllDay, locationName, status, isPublic, isFeatured, categoryID, typeID, createdByID) '
-    . 'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+    . 'isAllDay, locationName, status, isPublic, isFeatured, categoryID, typeID, createdByID, '
+    . 'locationAddress, locationWebURL, locationPhone, locationEmail, locationGeoLat, locationGeoLng, locationW3W) '
+    . 'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
 );
 if ($stmt === false) {
     Logger::errorPlatform('MySQL', 'Error', 'API_EVENT_CREATE_PREP', $db->error, '');
     ApiResponse::error('Database error', 500);
 }
+// 📍 #456 Chunk A: 14 -> 21 placeholders/vars (+locationAddress[s], +locationWebURL[s],
+// +locationPhone[s], +locationEmail[s], +locationGeoLat[d], +locationGeoLng[d], +locationW3W[s]).
 $stmt->bind_param(
-    'isssssisssiiii',
+    'isssssisssiiiissssdds',
     $siteId, $eventName, $slug, $description, $startSql, $endSql,
     $isAllDay, $locationName, $status, $isPublic, $isFeatured,
-    $categoryId, $typeId, $creatorId
+    $categoryId, $typeId, $creatorId,
+    $locationAddress, $locationWebURL, $locationPhone, $locationEmail, $locationGeoLat, $locationGeoLng, $locationW3W
 );
 $ok    = $stmt->execute();
 $newId = (int) $stmt->insert_id;
@@ -114,7 +143,19 @@ if ($ok === false) {
 
 Logger::activity('ApiEventCreate', 'API: created event #' . $newId . ' "' . $eventName . '"');
 
+// 📍 #456 Chunk A — canonical `location` object (cross-repo contract §2),
+// additive alongside the legacy locationName field for backward-compat.
+$locationObject = GeoLocation::toLocationObject(
+    [
+        'name' => $locationName, 'addressLine1' => $locationAddress,
+        'latitude' => $locationGeoLat, 'longitude' => $locationGeoLng, 'what3words' => $locationW3W,
+    ],
+    ['line1' => 'addressLine1']
+);
+
 ApiResponse::success([
-    'eventID'   => $newId,
-    'eventSlug' => $slug,
+    'eventID'      => $newId,
+    'eventSlug'    => $slug,
+    'locationName' => $locationName,
+    'location'     => $locationObject,
 ], 201);

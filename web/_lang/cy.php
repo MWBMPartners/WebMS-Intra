@@ -122,4 +122,25 @@ return [
     'format.thousands_separator'    => ',',
     'format.currency_position'      => 'before',
 
+    // =========================================================================
+    // 📍 Lleoliad / Cyfesurynnau / What3Words (#456 Chunk A)
+    // =========================================================================
+    'location.section'         => 'Lleoliad',
+    'location.address'         => 'Cyfeiriad',
+    'location.address_line1'   => 'Llinell gyfeiriad 1',
+    'location.address_line2'   => 'Llinell gyfeiriad 2',
+    'location.city'            => 'Dinas / tref',
+    'location.region'          => 'Sir / rhanbarth',
+    'location.postcode'        => 'Cod post',
+    'location.country'         => 'Gwlad',
+    'location.latitude'        => 'Lledred',
+    'location.longitude'       => 'Hydred',
+    'location.what3words'      => 'what3words',
+    'location.w3w_placeholder' => '///gair.gair.gair',
+    'location.view_on_map'     => 'Gweld ar y map',
+    'location.get_directions'  => 'Cael cyfarwyddiadau',
+    'location.open_in_osm'     => 'Agor yn OpenStreetMap',
+    'location.lookup_coords'   => 'Chwilio cyfesurynnau',
+    'location.coords_approx'   => 'Lleoliad bras',
+
 ];
