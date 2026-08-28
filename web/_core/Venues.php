@@ -441,6 +441,50 @@ class Venues
             $countryCode = 'GB';
         }
 
+        // 📍 Geocoordinates / what3words (#456 Chunk A) — validated the
+        // same as every other new location field; invalid non-empty W3W
+        // is treated as null here (the HTTP handler pre-validates and
+        // flashes — the model layer never fatals).
+        $coords = GeoLocation::validateCoords($data['latitude'] ?? null, $data['longitude'] ?? null);
+        $w3w    = GeoLocation::validateW3W($data['what3words'] ?? null);
+        $geocodedAt    = null;
+        $geocodeSource = null;
+
+        if ($w3w !== null && What3Words::isConfigured() === true) {
+            $verifiedCoords = What3Words::convertToCoordinates($w3w);
+            if ($verifiedCoords !== null) {
+                if ($coords === null) {
+                    $coords = $verifiedCoords;
+                    $geocodedAt = date('Y-m-d H:i:s');
+                    $geocodeSource = 'w3w';
+                }
+            }
+            // ⚠️ Verification failure is a warning at the HTTP layer, never
+            // a rejection here — best-effort, save must still succeed.
+        }
+
+        if ($coords !== null && $geocodeSource === null) {
+            $geocodeSource = 'manual';
+        }
+
+        if ($coords === null && Geocoder::autoEnabled() === true) {
+            $addressForGeocode = GeoLocation::formatAddress([
+                'line1' => $addr1 ?? null, 'line2' => $addr2 ?? null, 'city' => $city ?? null,
+                'region' => $region ?? null, 'postcode' => $postcode ?? null,
+            ]);
+            if ($addressForGeocode !== '') {
+                $geocoded = Geocoder::forward($addressForGeocode, $countryCode);
+                if ($geocoded !== null) {
+                    $coords = ['lat' => $geocoded['lat'], 'lng' => $geocoded['lng']];
+                    $geocodedAt = date('Y-m-d H:i:s');
+                    $geocodeSource = $geocoded['source'];
+                }
+            }
+        }
+
+        $latVal = $coords['lat'] ?? null;
+        $lngVal = $coords['lng'] ?? null;
+
         $timezone = trim((string) ($data['timezone'] ?? 'Europe/London'));
         try {
             new \DateTimeZone($timezone);
@@ -465,15 +509,18 @@ class Venues
                 $stmt = $db->prepare(
                     'UPDATE tblVenues SET venueName = ?, landlordOrgID = ?, addressLine1 = ?, addressLine2 = ?, '
                     . 'city = ?, region = ?, postcode = ?, countryCode = ?, timezone = ?, caretakerName = ?, '
-                    . 'caretakerPhone = ?, notes = ? WHERE venueID = ? AND siteID = ?'
+                    . 'caretakerPhone = ?, notes = ?, latitude = ?, longitude = ?, what3words = ?, '
+                    . 'geocodedAt = ?, geocodeSource = ? WHERE venueID = ? AND siteID = ?'
                 );
                 if ($stmt === false) {
                     return 0;
                 }
+                // 📍 #456 Chunk A: 14 -> 19 placeholders/vars (+lat[d], +lng[d], +w3w[s], +geocodedAt[s], +geocodeSource[s]).
                 $stmt->bind_param(
-                    'sissssssssssii',
+                    'sissssssssssddsssii',
                     $name, $landlordOrgIdVal, $addr1, $addr2, $city, $region, $postcode,
-                    $countryCode, $timezone, $caretakerName, $caretakerPhone, $notes, $venueId, $siteId
+                    $countryCode, $timezone, $caretakerName, $caretakerPhone, $notes,
+                    $latVal, $lngVal, $w3w, $geocodedAt, $geocodeSource, $venueId, $siteId
                 );
                 $ok = $stmt->execute();
                 $stmt->close();
@@ -488,17 +535,19 @@ class Venues
 
             $stmt = $db->prepare(
                 'INSERT INTO tblVenues (siteID, venueName, landlordOrgID, addressLine1, addressLine2, city, region, '
-                . 'postcode, countryCode, timezone, caretakerName, caretakerPhone, notes, createdByID) '
-                . 'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                . 'postcode, countryCode, timezone, caretakerName, caretakerPhone, notes, '
+                . 'latitude, longitude, what3words, geocodedAt, geocodeSource, createdByID) '
+                . 'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
             );
             if ($stmt === false) {
                 return 0;
             }
-            // SEC-01 fix: 14 placeholders/14 vars need 14 type chars (was 13: 'isisssssssssi').
+            // 📍 #456 Chunk A: 14 -> 19 placeholders/vars (+lat[d], +lng[d], +w3w[s], +geocodedAt[s], +geocodeSource[s]).
             $stmt->bind_param(
-                'isissssssssssi',
+                'isissssssssssddsssi',
                 $siteId, $name, $landlordOrgIdVal, $addr1, $addr2, $city, $region,
-                $postcode, $countryCode, $timezone, $caretakerName, $caretakerPhone, $notes, $actorUserId
+                $postcode, $countryCode, $timezone, $caretakerName, $caretakerPhone, $notes,
+                $latVal, $lngVal, $w3w, $geocodedAt, $geocodeSource, $actorUserId
             );
             $ok = $stmt->execute();
             $newId = (int) $stmt->insert_id;

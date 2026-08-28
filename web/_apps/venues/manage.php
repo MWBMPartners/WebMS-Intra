@@ -35,6 +35,8 @@ use Portal\Core\Router;
 use Portal\Core\Site;
 use Portal\Core\Venues;
 
+require_once PORTAL_CORE . DIRECTORY_SEPARATOR . 'partials' . DIRECTORY_SEPARATOR . 'location-input.php';
+
 Auth::ensureSession();
 Auth::requireLogin();
 
@@ -211,6 +213,18 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 <input type="text" class="form-control form-control-sm text-uppercase" id="countryCode" name="countryCode" maxlength="2"
                        value="<?php echo htmlspecialchars($editVenue !== null ? (string) $editVenue['countryCode'] : 'GB', ENT_QUOTES, 'UTF-8'); ?>">
             </div>
+
+            <?php portal_location_input([
+                'values' => [
+                    'lat' => $editVenue !== null ? ($editVenue['latitude'] ?? '') : '',
+                    'lng' => $editVenue !== null ? ($editVenue['longitude'] ?? '') : '',
+                    'w3w' => $editVenue !== null ? ($editVenue['what3words'] ?? '') : '',
+                ],
+                'showAddress' => false,
+                'compact'     => true,
+                'lookup'      => true,
+                'w3wSuggest'  => true,
+            ]); ?>
 
             <div class="col-md-4">
                 <label class="form-label small" for="caretakerName">On-site caretaker name</label>

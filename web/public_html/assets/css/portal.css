@@ -783,6 +783,14 @@ textarea:focus-visible,
     line-height: 1;
     border-radius: var(--portal-radius-sm);
     transition: background-color var(--portal-transition-fast);
+    /* 📱 44px touch-target floor (#225) — these were ≈34×34px, below the
+       accessible tap-target guideline and easy to fat-finger next to
+       the language/site switchers. */
+    min-width: 44px;
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
 }
 
 .portal-theme-toggle:hover,
@@ -1026,6 +1034,16 @@ noscript ~ .accordion .collapse {
     cursor: not-allowed;
 }
 
+/* 📱 iOS zoom-on-focus guard (#225). The base .form-control/.form-select
+   above is correctly forced to 16px, but the Bootstrap -sm variants
+   inherit a 14px font-size — iOS Safari auto-zooms the page when
+   focusing any input under 16px. Visual density of -sm is kept by its
+   padding; only the font-size changes here. */
+.form-control-sm,
+.form-select-sm {
+    font-size: var(--portal-font-size-base);
+}
+
 /* ----- Form help text ----- */
 .form-text {
     color: var(--portal-text-muted);
@@ -1114,14 +1132,20 @@ li code {
 
 /* Centred auth-shell pattern (login, forgot-password, reset-password).
    Matches body that uses Bootstrap's d-flex+vh-100 centring with a card
-   inside. CSS-only enhancement — markup unchanged. */
-body.d-flex.vh-100 { background-color: var(--portal-bg); }
-body.d-flex.vh-100 > .card {
+   inside. CSS-only enhancement — markup unchanged. Also matches the
+   min-vh-100 variant (#225) — vh-100's fixed height clips tall cards
+   (error alert + captcha + SSO buttons) on short/keyboard-open viewports;
+   min-vh-100 + py-4 lets the shell grow and scroll instead. */
+body.d-flex.vh-100,
+body.d-flex.min-vh-100 { background-color: var(--portal-bg); }
+body.d-flex.vh-100 > .card,
+body.d-flex.min-vh-100 > .card {
     border-radius: var(--portal-radius-xl);
     box-shadow: var(--portal-shadow-lg);
     padding: 2rem !important;        /* override the p-4 utility */
 }
-body.d-flex.vh-100 > .card h1 {
+body.d-flex.vh-100 > .card h1,
+body.d-flex.min-vh-100 > .card h1 {
     font-weight: var(--portal-font-weight-bold);
     letter-spacing: var(--portal-letter-spacing-tight);
 }
@@ -1202,6 +1226,16 @@ body.d-flex.vh-100 > .card h1 {
                 border-color     var(--portal-transition-fast),
                 color            var(--portal-transition-fast),
                 box-shadow       var(--portal-transition-fast);
+}
+
+/* 📱 Global small-button touch floor (#225). Bootstrap's .btn-sm computes
+   to ≈31px tall — under the 44px tap-target guideline. Scoped to
+   pointer:coarse (touch) so desktop mouse-driven density is untouched;
+   retires ~8 separate per-page btn-sm findings in one rule. */
+@media (pointer: coarse) {
+    .btn-sm {
+        padding: .375rem .65rem;
+    }
 }
 .btn-primary {
     --bs-btn-bg:                  var(--portal-primary);
@@ -2176,11 +2210,20 @@ a:focus > .app-card {
 /* ---------- Mobile: collapse grid views to a friendlier layout ---------- */
 
 @media (max-width: 640px) {
-    /* Hour-timeline grids stay scrollable horizontally so the week view
-       doesn't get squashed past readability. */
-    .portal-cal-timeline,
+    /* Give the columns a real minimum instead of minmax(0,1fr) — at
+       minmax(0,1fr) nothing ever exceeds the container, so the horizontal
+       scroll below never engaged and 7 day-columns simply compressed to
+       illegibility (#225). Day view (--cal-cols:1) is unaffected — one
+       110px+ column never needs to scroll. */
     .portal-cal-headrow,
-    .portal-cal-allday {
+    .portal-cal-allday,
+    .portal-cal-timeline {
+        grid-template-columns: 56px repeat(var(--cal-cols, 7), minmax(110px, 1fr));
+    }
+    /* Horizontal scroll lives on the single common ancestor so the header,
+       all-day strip and timeline pan together instead of desynchronising
+       (each row previously had its own independent overflow-x:auto). */
+    .portal-cal-grid {
         overflow-x: auto;
     }
     /* Month cells shrink to fit but stay readable */
@@ -2188,8 +2231,14 @@ a:focus > .app-card {
         min-height: 64px;
         font-size: var(--portal-font-size-xs);
     }
+    /* All-day pills have no time span to fall back on, so hiding the name
+       left them blank/invisible — keep it visible but clamped (#225). */
     .portal-cal-month-pill-name {
-        display: none;
+        display: block;
+        max-width: 100%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
     }
 }
 

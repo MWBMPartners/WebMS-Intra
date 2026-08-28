@@ -62,7 +62,7 @@ Foundational classes loaded by every request via `bootstrap.php`. All ✅.
 | `Site` | Multi-site context — detection, branding, per-site settings overrides; product-brand resolution helpers `productName()` / `productTagline()` / `productPublisher()` (#296) |
 | `AppRegistry` | Single source of truth for installable apps; powers `/admin/apps` toggle + Router enablement gating + industry filter (#255) |
 | `Captcha` | Provider-agnostic — Turnstile / reCAPTCHA v2+v3 / hCaptcha with admin-configurable priority |
-| `Mailer`, `MailerGoogle` | Microsoft Graph "SendAs" + Google Workspace SendAs |
+| `Mailer`, `MailerGoogle` | Microsoft Graph app-only send (direct or admin-configured shared mailbox, #234) + Google Workspace SendAs; every send logged to `tblEmailLog` |
 | `ExpenseMailer`, `ExpensePdf`, `Pdf` | Expense email notifier, PDF generator, dompdf wrapper |
 | `Logger` | Activity + error logging into `tblActivityLogs` / `tblErrors` |
 | `Migrator` | Web-based SQL migration runner |
@@ -456,6 +456,93 @@ Self-contained 6-step setup wizard (bootstrap-free).
 | Prod secrets behind GitHub Environment + reviewer gate | 🔜 (#105) |
 | Privacy / GDPR helpers | 🔜 (#47) |
 | 2FA TOTP available | ✅ (#92) |
+
+### 📍 Location & maps (#456) ✅ (foundation + PII/GDPR)
+
+Full address + geocoordinates + what3words platform layer, shared as a
+cross-repo data-format CONTRACT with ProjectBookIT/ProjectEPass (identical
+column shapes, canonical `location` JSON wire object, what3words canonical
+form) — but each repo is fully standalone: **no runtime dependency on
+another repo, ever**.
+
+- `Portal\Core\GeoLocation` — address normalise/format (mirrors
+  `Venues::saveVenue()`'s rules exactly), DECIMAL(10,7) coordinate
+  validation/coarsening, what3words canonicalisation (`word.word.word`,
+  no leading `///`, Unicode-aware), map link-outs (Directions / OSM /
+  `///w3w`), and the `toLocationObject()`/`fromLocationObject()` wire
+  serializer. Pure value/service class — zero network.
+- `Portal\Core\What3Words` — v3 API client (`convertTo3wa`,
+  `convertToCoordinates`, server-proxied `autosuggest`, `testConnection`).
+  Key passed as a query-string param, never logged. Default OFF
+  (`w3w.enabled`) — the flag gates ONLY the API; the `///word.word.word`
+  input field is always present as a manual-entry fallback.
+- `Portal\Core\Geocoder` — Google primary → OpenStreetMap Nominatim
+  fallback, forward + reverse. Nominatim policy compliance built in:
+  descriptive User-Agent, ≤1 request/second throttle (persisted
+  `geo.nominatim.lastCallAt`), and a `tblGeocodeCache` result cache (an
+  address geocodes once, ever). `geo.autoGeocode` default OFF; a manual
+  "Look up coordinates" action always works regardless.
+- Interactive map: Leaflet 1.9.4 from `cdn.jsdelivr.net` with SRI (hashes
+  independently re-derived from the npm registry tarball and matched
+  exactly — see DEV_NOTES for the verification method + upgrade
+  procedure). Inline SVG marker icon (no external icon assets needed —
+  keeps `img-src` limited to the OSM tile host). Tiles via the existing
+  per-page `$cspImgExtra` CSP hook, set only on pages that will render a
+  map with coordinates present.
+- Three new shared partials (`web/_core/partials/` — first in the
+  codebase): `location-display.php` (label + address + link row + map),
+  `location-input.php` (address/coords/W3W fields, configurable field
+  names for legacy columns, optional lookup button + W3W autosuggest),
+  `location-map-assets.php` (the Leaflet tags + one nonce'd init script,
+  included once per map-bearing page).
+- Admin pages: `/admin/integrations/what3words`,
+  `/admin/integrations/geocoding` (both with a "Test connection" action),
+  `/admin/settings/organisation` (site-HQ address, nine `org.*` settings —
+  the `portal.sabbath.location_lat/lng` precedent).
+- Two session-authed AJAX proxies (`/geo/w3w-suggest`, `/geo/lookup`) —
+  deliberately outside `api/*` so the browser never sees either API key.
+- **Wired into (Chunk A, non-PII):** Venues (structured address +
+  coords/W3W + interactive map on the detail page), Events (existing
+  `locationGeoLat/locationGeoLng/locationW3W` columns now validated on
+  save with a W3W dual-mode verify/fill, JSON-LD `geo`, interactive map on
+  the event page, canonical `location` object additively emitted by the
+  events REST API's create/update/list/detail — kept alongside the legacy
+  `locationName` field for backward compatibility), Event occurrence
+  overrides (hand-entered `overrideGeoLat/overrideGeoLng/overrideW3W`,
+  `NULL` = inherit the parent event), Resources, Asset Locations.
+- **Chunk B — member PII + GDPR lockstep** (migration 181, `tblUsers`
+  ONLY: `latitude`/`longitude`/`what3words` + a dedicated
+  `visibilityCoords` ENUM tier, default `'private'`, INDEPENDENT of the
+  existing `visibilityAddress` — sharing address text never implies
+  consent to show a map pin). Deliberately NO `geocodedAt`/`geocodeSource`
+  on `tblUsers` — a member's own coordinates are NEVER auto-geocoded, only
+  hand-entered or set via their own explicit "Look up coordinates" click.
+  Capture on the owner edit surface (`directory/me.php`); display
+  (`directory/profile.php`) gates coords through a SEPARATE
+  `$can($u['visibilityCoords'])` check stricter than the address text: the
+  owner/admin sees full precision + the exact what3words, any other
+  permitted viewer sees coordinates coarsened to 3dp (~110m) with an
+  "Approximate location" badge and the what3words value suppressed
+  entirely (a 3m-precise W3W square cannot be meaningfully coarsened). The
+  pre-existing `$can()` "team tier behaves as private" quirk is inherited
+  verbatim. GDPR lockstep shipped in the SAME PR as the schema: the export
+  (`/account/data-export`) gained a `giftAidDeclarations` block (closed a
+  pre-existing gap — Gift Aid address PII was never exported at all); the
+  self-service delete path (`delete-confirm.php`) now also nulls
+  `displayAddress`/`displayPhone` (a separate pre-existing miss) plus the
+  four new columns; the admin erasure catalogue (`GdprEraser::
+  catalogue()`) extended to null the three PII coordinate/W3W columns.
+  GiftAid/Salvation reuse the shared input partial in TEXT-ONLY mode (no
+  coordinates, no new columns, no new erasure surface). Kids/Care/
+  Visitors remain permanently excluded (safeguarding apps, no consent
+  mechanism) — verified by a diff-level grep, zero references.
+- Migration 180 (Chunk A): `latitude/longitude/what3words/geocodedAt/
+  geocodeSource` on `tblVenues`/`tblResource`/`tblAssetLocations`;
+  `overrideGeoLat/overrideGeoLng/overrideW3W` on
+  `tblEventOccurrenceOverrides`; new `tblGeocodeCache`; 14 settings seeds
+  (all default OFF/empty); 10 route seeds. Migration 181 (Chunk B): four
+  columns on `tblUsers` only, no settings/route seeds. A fresh upgrade is
+  a full no-op until an admin opts in / a member sets their own coords.
 
 ### 🌍 Multi-site (Phase 10) ✅
 
@@ -1002,6 +1089,76 @@ dead-subscription pruning), settings seeds (TTLs, auto-notify toggles,
 `api.push.*.enabled` flags), 4 route seeds. No new tables — reuses
 `tblUserReminderLog` (go-live dedupe) and `tblEventReminderLog` (reminder
 dedupe).
+
+---
+
+### MS365 Graph email via a shared mailbox (gap #234, migration 176)
+
+The portal already sent every email app-only through Microsoft Graph
+(`POST /users/{mail.defaultFromAddress}/sendMail`) — this gap item
+formalises and hardens that path rather than adding a new auth model: an
+explicit, admin-configured shared-mailbox identity, an explicit `from`
+object (with display name) in both modes, 401/429/403/404 error handling
+with an optional Google fallback, and a `tblEmailLog` audit trail
+(also closes the #230 dependency).
+
+- **Model chosen: app-only, application permission `Mail.Send`**, via
+  `POST /users/{sharedMailbox}/sendMail` — reuses `Mailer::accessToken()`
+  verbatim, zero new secrets. The issue body's delegated
+  `Mail.Send.Shared` refresh-token model is explicitly deferred (would add
+  an OAuth authorize/refresh surface, a new encrypted secret lifecycle,
+  and a dependency on a licensed "delegate" human account whose password/
+  MFA/offboarding events would silently kill portal mail).
+- **`Mailer::effectiveSender()`** — resolution order: (1) non-empty +
+  valid `mail.ms365.sharedMailbox` → the shared mailbox is both the URL
+  mailbox and the `from` address, display name from
+  `mail.ms365.sharedMailboxName` falling back to `mail.defaultFromName`;
+  (2) non-empty but invalid (hand-edited) → log once, fall through; (3)
+  empty (seeded default) → `mail.defaultFromAddress` exactly as before.
+  **Empty mailbox = feature off** — no separate enable toggle, so it's
+  impossible to half-configure toggle-on-but-empty-mailbox.
+- **Benign behaviour change:** the `from` object is now built in BOTH
+  modes, so `mail.defaultFromName` finally takes effect on the MS365 path
+  (previously unused there — only the Google path honoured it).
+  `sender` is intentionally never set (that's the delegated
+  send-on-behalf field, not app-only send-as).
+- **Error matrix:** 401 → clear cached token, retry once; 429 → bounded
+  single retry only when Graph's own `Retry-After` is ≤5s (never an
+  unbounded sleep inside a web request on shared hosting); 403/404 →
+  parse Graph's own `error.code` for a targeted admin hint instead of a
+  bare HTTP code; optional `mail.fallbackProvider='google'` (default `''`
+  = fail loudly) makes one fallback attempt via `MailerGoogle::send()`.
+- **`tblEmailLog`** (migration 176) — per-send audit row from BOTH
+  providers via the new `Mailer::logSend()` (public, called from
+  `sendViaGraph()` and from `MailerGoogle::send()`'s own success/failure
+  branches). Fail-soft (a logging exception never breaks a send).
+  Opportunistic retention prune (`mail.log.retentionDays`, default 90) on
+  ~1-in-50 writes — no new cron endpoint. `GdprEraser` gained a bespoke
+  step (not a `catalogue()` entry — `toRecipients` is a comma-joined
+  free-text list, not a single `userCol` FK) that scrubs an erased user's
+  address out of it, captured before the catalogue's own `tblUsers` step
+  nulls the address.
+- **Admin UI** (`/admin/integrations`) — Shared-Mailbox Sending
+  sub-section on the MS365 Graph API card (status, mode badge, last-send
+  indicator, CSRF'd save form → new `admin/integrations/ms365-mail-save.php`);
+  Send Test Email now calls the real `Mailer::send()` instead of
+  duplicating the token+sendMail cURL flow inline, closing the
+  test-vs-production drift risk permanently.
+- **Fold-in fix** — `/admin/integrations/email` was reading a dead
+  `email.provider`/`email.from` settings vocabulary (seeded, never
+  written by any save handler) and always reported "smtp"; now reports
+  the real `Mailer::provider()` + effective sender, plus a "Recent sends
+  (last 10)" `portal-data-list` from `tblEmailLog`.
+- **Security:** the shared mailbox is ADMIN-CONFIG ONLY — read
+  exclusively from `tblSettings` via `effectiveSender()`, written only by
+  the CSRF'd, admin-gated save handler; no request/user input reaches it.
+  No secret is ever logged (`tblEmailLog.errorDetail` holds only Graph's
+  own truncated `error.code`/`error.message`).
+
+**New files:** `web/_apps/admin/integrations/ms365-mail-save.php`.
+**Schema:** migration 176 — `tblEmailLog` (standard `CREATE TABLE IF NOT
+EXISTS`, no guard idiom needed for a new table), 5 non-sensitive settings
+seeds, 1 route seed, folded into `full_schema.sql`.
 
 ---
 

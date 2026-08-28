@@ -23,6 +23,7 @@ declare(strict_types=1);
 use Portal\Core\ApiAuth;
 use Portal\Core\ApiResponse;
 use Portal\Core\App;
+use Portal\Core\GeoLocation;
 use Portal\Core\Logger;
 use Portal\Core\Site;
 
@@ -54,17 +55,22 @@ if ($exists === false) {
 
 // 🛠️ Build dynamic UPDATE — only includes columns the caller provided
 $columnMap = [
-    'eventName'     => 's',
-    'description'   => 's',
-    'startDateTime' => 's',
-    'endDateTime'   => 's',
-    'isAllDay'      => 'i',
-    'locationName'  => 's',
-    'categoryID'    => 'i',
-    'typeID'        => 'i',
-    'status'        => 's',
-    'isPublic'      => 'i',
-    'isFeatured'    => 'i',
+    'eventName'       => 's',
+    'description'     => 's',
+    'startDateTime'   => 's',
+    'endDateTime'     => 's',
+    'isAllDay'        => 'i',
+    'locationName'    => 's',
+    'categoryID'      => 'i',
+    'typeID'          => 'i',
+    'status'          => 's',
+    'isPublic'        => 'i',
+    'isFeatured'      => 'i',
+    // 📍 #456 Chunk A — additive location passthrough fields.
+    'locationAddress' => 's',
+    'locationWebURL'  => 's',
+    'locationPhone'   => 's',
+    'locationEmail'   => 's',
 ];
 $validStatuses = ['draft', 'published', 'cancelled', 'archived'];
 
@@ -100,6 +106,37 @@ foreach ($columnMap as $col => $type) {
     $params[] = $value;
 }
 
+// 📍 #456 Chunk A — locationGeoLat/locationGeoLng are a validated PAIR
+// (all-or-nothing), so they're handled outside the generic per-column
+// loop above. Either key present triggers validation of both.
+if (array_key_exists('locationGeoLat', $body) === true || array_key_exists('locationGeoLng', $body) === true) {
+    $geoCoords = GeoLocation::validateCoords($body['locationGeoLat'] ?? null, $body['locationGeoLng'] ?? null);
+    if ($geoCoords === null && ($body['locationGeoLat'] ?? null) !== null && ($body['locationGeoLng'] ?? null) !== null) {
+        ApiResponse::error('locationGeoLat/locationGeoLng must be a valid coordinate pair', 422);
+    }
+    $set[]    = 'locationGeoLat = ?';
+    $set[]    = 'locationGeoLng = ?';
+    $types   .= 'dd';
+    $params[] = $geoCoords['lat'] ?? null;
+    $params[] = $geoCoords['lng'] ?? null;
+}
+
+// 📍 #456 Chunk A — locationW3W is regex-validated; an invalid non-empty
+// value is a 422, never silently dropped or stored malformed.
+if (array_key_exists('locationW3W', $body) === true) {
+    $w3wRaw = trim((string) ($body['locationW3W'] ?? ''));
+    $w3wVal = null;
+    if ($w3wRaw !== '') {
+        $w3wVal = GeoLocation::validateW3W($w3wRaw);
+        if ($w3wVal === null) {
+            ApiResponse::error('locationW3W is not a valid what3words address (word.word.word)', 422);
+        }
+    }
+    $set[]    = 'locationW3W = ?';
+    $types   .= 's';
+    $params[] = $w3wVal;
+}
+
 if (count($set) === 0) {
     ApiResponse::error('No updatable fields in request body', 400);
 }
@@ -127,4 +164,26 @@ if ($ok === false) {
 
 Logger::activity('ApiEventUpdate', 'API: updated event #' . $eventId);
 
-ApiResponse::success(['eventID' => $eventId], 200);
+// 📍 #456 Chunk A — re-fetch and emit the canonical `location` object
+// (cross-repo contract §2) reflecting the post-update row, additive
+// alongside eventID.
+$locationObject = null;
+$locRow = $db->prepare('SELECT locationName, locationAddress, locationGeoLat, locationGeoLng, locationW3W FROM tblEvents WHERE eventID = ? AND siteID = ? LIMIT 1');
+if ($locRow !== false) {
+    $locRow->bind_param('ii', $eventId, $siteId);
+    $locRow->execute();
+    $freshRow = $locRow->get_result()->fetch_assoc();
+    $locRow->close();
+    if ($freshRow !== null) {
+        $locationObject = GeoLocation::toLocationObject(
+            [
+                'name' => $freshRow['locationName'], 'addressLine1' => $freshRow['locationAddress'],
+                'latitude' => $freshRow['locationGeoLat'], 'longitude' => $freshRow['locationGeoLng'],
+                'what3words' => $freshRow['locationW3W'],
+            ],
+            ['line1' => 'addressLine1']
+        );
+    }
+}
+
+ApiResponse::success(['eventID' => $eventId, 'location' => $locationObject], 200);

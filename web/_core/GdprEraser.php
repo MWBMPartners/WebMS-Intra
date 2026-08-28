@@ -210,8 +210,19 @@ class GdprEraser
             // tblLocalAccounts; SSO links live in tblLinkedAccounts — both
             // now hard-deleted above), so referencing them here made the
             // whole UPDATE fail to prepare and this final step never ran.
+            // 📍 #456 Chunk B — `displayPhone`/`latitude`/`longitude`/
+            // `what3words` (migration 181) added to nullCols alongside the
+            // pre-existing PII columns: the member's own map pin is exactly
+            // the kind of PII this final anonymise step exists to remove.
+            // `visibilityCoords` is a NOT NULL ENUM (default 'private') so
+            // it cannot be nulled via this generic mechanism — with lat/
+            // lng/what3words all NULL there is nothing left for that tier
+            // to gate, so leaving its value untouched here is harmless
+            // (delete-confirm.php's self-deletion path DOES reset it to
+            // 'private' defensively, since that path builds its own
+            // literal SET list rather than using this nullCols mechanism).
             ['table' => 'tblUsers', 'userCol' => 'userID', 'action' => 'anonymise',
-             'nullCols' => ['emailAddress','phoneNumber','displayAddress','locale','totpSecret'],
+             'nullCols' => ['emailAddress','phoneNumber','displayAddress','displayPhone','latitude','longitude','what3words','locale','totpSecret'],
              'overrides' => ['fullName' => self::TOMBSTONE_NAME, 'isActive' => 0],
              'reason' => 'user row retained for historical FK integrity; PII removed'],
         ];
@@ -225,6 +236,22 @@ class GdprEraser
     public static function execute(int $requestId, int $userId, ?int $processedByID = null): bool
     {
         $db = App::db();
+
+        // 📧 #234 — capture the CURRENT address before the catalogue below
+        // anonymises `tblUsers.emailAddress` (its final entry) — the
+        // tblEmailLog recipient scrub below needs something to match
+        // against, and by the time execute() reaches it the user row is
+        // already tombstoned.
+        $erasedEmail = '';
+        $es = $db->prepare('SELECT emailAddress FROM tblUsers WHERE userID = ? LIMIT 1');
+        if ($es !== false) {
+            $es->bind_param('i', $userId);
+            $es->execute();
+            $row = $es->get_result()->fetch_assoc();
+            $es->close();
+            $erasedEmail = (string) ($row['emailAddress'] ?? '');
+        }
+
         $catalogue = self::catalogue();
         $any = false;
         foreach ($catalogue as $entry) {
@@ -237,6 +264,10 @@ class GdprEraser
         // the RENDERED PDF is a name-bearing document with no retention
         // duty once its subject is erased, so the files are unlinked here.
         $any = (self::eraseGivingStatementFiles($requestId, $userId) > 0) || $any;
+        // 📧 #234 — tblEmailLog audit trail: scrub the erased address out
+        // of the comma-joined `toRecipients` column. Not a catalogue()
+        // entry — see eraseEmailLogRecipients()'s doc comment for why.
+        $any = (self::eraseEmailLogRecipients($requestId, $erasedEmail) > 0) || $any;
         // Final status flip.
         $u = $db->prepare('UPDATE tblErasureRequest SET status = "completed", processedAt = NOW(), processedByID = ?, userID = NULL WHERE requestID = ?');
         if ($u !== false) {
@@ -454,6 +485,49 @@ class GdprEraser
         }
 
         return $removed + $nulled;
+    }
+
+    /**
+     * #234 — scrub the erased user's address out of `tblEmailLog.
+     * toRecipients`. Not a catalogue() entry: that column is a
+     * comma-joined free-text address LIST (one send can have many
+     * recipients), not a single `userCol` FK the generic anonymise/delete
+     * actions can target — this bespoke sweep does a targeted
+     * substring REPLACE instead, mirroring
+     * eraseGivingStatementFiles()'s "PII column scrubbed, row + other
+     * columns (provider/status/subject/httpCode) retained for the audit
+     * trail" convention immediately above.
+     *
+     * Must be called with the address captured BEFORE the catalogue's
+     * final `tblUsers` entry nulls it out (see execute()).
+     *
+     * @return int Number of tblEmailLog rows whose toRecipients was
+     *   rewritten (0 means there was nothing to erase, or no address).
+     */
+    private static function eraseEmailLogRecipients(int $requestId, string $email): int
+    {
+        if ($email === '') {
+            return 0;
+        }
+
+        $db          = App::db();
+        $like        = '%' . $email . '%';
+        $replacement = '[erased]';
+
+        $stmt = $db->prepare('UPDATE tblEmailLog SET toRecipients = REPLACE(toRecipients, ?, ?) WHERE toRecipients LIKE ?');
+        if ($stmt === false) {
+            return 0;
+        }
+        $stmt->bind_param('sss', $email, $replacement, $like);
+        $stmt->execute();
+        $affected = $stmt->affected_rows;
+        $stmt->close();
+
+        if ($affected > 0) {
+            self::logAudit($db, $requestId, 'anonymise', 'tblEmailLog', (string) $affected . ' rows', 'recipient address detached from send-log audit trail; provider/status/subject/httpCode retained');
+        }
+
+        return $affected > 0 ? (int) $affected : 0;
     }
 
     private static function logAudit(\mysqli $db, int $requestId, string $action, string $table, ?string $recordKey, string $details): void

@@ -24,6 +24,8 @@
  *   tblVenueBookings      (bookings you last edited — #429)
  *   tblVenueUsageTypeWindows (default-hours windows you created — #429)
  *   tblVenueImportBatches (CSV/XLSX import batches you uploaded — #429)
+ *   tblGiftAidDeclaration (your Gift Aid declarations — address/postcode/
+ *                          status/dates — #456 Chunk B)
  *
  * Sensitive fields (password hashes, TOTP secret, tokenHash etc.) are
  * EXCLUDED — exporting them would be a security regression, not a feature.
@@ -84,6 +86,11 @@ $payload = [
         'emailAddress' => $user['emailAddress'] ?? null,
     ],
     'data' => [
+        // 📍 #456 Chunk B — latitude/longitude/what3words/visibilityCoords
+        // ride along automatically via SELECT * (verified: they are NOT
+        // added to the strip list below — visibilityCoords is the
+        // subject's own datum, and the coordinates/W3W are exactly the
+        // kind of PII this export exists to surface).
         'user' => $fetchUserRows(
             'SELECT * FROM tblUsers WHERE userID = ? LIMIT 1',
             ['totpSecret']
@@ -135,6 +142,24 @@ $payload = [
             'SELECT batchID, siteID, venueID, fileName, sourceKind, status, rowCount, importedCount, skippedCount, createdAt, committedAt '
             . 'FROM tblVenueImportBatches WHERE createdByID = ?'
         ),
+        // 📍 #456 Chunk B — closes a pre-existing gap found while building
+        // the location/GDPR lockstep: Gift Aid declarations carry a home
+        // address + postcode (HMRC requires it) but were never exported
+        // for the declaring donor. GdprEraser::catalogue() already
+        // hard-DELETEs this table on erasure (donorID match) — this export
+        // block is the missing access/portability half of that pair.
+        'giftAidDeclarations' => $fetchUserRows(
+            'SELECT declarationID, siteID, status, validFrom, validTo, address, postcode, acceptedAt, createdAt '
+            . 'FROM tblGiftAidDeclaration WHERE donorID = ?'
+        ),
+        // 🙏 Salvation decision cards (tblSalvationCards) are DELIBERATELY
+        // NOT exported here: the public decision-card form has no userID
+        // FK at all (fullName/email/phone/address are free-text fields
+        // filled by an anonymous submitter, logged-in or not — see
+        // salvation/card-save.php), so there is no reliable donorID/userID
+        // column to match this export's subject against. Matching on
+        // email/name would be a false-positive risk (another person's card
+        // sharing the same name/email) that this export must not take.
     ],
 ];
 
