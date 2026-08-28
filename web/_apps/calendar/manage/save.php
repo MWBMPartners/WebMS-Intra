@@ -11,7 +11,8 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   0.3.0
+ * @version   0.4.0
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/436
  * -----------------------------------------------------------------------------
  */
 
@@ -214,28 +215,62 @@ $userId = $_SESSION['user_id'] ?? null;
 $siteId = Site::id();
 
 // -----------------------------------------------------------------------------
-// 🏛️ Venue Bookings (#429) Surface B — guarded post-save "is it booked?"
-// advisory appended to the flash message. NEVER blocks the save (called
-// only after the flash success message is already set); a venueID of 0/
-// invalid/not-found is silently suppressed rather than surfacing the
-// dormant "no venue configured" sentinel in a save-success flash.
+// 🏛️ Venue Bookings (#429, #436) — resolve the persisted venue/room links.
+// Tri-state:
+//   $venueLinkActive === false ⇒ Venues disabled/absent/threw ⇒ do NOT
+//     touch tblEvents.venueID/roomID at all (UPDATE omits them entirely,
+//     below) — an app toggle must never silently wipe an existing link.
+//   $venueLinkActive === true  ⇒ write $eventVenueID / $eventRoomID
+//     (either may be NULL — invalid/foreign/absent posts silently NULL,
+//     never a save-blocking error; this is advisory metadata, not the
+//     record of truth).
+// Both are validated site+venue scoped (Venues::getVenue()/getRoom()) so
+// an event can only ever link a venue/room belonging to ITS OWN site —
+// never cross-tenant. roomID never survives without a venueID it
+// validated against (clearing/changing the venue always re-validates the
+// room, so a stale roomID from a DIFFERENT venue can't persist).
 // -----------------------------------------------------------------------------
-$venueCheckID = (int) ($_POST['venueID'] ?? 0);
-$appendVenueCoverageFlash = function (string $eventStart, ?string $eventEnd, string $eventTz) use ($venueCheckID, $siteId): void {
-    if (AppRegistry::isEnabled('venues') === false || $venueCheckID <= 0) {
+$venueLinkActive = false;
+$eventVenueID    = null;
+$eventRoomID     = null;
+if (AppRegistry::isEnabled('venues') === true) {
+    try {
+        $venueLinkActive = true;
+        $postedVenue = (int) ($_POST['venueID'] ?? 0);
+        $postedRoom  = (int) ($_POST['roomID'] ?? 0);
+        if ($postedVenue > 0 && Venues::getVenue($postedVenue, $siteId) !== null) {
+            $eventVenueID = $postedVenue;
+            if ($postedRoom > 0 && Venues::getRoom($postedRoom, $postedVenue, $siteId) !== null) {
+                $eventRoomID = $postedRoom;
+            }   // else: silently NULL — never a save-blocking error (advisory feature)
+        }       // venue 0/foreign ⇒ both NULL (roomID never survives without its venue)
+    } catch (\Throwable $e) {
+        $venueLinkActive = false;
+        $eventVenueID    = null;
+        $eventRoomID     = null;
+        error_log('Calendar save: venue link resolution failed: ' . $e->getMessage());
+    }
+}
+
+// -----------------------------------------------------------------------------
+// 🏛️ Venue Bookings (#429, #436) Surface B — guarded post-save "is it
+// booked?" advisory appended to the flash message. NEVER blocks the save
+// (called only after the flash success message is already set). Uses the
+// VALIDATED persisted values above (not raw POST) — validation already
+// happened, so this closure only classifies + messages.
+// -----------------------------------------------------------------------------
+$appendVenueCoverageFlash = function (string $eventStart, ?string $eventEnd, string $eventTz) use ($eventVenueID, $eventRoomID): void {
+    if ($eventVenueID === null) {
+        // 🚪 No resolved venue link ⇒ suppressed — never surface the
+        // dormant "no venue configured" sentinel in a save-success flash.
         return;
     }
     try {
-        if (Venues::getVenue($venueCheckID, $siteId) === null) {
-            // 🚪 getVenue-null ⇒ suppressed — never mention a venue that
-            // doesn't resolve for this site.
-            return;
-        }
         $coverage = Venues::classifyEventCoverage([
             'startDateTime' => $eventStart,
             'endDateTime'   => $eventEnd,
             'timezone'      => $eventTz,
-        ], $venueCheckID);
+        ], $eventVenueID, $eventRoomID);
         $coverageMsg = (string) ($coverage['message'] ?? '');
         if ($coverageMsg !== '') {
             $_SESSION['flash_msg'] = (string) ($_SESSION['flash_msg'] ?? '') . ' ' . $coverageMsg;
@@ -270,15 +305,49 @@ if ($action === 'create') {
         $counter++;
     }
 
+    $endDt = $endDateTime !== '' ? $endDateTime : null;
+
+    // 📋 #436 — column/type/value lists built as arrays (rather than one
+    // static literal string) so the optional venueID/roomID pair can be
+    // spliced in ONLY when $venueLinkActive is true, with the placeholder
+    // count, type-string, and bound-value count guaranteed to stay in
+    // lockstep by construction (never hand-counted separately).
+    $insertColumns = [
+        'eventName', 'eventSlug', 'description', 'startDateTime', 'endDateTime', 'timezone', 'isAllDay',
+        'categoryID', 'typeID', 'seriesID', 'status', 'isPublic', 'isFeatured',
+        'locationName', 'locationAddress', 'locationWebURL', 'locationGeoLat', 'locationGeoLng',
+        'locationW3W', 'locationPhone', 'locationEmail',
+        'hostOrgName', 'partnerOrgs', 'heroImage', 'posterImage', 'profileImage',
+    ];
+    $insertTypes = 'ssssssiiiisissssddssssssss';
+    $insertValues = [
+        $eventName, $slug, $description, $startDateTime, $endDt, $timezone, $isAllDay,
+        $categoryID, $typeID, $seriesID, $status, $isPublic, $isFeatured,
+        $locationName, $locationAddress, $locationWebURL, $locationGeoLat, $locationGeoLng,
+        $locationW3W, $locationPhone, $locationEmail,
+        $hostOrgName, $partnerOrgs, $heroImage, $posterImage, $profileImage,
+    ];
+
+    if ($venueLinkActive === true) {
+        $insertColumns[] = 'venueID';
+        $insertColumns[] = 'roomID';
+        $insertTypes    .= 'ii';
+        $insertValues[]  = $eventVenueID;
+        $insertValues[]  = $eventRoomID;
+    }
+
+    $insertColumns[] = 'createdByID';
+    $insertColumns[] = 'updatedByID';
+    $insertColumns[] = 'siteID';
+    $insertTypes    .= 'iii';
+    $insertValues[]  = $userId;
+    $insertValues[]  = $userId;
+    $insertValues[]  = $siteId;
+
+    $insertPlaceholders = implode(', ', array_fill(0, count($insertColumns), '?'));
+
     $stmt = $mysqli->prepare(
-        'INSERT INTO tblEvents ('
-        . 'eventName, eventSlug, description, startDateTime, endDateTime, timezone, isAllDay, '
-        . 'categoryID, typeID, seriesID, status, isPublic, isFeatured, '
-        . 'locationName, locationAddress, locationWebURL, locationGeoLat, locationGeoLng, '
-        . 'locationW3W, locationPhone, locationEmail, '
-        . 'hostOrgName, partnerOrgs, heroImage, posterImage, profileImage, '
-        . 'createdByID, updatedByID, siteID'
-        . ') VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        'INSERT INTO tblEvents (' . implode(', ', $insertColumns) . ') VALUES (' . $insertPlaceholders . ')'
     );
 
     if ($stmt === false) {
@@ -288,17 +357,7 @@ if ($action === 'create') {
         exit();
     }
 
-    $endDt = $endDateTime !== '' ? $endDateTime : null;
-
-    $stmt->bind_param(
-        'ssssssiiiisissssddssssssssiii',
-        $eventName, $slug, $description, $startDateTime, $endDt, $timezone, $isAllDay,
-        $categoryID, $typeID, $seriesID, $status, $isPublic, $isFeatured,
-        $locationName, $locationAddress, $locationWebURL, $locationGeoLat, $locationGeoLng,
-        $locationW3W, $locationPhone, $locationEmail,
-        $hostOrgName, $partnerOrgs, $heroImage, $posterImage, $profileImage,
-        $userId, $userId, $siteId
-    );
+    $stmt->bind_param($insertTypes, ...$insertValues);
     $stmt->execute();
     $newEventId = $stmt->insert_id;
     $stmt->close();
@@ -360,6 +419,19 @@ if ($action === 'update') {
         $setClauses[]  = 'profileImage = ?';
         $paramTypes   .= 's';
         $paramValues[] = $profileImage;
+    }
+
+    // 🏛️ #436 — only touch venueID/roomID when the guard is active. When
+    // Venues is disabled/absent/threw, these columns are OMITTED from the
+    // SET list entirely — an app toggle must never silently wipe an
+    // existing link (the write-path mirror of the render-path
+    // byte-identical rule below).
+    if ($venueLinkActive === true) {
+        $setClauses[]  = 'venueID = ?';
+        $setClauses[]  = 'roomID = ?';
+        $paramTypes   .= 'ii';
+        $paramValues[] = $eventVenueID;
+        $paramValues[] = $eventRoomID;
     }
 
     $paramTypes   .= 'ii';

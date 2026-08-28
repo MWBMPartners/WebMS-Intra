@@ -2,6 +2,49 @@
 
 
 ## [Unreleased] (alpha)
+- feat(calendar/venues): gap #436 — per-event venueID/roomID links +
+  room-aware venue coverage, an additive follow-up to the shipped Venue
+  Bookings app (#429, migration 170). `tblEvents` gains two optional
+  nullable columns, `venueID`/`roomID` (migration 179, FKs
+  `ON DELETE SET NULL`, guarded MySQL-8-safe DDL, folded into
+  `full_schema.sql`) — NULL on every pre-existing event, zero backfill from
+  `tblVenueBookings.eventID` (a hire hosting an event isn't necessarily
+  "the event's venue"). `Portal\Core\Venues::classifyEventCoverage()`
+  gains an optional trailing `?int $roomId = null`: when set, per-day
+  booking rows are filtered to `roomID IS NULL OR roomID = $roomId`
+  (a whole-venue booking still covers every room) before the existing
+  wall-clock day-cascade runs unmodified, and a new
+  `COVERAGE_ROOM_NOT_COVERED` verdict (severity danger, new
+  `venues.coverage.room_not_covered` i18n key with a `:room` placeholder)
+  fires when the room itself has no cover but the venue has a confirmed
+  bookable hire for a *different* room that day. Omitted/null `$roomId`
+  (both pre-#436 call sites) reproduces today's output bit-for-bit; an
+  unresolvable room (wrong venue/site, deleted, foreign) silently degrades
+  to venue-level coverage — no existence oracle, same philosophy as the
+  venue-missing sentinel. New public `Venues::getRoom()` accessor (mirrors
+  `getVenue()`) for save.php's site+venue-scoped room validation. The
+  calendar manage form's venue picker (`calendar/manage/_event_form.php`)
+  is upgraded from a transient advisory-only Surface A check into a
+  **persisted** link: a cascading room `<select>` (disabled, not hidden,
+  when the chosen venue has no rooms) sits beside the venue picker,
+  server-rendered for the initially selected venue and client-side
+  repopulated on venue change; `calendar/manage/save.php` validates and
+  writes both links on create/update (site-scoped `Venues::getVenue()`/
+  `getRoom()`, invalid posts silently NULL — never a save-blocking error)
+  and, when the Venues app is disabled/absent/throws, OMITS the columns
+  from the UPDATE entirely so an app toggle can never wipe an existing
+  link. An event can only ever link a venue/room belonging to its own
+  site — never cross-tenant. Also fixed in this PR: the venue-check live
+  "is it booked?" JS (`_event_form.php`) posted `startDateTime`/
+  `endDateTime`/`timezone`, but `venues/api/check.php` has always read
+  `start`/`end`/`tz` — every live check silently 400'd and the JS's
+  `.catch()` hid the alert, so Surface A never actually worked. Canonicalised
+  on `check.php`'s existing `start`/`end`/`tz` contract (it already matched
+  its own documented header) and fixed the JS to match, adding `roomID`
+  alongside. Deferred (see the build plan's Open Questions): per-event
+  coverage badges on calendar grid views; venueID/roomID on the events
+  REST write API (read side is automatic via `SELECT e.*`); room-flavouring
+  the pre-existing coverage messages.
 - feat(location): #456 Chunk A — full address + geocoordinates + What3Words
   platform layer (foundation, non-PII, interactive map). New
   `Portal\Core\GeoLocation` (address normalise/format, DECIMAL(10,7) coord
