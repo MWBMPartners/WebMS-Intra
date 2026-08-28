@@ -814,6 +814,19 @@ CREATE TABLE IF NOT EXISTS `tblEvents` (
     `externalFeedID`     INT           DEFAULT NULL,
     `externalUid`        VARCHAR(255)  DEFAULT NULL,
 
+    -- 🏛️ Per-event venue/room links (#436 — added by migration 179).
+    -- Optional, NULL = no link (every pre-#436 event). The FKs
+    -- (fk_event_venue -> tblVenues, fk_event_room -> tblVenueRooms) are
+    -- deliberately NOT folded here — tblVenues/tblVenueRooms are created
+    -- much further down this file, so a forward-referencing FK on a fresh
+    -- install would fail with errno 1824. They're added by migration 179's
+    -- guarded ADD CONSTRAINT blocks on replay instead (the installer
+    -- replays every numbered migration after this file — see that
+    -- migration's own header note, and the matching comment at the
+    -- tblVenues section below).
+    `venueID`            INT           DEFAULT NULL COMMENT 'Optional link to the hired external venue hosting this event — tblVenues.venueID; NULL = none (#436)',
+    `roomID`             INT           DEFAULT NULL COMMENT 'Optional room within venueID — tblVenueRooms.roomID; NULL = whole venue (#436)',
+
     PRIMARY KEY (`eventID`),
     UNIQUE KEY `uq_event_site_slug` (`siteID`, `eventSlug`),
     KEY `idx_event_series`   (`seriesID`),
@@ -827,6 +840,8 @@ CREATE TABLE IF NOT EXISTS `tblEvents` (
     KEY `idx_event_public`   (`isPublic`, `status`, `isDeleted`),
     KEY `idx_events_site`    (`siteID`),
     KEY `idx_events_site_status_date` (`siteID`, `status`, `isDeleted`, `startDateTime`),
+    KEY `idx_event_venue`    (`venueID`),
+    KEY `idx_event_room`     (`roomID`),
     CONSTRAINT `fk_event_series`   FOREIGN KEY (`seriesID`)   REFERENCES `tblEventSeries` (`seriesID`)     ON DELETE SET NULL,
     CONSTRAINT `fk_event_category` FOREIGN KEY (`categoryID`) REFERENCES `tblEventCategories` (`categoryID`) ON DELETE SET NULL,
     CONSTRAINT `fk_event_type`     FOREIGN KEY (`typeID`)     REFERENCES `tblEventTypes` (`typeID`)       ON DELETE SET NULL,
@@ -6811,6 +6826,15 @@ ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 -- the generic external-org registry `tblAssetOrgs` rather than duplicating
 -- it (01-data-model.md §1.1) — the FK target ships in every install
 -- regardless of whether the Assets app is enabled. (#429)
+--
+-- 🔗 #436 FK-deferral note: tblEvents.venueID/roomID (folded inline into
+-- tblEvents' CREATE far above) point AT tblVenues/tblVenueRooms below, but
+-- their FK constraints (fk_event_venue, fk_event_room) are NOT declared on
+-- either table here — they're added only by migration 179's guarded ADD
+-- CONSTRAINT blocks on replay, since tblEvents is created thousands of
+-- lines before this section and a forward-referencing FK on a fresh
+-- install would fail with errno 1824. Same end state either way (upgraded
+-- or fresh install).
 -- -----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS `tblVenues` (
     `venueID`        INT          NOT NULL AUTO_INCREMENT,
@@ -7759,4 +7783,19 @@ ON DUPLICATE KEY UPDATE `filename` = `filename`;
 -- AssetRegister::LABEL_SYMBOLOGIES etc. are PHP-only changes — no schema
 -- impact beyond that one column.)
 INSERT INTO `tblMigrations` (`filename`) VALUES ('175_upce_barcode.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- ── from 179_event_venue_link.sql ────────────────────────────────────────────
+-- 🏛️🔗 Per-event venue/room links + room-aware coverage (#436). The two
+-- additive tblEvents columns (`venueID`, `roomID`) + their KEY indexes
+-- (idx_event_venue, idx_event_room) are already folded inline into the
+-- tblEvents CREATE TABLE block above; their FK constraints (fk_event_venue
+-- -> tblVenues, fk_event_room -> tblVenueRooms) are deliberately NOT folded
+-- here — tblEvents precedes tblVenues in this file, so a forward-
+-- referencing FK on a fresh install would fail (errno 1824). Migration
+-- 179's guarded ADD CONSTRAINT blocks add both FKs on replay instead (see
+-- the FK-deferral note at the tblVenues section above and 179's own
+-- header). No new settings keys, no new routes — nothing further to fold
+-- here except this migration's own self-record.
+INSERT INTO `tblMigrations` (`filename`) VALUES ('179_event_venue_link.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;

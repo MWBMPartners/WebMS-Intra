@@ -7,21 +7,24 @@
  * Shared form fields for creating and editing events. Included by both the
  * create and edit sections of manage/index.php. Expects $editEvent to be
  * set (or null for create mode), and $categories, $eventTypes, $seriesList,
- * $defaultVenueId, $venueOptions.
+ * $defaultVenueId, $venueOptions, $venueRoomOptions.
  *
- * 🏛️ Venue Bookings (#429) Surface A: when $venueOptions is non-empty
- * (manage/index.php's guarded venues integration), renders an advisory
- * "External Venue" picker + a hidden alert div wired to a debounced fetch
- * against /api/venues/check. This is a TRANSIENT UI helper only — tblEvents
- * has no venueID column, so nothing here is persisted; it exists purely to
- * warn an admin, before they save, whether the picked venue is actually
- * booked/confirmed/closed/unavailable for the chosen date/time.
+ * 🏛️ Venue Bookings (#429, #436) Surface A: when $venueOptions is non-empty
+ * (manage/index.php's guarded venues integration), renders a persistent
+ * "External Venue" + "Room" picker + a hidden alert div wired to a
+ * debounced fetch against /api/venues/check. #436 flipped this from a
+ * transient advisory-only helper into a PERSISTED link — save.php now
+ * writes the posted venueID/roomID into tblEvents.venueID/roomID
+ * (site+venue scoped, silently NULL on anything invalid) — while still
+ * warning an admin, before they save, whether the picked venue/room is
+ * actually booked/confirmed/closed/unavailable for the chosen date/time.
  *
  * @package   Portal\Calendar
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   0.3.0
+ * @version   0.4.0
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/436
  * -----------------------------------------------------------------------------
  */
 
@@ -33,11 +36,19 @@ use Portal\Core\I18n;
 $ev = $editEvent ?? [];
 $isEdit = $editEvent !== null;
 
-// 🏛️ Venue Bookings (#429) — set by manage/index.php's guarded block;
+// 🏛️ Venue Bookings (#429, #436) — set by manage/index.php's guarded block;
 // defensive fallback keeps this partial safe if ever included elsewhere.
-$venueOptions   = $venueOptions   ?? [];
-$defaultVenueId = $defaultVenueId ?? 0;
-$hasVenueCheck  = count($venueOptions) > 0;
+$venueOptions     = $venueOptions     ?? [];
+$venueRoomOptions = $venueRoomOptions ?? [];
+$defaultVenueId   = $defaultVenueId   ?? 0;
+$hasVenueCheck    = count($venueOptions) > 0;
+
+// 🏛️ #436 — the persisted link beats the site default when editing an
+// event that already has one; option value 0 = "— Not applicable —" ⇒ NULL.
+$selectedVenueId = (isset($ev['venueID']) === true && (int) $ev['venueID'] > 0)
+    ? (int) $ev['venueID']
+    : $defaultVenueId;
+$selectedRoomId  = (int) ($ev['roomID'] ?? 0);
 ?>
 
 <div class="row g-3">
@@ -275,9 +286,11 @@ $hasVenueCheck  = count($venueOptions) > 0;
     </div>
 
     <?php if ($hasVenueCheck === true): ?>
-    <!-- 🏛️ Venue Bookings (#429) Surface A — advisory "is it booked?" check.
-         TRANSIENT: venueID is never saved to tblEvents; it only drives the
-         client-side fetch below and Surface B's post-save flash check. -->
+    <!-- 🏛️ Venue Bookings (#429, #436) Surface A — venue/room picker +
+         "is it booked?" advisory check. #436: venueID/roomID are now
+         PERSISTED (save.php writes them, site+venue scoped, silently NULL
+         on anything invalid) — they also still drive the client-side fetch
+         below and Surface B's post-save flash check. -->
     <div class="col-12 mt-4">
         <h6 class="text-muted text-uppercase"><i class="fa-solid fa-building-columns me-1"></i>
             <?php echo htmlspecialchars(I18n::t('venues.check.heading'), ENT_QUOTES, 'UTF-8'); ?>
@@ -293,7 +306,7 @@ $hasVenueCheck  = count($venueOptions) > 0;
             <option value="0"><?php echo htmlspecialchars(I18n::t('venues.check.select_placeholder'), ENT_QUOTES, 'UTF-8'); ?></option>
             <?php foreach ($venueOptions as $v): ?>
                 <option value="<?php echo (int) $v['venueID']; ?>"
-                    <?php echo ($defaultVenueId === (int) $v['venueID']) ? 'selected' : ''; ?>>
+                    <?php echo ($selectedVenueId === (int) $v['venueID']) ? 'selected' : ''; ?>>
                     <?php echo htmlspecialchars((string) $v['venueName'], ENT_QUOTES, 'UTF-8'); ?>
                 </option>
             <?php endforeach; ?>
@@ -301,18 +314,46 @@ $hasVenueCheck  = count($venueOptions) > 0;
         <div class="form-text"><?php echo htmlspecialchars(I18n::t('venues.check.help_text'), ENT_QUOTES, 'UTF-8'); ?></div>
     </div>
 
-    <div class="col-12 col-md-6 d-flex align-items-end">
+    <?php
+        // 🚪 #436 — room options for the INITIALLY selected venue only;
+        // JS repopulates roomsByVenue[...] client-side on venue change.
+        // Disabled (never hidden — Open Question 6) when the chosen venue
+        // has no rooms: stable layout, roomID NULL = whole venue (mirrors
+        // tblVenueBookings.roomID's own semantics).
+        $initialRooms = $venueRoomOptions[$selectedVenueId] ?? [];
+    ?>
+    <div class="col-12 col-md-6">
+        <label class="form-label" for="venueRoomSelect-<?php echo $isEdit ? 'edit' : 'new'; ?>">
+            <?php echo htmlspecialchars(I18n::t('venues.check.room_label'), ENT_QUOTES, 'UTF-8'); ?>
+        </label>
+        <select class="form-select" name="roomID" id="venueRoomSelect-<?php echo $isEdit ? 'edit' : 'new'; ?>"
+            <?php echo (count($initialRooms) === 0) ? 'disabled' : ''; ?>>
+            <option value="0"><?php echo htmlspecialchars(I18n::t('venues.check.room_placeholder'), ENT_QUOTES, 'UTF-8'); ?></option>
+            <?php foreach ($initialRooms as $r): ?>
+                <option value="<?php echo (int) $r['roomID']; ?>"
+                    <?php echo ($selectedRoomId === (int) $r['roomID']) ? 'selected' : ''; ?>>
+                    <?php echo htmlspecialchars((string) $r['roomName'], ENT_QUOTES, 'UTF-8'); ?>
+                </option>
+            <?php endforeach; ?>
+        </select>
+        <div class="form-text"><?php echo htmlspecialchars(I18n::t('venues.check.room_help'), ENT_QUOTES, 'UTF-8'); ?></div>
+    </div>
+
+    <div class="col-12">
         <div id="venueCheckAlert-<?php echo $isEdit ? 'edit' : 'new'; ?>" class="alert d-none mb-0 w-100" role="status" aria-live="polite"></div>
     </div>
 
     <script>
     (function () {
-        // 🏛️ Venue Bookings (#429) Surface A — debounced "is it booked?"
-        // check. Silent no-op on ANY failure (network error, app disabled,
-        // aborted request) — this is a pre-save advisory, it must never
-        // block or interfere with the form itself.
+        // 🏛️ Venue Bookings (#429, #436) Surface A — venue→room cascade +
+        // debounced "is it booked?" check. Silent no-op on ANY failure
+        // (network error, app disabled, aborted request) — this is a
+        // pre-save advisory, it must never block or interfere with the
+        // form itself (venueID/roomID persistence happens server-side in
+        // save.php, independent of whether this check ever runs).
         var idSuffix   = <?php echo json_encode($isEdit ? 'edit' : 'new'); ?>;
         var select     = document.getElementById('venueCheckSelect-' + idSuffix);
+        var roomSelect = document.getElementById('venueRoomSelect-' + idSuffix);
         var alertBox   = document.getElementById('venueCheckAlert-' + idSuffix);
         if (select === null || alertBox === null) { return; }
 
@@ -323,6 +364,14 @@ $hasVenueCheck  = count($venueOptions) > 0;
         var endInput   = form.querySelector('[name="endDateTime"]');
         var tzInput    = form.querySelector('[name="timezone"]');
 
+        // 🚪 #436 — venueID => [{roomID, roomName}, …] active-room map,
+        // used to rebuild the room <select> client-side on venue change.
+        // JSON_HEX_TAG belt-and-braces even though this sits inside a
+        // <script> block and roomName already goes through
+        // htmlspecialchars() server-side wherever it's rendered as HTML.
+        var roomsByVenue = <?php echo json_encode($venueRoomOptions, JSON_HEX_TAG); ?>;
+        var roomPlaceholder = <?php echo json_encode(I18n::t('venues.check.room_placeholder')); ?>;
+
         var debounceTimer   = null;
         var currentController = null;
 
@@ -332,22 +381,59 @@ $hasVenueCheck  = count($venueOptions) > 0;
             alertBox.textContent = '';
         }
 
+        // 🚪 #436 — rebuild the room <select> for the given venue. Uses
+        // createElement/textContent only (never innerHTML) since
+        // roomName is user-authored. preselectRoomId lets the initial
+        // page-load call restore the edit-mode selection; subsequent
+        // (user-driven) venue changes always reset to "whole venue".
+        function rebuildRoomOptions(venueId, preselectRoomId) {
+            if (roomSelect === null) { return; }
+            while (roomSelect.firstChild) {
+                roomSelect.removeChild(roomSelect.firstChild);
+            }
+            var placeholderOpt = document.createElement('option');
+            placeholderOpt.value = '0';
+            placeholderOpt.textContent = roomPlaceholder;
+            roomSelect.appendChild(placeholderOpt);
+
+            var rooms = roomsByVenue[String(venueId)] || [];
+            for (var i = 0; i < rooms.length; i++) {
+                var opt = document.createElement('option');
+                opt.value = String(rooms[i].roomID);
+                opt.textContent = rooms[i].roomName;
+                if (preselectRoomId > 0 && rooms[i].roomID === preselectRoomId) {
+                    opt.selected = true;
+                }
+                roomSelect.appendChild(opt);
+            }
+            roomSelect.disabled = rooms.length === 0;
+        }
+
         function runCheck() {
             var venueId  = parseInt(select.value, 10) || 0;
+            var roomId   = (roomSelect !== null) ? (parseInt(roomSelect.value, 10) || 0) : 0;
             var startVal = startInput !== null ? startInput.value : '';
             if (venueId <= 0 || startVal === '') {
                 hideAlert();
                 return;
             }
 
+            // 🐛 #436 fix — check.php reads start/end/tz (its documented
+            // contract); this JS previously sent startDateTime/endDateTime/
+            // timezone, so `start` always arrived empty, every check 400'd,
+            // and the .catch() below silently hid the alert. Every live
+            // check was dead until this fix.
             var params = new URLSearchParams();
             params.set('venueID', String(venueId));
-            params.set('startDateTime', startVal);
+            if (roomId > 0) {
+                params.set('roomID', String(roomId));
+            }
+            params.set('start', startVal);
             if (endInput !== null && endInput.value !== '') {
-                params.set('endDateTime', endInput.value);
+                params.set('end', endInput.value);
             }
             if (tzInput !== null && tzInput.value !== '') {
-                params.set('timezone', tzInput.value);
+                params.set('tz', tzInput.value);
             }
 
             if (currentController !== null && typeof currentController.abort === 'function') {
@@ -393,10 +479,17 @@ $hasVenueCheck  = count($venueOptions) > 0;
             debounceTimer = window.setTimeout(runCheck, 500);
         }
 
-        select.addEventListener('change', scheduleCheck);
-        if (startInput !== null) { startInput.addEventListener('change', scheduleCheck); }
-        if (endInput   !== null) { endInput.addEventListener('change', scheduleCheck); }
-        if (tzInput    !== null) { tzInput.addEventListener('change', scheduleCheck); }
+        select.addEventListener('change', function () {
+            // 🚪 #436 — a user-driven venue change always resets the room
+            // to "whole venue" (a room from the PREVIOUS venue would be
+            // meaningless against the new one).
+            rebuildRoomOptions(parseInt(select.value, 10) || 0, 0);
+            scheduleCheck();
+        });
+        if (roomSelect  !== null) { roomSelect.addEventListener('change', scheduleCheck); }
+        if (startInput  !== null) { startInput.addEventListener('change', scheduleCheck); }
+        if (endInput    !== null) { endInput.addEventListener('change', scheduleCheck); }
+        if (tzInput     !== null) { tzInput.addEventListener('change', scheduleCheck); }
     })();
     </script>
     <?php endif; ?>

@@ -848,6 +848,22 @@ event into an unbooked or unavailable slot.
   (confirmed / proposed / closed / unavailable rendered distinctly) and an
   "is it booked?" warning on event save + a live event-form check
   (`/api/venues/check`), keyed off `venues.calendar_default_venue`.
+- **Per-event venue/room links + room-aware coverage (#436, migration
+  179)** — the calendar manage form's venue picker is a **persisted**
+  link (not just an advisory check): an optional cascading room `<select>`
+  sits beside it, and `tblEvents.venueID`/`roomID` (both nullable, FKs
+  `ON DELETE SET NULL`) record which venue/room the event is actually
+  held at, site+venue scoped so an event can never link a foreign
+  tenant's venue/room. `classifyEventCoverage()` narrows to that room —
+  a whole-venue booking still covers every room, but a booking scoped to
+  a *different* room no longer does — and reports a new `room-not-covered`
+  verdict when the room itself is uncovered but the venue has a confirmed
+  hire elsewhere that day. Invalid/foreign posted links silently save as
+  NULL (never block the event save); disabling the Venues app leaves
+  existing links untouched and the calendar/form byte-identical to
+  pre-#429 output. Also fixed: the live "is it booked?" check's field
+  names had drifted from `check.php`'s contract, so it silently 400'd on
+  every request — now aligned on `start`/`end`/`tz`.
 - **Hire agreements** — standing/ad-hoc terms, rates (pence-integer), renewal
   + notice-period reminder sweep, document vault with gated downloads.
 - **Payable invoice ledger** — money OUT to the landlord: invoices, per-booking
@@ -867,6 +883,15 @@ tables, zero guarded ALTERs. **New seeded settings:** `venues.enabled`,
 `venues.reminders_enabled`, `venues.reminder_roles`, `venues.cron_token`,
 `venues.calendar_default_venue`, `api.venues.check.enabled`,
 `api.venues.availability.enabled`.
+
+**#436 additions:** migration 179 — guarded, additive `tblEvents.venueID`/
+`roomID` (nullable, FKs `ON DELETE SET NULL` → `tblVenues`/`tblVenueRooms`,
+added on replay since `tblEvents` precedes those tables in
+`full_schema.sql`). `Venues::classifyEventCoverage()` gained an optional
+trailing `?int $roomId`; new `Venues::COVERAGE_ROOM_NOT_COVERED` constant
+and public `Venues::getRoom()` accessor. Touched:
+`web/_apps/calendar/manage/{index.php,save.php,_event_form.php}`,
+`web/_apps/venues/api/check.php`. No new settings keys, no new routes.
 
 ### User reminders sweep — Tasks/Rota/Milestones (gap #439, migration 171)
 

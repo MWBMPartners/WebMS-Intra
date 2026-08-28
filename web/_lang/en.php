@@ -348,17 +348,21 @@ return [
     // Coverage classification messages — built by Portal\Core\Venues::
     // coverageMessage()/classifyEventCoverage() and surfaced through the
     // calendar's Surface A (event-form inline check) and Surface B
-    // (post-save flash). Placeholders: :venue, :date, :window are the only
-    // ones classifyEventCoverage() actually populates — :status is
-    // deliberately not referenced below since callers never set it.
-    'venues.coverage.venue_missing'   => 'No external venue is linked to this check, so no booking status is available.',
-    'venues.coverage.no_booking'      => 'No booking found for :venue on :date — this event may need a venue booking.',
-    'venues.coverage.unavailable'     => ':venue is marked unavailable on :date.',
-    'venues.coverage.outside_hours'   => 'This event falls outside the booked hours (:window) at :venue on :date.',
-    'venues.coverage.unconfirmed'     => 'The booking for :venue on :date has not yet been confirmed.',
-    'venues.coverage.closed'          => ':venue is marked closed on :date.',
-    'venues.coverage.confirmed'       => ':venue is confirmed and booked for :date (:window).',
-    'venues.coverage.multi_day_worst' => 'Across :count days, the worst case is: :message',
+    // (post-save flash). Placeholders: :venue, :date, :window, :room are
+    // the only ones classifyEventCoverage() actually populates — :status
+    // is deliberately not referenced below since callers never set it.
+    // :room (#436) is populated only when a room-scoped check is made;
+    // only room_not_covered below actually references it — the other
+    // messages are deliberately left un-"room-flavoured" (#436 decision).
+    'venues.coverage.venue_missing'      => 'No external venue is linked to this check, so no booking status is available.',
+    'venues.coverage.no_booking'         => 'No booking found for :venue on :date — this event may need a venue booking.',
+    'venues.coverage.unavailable'        => ':venue is marked unavailable on :date.',
+    'venues.coverage.room_not_covered'   => ':venue is booked on :date, but not for :room — this event\'s room has no booking covering it.',
+    'venues.coverage.outside_hours'      => 'This event falls outside the booked hours (:window) at :venue on :date.',
+    'venues.coverage.unconfirmed'        => 'The booking for :venue on :date has not yet been confirmed.',
+    'venues.coverage.closed'             => ':venue is marked closed on :date.',
+    'venues.coverage.confirmed'          => ':venue is confirmed and booked for :date (:window).',
+    'venues.coverage.multi_day_worst'    => 'Across :count days, the worst case is: :message',
 
     // Calendar overlay legend (views/_shared_header.php) — the 4-swatch key
     // shown whenever a grid view's venue overlay has bookings to explain.
@@ -368,12 +372,16 @@ return [
     'venues.legend.closed'      => 'Closed',
     'venues.legend.unavailable' => 'Unavailable',
 
-    // Event-form "is it booked?" advisory check (manage/_event_form.php
-    // Surface A). Transient UI only — never persisted on tblEvents.
+    // Event-form "is it booked?" venue/room picker (manage/_event_form.php
+    // Surface A). #436: venueID/roomID are now PERSISTED on tblEvents (not
+    // just a transient advisory check) as well as driving the live check.
     'venues.check.heading'            => 'Venue Booking Check',
     'venues.check.select_label'       => 'External Venue (optional)',
     'venues.check.select_placeholder' => '— Not applicable —',
     'venues.check.help_text'          => 'If this event is being held at a hired external building, pick it here to check its booking status.',
+    'venues.check.room_label'         => 'Room (optional)',
+    'venues.check.room_placeholder'   => '— Whole venue —',
+    'venues.check.room_help'          => 'Pick a specific room to check and record room-level coverage.',
 
     // App-level labels (venue register admin screens).
     'venues.title'            => 'Venue Bookings',
