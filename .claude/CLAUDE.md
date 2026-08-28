@@ -19,12 +19,12 @@ Internal portal platform (PHP 8.5, backward-compatible with 8.4, MySQL 8.0, Boot
 ```
 repo root/          <- NOT deployed (docs, CI/CD only)
 web/                <- ALL deployable files (synced to server via SFTP)
-  _core/            <- Framework classes (Portal\Core namespace, 26 classes)
+  _core/            <- Framework classes (Portal\Core namespace, 63 classes)
   _apps/            <- App controllers — outside the webroot (#159). Every
                        app's PHP handlers live here; Router resolves
                        tblRoutes.targetFile against PORTAL_APPS = _apps/.
   _vendor/simplejwt/<- Vendored RS256 JWT verifier
-  _sql/             <- Numbered SQL migrations (000-158 + full_schema.sql)
+  _sql/             <- Numbered SQL migrations (000-170 + full_schema.sql)
   _lang/            <- I18n translation files (en.php, cy.php, …)
   _install/         <- Standalone 6-step installation wizard (bootstrap-free)
   public_html/      <- Web root: ONLY the front controller + static assets +
@@ -46,7 +46,7 @@ web/                <- ALL deployable files (synced to server via SFTP)
 
 `web/_apps/` holds ~47 top-level entries; `web/_core/apps/*.php` is the
 AppRegistry — the single source of truth for **installable marketplace
-apps** (toggleable per-site at `/admin/apps`), 42 of them. The table below
+apps** (toggleable per-site at `/admin/apps`), 43 of them. The table below
 is every user-facing app (see note below the table for dirs that are
 infrastructure rather than apps).
 
@@ -93,6 +93,7 @@ infrastructure rather than apps).
 | tasks | `/tasks` | Reminders / task list |
 | transcription | `/admin/transcription` | Auto-transcribe Recordings via Whisper / AssemblyAI / local whisper.cpp; full-text search |
 | translation | `/admin/translation` | Auto-translate user content via Anthropic / OpenAI / Google / DeepL / LibreTranslate, cached after first translate |
+| venues | `/venues` | Tenant-side venue-hire register — schedule of agreed bookings of a rented building, configurable statuses/usage types, recurring generator, XLSX import, calendar overlay + "is it booked?" warnings, hire agreements + renewal reminders, payable invoice/payment ledger (#429) |
 | visitors | `/visitors` | First-time visitor capture with follow-up cadence + kanban workflow |
 | worship | `/worship/*` | Live presentation layer for Service Plans — operator console, public projector display, song library + CCLI usage log (#308) |
 | zoom | `/admin/integrations/zoom` | OAuth Zoom integration: create meetings from calendar events, auto-link recordings via webhook |

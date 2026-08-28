@@ -2769,4 +2769,58 @@ page instead of a silent failure discovered mid-upload.
 
 ---
 
+## Venue Bookings (#429)
+
+### Wall-clock rule (make-or-break)
+
+`tblVenueBookings` times are wall-clock VENUE-local (`DATE` + `TIME`, never
+converted to UTC — a 09:30 hire stays 09:30 across DST). `tblEvents`
+datetimes are wall-clock EVENT-local in `timezone`/`eventTimezone` (their
+column comment claiming UTC is a known doc bug — see the follow-up issue
+below). `Venues::classifyEventCoverage()` therefore compares wall-clock to
+wall-clock: identical IANA zones ⇒ direct comparison, NO conversion;
+differing zones ⇒ convert event-zone → venue-zone via `DateTimeImmutable`.
+UTC never appears in this path. Never "fix" either store to UTC.
+
+**Follow-up issue (filed at ship time, not yet actioned):** `tblEvents.
+*DateTime` column comments say "stored in UTC" — that's wrong. Events are
+stored wall-clock event-local (proof: `calendar/manage/save.php` binds the
+raw POST value verbatim; `calendar/event.php` reads it back in the event's
+own zone; `Ical.php` emits a `TZID`, never a trailing `Z`). The comments
+need reconciling project-wide; storage itself must NOT change.
+
+### Native XLSX parser caps (no Composer)
+
+`Venues::parseWorkbook()` reads `.xlsx` via `ZipArchive` + `SimpleXML` with
+hard caps: upload size ≤ `venues.maxFileSize` (10 MB fallback when unset),
+≤ 200 zip entries, ≤ 20 MB per entry (checked pre-extraction), only the
+workbook/rels/sheets/sharedStrings parts are read, `LIBXML_NONET` always
+set and `LIBXML_NOENT` never set, 5,000 rows/sheet, 500 chars/cell. Excel
+serial dates are converted explicitly rather than trusted from cell
+formatting. `ZipArchive` availability isn't guaranteed on every shared host,
+so the import wizard checks `class_exists('ZipArchive')` up front and
+degrades to CSV-only with a visible notice when it's missing — the CSV path
+never depends on `ZipArchive` at all.
+
+### Scheduler
+
+Add alongside the other cron lines (token in `venues.cron_token`, seeded
+empty — the endpoint is inert until an admin sets a real value, same
+pattern as `discipleship.cron_token` / `assets.cron_token`):
+
+```
+https://<your-portal-host>/cron/venue-reminders?key=<your-token>   (daily)
+```
+
+The route (`cron/venue-reminders`, migration 170) is seeded
+`isProtected = 0` — public but token-gated, exactly like
+`cron/asset-reminders`. It loops every distinct `siteID` with at least one
+active venue, skips sites with `venues.enabled` or
+`venues.reminders_enabled` off, and runs three sweeps per site (un-agreed
+bookings, agreement renewals, invoices due) with a `(refType, refID,
+dueDate)` dedupe key so a re-scheduled item naturally re-reminds without
+spamming on every run.
+
+---
+
 Last updated: August 2026
