@@ -62,6 +62,15 @@ class GdprEraser
             ['table' => 'tblEvents',           'userCol' => 'createdByID',  'action' => 'anonymise', 'nullCols' => [], 'reason' => 'authorship attribution detached'],
             ['table' => 'tblRecording',        'userCol' => 'uploadedByID', 'action' => 'anonymise', 'nullCols' => [], 'reason' => 'authorship attribution detached'],
 
+            // 📝 Forms Builder (#153) — a response's answersJson is arbitrary
+            // free-text and may contain any PII the form asked for; hard DELETE is
+            // the only default-safe action (no per-column blanking can know which
+            // answers are personal). Public (anonymous) responses carry no
+            // submitterID at all, so they are outside this catalogue entry's
+            // reach by design — see FormEngine's file header + help/forms.php's
+            // "Privacy Note" section.
+            ['table' => 'tblFormResponses',    'userCol' => 'submitterID',  'action' => 'delete'],
+
             // Sessions / tokens / personal devices — hard delete.
             // NOTE: PHP's own session store is file-based, not a DB table
             // (there never was a `tblSessions` row to erase).
@@ -216,6 +225,18 @@ class GdprEraser
             // scrub either. Report OUTPUT itself is never stored anywhere, so
             // there is no separate "results" table to catalogue.
             ['table' => 'tblReportDefinitions', 'userCol' => 'createdByID', 'action' => 'anonymise', 'nullCols' => ['updatedByID'], 'reason' => 'saved report definitions retained (metadata, not personal data); authorship attribution detached'],
+            // 👥 Small Groups (#150). The membership row is the subject's
+            // OWN personal data (which group, which role) so it is hard
+            // DELETEd, not retained — unlike the attendance/authorship
+            // rows below, which stay for the GROUP's own continuity with
+            // only the subject's identity detached (mirrors
+            // tblEventAttendance / tblAssetAudit convention above).
+            ['table' => 'tblSmallGroupMembers',           'userCol' => 'userID',       'action' => 'delete'],
+            ['table' => 'tblSmallGroupMembers',           'userCol' => 'addedByID',    'action' => 'anonymise', 'nullCols' => [], 'reason' => 'membership rows retained for the group; assigner identity detached'],
+            ['table' => 'tblSmallGroupMeetingAttendance', 'userCol' => 'userID',       'action' => 'anonymise', 'nullCols' => [], 'reason' => 'aggregate attendance stats retained — userID nulled (tblEventAttendance precedent)'],
+            ['table' => 'tblSmallGroupMeetingAttendance', 'userCol' => 'markedByID',   'action' => 'anonymise', 'nullCols' => [], 'reason' => 'roll history retained; recorder identity detached'],
+            ['table' => 'tblSmallGroupMeetings',          'userCol' => 'recordedByID', 'action' => 'anonymise', 'nullCols' => [], 'reason' => 'meeting history retained; recorder identity detached'],
+            ['table' => 'tblSmallGroups',                 'userCol' => 'createdByID',  'action' => 'anonymise', 'nullCols' => [], 'reason' => 'group retained for the congregation; creator identity detached'],
 
             // Final step — anonymise the user row itself rather than delete,
             // so foreign keys with ON DELETE SET NULL don't cascade-blow

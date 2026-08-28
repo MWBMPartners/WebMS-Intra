@@ -256,6 +256,71 @@ Per-site prayer-request submission with moderation and anonymous public submissi
 
 ---
 
+### 🧾 Forms Builder — `/forms/` ✅ (#153)
+
+Generic form designer — "we need a quick form" without a code change.
+Admins build a form's fields, publish it internally and/or publicly, and
+review/export the responses. Built as a reusable engine
+(`Portal\Core\FormEngine`) so a future app (e.g. #302 mission-trips) can
+create/render/validate/persist a form programmatically without any HTTP
+involvement.
+
+- **Field types (12):** Short text, Long text, Email, Phone, Number, Date,
+  Time, Dropdown, Choose one (radio), Choose many (checkboxes), Single
+  tick/consent, and a display-only Section heading. The registry
+  (`FormEngine::FIELD_TYPES`) is a PHP whitelist, not a SQL ENUM — adding a
+  type is a code change, never a migration; a type is never removed once
+  shipped (historic response snapshots still reference it).
+- **Injection safety (the whole point of `FormEngine`):** field configuration
+  (`configJson`) is DATA, whitelist-copied by `sanitiseConfig()` on both
+  read and write; a choice field (`select`/`radio`/`checkboxes`) submits as
+  a bounds-checked INTEGER INDEX into its own sanitised options array — the
+  stored value is the server-side option string at that index, never raw
+  client text; the form field's HTML `name` is always `f_{fieldID}`, a
+  server-controlled integer. Every SQL statement is a MySQLi prepared
+  statement; every rendered value is `htmlspecialchars(…, ENT_QUOTES,
+  'UTF-8')`'d at the echo point.
+- **Responses are an immutable snapshot** — `answersJson` captures
+  `{fieldKey: {label, type, value}}` at submission time, so editing or
+  deleting a field afterwards can never corrupt or orphan a historical
+  answer. CSV export reflects current fields by position/label, with any
+  orphaned (since-deleted) field's answers appended as trailing columns
+  keyed by their original `fieldKey` — nothing is silently dropped.
+- **Internal fill (`/forms`, `/forms/fill`):** signed-in members of the site
+  see published `internal`/`both` forms currently within their open window;
+  an `allowMultiple = 0` form shows a "Submitted" badge instead of the fill
+  link once answered.
+- **Public fill (`/f/{token}`):** a Router special route (cloned from
+  service-plans' `/os/{token}`), six-gate uniform-404 (token exists /
+  audience public|both / published / open window / site
+  `forms.allowPublic` / site `forms.enabled` — all scoped to the FORM's own
+  site, never the request's ambient site). **Default OFF**
+  (`forms.allowPublic = 'false'`) — an admin must opt a site in before the
+  public/both audience options unlock on the builder. Public POST layers
+  honeypot → CSRF → `Captcha::verify()` → `RateLimiter::isBlocked()`
+  (fake-success on trip) → a 5-per-15-minute per-IP bucket. QR code + link
+  shown on `/forms/manage`; "Rotate link" mints a fresh token, invalidating
+  the old one immediately.
+- **Admin-only** for all build/publish/responses/export surfaces (v1 — no
+  separate "forms manager" role yet).
+- **Responses (`/forms/responses`):** new/reviewed tabs, expandable answer
+  detail, mark reviewed/new, delete, CSV export (`/forms/export`).
+- Help page at `/help/forms`.
+
+**GDPR:** an internal response is erased (hard delete, `submitterID` match)
+alongside the rest of a member's data via `GdprEraser`, and included in
+their `/account/data-export`. A public (anonymous) response carries no
+`submitterID` — only `submitterIP` for abuse-tracing — so it sits outside
+subject-linked erasure by design (same reasoning as Salvation's decision
+cards); an admin can still delete any individual response by hand. Public
+responses are kept indefinitely in v1 (`forms.responseRetentionDays` is a
+seeded `'0'` stub for a future auto-purge cron — see DEV_NOTES).
+
+**Tables:** `tblForms`, `tblFormFields`, `tblFormResponses`
+**Settings:** `forms.enabled`, `forms.allowPublic`, `forms.responseRetentionDays`
+
+---
+
 ### 📋 Attendance — `/attendance/` ✅
 
 Service-type-aware headcount tracker.
@@ -360,6 +425,47 @@ Reminder / task system.
 
 ---
 
+### 👥 Small Groups — `/small-groups/` ✅ (#150)
+
+Groups/classes register — Sabbath School classes, home groups, Bible
+studies. New installable app, opt-in (`small-groups.enabled` defaults
+`'0'`).
+
+- Groups directory + per-group detail page; leader/co-leader/member roster
+  with optional self-service join requests (pending → approve/decline) and
+  a last-active-leader guard on remove/demote/leave.
+- Per-meeting roll (`tblSmallGroupMeetingAttendance`, presence-row model
+  mirroring `tblEventAttendance`) with an ADDITIVE headcount push into the
+  existing Attendance app via a group's linked `tblAttendanceServiceTypes`
+  row — several groups can share one service type/session, each
+  contributing its own labelled headcount line; zero changes to
+  Attendance's own schema/code.
+- Meeting location reuses the #456 shared location partials
+  (`portal_location_input`/`portal_location_display`) byte-identical to
+  migration 180's `tblVenues` shape, plus a `locationVisibility` gate
+  (leaders/members/site, default members — no public tier, since groups
+  often meet in a member's home).
+- `Portal\Core\SmallGroups` is the tenant-safety choke-point and the
+  stable contract #304 (group messaging) and #321 (watch-party rooms) are
+  expected to consume — `groupID` scope anchor, `status='active'`
+  membership predicate, `isLeader()` leader gate. The denormalised
+  `siteID` on member/meeting rows is written only after confirming an
+  active `tblUserSites` row for the group's site — cross-site membership
+  is structurally impossible.
+- New `groups_coordinator` role — manages every group at a site without
+  needing to be admin.
+- Attendance report + CSV export (roster and per-member attendance %).
+- **v1 is adults-only**: membership rows are portal users only, no named
+  child rows anywhere — the Kids app's `tblKidProfiles` remains the sole
+  place child identity lives.
+- GDPR lockstep: `GdprEraser::catalogue()` (6 entries), `data-export.php`
+  (4 blocks), and an `offboarding/do.php` step ending a leaver's
+  memberships.
+
+**Tables:** `tblSmallGroups`, `tblSmallGroupMembers`, `tblSmallGroupMeetings`, `tblSmallGroupMeetingAttendance` (migration 183)
+
+---
+
 ### ✅🔏 Approvals — `/approvals/` ✅ (#443)
 
 Generic inbox for the Workflow Execution Engine (`Portal\Core\Workflow`,
@@ -445,6 +551,7 @@ In-app documentation per app.
 | `/help/admin` | Settings, user roles, site branding, captcha config |
 | `/help/translations` | Language + i18n |
 | `/help/prayer-requests` | Prayer requests lifecycle, anonymous route, moderation |
+| `/help/forms` | Field types, building/publishing a form, the public link, responses/CSV export, privacy |
 | `/help/faq` | Common questions |
 
 ---

@@ -26,6 +26,9 @@
  *   tblVenueImportBatches (CSV/XLSX import batches you uploaded — #429)
  *   tblGiftAidDeclaration (your Gift Aid declarations — address/postcode/
  *                          status/dates — #456 Chunk B)
+ *   tblFormResponses      (your Forms Builder responses — internal channel
+ *                          only, public/anonymous responses have no
+ *                          submitterID to match — #153)
  *
  * Sensitive fields (password hashes, TOTP secret, tokenHash etc.) are
  * EXCLUDED — exporting them would be a security regression, not a feature.
@@ -159,6 +162,46 @@ $payload = [
         'reportDefinitions' => $fetchUserRows(
             'SELECT reportID, siteID, reportName, description, sourceKey, definition, isShared, lastRunAt, runCount, createdAt '
             . 'FROM tblReportDefinitions WHERE createdByID = ?'
+        ),
+        // 🧾 Forms Builder (#153) — export↔erasure parity with the
+        // GdprEraser::catalogue() 'tblFormResponses' entry added alongside
+        // this block. Public (anonymous) responses carry no submitterID and
+        // so are never included here — same reasoning as the salvation
+        // decision-card note immediately below.
+        'formResponses' => $fetchUserRows(
+            'SELECT responseID, formID, siteID, channel, answersJson, status, createdAt '
+            . 'FROM tblFormResponses WHERE submitterID = ?'
+        ),
+        // 👥 Small Groups (#150) — export↔erasure parity with the six
+        // GdprEraser::catalogue() entries added alongside this block.
+        // Neither block below aliases its OWN `tblSmallGroup*` table right
+        // after its FROM — every such table name contains the bare
+        // substring "Group", which trips a backtracking false-positive in
+        // check_sql_columns.py's SELECT-column regex when a short alias
+        // sits directly after `FROM tblSmallGroup*` (see SmallGroups.php's
+        // matching comment for the full mechanics). The JOINed table can
+        // still be aliased freely — the checker's FROM-anchored regex
+        // never inspects text after JOIN.
+        'smallGroupMemberships' => $fetchUserRows(
+            'SELECT tblSmallGroupMembers.membershipID, tblSmallGroupMembers.siteID, tblSmallGroupMembers.groupID, '
+            . 'g.groupName, tblSmallGroupMembers.memberRole, tblSmallGroupMembers.status, '
+            . 'tblSmallGroupMembers.joinedAt, tblSmallGroupMembers.endedAt, tblSmallGroupMembers.requestNote, '
+            . 'tblSmallGroupMembers.createdAt '
+            . 'FROM tblSmallGroupMembers INNER JOIN tblSmallGroups g ON g.groupID = tblSmallGroupMembers.groupID '
+            . 'WHERE tblSmallGroupMembers.userID = ?'
+        ),
+        'smallGroupAttendance' => $fetchUserRows(
+            'SELECT tblSmallGroupMeetingAttendance.attendanceID, mt.groupID, mt.meetingDate, mt.topic, '
+            . 'tblSmallGroupMeetingAttendance.markedAt '
+            . 'FROM tblSmallGroupMeetingAttendance '
+            . 'INNER JOIN tblSmallGroupMeetings mt ON mt.meetingID = tblSmallGroupMeetingAttendance.meetingID '
+            . 'WHERE tblSmallGroupMeetingAttendance.userID = ?'
+        ),
+        'smallGroupsCreated' => $fetchUserRows(
+            'SELECT groupID, siteID, groupName, createdAt FROM tblSmallGroups WHERE createdByID = ?'
+        ),
+        'smallGroupMembersAdded' => $fetchUserRows(
+            'SELECT membershipID, groupID, memberRole, status, createdAt FROM tblSmallGroupMembers WHERE addedByID = ?'
         ),
         // 🙏 Salvation decision cards (tblSalvationCards) are DELIBERATELY
         // NOT exported here: the public decision-card form has no userID

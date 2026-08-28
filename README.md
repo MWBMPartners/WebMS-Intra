@@ -248,6 +248,7 @@ Phase-level milestones (granular per-feature state lives in [FEATURES.md](FEATUR
 - **#137** — Calendar seven view modes (Day, Week, Weekdays, Weekend, Month, Year planner, List). Merged (PR #137).
 - **#138** — Calendar per-month strap-lines + category `displayStyle` toggle (background-band vs text-only) — stacked on #137. Merged (PR #138).
 - **#128** — Re-scoped: service-plans (#262/#300) + Worship (#308/#355) already covered the "Order of Service planner" ask; the residual — local hymnal index, an optional default-off remote ("iHymns") lookup, and a congregation-facing public `/os/{token}` view — shipped in migration 178.
+- **#153** — Forms Builder app: generic admin-built form designer, internal + optional public (`/f/{token}`) fill, response review/CSV export, built on a reusable `Portal\Core\FormEngine`. Merged (migration 182).
 
 **Tracked but not started:** WordPress Multisite integration (#127), BookIT integration cluster (#97–#103), Privacy / GDPR helpers (#47), Payment integration prep (#40). See [FEATURES.md](FEATURES.md#tracked-but-not-started) for the full backlog with scope notes.
 

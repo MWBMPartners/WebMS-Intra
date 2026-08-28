@@ -1133,6 +1133,40 @@ up-to-date schema:
   uq_filename`) needs `ON DUPLICATE KEY UPDATE`, `INSERT IGNORE`, or a `WHERE NOT
   EXISTS` guard, or it fails with ERROR 1062 on replay.
 
+### `check_sql_columns.py` false positive: a table name embedding a bare SQL keyword + a short alias (#150)
+
+`tools/audit-checks/check_sql_columns.py`'s `SELECT_RE` locates a query's table
+name with `FROM\s+\`?(tbl\w+)\`?\s*(?:WHERE|ORDER|GROUP|LIMIT|;|…|\s+(?:LEFT|
+INNER|RIGHT|OUTER|JOIN))` — it requires the greedy `\w+` table-name capture to
+be *immediately* followed (mod whitespace) by one of those bare keywords. When
+the SQL text instead puts a short **alias** right after the table name (e.g.
+`FROM tblSmallGroupMembers m INNER JOIN …`), the full-length match fails and
+the regex engine backtracks the `\w+` capture shorter and shorter — and if the
+table name happens to **contain one of those keywords as a bare substring**
+(`tblSmallGroup*` all contain "Group"), the backtrack eventually lands on
+`tblSmall` + `Group…`, which matches the literal `GROUP` alternative (no word
+boundary required) and stops there. The checker then reports the truncated,
+unregistered `tblSmall` as an "unknown table", even though the real table
+(`tblSmallGroupMembers`) is correctly defined in `full_schema.sql`. This is
+NOT a real defect in the SQL — verified by hand-tracing the regex and
+confirmed empirically (`python3 -c '...'` against the exact pattern).
+
+**Workaround** (no audit-script change needed): never put a short alias
+*immediately* after `FROM tblKeywordEmbeddingTable` — either drop the alias
+entirely and qualify columns with the full table name (`tblSmallGroupMembers.
+userID`), or reorder the join so the keyword-embedding table is introduced via
+`JOIN` instead of being the primary `FROM` target (the checker's regex is
+strictly `FROM`-anchored — it never inspects text after `JOIN`, so an alias on
+a *joined* table, however named, is invisible to it and always safe). Both
+forms are semantically identical to the aliased original; MySQL still returns
+the column under its own unqualified name either way. See
+`web/_core/SmallGroups.php` (`listGroups()`, `groupsFor()`, `membersOf()`,
+`pushHeadcountToAttendance()`, `attendanceStats()`) and
+`web/_apps/auth/account/data-export.php`'s `smallGroupMemberships`/
+`smallGroupAttendance` blocks for worked examples. Will recur for any future
+table whose name embeds `GROUP`/`ORDER`/`LIMIT`/`WHERE` as a bare substring
+right after `tbl` — check new table names against this before aliasing them.
+
 ---
 
 ## File Structure Quick Reference
@@ -4498,6 +4532,139 @@ tarball. See `Asset.php`'s `CHARTJS_INTEGRITY` doc comment for the exact
 
 Scheduling/emailed reports are explicitly OUT of #156's scope — not
 built, not stubbed.
+## Forms Builder (#153)
+
+New app at `/forms` (`web/_apps/forms/`) + `Portal\Core\FormEngine`
+(`web/_core/FormEngine.php`) — a generic form designer so "we need a quick
+form" doesn't need a code change. Migration 182: `tblForms`,
+`tblFormFields`, `tblFormResponses` (all three brand new — no ALTERs, so
+no `information_schema` guard idiom needed).
+
+### Why a JSON snapshot, not an EAV values table
+
+`tblFormResponses.answersJson` stores `{fieldKey: {label, type, value}}`
+for the whole submission in ONE column, rather than a normalised
+`tblFormResponseValues (responseID, fieldID, value)` table. Reasoning:
+
+- A response is a record of *what was submitted*, not a live view of the
+  current form. An EAV table keyed on `fieldID` breaks the moment an admin
+  edits a field's label or type, or deletes it — either the historical
+  value silently relabels itself (wrong), or an `ON DELETE CASCADE`
+  destroys it (worse). The snapshot captures label+type at submission
+  time, so it stays correct forever regardless of later edits.
+- Every read path (moderation list, response detail, CSV export, GDPR
+  export) consumes a WHOLE response at once, never filters/aggregates by a
+  single field's value — so EAV's one real advantage (per-value SQL
+  `WHERE`) buys nothing here.
+- JSON columns for this exact "denormalised historical snapshot" shape are
+  already house practice — `tblUsers.notifyPrefs`, `tblAuditTrail
+  .changeSet`, `tblWorkflowInstances.stepsLog`.
+- `FormEngine::csvRows()` reconciles the two worlds for export: it walks
+  CURRENT fields by position for the main columns, then appends any
+  fieldKey present in a snapshot but absent from the current field list
+  (a field deleted after that response was submitted) as trailing columns
+  keyed by the original `fieldKey` — nothing is ever silently dropped from
+  an export just because a field was later removed.
+
+### Field-type registry + extension contract
+
+`FormEngine::FIELD_TYPES` is a PHP whitelist keyed by the stored
+`fieldType` string — deliberately `tblFormFields.fieldType VARCHAR(20)`,
+**not a SQL ENUM**. Adding a new field type is: one new `FIELD_TYPES`
+entry (with its allowed `config` keys), one new `case` in
+`renderField()`'s switch, one new `case` in `validateSubmission()`'s
+switch. No migration required. A type is never removed once shipped —
+`decodeAnswers()`'s historic snapshots still reference it by name, and an
+unknown/removed type simply renders nothing / validates nothing / stores
+nothing (`isset(FIELD_TYPES[$type])` gates every code path) rather than
+erroring.
+
+`sanitiseConfig()` is the ONE place admin-entered field configuration is
+allowed to cross into storage — it copies ONLY the keys named in that
+type's `config` list, casts/clamps every value to a hard `CAP_*` constant,
+and is re-run on every READ too (`FormEngine::resolveConfig()`), so even a
+hand-edited row in the database can't smuggle an unexpected key or an
+oversized value through to `renderField()`/`validateSubmission()`.
+
+### `/f/{token}` public route
+
+Cloned from service-plans' `/os/{token}` (itself cloned from
+`assets/tag.php`'s `/a/{token}`) — a `Router::handleSpecialRoutes()` block
+matching `^[a-f0-9]{32}$`, bypassing `tblRoutes` entirely (works even
+mid-migration). `web/_apps/forms/public.php` owns the six-gate uniform-404
+(token exists / audience public|both / published / open window / site
+`forms.allowPublic` / site `forms.enabled`) — **every gate after the token
+lookup is scoped to the form's own `siteID`**, never `Site::id()`, since a
+public route has no ambient site context and the request's Host header
+need not belong to the form's own site on a multi-site install. This is
+the same tenant-safety discipline as `service-plans/public.php` and
+`ApiRouter::resolveEnabledFlag()`.
+
+`forms/public-submit.php` is a NORMAL `tblRoutes` row (`isProtected = 0`)
+— NOT a special route — so it re-resolves the token and re-runs all six
+gates itself rather than trusting anything about how the visitor arrived.
+Hardening ladder: honeypot → CSRF → `Captcha::verify()` →
+`RateLimiter::isBlocked()` (fake-success redirect on trip — never signal
+an abuser) → a per-IP `tooMany()`/`recordHit()` bucket (5 / 15 min,
+keyed on a SHA-256 of the client IP, `assets/found-save.php` precedent).
+
+### Residual defaults applied (owner sign-off deferred — see spec §1.2)
+
+The build spec left three decisions open with a stated minimal-safe
+default; all three were applied as-is:
+
+1. **Public response retention: keep indefinitely in v1.** Public
+   submissions have no `submitterID` (see below), so there is no
+   subject-linked erasure path for them at all — only a per-row admin
+   delete from `/forms/responses`. `forms.responseRetentionDays` was
+   seeded as a stub, default `'0'` (= keep forever), for a follow-up. When
+   the owner wants an auto-purge window, the shape is a ~20-line addition
+   to an existing token-gated cron sweep (e.g. `cron/forms-purge.php`,
+   `user_reminders.cron_token`/`giving-statements.php` precedent): for
+   each site with `forms.responseRetentionDays > 0`, blank
+   `submitterIP`/delete `tblFormResponses` rows where `channel = 'public'
+   AND createdAt < NOW() - INTERVAL {days} DAY` — no schema change needed,
+   the column and the setting already exist.
+2. **No per-role fill restriction in v1.** Any signed-in member of the
+   site can fill any published `internal`/`both` form — there's no
+   `restrictRoleKey` column. If the owner wants form-level role gating
+   later, that's one nullable `tblForms.restrictRoleKey` column +
+   `App::hasRole()` checks in `fill.php`/`submit.php`, no other schema
+   change.
+3. **`heading` display-only field type is included** (a section header
+   inside a long form) — near-zero cost, `'input' => false` in the
+   registry skips it in validation/snapshot building entirely. The owner
+   may strike it from `FIELD_TYPES` without touching anything else.
+
+### #302 reuse seam (mission-trips public application form)
+
+`FormEngine` is deliberately parameter-driven — no method reads
+`Site::id()` or `$_SESSION`. Every call takes the site/form/user context
+it needs explicitly, so a future app (#302 mission-trips names this exact
+seam: "reuses `forms` framework when #153 ships") can:
+
+1. Create a form programmatically — prepared `INSERT`s into
+   `tblForms`/`tblFormFields` (or a follow-up
+   `FormEngine::createForm(array $definition): int` convenience method).
+2. Render it inside its OWN page — `FormEngine::getFields($formId)` +
+   `FormEngine::renderField($field, $old, $errors)` in a loop, same as
+   `forms/fill.php` does.
+3. Validate + persist under its OWN channel label —
+   `FormEngine::validateSubmission()` → `buildAnswersJson()` →
+   `saveResponse($formId, $siteId, 'mission-trip-application', $userId,
+   null, $json)` — `channel` is a free-text-ish label the caller chooses
+   (the `tblFormResponses.channel` ENUM would need `'mission-trip
+   -application'` added as a value, or the caller can reuse `'internal'`
+   and disambiguate by which `formID` it queries instead).
+4. Read responses back by `formID` for its own approval workflow —
+   `tblFormResponses WHERE formID = ?`, no `forms` app UI involved at all.
+
+**Special-category data does NOT go through generic forms.** A mission
+trip's passport/medical manifest data must stay in #302's own encrypted
+manifest store — `answersJson` has no field-level encryption and is
+readable by any admin who can view `/forms/responses`, which is the wrong
+protection level for that category of data. Generic Forms is for the
+application/registration questions only.
 
 ---
 

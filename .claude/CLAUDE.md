@@ -44,7 +44,7 @@ web/                <- ALL deployable files (synced to server via SFTP)
 
 ## Apps (shipped on `main`)
 
-`web/_apps/` holds ~47 top-level entries; `web/_core/apps/*.php` is the
+`web/_apps/` holds ~48 top-level entries; `web/_core/apps/*.php` is the
 AppRegistry — the single source of truth for **installable marketplace
 apps** (toggleable per-site at `/admin/apps`), 44 of them. The table below
 is every user-facing app (see note below the table for dirs that are
@@ -67,6 +67,7 @@ infrastructure rather than apps).
 | discipleship | `/discipleship` | Ordered formation pathways with per-member progress tracking, auto-completion from attendance/RSVPs, pastor roster (#303) |
 | documents | `/documents` | File library with categories |
 | expenses | `/expenses` | Submit, approve, treasury, withdraw, multi-approver, PDF, CSV |
+| forms | `/forms` | Generic form designer — admin-built fields, internal + optional public (`/f/{token}`) fill, response review/CSV export; `Portal\Core\FormEngine` is the reusable injection-safety boundary (#153) |
 | giving | `/giving` | Contributions log, Gift Aid capture, HMRC export, year-end statements (self-service + treasurer bulk batch generate/email, #440); two-person offering count, pledge campaigns, bank reconciliation (#299) |
 | help | `/help/*` | In-app guides (getting-started, expenses, calendar, prayer-requests, admin, faq, …) |
 | invites | `/invites` | Single-use invite links so new members self-register with role pre-assigned |
@@ -90,6 +91,7 @@ infrastructure rather than apps).
 | service-plans | `/service-plans` | Programme run-sheet builder (preacher, scripture, hymns, AV, welcome team); operator → confidence-monitor messaging (#300); local hymnal index + default-off remote lookup + congregation-facing public `/os/{token}` view (gap #128, migration 178) |
 | settings | `/settings` | Generic dot-notation settings editor |
 | site | `/site` | Multi-site switcher handler |
+| small-groups | `/small-groups` | Groups/classes register — leaders, member assignment, join requests, meeting rolls tied to attendance service types (#150) |
 | sms | `/admin/sms` | SMS notifications for critical alerts via Twilio / MessageBird / AWS SNS |
 | tasks | `/tasks` | Reminders / task list |
 | transcription | `/admin/transcription` | Auto-transcribe Recordings via Whisper / AssemblyAI / local whisper.cpp; full-text search |
@@ -198,6 +200,92 @@ Calendar/Events/Preaching Plan is ONE app ("Events") — `/calendar` covers view
   `InvalidArgumentException` before any SQL string exists. All 11 audit
   checks green, `php -l` clean on every touched file, `node --check`
   clean on the new JS.
+- **`claude/backlog153-forms`** (branched off `alpha`) — issue #153: new
+  Forms Builder app at `/forms` (`web/_apps/forms/`, 16 pages/handlers) +
+  `Portal\Core\FormEngine` — the single injection-safety boundary for a
+  12-type field registry (`FormEngine::FIELD_TYPES` — a PHP whitelist, NOT a
+  SQL ENUM, so adding a type is code-only, never a migration), a whitelist
+  config sanitiser (`sanitiseConfig()` — `configJson` is DATA, re-sanitised
+  on every read AND write), an escaped-everything renderer
+  (`f_{fieldID}` server-integer field names; choice fields submit
+  bounds-checked integer indexes, never raw option text), per-type
+  server-side validators, and immutable `answersJson` snapshot persistence
+  (`{fieldKey:{label,type,value}}`, survives later field edits/deletes).
+  Admins build/publish forms at `/forms/edit` + `/forms/manage`; members
+  fill published internal/both forms at `/forms/fill`; an OPTIONAL public
+  link `/f/{token}` is a Router special route (cloned from service-plans'
+  `/os/{token}`), default OFF (`forms.allowPublic='false'`), six-gate
+  uniform-404 scoped to the FORM's own siteID throughout (never ambient
+  `Site::id()` — no active-site context on a public route). Public POST:
+  honeypot → CSRF → `Captcha::verify()` → `RateLimiter` (fake-success on
+  `isBlocked()`) → 5/15min per-IP bucket (`prayer-requests/anonymous-save
+  .php` + `assets/found-save.php` precedent). Responses reviewed/exported
+  admin-only at `/forms/responses` (CSV via `FormEngine::csvRows()` +
+  `CsvExporter`). GDPR lockstep in the SAME PR: `GdprEraser::catalogue()`
+  hard-deletes a member's responses by `submitterID`;
+  `auth/account/data-export.php` gained a matching `formResponses` block —
+  a public (anonymous) response carries no `submitterID` and sits outside
+  both by design (salvation decision-card precedent), documented in
+  `/help/forms` + DEV_NOTES. Three residual defaults applied per the build
+  spec (owner sign-off deferred, minimal-safe choice made): the
+  display-only `heading` field type is included; NO per-role fill
+  restriction in v1 (any signed-in site member may fill a published
+  internal/both form); public-response retention = **keep indefinitely**
+  in v1, with a `forms.responseRetentionDays` settings stub (seeded `'0'`
+  = forever) for a future auto-purge cron. Migration 182: 3 new tables
+  (`tblForms`/`tblFormFields`/`tblFormResponses`), 3 settings seeds, 15
+  route seeds (13 protected + 2 public, no `api/*` rows — ApiRouter trap).
+  All 11 audit checks green, `php -l` clean on every touched file.
+- **`claude/backlog150-groups`** (branched off `alpha`) — issue #150: new
+  Small Groups app (`web/_apps/small-groups/`, slug `small-groups`) —
+  groups/classes register for Sabbath School classes, home groups, Bible
+  studies. Roster with leader/co-leader/member roles + optional
+  self-service join requests (pending → approve/decline, last-active-leader
+  guard on remove/demote/leave); per-meeting roll
+  (`tblSmallGroupMeetingAttendance`, presence-row model mirroring
+  `tblEventAttendance`) with an ADDITIVE headcount push into the existing
+  Attendance app via a group's linked `tblAttendanceServiceTypes` row —
+  several groups can share one service type/session, each contributing its
+  own labelled `tblAttendanceCounts` row matched by `(sessionID,
+  groupLabel)`; zero changes to Attendance's own schema/code. Meeting
+  location reuses the #456 shared partials (`portal_location_input`/
+  `portal_location_display`) with canonical column names, byte-identical
+  to migration 180's `tblVenues` shape, plus a new `locationVisibility`
+  gate (leaders/members/site, default `members` — no public tier, since
+  groups often meet in a member's home). New `Portal\Core\SmallGroups`
+  class is the tenant-safety choke-point AND the stable contract #304
+  (group messaging) and #321 (watch-party rooms) are expected to consume —
+  `groupID` scope anchor, `status='active'` membership predicate,
+  `isLeader()`/`canManage()` gates; the denormalised `siteID` on
+  member/meeting rows is written only by `SmallGroups::upsertMembership()`
+  after confirming an ACTIVE `tblUserSites` row for the group's own site
+  (leadership `assign.php:87-93` join precedent), making cross-site
+  membership structurally impossible. New `groups_coordinator` role. GDPR
+  lockstep in the same PR: 6 `GdprEraser::catalogue()` entries, 4
+  `data-export.php` blocks, 1 `offboarding/do.php` step ending a leaver's
+  memberships. **v1 is adults-only** — membership rows are portal users
+  only; zero named-child rows anywhere (the Kids app's `tblKidProfiles`
+  remains the sole place child identity lives, verified by grep). Migration
+  183 (181 = alpha head at spec time, 182 reserved by #153 Forms in
+  flight): 4 new tables, 7 settings seeds (`small-groups.enabled` defaults
+  `'0'`, opt-in — the pre-existing `'1'`-vs-`'true'` nav/dashboard
+  enable-flag quirk is inherited verbatim, not fixed here), 1 role seed
+  (`WHERE NOT EXISTS` idiom), 13 route seeds (12 app + 1 help,
+  `isProtected=0`), zero ALTERs to any existing table. Also found + fixed
+  along the way: `check_sql_columns.py`'s SELECT-column regex false-
+  positives on any `FROM tblSmallGroup*` clause carrying a short alias
+  immediately after the table name — the bare substring "Group" inside
+  every one of the four new table names lets the regex's own greedy-`\w+`
+  backtracking mis-match "Group…" as a false `GROUP BY` terminator,
+  truncating the captured table name to `tblSmall` and reporting a bogus
+  unknown-table finding; worked around by never aliasing the PRIMARY
+  `FROM tblSmallGroup*` table (using full-name column qualification
+  instead) while still freely aliasing any table introduced via `JOIN`
+  (invisible to that checker's FROM-anchored regex) — documented inline at
+  each call site since the same shape will recur for any future table
+  whose name embeds a bare SQL keyword. New help page (`/help/small-groups`)
+  + help-index card. All 11 audit checks green, `php -l` clean on every
+  touched file, zero raw `<table>` (portal-data-list throughout).
 - **`claude/backlog-pwa-brand`** (branched off `alpha`) — two small,
   low-risk backlog finishers, one PR: **#141 residual** (the push half
   was already fully shipped as #322 — only install-prompt/manifest/iOS-meta

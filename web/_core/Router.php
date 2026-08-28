@@ -309,6 +309,24 @@ class Router
             }
         }
 
+        // 📝 Forms Builder public fill page (#153) — short URL /f/<token>. Cloned
+        //    from the /os/<token> block immediately above: the token is
+        //    tblForms.publicToken — always exactly 32 lowercase-hex chars
+        //    (bin2hex(random_bytes(16)), see Portal\Core\FormEngine::
+        //    generatePublicToken()) — anchored + exact regex, not a tblRoutes row
+        //    (bypasses the DB route lookup entirely, same mid-migration-safety
+        //    rationale as every other special-route block on this page). The
+        //    handler (web/_apps/forms/public.php) owns the full uniform-404 logic
+        //    for unknown/unpublished/closed/disabled tokens — see its header.
+        if (str_starts_with($path, 'f/') === true) {
+            $token = substr($path, 2);
+            if (preg_match('/^[a-f0-9]{32}$/', $token) === 1) {
+                $_GET['token'] = $token;
+                require PORTAL_APPS . DIRECTORY_SEPARATOR . 'forms' . DIRECTORY_SEPARATOR . 'public.php';
+                return true;
+            }
+        }
+
         // 🔗 Asset Tracker GS1 Digital Link resolver (#415, Phase 3 Pass 6
         // — FINAL Asset Tracker pass) — recognises the three GS1
         // Application Identifier path shapes a GS1 Digital Link URI uses

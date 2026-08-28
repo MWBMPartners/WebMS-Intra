@@ -65,6 +65,67 @@
   `InvalidArgumentException` before any SQL string exists — all pass. All
   11 audit checks green, `php -l` clean on every touched file, `node
   --check` clean on the new JS.
+- feat(forms): #153 — Forms Builder app. New `web/_apps/forms/` (16 pages/
+  handlers) + `Portal\Core\FormEngine` — the single injection-safety
+  boundary for a 12-type field registry (text/textarea/email/phone/number/
+  date/time/select/radio/checkboxes/checkbox/heading), a whitelist config
+  sanitiser (`sanitiseConfig()` — `configJson` is DATA, never SQL, never
+  trusted raw even on read), an escaped-everything renderer (`f_{fieldID}`
+  server-integer field names; choice options submit as bounds-checked
+  integer indexes, never raw option text), per-type server-side validators,
+  and immutable `answersJson` snapshot persistence (`{fieldKey: {label,
+  type, value}}` — survives later field edits/deletes without corrupting
+  history). Admins build a form (title/description/audience/window) and its
+  fields at `/forms/edit`, publish/close/rotate its link from
+  `/forms/manage`; members fill published internal/both forms at
+  `/forms/fill`; a public link `/f/{token}` (Router special route, cloned
+  from service-plans' `/os/{token}`) is default OFF
+  (`forms.allowPublic='false'`) and six-gate uniform-404s exactly like its
+  precedent, scoped to the FORM's own siteID throughout (never ambient
+  `Site::id()`). Public POST layers honeypot → CSRF → `Captcha::verify()` →
+  `RateLimiter` (fake-success on `isBlocked()`) → a 5/15min per-IP bucket.
+  Responses reviewed/exported at `/forms/responses` (admin-only,
+  new/reviewed tabs, CSV export via `FormEngine::csvRows()` +
+  `CsvExporter`). GDPR lockstep in this PR: `GdprEraser::catalogue()` hard-
+  deletes a user's responses by `submitterID`; `auth/account/data-export.php`
+  gained a matching `formResponses` block — public (anonymous) responses
+  carry no `submitterID` and so sit outside both by design (documented in
+  `/help/forms` + DEV_NOTES). Migration 182: 3 new tables (`tblForms`,
+  `tblFormFields`, `tblFormResponses`), 3 settings seeds (`forms.enabled`,
+  `forms.allowPublic`, `forms.responseRetentionDays` stub), 15 route seeds
+  (13 protected + 2 public — no `api/*` rows, ApiRouter trap). All 11 audit
+  checks green, `php -l` clean on every touched file.
+- feat(small-groups): #150 — new Small Groups app (groups/classes register:
+  Sabbath School classes, home groups, Bible studies). Roster with
+  leader/co-leader/member roles, optional self-service join requests
+  (pending → approve/decline, with a last-active-leader guard on
+  remove/demote/leave), per-meeting roll (`tblSmallGroupMeetingAttendance`,
+  presence-row model mirroring `tblEventAttendance`) with an ADDITIVE
+  headcount push into the existing Attendance app via a group's linked
+  `tblAttendanceServiceTypes` row — several groups can share one service
+  type/session, each contributing its own labelled headcount line; zero
+  changes to Attendance's own schema or code. Meeting location reuses the
+  #456 shared partials byte-identical to migration 180's `tblVenues` block,
+  plus a new `locationVisibility` gate (leaders/members/site, default
+  members, no public tier — groups often meet in a member's home). New
+  `Portal\Core\SmallGroups` class is the tenant-safety choke-point and the
+  stable contract #304 (group messaging) and #321 (watch-party rooms) are
+  expected to consume (`groupID` scope anchor, `status='active'` membership
+  predicate, `isLeader()` leader gate) — the denormalised `siteID` on
+  member/meeting rows is written only after confirming an active
+  `tblUserSites` row for the group's site, making cross-site membership
+  structurally impossible. New `groups_coordinator` role (manages every
+  group at a site without needing to be admin). GDPR lockstep in the same
+  PR: six `GdprEraser::catalogue()` entries, four `data-export.php` blocks,
+  and an `offboarding/do.php` step that ends a leaver's memberships. **v1
+  is adults-only** — membership rows are portal users only; no named-child
+  rows anywhere (the Kids app's `tblKidProfiles` remains the sole place
+  child identity lives; verified zero references). Migration 183: 4 new
+  tables (`tblSmallGroups`/`tblSmallGroupMembers`/`tblSmallGroupMeetings`/
+  `tblSmallGroupMeetingAttendance`), 7 settings seeds (`small-groups.enabled`
+  defaults `'0'`, opt-in), 1 role seed, 13 route seeds, zero ALTERs to any
+  existing table. New help page (`/help/small-groups`) + help-index card.
+  All 11 audit checks green, `php -l` clean on every touched file.
 - feat(pwa): #141 residual + #306 — the two remaining PWA install-prompt
   pieces (Web Push itself already shipped as #322) plus starter sub-brand
   artwork. **#141**: a self-hosted `assets/js/pwa-install.js` captures
