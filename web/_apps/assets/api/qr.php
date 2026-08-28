@@ -8,7 +8,7 @@
  * migration-159 orphan `api.assets.qr.enabled` seed — that flag existed with
  * no matching handler until this pass.
  *
- *   GET /api/assets/qr?id=N&format=png|svg&symbology=qr|code128|ean13|upca|itf14
+ *   GET /api/assets/qr?id=N&format=png|svg&symbology=qr|code128|ean13|ean8|upca|upce|itf14
  *
  *   id          required — the asset's id (site-scoped; cross-site/missing
  *               → 404, same as detail.php).
@@ -24,8 +24,8 @@
  *
  * NEVER FATAL for a missing barcode source value — same house convention as
  * `AssetRegister::buildLabelSheets()` (labels.php's PDF renderer): a Code
- * 128 request with no `assetTagCode`, or a GS1 (EAN-13/UPC-A/ITF-14)
- * request with no matching PRIMARY `tblAssetIdentifiers` row, silently
+ * 128 request with no `assetTagCode`, or a GS1 (EAN-13/EAN-8/UPC-A/UPC-E/
+ * ITF-14) request with no matching PRIMARY `tblAssetIdentifiers` row, silently
  * falls back to the QR image + an `X-Label-Fallback` response header
  * explaining why, rather than a 4xx/5xx.
  *
@@ -40,9 +40,10 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.4.0
+ * @version   1.5.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/406
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/159
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/423
  * -----------------------------------------------------------------------------
  */
 
@@ -143,8 +144,8 @@ if ($symbology === 'qr') {
     // 🏷️ Barcode symbologies — resolve the source value the SAME way
     // buildLabelSheets() does: Code 128 encodes the asset's own tag code
     // (falling back to a synthetic 'AST-{id}' code when unset, same as
-    // that method); the GS1 symbologies (EAN-13/UPC-A/ITF-14) encode the
-    // asset's PRIMARY matching `tblAssetIdentifiers` row, resolved via the
+    // that method); the GS1 symbologies (EAN-13/EAN-8/UPC-A/UPC-E/ITF-14)
+    // encode the asset's PRIMARY matching `tblAssetIdentifiers` row, resolved via the
     // SAME `assetsForLabels()` lookup labels.php/labels-pdf.php already
     // use — reusing it here means the value can never drift from what a
     // printed sheet would show for this asset.
