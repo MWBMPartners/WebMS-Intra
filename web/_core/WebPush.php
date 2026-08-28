@@ -218,10 +218,30 @@ class WebPush
     {
         $endpoint = (string) ($sub['endpoint'] ?? '');
         if (self::validateEndpoint($endpoint) === false) {
+            // 🩹 Robustness fix (#322 follow-up): a subscription can start
+            // failing the SSRF gate long after it was legitimately accepted
+            // at subscribe time — e.g. an admin narrows
+            // `push.endpointHostAllowlist` while stale endpoints are still on
+            // file. Previously this returned -1 WITHOUT ever calling
+            // recordOutcome(), so such a row's failCount never moved and it
+            // retried forever. -1 is the same "local pre-flight refusal"
+            // sentinel already documented on this method's @return above; it
+            // is neither a 2xx nor 404/410, so recordOutcome() routes it
+            // through its existing transient-failure branch — bump
+            // failCount/lastFailureAt/lastHttpStatus and deactivate once
+            // MAX_FAIL_COUNT is reached, exactly like a persistent 429/5xx.
+            self::recordOutcome((int) ($sub['subID'] ?? 0), -1);
             return -1;
         }
         if (strlen($json) > self::MAX_PLAINTEXT_BYTES) {
             Logger::activity('WebPushPayloadTooLarge', 'bytes=' . strlen($json) . ' cap=' . self::MAX_PLAINTEXT_BYTES);
+            // 🩹 Same fix as above — an oversized payload is a caller-side
+            // condition, not this subscription's fault on any ONE send, but
+            // if a channel's payload is persistently too large every send to
+            // this row will keep refusing pre-flight; record it so a
+            // pathological subscription still ages out via the normal prune
+            // threshold rather than retrying forever untracked.
+            self::recordOutcome((int) ($sub['subID'] ?? 0), -1);
             return -1;
         }
 
@@ -721,9 +741,11 @@ class WebPush
      * Record the outcome of one send() against its subscription row —
      * RFC 8030 §7.3 prune policy. 2xx → refresh lastUsedAt, reset
      * failCount. 404/410 → dead, deactivate immediately. Anything else
-     * (429/5xx/timeout) → bump failCount; MAX_FAIL_COUNT consecutive
-     * failures deactivates (push endpoints are cheap to re-create — the
-     * client re-subscribes on next visit). Never throws.
+     * (429/5xx/timeout, or -1 — a send-time pre-flight refusal: the
+     * SSRF/allowlist gate or the oversize-payload check in send(), #322
+     * follow-up) → bump failCount; MAX_FAIL_COUNT consecutive failures
+     * deactivates (push endpoints are cheap to re-create — the client
+     * re-subscribes on next visit). Never throws.
      */
     private static function recordOutcome(int $subId, int $status): void
     {

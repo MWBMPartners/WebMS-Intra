@@ -1,7 +1,7 @@
 -- =============================================================================
--- Migration 175: Web Push sender — VAPID + RFC 8291, live/reminder channels (#322)
+-- Migration 177: Web Push sender — VAPID + RFC 8291, live/reminder channels (#322)
 --
--- Path: web/_sql/175_web_push_sender.sql
+-- Path: web/_sql/177_web_push_sender.sql
 -- Migration 111 (`111_cop_easy_wins.sql`) shipped `tblPushSubscriptions` +
 -- the four `push.vapid*`/`push.contact`/`push.enabled` settings, plus the
 -- subscribe/unsubscribe handlers — but at `_apps/api/push/{subscribe,
@@ -149,5 +149,5 @@ ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 -- after full_schema.sql, ignoring tblMigrations — this INSERT must be
 -- idempotent too).
 -- -----------------------------------------------------------------------------
-INSERT INTO `tblMigrations` (`filename`) VALUES ('175_web_push_sender.sql')
+INSERT INTO `tblMigrations` (`filename`) VALUES ('177_web_push_sender.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;

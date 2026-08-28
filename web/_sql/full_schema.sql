@@ -5218,7 +5218,7 @@ CREATE TABLE IF NOT EXISTS `tblPushSubscriptions` (
     `createdAt`    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     `lastUsedAt`   DATETIME     DEFAULT NULL,
     `isActive`     TINYINT(1)   NOT NULL DEFAULT 1,
-    -- ── from 175_web_push_sender.sql ── dead-subscription pruning (RFC 8030 §7.3)
+    -- ── from 177_web_push_sender.sql ── dead-subscription pruning (RFC 8030 §7.3)
     `failCount`      TINYINT UNSIGNED NOT NULL DEFAULT 0
                      COMMENT 'Consecutive transient (429/5xx/timeout) failures; >= 8 deactivates the subscription',
     `lastFailureAt`  DATETIME DEFAULT NULL COMMENT 'Timestamp of the most recent transient send failure',
@@ -7756,7 +7756,7 @@ ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 INSERT INTO `tblMigrations` (`filename`) VALUES ('174_workflow_engine.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
--- ── from 175_web_push_sender.sql ─────────────────────────────────────────────
+-- ── from 177_web_push_sender.sql ─────────────────────────────────────────────
 -- 🔔🔐 Web Push sender (#322) — VAPID ES256 + RFC 8291 aes128gcm. The three
 -- additive tblPushSubscriptions columns (failCount/lastFailureAt/
 -- lastHttpStatus) are already folded inline into that CREATE TABLE block
@@ -7792,5 +7792,5 @@ INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
     ('cron/push-golive',             'cron/push-golive.php',              0)
 ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 
-INSERT INTO `tblMigrations` (`filename`) VALUES ('175_web_push_sender.sql')
+INSERT INTO `tblMigrations` (`filename`) VALUES ('177_web_push_sender.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;

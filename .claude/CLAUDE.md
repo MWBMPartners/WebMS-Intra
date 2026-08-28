@@ -168,7 +168,7 @@ Calendar/Events/Preaching Plan is ONE app ("Events") — `/calendar` covers view
   (`tools/webpush-selftest.php`, no DB/network, exercises the real private
   methods via reflection) that PASSES; relocated
   `_apps/push/api/{subscribe,unsubscribe}.php` + the two
-  `api.push.*.enabled` flags migration 175 seeds; SSRF-guarded endpoint
+  `api.push.*.enabled` flags migration 177 seeds; SSRF-guarded endpoint
   validation (https-only, no IP-literal/local host, admin-editable
   host-suffix allowlist) enforced at BOTH subscribe and send time; the
   VAPID private key sodium-encrypted at rest, never redisplayed, never
@@ -182,7 +182,8 @@ Calendar/Events/Preaching Plan is ONE app ("Events") — `/calendar` covers view
   (generate-or-paste keys, TTLs, toggles, per-channel subscription counts,
   test-send); GdprEraser + offboarding coverage of `tblPushSubscriptions`.
   INERT until an admin sets VAPID keys (`WebPush::isConfigured()` gates
-  every send path). Migration 175: 3 additive `tblPushSubscriptions`
+  every send path). Migration 177 (renumbered from 175 — #423's UPC-E took
+  175, #234's shared-mailbox took 176): 3 additive `tblPushSubscriptions`
   columns (dead-subscription pruning), settings seeds, 4 route seeds, no
   new tables (reuses `tblUserReminderLog` / `tblEventReminderLog` for
   dedupe). All 11 audit checks green, `php -l` clean on every touched file.

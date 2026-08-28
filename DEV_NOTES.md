@@ -3527,7 +3527,7 @@ own authorisation surface) — v1 ships approve/reject/comment only.
 `Portal\Core\WebPush` (`web/_core/WebPush.php`) sends VAPID (RFC 8292)
 signed, RFC 8291 aes128gcm-encrypted browser push notifications for "we're
 live now" and upcoming-service reminders. Migration 111 seeded the
-`push.*` settings keys empty; migration 175 seeded everything else
+`push.*` settings keys empty; migration 177 seeded everything else
 (TTLs, auto-notify toggles, the SSRF host allowlist, the two
 `api.push.*.enabled` ApiRouter flags, four route rows) — **no key
 material**. The feature is **INERT** on every fresh install until an

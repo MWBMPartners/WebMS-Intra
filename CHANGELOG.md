@@ -31,7 +31,8 @@
   New `/admin/integrations/push` config page (generate-or-paste keys,
   TTLs, toggles, per-channel subscription counts, test-send).
   `tblPushSubscriptions` added to `GdprEraser` + offboarding revocation.
-  INERT until an admin sets VAPID keys. Migration 175: 3 additive
+  INERT until an admin sets VAPID keys. Migration 177 (renumbered from 175
+  — #423's UPC-E took 175, #234's shared-mailbox took 176): 3 additive
   `tblPushSubscriptions` columns, settings seeds, 4 route seeds, no new
   tables. All 11 audit checks green, `php -l` clean on every touched file.
 - feat(workflow): gap #7 (#443) — Workflow Execution Engine +
