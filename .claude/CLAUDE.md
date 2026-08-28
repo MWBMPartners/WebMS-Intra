@@ -153,6 +153,34 @@ Calendar/Events/Preaching Plan is ONE app ("Events") — `/calendar` covers view
 
 ## Recent ships (chronological)
 
+- **`claude/gap6-serviceplan-bridge`** (branched off `alpha`) — gap #6
+  (#442): additive, non-destructive bridge between the two parallel
+  "service plan" data models that never knew about each other — the
+  run-sheet builder (`tblServicePlan` SINGULAR, migration 089, #262/#300)
+  and the worship presentation engine (`tblServicePlans` PLURAL, migration
+  137, #308/#355). New nullable, UNIQUE `tblServicePlans.runSheetPlanID`
+  FK (`ON DELETE SET NULL` → `tblServicePlan.planID`) — NULL (unpaired) is
+  the state of every pre-existing row, zero data migration. New
+  `Portal\Core\ServicePlanLink` resolver is the only code that knows about
+  both models; `pair()`/`unpair()` enforce same-site (hard), same-event
+  when both sides declare one (hard, either-NULL always proceeds), and
+  1:1 (hard — UNIQUE key + errno-1062 race catch, never fatal). A
+  NULL-only, one-directional (worship → run-sheet) backfill wakes the
+  run-sheet's dormant, write-dead `eventID` at pair time — never the
+  reverse, since the worship side's `eventID` is ACL-bearing. New CSRF'd
+  `worship/plan/link` POST handler (`worship/plan-link.php`) reuses the
+  worship app's admin-or-coordinator write gate verbatim (copied, not
+  refactored out of `plan-save.php`); own-row re-pairing overwrites, a
+  foreign run-sheet claim is refused with a flash. Read-only counterpart
+  panels on both editors (`service-plans/edit.php`, `worship/plan.php`),
+  each guarded by `AppRegistry::isEnabled()` + try/catch (venue-overlay
+  resilience precedent) so a disabled counterpart app or any resolver
+  exception leaves the panel empty rather than breaking the page. No
+  field sync in v1 — the song representations are structurally
+  incompatible (free-text title vs canonical `songID` FK) — read-only
+  visibility only. Migration 173: guarded MySQL-8-safe DDL, one route
+  seed, no new settings keys, folded into `full_schema.sql`. All 11 audit
+  checks green, `php -l` clean on every touched file.
 - **`claude/gap3-reminders`** (branched off `alpha`) — gap #3 (#439):
   new `cron/user-reminders.php` sweeps three reminder fields earlier
   migrations shipped but no code ever consumed —

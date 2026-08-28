@@ -26,8 +26,10 @@
 declare(strict_types=1);
 
 use Portal\Core\App;
+use Portal\Core\AppRegistry;
 use Portal\Core\Asset;
 use Portal\Core\Auth;
+use Portal\Core\ServicePlanLink;
 use Portal\Core\Site;
 
 Auth::ensureSession();
@@ -86,6 +88,33 @@ if ($isNew === true && App::isAdmin() === false) {
     $canWrite = true;
 }
 
+// -----------------------------------------------------------------------------
+// 🎶 Gap #6 bridge (#442) — paired run-sheet summary, if any. Guarded exactly
+// like the venue-overlay resilience precedent (calendar/index.php):
+// AppRegistry::isEnabled() short-circuit + try/catch, so a disabled
+// service-plans app, a not-yet-migrated column, or ANY resolver exception
+// leaves the panel empty and this page renders unchanged. New plans
+// (isNew=true, no planID yet) have nothing to pair, so this only resolves
+// for an existing plan.
+// -----------------------------------------------------------------------------
+$runSheetLink       = null;
+$runSheetCandidates = [];
+if ($isNew !== true && AppRegistry::isEnabled('service-plans') === true) {
+    try {
+        $runSheetLink = ServicePlanLink::runSheetForWorshipPlan((int) $plan['planID'], $siteId);
+        if ($runSheetLink === null && $canWrite === true) {
+            $runSheetCandidates = ServicePlanLink::candidatesForWorshipPlan(
+                $siteId,
+                $plan['eventID'] !== null ? (int) $plan['eventID'] : null
+            );
+        }
+    } catch (\Throwable $e) {
+        error_log('Worship run-sheet panel failed: ' . $e->getMessage());
+        $runSheetLink       = null;
+        $runSheetCandidates = [];
+    }
+}
+
 // 🎵 Song pool for the inline "Add song slide" dropdown.
 $songs = [];
 $stmt = $mysqli->prepare(
@@ -99,10 +128,20 @@ $stmt->close();
 
 $pageTitle = $isNew === true ? 'New service plan' : (string) $plan['name'];
 $csrf      = htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8');
+
+// 🚩 Flash (e.g. gap #6 pair/unpair refusals redirected back here).
+$flashMsg  = $_SESSION['flash_msg']  ?? '';
+$flashType = $_SESSION['flash_type'] ?? '';
+unset($_SESSION['flash_msg'], $_SESSION['flash_type']);
+
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 <div class="container py-3" style="max-width:880px;">
     <h1 class="h4 mb-3"><i class="fa-solid fa-music me-2 text-primary"></i><?php echo htmlspecialchars($pageTitle, ENT_QUOTES, 'UTF-8'); ?></h1>
+
+    <?php if ($flashMsg !== ''): ?>
+        <div class="alert alert-<?php echo htmlspecialchars($flashType !== '' ? $flashType : 'info', ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars($flashMsg, ENT_QUOTES, 'UTF-8'); ?></div>
+    <?php endif; ?>
 
     <?php if ($canWrite === false): ?>
         <div class="alert alert-info small">Read-only view. To edit this plan, you must be an admin or a coordinator of its bound event.</div>
@@ -138,6 +177,75 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 </div>
             </div>
         </form>
+    <?php endif; ?>
+
+    <?php if ($isNew !== true && AppRegistry::isEnabled('service-plans') === true): ?>
+    <!-- 🎶 Gap #6 bridge — paired run-sheet programme (#442) -->
+    <div class="card mb-4">
+        <div class="card-body">
+            <h2 class="h6"><i class="fa-solid fa-list-check me-1"></i>Run-sheet programme</h2>
+            <?php if ($runSheetLink !== null): ?>
+                <div class="portal-data-list">
+                    <div class="portal-data-row">
+                        <div class="portal-data-row-main">
+                            <a href="/service-plans/edit?id=<?php echo (int) $runSheetLink['planID']; ?>" class="text-decoration-none fw-semibold">
+                                <?php echo htmlspecialchars((string) $runSheetLink['title'], ENT_QUOTES, 'UTF-8'); ?>
+                            </a>
+                            <span class="badge bg-secondary ms-1"><?php echo htmlspecialchars((string) $runSheetLink['status'], ENT_QUOTES, 'UTF-8'); ?></span>
+                            <div class="small text-muted mt-1">
+                                <?php echo htmlspecialchars(date('l j F Y', strtotime((string) $runSheetLink['serviceDate'])), ENT_QUOTES, 'UTF-8'); ?>
+                                &middot; <?php echo (int) $runSheetLink['itemCount']; ?> section<?php echo (int) $runSheetLink['itemCount'] === 1 ? '' : 's'; ?>
+                                <?php if (count($runSheetLink['songTitles']) > 0): ?>
+                                    &middot; songs: <?php echo htmlspecialchars(implode(', ', $runSheetLink['songTitles']), ENT_QUOTES, 'UTF-8'); ?>
+                                <?php endif; ?>
+                            </div>
+                        </div>
+                        <div class="portal-data-row-aside">
+                            <a href="/service-plans/edit?id=<?php echo (int) $runSheetLink['planID']; ?>" class="btn btn-sm btn-outline-primary"><i class="fa-solid fa-pen me-1"></i>Open</a>
+                            <a href="/service-plans/print?id=<?php echo (int) $runSheetLink['planID']; ?>" target="_blank" class="btn btn-sm btn-outline-secondary"><i class="fa-solid fa-print me-1"></i>Print</a>
+                            <?php if ($canWrite === true): ?>
+                                <form method="post" action="/worship/plan/link" class="d-inline">
+                                    <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
+                                    <input type="hidden" name="worshipPlanID" value="<?php echo (int) $plan['planID']; ?>">
+                                    <input type="hidden" name="action" value="unpair">
+                                    <input type="hidden" name="from" value="worship">
+                                    <button type="submit" class="btn btn-sm btn-outline-danger" data-confirm="Unlink this run-sheet from this worship plan?" data-confirm-destructive="true"><i class="fa-solid fa-link-slash me-1"></i>Unlink</button>
+                                </form>
+                            <?php endif; ?>
+                        </div>
+                    </div>
+                </div>
+            <?php elseif ($canWrite === true): ?>
+                <?php if (count($runSheetCandidates) > 0): ?>
+                    <form method="post" action="/worship/plan/link" class="row g-2 align-items-end">
+                        <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
+                        <input type="hidden" name="worshipPlanID" value="<?php echo (int) $plan['planID']; ?>">
+                        <input type="hidden" name="action" value="pair">
+                        <input type="hidden" name="from" value="worship">
+                        <div class="col-md-8">
+                            <label class="form-label small">Link an existing run-sheet programme</label>
+                            <select name="runPlanID" required class="form-select form-select-sm">
+                                <option value="">Choose a plan…</option>
+                                <?php foreach ($runSheetCandidates as $c): ?>
+                                    <option value="<?php echo (int) $c['planID']; ?>">
+                                        <?php echo htmlspecialchars((string) $c['title'], ENT_QUOTES, 'UTF-8'); ?>
+                                        (<?php echo htmlspecialchars(date('j M Y', strtotime((string) $c['serviceDate'])), ENT_QUOTES, 'UTF-8'); ?>, <?php echo htmlspecialchars((string) $c['status'], ENT_QUOTES, 'UTF-8'); ?>)
+                                    </option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <button type="submit" class="btn btn-primary btn-sm w-100"><i class="fa-solid fa-link me-1"></i>Link</button>
+                        </div>
+                    </form>
+                <?php else: ?>
+                    <p class="text-muted small mb-0">No unpaired run-sheet programmes available to link.</p>
+                <?php endif; ?>
+            <?php else: ?>
+                <p class="text-muted small mb-0">No run-sheet programme linked.</p>
+            <?php endif; ?>
+        </div>
+    </div>
     <?php endif; ?>
 
     <?php if ($isNew !== true): ?>

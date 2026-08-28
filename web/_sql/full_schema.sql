@@ -4797,6 +4797,7 @@ INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
     -- the reachable convention path _apps/worship/api/{state,advance}.php.
     -- 139_worship_phase3.sql
     ('worship/plan/reorder',                   'worship/plan-reorder.php',                1),
+    ('worship/plan/link',                      'worship/plan-link.php',                   1), -- migration 173
     ('admin/reports/ccli',                     'admin/reports/ccli.php',                  1),
     -- 140_host_console.sql (#317)
     ('admin/host-console',                     'admin/host-console/index.php',            1),
@@ -5619,6 +5620,7 @@ CREATE TABLE IF NOT EXISTS `tblServicePlans` (
     `planID`        INT          NOT NULL AUTO_INCREMENT,
     `siteID`        INT          NOT NULL,
     `eventID`       INT          DEFAULT NULL COMMENT 'Optional event binding; NULL = re-usable template',
+    `runSheetPlanID` INT         DEFAULT NULL COMMENT 'Optional 1:1 link to the programme run-sheet this plan presents — tblServicePlan.planID (gap #6, migration 173)',
     `name`          VARCHAR(120) NOT NULL,
     `notes`         VARCHAR(1000) DEFAULT NULL COMMENT 'Operator-only context notes shown on the editor',
     `isActive`      TINYINT(1)   NOT NULL DEFAULT 1,
@@ -5631,9 +5633,11 @@ CREATE TABLE IF NOT EXISTS `tblServicePlans` (
     KEY `idx_plan_site_active` (`siteID`, `isActive`, `updatedAt`),
     KEY `idx_plan_event`       (`eventID`),
     UNIQUE KEY `uq_plan_display_token` (`displayToken`),
-    CONSTRAINT `fk_plan_site`    FOREIGN KEY (`siteID`)      REFERENCES `tblSites`(`siteID`) ON DELETE CASCADE,
-    CONSTRAINT `fk_plan_event`   FOREIGN KEY (`eventID`)     REFERENCES `tblEvents`(`eventID`) ON DELETE SET NULL,
-    CONSTRAINT `fk_plan_creator` FOREIGN KEY (`createdByID`) REFERENCES `tblUsers`(`userID`)  ON DELETE SET NULL
+    UNIQUE KEY `uq_plans_runsheet`     (`runSheetPlanID`),
+    CONSTRAINT `fk_plan_site`      FOREIGN KEY (`siteID`)         REFERENCES `tblSites`(`siteID`) ON DELETE CASCADE,
+    CONSTRAINT `fk_plan_event`     FOREIGN KEY (`eventID`)        REFERENCES `tblEvents`(`eventID`) ON DELETE SET NULL,
+    CONSTRAINT `fk_plan_creator`   FOREIGN KEY (`createdByID`)    REFERENCES `tblUsers`(`userID`)  ON DELETE SET NULL,
+    CONSTRAINT `fk_plans_runsheet` FOREIGN KEY (`runSheetPlanID`) REFERENCES `tblServicePlan`(`planID`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 -- ── from 137_worship_service_plans.sql ──────────────────────────────────────────
@@ -7628,4 +7632,17 @@ INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
 ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 
 INSERT INTO `tblMigrations` (`filename`) VALUES ('171_user_reminders.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+
+-- ── from 173_worship_runsheet_link.sql ────────────────────────────────────────
+-- 🎶🔗 Gap #6 additive bridge (#442) — tblServicePlans.runSheetPlanID
+-- (nullable, UNIQUE, FK ON DELETE SET NULL -> tblServicePlan.planID) is
+-- folded inline into the tblServicePlans CREATE above (column after
+-- eventID, UNIQUE KEY uq_plans_runsheet beside uq_plan_display_token,
+-- CONSTRAINT fk_plans_runsheet after fk_plan_creator) and the
+-- worship/plan/link route is folded into the worship routes INSERT above
+-- (migrations 137-144 block) — nothing further to fold here except this
+-- migration's own self-record.
+INSERT INTO `tblMigrations` (`filename`) VALUES ('173_worship_runsheet_link.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;
