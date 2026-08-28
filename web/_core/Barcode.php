@@ -2,7 +2,7 @@
 // Path: _core/Barcode.php
 /**
  * -----------------------------------------------------------------------------
- * WebMS Intra — 1D barcode encoder (Code 128 / EAN-13 / EAN-8 / UPC-A / ITF-14) 📊
+ * WebMS Intra — 1D barcode encoder (Code 128 / EAN-13 / EAN-8 / UPC-A / UPC-E / ITF-14) 📊
  * -----------------------------------------------------------------------------
  * Asset Tracker sub-issue #404 — the barcode counterpart to `Qr`/`QrEncoder`,
  * mirrored on the SAME class shape (`generate()` returns
@@ -11,7 +11,7 @@
  * the same way it already embeds a QR one (`Qr::generate(['format'=>'png'])`
  * → `data:{mime};base64,{b64}`).
  *
- * Supports five symbologies (`self::SYMBOLOGIES`):
+ * Supports six symbologies (`self::SYMBOLOGIES`):
  *   - `code128` — full ASCII (0-127) via auto Code Set A/B/C subset
  *     selection + mod-103 checksum. Used for `assetTagCode` (free text).
  *   - `ean13`   — 12 or 13 numeric digits (12 = check digit auto-computed
@@ -23,6 +23,15 @@
  *     leading `'0'` and delegating to the EAN-13 module builder — this is
  *     the same relationship real UPC-A/EAN-13 scanners rely on (a UPC-A
  *     symbol IS a valid EAN-13 symbol whose first digit happens to be 0).
+ *   - `upce`    — the "zero-suppressed" 6-digit compressed form of a
+ *     12-digit UPC-A, valid ONLY for number system 0 or 1. Accepts either
+ *     a UPC-E value itself (7 digits = number system + 6 data digits,
+ *     check digit auto-computed; or 8 = check digit supplied and
+ *     verified) OR a UPC-E-*compressible* UPC-A (11 or 12 digits — see
+ *     `upceCompress()`), rejecting a non-compressible UPC-A outright
+ *     rather than guessing. See `encodeUpce()`'s own doc for the full
+ *     expansion/compression rules and the verification this pass ran
+ *     against a published reference (#423).
  *   - `itf14`   — 13 or 14 numeric digits (Interleaved 2-of-5), rendered
  *     with GS1 "framed" bearer bars (a border rectangle around the whole
  *     symbol) — required by the GS1 General Specifications for
@@ -55,6 +64,20 @@
  *     port of `AssetRegister::gs1Mod10Check()` (migration 159 / #397) —
  *     verified BY HAND against the task's own worked example:
  *     `400638133393` (12 digits) → check digit `1` → `4006381333931`.
+ *   - UPC-E's number-system-1 parity table (`upceParity()`) is likewise NOT
+ *     separately hand-transcribed — it is the bitwise L/G complement of the
+ *     10-row `UPCE_PARITY_NUMSYS0` table (the actual GS1-spec relationship
+ *     between the two number systems, same derivation discipline as
+ *     `eanR()`/`eanG()` above), and that complement is numerically
+ *     IDENTICAL to the already-shipped `EAN_PARITY[1..9]` rows — a
+ *     documented GS1 historical coincidence (EAN-13's first-digit table
+ *     borrows 9 of UPC-E's 10 number-system-1 rows outright; only row 0
+ *     genuinely differs, since it means something different in each table)
+ *     that this class's own PHPDoc self-check on `upceParity()` asserts.
+ *     `UPCE_PARITY_NUMSYS0` itself was cross-checked against an
+ *     independently-worded published source (see `encodeUpce()`'s own doc
+ *     for the citation and the worked numeric example verified against a
+ *     second, unrelated source) rather than transcribed from memory alone.
  *
  * SECURITY (house "security musts"): every symbology rejects the wrong
  * length/charset OUTRIGHT rather than silently truncating/padding —
@@ -75,8 +98,9 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.0.0
+ * @version   1.1.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/404
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/423
  * -----------------------------------------------------------------------------
  */
 
@@ -87,7 +111,7 @@ namespace Portal\Core;
 class Barcode
 {
     /** @var string[] Symbologies this class knows how to encode/render. */
-    public const SYMBOLOGIES = ['code128', 'ean13', 'ean8', 'upca', 'itf14'];
+    public const SYMBOLOGIES = ['code128', 'ean13', 'ean8', 'upca', 'upce', 'itf14'];
 
     /**
      * Hard cap on the Code 128 payload length (bytes) — see class header's
@@ -194,6 +218,38 @@ class Barcode
     ];
 
     // #############################################################################
+    // 🟧 UPC-E — parity pattern table (number system 0; number system 1 is
+    // DERIVED, see upceParity()).
+    // #############################################################################
+
+    /**
+     * UPC-E parity pattern for NUMBER SYSTEM 0, keyed by the CHECK DIGIT
+     * (0-9) — which of L/G encodes each of the six data digits. Unlike
+     * EAN-13 (keyed by a digit that's actually one of the encoded digits),
+     * UPC-E's selector digits (number system + check digit) are NEVER
+     * themselves bar-encoded — a scanner recovers BOTH purely by noting
+     * which of the six digit positions were L- vs G-coded and looking that
+     * 6-bit pattern up in this table (reversed for decode). This is why
+     * UPC-E supports only number systems 0 and 1: those are the only two
+     * for which GS1 defined a (disjoint, unambiguous) 10-row parity table.
+     *
+     * VERIFIED (see `encodeUpce()`'s own doc for the full citation): every
+     * one of these 10 rows was cross-checked against an independently
+     * published UPC-E parity table (found via web search, quoting a
+     * source separate from this class's own author's memory), and — as a
+     * SECOND, independent check — `upceParity()`'s number-system-1
+     * derivation from this table is numerically identical to the
+     * already-shipped `EAN_PARITY[1..9]` rows (a documented GS1
+     * coincidence; see class header DESIGN note).
+     *
+     * @var array<int, string>
+     */
+    private const UPCE_PARITY_NUMSYS0 = [
+        'GGGLLL', 'GGLGLL', 'GGLLGL', 'GGLLLG', 'GLGGLL',
+        'GLLGGL', 'GLLLGG', 'GLGLGL', 'GLGLLG', 'GLLGLG',
+    ];
+
+    // #############################################################################
     // 🟩 ITF-14 — Interleaved 2-of-5 digit patterns.
     // #############################################################################
 
@@ -264,6 +320,7 @@ class Barcode
         $encoded = match ($symbology) {
             'code128' => self::encodeCode128($value),
             'ean13', 'ean8', 'upca', 'itf14' => self::encodeGs1($symbology, $value),
+            'upce' => self::encodeUpce($value),
             default => null,
         };
 
@@ -300,6 +357,11 @@ class Barcode
                 return 'Value exceeds the ' . self::CODE128_MAX_LEN . '-character Code 128 limit.';
             }
             return 'Value contains a byte outside the printable ASCII range Code 128 can encode.';
+        }
+        if ($symbology === 'upce') {
+            return 'Value must be a 7 or 8-digit UPC-E code (number system 0 or 1 only), or an '
+                . '11 or 12-digit UPC-A code that compresses to a valid UPC-E (with or without a '
+                . 'valid GS1 check digit).';
         }
         $bodyLen = self::GS1_BODY_LEN[$symbology] ?? 0;
         return 'Value must be ' . $bodyLen . ' or ' . ($bodyLen + 1) . ' numeric digits '
@@ -663,6 +725,247 @@ class Barcode
     private static function eanG(int $d): string
     {
         return strrev(self::eanR($d));
+    }
+
+    // #############################################################################
+    // 🟧 UPC-E — zero-suppressed UPC encoding (#423)
+    // #############################################################################
+
+    /**
+     * Encode a UPC-E payload. Accepts FOUR input shapes (see class header
+     * bullet + `rejectionReason()`):
+     *   - 7 digits  — number system (0 or 1) + 6 data digits; the check
+     *     digit is computed (from the EXPANDED UPC-A, never the raw 7
+     *     digits themselves — see `upceExpand()`) and appended.
+     *   - 8 digits  — as above, but with a check digit already supplied;
+     *     it is re-derived from the expansion and compared, and a
+     *     mismatch is REJECTED (never silently corrected).
+     *   - 11 digits — a UPC-A body (number system + 10 digits) with no
+     *     check digit; one is computed via the ordinary `gs1CheckDigit()`
+     *     BEFORE attempting compression (so a caller can hand this method
+     *     any UPC-A body and get either a UPC-E symbol or a clear
+     *     rejection).
+     *   - 12 digits — a full UPC-A (WITH its own check digit); that check
+     *     digit is verified FIRST (a UPC-A that fails its own checksum is
+     *     rejected outright, never "fixed up" en route to compression),
+     *     then `upceCompress()` attempts the zero-suppression.
+     *
+     * Every path enforces number system ∈ {0, 1} — UPC-E has no valid
+     * encoding for any other leading digit (class header) — and every
+     * path that starts from a UPC-A additionally rejects a value
+     * `upceCompress()` can't zero-suppress, with a clear reason surfaced
+     * via `rejectionReason()`. `text` in the returned shape is always the
+     * normalised 8-digit UPC-E value (number system + 6 data digits +
+     * check digit) — what a human-readable label under the symbol should
+     * show — regardless of which of the four input shapes was supplied.
+     *
+     * VERIFICATION (task requirement — "do NOT ship an unverified
+     * encoder"): this method's expansion/compression/parity logic was
+     * checked against a worked example independently found via web search
+     * (a source separate from this codebase, quoting BarcodeFAQ.com-style
+     * UPC-E documentation): UPC-E body `123456` (number system 0) expands
+     * to manufacturer code `12345` + item code `00006` → UPC-A body
+     * `01234500006` → `gs1CheckDigit()` computes check digit `5`,
+     * matching that independent source's own stated result of `5` for the
+     * same inputs — i.e. full UPC-A `012345000065` / full UPC-E
+     * `01234565`. The `UPCE_PARITY_NUMSYS0` table (see that constant's own
+     * doc) was separately cross-checked against a second, independently
+     * published UPC-E parity table found the same way. Every case of the
+     * expansion/compression rules was additionally round-trip tested
+     * (compress(expand(x)) === x for a canonical `x` in each of the four
+     * cases, PLUS a dedicated test confirming the GS1-mandated case
+     * PRIORITY ordering is honoured when a non-canonical `x` collides with
+     * a higher-priority case) before this method shipped.
+     *
+     * @see https://www.gs1.org/standards/barcodes/ean-upc GS1 EAN/UPC spec (class header)
+     *
+     * @return array{bits: string, text: string}|null
+     */
+    private static function encodeUpce(string $value): ?array
+    {
+        $value = trim($value);
+        if (preg_match('/^\d+$/', $value) !== 1) {
+            return null; // non-numeric — reject outright (house "security musts")
+        }
+        $len = strlen($value);
+
+        // 📥 Shape 1/2 — a UPC-E value itself (7 = no check digit, 8 = with).
+        if ($len === 7 || $len === 8) {
+            $numberSystem = $value[0];
+            if ($numberSystem !== '0' && $numberSystem !== '1') {
+                return null; // UPC-E is valid ONLY for number system 0 or 1
+            }
+            $sixDigits = substr($value, 1, 6);
+            $upcABody10 = self::upceExpand($sixDigits); // never fails — see that method's doc
+            $expectedCheckDigit = self::gs1CheckDigit($numberSystem . $upcABody10);
+            if ($len === 8) {
+                if ((int) $value[7] !== $expectedCheckDigit) {
+                    return null; // supplied check digit doesn't match the EXPANDED UPC-A's
+                }
+                $fullUpce = $value;
+            } else {
+                $fullUpce = $value . (string) $expectedCheckDigit;
+            }
+            return ['bits' => self::upceModules($fullUpce), 'text' => $fullUpce];
+        }
+
+        // 📥 Shape 3/4 — a UPC-A value (11 = no check digit, 12 = with),
+        // compressed to UPC-E via upceCompress() below.
+        if ($len === 11 || $len === 12) {
+            $numberSystem = $value[0];
+            if ($numberSystem !== '0' && $numberSystem !== '1') {
+                return null;
+            }
+            $upcABody10 = substr($value, 1, 10);
+            if ($len === 12) {
+                // 🔒 The supplied UPC-A must be internally valid BEFORE we
+                // even attempt compression — never compress a checksum-
+                // broken value into an equally-broken UPC-E.
+                $expectedUpcACheckDigit = self::gs1CheckDigit(substr($value, 0, 11));
+                if ((int) $value[11] !== $expectedUpcACheckDigit) {
+                    return null;
+                }
+            }
+            $sixDigits = self::upceCompress($upcABody10);
+            if ($sixDigits === null) {
+                return null; // not UPC-E-compressible — see upceCompress()'s doc
+            }
+            $checkDigit = self::gs1CheckDigit($numberSystem . $upcABody10);
+            $fullUpce = $numberSystem . $sixDigits . (string) $checkDigit;
+            return ['bits' => self::upceModules($fullUpce), 'text' => $fullUpce];
+        }
+
+        return null; // wrong length entirely
+    }
+
+    /**
+     * Expand a UPC-E's 6 data digits to the 10-digit UPC-A manufacturer +
+     * product body (WITHOUT the number-system digit or check digit) — the
+     * reverse of the zero-suppression the GS1 UPC-E spec defines. Keyed
+     * entirely off the 6th (last) data digit, which selects one of four
+     * cases; EVERY digit 0-9 hits exactly one case, so — unlike
+     * `upceCompress()` — expansion NEVER fails.
+     *
+     * | 6th digit | manufacturer code (5) | item code (5)   |
+     * |-----------|------------------------|-----------------|
+     * | 0, 1, 2   | d1 d2 d6 0 0           | 0 0 d3 d4 d5    |
+     * | 3         | d1 d2 d3 0 0           | 0 0 0 d4 d5     |
+     * | 4         | d1 d2 d3 d4 0          | 0 0 0 0 d5      |
+     * | 5-9       | d1 d2 d3 d4 d5         | 0 0 0 0 d6      |
+     *
+     * (d1-d6 = the six UPC-E digits in order; the table's own d6 column
+     * doubles as "the case selector" — for cases 0-2 it's copied into the
+     * manufacturer code verbatim, for cases 3/4 it's a fixed marker value
+     * that carries no data of its own, and for case 5-9 it IS the real
+     * trailing item-code digit.)
+     */
+    private static function upceExpand(string $sixDigits): string
+    {
+        $d = str_split($sixDigits); // $d[0]..$d[5] = the six UPC-E digits, in order
+        return match ($d[5]) {
+            '0', '1', '2' => $d[0] . $d[1] . $d[5] . '0000' . $d[2] . $d[3] . $d[4],
+            '3'           => $d[0] . $d[1] . $d[2] . '00000' . $d[3] . $d[4],
+            '4'           => $d[0] . $d[1] . $d[2] . $d[3] . '00000' . $d[4],
+            default       => $d[0] . $d[1] . $d[2] . $d[3] . $d[4] . '0000' . $d[5], // 5-9
+        };
+    }
+
+    /**
+     * Attempt to compress a 10-digit UPC-A manufacturer+product body (the
+     * UPC-A's 11-digit body MINUS its leading number-system digit) down to
+     * UPC-E's 6 data digits — the exact algebraic inverse of
+     * `upceExpand()`'s table, tried in GS1-MANDATED PRIORITY ORDER
+     * (case "0,1,2" first, then "3", then "4", then "5-9"). Priority
+     * matters because some UPC-A bodies satisfy more than one case's raw
+     * shape (e.g. a case-"5-9" body whose manufacturer code happens to
+     * ALSO end in a zero looks exactly like a case-"4" body too) — GS1
+     * resolves the ambiguity by always preferring the earliest-listed
+     * case, so this method checks them in that same order and returns on
+     * the FIRST match, exactly like a real UPC-E encoder must.
+     *
+     * Returns null when NONE of the four cases apply — not every UPC-A
+     * is representable as UPC-E (see class header UPC-E bullet); the
+     * caller (`encodeUpce()`) treats that as a hard rejection with a
+     * dedicated error message, never a silent best-effort guess.
+     */
+    private static function upceCompress(string $tenDigits): ?string
+    {
+        $m = substr($tenDigits, 0, 5); // manufacturer code
+        $p = substr($tenDigits, 5, 5); // item/product code
+
+        // Case "0,1,2" — mfr ends '00' with a 0-2 selector as its 3rd
+        // digit; item is '00' + 3 free digits.
+        if ($m[3] === '0' && $m[4] === '0' && in_array($m[2], ['0', '1', '2'], true) === true
+            && $p[0] === '0' && $p[1] === '0') {
+            return $m[0] . $m[1] . $p[2] . $p[3] . $p[4] . $m[2];
+        }
+        // Case "3" — mfr ends '00' (any 3 leading digits); item is '000' +
+        // 2 free digits. The marker '3' carries no data of its own.
+        if ($m[3] === '0' && $m[4] === '0' && $p[0] === '0' && $p[1] === '0' && $p[2] === '0') {
+            return $m[0] . $m[1] . $m[2] . $p[3] . $p[4] . '3';
+        }
+        // Case "4" — mfr ends a SINGLE '0'; item is '0000' + 1 free digit.
+        if ($m[4] === '0' && $p[0] === '0' && $p[1] === '0' && $p[2] === '0' && $p[3] === '0') {
+            return $m[0] . $m[1] . $m[2] . $m[3] . $p[4] . '4';
+        }
+        // Case "5-9" — mfr does NOT end in '0'; item is '0000' + a digit
+        // 5-9 (0-4 here would be genuinely non-compressible, not this case).
+        if ($m[4] !== '0' && $p[0] === '0' && $p[1] === '0' && $p[2] === '0' && $p[3] === '0'
+            && in_array($p[4], ['5', '6', '7', '8', '9'], true) === true) {
+            return $m[0] . $m[1] . $m[2] . $m[3] . $m[4] . $p[4];
+        }
+        return null; // not UPC-E-compressible
+    }
+
+    /**
+     * UPC-E parity pattern for the given number system ('0' or '1') and
+     * check digit (0-9) — which of L/G encodes each of the six data
+     * digits (see `UPCE_PARITY_NUMSYS0`'s own doc for why BOTH the number
+     * system and the check digit — never bar-encoded themselves — are
+     * recoverable purely from this pattern). Number system 1's table is
+     * NOT separately hand-transcribed: it is the bitwise L/G complement of
+     * `UPCE_PARITY_NUMSYS0` (the actual GS1-spec relationship between the
+     * two tables — same derivation discipline as `eanR()`/`eanG()`).
+     *
+     * SELF-CHECK (class header DESIGN note): for check digits 1-9, this
+     * complement is numerically IDENTICAL to the already-shipped
+     * `EAN_PARITY[1..9]` — a documented GS1 historical coincidence. Row 0
+     * is DELIBERATELY not required to match (and does not:
+     * `upceParity('1', 0)` is `'LLLGGG'`, `EAN_PARITY[0]` is `'LLLLLL'` —
+     * the two tables mean different things at digit/check-digit 0), so
+     * this fact is documented rather than asserted in code.
+     */
+    private static function upceParity(string $numberSystem, int $checkDigit): string
+    {
+        $ns0Pattern = self::UPCE_PARITY_NUMSYS0[$checkDigit];
+        return $numberSystem === '1' ? strtr($ns0Pattern, ['L' => 'G', 'G' => 'L']) : $ns0Pattern;
+    }
+
+    /**
+     * Build the full UPC-E module bit string — start guard, the six data
+     * digits L/G-coded per `upceParity()`'s selection, then the SPECIAL
+     * UPC-E end guard — for an already-validated 8-digit value (number
+     * system + 6 data digits + check digit). UNLIKE EAN-13/EAN-8, UPC-E
+     * has NO centre guard (there is no "left half"/"right half" split —
+     * all six digits sit in one continuous run) and its end guard is the
+     * 6-module `010101`, not the 3-module `101` the rest of the EAN/UPC
+     * family uses — both are fixed GS1 UPC-E symbol-structure facts, not
+     * derived from anything else in this class. Total width is the
+     * canonical 51 modules (3 start + 6×7 data + 6 end).
+     */
+    private static function upceModules(string $digits8): string
+    {
+        $numberSystem = $digits8[0];
+        $checkDigit   = (int) $digits8[7];
+        $parity       = self::upceParity($numberSystem, $checkDigit);
+
+        $bits = '101'; // start guard
+        for ($i = 0; $i < 6; $i++) {
+            $d = (int) $digits8[$i + 1];
+            $bits .= $parity[$i] === 'L' ? self::EAN_L[$d] : self::eanG($d);
+        }
+        $bits .= '010101'; // UPC-E end guard — no centre guard (see method doc)
+        return $bits;
     }
 
     /**

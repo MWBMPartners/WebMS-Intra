@@ -546,7 +546,7 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.11.0
+ * @version   1.12.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/393
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/394
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/395
@@ -567,6 +567,7 @@
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/413
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/414
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/415
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/423
  * -----------------------------------------------------------------------------
  */
 
@@ -6836,15 +6837,17 @@ class AssetRegister
 
     /**
      * Recognised label barcode symbologies — mirrors `tblAssets.labelSymbology`'s
-     * ENUM exactly (migration 159, unused until this pass — #404). Stored
-     * per-asset; `buildLabelSheets()` reads each asset's own value to
-     * decide what to render alongside/instead of the QR code (see that
+     * ENUM exactly (migration 159, unused until this pass — #404; widened
+     * to add `ean8` + `upce` by migration 175 — #423, see that migration's
+     * header for why `ean8` was ALSO missing from the ENUM before now).
+     * Stored per-asset; `buildLabelSheets()` reads each asset's own value
+     * to decide what to render alongside/instead of the QR code (see that
      * method's own doc for the fallback-to-QR behaviour when the chosen
      * symbology's source value is missing/invalid).
      *
      * @var string[]
      */
-    public const LABEL_SYMBOLOGIES = ['qr', 'code128', 'ean13', 'ean8', 'upca', 'itf14', 'qr+code128'];
+    public const LABEL_SYMBOLOGIES = ['qr', 'code128', 'ean13', 'ean8', 'upca', 'upce', 'itf14', 'qr+code128'];
 
     /** @var array<string, string> Human labels for LABEL_SYMBOLOGIES, keyed the same — feeds edit.php's `<select>`. */
     public const LABEL_SYMBOLOGY_LABELS = [
@@ -6853,6 +6856,7 @@ class AssetRegister
         'ean13'      => 'EAN-13 (primary EAN-13 identifier)',
         'ean8'       => 'EAN-8 (primary EAN-8 identifier)',
         'upca'       => 'UPC-A (primary UPC-A identifier)',
+        'upce'       => 'UPC-E (primary UPC-E identifier)',
         'itf14'      => 'ITF-14 (primary ITF-14 identifier)',
         'qr+code128' => 'QR code + Code 128 (both)',
     ];
@@ -6865,7 +6869,7 @@ class AssetRegister
      *
      * @var string[]
      */
-    private const BARCODE_SYMBOLOGIES = ['code128', 'ean13', 'ean8', 'upca', 'itf14', 'qr+code128'];
+    private const BARCODE_SYMBOLOGIES = ['code128', 'ean13', 'ean8', 'upca', 'upce', 'itf14', 'qr+code128'];
 
     /**
      * Maps a `LABEL_SYMBOLOGIES` GS1 value to the `tblAssetIdentifierTypes.typeCode`
@@ -6873,6 +6877,9 @@ class AssetRegister
      * supplies the barcode's source value — see `assetsForLabels()`'s
      * `barcodeIdentifierValue` subquery, which uses the identical mapping
      * in SQL (`CASE a.labelSymbology WHEN ...`) so the two never drift.
+     * `UPC-E` was already seeded as an identifier type by migration 159
+     * (retail-barcode category) — this pass only wires it into the
+     * BARCODE SYMBOLOGY path, which never previously supported it.
      *
      * @var array<string, string>
      */
@@ -6880,6 +6887,7 @@ class AssetRegister
         'ean13' => 'EAN-13',
         'ean8'  => 'EAN-8',
         'upca'  => 'UPC-A',
+        'upce'  => 'UPC-E',
         'itf14' => 'ITF-14',
     ];
 
@@ -6969,6 +6977,7 @@ class AssetRegister
              . "                             WHEN 'ean13' THEN 'EAN-13' "
              . "                             WHEN 'ean8'  THEN 'EAN-8' "
              . "                             WHEN 'upca'  THEN 'UPC-A' "
+             . "                             WHEN 'upce'  THEN 'UPC-E' "
              . "                             WHEN 'itf14' THEN 'ITF-14' "
              . '                             ELSE NULL END '
              . '        LIMIT 1) AS barcodeIdentifierValue '
@@ -7124,8 +7133,8 @@ class AssetRegister
      * @param bool     $qrOn      Master "render a machine-readable code at
      *        all" switch — when true, EACH asset renders per its OWN
      *        `labelSymbology` (#404): plain QR for `'qr'`, a barcode ALONE
-     *        for `'code128'`/`'ean13'`/`'upca'`/`'itf14'`, or BOTH for
-     *        `'qr+code128'`. When an asset's chosen barcode symbology has
+     *        for `'code128'`/`'ean13'`/`'ean8'`/`'upca'`/`'upce'`/`'itf14'`,
+     *        or BOTH for `'qr+code128'`. When an asset's chosen barcode symbology has
      *        no usable source value (see `LABEL_SYMBOLOGIES` doc — missing
      *        assetTagCode for Code 128, or no valid PRIMARY matching
      *        identifier for the GS1 symbologies), that ONE asset silently

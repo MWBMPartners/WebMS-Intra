@@ -6284,8 +6284,8 @@ CREATE TABLE IF NOT EXISTS `tblAssets` (
     `isConfidential`      TINYINT(1)    NOT NULL DEFAULT 0 COMMENT 'Hides the item from the public lost-and-found page (#395 access gate)',
     `publicToken`         CHAR(32)      NOT NULL COMMENT '32-char hex token for the public /a/{token} lost-and-found page',
     `publicPageEnabled`   TINYINT(1)    NOT NULL DEFAULT 1,
-    `labelSymbology`      ENUM('qr','code128','ean13','upca','itf14','qr+code128') NOT NULL DEFAULT 'qr'
-                          COMMENT 'Preferred symbology for this asset''s printed label (labels sub-issue)',
+    `labelSymbology`      ENUM('qr','code128','ean13','ean8','upca','upce','itf14','qr+code128') NOT NULL DEFAULT 'qr'
+                          COMMENT 'Preferred symbology for this asset''s printed label (labels sub-issue) — widened for ean8/upce, migration 175 (#423)',
     `parentAssetID`       INT           DEFAULT NULL COMMENT 'Self-FK — bundles/kits/component relationships',
     `createdByID`         INT           NOT NULL,
     `createdAt`           DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -7756,6 +7756,16 @@ ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 INSERT INTO `tblMigrations` (`filename`) VALUES ('174_workflow_engine.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
+-- ── from 175_upce_barcode.sql ────────────────────────────────────────────────
+-- 🟧 UPC-E barcode symbology for the Asset Tracker (#423). The
+-- tblAssets.labelSymbology ENUM widen ('ean8' + 'upce') is already folded
+-- inline into the CREATE TABLE block above — nothing further to fold here
+-- except this migration's own self-record. (Barcode::encodeUpce()/
+-- AssetRegister::LABEL_SYMBOLOGIES etc. are PHP-only changes — no schema
+-- impact beyond that one column.)
+INSERT INTO `tblMigrations` (`filename`) VALUES ('175_upce_barcode.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
 -- ── from 177_web_push_sender.sql ─────────────────────────────────────────────
 -- 🔔🔐 Web Push sender (#322) — VAPID ES256 + RFC 8291 aes128gcm. The three
 -- additive tblPushSubscriptions columns (failCount/lastFailureAt/
@@ -7765,7 +7775,9 @@ ON DUPLICATE KEY UPDATE `filename` = `filename`;
 -- TTL/auto-notify/cron-token/SSRF-allowlist settings, and the admin +
 -- cron routes. `push.vapidPublicKey`/`push.vapidPrivateKey`/`push.contact`/
 -- `push.enabled` already exist (111_cop_easy_wins.sql, seeded empty above)
--- and are deliberately NOT re-seeded here.
+-- and are deliberately NOT re-seeded here. Migration renumbered 175→177
+-- (175 taken by 175_upce_barcode.sql above, 176 reserved for the in-flight
+-- 176_ms365_shared_mailbox.sql, not yet on alpha).
 INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
     (NULL, 'api.push.subscribe.enabled',   'true',  'true',  0),
     (NULL, 'api.push.unsubscribe.enabled', 'true',  'true',  0),

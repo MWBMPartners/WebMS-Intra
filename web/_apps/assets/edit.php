@@ -34,12 +34,13 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.3.0
+ * @version   1.4.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/393
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/394
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/396
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/404
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/408
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/423
  * -----------------------------------------------------------------------------
  */
 
@@ -244,7 +245,7 @@ $nonce = htmlspecialchars(App::cspNonce(), ENT_QUOTES, 'UTF-8');
                     <?php endforeach; ?>
                 </select>
                 <small class="text-muted">
-                    Which code prints on <a href="/assets/labels">Label Designer</a> labels (#404). EAN-13/UPC-A/ITF-14
+                    Which code prints on <a href="/assets/labels">Label Designer</a> labels (#404). EAN-13/EAN-8/UPC-A/UPC-E/ITF-14
                     need a matching primary identifier recorded below, or the label falls back to the QR code.
                 </small>
             </div>
