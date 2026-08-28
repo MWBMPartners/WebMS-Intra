@@ -8,12 +8,47 @@
 #   - npm (none yet — placeholder so adding a package.json later auto-picks up)
 #
 # Docs: https://docs.github.com/en/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
+#
+# -----------------------------------------------------------------------------
+# #370 — alpha/beta tier coverage
+# -----------------------------------------------------------------------------
+# Dependabot *security updates* + *alerts* (Security tab, Dependabot alerts)
+# are repo-wide by design and already cover every branch regardless of what's
+# configured below — nothing to add for those.
+#
+# Dependabot *version updates* (this file) are different: each `updates:`
+# entry only opens PRs against ONE branch — the repo's default branch (today
+# `main`) when `target-branch` is omitted, or the named branch otherwise. Before
+# this change every entry below was default-branch-only, so alpha/beta never
+# got routine version-bump PRs even though our four-tier flow
+# (alpha → beta → release-candidate → main) merges upward through them first.
+#
+# Conservative extension chosen here: add `target-branch` entries for
+# `alpha` and `beta` for the `github-actions` ecosystem ONLY (workflow-version
+# drift is exactly what the security workflows below need current-on-every-
+# tier action versions for, and it's low-volume/low-risk to bump). We
+# deliberately do NOT duplicate the `composer` ecosystem onto alpha/beta:
+# it's manifest-only (no lockfile, `composer install` never runs — see the
+# block below) and exists purely so Dependabot's CVE-watching applies to it;
+# that watching is already repo-wide per the paragraph above, so a
+# main-only version-update entry is sufficient and avoids tripling
+# Composer-bump PR volume across three branches for no functional gain.
+# There is no npm/other lockfile ecosystem in this repo yet (no
+# package.json/composer.lock — see DEV_NOTES "no CLI, no Composer on
+# DreamHost"), so there's nothing else to extend.
+#
+# `open-pull-requests-limit` is kept low (3) on the alpha/beta entries — and
+# schedules are offset by a day from the main-branch run (and from each
+# other) — specifically to keep this from spamming three near-simultaneous
+# waves of near-duplicate PRs across alpha/beta/main.
 # =============================================================================
 
 version: 2
 
 updates:
-  # GitHub Actions — keep workflow versions current
+  # ---------------------------------------------------------------------------
+  # GitHub Actions — keep workflow versions current on the default branch
+  # ---------------------------------------------------------------------------
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
@@ -34,10 +69,63 @@ updates:
         patterns:
           - "*"
 
+  # ---------------------------------------------------------------------------
+  # GitHub Actions — alpha tier (#370). Same ecosystem, targeted at `alpha`
+  # so the earliest tier in the merge flow also gets routine action bumps
+  # (and the alpha-targeted CodeQL/php-static-analysis workflows stay
+  # current). Tuesday (a day after the main-branch run) + a lower PR cap
+  # keep this from doubling PR volume in lockstep with main.
+  # ---------------------------------------------------------------------------
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    target-branch: "alpha"
+    schedule:
+      interval: "weekly"
+      day: "tuesday"
+      time: "09:00"
+      timezone: "Europe/London"
+    open-pull-requests-limit: 3
+    labels:
+      - "type: infrastructure"
+      - "scope: ci"
+    commit-message:
+      prefix: "ci(deps)"
+      include: "scope"
+    groups:
+      gh-actions:
+        patterns:
+          - "*"
+
+  # ---------------------------------------------------------------------------
+  # GitHub Actions — beta tier (#370). Wednesday keeps all three
+  # (main/alpha/beta) staggered across separate days.
+  # ---------------------------------------------------------------------------
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    target-branch: "beta"
+    schedule:
+      interval: "weekly"
+      day: "wednesday"
+      time: "09:00"
+      timezone: "Europe/London"
+    open-pull-requests-limit: 3
+    labels:
+      - "type: infrastructure"
+      - "scope: ci"
+    commit-message:
+      prefix: "ci(deps)"
+      include: "scope"
+    groups:
+      gh-actions:
+        patterns:
+          - "*"
+
   # Composer (manifest-only — see composer.json + DEV_NOTES "Vendored library
   # CVE watching" for the rationale). DreamHost shared hosting has no CLI
   # so we never run `composer install`; the manifest exists purely so
-  # Dependabot opens a PR when a watched library has a published CVE.
+  # Dependabot can report CVEs. Kept default-branch-only per the #370 note
+  # above — CVE alerting is already repo-wide regardless of this entry's
+  # target branch, so there's no coverage gap being left on alpha/beta.
   - package-ecosystem: "composer"
     directory: "/"
     schedule:
