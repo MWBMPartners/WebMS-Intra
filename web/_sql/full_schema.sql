@@ -1066,6 +1066,29 @@ CREATE TABLE IF NOT EXISTS `tblErrors` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
 COMMENT='Centralised error log for all platforms/libraries. See core/Logger.php.';
 
+-- ── from 176_ms365_shared_mailbox.sql (#234) — per-send email audit trail,
+-- BOTH mail providers. Also closes the #230 dependency. See that
+-- migration's header for the full model-decision rationale.
+CREATE TABLE IF NOT EXISTS `tblEmailLog` (
+    `emailLogID`      INT           NOT NULL AUTO_INCREMENT COMMENT 'Unique send-log record identifier',
+    `siteID`          INT           DEFAULT NULL COMMENT 'Site::id() at send time; NULL when sent outside site context (e.g. cron)',
+    `provider`        VARCHAR(20)   NOT NULL COMMENT 'ms365, ms365-shared, or google',
+    `fromAddress`     VARCHAR(255)  NOT NULL DEFAULT '' COMMENT 'Effective sender address at send time',
+    `toRecipients`    TEXT          NOT NULL COMMENT 'Comma-joined recipient address list',
+    `subject`         VARCHAR(500)  NOT NULL DEFAULT '' COMMENT 'Truncated subject line',
+    `attachmentCount` TINYINT UNSIGNED NOT NULL DEFAULT 0 COMMENT 'Number of files actually attached',
+    `status`          ENUM('sent','failed') NOT NULL,
+    `httpCode`        SMALLINT      DEFAULT NULL COMMENT 'Provider HTTP response code, when one was received',
+    `errorCode`       VARCHAR(100)  NOT NULL DEFAULT '' COMMENT 'Provider error code, e.g. Graph ErrorAccessDenied',
+    `errorDetail`     VARCHAR(500)  NOT NULL DEFAULT '' COMMENT 'Truncated error message. Never token or secret material',
+    `sentAt`          DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`emailLogID`),
+    KEY `idx_emaillog_site_sent` (`siteID`, `sentAt`),
+    CONSTRAINT `fk_emaillog_site` FOREIGN KEY (`siteID`)
+        REFERENCES `tblSites` (`siteID`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+COMMENT='Per-send audit trail for outbound email (#234, #230). See _core/Mailer.php::logSend().';
+
 
 -- #############################################################################
 -- SECTION 4B: APP TABLES FROM MIGRATIONS 029-036
@@ -7759,4 +7782,24 @@ ON DUPLICATE KEY UPDATE `filename` = `filename`;
 -- AssetRegister::LABEL_SYMBOLOGIES etc. are PHP-only changes — no schema
 -- impact beyond that one column.)
 INSERT INTO `tblMigrations` (`filename`) VALUES ('175_upce_barcode.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- ── from 176_ms365_shared_mailbox.sql (#234) ─────────────────────────────────
+-- MS365 Graph email via a shared mailbox. The tblEmailLog table itself is
+-- already folded inline above (next to tblErrors, both being platform log
+-- tables). This block carries only the seeds: the 5 settings keys and the
+-- 1 route for the new admin save handler.
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'mail.ms365.sharedMailbox',     '',     '',     0),
+    (NULL, 'mail.ms365.sharedMailboxName', '',     '',     0),
+    (NULL, 'mail.ms365.saveToSentItems',   'true', 'true', 0),
+    (NULL, 'mail.fallbackProvider',        '',     '',     0),
+    (NULL, 'mail.log.retentionDays',       '90',   '90',   0)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('admin/integrations/ms365-mail-save', 'admin/integrations/ms365-mail-save.php', 1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('176_ms365_shared_mailbox.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;

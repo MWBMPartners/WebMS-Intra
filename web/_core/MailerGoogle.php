@@ -67,6 +67,16 @@ class MailerGoogle
             throw new RuntimeException('Google mail delegate user not configured.');
         }
 
+        // 📊 #234 — attachment count for the tblEmailLog audit row below
+        //    (mirrors buildMime()'s own <=25MB filter; kept separate since
+        //    buildMime() doesn't return a count).
+        $attachmentCount = 0;
+        foreach ($files as $p) {
+            if (is_file($p) === true && filesize($p) <= 25 * 1024 * 1024) {
+                $attachmentCount++;
+            }
+        }
+
         // 📝 Build the RFC 2822 MIME message
         $mime = self::buildMime($to, $subj, $html, $delegateUser, $fromName, $files);
 
@@ -111,10 +121,12 @@ class MailerGoogle
         }
 
         if ($code >= 200 && $code < 300) {
+            Mailer::logSend('google', $delegateUser, implode(', ', $to), $subj, $attachmentCount, 'sent', $code, '', '');
             return true;
         }
 
         Logger::errorPlatform('Gmail', 'Error', (string) $code, 'Gmail send failed', (string) $resp);
+        Mailer::logSend('google', $delegateUser, implode(', ', $to), $subj, $attachmentCount, 'failed', $code, '', mb_substr((string) $resp, 0, 500));
         return false;
     }
 

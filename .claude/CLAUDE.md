@@ -154,6 +154,35 @@ Calendar/Events/Preaching Plan is ONE app ("Events") — `/calendar` covers view
 
 ## Recent ships (chronological)
 
+- **`claude/gap234-shared-mailbox`** (branched off `alpha`) — gap #234:
+  MS365 Graph email via an admin-configured shared mailbox, formalising
+  and hardening the app-only `Mailer::sendViaGraph()` path already in
+  place rather than adding the issue body's delegated `Mail.Send.Shared`
+  auth model (deferred — zero new secrets vs. an entire OAuth refresh
+  surface + a dependency on a licensed human account). New
+  `mail.ms365.sharedMailbox` (empty = off, today's behaviour unchanged)
+  + `Mailer::effectiveSender()` resolver; explicit `message.from` object
+  now built in BOTH modes (benign fix — `mail.defaultFromName` finally
+  works on MS365, not just Google); 401-retry-once / 429-bounded-retry
+  (≤5s `Retry-After` only) / 403-404-Graph-error-code-surfaced / optional
+  opt-in `mail.fallbackProvider='google'` (default off, fail loud). New
+  `tblEmailLog` (migration 176) logs every send from BOTH providers via
+  the new public `Mailer::logSend()` — closes the #230 audit-trail
+  dependency too; opportunistic retention prune, no new cron.
+  `GdprEraser` gained a bespoke (not `catalogue()`) step scrubbing an
+  erased user's address out of the comma-joined `toRecipients` column,
+  captured before the catalogue's own `tblUsers` step nulls it. Admin UI:
+  `/admin/integrations` MS365 Graph card gained a Shared-Mailbox Sending
+  sub-section + CSRF'd save handler (`admin/integrations/ms365-mail-
+  save.php`); Send Test Email now calls the real `Mailer::send()` instead
+  of a duplicated inline cURL flow, closing the test/production drift
+  risk permanently. Fold-in fix: `/admin/integrations/email` was reading
+  a dead `email.provider`/`email.from` vocabulary and always reported
+  "smtp" — now reports `Mailer::provider()` + effective sender, plus a
+  "Recent sends" `portal-data-list`. Shared mailbox is admin-config-only
+  (never request-derived); no secret ever logged. Migration 176:
+  `tblEmailLog` + 5 non-sensitive settings seeds + 1 route seed, folded
+  into `full_schema.sql`. All 11 audit checks green, `php -l` clean.
 - **`claude/gap7-workflow-engine`** (branched off `alpha`) — gap #7
   (#443): Workflow Execution Engine + generic `/approvals` inbox.
   Migration 034 shipped four workflow tables + an admin definition CRUD

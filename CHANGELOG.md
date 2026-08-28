@@ -2,6 +2,61 @@
 
 
 ## [Unreleased] (alpha)
+- feat(mail): gap #234 — MS365 Graph email via an admin-configured shared
+  mailbox, plus hardening of the whole `Mailer::sendViaGraph()` path. The
+  portal already sent every email app-only through Microsoft Graph
+  (`/users/{mail.defaultFromAddress}/sendMail`); this formalises and
+  hardens that path rather than adding a new auth model. New
+  `mail.ms365.sharedMailbox` setting (empty = off, today's behaviour
+  unchanged) routes `sendMail` through a dedicated shared mailbox instead
+  — same app-only client-credentials token
+  (`Mailer::accessToken()`, unchanged), explicit `message.from` identity
+  (address + display name), and `saveToSentItems` so a copy lands in the
+  shared mailbox's own Sent Items. New `effectiveSender()` resolver falls
+  back to `mail.defaultFromAddress` when the shared mailbox is empty OR
+  invalid (hand-edited via the generic settings editor) — mail keeps
+  flowing either way. Benign fold-in: the `from` object is now built in
+  **both** modes, so `mail.defaultFromName` finally takes effect on the
+  MS365 path (previously the URL mailbox alone decided the display name;
+  the Google path has always honoured this setting). `sender` is
+  intentionally never set — that is the delegated send-on-behalf field
+  for the `Mail.Send.Shared` model named in the issue body, which is
+  explicitly deferred (app-only + an Application Access Policy covers the
+  same ground with zero new secrets and no dependency on a licensed
+  "delegate" human account). Error handling: 401 clears the cached token
+  and retries once; 429 retries once ONLY when Graph's own `Retry-After`
+  is ≤5s (never an unbounded wait inside a web request); 403/404 parse
+  Graph's own `error.code` for a targeted admin-facing hint instead of a
+  bare HTTP code; an optional `mail.fallbackProvider='google'` (default
+  `''` = fail loudly) makes one fallback attempt via `MailerGoogle::send()`
+  on any Graph failure. New `tblEmailLog` (migration 176) records every
+  send attempt from BOTH providers via the new `Mailer::logSend()` — also
+  closes the #230 audit-trail dependency; opportunistic retention prune
+  (`mail.log.retentionDays`, default 90) piggybacks on ~1-in-50 writes, no
+  new cron endpoint. `GdprEraser` gained a bespoke step scrubbing an
+  erased user's address out of `tblEmailLog.toRecipients` (a comma-joined
+  free-text column, not a catalogue()-shaped `userCol` FK) — captured
+  BEFORE the catalogue's own `tblUsers` anonymisation step nulls it out.
+  Admin UI: `/admin/integrations`' MS365 Graph API card gained a
+  Shared-Mailbox Sending sub-section (status, mode badge, last-send
+  indicator, CSRF'd save form → new `admin/integrations/ms365-mail-save.php`
+  handler); its Send Test Email button now calls the real
+  `Mailer::send()` instead of duplicating the token+sendMail cURL flow
+  inline, permanently closing the test-vs-production drift risk, and
+  surfaces the just-written `tblEmailLog` row as the diagnostic detail.
+  Fold-in fix: `/admin/integrations/email` was reading a dead
+  `email.provider`/`email.from` settings vocabulary (seeded, never
+  written) and always reported "smtp" — now reports the real
+  `Mailer::provider()` + effective sender, plus a new "Recent sends (last
+  10)" `portal-data-list` from `tblEmailLog`. The shared mailbox is
+  ADMIN-CONFIG ONLY — read exclusively from `tblSettings` via
+  `effectiveSender()`, written only by the CSRF'd, admin-gated save
+  handler; no request/user input ever reaches it. No secret is ever
+  logged (`tblEmailLog.errorDetail` holds only Graph's own truncated
+  `error.code`/`error.message`). Migration 176: `tblEmailLog` +
+  5 non-sensitive settings seeds + 1 route seed, folded into
+  `full_schema.sql`. All 11 audit checks green, `php -l` clean on every
+  touched file.
 - feat(workflow): gap #7 (#443) — Workflow Execution Engine +
   generic `/approvals` inbox. Migration 034 shipped four workflow tables
   and an admin definition CRUD, but no code anywhere started, advanced,

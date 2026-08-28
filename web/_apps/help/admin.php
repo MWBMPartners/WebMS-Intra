@@ -51,6 +51,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <a href="#gatekeeper" class="badge text-bg-secondary text-decoration-none">Dev Site Access (Gatekeeper)</a>
             <a href="#logs" class="badge text-bg-secondary text-decoration-none">Viewing Logs</a>
             <a href="#csv-export" class="badge text-bg-secondary text-decoration-none">CSV Export</a>
+            <a href="#ms365-shared-mailbox" class="badge text-bg-secondary text-decoration-none">MS365 Shared Mailbox</a>
             <a href="#developer" class="badge text-bg-secondary text-decoration-none">Developer Tools</a>
         </div>
     </div>
@@ -490,6 +491,87 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     </ul>
 
     <p>To export, click the <span class="badge text-bg-success"><i class="fa-solid fa-file-csv me-1"></i>Export CSV</span> button located near the top of the relevant list. The file will download to your browser's default downloads folder.</p>
+</div>
+
+<!-- Section: Sending email via a Microsoft 365 shared mailbox (#234) -->
+<div class="portal-card p-4 mb-4" id="ms365-shared-mailbox">
+    <h2 class="h4 mb-3"><i class="fa-solid fa-users-rectangle me-2 text-primary"></i>Sending Email via a Microsoft 365 Shared Mailbox</h2>
+
+    <p>By default the portal sends every email through Microsoft Graph as <code>mail.defaultFromAddress</code>. An admin can instead route sending through a dedicated <strong>shared mailbox</strong> — e.g. <code>office@yourchurch.org</code> — so mail arrives with that identity and, optionally, keeps a copy in the shared mailbox's own Sent Items.</p>
+
+    <div class="alert alert-info d-flex gap-2" role="alert">
+        <i class="fa-solid fa-circle-info mt-1"></i>
+        <div>
+            <strong>Off by default.</strong> Leaving the shared-mailbox address blank keeps today's behaviour completely unchanged — this is an opt-in feature, not a migration.
+        </div>
+    </div>
+
+    <h5 class="mt-4 mb-3">Owner setup (Azure AD / Microsoft 365 admin)</h5>
+
+    <ol class="mb-3">
+        <li class="mb-2">
+            <strong>Create or identify the shared mailbox</strong> in the Microsoft 365 admin centre
+            (e.g. <code>office@yourchurch.org</code>). No licence is required for a shared mailbox.
+        </li>
+        <li class="mb-2">
+            <strong>Confirm the app registration has <code>Mail.Send</code>.</strong> The portal already
+            uses an app-wide Azure AD registration for mail (<code>auth.ms365.appwide.clientID</code>) —
+            in Entra ID → App registrations → API permissions, confirm the <strong>Application</strong>
+            permission <code>Microsoft Graph → Mail.Send</code> is present with <strong>admin consent
+            granted</strong>. If portal email already works today, this step is already done — there is
+            nothing further to change here.
+        </li>
+        <li class="mb-2">
+            <strong>Recommended: scope the permission with an Application Access Policy.</strong>
+            Application <code>Mail.Send</code> lets the app send as <em>any</em> mailbox in the tenant —
+            no Exchange "Send As" grant on the mailbox itself is needed. Because that is deliberately
+            broad, scope it down with either the legacy PowerShell cmdlet:
+            <pre class="p-2 bg-body-tertiary rounded small mb-2" style="white-space:pre-wrap;">New-ApplicationAccessPolicy -AppId &lt;clientID&gt; -PolicyScopeGroupId &lt;mail-enabled security group containing the shared mailbox&gt; -AccessRight RestrictAccess -Description "WebMS Intra mail"
+Test-ApplicationAccessPolicy -AppId &lt;clientID&gt; -Identity office@yourchurch.org</pre>
+            or its successor, <strong>RBAC for Applications</strong> in Exchange Online (a
+            management-scope-restricted <code>Mail.Send</code> role assignment). Without this step the
+            app token can technically send as any tenant mailbox, not just the one configured below.
+        </li>
+        <li class="mb-2">
+            <strong>Configure the portal</strong> — go to
+            <a href="/admin/integrations">Admin → Integrations</a>, find the
+            <strong>Shared-Mailbox Sending</strong> section inside the MS365 Graph API card, and set the
+            shared mailbox address + display name. Optionally leave "Keep a copy in Sent Items" checked
+            (the default) and leave the fallback provider blank (recommended — see below). Save, then use
+            <strong>Send Test Email</strong> on the same page.
+        </li>
+        <li class="mb-2">
+            <strong>Confirm</strong> the test email arrives showing the shared mailbox as sender with the
+            configured display name, that the page shows a <code>ms365-shared</code> mode badge and a
+            "sent" last-send indicator, and — if enabled — that a copy landed in the shared mailbox's own
+            Sent Items.
+        </li>
+    </ol>
+
+    <h5 class="mt-4 mb-3">Deliverability note</h5>
+    <p>Mail sent this way leaves Microsoft's own infrastructure, so the organisation's standard Microsoft 365 SPF (<code>include:spf.protection.outlook.com</code>), DKIM (selector1/selector2 CNAMEs enabled in the Defender portal), and DMARC records are what make it align — the web server's own IP reputation is not involved. The <a href="/admin/integrations/email">Email Deliverability</a> page's DNS probe checks these records against the effective sender's domain.</p>
+
+    <h5 class="mt-4 mb-3">Error handling and fallback</h5>
+    <ul class="list-group list-group-flush mb-3">
+        <li class="list-group-item d-flex gap-2">
+            <i class="fa-solid fa-rotate text-info mt-1"></i>
+            <div><strong>Expired token (401):</strong> the portal clears its cached token and retries once automatically — no admin action needed.</div>
+        </li>
+        <li class="list-group-item d-flex gap-2">
+            <i class="fa-solid fa-clock text-info mt-1"></i>
+            <div><strong>Throttled (429):</strong> a short, bounded retry (5 seconds or less, following Microsoft's own <code>Retry-After</code> header) is attempted once; a longer wait fails the send rather than blocking the page.</div>
+        </li>
+        <li class="list-group-item d-flex gap-2">
+            <i class="fa-solid fa-ban text-danger mt-1"></i>
+            <div><strong>Access denied / mailbox not found (403/404):</strong> usually means the mailbox is outside the Application Access Policy scope, was deleted, or consent is missing — the Integration Diagnostics page shows Microsoft's own error code as a targeted hint.</div>
+        </li>
+        <li class="list-group-item d-flex gap-2">
+            <i class="fa-solid fa-arrows-turn-right text-warning mt-1"></i>
+            <div><strong>Fallback provider:</strong> off by default — a failed send fails loudly and is logged rather than silently switching sender identity (which can break DMARC alignment). An admin can opt into a one-time Google (Gmail API) fallback attempt if Google sending is also configured.</div>
+        </li>
+    </ul>
+
+    <p>Every send attempt — successful or failed, either provider — is recorded to a send log visible on the <a href="/admin/integrations/email">Email Deliverability</a> page's "Recent sends" list, kept for 90 days by default.</p>
 </div>
 
 <!-- Section 6: Developer Tools -->
