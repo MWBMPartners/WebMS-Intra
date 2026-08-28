@@ -100,8 +100,11 @@ if ($stmt === false) {
     Logger::errorPlatform('MySQL', 'Error', 'API_ANNOUNCEMENT_CREATE_PREP', $db->error, '');
     ApiResponse::error('Database error', 500);
 }
+// 🛠️ expiresAt is a 'Y-m-d H:i:s' string (or NULL) → bind as 's', not 'i'
+// (position 8). Binding a datetime string as 'i' coerces it to an int and
+// corrupts the stored expiry; save.php's equivalent INSERT binds it 's'.
 $stmt->bind_param(
-    'issssisiii',
+    'issssissii',
     $siteId, $title, $slug, $text, $priority, $isPinned,
     $publishAt, $expiresAt, $isPublished, $creatorId
 );
