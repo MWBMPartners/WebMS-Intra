@@ -870,7 +870,7 @@
           "insuranceRenewalDate": { "type": "string", "format": "date", "nullable": true },
           "isConfidential": { "type": "boolean", "description": "When true the asset is hidden from non-privileged callers: list/detail/qr return it only to a logged-in session admin or asset_manager (detail/qr also to a responsible owner-party) — never to a bearer key or an ordinary logged-in user. Non-privileged callers get a uniform 404, not a 403." },
           "publicPageEnabled": { "type": "boolean" },
-          "labelSymbology": { "type": "string", "enum": ["qr", "code128", "ean13", "upca", "itf14", "qr+code128"] },
+          "labelSymbology": { "type": "string", "enum": ["qr", "code128", "ean13", "ean8", "upca", "upce", "itf14", "qr+code128"] },
           "parentAssetID": { "type": "integer", "nullable": true },
           "createdByID": { "type": "integer" },
           "createdAt": { "type": "string", "format": "date-time" },
@@ -912,7 +912,7 @@
           "insuranceRenewalDate": { "type": "string", "format": "date", "nullable": true },
           "isConfidential": { "type": "boolean", "default": false },
           "publicPageEnabled": { "type": "boolean", "default": true },
-          "labelSymbology": { "type": "string", "enum": ["qr", "code128", "ean13", "upca", "itf14", "qr+code128"], "default": "qr" },
+          "labelSymbology": { "type": "string", "enum": ["qr", "code128", "ean13", "ean8", "upca", "upce", "itf14", "qr+code128"], "default": "qr" },
           "parentAssetID": { "type": "integer", "nullable": true },
           "csrf_token": { "type": "string", "description": "CSRF token (or use X-CSRF-TOKEN header)" }
         }
@@ -1802,7 +1802,7 @@
         "parameters": [
           { "name": "id", "in": "query", "required": true, "schema": { "type": "integer" } },
           { "name": "format", "in": "query", "schema": { "type": "string", "enum": ["svg", "png"], "default": "svg" } },
-          { "name": "symbology", "in": "query", "schema": { "type": "string", "enum": ["qr", "code128", "ean13", "upca", "itf14"] }, "description": "Defaults to the asset's own labelSymbology." }
+          { "name": "symbology", "in": "query", "schema": { "type": "string", "enum": ["qr", "code128", "ean13", "ean8", "upca", "upce", "itf14"] }, "description": "Defaults to the asset's own labelSymbology." }
         ],
         "responses": {
           "200": {
