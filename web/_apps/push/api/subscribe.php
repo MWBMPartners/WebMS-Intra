@@ -76,7 +76,11 @@ if ((App::settings('push.enabled') ?? 'false') !== 'true') {
 }
 
 // 🛡️ Rate limit — public POST, reachable by anonymous visitors, per #322 §6.4.
-$clientIp = (string) ($_SERVER['REMOTE_ADDR'] ?? 'unknown');
+//    RateLimiter::clientIp() is the repo's CF/X-Forwarded-For-aware IP
+//    detector (CF-Connecting-IP > X-Forwarded-For > REMOTE_ADDR) — using the
+//    raw REMOTE_ADDR here collapses every visitor behind the same Cloudflare
+//    edge IP into one shared bucket.
+$clientIp = RateLimiter::clientIp();
 $rlBucket = 'pushsub:' . $clientIp;
 if (RateLimiter::tooMany($rlBucket, 30, 3600) === true) {
     http_response_code(429);
@@ -94,6 +98,31 @@ $channels = (array)  ($payload['channels'] ?? ['livestream', 'reminders']);
 if ($endpoint === '' || $p256dh === '' || $auth === '') {
     http_response_code(400);
     echo json_encode(['error' => 'Missing endpoint, keys.p256dh, or keys.auth']);
+    exit();
+}
+
+// 🛡️ Format/length validation (#322 F6 hardening) — p256dh must decode to a
+//    65-byte uncompressed P-256 point (0x04 || X(32) || Y(32)) and auth to a
+//    16-byte secret (RFC 8291 §3.2/§3.4). A malformed pair would otherwise
+//    persist silently and only surface later as encryptPayload() failures
+//    (8 failed sends before recordOutcome() prunes the row) — reject at
+//    subscribe time instead. Inline base64url decode, tolerant of missing
+//    padding, matching WebPush::b64urlDecode()'s own style.
+$b64urlDecode = static function (string $str): string {
+    $str = strtr($str, '-_', '+/');
+    $pad = strlen($str) % 4;
+    if ($pad > 0) {
+        $str .= str_repeat('=', 4 - $pad);
+    }
+    $out = base64_decode($str, true);
+    return $out === false ? '' : $out;
+};
+$p256dhDecoded = $b64urlDecode($p256dh);
+$authDecoded   = $b64urlDecode($auth);
+if (strlen($p256dhDecoded) !== 65 || strlen($authDecoded) !== 16) {
+    Logger::activity('PushSubscribeRejected', 'Malformed keys.p256dh/keys.auth length');
+    http_response_code(400);
+    echo json_encode(['error' => 'keys.p256dh must be a 65-byte uncompressed point and keys.auth a 16-byte secret']);
     exit();
 }
 
@@ -146,4 +175,7 @@ if ($ok === false) {
 }
 
 Logger::activity('PushSubscribed', 'User=' . ($userId > 0 ? $userId : 'anon') . ', channels=' . implode(',', $channels));
-echo json_encode(['ok' => true, 'channels' => $channels]);
+// 🔄 Auth::verifyCsrf() rotated the session token above on successful
+//    verification — hand the NEW token back so the client's next POST
+//    (e.g. an immediate "disable" click) doesn't submit the now-stale one.
+echo json_encode(['ok' => true, 'channels' => $channels, 'csrf_token' => Auth::csrfToken()]);

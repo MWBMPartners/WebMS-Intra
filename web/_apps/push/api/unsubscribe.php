@@ -56,7 +56,11 @@ if (Auth::verifyCsrf($csrf) === false) {
 }
 
 // 🛡️ Rate limit — public POST, reachable by anonymous visitors, per #322 §6.4.
-$clientIp = (string) ($_SERVER['REMOTE_ADDR'] ?? 'unknown');
+//    RateLimiter::clientIp() is the repo's CF/X-Forwarded-For-aware IP
+//    detector (CF-Connecting-IP > X-Forwarded-For > REMOTE_ADDR) — using the
+//    raw REMOTE_ADDR here collapses every visitor behind the same Cloudflare
+//    edge IP into one shared bucket.
+$clientIp = RateLimiter::clientIp();
 $rlBucket = 'pushsub:' . $clientIp;
 if (RateLimiter::tooMany($rlBucket, 30, 3600) === true) {
     http_response_code(429);
@@ -82,4 +86,7 @@ if ($stmt !== false) {
 }
 
 Logger::activity('PushUnsubscribed', 'Endpoint=' . substr($endpoint, 0, 80));
-echo json_encode(['ok' => true]);
+// 🔄 Auth::verifyCsrf() rotated the session token above on successful
+//    verification — hand the NEW token back so the client's next POST
+//    (e.g. an immediate "re-enable" click) doesn't submit the now-stale one.
+echo json_encode(['ok' => true, 'csrf_token' => Auth::csrfToken()]);

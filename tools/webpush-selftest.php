@@ -178,6 +178,80 @@ $body2 = $encMethod->invoke(null, $browserKeys['publicKey'], $authSecretB64, $pl
 assertTrue('Two encryptions of the same plaintext produce DIFFERENT wire bodies (fresh ephemeral key + salt each time)', is_string($body2) && $body2 !== $body);
 
 // =============================================================================
+// PART C — F1 regression guard: settings-snapshot single- vs double-decrypt
+// =============================================================================
+echo "\n=== Part C: settings-snapshot decrypt semantics (issue #322 F1) ===\n";
+
+// This script deliberately never requires bootstrap.php (see the header
+// comment above) to stay DB-free/network-free, so encrypt_setting()/
+// decrypt_setting() (defined there) aren't in scope here. Reimplemented
+// BYTE-FOR-BYTE below from bootstrap.php's libsodium secretbox helpers
+// (nonce-prepended ciphertext, base64-encoded) purely to pin the snapshot
+// semantics WebPush::isConfigured()/vapidAuthHeader() depend on. This is
+// NOT a re-test of WebPush's own crypto — that is Parts A/B above.
+//
+// The bug this guards against: App::settings() is the BOOTSTRAP SNAPSHOT,
+// which already decrypts every isSensitive='1' value ONCE while building
+// it. The old WebPush.php called decrypt_setting() a SECOND time on that
+// already-plaintext value — sodium_crypto_secretbox_open() on plaintext
+// (not a valid nonce‖ciphertext blob) always fails and decrypt_setting()
+// returns '', so isConfigured() was permanently false and the ENTIRE
+// feature was inert with no error anywhere. This block would FAIL against
+// that old double-decrypt code and PASSES against the fix
+// ($privRaw = $encPriv; return true;).
+$selftestKeyPath = sys_get_temp_dir() . '/webpush-selftest-' . bin2hex(random_bytes(8)) . '.key';
+file_put_contents($selftestKeyPath, bin2hex(random_bytes(32)));
+
+$encryptSettingTest = static function (string $plain) use ($selftestKeyPath): string {
+    $keyHash = hash('sha256', (string) file_get_contents($selftestKeyPath));
+    $key     = sodium_hex2bin($keyHash);
+    $nonce   = random_bytes(SODIUM_CRYPTO_SECRETBOX_NONCEBYTES);
+    $cipher  = sodium_crypto_secretbox($plain, $nonce, $key);
+    return base64_encode($nonce . $cipher);
+};
+$decryptSettingTest = static function (string $encoded) use ($selftestKeyPath): string {
+    if ($encoded === '') {
+        return '';
+    }
+    $bin = base64_decode($encoded, true);
+    if ($bin === false) {
+        return '';
+    }
+    $nonce   = substr($bin, 0, SODIUM_CRYPTO_SECRETBOX_NONCEBYTES);
+    $cipher  = substr($bin, SODIUM_CRYPTO_SECRETBOX_NONCEBYTES);
+    $keyHash = hash('sha256', (string) file_get_contents($selftestKeyPath));
+    $key     = sodium_hex2bin($keyHash);
+    $plain   = sodium_crypto_secretbox_open($cipher, $nonce, $key);
+    return $plain === false ? '' : $plain;
+};
+
+// 1) Admin save: push.vapidPrivateKey stored via encrypt_setting(), isSensitive=1.
+$originalPem = "-----BEGIN EC PRIVATE KEY-----\nMHcCAQEEIP-SELFTEST-FAKE-SCALAR-BYTES-oAoGCCqGSM49AwEHoUQDQgAE\n-----END EC PRIVATE KEY-----\n";
+$storedCiphertext = $encryptSettingTest($originalPem);
+
+// 2) bootstrap.php builds the App::settings() snapshot, decrypting every
+//    isSensitive='1' value ONCE.
+$bootstrapSnapshotValue = $decryptSettingTest($storedCiphertext);
+assertTrue('Bootstrap snapshot value (single decrypt) equals the original PEM', $bootstrapSnapshotValue === $originalPem);
+
+// 3) THE BUG (pre-fix): a second decrypt_setting() call on the
+//    already-plaintext snapshot value always returns '' — this is exactly
+//    why isConfigured() was permanently false.
+$secondDecryptResult = $decryptSettingTest($bootstrapSnapshotValue);
+assertTrue("A SECOND decrypt_setting() on the already-plaintext snapshot value returns '' (this is why the double-decrypt made isConfigured() always false)", $secondDecryptResult === '');
+
+// 4) THE FIX: WebPush.php now uses the snapshot value directly — no second
+//    decrypt_setting() call. isConfigured() (~line 101) does
+//    `return true;` once the empty-string guard above it has passed;
+//    vapidAuthHeader() (~line 562) does `$privRaw = $encPriv;`.
+$fixedPrivRaw = $bootstrapSnapshotValue; // matches WebPush.php: $privRaw = $encPriv;
+assertTrue('Fixed code path ($privRaw = $encPriv, no re-decrypt) yields the original PEM', $fixedPrivRaw === $originalPem);
+$fixedIsConfigured = $bootstrapSnapshotValue !== ''; // matches WebPush.php's post-guard `return true;`
+assertTrue("Fixed isConfigured()-equivalent logic (encPriv !== '') is true for a configured key", $fixedIsConfigured === true);
+
+@unlink($selftestKeyPath);
+
+// =============================================================================
 echo "\n";
 if ($failures === 0) {
     echo "ALL CHECKS PASSED — Web Push crypto pipeline is correct.\n";

@@ -98,7 +98,13 @@ class WebPush
         if ($encPriv === '' || function_exists('decrypt_setting') === false) {
             return false;
         }
-        return decrypt_setting($encPriv) !== '';
+        // 🔓 App::settings() is the bootstrap SNAPSHOT — bootstrap.php already
+        // decrypts every isSensitive='1' value ONCE while building it, so
+        // $encPriv here is already plaintext. Re-decrypting it (the old bug)
+        // always returns '' (sodium_crypto_secretbox_open on plaintext fails),
+        // making isConfigured() permanently false. The empty-string guard
+        // above already covers the "not configured" case.
+        return true;
     }
 
     /**
@@ -559,7 +565,10 @@ class WebPush
         if ($pubB64 === '' || $encPriv === '' || function_exists('decrypt_setting') === false) {
             return null;
         }
-        $privRaw = decrypt_setting($encPriv);
+        // 🔓 Already-decrypted snapshot value (see isConfigured() above) —
+        // re-decrypting here was the bug: App::settings() has already run
+        // decrypt_setting() once for every isSensitive='1' key at bootstrap.
+        $privRaw = $encPriv;
         if ($privRaw === '') {
             return null;
         }

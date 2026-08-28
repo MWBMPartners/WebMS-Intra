@@ -7787,8 +7787,8 @@ INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue
     (NULL, 'push.reminders.broadcast',     'false', 'false', 0),
     (NULL, 'push.cron_token',              '',      '',      1),
     (NULL, 'push.endpointHostAllowlist',
-           'fcm.googleapis.com,push.services.mozilla.com,push.apple.com,notify.windows.com,windows.com,pushsvc.mozilla.com',
-           'fcm.googleapis.com,push.services.mozilla.com,push.apple.com,notify.windows.com,windows.com,pushsvc.mozilla.com',
+           'fcm.googleapis.com,push.services.mozilla.com,push.apple.com,notify.windows.com',
+           'fcm.googleapis.com,push.services.mozilla.com,push.apple.com,notify.windows.com',
            0)
 ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
 

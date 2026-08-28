@@ -31,9 +31,27 @@
 (function () {
     'use strict';
 
+    // 🔄 In-memory cache of the current CSRF token (#322 F5). Auth::verifyCsrf()
+    // rotates the session token on EVERY successful verify, so the <meta>
+    // tag's value goes stale after the first POST in a page load — an
+    // immediate enable-then-disable click would otherwise submit the old
+    // token and get a 400. subscribe.php/unsubscribe.php return the freshly
+    // rotated token as `csrf_token` in their JSON response; updateCsrfToken()
+    // below keeps this in sync so the NEXT POST always uses the live token.
+    var cachedCsrfToken = null;
+
     function csrfToken() {
-        var meta = document.querySelector('meta[name="csrf-token"]');
-        return meta ? meta.getAttribute('content') : '';
+        if (cachedCsrfToken === null) {
+            var meta = document.querySelector('meta[name="csrf-token"]');
+            cachedCsrfToken = meta ? meta.getAttribute('content') : '';
+        }
+        return cachedCsrfToken;
+    }
+
+    function updateCsrfToken(token) {
+        if (typeof token === 'string' && token !== '') {
+            cachedCsrfToken = token;
+        }
     }
 
     /** Standard applicationServerKey conversion (base64url -> Uint8Array). */
@@ -54,7 +72,15 @@
             headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken() },
             credentials: 'same-origin',
             body: JSON.stringify(body)
-        }).then(function (r) { return r.json().catch(function () { return {}; }); });
+        }).then(function (r) { return r.json().catch(function () { return {}; }); })
+            .then(function (json) {
+                // 🔄 Pick up the rotated token (see updateCsrfToken() comment
+                // above) so a second POST later in this page load succeeds.
+                if (json && typeof json.csrf_token === 'string') {
+                    updateCsrfToken(json.csrf_token);
+                }
+                return json;
+            });
     }
 
     function renderState(container, state, message) {
