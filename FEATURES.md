@@ -204,6 +204,71 @@ Per-site prayer-request submission with moderation and anonymous public submissi
 
 ---
 
+### 🧾 Forms Builder — `/forms/` ✅ (#153)
+
+Generic form designer — "we need a quick form" without a code change.
+Admins build a form's fields, publish it internally and/or publicly, and
+review/export the responses. Built as a reusable engine
+(`Portal\Core\FormEngine`) so a future app (e.g. #302 mission-trips) can
+create/render/validate/persist a form programmatically without any HTTP
+involvement.
+
+- **Field types (12):** Short text, Long text, Email, Phone, Number, Date,
+  Time, Dropdown, Choose one (radio), Choose many (checkboxes), Single
+  tick/consent, and a display-only Section heading. The registry
+  (`FormEngine::FIELD_TYPES`) is a PHP whitelist, not a SQL ENUM — adding a
+  type is a code change, never a migration; a type is never removed once
+  shipped (historic response snapshots still reference it).
+- **Injection safety (the whole point of `FormEngine`):** field configuration
+  (`configJson`) is DATA, whitelist-copied by `sanitiseConfig()` on both
+  read and write; a choice field (`select`/`radio`/`checkboxes`) submits as
+  a bounds-checked INTEGER INDEX into its own sanitised options array — the
+  stored value is the server-side option string at that index, never raw
+  client text; the form field's HTML `name` is always `f_{fieldID}`, a
+  server-controlled integer. Every SQL statement is a MySQLi prepared
+  statement; every rendered value is `htmlspecialchars(…, ENT_QUOTES,
+  'UTF-8')`'d at the echo point.
+- **Responses are an immutable snapshot** — `answersJson` captures
+  `{fieldKey: {label, type, value}}` at submission time, so editing or
+  deleting a field afterwards can never corrupt or orphan a historical
+  answer. CSV export reflects current fields by position/label, with any
+  orphaned (since-deleted) field's answers appended as trailing columns
+  keyed by their original `fieldKey` — nothing is silently dropped.
+- **Internal fill (`/forms`, `/forms/fill`):** signed-in members of the site
+  see published `internal`/`both` forms currently within their open window;
+  an `allowMultiple = 0` form shows a "Submitted" badge instead of the fill
+  link once answered.
+- **Public fill (`/f/{token}`):** a Router special route (cloned from
+  service-plans' `/os/{token}`), six-gate uniform-404 (token exists /
+  audience public|both / published / open window / site
+  `forms.allowPublic` / site `forms.enabled` — all scoped to the FORM's own
+  site, never the request's ambient site). **Default OFF**
+  (`forms.allowPublic = 'false'`) — an admin must opt a site in before the
+  public/both audience options unlock on the builder. Public POST layers
+  honeypot → CSRF → `Captcha::verify()` → `RateLimiter::isBlocked()`
+  (fake-success on trip) → a 5-per-15-minute per-IP bucket. QR code + link
+  shown on `/forms/manage`; "Rotate link" mints a fresh token, invalidating
+  the old one immediately.
+- **Admin-only** for all build/publish/responses/export surfaces (v1 — no
+  separate "forms manager" role yet).
+- **Responses (`/forms/responses`):** new/reviewed tabs, expandable answer
+  detail, mark reviewed/new, delete, CSV export (`/forms/export`).
+- Help page at `/help/forms`.
+
+**GDPR:** an internal response is erased (hard delete, `submitterID` match)
+alongside the rest of a member's data via `GdprEraser`, and included in
+their `/account/data-export`. A public (anonymous) response carries no
+`submitterID` — only `submitterIP` for abuse-tracing — so it sits outside
+subject-linked erasure by design (same reasoning as Salvation's decision
+cards); an admin can still delete any individual response by hand. Public
+responses are kept indefinitely in v1 (`forms.responseRetentionDays` is a
+seeded `'0'` stub for a future auto-purge cron — see DEV_NOTES).
+
+**Tables:** `tblForms`, `tblFormFields`, `tblFormResponses`
+**Settings:** `forms.enabled`, `forms.allowPublic`, `forms.responseRetentionDays`
+
+---
+
 ### 📋 Attendance — `/attendance/` ✅
 
 Service-type-aware headcount tracker.
@@ -393,6 +458,7 @@ In-app documentation per app.
 | `/help/admin` | Settings, user roles, site branding, captcha config |
 | `/help/translations` | Language + i18n |
 | `/help/prayer-requests` | Prayer requests lifecycle, anonymous route, moderation |
+| `/help/forms` | Field types, building/publishing a form, the public link, responses/CSV export, privacy |
 | `/help/faq` | Common questions |
 
 ---
