@@ -888,11 +888,17 @@ class Venues
         $startVal = null;
         $endVal = null;
         if ($start !== '' && $end !== '') {
-            if (preg_match('/^([01]\d|2[0-3]):[0-5]\d$/', $start) !== 1 || preg_match('/^([01]\d|2[0-3]):[0-5]\d$/', $end) !== 1) {
+            // 🕑 Accept HH:MM or HH:MM:SS — the BackingData importer
+            //     (importBackingDataWindows) feeds parsed times that already
+            //     carry a :SS suffix, so a strict HH:MM-only rule silently
+            //     dropped every imported default window. Normalise to HH:MM
+            //     then re-append :00 for storage (windows are minute-grained).
+            if (preg_match('/^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/', $start) !== 1
+                || preg_match('/^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/', $end) !== 1) {
                 return ['id' => 0, 'error' => 'Times must be HH:MM.'];
             }
-            $startVal = $start . ':00';
-            $endVal = $end . ':00';
+            $startVal = substr($start, 0, 5) . ':00';
+            $endVal = substr($end, 0, 5) . ':00';
             if ($endVal <= $startVal) {
                 return ['id' => 0, 'error' => 'End time must be after start time.'];
             }
@@ -3654,7 +3660,13 @@ class Venues
      */
     public static function resolveReminderRecipients(int $siteId): array
     {
-        $csv = (string) (Settings::get('venues.reminder_roles', '') ?? '');
+        // 🌐 Site-scoped read — this runs inside the reminders cron's
+        //     per-site loop (Site::forceContext), and the ambient Settings
+        //     snapshot is NOT refreshed by forceContext, so an ambient
+        //     Settings::get() would apply the first site's reminder_roles to
+        //     every site. settingForSite($key, $siteId) honours per-site
+        //     overrides (falling back to the global NULL-siteID default).
+        $csv = (string) (App::settingForSite('venues.reminder_roles', $siteId) ?? '');
         $roleKeys = array_values(array_filter(array_map('trim', explode(',', $csv)), static fn (string $r): bool => $r !== ''));
         if (count($roleKeys) === 0) {
             $roleKeys = ['venue_manager'];
