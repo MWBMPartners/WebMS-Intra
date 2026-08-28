@@ -7,8 +7,19 @@
  * Used by Giving (purpose=giving, purposeRef=categoryID) and Projects
  * (purpose=pledge, purposeRef=pledgeID).
  *
+ * purpose/purposeRef are authorised server-side against the current user +
+ * site BEFORE the pending row is created (IDOR + amount-forgery hardening,
+ * #430). Descriptions are built server-side from the validated category /
+ * project name — the POSTed `description` field is never read (S11, closes
+ * the provider-page text-injection vector PayPal's own hosted checkout page
+ * makes reachable). Giving amounts additionally carry a sanity ceiling
+ * (S10) — see GIVING_MAX_AMOUNT_PENCE below.
+ *
  * @package   Portal\Payments
- * @version   1.0.1
+ * @author    MWBM Partners Ltd (t/a MWservices)
+ * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
+ * @license   All Rights Reserved
+ * @version   1.0.2
  * @link      https://github.com/MWBMPartners/webMS-Intra/issues/268
  */
 
@@ -22,7 +33,9 @@ use Portal\Core\Site;
 /**
  * 🛡️ Open-redirect guard for the POST-supplied `return_to` value. Mirrors
  * assets/event-assign.php's safe-redirect rule: reject protocol-relative
- * (`//`), absolute-URL (`://`), or non-rooted values; fall back to `/`.
+ * (`//`), absolute-URL (`://`), backslash (`/\` — browsers normalise `\`
+ * to `/`, so `/\evil.com` resolves as protocol-relative `//evil.com`), or
+ * non-rooted values; fall back to `/`.
  *
  * @param mixed $raw Raw POST value.
  *
@@ -34,12 +47,20 @@ function sanitizeReturnTo(mixed $raw): string
     if ($value === ''
         || str_starts_with($value, '//') === true
         || str_contains($value, '://') === true
+        || str_contains($value, '\\') === true
         || str_starts_with($value, '/') === false
     ) {
         return '/';
     }
     return $value;
 }
+
+// 💷 Fat-finger/fraud ceiling on self-service online GIVING only (S10) —
+// large legitimate gifts should go through the office rather than this
+// form. Pledges are exempt (their amount is forced from the pledge row
+// below, never the POSTed value, so a large pledge is never at risk of
+// this rejecting it). Tune here.
+const GIVING_MAX_AMOUNT_PENCE = 1_000_000; // £10,000.00
 
 Auth::ensureSession();
 Auth::requireLogin();
@@ -70,7 +91,10 @@ if ($amountPence < 100) {
 
 $purpose     = (string) ($_POST['purpose'] ?? 'other');
 $purposeRef  = trim((string) ($_POST['purposeRef'] ?? ''));
-$description = trim((string) ($_POST['description'] ?? '')) ?: 'Donation';
+// 🛡️ Server-built description (S11) — the POSTed `description` field is
+// NEVER read; this default only ever reaches the provider for the 'other'
+// branch below, which has no natural title and never fans out.
+$description = 'Donation';
 
 // 🛡️ Purpose/purposeRef authorisation (IDOR + amount-forgery hardening).
 // `purposeRef` arrives as raw POST and, uncontrolled, becomes a free-form
@@ -85,7 +109,7 @@ if ($purpose === 'pledge') {
     $pledge   = null;
     if ($pledgeId > 0) {
         $stmt = $db->prepare(
-            'SELECT p.donorID, p.amountPence, pr.currency '
+            'SELECT p.donorID, p.amountPence, pr.currency, pr.title '
             . 'FROM tblProjectPledge p INNER JOIN tblProject pr ON pr.projectID = p.projectID '
             . 'WHERE p.pledgeID = ? AND pr.siteID = ? AND p.fulfilledAt IS NULL LIMIT 1'
         );
@@ -110,12 +134,14 @@ if ($purpose === 'pledge') {
     $amountPence = (int) $pledge['amountPence'];
     $currency    = (string) ($pledge['currency'] ?? $currency);
     $purposeRef  = (string) $pledgeId;
+    // 🖊️ Server-built description (S11) — never the POSTed value.
+    $description = mb_substr('Pledge — ' . (string) $pledge['title'], 0, 120);
 } elseif ($purpose === 'giving') {
     $categoryId = (int) $purposeRef;
     $category   = null;
     if ($categoryId > 0) {
         $stmt = $db->prepare(
-            'SELECT categoryID FROM tblGivingCategory WHERE categoryID = ? AND siteID = ? AND isActive = 1 LIMIT 1'
+            'SELECT categoryID, name FROM tblGivingCategory WHERE categoryID = ? AND siteID = ? AND isActive = 1 LIMIT 1'
         );
         if ($stmt !== false) {
             $stmt->bind_param('ii', $categoryId, $siteId);
@@ -130,9 +156,19 @@ if ($purpose === 'pledge') {
         header('Location: ' . sanitizeReturnTo($_POST['return_to'] ?? '/'));
         exit();
     }
+    // 💷 Fat-finger/fraud ceiling (S10) — large legitimate gifts should go
+    // through the office rather than this self-service form.
+    if ($amountPence > GIVING_MAX_AMOUNT_PENCE) {
+        $_SESSION['flash_msg']  = 'For large gifts please contact the office.';
+        $_SESSION['flash_type'] = 'danger';
+        header('Location: ' . sanitizeReturnTo($_POST['return_to'] ?? '/'));
+        exit();
+    }
     // The donation amount is the donor's own choice (subject to the
-    // min-amount check above) — only the category needs validating.
+    // min/max checks above) — only the category needs validating.
     $purposeRef = (string) $categoryId;
+    // 🖊️ Server-built description (S11) — never the POSTed value.
+    $description = 'Giving — ' . (string) $category['name'];
 } else {
     // membership/other/unrecognised — markPaymentSucceeded() has no side
     // effect for these purposes, so never let an arbitrary purposeRef ride

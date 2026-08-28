@@ -513,10 +513,10 @@ setting seeds.
 | Recordings (RSS podcast feed + HTTP Range streaming + FULLTEXT search) | #264 | 091 | ✅ |
 | Zoom (OAuth, meeting creation from calendar, webhook HMAC) | #274 | 092 | ✅ |
 | Newsletter (composer with auto-pulled content blocks, provider abstraction → MailerMatt slot) | #269 | 093 | ✅ |
-| Giving (tithe log, Gift Aid digital declaration, HMRC schedule CSV, year-end PDF) | #266 | 094 | ✅ |
+| Giving (tithe log, Gift Aid digital declaration, HMRC schedule CSV, year-end PDF; online give-online checkout added later, see "PayPal payment adapter" section below) | #266 | 094 | ✅ |
 | SMS (Twilio + MessageBird + SigV4-signed AWS SNS; verification + per-category opt-in + Sabbath quiet hours) | #272 | 095 | ✅ |
-| Projects (public fundraising page, pledge thermometer, captcha-gated anonymous pledges) | #267 | 096 | ✅ |
-| Payments (Stripe Checkout + v1 HMAC webhook + refund; side-effects into Giving/Projects) | #268 | 097 | ✅ |
+| Projects (public fundraising page, pledge thermometer, captcha-gated anonymous pledges; member "Pay now" pledge checkout added later, see "PayPal payment adapter" section below) | #267 | 096 | ✅ |
+| Payments (Stripe Checkout + PayPal Orders v2 + v1 HMAC/verified webhooks + refund; side-effects into Giving/Projects — PayPal + online checkout UI added later, see "PayPal payment adapter" section below) | #268 | 097 | ✅ |
 
 ### Wave 5 (#285) — PR landed 2026-06-03
 
@@ -746,6 +746,19 @@ Three small, independent feature completions, each closing out a v1.1 follow-up 
 
 ---
 
+### PayPal payment adapter + online giving/pledge checkout UI (gap #1, 2026-08-28)
+
+The Payments app's `paypal` branch was previously stubbed ("not-implemented" — every checkout attempt failed visibly) and neither Giving nor Projects exposed any button that could reach `/payments/checkout` at all — even Stripe was unreachable by end users before this. Both gaps close together: PayPal Orders v2 is now fully wired, and the missing checkout UI ships alongside it.
+
+| Item | Issue | Migration | Status |
+|---|---|---|---|
+| PayPal Orders v2 — `paypalCreateCheckout()` (create + approve-link redirect), `paypalCaptureOrder()`/`paypalFetchOrder()` (capture-on-return + 422 `ORDER_ALREADY_CAPTURED` reconcile), `paypalVerifyWebhook()` (PayPal's own verify-webhook-signature API, fail-closed on any missing input), `handlePayPalEvent()` (`CHECKOUT.ORDER.APPROVED` backstop capture for a payer who approves and never returns, `PAYMENT.CAPTURE.COMPLETED`, best-effort `PAYMENT.CAPTURE.REFUNDED`), `paypalRefund()` — all raw cURL, no SDK, 15s timeouts, same shape as the existing Stripe block | #268 | 167 | ✅ |
+| ★ S1 integrity gate — `Payments::markPaymentSucceeded()` gained `?int $observedAmountPence, ?string $observedCurrency`; every PayPal success path (return capture, 422 reconcile, verified webhook) asserts the captured amount+currency EXACTLY against the pending row before any Giving/Projects fan-out — a mismatch marks the row `failed` (`errorMsg='amount-mismatch…'`) and logs `PaymentIntegrityFail`, never books the wrong amount. The status transition is now a single atomic `UPDATE … WHERE status='pending'` (`affected_rows === 1` gate), closing the return-path-vs-webhook race | #268 | 167 | ✅ |
+| Checkout UI — new `giving/give.php` "Give online" page (active-category picker + amount, quick-amount buttons, TEST MODE badge) linked from `giving/index.php`; a "Pay now" form on `projects/my-pledges.php`'s unfulfilled pledges (hidden when the pledge's project currency ≠ `payments.currency` — no silent wrong-currency charge) | #268 | 167 | ✅ |
+| `checkout.php` hardening completion — a £10,000 ceiling on self-service online giving (`GIVING_MAX_AMOUNT_PENCE`, pledges exempt — their amount is always forced from the pledge row) and server-built order descriptions (`'Giving — {category}'` / `'Pledge — {project}'`, truncated + control-chars stripped); the POSTed `description` field is removed from the flow entirely, closing a provider-page text-injection vector. (Purpose/purposeRef validation, the pledge donor-ownership check, and the forced pledge amount were already shipped by #430 and are unchanged) | #268 | — | ✅ |
+| Admin config — PayPal column on `/payments` gains Mode (sandbox/live) + Webhook ID fields and a live-mode-while-test-mode-on warning; Client ID becomes password-style keep-if-blank (matches Secret) now that it's encrypted at rest | #268 | 167 | ✅ |
+
+**New settings:** `payments.paypal.webhookId`, `payments.paypal.mode` (`sandbox`\|`live`, default `sandbox`). **Changed:** `payments.paypal.clientId` isSensitive `0`→`1` (predicate-guarded flip on existing installs — only where still empty). **New route:** `giving/give`.
 ### Venue Bookings (`/venues`) (#429, migration 170)
 
 Tenant-side register for congregations that RENT their building from another

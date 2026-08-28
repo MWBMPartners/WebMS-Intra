@@ -4,6 +4,10 @@
  * Projects — member's own pledge history.
  *
  * @package   Portal\Projects
+ * @author    MWBM Partners Ltd (t/a MWservices)
+ * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
+ * @license   All Rights Reserved
+ * @version   1.1.0
  * @link      https://github.com/MWBMPartners/webMS-Intra/issues/267
  */
 
@@ -18,9 +22,19 @@ Auth::requireLogin();
 $db     = App::db();
 $userId = (int) ($_SESSION['user_id'] ?? 0);
 
+// 💳 "Pay now" entry point (#268) — only offered when Payments has a
+// provider enabled AND the pledge's own project currency matches the
+// configured checkout currency (gap-item Q5: `/payments/checkout` always
+// charges `payments.currency`, so a mismatched project would otherwise be
+// silently charged in the wrong currency at face value).
+$paymentsSettings = App::settings()['payments'] ?? [];
+$paymentsEnabled  = (string) ($paymentsSettings['enabled'] ?? '0') === '1';
+$paymentsCurrency = (string) ($paymentsSettings['currency'] ?? 'GBP');
+$csrf = Auth::csrfToken();
+
 $rows = [];
 $stmt = $db->prepare(
-    'SELECT p.amountPence, p.pledgedAt, p.fulfilledAt, p.message, '
+    'SELECT p.pledgeID, p.amountPence, p.pledgedAt, p.fulfilledAt, p.message, '
     . '       pr.title, pr.slug, pr.currency '
     . 'FROM tblProjectPledge p INNER JOIN tblProject pr ON pr.projectID = p.projectID '
     . 'WHERE p.donorID = ? ORDER BY p.pledgedAt DESC LIMIT 200'
@@ -61,6 +75,20 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                             <span class="badge bg-success">Fulfilled</span>
                         <?php else: ?>
                             <span class="badge bg-warning">Pending</span>
+                            <?php if ($paymentsEnabled === true && $cur === $paymentsCurrency): ?>
+                                <form method="post" action="/payments/checkout" class="d-inline ms-1">
+                                    <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
+                                    <input type="hidden" name="purpose" value="pledge">
+                                    <input type="hidden" name="purposeRef" value="<?php echo (int) $r['pledgeID']; ?>">
+                                    <?php /* checkout.php's amount floor-check runs BEFORE the pledge branch overrides
+                                             the amount from the pledge row itself — this placeholder value is
+                                             discarded the moment the pledge branch runs; it only needs to clear
+                                             the 100-pence floor. */ ?>
+                                    <input type="hidden" name="amount" value="1.00">
+                                    <input type="hidden" name="return_to" value="/projects/my-pledges">
+                                    <button type="submit" class="btn btn-sm btn-outline-success">Pay now</button>
+                                </form>
+                            <?php endif; ?>
                         <?php endif; ?>
                     </div>
                 </div>

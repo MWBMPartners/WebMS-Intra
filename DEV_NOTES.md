@@ -2769,6 +2769,155 @@ page instead of a silent failure discovered mid-upload.
 
 ---
 
+## PayPal payment adapter + online giving/pledge checkout (gap #1)
+
+### Sandbox setup
+
+1. Create a PayPal Developer account at https://developer.paypal.com and a
+   **Sandbox** app (Apps & Credentials → Create App). Note the **Client ID**
+   and **Secret** — these are the sandbox pair, distinct from any live pair.
+2. On `/payments` (admin), set Provider = PayPal, Mode = Sandbox, paste the
+   Client ID + Secret, tick Enable. Client ID and Secret are both stored
+   encrypted at rest (libsodium, same as Stripe's secret key) and rendered
+   as password-style "leave blank to keep" inputs — the saved value is
+   never re-echoed into the form.
+3. Create a webhook subscription (Apps & Credentials → your app → Add
+   Webhook) pointed at the URL shown on the admin page:
+   `https://<your-host>/payments/webhook?provider=paypal`, subscribed to
+   exactly these three events:
+   - `CHECKOUT.ORDER.APPROVED`
+   - `PAYMENT.CAPTURE.COMPLETED`
+   - `PAYMENT.CAPTURE.REFUNDED`
+4. Copy the webhook's **Webhook ID** (`WH-…`) into the admin page's
+   "Webhook ID" field and save. This is the ONE value
+   `paypalVerifyWebhook()` needs to call PayPal's verify-webhook-signature
+   API — leaving it blank means every PayPal webhook 401s (fail-closed by
+   design, not a bug: S13 in the threat table below).
+5. Test end-to-end with a PayPal sandbox buyer account (created
+   automatically alongside the sandbox app, under Sandbox → Accounts):
+   `/giving/give` → pick a category → an amount → "Continue to secure
+   payment" → approve as the sandbox buyer → land back on
+   `/payments/return` → `tblPayment` should show `succeeded` with the
+   PayPal capture id as `providerRef`, and exactly one `tblGivingEntry` row
+   (`reference = 'payment:{id}'`).
+
+Going live is the same five steps against a **Live** app + Mode = Live —
+there is deliberately no code branch that reads `payments.test_mode` for
+PayPal; `payments.paypal.mode` is the sole authority for which API base
+URL (`api-m.sandbox.paypal.com` vs `api-m.paypal.com`) is used, and
+anything other than the literal string `'live'` is treated as sandbox
+(fail-safe: a typo or half-finished migration hits sandbox, never live
+money).
+
+### Why `intent=CAPTURE` orders need TWO capture triggers
+
+Unlike Stripe Checkout (charged the moment the payer completes checkout),
+a PayPal Orders v2 order with `intent: 'CAPTURE'` is only APPROVED when
+the payer finishes on PayPal's page — an explicit second API call
+(`POST /v2/checkout/orders/{id}/capture`) actually takes the money. Two
+paths make that call, both funnelled through the same
+`paypalCaptureOrder()` → `paypalHandleCaptureResult()` →
+`markPaymentSucceeded()` chain:
+
+1. **Return path** (primary, fast) — `payments/return.php` calls
+   `Payments::finalizeReturn()` before rendering, which captures
+   immediately when the row is still `pending` and the redirect result is
+   `ok`. Most payers land here within seconds of approving.
+2. **`CHECKOUT.ORDER.APPROVED` webhook** (backstop) — covers a payer who
+   approves on PayPal's page and then closes the tab / loses connectivity
+   before the redirect completes. Without this, that payment would sit
+   `pending` forever (PayPal auto-voids an uncaptured APPROVED order after
+   ~3 days, so the payer is never actually charged, but the giving/pledge
+   record would never land either).
+
+Both paths — plus the `PAYMENT.CAPTURE.COMPLETED` webhook that arrives
+after ANY capture, whoever triggered it — can race each other for the same
+row. That's safe by construction: `markPaymentSucceeded()`'s final
+transition is a single atomic
+`UPDATE tblPayment SET status='succeeded', … WHERE status='pending'`
+gated on `affected_rows === 1` — only the first caller to win that WHERE
+clause fans out into Giving/Projects; every later caller (a slower webhook
+delivery, a double-click, a retried delivery) sees `affected_rows === 0`
+and returns immediately.
+
+### ★ The S1 integrity gate — the one control that matters most
+
+`Payments::markPaymentSucceeded()` is the single choke point every success
+path funnels through, and it now takes two additional parameters:
+`?int $observedAmountPence, ?string $observedCurrency`. When non-null,
+they are asserted EXACTLY (`===`, both amount and currency) against the
+pending row's own `amountPence`/`currency` BEFORE the atomic transition
+above runs. A mismatch:
+
+```php
+UPDATE tblPayment SET status = 'failed',
+       errorMsg = 'amount-mismatch exp:{row} got:{observed}'
+ WHERE paymentID = ? AND status = 'pending';
+-- + Logger::activity('PaymentIntegrityFail', …)
+-- + return; -- NEVER falls through to the fan-out below
+```
+
+Every PayPal call site extracts the observed amount from the field PayPal
+itself reports back (the capture response's `amount.value`/
+`currency_code`, the same fields on the 422-reconcile GET-order response,
+or the verified webhook's `resource.amount`) and parses it through
+`paypalMoneyToPence()` — a STRICT `^([0-9]+)\.([0-9]{2})$` parser that
+returns `null` on anything else (`"10.5"`, `"1,000.00"`, scientific
+notation). A `null` parse result is itself treated as an integrity failure
+(row marked `failed`, `PaymentIntegrityFail` logged) — it is never passed
+through to `markPaymentSucceeded()` as `null`, because a PayPal call site
+passing `null` observed values would silently DISABLE the gate for that
+call. **Grep rule for any future PayPal code path:**
+`grep -n 'markPaymentSucceeded' _core/Payments.php` — every PayPal call
+site must show 4 arguments, never 2. Stripe call sites keep passing 2 args
+(unchanged behaviour) — extending the same gate to Stripe using
+`checkout.session.completed`'s own `amount_total`/`currency` fields is a
+noted follow-up, not done in this PR, to keep the Stripe diff at zero.
+
+### `checkout.php` — what #430 already hardened vs. what this PR added
+
+`checkout.php` already validated `purpose`/`purposeRef` server-side before
+this PR (PR #430): the pledge branch requires `donorID` to be the logged-in
+user and forces `amountPence`/`currency` from the pledge row (never the
+POSTed amount — an under-payment could otherwise still fulfil a pledge in
+full); the giving branch validates the category is active and site-scoped;
+anything else coerces to `purpose = 'other'` with `purposeRef = null` (no
+fan-out target, so nothing to forge). This PR's additions sit ADJACENT to
+that, not instead of it:
+
+- **`GIVING_MAX_AMOUNT_PENCE`** (currently `1_000_000` — £10,000) rejects
+  an online GIVING amount above the ceiling with a "For large gifts please
+  contact the office" flash. Pledges are exempt — a legitimate pledge can
+  exceed this, and its amount is forced from the pledge row regardless of
+  what (if anything) was POSTed.
+- **Server-built descriptions** — `description` is no longer read from
+  `$_POST` at all; it's built from the already-validated category name
+  (`'Giving — {name}'`) or project title (`'Pledge — {title}'`, truncated
+  to 120 chars). This closes a text-injection vector that becomes
+  materially worse once a REAL provider-hosted page exists to inject into
+  — a POSTed description previously flowed straight into the (until this
+  PR, unreachable) provider checkout page's product/order name.
+
+One implementation quirk worth knowing: the 100-pence floor check runs
+BEFORE the purpose branch that overrides the amount for a pledge, so the
+pledge "Pay now" form on `my-pledges.php` submits a throwaway
+`amount=1.00` hidden field purely to clear that floor gate — the pledge
+branch immediately overwrites `$amountPence` from the pledge row, so the
+throwaway value never reaches the provider.
+
+### Q5 — pledge/checkout currency mismatch
+
+`/payments/checkout` always charges `payments.currency` (one site-wide
+currency), but `tblProject.currency` is set per-project. A pledge on a
+EUR-denominated project would, if charged, be billed `payments.currency`
+(e.g. GBP) at face value — a pre-existing quirk that #430's pledge-amount
+forcing doesn't address (it forces the AMOUNT, using
+`pledge['currency'] ?? $currency`, but `Payments::startCheckout()` still
+ultimately hands the provider whatever `$currency` ends up as). The v1
+mitigation shipped here is minimal: `my-pledges.php` only renders the "Pay
+now" button when `project.currency === payments.currency`; a currency
+mismatch hides the button rather than risking a wrong-currency charge.
+Proper multi-currency checkout is a separate, larger issue.
 ## Venue Bookings (#429)
 
 ### Wall-clock rule (make-or-break)
