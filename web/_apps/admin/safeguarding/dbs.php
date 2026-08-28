@@ -41,7 +41,7 @@ $requireForCoords = (string) Settings::get('safeguarding.dbs_required_for_coordi
 // 📋 Per-user latest DBS status. LEFT JOIN ensures users with no DBS row
 //     still appear (as Missing).
 $users = [];
-$sql = 'SELECT u.userID, u.fullName, u.email, '
+$sql = 'SELECT u.userID, u.fullName, u.emailAddress AS email, '
      . '       d.dbsCheckID, d.dbsType, d.referenceNumber, d.issuedDate, d.expiresAt, d.status '
      . 'FROM tblUsers u '
      . 'LEFT JOIN ( '
