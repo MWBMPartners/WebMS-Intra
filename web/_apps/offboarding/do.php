@@ -146,6 +146,15 @@ try {
         [$userId], 'i'
     );
 
+    // 8a. Delete Web Push subscriptions (#322) — offboarding's whole point
+    //     is credential revocation; an endpoint + p256dh/auth key pair is
+    //     exactly that (a leaving volunteer's own device should stop
+    //     receiving portal notifications the moment they're offboarded).
+    $run('delete_push_subscriptions',
+        'DELETE FROM tblPushSubscriptions WHERE userID = ?',
+        [$userId], 'i'
+    );
+
     // 9. Audit row.
     $logJson = json_encode($stepsLog);
     $stmt = $db->prepare(

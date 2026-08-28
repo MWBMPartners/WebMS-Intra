@@ -89,6 +89,13 @@ class GdprEraser
             ['table' => 'tblGiftAidDeclaration','userCol' => 'donorID', 'action' => 'delete'],
             ['table' => 'tblZoomAccount',      'userCol' => 'userID', 'action' => 'delete'],
             ['table' => 'tblUserTranslationPref','userCol' => 'userID', 'action' => 'delete'],
+            // #322 Web Push — endpoint URL + p256dh/auth keys are device
+            // credentials tied to a specific browser install, not history
+            // worth retaining once their owner is erased. Hard delete
+            // mirrors the tblTrustedDevices/tblLocalAccounts precedent
+            // immediately above, not the anonymise-and-keep pattern used
+            // for content/authorship tables.
+            ['table' => 'tblPushSubscriptions','userCol' => 'userID', 'action' => 'delete'],
             // #303 Phase 2 — discipleship per-user tables. markedByID /
             // enrolledByID / revokedByID attributions self-heal via
             // ON DELETE SET NULL on the FKs, so a hard delete here is safe.

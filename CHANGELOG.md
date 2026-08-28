@@ -2,6 +2,38 @@
 
 
 ## [Unreleased] (alpha)
+- feat(push): #322 — Web Push notifications ("we're live now" + service
+  reminders). Migration 111 shipped `tblPushSubscriptions` + the VAPID
+  settings keys, but the subscribe/unsubscribe handlers sat at
+  `_apps/api/push/*` — a path ApiRouter never resolves — and no sender
+  existed anywhere. Ships `Portal\Core\WebPush`: VAPID (RFC 8292) ES256
+  JWT signing with the mandatory DER→JOSE signature conversion (shipping
+  the raw DER bytes is the classic silent-401 bug), RFC 8291 aes128gcm
+  payload encryption (fresh ephemeral P-256 keypair per message,
+  `openssl_pkey_derive()` ECDH, triple `hash_hkdf()`), and the RFC 8030
+  delivery POST. A committed, dependency-free crypto self-test
+  (`tools/webpush-selftest.php`) exercises the real private methods via
+  reflection and passes (sign→verify + encrypt→decrypt round-trip).
+  Relocates the dead `push/subscribe`/`push/unsubscribe` handlers to the
+  ApiRouter convention path + seeds the two `api.push.*.enabled` flags;
+  adds rate limiting and SSRF-guarded endpoint validation (https-only, no
+  IP-literal/local host, admin-editable host-suffix allowlist) enforced at
+  BOTH subscribe and send time. VAPID private key is sodium-encrypted at
+  rest, never redisplayed, never sent to the client — only the public key
+  reaches the browser. New client subscribe UI
+  (`assets/js/push-subscribe.js`) + `sw.js` `push`/`notificationclick`
+  handlers (neither existed before), surfaced on `/account/notifications`
+  and `/live`. Two channels wired: "we're live now" (manual admin button
+  on `/admin/livestream` + Host Console, plus a default-OFF auto-detect
+  cron and a default-OFF anonymous "starting soon" broadcast, both in the
+  new `cron/push-golive.php`) and service reminders (a Web Push companion
+  riding `cron/event-reminders.php`'s existing 1h-window email dedupe).
+  New `/admin/integrations/push` config page (generate-or-paste keys,
+  TTLs, toggles, per-channel subscription counts, test-send).
+  `tblPushSubscriptions` added to `GdprEraser` + offboarding revocation.
+  INERT until an admin sets VAPID keys. Migration 175: 3 additive
+  `tblPushSubscriptions` columns, settings seeds, 4 route seeds, no new
+  tables. All 11 audit checks green, `php -l` clean on every touched file.
 - feat(workflow): gap #7 (#443) — Workflow Execution Engine +
   generic `/approvals` inbox. Migration 034 shipped four workflow tables
   and an admin definition CRUD, but no code anywhere started, advanced,

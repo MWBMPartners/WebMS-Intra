@@ -23,7 +23,9 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\HostConsole;
+use Portal\Core\Livestream;
 use Portal\Core\Site;
+use Portal\Core\WebPush;
 
 Auth::ensureSession();
 Auth::requireLogin();
@@ -66,11 +68,25 @@ $momentMeta = [
 // 📊 Sparkline scale.
 $maxTrend = max(1, max(array_column($trend, 'count')));
 
+// 🔔 "We're live now" push (#322) — same handler as /admin/livestream,
+// posted here with eventID + a returnTo so the host stays on this console.
+$pushConfigured = WebPush::isConfigured();
+$currentlyLive  = Livestream::currentlyLive($siteId);
+
+$flashMsg  = $_SESSION['flash_msg']  ?? '';
+$flashType = $_SESSION['flash_type'] ?? '';
+unset($_SESSION['flash_msg'], $_SESSION['flash_type']);
+
 $pageTitle = 'Host Console — ' . (string) $event['eventName'];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 <meta http-equiv="refresh" content="30">
 <div class="container-fluid py-3">
+    <?php if ($flashMsg !== ''): ?>
+        <div class="alert alert-<?php echo htmlspecialchars($flashType !== '' ? $flashType : 'info', ENT_QUOTES, 'UTF-8'); ?>">
+            <?php echo htmlspecialchars($flashMsg, ENT_QUOTES, 'UTF-8'); ?>
+        </div>
+    <?php endif; ?>
     <div class="d-flex justify-content-between align-items-start mb-3 flex-wrap gap-2">
         <div>
             <h1 class="h4 mb-1"><i class="fa-solid fa-headset me-2 text-primary"></i><?php echo htmlspecialchars((string) $event['eventName'], ENT_QUOTES, 'UTF-8'); ?></h1>
@@ -82,7 +98,20 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 &middot; refreshes every 30s
             </p>
         </div>
-        <a href="/admin/host-console" class="btn btn-sm btn-outline-secondary"><i class="fa-solid fa-arrow-left me-1"></i>Back</a>
+        <div class="d-flex gap-2">
+            <form method="post" action="/admin/livestream" class="d-inline">
+                <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
+                <input type="hidden" name="action" value="notify_live">
+                <input type="hidden" name="eventID" value="<?php echo (int) $eventId; ?>">
+                <input type="hidden" name="returnTo" value="/admin/host-console/event?id=<?php echo (int) $eventId; ?>">
+                <button type="submit" class="btn btn-sm btn-primary"
+                        <?php echo ($pushConfigured === false || $currentlyLive === null) ? 'disabled' : ''; ?>
+                        title="<?php echo $pushConfigured === false ? 'Configure Web Push at /admin/integrations/push first' : ($currentlyLive === null ? 'No channel is currently in its scheduled live window' : 'Send a push to everyone subscribed to the livestream channel'); ?>">
+                    <i class="fa-solid fa-bullhorn me-1"></i>Send "We're live"
+                </button>
+            </form>
+            <a href="/admin/host-console" class="btn btn-sm btn-outline-secondary"><i class="fa-solid fa-arrow-left me-1"></i>Back</a>
+        </div>
     </div>
 
     <div class="row g-3 mb-3">

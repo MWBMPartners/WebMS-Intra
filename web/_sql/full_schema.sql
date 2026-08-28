@@ -5218,6 +5218,11 @@ CREATE TABLE IF NOT EXISTS `tblPushSubscriptions` (
     `createdAt`    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     `lastUsedAt`   DATETIME     DEFAULT NULL,
     `isActive`     TINYINT(1)   NOT NULL DEFAULT 1,
+    -- ── from 175_web_push_sender.sql ── dead-subscription pruning (RFC 8030 §7.3)
+    `failCount`      TINYINT UNSIGNED NOT NULL DEFAULT 0
+                     COMMENT 'Consecutive transient (429/5xx/timeout) failures; >= 8 deactivates the subscription',
+    `lastFailureAt`  DATETIME DEFAULT NULL COMMENT 'Timestamp of the most recent transient send failure',
+    `lastHttpStatus` SMALLINT DEFAULT NULL COMMENT 'Last push-service HTTP response code (201/404/410/429/5xx) — diagnostics on the admin page',
     PRIMARY KEY (`subID`),
     UNIQUE KEY `uq_ps_endpoint` (`endpoint`(255)),
     KEY `idx_ps_user`   (`userID`),
@@ -7749,4 +7754,43 @@ INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
 ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 
 INSERT INTO `tblMigrations` (`filename`) VALUES ('174_workflow_engine.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- ── from 175_web_push_sender.sql ─────────────────────────────────────────────
+-- 🔔🔐 Web Push sender (#322) — VAPID ES256 + RFC 8291 aes128gcm. The three
+-- additive tblPushSubscriptions columns (failCount/lastFailureAt/
+-- lastHttpStatus) are already folded inline into that CREATE TABLE block
+-- above (SECTION "from 111_cop_easy_wins.sql"). This block carries only the
+-- seeds: the ApiRouter gating flags for the relocated push/api handlers,
+-- TTL/auto-notify/cron-token/SSRF-allowlist settings, and the admin +
+-- cron routes. `push.vapidPublicKey`/`push.vapidPrivateKey`/`push.contact`/
+-- `push.enabled` already exist (111_cop_easy_wins.sql, seeded empty above)
+-- and are deliberately NOT re-seeded here.
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'api.push.subscribe.enabled',   'true',  'true',  0),
+    (NULL, 'api.push.unsubscribe.enabled', 'true',  'true',  0),
+    (NULL, 'push.ttl.golive',              '900',   '900',   0),
+    (NULL, 'push.ttl.reminder',            '3600',  '3600',  0),
+    (NULL, 'push.golive.auto',             'false', 'false', 0),
+    (NULL, 'push.reminders.broadcast',     'false', 'false', 0),
+    (NULL, 'push.cron_token',              '',      '',      1),
+    (NULL, 'push.endpointHostAllowlist',
+           'fcm.googleapis.com,push.services.mozilla.com,push.apple.com,notify.windows.com,windows.com,pushsvc.mozilla.com',
+           'fcm.googleapis.com,push.services.mozilla.com,push.apple.com,notify.windows.com,windows.com,pushsvc.mozilla.com',
+           0)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
+-- 🗺️ Route seed — admin/integrations/push* isProtected=1 (session/admin
+-- gated); cron/push-golive isProtected=0 (public but token-gated), matching
+-- cron/user-reminders / cron/workflow-timeouts above. No api/push/* rows —
+-- the ApiRouter routing trap: Router never consults tblRoutes for api/*
+-- paths, the settings flags above are the only gate those need.
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('admin/integrations/push',      'admin/integrations/push/index.php', 1),
+    ('admin/integrations/push/save', 'admin/integrations/push/save.php',  1),
+    ('admin/integrations/push/test', 'admin/integrations/push/test.php',  1),
+    ('cron/push-golive',             'cron/push-golive.php',              0)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('175_web_push_sender.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;

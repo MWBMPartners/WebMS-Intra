@@ -970,6 +970,41 @@ the existing `worship.enabled` / `service_plans.enabled`).
 
 ---
 
+### Web Push notifications (#322, migration 175)
+
+Migration 111 shipped `tblPushSubscriptions` + the four `push.vapid*`/
+`push.contact`/`push.enabled` settings, but the subscribe/unsubscribe
+handlers sat at the wrong path for ApiRouter to ever reach (same routing
+trap #372/#373/#387 already fixed for worship/livestream) and NO sender
+existed anywhere. This closes the whole loop: relocation, sender class,
+client subscribe UI, and two notification channels.
+
+| Item | Issue | Migration | Status |
+|---|---|---|---|
+| `Portal\Core\WebPush` — VAPID (RFC 8292) ES256 JWT signer with the mandatory DER→JOSE signature conversion (`openssl_sign()` yields DER; every real push service 401s on the raw bytes), RFC 8291 aes128gcm payload encryption (fresh ephemeral P-256 keypair per message, `openssl_pkey_derive()` ECDH, three `hash_hkdf()` derivations), RFC 8030 delivery POST with TTL/Urgency/Topic. Committed self-test (`tools/webpush-selftest.php`) exercises the real private methods via reflection — sign→verify + encrypt→decrypt round-trip, no DB/network needed | #322 | 175 | ✅ |
+| Relocated `_apps/api/push/{subscribe,unsubscribe}.php` → `_apps/push/api/{subscribe,unsubscribe}.php` (the ApiRouter convention path) + seeded `api.push.{subscribe,unsubscribe}.enabled` flags — the original location was unreachable dead code from the day it shipped. Added rate limiting (`RateLimiter`, 30/hour/IP) and endpoint SSRF validation at subscribe time (`WebPush::validateEndpoint()` — https-only, no IP-literal/local host, admin-editable host-suffix allowlist) | #322 | 175 | ✅ |
+| Client subscribe UI — `assets/js/push-subscribe.js` (vanilla, explicit-gesture `pushManager.subscribe`, never on page load) + `sw.js` `push`/`notificationclick` handlers (neither existed before). Rendered on `/account/notifications` (master prefs `pushLivestream`/`pushServiceReminders`, both default-on) and `/live` (anonymous viewer opt-in bell) | #322 | — | ✅ |
+| "We're live now" — manual admin button on `/admin/livestream` + Host Console (`Topic` header replaces, not stacks, a re-press; rate-limited 3/15min/site), plus default-OFF `cron/push-golive.php` auto-detect (`push.golive.auto`, dedupe once per channel per day via `tblUserReminderLog`) and a default-OFF anonymous "starting soon" broadcast (`push.reminders.broadcast`) | #322 | 175 | ✅ |
+| Service reminders — `cron/event-reminders.php`'s 1h window now ALSO pushes to the same RSVP'd users, riding the existing `tblEventReminderLog` single-shot claim (no separate dedupe). 24h window stays email-only | #322 | — | ✅ |
+| GdprEraser + offboarding coverage — `tblPushSubscriptions` hard-deleted on both right-to-erasure and offboarding revocation (endpoint + keys are device credentials, not history worth retaining) | #322 | — | ✅ |
+| Admin config `/admin/integrations/push` — generate-or-paste VAPID keys (private key sodium-encrypted at rest, never re-displayed; only a public-key fingerprint shown), contact/enable/TTL/auto-toggle settings, per-channel subscription counts (no endpoint enumeration), "send test" to the admin's own devices | #322 | 175 | ✅ |
+
+**INERT UNTIL CONFIGURED** — exactly like PayPal/Cloudflare Stream: with
+`push.vapidPublicKey`/`push.vapidPrivateKey` empty (as migration 111 seeded
+them), `WebPush::isConfigured()` is false and every send path, the client
+bootstrap, and both cron jobs no-op silently. **New files:**
+`web/_core/WebPush.php`, `web/_apps/admin/integrations/push/{index,save,test}.php`,
+`web/_apps/cron/push-golive.php`, `web/public_html/assets/js/push-subscribe.js`,
+`tools/webpush-selftest.php`. **Schema:** migration 175 — three additive
+`tblPushSubscriptions` columns (`failCount`/`lastFailureAt`/`lastHttpStatus`,
+dead-subscription pruning), settings seeds (TTLs, auto-notify toggles,
+`push.cron_token` empty+sensitive, `push.endpointHostAllowlist`, the two
+`api.push.*.enabled` flags), 4 route seeds. No new tables — reuses
+`tblUserReminderLog` (go-live dedupe) and `tblEventReminderLog` (reminder
+dedupe).
+
+---
+
 ## Audit scripts (`tools/audit-checks/`)
 
 CI-runnable static audits invoked from PHP-static-analysis workflow:

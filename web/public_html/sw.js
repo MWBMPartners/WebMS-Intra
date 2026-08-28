@@ -9,14 +9,22 @@
  *
  * Cache is versioned via CACHE_VERSION — bump to invalidate old caches on deploy.
  *
+ * Also handles Web Push (#322): `push` shows a notification for every
+ * message (a push with an unparseable/missing body still shows a generic
+ * notification — a `push` event SHOULD always display something when
+ * `userVisibleOnly: true` was promised at subscribe time), and
+ * `notificationclick` focuses an existing tab or opens a new one at the
+ * payload's `url` (defence-in-depth same-origin-relative check even though
+ * the payload is server-authored).
+ *
  * @package   Portal
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
- * @version   0.7.0
+ * @version   0.8.0
  * =============================================================================
  */
 
-var CACHE_VERSION = 'portal-v1';
+var CACHE_VERSION = 'portal-v2';
 var OFFLINE_PAGE  = '/offline';
 
 // 📋 Static assets to pre-cache on install
@@ -207,4 +215,66 @@ self.addEventListener('message', function (event) {
     if (event.data && event.data.type === 'portal-skip-waiting') {
         self.skipWaiting();
     }
+});
+
+// =========================================================================
+// 🔔 Web Push (#322) — RFC 8291 decryption happens in the browser itself
+// (the Push API spec, not this file); by the time `push` fires here the
+// payload is already plaintext JSON on `event.data`.
+// =========================================================================
+self.addEventListener('push', function (event) {
+    var data = { title: 'Notification', body: '', url: '/', tag: 'portal-push' };
+    try {
+        if (event.data) {
+            var parsed = event.data.json();
+            data.title = parsed.title || data.title;
+            data.body  = parsed.body  || data.body;
+            data.url   = parsed.url   || data.url;
+            data.tag   = parsed.tag   || data.tag;
+        }
+    } catch (err) {
+        // 📋 Unparseable body — still show SOMETHING. userVisibleOnly:true
+        // was promised at subscribe time; a silent push erodes that promise
+        // and browsers may revoke the subscription if it happens too often.
+        data.body = 'You have a new notification.';
+    }
+
+    event.waitUntil(
+        self.registration.showNotification(data.title, {
+            body: data.body,
+            icon: '/assets/images/icon-192.svg',
+            badge: '/assets/images/icon-192.svg',
+            tag: data.tag,
+            data: { url: data.url }
+        })
+    );
+});
+
+self.addEventListener('notificationclick', function (event) {
+    event.notification.close();
+
+    // 🛡️ Defence-in-depth: only ever navigate to a same-origin-relative
+    // path, even though the payload is server-authored (WebPush.php only
+    // ever sends portal-internal URLs).
+    var url = (event.notification.data && event.notification.data.url) || '/';
+    if (typeof url !== 'string' || url.indexOf('/') !== 0 || url.indexOf('//') === 0) {
+        url = '/';
+    }
+
+    event.waitUntil(
+        self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(function (clientList) {
+            for (var i = 0; i < clientList.length; i++) {
+                var client = clientList[i];
+                if (client.url.indexOf(self.location.origin) === 0 && 'focus' in client) {
+                    if ('navigate' in client) {
+                        client.navigate(url);
+                    }
+                    return client.focus();
+                }
+            }
+            if (self.clients.openWindow) {
+                return self.clients.openWindow(url);
+            }
+        })
+    );
 });

@@ -15,7 +15,17 @@
  *   day  — once per day at 06:30-08:00 local — coordinator/admin
  *          summary of today's events
  *
+ * WEB PUSH (#322): the 1h window ALSO fans a push out to the same RSVP'd
+ * ("going"/"confirmed") userIDs, on the `reminders` channel, gated on their
+ * `pushServiceReminders` notifyPrefs key — riding the SAME
+ * `tblEventReminderLog('1h')` single-shot claim the email batch already
+ * makes (push goes out iff the email batch for that window goes out; no
+ * separate dedupe row). The 24h window stays email-only (a push a day
+ * early is noise). `WebPush::isConfigured()` short-circuits first, so an
+ * unconfigured install pays one settings read and nothing else.
+ *
  * @link https://github.com/MWBMPartners/webMS-Intra/issues/329
+ * @link https://github.com/MWBMPartners/webMS-Intra/issues/322
  * -----------------------------------------------------------------------------
  */
 
@@ -24,6 +34,7 @@ declare(strict_types=1);
 use Portal\Core\Logger;
 use Portal\Core\Mailer;
 use Portal\Core\Settings;
+use Portal\Core\WebPush;
 
 // 🔑 Token gate (constant-time compare).
 $incoming = (string) ($_GET['key'] ?? '');
@@ -75,6 +86,33 @@ function sendReminderBatch(\mysqli $db, int $eventId, string $type, string $subj
     return $sent;
 }
 
+/**
+ * The RSVP'd ("going"/"confirmed") userIDs for one event — used only by
+ * the 1h Web Push fan-out (#322), a companion query to
+ * sendReminderBatch()'s email-address SELECT above (kept separate rather
+ * than widening that shared function's signature, since the 24h/day
+ * windows never need userIDs).
+ */
+function eventRsvpUserIds(\mysqli $db, int $eventId): array
+{
+    $stmt = $db->prepare(
+        'SELECT DISTINCT r.userID FROM tblEventRSVPs r '
+        . 'WHERE r.eventID = ? AND r.response = "going" AND r.status = "confirmed"'
+    );
+    if ($stmt === false) {
+        return [];
+    }
+    $stmt->bind_param('i', $eventId);
+    $stmt->execute();
+    $ids = [];
+    $result = $stmt->get_result();
+    while ($row = $result->fetch_assoc()) {
+        $ids[] = (int) $row['userID'];
+    }
+    $stmt->close();
+    return $ids;
+}
+
 // ─────────────────────────────────────────────────────────────────────
 // 24h window
 // ─────────────────────────────────────────────────────────────────────
@@ -102,7 +140,7 @@ $stmt->close();
 // 1h window
 // ─────────────────────────────────────────────────────────────────────
 $stmt = $mysqli->prepare(
-    'SELECT e.eventID, e.eventName, e.eventSlug, e.startDateTime, e.locationName FROM tblEvents e '
+    'SELECT e.eventID, e.siteID, e.eventName, e.eventSlug, e.startDateTime, e.locationName FROM tblEvents e '
     . 'WHERE e.isDeleted = 0 AND e.status = "published" '
     . '  AND e.startDateTime BETWEEN DATE_ADD(NOW(), INTERVAL 45 MINUTE) '
     . '                          AND DATE_ADD(NOW(), INTERVAL 75 MINUTE) '
@@ -110,6 +148,7 @@ $stmt = $mysqli->prepare(
 );
 $stmt->execute();
 $result = $stmt->get_result();
+$pushConfigured = WebPush::isConfigured();
 while ($e = $result->fetch_assoc()) {
     $when = date('H:i', strtotime((string) $e['startDateTime']));
     $subject = '⏰ Starting soon: ' . (string) $e['eventName'];
@@ -117,6 +156,31 @@ while ($e = $result->fetch_assoc()) {
            . (!empty($e['locationName']) ? '<p><strong>Where:</strong> ' . htmlspecialchars((string) $e['locationName'], ENT_QUOTES, 'UTF-8') . '</p>' : '')
            . '<p>See you in about an hour!</p>';
     $stats['1h'] += sendReminderBatch($mysqli, (int) $e['eventID'], '1h', $subject, $body);
+
+    // 🔔 Web Push companion (#322) — same RSVP'd users, riding the SAME
+    // '1h' single-shot claim the email batch above just made. Never blocks
+    // or retries independently of the email send.
+    if ($pushConfigured === true) {
+        $rsvpUserIds = eventRsvpUserIds($mysqli, (int) $e['eventID']);
+        if (count($rsvpUserIds) > 0) {
+            $ttl = (int) (Settings::get('push.ttl.reminder', '3600') ?? '3600');
+            WebPush::sendToChannel(
+                (int) $e['siteID'],
+                'reminders',
+                [
+                    'title' => (string) $e['eventName'] . ' starts soon',
+                    'body'  => 'Starting at ' . $when . (!empty($e['locationName']) ? ' · ' . (string) $e['locationName'] : ''),
+                    'url'   => '/calendar/event?slug=' . rawurlencode((string) $e['eventSlug']),
+                    'tag'   => 'evt' . (int) $e['eventID'],
+                ],
+                $ttl,
+                'normal',
+                'evt' . (int) $e['eventID'],
+                'pushServiceReminders',
+                $rsvpUserIds
+            );
+        }
+    }
 }
 $stmt->close();
 

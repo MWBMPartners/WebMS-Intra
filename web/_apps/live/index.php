@@ -15,6 +15,7 @@ use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Livestream;
 use Portal\Core\Site;
+use Portal\Core\WebPush;
 
 Auth::ensureSession();
 Auth::requireLogin();
@@ -37,6 +38,20 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <span class="badge bg-danger ms-3"><i class="fa-solid fa-circle me-1" style="font-size:0.6em;"></i>LIVE NOW</span>
     <?php endif; ?>
 </div>
+
+<?php
+// 🔔 Viewer opt-in bell (#322) — quiet, one-line "get notified" widget.
+// Hidden entirely when Web Push is unconfigured (WebPush::publicKey()
+// returns '' — push-subscribe.js also self-hides in that case, this just
+// avoids the extra <script> request for nothing).
+$livePushPublicKey = WebPush::publicKey();
+if ($livePushPublicKey !== ''):
+?>
+<div class="mb-3" data-push-optin
+     data-vapid-key="<?php echo htmlspecialchars($livePushPublicKey, ENT_QUOTES, 'UTF-8'); ?>"
+     data-channels="livestream"></div>
+<script src="/assets/js/push-subscribe.js" defer></script>
+<?php endif; ?>
 
 <?php if ($live !== null):
     $override = trim((string) ($live['embedHtmlOverride'] ?? ''));
