@@ -4375,6 +4375,163 @@ git diff | grep -iE "tblKidProfiles|tblCareCase|tblCareVisit|tblVisitor" # must 
 
 ---
 
+## Reports Builder (#156, migration 184)
+
+Whitelist-driven custom report builder alongside the pre-existing #93
+fixed dashboards, at `/admin/reports/builder/*`. The **entire point** of
+this feature is that a saved report is a **definition** (registry keys +
+literal filter values), never SQL — see FEATURES.md's "Reports Builder"
+subsection for the user-facing summary; this section is the how-it-works
+and how-to-extend-it writeup.
+
+### The two-class architecture
+
+- **`Portal\Core\ReportRegistry`** (`web/_core/ReportRegistry.php`) —
+  pure static data + lookups. No DB access, no `$_GET`/`$_POST`/
+  `$_REQUEST`/`$_COOKIE` reads anywhere in the file (grep-provable). Holds
+  the closed `SOURCES` constant (six v1 sources), `OPERATORS`/
+  `TYPE_OPERATORS`, `AGGREGATIONS`/`DEFAULT_AGGS_BY_TYPE`, and
+  `TRANSFORMS`. Every lookup method (`source()`, `column()`, `operator()`,
+  `aggregation()`, `transform()`) is a strict `array_key_exists()` /
+  `??`-null-coalesce read against those constants — an unknown key always
+  resolves to `null`, never a partial/fuzzy match.
+- **`Portal\Core\ReportBuilder`** (`web/_core/ReportBuilder.php`) — the
+  compiler/executor/CSV/CRUD engine. `compile(array $definition, int
+  $siteId): array` is the ONE place in the codebase that assembles report
+  SQL. Every substring it concatenates into the SQL string is either (a) a
+  `ReportRegistry` constant reached by strict key lookup, (b) a
+  request-independent literal (`AS `, ` FROM `, backticks, …), or (c)
+  generated placeholder text (`implode(', ', array_fill(0, $n, '?'))`)
+  whose LENGTH comes from `count()`, never from request content. The only
+  user-typed contribution anywhere is inside `$params`, always reaching
+  the DB via `mysqli_stmt::bind_param()`.
+
+### Adding a new data source safely
+
+This is **code + PR review only** — there is no admin UI that can add a
+source, and that is intentional. To add a seventh source:
+
+1. Add an entry to `ReportRegistry::SOURCES` — `table`/`alias`/`appSlug`/
+   `siteExpr` are mandatory; `fixedWhere`/`joins`/`mandatoryJoins` as
+   needed. Every column needs `expr` (`alias.column` — validated by
+   `assertSelfConsistent()`'s regex), `label`, and `type`.
+2. Confirm the table is a REAL table already in `full_schema.sql` —
+   `tools/audit-checks/check_php_table_refs.py` enforces this
+   automatically for anything referenced from PHP.
+3. If any column carries financial or PII-adjacent data, set `'gates' =>
+   […]` (a `tblRoles.roleKey` string, `'@siteAdmin'`, or `'@rootAdmin'` —
+   ANY one passing is enough) and `'pii' => true` for audit-log/CSV-notice
+   purposes. Gates apply identically in SELECT and WHERE — there is no
+   separate "read-only" vs "filterable" tier.
+4. Run `php tools/report-builder-selftest.php` — Part A asserts
+   `ReportRegistry::assertSelfConsistent()` passes (naming conventions +
+   the forbidden-table blocklist below); add a red-team case for any new
+   gate to Part C.
+5. **Never** add a table matching the forbidden-table blocklist (care,
+   kids, safeguarding, prayer requests, local/linked accounts, settings,
+   API keys, sessions, trusted devices, password resets, WebAuthn, TOTP) —
+   `assertSelfConsistent()` throws a `RuntimeException` if you do. Those
+   fragments are deliberately stored as bare word fragments (`'Kid'`,
+   `'Care'`, …) reassembled with the `'tbl'` prefix only at RUNTIME inside
+   `containsForbiddenTable()` — NOT as literal `'tblXxx'` strings — purely
+   so `check_php_table_refs.py`'s regex scanner (which flags any
+   `tblXxx`-shaped identifier that isn't a real schema table) doesn't
+   false-positive on a string that names a forbidden PATTERN rather than
+   referencing an actual table.
+
+### The compile() algorithm, in order
+
+1. **Shape gate** — reject unknown top-level keys, wrong format version,
+   oversized JSON (`ReportBuilder::MAX_DEF_BYTES`).
+2. **Source resolve** — `ReportRegistry::source()` (null ⇒ refuse) +
+   `AppRegistry::isEnabled($src['appSlug'])` (false ⇒ refuse — a
+   report's owning app being disabled fails the SAME way an unknown
+   source does).
+3. **Column resolve** (SELECT or GROUP+aggregates) — `resolveColumn()`
+   looks up the column AND checks its gates in one call, shared by every
+   position (SELECT/WHERE/GROUP/aggregate) so a gate can never be
+   accidentally skipped in one position but not another.
+4. **WHERE — tenant scope FIRST, forced.** `$where = ["{siteExpr} = ?"]`
+   with `$siteId` from the CALLER's `Site::id()` — the definition format
+   has NO siteID field at all, so there is nothing for a hostile
+   definition to even attempt to override.
+5. **WHERE — user filters**, arity-checked per operator, value-coerced
+   per column type, then wrapped in ONE set of parentheses and AND-ed onto
+   the tenant scope: `siteExpr = ? AND fixedWhere AND (userRow1 OR
+   userRow2 …)`. An `OR` conjunction can only ever widen matches INSIDE
+   that parenthesised group — it structurally cannot reach outside it to
+   touch the tenant-scope predicate.
+6. **GROUP BY / ORDER BY** reference the SELECT list's OWN output alias
+   (backtick-quoted), never re-derive an expression — `sort.col` must be
+   a member of the exact output-key set step 3 built, checked by
+   `in_array(..., true)`.
+7. **JOINs** — `mandatoryJoins` always emitted; every other join emitted
+   only if some selected/filtered/grouped column actually needs it
+   (`noteJoin()` tracks a `$joinsNeeded` set keyed by join-key, not by
+   content).
+8. **Assemble + `strlen($types) === count($params)` assert** — belt-and-
+   braces; should be structurally unreachable given the lockstep
+   construction above, but throws a clean `RuntimeException` instead of
+   letting a mismatched `bind_param()` produce PHP 8's uncaught
+   `ValueError` (see `check_bind_param_arity.py`'s own doc comment for why
+   that class of bug is otherwise invisible to `mysqli_report(STRICT)`).
+
+### Re-validation on every run — the "DB-tampered row" story
+
+A saved definition is JSON in `tblReportDefinitions.definition`. Nothing
+about the STORAGE format is trusted at read time: `run.php`/`export.php`/
+`edit.php` all call `ReportBuilder::decodeDefinitionJson()` then
+`ReportBuilder::compile()` FRESH on every single load — there is no
+"compile once, cache the SQL" path anywhere. If a row is hand-edited in
+the database (or a column is removed from the registry in a later
+release) to reference an unknown key, `compile()` throws
+`\InvalidArgumentException` and the page shows "this report definition is
+no longer valid" instead of ever reaching the SQL layer.
+
+### `preview.php` — the AJAX endpoint, not `api/*`
+
+Session-authed AJAX POST, following the `geo/lookup.php` /
+`geo/w3w-suggest.php` precedent (#456) — deliberately NOT under `api/*`
+(the ApiRouter routing trap in `.claude/CLAUDE.md` does not apply here at
+all; no `api.*.enabled` flag, no `tblRoutes` row needed for it — it IS a
+normal `tblRoutes` row, `admin/reports/builder/preview`, `isProtected=1`).
+`Auth::verifyCsrf()` rotates the session token on every successful check
+(`_core/Auth.php`), so the JSON response always carries the freshly
+rotated token back (`csrf` key) and `report-builder.js`'s `syncCsrf()`
+writes it into every `input[name="csrf_token"]` on the page — the same
+pattern `event-hub-upload.js` uses for its own repeated-AJAX-POSTs case.
+
+### Chart.js SRI hash — derived without jsdelivr access
+
+`Asset::chartJs()` follows the `Asset::sortableJs()`/Bootstrap precedent
+exactly. `cdn.jsdelivr.net` was policy-denied (403) from THIS build's
+sandbox proxy (see `/root/.ccr/README.md`'s per-tool status), so the hash
+was derived the same way the location-chunkA Leaflet SRI hashes were
+(#456): downloaded the real npm tarball from `registry.npmjs.org` (which
+IS reachable — it's in the proxy's `noProxy` allowlist) and hashed
+`dist/chart.umd.js` directly. That file is deliberately the UNMINIFIED
+UMD build, not `chart.umd.min.js` — the 4.x npm package ships NO
+pre-minified UMD file at all (verified by inspecting the extracted
+tarball), and jsdelivr's on-the-fly minification pipeline would make a
+`.min.js` URL's served bytes NOT independently reproducible from the
+tarball. See `Asset.php`'s `CHARTJS_INTEGRITY` doc comment for the exact
+`curl | tar | openssl dgst` derivation command.
+
+### Ambiguities resolved (A1–A8, full spec in the #156 build plan)
+
+| # | Decision |
+| --- | --- |
+| A1 | Chart.js (SRI-pinned) shipped, not CSS bars |
+| A2 | One AND/OR conjunction per report — no nested filter groups in v1 |
+| A3 | Drag-and-drop = column-order chip reordering (SortableJS), not a free-form field-onto-canvas builder |
+| A4 | Table is `tblReportDefinitions`, not the issue's literal `tblReports` |
+| A5 | `isShared` = visible to this site's admins, never truly public/member-visible |
+| A6 | Users source exposes fullName (open) + email (site-admin gated) only — no phone/address/coords/bio (directory visibility tiers aren't modelled by the builder) |
+| A7 | `reports.enabled` slug folds BOTH the #93 dashboards and the new builder — seeded ON so nothing changes on upgrade |
+| A8 | Giving `donorName` gated strictly `treasurer` (no `@siteAdmin` escape hatch); `amountPence` gated `treasurer` OR `@siteAdmin` (Giving::canManage() parity) |
+
+Scheduling/emailed reports are explicitly OUT of #156's scope — not
+built, not stubbed.
 ## Forms Builder (#153)
 
 New app at `/forms` (`web/_apps/forms/`) + `Portal\Core\FormEngine`

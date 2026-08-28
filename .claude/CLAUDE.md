@@ -19,7 +19,7 @@ Internal portal platform (PHP 8.5, backward-compatible with 8.4, MySQL 8.0, Boot
 ```
 repo root/          <- NOT deployed (docs, CI/CD only)
 web/                <- ALL deployable files (synced to server via SFTP)
-  _core/            <- Framework classes (Portal\Core namespace, 67 classes)
+  _core/            <- Framework classes (Portal\Core namespace, 69 classes)
   _apps/            <- App controllers — outside the webroot (#159). Every
                        app's PHP handlers live here; Router resolves
                        tblRoutes.targetFile against PORTAL_APPS = _apps/.
@@ -52,7 +52,7 @@ infrastructure rather than apps).
 
 | Slug | Route | What it does |
 | --- | --- | --- |
-| admin | `/admin` | Users, roles, settings, sites, errors, activity, audit, migrations, integrations, workflows, reports, **captcha config** |
+| admin | `/admin` | Users, roles, settings, sites, errors, activity, audit, migrations, integrations, workflows, reports (fixed dashboards, #93, **+ whitelist-driven custom report builder at `/admin/reports/builder`, #156**), **captcha config** |
 | ai-assist | `/admin/ai-assist` | LLM-assisted drafting for announcements, prayer requests, newsletter (Anthropic / OpenAI / local ollama) |
 | announcements | `/announcements` | Per-site text announcements, pinned + scheduled posts |
 | approvals | `/approvals` | Generic inbox for the Workflow Execution Engine (`Portal\Core\Workflow`) — awaiting-decision queue, approve/reject/comment, decision history (#443) |
@@ -158,6 +158,48 @@ Calendar/Events/Preaching Plan is ONE app ("Events") — `/calendar` covers view
 
 ## Recent ships (chronological)
 
+- **`claude/backlog156-reports`** (branched off `alpha`) — issue #156:
+  Reports Builder, a whitelist-driven custom report builder at
+  `/admin/reports/builder/*` alongside the pre-existing #93 fixed
+  dashboards. `Portal\Core\ReportRegistry` (pure static data — no DB, no
+  superglobal reads) is the ENTIRE whitelist: six v1 sources (users,
+  events, attendance, expenses, giving, tasks), each a registry-owned
+  table/alias/tenant-scope-expression/curated-JOINs entry with a closed
+  per-column expr/type/gates/aggs whitelist; closed keyed sets for
+  operators, aggregations, and date-bucket transforms.
+  `ReportRegistry::assertSelfConsistent()` hard-fails if a future edit
+  ever references care/kids/safeguarding/prayer-requests/auth/settings/
+  API-key tables — those domains are structurally absent, not merely
+  gated. `Portal\Core\ReportBuilder::compile()` is the ONE place report
+  SQL is assembled: every identifier reaches the SQL string only via
+  strict key lookup against the registry; every value is bound via
+  `bind_param()` with a lockstep types string + an explicit
+  `strlen()===count()` assert; `siteID = ?` is force-injected first,
+  outside the user-filter parentheses, so no `OR` can bypass tenancy.
+  Column gates (a role, `@siteAdmin`, or `@rootAdmin`) apply identically
+  in SELECT and WHERE, closing the filter-as-oracle leak; financial
+  totals need Treasurer/Site Admin, Giving donor identity needs Treasurer
+  strictly. A saved definition is re-validated against the registry on
+  EVERY run — a hand-edited DB row fails closed. Builder UI: drag-
+  reorderable column chips (`Asset::sortableJs()`), repeatable filter rows
+  (one AND/OR toggle), optional group-by + aggregates, an AJAX preview
+  endpoint (session-authed, outside `api/*` — the `geo/` precedent), CSV
+  export, and a bar/line chart on grouped results via a new SRI-pinned
+  `Asset::chartJs()` (Chart.js 4.4.4, hash independently re-derived from
+  the npm registry tarball — jsdelivr itself was policy-denied from this
+  build's sandbox proxy). Migration 184: `tblReportDefinitions`
+  (DEVIATION from #156's literal `tblReports` — documented in the
+  migration header), 3 settings seeds (`reports.enabled` seeded ON so the
+  #93 dashboards survive the upgrade unchanged), 8 route seeds. New
+  AppRegistry entry `reports` folds BOTH the dashboards and the builder
+  under one toggle. GDPR lockstep in the same PR (GdprEraser catalogue
+  entry + data-export.php block). A committed, dependency-free red-team
+  self-test (`tools/report-builder-selftest.php`) exercises the real
+  classes — registry self-consistency, a benign compile with tenant scope
+  provably first, and 15 hostile/malformed definitions each throwing
+  `InvalidArgumentException` before any SQL string exists. All 11 audit
+  checks green, `php -l` clean on every touched file, `node --check`
+  clean on the new JS.
 - **`claude/backlog153-forms`** (branched off `alpha`) — issue #153: new
   Forms Builder app at `/forms` (`web/_apps/forms/`, 16 pages/handlers) +
   `Portal\Core\FormEngine` — the single injection-safety boundary for a

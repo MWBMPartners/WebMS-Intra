@@ -145,7 +145,12 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 ?>
 
 <!-- 📊 Reports Dashboard -->
-<h1 class="mb-4"><i class="fa-solid fa-chart-bar me-2"></i>Reports & Analytics</h1>
+<div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-4">
+    <h1 class="mb-0"><i class="fa-solid fa-chart-bar me-2"></i>Reports & Analytics</h1>
+    <a href="/admin/reports/builder" class="btn btn-primary">
+        <i class="fa-solid fa-table-list me-1"></i>Custom reports
+    </a>
+</div>
 
 <!-- 📊 Summary Cards -->
 <div class="row g-3 mb-4">

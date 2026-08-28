@@ -210,6 +210,21 @@ class GdprEraser
             ['table' => 'tblVenueUsageTypeWindows', 'userCol' => 'createdByID', 'action' => 'anonymise', 'nullCols' => [], 'reason' => 'effective-dated default-hours history retained; author identity detached'],
             ['table' => 'tblVenueImportBatches',    'userCol' => 'createdByID', 'action' => 'anonymise', 'nullCols' => [], 'reason' => 'CSV/XLSX import-wizard batch history retained for audit trail; uploader identity detached'],
 
+            // 📊 Reports Builder (#156). A saved report DEFINITION (registry
+            // keys + literal filter values) is retained — it is metadata
+            // about a query, not personal data about anyone other than its
+            // author — only the authorship attribution is detached, mirroring
+            // tblAnnouncements/tblEvents/tblRecording above. updatedByID rides
+            // along via nullCols since processEntry()'s anonymise path only
+            // auto-nulls the matched userCol (createdByID) itself.
+            // RESIDUAL RISK (documented, not mechanically solvable): an admin
+            // may have typed personal data — a name, an email address — into
+            // a FILTER VALUE inside the JSON definition (e.g. `donorName eq
+            // "Jane Smith"`). That is admin-authored free text of the same
+            // class as tblTasks.description, which existing erasure doesn't
+            // scrub either. Report OUTPUT itself is never stored anywhere, so
+            // there is no separate "results" table to catalogue.
+            ['table' => 'tblReportDefinitions', 'userCol' => 'createdByID', 'action' => 'anonymise', 'nullCols' => ['updatedByID'], 'reason' => 'saved report definitions retained (metadata, not personal data); authorship attribution detached'],
             // 👥 Small Groups (#150). The membership row is the subject's
             // OWN personal data (which group, which role) so it is hard
             // DELETEd, not retained — unlike the attendance/authorship
