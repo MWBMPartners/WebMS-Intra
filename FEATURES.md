@@ -847,6 +847,63 @@ reminderSentAt` + `rota.reminder_days_before` (074), and the milestones
 `tasks.reminders_enabled`, `tasks.reminder_lookback_days`,
 `rota.reminders_enabled`, `milestones.digest_enabled`.
 
+### Service-Plans ↔ Worship additive bridge (gap #6, #442, migration 173)
+
+Two independent "service plan" data models have existed side-by-side since
+migration 137 with neither aware of the other: the run-sheet builder
+(`tblServicePlan` SINGULAR, #262/#300) and the worship presentation engine
+(`tblServicePlans` PLURAL, #308/#355). Migration 154's own header calls the
+two "unrelated" — this gap item adds an OPTIONAL, ADDITIVE cross-reference
+so a worship presentation can declare which run-sheet it presents, with
+zero merge, zero data migration, and zero change to either surface's
+existing behaviour when unpaired.
+
+- **New column** — `tblServicePlans.runSheetPlanID` (nullable, UNIQUE,
+  `FOREIGN KEY … REFERENCES tblServicePlan(planID) ON DELETE SET NULL`).
+  NULL = unpaired, the state of every pre-existing row.
+- **`Portal\Core\ServicePlanLink`** — the only code in the codebase that
+  knows about both models: resolves each side's paired counterpart summary
+  (name/title, event or template badge, item/slide count, song titles) and
+  implements `pair()`/`unpair()` with the hard invariants — same site
+  (rows simply resolve to "not found" across tenants), same event when
+  BOTH sides declare one (refused otherwise, either side NULL always
+  proceeds), and 1:1 (a run-sheet already claimed by a different worship
+  plan is refused; the UNIQUE key is the race backstop, caught as a
+  friendly message, never a fatal 500).
+- **eventID backfill (Q1, decided: yes)** — NULL-only, one-directional
+  (worship → run-sheet): pairing a worship plan that already has an event
+  wakes the run-sheet's dormant, write-dead `eventID` column ONLY when it
+  is currently NULL. Never the reverse — the worship side's `eventID` is
+  ACL-bearing (it decides who may edit the plan) and is only ever set
+  through that app's own explicit, authorised binding flow.
+- **`worship/plan/link`** — new CSRF'd POST handler
+  (`worship/plan-link.php`) serving both editors' pair/unpair controls.
+  Reuses the worship app's existing write gate verbatim (admin OR
+  coordinator of the plan's bound event; template plans admin-only) —
+  pairing mutates a `tblServicePlans` row, so that row's own rule governs.
+  Re-pairing a worship plan's own existing link overwrites; claiming a
+  run-sheet already linked elsewhere is refused (Q6, decided).
+- **Read-only counterpart panels** on both editors
+  (`service-plans/edit.php`, `worship/plan.php`) — each guarded by
+  `AppRegistry::isEnabled()` + try/catch (venue-overlay resilience
+  precedent), so a disabled counterpart app, a not-yet-migrated column, or
+  any resolver exception leaves the panel empty rather than breaking the
+  page. Pair/unpair controls: worship-side gated by the page's own
+  `$canWrite`; run-sheet side is admin-only in v1 (Q2, decided — the
+  run-sheet app itself has no coordinator concept to check per-candidate).
+- **No field sync in v1 (Q4, decided)** — the two item representations are
+  structurally incompatible (Model A: free-text `title` per section; Model
+  B: canonical `songID` FK into `tblSongs`). Panels are read-only visibility
+  only; a one-shot, user-triggered "copy sections → slides" action is a
+  deliberate v2 candidate, not built here. List-page paired badges (Q3)
+  are likewise deferred to v2.
+
+**New files:** `web/_core/ServicePlanLink.php`,
+`web/_apps/worship/plan-link.php`. **Schema:** migration 173 — guarded
+MySQL-8-safe DDL (column + UNIQUE key + FK on `tblServicePlans`), one
+route seed (`worship/plan/link`), no new settings keys (gating rides on
+the existing `worship.enabled` / `service_plans.enabled`).
+
 ---
 
 ## Audit scripts (`tools/audit-checks/`)

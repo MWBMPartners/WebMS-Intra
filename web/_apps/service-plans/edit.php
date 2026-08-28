@@ -10,8 +10,10 @@
 declare(strict_types=1);
 
 use Portal\Core\App;
+use Portal\Core\AppRegistry;
 use Portal\Core\Auth;
 use Portal\Core\Markdown;
+use Portal\Core\ServicePlanLink;
 use Portal\Core\Site;
 
 Auth::ensureSession();
@@ -36,6 +38,28 @@ if ($stmt !== false) {
 if ($plan === null) {
     http_response_code(404);
     exit('Plan not found');
+}
+
+// -----------------------------------------------------------------------------
+// 🎶 Gap #6 bridge (#442) — paired worship (presentation) plan summary, if
+// any. Guarded exactly like the venue-overlay resilience precedent
+// (calendar/index.php): AppRegistry::isEnabled() short-circuit + try/catch,
+// so a disabled worship app, a not-yet-migrated column, or ANY resolver
+// exception leaves the panel empty and this page renders unchanged.
+// -----------------------------------------------------------------------------
+$worshipLink       = null;
+$worshipCandidates = [];
+if (AppRegistry::isEnabled('worship') === true) {
+    try {
+        $worshipLink = ServicePlanLink::worshipPlanForRunSheet($id, $siteId);
+        if ($worshipLink === null && App::isAdmin() === true) {
+            $worshipCandidates = ServicePlanLink::candidatesForRunSheet($siteId);
+        }
+    } catch (\Throwable $e) {
+        error_log('Service-plan worship panel failed: ' . $e->getMessage());
+        $worshipLink       = null;
+        $worshipCandidates = [];
+    }
 }
 
 $items = [];
@@ -82,6 +106,11 @@ $breadcrumbs = ['Dashboard' => '/', 'Service Plans' => '/service-plans', (string
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 $csrf = Auth::csrfToken();
 
+// 🚩 Flash (e.g. gap #6 pair/unpair refusals redirected back here).
+$flashMsg  = $_SESSION['flash_msg']  ?? '';
+$flashType = $_SESSION['flash_type'] ?? '';
+unset($_SESSION['flash_msg'], $_SESSION['flash_type']);
+
 $sectionTypes = [
     'greeting'       => 'Greeting / Welcome',
     'song'           => 'Song / Hymn',
@@ -113,6 +142,10 @@ $sectionTypes = [
     </div>
 </div>
 
+<?php if ($flashMsg !== ''): ?>
+    <div class="alert alert-<?php echo htmlspecialchars($flashType !== '' ? $flashType : 'info', ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars($flashMsg, ENT_QUOTES, 'UTF-8'); ?></div>
+<?php endif; ?>
+
 <!-- Plan metadata -->
 <div class="card mb-3">
     <div class="card-body">
@@ -141,6 +174,90 @@ $sectionTypes = [
         </form>
     </div>
 </div>
+
+<?php if (AppRegistry::isEnabled('worship') === true): ?>
+<!-- 🎶 Gap #6 bridge — paired worship presentation plan (#442) -->
+<div class="card mb-3">
+    <div class="card-body">
+        <h2 class="h5"><i class="fa-solid fa-music me-1 text-primary"></i>Worship presentation</h2>
+        <?php if ($worshipLink !== null): ?>
+            <div class="portal-data-list">
+                <div class="portal-data-row">
+                    <div class="portal-data-row-main">
+                        <a href="/worship/plan?id=<?php echo (int) $worshipLink['planID']; ?>" class="text-decoration-none fw-semibold">
+                            <?php echo htmlspecialchars((string) $worshipLink['name'], ENT_QUOTES, 'UTF-8'); ?>
+                        </a>
+                        <?php if ((int) $worshipLink['isActive'] === 0): ?>
+                            <span class="badge bg-secondary ms-1">Archived</span>
+                        <?php endif; ?>
+                        <?php if ($worshipLink['eventName'] !== null): ?>
+                            <span class="badge bg-info text-dark ms-1"><i class="fa-solid fa-calendar me-1"></i><?php echo htmlspecialchars((string) $worshipLink['eventName'], ENT_QUOTES, 'UTF-8'); ?></span>
+                        <?php else: ?>
+                            <span class="badge bg-light text-dark border ms-1">Template</span>
+                        <?php endif; ?>
+                        <div class="small text-muted mt-1">
+                            <?php echo (int) $worshipLink['itemCount']; ?> slide<?php echo (int) $worshipLink['itemCount'] === 1 ? '' : 's'; ?>
+                            <?php if (count($worshipLink['songTitles']) > 0): ?>
+                                &middot; songs:
+                                <?php echo htmlspecialchars(
+                                    implode(', ', array_map(
+                                        static fn ($t) => $t !== null ? $t : '(song deleted)',
+                                        $worshipLink['songTitles']
+                                    )),
+                                    ENT_QUOTES,
+                                    'UTF-8'
+                                ); ?>
+                            <?php endif; ?>
+                        </div>
+                    </div>
+                    <div class="portal-data-row-aside">
+                        <a href="/worship/plan?id=<?php echo (int) $worshipLink['planID']; ?>" class="btn btn-sm btn-outline-primary"><i class="fa-solid fa-pen me-1"></i>Open</a>
+                        <a href="/worship/present?id=<?php echo (int) $worshipLink['planID']; ?>" class="btn btn-sm btn-outline-secondary"><i class="fa-solid fa-play me-1"></i>Present</a>
+                        <?php if (App::isAdmin() === true): ?>
+                            <form method="post" action="/worship/plan/link" class="d-inline">
+                                <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
+                                <input type="hidden" name="worshipPlanID" value="<?php echo (int) $worshipLink['planID']; ?>">
+                                <input type="hidden" name="action" value="unpair">
+                                <input type="hidden" name="from" value="runsheet">
+                                <button type="submit" class="btn btn-sm btn-outline-danger" data-confirm="Unlink this worship presentation from this run-sheet?" data-confirm-destructive="true"><i class="fa-solid fa-link-slash me-1"></i>Unlink</button>
+                            </form>
+                        <?php endif; ?>
+                    </div>
+                </div>
+            </div>
+        <?php elseif (App::isAdmin() === true): ?>
+            <?php if (count($worshipCandidates) > 0): ?>
+                <form method="post" action="/worship/plan/link" class="row g-2 align-items-end">
+                    <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
+                    <input type="hidden" name="runPlanID" value="<?php echo $id; ?>">
+                    <input type="hidden" name="action" value="pair">
+                    <input type="hidden" name="from" value="runsheet">
+                    <div class="col-md-8">
+                        <label class="form-label small">Link an existing worship presentation plan</label>
+                        <select name="worshipPlanID" required class="form-select form-select-sm">
+                            <option value="">Choose a plan…</option>
+                            <?php foreach ($worshipCandidates as $c): ?>
+                                <option value="<?php echo (int) $c['planID']; ?>">
+                                    <?php echo htmlspecialchars((string) $c['name'], ENT_QUOTES, 'UTF-8'); ?>
+                                    <?php echo $c['eventName'] !== null ? ' (' . htmlspecialchars((string) $c['eventName'], ENT_QUOTES, 'UTF-8') . ')' : ' (Template)'; ?>
+                                    — <?php echo (int) $c['itemCount']; ?> slide<?php echo (int) $c['itemCount'] === 1 ? '' : 's'; ?>
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    <div class="col-md-4">
+                        <button type="submit" class="btn btn-primary btn-sm w-100"><i class="fa-solid fa-link me-1"></i>Link</button>
+                    </div>
+                </form>
+            <?php else: ?>
+                <p class="text-muted small mb-0">No unpaired worship presentation plans available to link.</p>
+            <?php endif; ?>
+        <?php else: ?>
+            <p class="text-muted small mb-0">No worship presentation linked.</p>
+        <?php endif; ?>
+    </div>
+</div>
+<?php endif; ?>
 
 <!-- Items -->
 <div class="card">
