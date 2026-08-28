@@ -69,7 +69,7 @@ if ($action === 'add') {
         . '                       overrideStartTime = VALUES(overrideStartTime), overrideEndTime = VALUES(overrideEndTime), '
         . '                       overrideLocation = VALUES(overrideLocation), notes = VALUES(notes)'
     );
-    $stmt->bind_param('isissssi', $eventId, $date, $cancelled, $nameArg, $startArg, $endArg, $locArg, $notesArg, $userId);
+    $stmt->bind_param('isisssssi', $eventId, $date, $cancelled, $nameArg, $startArg, $endArg, $locArg, $notesArg, $userId);
     $stmt->execute();
     $stmt->close();
     Logger::activity('EventOccurrenceOverride', 'Event #' . $eventId . ' date=' . $date . ' cancelled=' . $cancelled);
