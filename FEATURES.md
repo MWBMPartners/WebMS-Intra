@@ -804,6 +804,49 @@ tables, zero guarded ALTERs. **New seeded settings:** `venues.enabled`,
 `venues.calendar_default_venue`, `api.venues.check.enabled`,
 `api.venues.availability.enabled`.
 
+### User reminders sweep — Tasks/Rota/Milestones (gap #439, migration 171)
+
+Three reminder fields shipped by earlier migrations but never consumed by
+any code: `tblTasks.reminderDate`/`reminderSent` (036), `tblRotaSlot.
+reminderSentAt` + `rota.reminder_days_before` (074), and the milestones
+"daily digest for designated roles" the app's own description promised
+(076). All three now fire via one new cron endpoint.
+
+- **`cron/user-reminders`** (token-gated, 15-minute cadence) — three
+  families per active site: **task-reminder** (assignee-only email once a
+  task's `reminderDate` arrives, capped by a first-activation lookback
+  window so turning the sweep on doesn't blast years of backlog), **rota-
+  slot** (one grouped email per assignee listing every duty due within
+  `rota.reminder_days_before`), **milestone-digest** (once-daily 06:00-
+  08:59 digest of today's birthdays/anniversaries to the roles listed in
+  `milestones.digest_recipients` — an empty CSV skips the site entirely,
+  explicit opt-in only for birthday data).
+- **Dedupe** — tasks/rota reuse their existing sent-flag columns via an
+  atomic claim UPDATE; milestone-digest uses a new generic
+  `tblUserReminderLog` table (check-first + race-catch), reserved so a
+  future single-shot family (e.g. DBS expiry) can reuse it with zero DDL.
+- **Two new notification preferences** — `taskReminders` / `rotaReminders`
+  on `/account/notifications` (default on), the first prefs this codebase
+  actually honours when sending (every earlier switch on that page was
+  captured but never read).
+- **Write-path fixes** so the dedupe stamps stay correct when the
+  underlying row changes: `tasks/save.php` re-arms `reminderSent` on a
+  future reminder edit; `tasks/complete.php` carries the reminder forward
+  (interval-shifted) into a recurring task's next occurrence instead of
+  dropping it; `rota/swap-respond.php` clears `reminderSentAt` on an
+  accepted swap so the new assignee gets their own reminder.
+- **Fixed in the same PR:** `cron/event-reminders.php` selected `u.email`
+  from `tblUsers` — the real column is `emailAddress` — so under this
+  app's strict mysqli reporting the event-reminder cron 500'd on every
+  single invocation. Three other `u.email` sites found during this work
+  are tracked separately (#438), not touched here.
+
+**New files:** `web/_apps/cron/user-reminders.php`. **Schema:** migration
+171, new `tblUserReminderLog` table, zero ALTERs. **New seeded settings:**
+`user_reminders.cron_token`, `user_reminders.enabled`,
+`tasks.reminders_enabled`, `tasks.reminder_lookback_days`,
+`rota.reminders_enabled`, `milestones.digest_enabled`.
+
 ---
 
 ## Audit scripts (`tools/audit-checks/`)

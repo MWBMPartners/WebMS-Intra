@@ -96,6 +96,7 @@ if ((int) $task['isRecurring'] === 1 && $task['recurrenceType'] !== null) {
     $nextDue = null;
     $interval = max(1, (int) $task['recurrenceInterval']);
 
+    $nextReminder = null;
     if ($task['dueDate'] !== null) {
         $dt = new DateTime($task['dueDate']);
         switch ($task['recurrenceType']) {
@@ -114,25 +115,48 @@ if ((int) $task['isRecurring'] === 1 && $task['recurrenceType'] !== null) {
         }
         $nextDue = $dt->format('Y-m-d');
 
+        // 🔔 Carry the reminder forward by the same interval (gap #439
+        //    write-path fix) — previously dropped entirely on recurrence
+        //    spawn, so a recurring task only ever got ONE reminder ever.
+        if ($task['reminderDate'] !== null) {
+            $rdt = new DateTime($task['reminderDate']);
+            switch ($task['recurrenceType']) {
+                case 'daily':
+                    $rdt->modify('+' . $interval . ' days');
+                    break;
+                case 'weekly':
+                    $rdt->modify('+' . $interval . ' weeks');
+                    break;
+                case 'monthly':
+                    $rdt->modify('+' . $interval . ' months');
+                    break;
+                case 'yearly':
+                    $rdt->modify('+' . $interval . ' years');
+                    break;
+            }
+            $nextReminder = $rdt->format('Y-m-d H:i:s');
+        }
+
         // 🔍 Check if past recurrence end date
         if ($task['recurrenceEndDate'] !== null && $nextDue > $task['recurrenceEndDate']) {
             $nextDue = null; // Don't create next occurrence
+            $nextReminder = null;
         }
     }
 
     if ($nextDue !== null) {
         $nStmt = $mysqli->prepare(
             'INSERT INTO tblTasks (siteID, title, description, assignedToID, createdByID, priority, '
-            . 'dueDate, isRecurring, recurrenceType, recurrenceInterval, recurrenceEndDate, parentTaskID) '
-            . 'VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)'
+            . 'dueDate, isRecurring, recurrenceType, recurrenceInterval, recurrenceEndDate, parentTaskID, reminderDate) '
+            . 'VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)'
         );
         if ($nStmt !== false) {
             $nStmt->bind_param(
-                'issiisssisi',
+                'issiisssisis',
                 $siteId, $task['title'], $task['description'],
                 $task['assignedToID'], $userId, $task['priority'],
                 $nextDue, $task['recurrenceType'], $interval,
-                $task['recurrenceEndDate'], $taskId
+                $task['recurrenceEndDate'], $taskId, $nextReminder
             );
             $nStmt->execute();
             $nStmt->close();

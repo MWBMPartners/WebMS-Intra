@@ -2,6 +2,35 @@
 
 
 ## [1.4.0] - 2026-07-22 (alpha)
+- feat(cron): gap #3 (#439) — new `cron/user-reminders.php` sweeps three
+  reminder fields that earlier migrations shipped but no code ever
+  consumed: `tblTasks.reminderDate`/`reminderSent` (036), `tblRotaSlot.
+  reminderSentAt` + `rota.reminder_days_before` (074), and the milestones
+  daily digest promised by `milestones.digest_recipients` (076). Token-
+  gated (`user_reminders.cron_token`, empty-fails-closed), 15-minute
+  cadence, one grouped email per assignee for rota duties, an atomic
+  `WHERE reminderSent = 0` / `WHERE reminderSentAt IS NULL` claim as the
+  dedupe for tasks/rota, and a new generic `tblUserReminderLog`
+  `(refType, refID, dueDate)` table for milestone-digest (the only family
+  without its own sent-flag column) — reserved so a future family like
+  DBS-expiry can reuse it with zero DDL. Milestone-digest is explicit
+  opt-in only: an empty `milestones.digest_recipients` skips the site
+  rather than silently falling back to admins for birthday data. Two new
+  notification preferences, `taskReminders`/`rotaReminders` on
+  `/account/notifications` (default on) — the first prefs this codebase
+  actually honours when sending. Write-path fixes so the dedupe stamps
+  stay correct as rows change: `tasks/save.php` re-arms `reminderSent` on
+  a future reminder edit, `tasks/complete.php` carries the reminder
+  forward (interval-shifted) into a recurring task's spawned next
+  occurrence, `rota/swap-respond.php` clears `reminderSentAt` on an
+  accepted swap. Migration 171 (new `tblUserReminderLog` table + six
+  settings seeds + route seed, zero ALTERs).
+- fix(cron): `cron/event-reminders.php` selected `u.email` from
+  `tblUsers` — the real column is `emailAddress` — so under this app's
+  strict mysqli reporting the very first `prepare()` threw and the
+  event-reminder cron 500'd on every single invocation. Fixed throughout
+  (`u.emailAddress AS email`). Three other `u.email` call sites found
+  during this work are tracked separately in #438, not touched here.
 - feat(payments): gap #1 — PayPal Orders v2 adapter fully wired into
   `Portal\Core\Payments` (create checkout, capture-on-return +
   `CHECKOUT.ORDER.APPROVED` webhook backstop, verified webhooks via

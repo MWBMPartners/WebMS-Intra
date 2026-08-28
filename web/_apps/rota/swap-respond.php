@@ -55,8 +55,11 @@ $response = trim((string) ($_POST['responseMessage'] ?? ''));
 try {
     $db->begin_transaction();
     if ($action === 'accept') {
-        // Reassign the slot to me and mark swap accepted.
-        $stmt = $db->prepare('UPDATE tblRotaSlot SET assignedToID = ? WHERE slotID = ?');
+        // Reassign the slot to me and mark swap accepted. reminderSentAt
+        // is reset to NULL (gap #439 write-path fix) so the newly-assigned
+        // person gets their own reminder instead of inheriting the
+        // previous assignee's already-sent stamp.
+        $stmt = $db->prepare('UPDATE tblRotaSlot SET assignedToID = ?, reminderSentAt = NULL WHERE slotID = ?');
         if ($stmt !== false) {
             $stmt->bind_param('ii', $userId, $swap['slotID']);
             $stmt->execute();

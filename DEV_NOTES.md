@@ -2970,6 +2970,61 @@ bookings, agreement renewals, invoices due) with a `(refType, refID,
 dueDate)` dedupe key so a re-scheduled item naturally re-reminds without
 spamming on every run.
 
+### User reminders cron (#439, migration 171)
+
+Token in `user_reminders.cron_token`, seeded empty + `isSensitive = 1` — set
+a real value at `/admin/settings` before adding the crontab line, same
+empty-fails-closed pattern as every other cron token in this app. Add
+alongside the other cron lines — this one needs **15-minute** granularity
+(unlike the daily venue/asset sweeps) because the task family compares
+against a DATETIME the user picked deliberately:
+
+```
+*/15 * * * * curl -fsS "https://<your-portal-host>/cron/user-reminders?key=<your-token>" > /dev/null
+```
+
+The route (`cron/user-reminders`, migration 171) is seeded
+`isProtected = 0` — public but token-gated. It loops every distinct
+**active site** (not pre-filtered to "owns a candidate row" — with three
+unrelated families that pre-filter would be noisier than a few cheap empty
+result sets) and runs three families per site, each gated by its own
+per-site flag (`tasks.reminders_enabled` / `rota.reminders_enabled` /
+`milestones.digest_enabled`, all default ON, read via
+`App::settingForSite()` inside the loop):
+
+- **task-reminder** — `tblTasks.reminderDate <= NOW()`, capped to the last
+  `tasks.reminder_lookback_days` (default 7) so first activation on an
+  install with years of stale `reminderSent = 0` rows doesn't blast every
+  overdue task in one run. Dedupe is an atomic claim on the existing
+  `tblTasks.reminderSent` flag column (migration 036) — no new log table.
+  Honours the new `taskReminders` notification preference (default on).
+- **rota-slot** — `tblRotaSlot` rows due within
+  `rota.reminder_days_before` (default 3, migration 074) with
+  `reminderSentAt IS NULL`. One grouped email per assignee per run listing
+  every due duty; dedupe still claims each slot individually
+  (`reminderSentAt = NOW() WHERE reminderSentAt IS NULL`). Honours the new
+  `rotaReminders` notification preference (default on).
+- **milestone-digest** — once per day, 06:00-08:59 server time (matches
+  `cron/event-reminders.php`'s own day-of window). Sends today's
+  birthdays/anniversaries to the roles listed in
+  `milestones.digest_recipients` (migration 076) — **an empty recipients
+  CSV skips the site entirely** (explicit opt-in only; no silent fallback
+  to admins for birthday data). Dedupe uses the new generic
+  `tblUserReminderLog` table (`(refType, refID, dueDate)` unique key,
+  check-first + race-catch on the concurrent-run case) since
+  `tblUserMilestone` carries no sent-flag column of its own — the table is
+  deliberately generic so a future single-shot family (e.g. DBS expiry,
+  deferred) can reuse it with zero DDL.
+
+Also repaired in the same PR: `cron/event-reminders.php` was selecting
+`u.email` from `tblUsers` — the real column is `emailAddress` — so under
+this app's strict mysqli reporting the very first `prepare()` threw and the
+event-reminder cron 500'd on **every** invocation. Fixed to
+`u.emailAddress AS email` throughout; the three other `u.email` call sites
+found during this work (`calendar/event-broadcast-send.php`,
+`admin/calendar/coordinators.php`, `admin/safeguarding/dbs.php`) are
+tracked separately in #438, not touched here.
+
 ---
 
 Last updated: August 2026
