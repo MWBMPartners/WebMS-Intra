@@ -72,8 +72,8 @@ $sent = (isset($_GET['sent']) === true && $_GET['sent'] === '1');
     <?php echo Captcha::scriptTag(); ?>
 
 </head>
-<body class="d-flex align-items-center justify-content-center vh-100">
-<div class="card shadow p-4" style="min-width:320px;max-width:420px;width:100%;">
+<body class="d-flex align-items-center justify-content-center min-vh-100 py-4">
+<div class="card shadow p-4" style="min-width:min(320px,100%);max-width:420px;width:100%;">
 
     <!-- 🏷️ Header -->
     <div class="text-center mb-3">

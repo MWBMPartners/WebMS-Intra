@@ -100,7 +100,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     <label class="form-label" for="give-amount">Amount</label>
                     <div class="input-group">
                         <span class="input-group-text"><?php echo htmlspecialchars($sym, ENT_QUOTES, 'UTF-8'); ?></span>
-                        <input type="text" inputmode="decimal" pattern="[0-9]+([.][0-9]{1,2})?" min="1.00" class="form-control" id="give-amount" name="amount" placeholder="0.00" required>
+                        <input type="text" inputmode="decimal" pattern="[0-9]+([.][0-9]{1,2})?" class="form-control" id="give-amount" name="amount" placeholder="0.00" required>
                     </div>
                     <div class="form-text">Minimum <?php echo htmlspecialchars($sym, ENT_QUOTES, 'UTF-8'); ?>1.00. The server always re-checks this regardless of what's typed here.</div>
                 </div>

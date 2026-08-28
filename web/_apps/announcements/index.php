@@ -137,14 +137,18 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <!-- 📊 Pagination -->
     <?php if ($totalPages > 1): ?>
         <nav aria-label="Announcements pagination">
-            <ul class="pagination justify-content-center">
+            <ul class="pagination justify-content-center flex-wrap">
                 <li class="page-item <?php echo ($page <= 1 ? 'disabled' : ''); ?>">
                     <a class="page-link" href="?page=<?php echo $page - 1; ?>">Previous</a>
                 </li>
                 <?php for ($p = 1; $p <= $totalPages; $p++): ?>
-                    <li class="page-item <?php echo ($p === $page ? 'active' : ''); ?>">
-                        <a class="page-link" href="?page=<?php echo $p; ?>"><?php echo $p; ?></a>
-                    </li>
+                    <?php if ($p <= 3 || $p >= $totalPages - 2 || abs($p - $page) <= 1): ?>
+                        <li class="page-item <?php echo ($p === $page ? 'active' : ''); ?>">
+                            <a class="page-link" href="?page=<?php echo $p; ?>"><?php echo $p; ?></a>
+                        </li>
+                    <?php elseif ($p === 4 || $p === $totalPages - 3): ?>
+                        <li class="page-item disabled"><span class="page-link">&hellip;</span></li>
+                    <?php endif; ?>
                 <?php endfor; ?>
                 <li class="page-item <?php echo ($page >= $totalPages ? 'disabled' : ''); ?>">
                     <a class="page-link" href="?page=<?php echo $page + 1; ?>">Next</a>
