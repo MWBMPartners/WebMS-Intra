@@ -376,7 +376,7 @@ endif;
                         <div class="portal-data-list">
                             <?php foreach ($people as $person): ?>
                                 <div class="portal-data-row">
-                                    <div class="col-6">
+                                    <div class="portal-data-cell col-12 col-md-6" data-label="Name">
                                         <strong>
                                             <?php echo htmlspecialchars(
                                                 $person['fullName'] ?? $person['externalName'] ?? 'Unknown',
@@ -387,7 +387,7 @@ endif;
                                             <span class="badge bg-warning text-dark ms-1">Primary</span>
                                         <?php endif; ?>
                                     </div>
-                                    <div class="col-6 text-end">
+                                    <div class="portal-data-cell col-12 col-md-6 text-md-end" data-label="Role">
                                         <span class="badge bg-secondary"><?php echo htmlspecialchars(ucfirst($person['role']), ENT_QUOTES, 'UTF-8'); ?></span>
                                     </div>
                                 </div>
@@ -467,7 +467,7 @@ endif;
                         <div class="portal-data-list">
                             <?php foreach ($assignedAssets as $aa): ?>
                                 <div class="portal-data-row align-items-center">
-                                    <div class="col-6 col-md-7">
+                                    <div class="portal-data-cell col-12 col-md-6" data-label="Asset">
                                         <a href="/assets/item?id=<?php echo (int) $aa['assetID']; ?>" class="text-decoration-none">
                                             <?php echo htmlspecialchars((string) $aa['assetName'], ENT_QUOTES, 'UTF-8'); ?>
                                         </a>
@@ -475,11 +475,11 @@ endif;
                                             <br><small class="text-muted"><?php echo htmlspecialchars((string) $aa['assetTagCode'], ENT_QUOTES, 'UTF-8'); ?></small>
                                         <?php endif; ?>
                                     </div>
-                                    <div class="col-4 col-md-3 small text-muted">
+                                    <div class="portal-data-cell col-12 col-md-4 small text-muted" data-label="Status">
                                         <?php echo htmlspecialchars(ucwords(str_replace('-', ' ', (string) $aa['assetStatus'])), ENT_QUOTES, 'UTF-8'); ?>
                                     </div>
                                     <?php if ($canManageAssets === true): ?>
-                                        <div class="col-2 text-end">
+                                        <div class="portal-data-cell col-12 col-md-2 text-md-end" data-label="">
                                             <form method="post" action="/assets/event-assign" class="d-inline"
                                                   data-confirm="Remove this asset's assignment to this event?" data-confirm-destructive="true">
                                                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">

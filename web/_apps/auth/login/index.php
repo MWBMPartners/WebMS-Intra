@@ -145,6 +145,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         var t = localStorage.getItem('portal-theme');
         if (t === 'dark' || t === 'light') {
             document.documentElement.setAttribute('data-bs-theme', t);
+        } else if (t === 'auto' || t === null) {
+            var prefersDark = window.matchMedia
+                && window.matchMedia('(prefers-color-scheme: dark)').matches;
+            document.documentElement.setAttribute('data-bs-theme', prefersDark ? 'dark' : 'light');
         }
     })();
     </script>
@@ -153,8 +157,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <?php echo Captcha::scriptTag(); ?>
 
 </head>
-<body class="d-flex align-items-center justify-content-center vh-100">
-<div class="card shadow p-4" style="min-width:320px;max-width:420px;width:100%;">
+<body class="d-flex align-items-center justify-content-center min-vh-100 py-4">
+<div class="card shadow p-4" style="min-width:min(320px,100%);max-width:420px;width:100%;">
 
     <!-- 🏷️ Site branding -->
     <div class="text-center mb-3">
@@ -187,7 +191,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             <label for="username" class="form-label"><?php echo htmlspecialchars(t('auth.username_or_email'), ENT_QUOTES, 'UTF-8'); ?></label>
             <input type="text" class="form-control" id="username" name="username"
                    value="<?php echo htmlspecialchars($username, ENT_QUOTES, 'UTF-8'); ?>"
-                   autocomplete="username" required autofocus>
+                   autocomplete="username" required autofocus
+                   autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="email">
         </div>
 
         <div class="mb-2">
