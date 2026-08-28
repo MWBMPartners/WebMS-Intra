@@ -13,6 +13,8 @@ use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Site;
 
+require_once PORTAL_CORE . DIRECTORY_SEPARATOR . 'partials' . DIRECTORY_SEPARATOR . 'location-display.php';
+
 Auth::ensureSession();
 Auth::requireLogin();
 
@@ -77,6 +79,13 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <?php if (($r['description'] ?? '') !== ''): ?>
     <p><?php echo htmlspecialchars((string) $r['description'], ENT_QUOTES, 'UTF-8'); ?></p>
 <?php endif; ?>
+
+<?php portal_location_display([
+    'lat'     => $r['latitude'] !== null ? (float) $r['latitude'] : null,
+    'lng'     => $r['longitude'] !== null ? (float) $r['longitude'] : null,
+    'w3w'     => $r['what3words'] ?? null,
+    'showMap' => false,
+]); ?>
 
 <a href="/resources/book?id=<?php echo $id; ?>" class="btn btn-primary mb-3">
     <i class="fa-solid fa-calendar-plus me-1"></i>Book this resource

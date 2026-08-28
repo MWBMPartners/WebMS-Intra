@@ -2,6 +2,42 @@
 
 
 ## [Unreleased] (alpha)
+- feat(location): #456 Chunk A — full address + geocoordinates + What3Words
+  platform layer (foundation, non-PII, interactive map). New
+  `Portal\Core\GeoLocation` (address normalise/format, DECIMAL(10,7) coord
+  validation, W3W canonicalisation, map link-outs, and the cross-repo
+  `toLocationObject()`/`fromLocationObject()` serializer shared byte-for-
+  byte with ProjectBookIT/ProjectEPass), `Portal\Core\What3Words` (v3 API
+  client — key passed as a query param, never logged; default OFF;
+  `w3w.enabled` gates only the API, the `///word.word.word` input is
+  always present as a stored-field fallback), and `Portal\Core\Geocoder`
+  (Google primary → Nominatim/OSM fallback, policy-compliant User-Agent +
+  ≤1 req/s throttle + `tblGeocodeCache` result cache, `geo.autoGeocode`
+  default OFF). Every new class is a zero-runtime-dependency standalone
+  implementation — no call ever crosses to another repo. Three new shared
+  partials (`web/_core/partials/` — first in the codebase):
+  `location-display.php`, `location-input.php`, `location-map-assets.php`
+  (pinned Leaflet 1.9.4 from cdn.jsdelivr.net with SRI, hashes
+  independently re-derived from the npm registry tarball and matched
+  exactly — see DEV_NOTES). New admin integration pages
+  (`/admin/integrations/what3words`, `/admin/integrations/geocoding`) and
+  a site-HQ address page (`/admin/settings/organisation`); two session-
+  authed AJAX proxies (`/geo/w3w-suggest`, `/geo/lookup`) outside `api/*`
+  so the browser never sees either API key. Wired into Venues (structured
+  address + coords/W3W + interactive map), Events (existing
+  `locationGeoLat/locationGeoLng/locationW3W` columns now validated on
+  save, JSON-LD `geo`, interactive map, canonical `location` object
+  additively emitted by the events REST API create/update/list/detail),
+  Event occurrence overrides (hand-entered `overrideGeoLat/overrideGeoLng/
+  overrideW3W`, NULL = inherit), Resources, and Asset Locations. Migration
+  180: five new columns (`latitude/longitude/what3words/geocodedAt/
+  geocodeSource`) on `tblVenues`/`tblResource`/`tblAssetLocations`, three
+  override columns on `tblEventOccurrenceOverrides`, new `tblGeocodeCache`,
+  14 settings seeds (all default OFF/empty), 10 route seeds — a fresh
+  upgrade is a full no-op until an admin opts in. No PII table touched in
+  this chunk (tblUsers/directory/GiftAid/Salvation land in a later Chunk
+  B PR with the matching GDPR export/erasure wiring in the same commit).
+  All 11 audit checks green, `php -l` clean on every touched file.
 - feat(mail): gap #234 — MS365 Graph email via an admin-configured shared
   mailbox, plus hardening of the whole `Mailer::sendViaGraph()` path. The
   portal already sent every email app-only through Microsoft Graph

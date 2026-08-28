@@ -36,6 +36,7 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\AssetRegister;
 use Portal\Core\Auth;
+use Portal\Core\GeoLocation;
 use Portal\Core\Logger;
 use Portal\Core\Router;
 use Portal\Core\Site;
@@ -95,6 +96,17 @@ if ($action === 'save') {
         $landlordOrgId = $newOrgId;
     }
 
+    // 📍 #456 Chunk A — pre-validate a non-empty W3W here so a typo gets a
+    // proper flash + redirect-back rather than a silent-to-null model-layer
+    // drop; empty/valid values pass through untouched.
+    $w3wPosted = trim((string) ($_POST['what3words'] ?? ''));
+    if ($w3wPosted !== '' && GeoLocation::validateW3W($w3wPosted) === null) {
+        $_SESSION['flash_msg']  = t('location.w3w_invalid');
+        $_SESSION['flash_type'] = 'danger';
+        header('Location: /venues/manage' . ($isCreate ? '' : '?edit=' . $venueId));
+        exit();
+    }
+
     $data = [
         'venueName'      => (string) ($_POST['venueName'] ?? ''),
         'landlordOrgID'  => $landlordOrgId,
@@ -108,6 +120,9 @@ if ($action === 'save') {
         'caretakerName'  => (string) ($_POST['caretakerName'] ?? ''),
         'caretakerPhone' => (string) ($_POST['caretakerPhone'] ?? ''),
         'notes'          => (string) ($_POST['notes'] ?? ''),
+        'latitude'       => $_POST['latitude'] ?? null,
+        'longitude'      => $_POST['longitude'] ?? null,
+        'what3words'     => $w3wPosted,
     ];
 
     $savedId = Venues::saveVenue($siteId, $venueId, $data, $userId);

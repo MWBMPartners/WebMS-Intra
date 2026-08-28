@@ -32,6 +32,9 @@ use Portal\Core\Auth;
 use Portal\Core\Router;
 use Portal\Core\Site;
 
+require_once PORTAL_CORE . DIRECTORY_SEPARATOR . 'partials' . DIRECTORY_SEPARATOR . 'location-display.php';
+require_once PORTAL_CORE . DIRECTORY_SEPARATOR . 'partials' . DIRECTORY_SEPARATOR . 'location-map-assets.php';
+
 // 🛡️ Ensure session for nav state
 Auth::ensureSession();
 
@@ -70,6 +73,13 @@ if ($event === null) {
 // 🛡️ Check visibility (non-public events require login)
 if (($event['isPublic'] === '0' || (int) $event['isPublic'] === 0) && Auth::check() === false) {
     Auth::requireLogin();
+}
+
+// 🗺️ #456 Chunk A — page-scoped CSP widening for OSM tiles, ONLY when the
+// event has coordinates (conditional, #386 precedent). Must be set BEFORE
+// header.php is required below.
+if ($event['locationGeoLat'] !== null && $event['locationGeoLng'] !== null) {
+    $cspImgExtra = 'https://*.tile.openstreetmap.org';
 }
 
 // 📌 Page metadata
@@ -272,6 +282,14 @@ if (($event['isPublic'] ?? '0') === '1' && in_array($event['status'] ?? '', ['pu
             'name'    => (string) ($event['locationName']    ?? ''),
             'address' => (string) ($event['locationAddress'] ?? ''),
         ];
+        // 📍 #456 Chunk A — geo sub-object when coordinates are present.
+        if ($event['locationGeoLat'] !== null && $event['locationGeoLng'] !== null) {
+            $jsonLd['location']['geo'] = [
+                '@type'     => 'GeoCoordinates',
+                'latitude'  => (float) $event['locationGeoLat'],
+                'longitude' => (float) $event['locationGeoLng'],
+            ];
+        }
     }
     if ($heroAbsUrl !== null) {
         $jsonLd['image'] = [$heroAbsUrl];
@@ -533,11 +551,19 @@ endif;
             </div>
 
             <!-- 📍 Location card -->
-            <?php if ($event['locationName'] !== null && $event['locationName'] !== ''): ?>
+            <?php
+            $hasLocationInfo = ($event['locationName'] ?? '') !== ''
+                || ($event['locationAddress'] ?? '') !== ''
+                || ($event['locationGeoLat'] !== null && $event['locationGeoLng'] !== null)
+                || ($event['locationW3W'] ?? '') !== '';
+            ?>
+            <?php if ($hasLocationInfo === true): ?>
                 <div class="card mb-4">
                     <div class="card-header"><h5 class="mb-0"><i class="fa-solid fa-location-dot me-2"></i>Where</h5></div>
                     <div class="card-body">
-                        <p class="mb-1"><strong><?php echo htmlspecialchars($event['locationName'], ENT_QUOTES, 'UTF-8'); ?></strong></p>
+                        <?php if ($event['locationName'] !== null && $event['locationName'] !== ''): ?>
+                            <p class="mb-1"><strong><?php echo htmlspecialchars($event['locationName'], ENT_QUOTES, 'UTF-8'); ?></strong></p>
+                        <?php endif; ?>
                         <?php if ($event['locationAddress'] !== null && $event['locationAddress'] !== ''): ?>
                             <p class="mb-1 small"><?php echo nl2br(htmlspecialchars($event['locationAddress'], ENT_QUOTES, 'UTF-8')); ?></p>
                         <?php endif; ?>
@@ -553,6 +579,13 @@ endif;
                                 <?php echo htmlspecialchars($event['locationPhone'], ENT_QUOTES, 'UTF-8'); ?>
                             </p>
                         <?php endif; ?>
+                        <?php portal_location_display([
+                            'lat'     => $event['locationGeoLat'] !== null ? (float) $event['locationGeoLat'] : null,
+                            'lng'     => $event['locationGeoLng'] !== null ? (float) $event['locationGeoLng'] : null,
+                            'w3w'     => $event['locationW3W'] ?? null,
+                            'showMap' => true,
+                            'mapId'   => 'eventMap',
+                        ]); ?>
                     </div>
                 </div>
             <?php endif; ?>
@@ -690,6 +723,8 @@ endif;
 </article>
 
 <?php
+portal_location_map_assets(App::cspNonce());
+
 // 📄 Include shared footer template
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'footer.php';
 ?>

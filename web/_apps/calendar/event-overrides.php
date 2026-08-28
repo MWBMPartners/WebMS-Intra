@@ -16,6 +16,8 @@ use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Site;
 
+require_once PORTAL_CORE . DIRECTORY_SEPARATOR . 'partials' . DIRECTORY_SEPARATOR . 'location-input.php';
+
 Auth::ensureSession();
 Auth::requireLogin();
 
@@ -34,7 +36,7 @@ $stmt->close();
 if ($event === null) { http_response_code(404); exit('Event not found'); }
 
 $rows = [];
-$stmt = $mysqli->prepare('SELECT overrideID, occurrenceDate, isCancelled, overrideName, overrideStartTime, overrideLocation, notes FROM tblEventOccurrenceOverrides WHERE eventID = ? ORDER BY occurrenceDate ASC');
+$stmt = $mysqli->prepare('SELECT overrideID, occurrenceDate, isCancelled, overrideName, overrideStartTime, overrideLocation, overrideGeoLat, overrideGeoLng, overrideW3W, notes FROM tblEventOccurrenceOverrides WHERE eventID = ? ORDER BY occurrenceDate ASC');
 $stmt->bind_param('i', $eventId);
 $stmt->execute();
 $result = $stmt->get_result();
@@ -68,6 +70,12 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         <?php endif; ?>
                         <?php if (!empty($r['overrideLocation'])): ?>
                             <span class="badge bg-secondary ms-1">📍 <?php echo htmlspecialchars((string) $r['overrideLocation'], ENT_QUOTES, 'UTF-8'); ?></span>
+                        <?php endif; ?>
+                        <?php if ($r['overrideGeoLat'] !== null && $r['overrideGeoLng'] !== null): ?>
+                            <span class="badge bg-secondary ms-1" title="Override coordinates">📍 <?php echo htmlspecialchars((string) $r['overrideGeoLat'], ENT_QUOTES, 'UTF-8'); ?>, <?php echo htmlspecialchars((string) $r['overrideGeoLng'], ENT_QUOTES, 'UTF-8'); ?></span>
+                        <?php endif; ?>
+                        <?php if (!empty($r['overrideW3W'])): ?>
+                            <span class="badge bg-secondary ms-1">📍 ///<?php echo htmlspecialchars((string) $r['overrideW3W'], ENT_QUOTES, 'UTF-8'); ?></span>
                         <?php endif; ?>
                     <?php endif; ?>
                     <?php if (!empty($r['notes'])): ?>
@@ -107,6 +115,11 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <input type="time" name="overrideEndTime"   class="form-control form-control-sm" placeholder="end">
         </div>
         <div class="col-md-6"><label class="form-label small">New location (optional)</label><input type="text" name="overrideLocation" maxlength="255" class="form-control form-control-sm"></div>
+        <?php portal_location_input([
+            'names' => ['lat' => 'overrideGeoLat', 'lng' => 'overrideGeoLng', 'w3w' => 'overrideW3W'],
+            'showAddress' => false,
+            'compact'     => true,
+        ]); ?>
         <div class="col-md-4"><label class="form-label small">Notes (optional)</label><input type="text" name="notes" maxlength="1000" class="form-control form-control-sm"></div>
         <div class="col-md-2 d-flex align-items-end"><button class="btn btn-primary btn-sm w-100">Save</button></div>
     </form>
