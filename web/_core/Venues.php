@@ -324,7 +324,8 @@ class Venues
             }
             $startVal = $start !== null ? $start . ':00' : null;
             $endVal   = $end !== null ? $end . ':00' : null;
-            $win->bind_param('iissi', $siteId, $usageTypeId, $effectiveFrom, $startVal, $endVal, $actorUserId);
+            // SEC-01 fix: 6 placeholders/6 vars need 6 type chars (was 5: 'iissi') — siteID(i), usageTypeID(i), effectiveFrom DATE(s), defaultStartTime/EndTime TIME-or-NULL(s,s), createdByID(i).
+            $win->bind_param('iisssi', $siteId, $usageTypeId, $effectiveFrom, $startVal, $endVal, $actorUserId);
             $win->execute();
             $win->close();
         }
@@ -493,8 +494,9 @@ class Venues
             if ($stmt === false) {
                 return 0;
             }
+            // SEC-01 fix: 14 placeholders/14 vars need 14 type chars (was 13: 'isisssssssssi').
             $stmt->bind_param(
-                'isisssssssssi',
+                'isissssssssssi',
                 $siteId, $name, $landlordOrgIdVal, $addr1, $addr2, $city, $region,
                 $postcode, $countryCode, $timezone, $caretakerName, $caretakerPhone, $notes, $actorUserId
             );
@@ -746,7 +748,7 @@ class Venues
 
         $date = $forDate ?? date('Y-m-d');
         foreach ($rows as &$row) {
-            $row['resolvedWindow'] = self::resolveWindow((int) $row['usageTypeID'], $date);
+            $row['resolvedWindow'] = self::resolveWindow((int) $row['usageTypeID'], $date, $siteId);
         }
         unset($row);
         return $rows;
@@ -913,7 +915,8 @@ class Venues
             if ($stmt === false) {
                 return ['id' => 0, 'error' => 'Could not save.'];
             }
-            $stmt->bind_param('iisssi', $siteId, $usageTypeId, $effectiveFrom, $startVal, $endVal, $note, $actorUserId);
+            // SEC-01 fix: 7 placeholders/7 vars need 7 type chars (was 6: 'iisssi').
+            $stmt->bind_param('iissssi', $siteId, $usageTypeId, $effectiveFrom, $startVal, $endVal, $note, $actorUserId);
             $ok = $stmt->execute();
             $newId = (int) $stmt->insert_id;
             $stmt->close();
@@ -952,19 +955,24 @@ class Venues
      * the GREATEST effectiveFrom. No row => null (times manual). A row
      * with NULL times is a real "no default" answer.
      *
+     * SEC-04 (defence-in-depth): site-scoped — every live caller already
+     * pre-validates usageTypeId against the caller's siteId before reaching
+     * here, so this was not previously reachable cross-tenant, but the
+     * SELECT now carries its own AND siteID = ? guard too.
+     *
      * @return ?array{start: ?string, end: ?string}
      */
-    public static function resolveWindow(int $usageTypeId, string $date): ?array
+    public static function resolveWindow(int $usageTypeId, string $date, int $siteId): ?array
     {
         $db = self::db();
         $stmt = $db->prepare(
             'SELECT defaultStartTime, defaultEndTime FROM tblVenueUsageTypeWindows '
-            . 'WHERE usageTypeID = ? AND effectiveFrom <= ? ORDER BY effectiveFrom DESC LIMIT 1'
+            . 'WHERE usageTypeID = ? AND effectiveFrom <= ? AND siteID = ? ORDER BY effectiveFrom DESC LIMIT 1'
         );
         if ($stmt === false) {
             return null;
         }
-        $stmt->bind_param('is', $usageTypeId, $date);
+        $stmt->bind_param('isi', $usageTypeId, $date, $siteId);
         $stmt->execute();
         $row = $stmt->get_result()->fetch_assoc();
         $stmt->close();
@@ -998,7 +1006,7 @@ class Venues
         $touched = 0;
         foreach ($rows as $row) {
             $bookingId = (int) $row['bookingID'];
-            $window = self::resolveWindow($usageTypeId, (string) $row['bookingDate']);
+            $window = self::resolveWindow($usageTypeId, (string) $row['bookingDate'], $siteId);
             $upd = $db->prepare('UPDATE tblVenueBookings SET startTime = ?, endTime = ? WHERE bookingID = ? AND siteID = ?');
             if ($upd === false) {
                 continue;
@@ -1352,7 +1360,7 @@ class Venues
             $postedEnd = trim((string) ($data['endTime'] ?? ''));
             $timeRe = '/^([01]\d|2[0-3]):[0-5]\d$/';
             if ($postedStart === '' && $postedEnd === '') {
-                $resolved = $validDate === true ? self::resolveWindow($usageTypeId, $bookingDate) : null;
+                $resolved = $validDate === true ? self::resolveWindow($usageTypeId, $bookingDate, $siteId) : null;
                 $startTime = $resolved['start'] ?? null;
                 $endTime = $resolved['end'] ?? null;
                 $timesOverridden = 0;
@@ -1367,7 +1375,7 @@ class Venues
                     } else {
                         $startTime = $sVal;
                         $endTime = $eVal;
-                        $resolved = $validDate === true ? self::resolveWindow($usageTypeId, $bookingDate) : null;
+                        $resolved = $validDate === true ? self::resolveWindow($usageTypeId, $bookingDate, $siteId) : null;
                         $matchesDefault = $resolved !== null && ($resolved['start'] ?? null) === $sVal && ($resolved['end'] ?? null) === $eVal;
                         $timesOverridden = $matchesDefault === true ? 0 : 1;
                     }
@@ -1400,8 +1408,9 @@ class Venues
                 if ($stmt === false) {
                     return ['id' => 0, 'errors' => ['Could not save booking.']];
                 }
+                // SEC-01 fix: 16 placeholders/16 vars need 16 type chars (was 15: 'iiiisissiisiisi' — missing the 'i' for agreementID).
                 $stmt->bind_param(
-                    'iiiisissiisiisi',
+                    'iiiisissiisiiisi',
                     $siteId, $venueId, $roomId, $groupId, $bookingDate, $usageTypeId,
                     $startTime, $endTime, $timesOverridden, $statusId, $notes,
                     $eventId, $agreementId, $costPence, $currency, $actorUserId
@@ -1424,8 +1433,9 @@ class Venues
             if ($stmt === false) {
                 return ['id' => $bookingId, 'errors' => ['Could not save booking.']];
             }
+            // SEC-01 fix: 17 placeholders (15 SET + 2 WHERE)/17 vars need 17 type chars (was 16: 'iiisiissisiisiii', also mis-ordered around startTime/usageTypeID).
             $stmt->bind_param(
-                'iiisiissisiisiii',
+                'iiisissiisiiisiii',
                 $venueId, $roomId, $groupId, $bookingDate, $usageTypeId,
                 $startTime, $endTime, $timesOverridden, $statusId, $notes,
                 $eventId, $agreementId, $costPence, $currency, $actorUserId, $bookingId, $siteId
@@ -1599,7 +1609,7 @@ class Venues
 
             $created = [];
             foreach ($expansion['dates'] as $date) {
-                $window = self::resolveWindow($usageTypeId, $date);
+                $window = self::resolveWindow($usageTypeId, $date, $siteId);
                 $start = $window['start'] ?? null;
                 $end = $window['end'] ?? null;
                 $bstmt = $db->prepare(
@@ -2384,11 +2394,11 @@ class Venues
                     if ($row['parsedStartTime'] !== null && $row['parsedEndTime'] !== null) {
                         $start = $row['parsedStartTime'];
                         $end = $row['parsedEndTime'];
-                        $window = self::resolveWindow($usageTypeId, $bookingDate);
+                        $window = self::resolveWindow($usageTypeId, $bookingDate, $siteId);
                         $matches = $window !== null && ($window['start'] ?? null) === $start && ($window['end'] ?? null) === $end;
                         $overridden = $matches === true ? 0 : 1;
                     } else {
-                        $window = self::resolveWindow($usageTypeId, $bookingDate);
+                        $window = self::resolveWindow($usageTypeId, $bookingDate, $siteId);
                         $start = $window['start'] ?? null;
                         $end = $window['end'] ?? null;
                     }
@@ -2671,8 +2681,9 @@ class Venues
             if ($stmt === false) {
                 return ['id' => 0, 'errors' => ['Could not save agreement.']];
             }
+            // SEC-01 fix: 15 placeholders/15 vars need 15 type chars (was 14: 'iisssssiissssi').
             $stmt->bind_param(
-                'iisssssiissssi',
+                'iissssssiissssi',
                 $siteId, $venueId, $type, $title, $reference, $termStart, $termEnd, $renewalDate,
                 $noticePeriodDays, $rateAmountPence, $rateUnitVal, $currency, $status, $notes, $actorUserId
             );
@@ -2994,8 +3005,9 @@ class Venues
                     return ['id' => 0, 'errors' => ['Could not save invoice.']];
                 }
                 if ($filePath !== null) {
+                    // SEC-01 fix: 16 placeholders (14 SET + 2 WHERE)/16 vars need 16 type chars (was 15: 'issssssisssssii').
                     $stmt->bind_param(
-                        'issssssisssssii',
+                        'issssssissssisii',
                         $agreementId, $invoiceRef, $description, $periodStart, $periodEnd, $issueDate, $dueDate,
                         $amountPence, $currency, $notes, $fileName, $filePath, $fileSize, $mimeType, $invoiceId, $siteId
                     );
@@ -3030,8 +3042,9 @@ class Venues
             if ($stmt === false) {
                 return ['id' => 0, 'errors' => ['Could not save invoice.']];
             }
+            // SEC-01 fix: 17 placeholders/17 vars need 17 type chars (was 16: 'iiisssssissssisi').
             $stmt->bind_param(
-                'iiisssssissssisi',
+                'iiissssssissssisi',
                 $siteId, $venueId, $agreementId, $invoiceRef, $description, $periodStart, $periodEnd, $issueDate,
                 $dueDate, $amountPence, $currency, $notes, $fileName, $filePath, $fileSize, $mimeType, $actorUserId
             );
@@ -3188,6 +3201,24 @@ class Venues
         }
         $reference = self::nullableTrim($data['reference'] ?? null, 100);
         $notes = self::nullableTrim($data['notes'] ?? null, 500);
+
+        // 🛡️ SEC-03: reject a payment that would push total-paid past the
+        //     invoice's amountPence. Mirrors the already-paid SUM query in
+        //     recomputeInvoiceStatus() below. Partial payments that sum to
+        //     <= the invoice total are still allowed.
+        if ($amountPence > 0) {
+            $sumStmt = $db->prepare('SELECT COALESCE(SUM(amountPence), 0) AS total FROM tblVenueInvoicePayments WHERE invoiceID = ? AND siteID = ?');
+            if ($sumStmt !== false) {
+                $sumStmt->bind_param('ii', $invoiceId, $siteId);
+                $sumStmt->execute();
+                $alreadyPaid = (int) ($sumStmt->get_result()->fetch_assoc()['total'] ?? 0);
+                $sumStmt->close();
+                $invoiceAmount = (int) ($invoice['amountPence'] ?? 0);
+                if (($alreadyPaid + $amountPence) > $invoiceAmount) {
+                    $errors[] = 'Payment exceeds the invoice\'s outstanding balance.';
+                }
+            }
+        }
 
         if (count($errors) > 0) {
             return ['payID' => 0, 'errors' => $errors];
@@ -4050,23 +4081,5 @@ class Venues
         $row = $stmt->get_result()->fetch_assoc();
         $stmt->close();
         return $row !== null ? (int) $row['statusID'] : null;
-    }
-
-    /** Next free sortOrder (max + 10) for a per-venue/per-site vocabulary table — small UI convenience for "add new" forms. */
-    private static function nextSortOrder(string $table, string $scopeColumn, int $scopeId): int
-    {
-        if (in_array($table, ['tblVenueRooms', 'tblVenueUsageTypes', 'tblVenueStatuses'], true) === false) {
-            return 0;
-        }
-        $db = self::db();
-        $stmt = $db->prepare("SELECT COALESCE(MAX(sortOrder), 0) AS m FROM `{$table}` WHERE `{$scopeColumn}` = ?");
-        if ($stmt === false) {
-            return 0;
-        }
-        $stmt->bind_param('i', $scopeId);
-        $stmt->execute();
-        $max = (int) ($stmt->get_result()->fetch_assoc()['m'] ?? 0);
-        $stmt->close();
-        return $max + 10;
     }
 }
