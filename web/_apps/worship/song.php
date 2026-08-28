@@ -17,7 +17,7 @@ $song   = null;
 
 if ($isNew === true) {
     if (App::isAdmin() === false) { http_response_code(403); exit('Forbidden'); }
-    $song = ['songID' => 0, 'title' => '', 'author' => '', 'ccliNumber' => '', 'copyrightLine' => '', 'defaultKey' => '', 'defaultTempo' => '', 'lyrics' => '', 'tags' => ''];
+    $song = ['songID' => 0, 'title' => '', 'author' => '', 'ccliNumber' => '', 'copyrightLine' => '', 'defaultKey' => '', 'defaultTempo' => '', 'lyrics' => '', 'tags' => '', 'hymnalCode' => '', 'hymnNumber' => '', 'tuneName' => ''];
 } elseif ($songId > 0) {
     $stmt = $mysqli->prepare('SELECT * FROM tblSongs WHERE songID = ? AND siteID = ? AND isActive = 1');
     $stmt->bind_param('ii', $songId, $siteId);
@@ -46,6 +46,13 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 <div class="col-md-2"><label class="form-label small">Key</label><input type="text" name="defaultKey" value="<?php echo htmlspecialchars((string) $song['defaultKey'], ENT_QUOTES, 'UTF-8'); ?>" maxlength="10" class="form-control form-control-sm" placeholder="G"></div>
                 <div class="col-md-3"><label class="form-label small">Tempo</label><input type="text" name="defaultTempo" value="<?php echo htmlspecialchars((string) $song['defaultTempo'], ENT_QUOTES, 'UTF-8'); ?>" maxlength="20" class="form-control form-control-sm" placeholder="120 bpm"></div>
                 <div class="col-md-3"><label class="form-label small">Tags</label><input type="text" name="tags" value="<?php echo htmlspecialchars((string) $song['tags'], ENT_QUOTES, 'UTF-8'); ?>" maxlength="255" class="form-control form-control-sm" placeholder="praise, communion"></div>
+                <!-- 🎵 Gap #128 residual — hymnal identity, carried over
+                     automatically when a hymn is promoted from the Service
+                     Plans picker (Portal\Core\Hymnal::promoteToSong()); also
+                     hand-editable here like every other field. -->
+                <div class="col-md-3"><label class="form-label small">Hymnal code</label><input type="text" name="hymnalCode" value="<?php echo htmlspecialchars((string) ($song['hymnalCode'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>" maxlength="20" class="form-control form-control-sm" placeholder="SDAH"></div>
+                <div class="col-md-3"><label class="form-label small">Hymn number</label><input type="text" name="hymnNumber" value="<?php echo htmlspecialchars((string) ($song['hymnNumber'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>" maxlength="20" class="form-control form-control-sm" placeholder="256"></div>
+                <div class="col-md-3"><label class="form-label small">Tune name</label><input type="text" name="tuneName" value="<?php echo htmlspecialchars((string) ($song['tuneName'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>" maxlength="120" class="form-control form-control-sm" placeholder="Aurelia"></div>
                 <div class="col-12"><label class="form-label small">Copyright</label><input type="text" name="copyrightLine" value="<?php echo htmlspecialchars((string) $song['copyrightLine'], ENT_QUOTES, 'UTF-8'); ?>" maxlength="500" class="form-control form-control-sm"></div>
                 <div class="col-12"><label class="form-label small">Lyrics</label><textarea name="lyrics" rows="12" class="form-control"><?php echo htmlspecialchars((string) $song['lyrics'], ENT_QUOTES, 'UTF-8'); ?></textarea></div>
                 <div class="col-12 d-flex gap-2 mt-3">
@@ -62,6 +69,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <?php if (!empty($song['author'])): ?><?php echo htmlspecialchars((string) $song['author'], ENT_QUOTES, 'UTF-8'); ?><?php endif; ?>
             <?php if (!empty($song['ccliNumber'])): ?> &middot; CCLI <?php echo htmlspecialchars((string) $song['ccliNumber'], ENT_QUOTES, 'UTF-8'); ?><?php endif; ?>
             <?php if (!empty($song['defaultKey'])): ?> &middot; Key <?php echo htmlspecialchars((string) $song['defaultKey'], ENT_QUOTES, 'UTF-8'); ?><?php endif; ?>
+            <?php if (!empty($song['hymnalCode']) && !empty($song['hymnNumber'])): ?> &middot; <?php echo htmlspecialchars((string) $song['hymnalCode'], ENT_QUOTES, 'UTF-8'); ?> <?php echo htmlspecialchars((string) $song['hymnNumber'], ENT_QUOTES, 'UTF-8'); ?><?php endif; ?>
+            <?php if (!empty($song['tuneName'])): ?> &middot; Tune: <?php echo htmlspecialchars((string) $song['tuneName'], ENT_QUOTES, 'UTF-8'); ?><?php endif; ?>
         </p>
         <?php if (!empty($song['copyrightLine'])): ?>
             <p class="small text-muted"><?php echo htmlspecialchars((string) $song['copyrightLine'], ENT_QUOTES, 'UTF-8'); ?></p>

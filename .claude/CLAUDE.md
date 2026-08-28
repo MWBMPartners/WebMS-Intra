@@ -87,7 +87,7 @@ infrastructure rather than apps).
 | resources | `/resources` | Bookable resources (rooms, equipment, vehicles) with conflict detection + approval workflow |
 | rota | `/rota` | Recurring duty / shift assignments with swap requests and reminders |
 | salvation | `/decision-card` | Public decision-card / salvation tracker form + admin follow-up workflow (#316) |
-| service-plans | `/service-plans` | Programme run-sheet builder (preacher, scripture, hymns, AV, welcome team); operator → confidence-monitor messaging (#300) |
+| service-plans | `/service-plans` | Programme run-sheet builder (preacher, scripture, hymns, AV, welcome team); operator → confidence-monitor messaging (#300); local hymnal index + default-off remote lookup + congregation-facing public `/os/{token}` view (gap #128, migration 178) |
 | settings | `/settings` | Generic dot-notation settings editor |
 | site | `/site` | Multi-site switcher handler |
 | sms | `/admin/sms` | SMS notifications for critical alerts via Twilio / MessageBird / AWS SNS |
@@ -156,6 +156,36 @@ Calendar/Events/Preaching Plan is ONE app ("Events") — `/calendar` covers view
 
 ## Recent ships (chronological)
 
+- **`claude/gap128-oos`** (branched off `alpha`) — gap #128 residual
+  (re-scoped #128 "Order of Service planner with iHymns integration"):
+  service-plans (#262/#300) + Worship (#308/#355) already covered
+  everything the issue asked for except three genuine gaps, all additive
+  on the EXISTING `tblServicePlan`/`tblServicePlanItem`/`tblSongs` tables —
+  no third service-plan model, no new app. **R1** local hymnal index —
+  new `tblHymnals`/`tblHymnalEntries` (metadata only, never lyrics),
+  `Portal\Core\Hymnal::searchLocal()`, admin CRUD + CSV import at
+  `/admin/hymns`. **R2** optional remote ("iHymns") lookup, Tier 2,
+  default OFF (`hymns.remote.enabled='false'`) — a generic SSRF-hardened
+  HTTPS JSON client (`Hymnal::searchRemote()`: https-only, single-host
+  allowlist, private/reserved-IP refusal, no-redirect-follow, 3s/5s
+  timeouts, ~512 KB body cap, JSON-only, 24h cache in
+  `tblHymnLookupCache`), reachable via session-authed
+  `service-plans/api/hymn-search.php` (ApiRouter convention path,
+  `api.service-plans.hymn-search.enabled` flag, NOT a tblRoutes row).
+  **R3** congregation-facing public Order of Service — new
+  `tblServicePlan.publicToken`/`isPublicShared`, Router special route
+  `/os/{token}` (cloned from `/a/{token}`) → `service-plans/public.php`:
+  congregation fields only, `notes` never queried, uniform 404 for
+  unknown/unshared/unpublished/disabled tokens, OFF by default at both
+  site (`service_plans.public_share.enabled`) and plan level; CSRF'd
+  `service-plans/share.php` (enable/disable/rotate) + a `/qr.php` code.
+  `print.php` gains `?version=leader|congregation` (default `leader`,
+  byte-identical to before). **R4 (glue)** nullable
+  `tblServicePlanItem.songID` FK → `tblSongs` — picking a hymn/song
+  auto-promotes it into `tblSongs` (check-first upsert) and links it;
+  free-text `title` stays the universal fallback. Migration 178 (176/177
+  reserved by in-flight webpush/shared-mailbox work); all 11 audit checks
+  green, `php -l` clean on every touched file.
 - **`claude/gap436-venue-coverage`** (branched off `alpha`) — gap #436:
   additive follow-up to the shipped Venue Bookings app (#429, migration
   170) and the wall-clock fix (#435). `tblEvents` gains two optional
