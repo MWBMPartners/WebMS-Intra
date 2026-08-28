@@ -409,6 +409,12 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <?php endif; ?>
 
 <?php
+// 📍 #456 Chunk A — the "Look up coordinates" button + W3W autosuggest
+// wiring in the event form above needs the shared init script (no map div
+// is shown on this page, but the same partial carries both bindings).
+require_once PORTAL_CORE . DIRECTORY_SEPARATOR . 'partials' . DIRECTORY_SEPARATOR . 'location-map-assets.php';
+portal_location_map_assets(App::cspNonce());
+
 // 📄 Include shared footer template
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'footer.php';
 ?>

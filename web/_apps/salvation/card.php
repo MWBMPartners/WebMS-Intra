@@ -6,6 +6,12 @@ use Portal\Core\Auth;
 use Portal\Core\Captcha;
 use Portal\Core\Site;
 
+// 📍 #456 Chunk B — structured-input reuse, TEXT-ONLY, on the PUBLIC
+// decision-card form. No coords/W3W — a pastoral follow-up address needs
+// postal text, not a pin — and no schema change (tblSalvationCards gains
+// no new columns, so no new erasure surface).
+require_once PORTAL_CORE . DIRECTORY_SEPARATOR . 'partials' . DIRECTORY_SEPARATOR . 'location-input.php';
+
 $eventId = (int) ($_GET['eventID'] ?? 0);
 $pageTitle = 'Decision Card';
 $csrf = htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8');
@@ -29,7 +35,17 @@ if ($captchaConfigured === true) { echo Captcha::scriptTag(); }
             <div class="col-md-7"><label class="form-label">Email</label><input type="email" name="email" maxlength="255" class="form-control"></div>
             <div class="col-md-5"><label class="form-label">Phone</label><input type="tel" name="phone" maxlength="40" class="form-control"></div>
         </div>
-        <div class="mb-3"><label class="form-label">Address (optional)</label><textarea name="address" rows="2" maxlength="500" class="form-control"></textarea></div>
+        <?php
+        // 📍 #456 Chunk B — "reduced names map" mode: only line1 is mapped
+        // (-> the EXISTING `address` POST field), so only that one field
+        // renders. card-save.php's POST contract is unchanged.
+        portal_location_input([
+            'showCoords' => false,
+            'showW3W'    => false,
+            'compact'    => false,
+            'names'      => ['line1' => 'address'],
+        ]);
+        ?>
 
         <div class="mb-3">
             <label class="form-label">My decision</label>

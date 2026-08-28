@@ -19,7 +19,7 @@ Internal portal platform (PHP 8.5, backward-compatible with 8.4, MySQL 8.0, Boot
 ```
 repo root/          <- NOT deployed (docs, CI/CD only)
 web/                <- ALL deployable files (synced to server via SFTP)
-  _core/            <- Framework classes (Portal\Core namespace, 64 classes)
+  _core/            <- Framework classes (Portal\Core namespace, 67 classes)
   _apps/            <- App controllers — outside the webroot (#159). Every
                        app's PHP handlers live here; Router resolves
                        tblRoutes.targetFile against PORTAL_APPS = _apps/.
@@ -63,7 +63,7 @@ infrastructure rather than apps).
 | care | `/care` | Confidential pastoral / wellbeing register with visit log; role-restricted, encrypted notes |
 | cop-live-chat | `/admin/live/chat` | Moderate viewer chat on livestream events (#313); viewer-facing chat widget served alongside the `/live` embed |
 | dashboard | `/dashboard` | Portal home with app cards and pinned announcements |
-| directory | `/directory` | Searchable member directory with opt-in per-field visibility |
+| directory | `/directory` | Searchable member directory with opt-in per-field visibility, incl. an independent `visibilityCoords` tier for an optional home map pin (#456 Chunk B) |
 | discipleship | `/discipleship` | Ordered formation pathways with per-member progress tracking, auto-completion from attendance/RSVPs, pastor roster (#303) |
 | documents | `/documents` | File library with categories |
 | expenses | `/expenses` | Submit, approve, treasury, withdraw, multi-approver, PDF, CSV |
@@ -112,7 +112,9 @@ handlers backing the `api` app's events/users resources), `live/` +
 of `livestream`/`cop-live-chat` above), `privacy/` (GDPR consent banner +
 policy pages, public, tied to Auth), `widget/` (public embeddable
 countdown/calendar widgets for external sites), `qr.php` (shared QR-code
-generator utility used by Noticeboard/Visitors/etc).
+generator utility used by Noticeboard/Visitors/etc), `geo/` (session-authed
+AJAX proxies — `w3w-suggest`/`lookup` — backing the shared location
+partials' "Look up coordinates" button + W3W autosuggest, #456).
 
 Calendar/Events/Preaching Plan is ONE app ("Events") — `/calendar` covers viewing/listing/subscribing; the manage UI handles preaching-plan/worship event types and series.
 
@@ -188,6 +190,103 @@ Calendar/Events/Preaching Plan is ONE app ("Events") — `/calendar` covers view
   canonicalised on `check.php`'s existing contract and fixed the JS to
   match, adding `roomID`. All 10 audit checks green, `php -l` clean on
   every touched file.
+- **`claude/gap456-location-chunkB`** (branched off
+  `claude/gap456-location-chunkA`) — #456 Chunk B: the PII + GDPR half.
+  Migration 181 adds FOUR columns to `tblUsers` ONLY — `latitude`/
+  `longitude`/`what3words` (member home coordinates, PRIVATE by default,
+  NEVER auto-geocoded — no `geocodedAt`/`geocodeSource` pair) and
+  `visibilityCoords` (ENUM, default `'private'`, INDEPENDENT of the
+  existing `visibilityAddress`). Capture on the owner surface
+  (`directory/me.php`, per the spec — NOT `/account`); `directory/
+  save.php` validates the pair (10 → 14 bind_param placeholders).
+  `directory/profile.php` gates coords through a SEPARATE
+  `$can($u['visibilityCoords'])` check: owner/admin see full precision +
+  the exact what3words, any other permitted viewer sees coords coarsened
+  to 3dp (~110m, `GeoLocation::coarsenCoords()`) with an "Approximate
+  location" badge and the what3words value suppressed entirely (a
+  3m-precise W3W square can't be meaningfully coarsened). The pre-existing
+  `$can()` "team tier = private" quirk is inherited verbatim, not fixed.
+  GDPR lockstep in the SAME PR: `data-export.php` gained a
+  `giftAidDeclarations` block (closed a pre-existing gap — Gift Aid
+  address PII was never exported); `delete-confirm.php`'s tblUsers
+  anonymise UPDATE now also nulls `displayAddress`/`displayPhone` (a
+  separate pre-existing miss) plus the three new PII columns;
+  `GdprEraser::catalogue()`'s tblUsers `nullCols` extended with
+  `latitude`/`longitude`/`what3words`. GiftAid (`giving/gift-aid.php`) and
+  Salvation (`salvation/card.php`) reuse the shared `location-input`
+  partial in TEXT-ONLY "reduced names map" mode mapped onto their existing
+  `address`/`postcode` POST fields — no new columns, no new erasure
+  surface. Kids/Care/Visitors hard-excluded, verified by grep (zero
+  matches). `UserCreate`/`UserUpdate` API schemas document that member
+  coordinates/W3W are never readable or writable via the REST API in any
+  mode. All 11 audit checks green, `php -l` clean on every touched file.
+- **`claude/gap456-location-chunkA`** (branched off `alpha`) — #456 Chunk A:
+  full address + geocoordinates + what3words platform layer (foundation,
+  non-PII, interactive map — Chunk B lands the PII/GDPR half in a later
+  PR off this branch). Cross-repo data-format CONTRACT with
+  ProjectBookIT/ProjectEPass (identical column shapes, canonical
+  `location` JSON wire object, what3words canonical form) but fully
+  standalone — zero runtime dependency on either repo. New
+  `Portal\Core\GeoLocation` (address normalise/format mirroring
+  `Venues::saveVenue()`, DECIMAL(10,7) coord validation, W3W
+  canonicalisation, map link-outs, `toLocationObject()`/
+  `fromLocationObject()` serializer), `Portal\Core\What3Words` (v3 API
+  client — key in the QUERY STRING not a header, unlike every other
+  Bearer adapter in this codebase; never logged; default OFF via
+  `w3w.enabled`, which gates ONLY the API — the `///word.word.word` input
+  is always present as a stored-field fallback), `Portal\Core\Geocoder`
+  (Google primary → Nominatim/OSM fallback, policy-compliant User-Agent +
+  ≤1 rps throttle + `tblGeocodeCache`, `geo.autoGeocode` default OFF,
+  every method best-effort/never-throws). Three new shared partials —
+  first in the codebase at `web/_core/partials/`:
+  `location-display.php`/`location-input.php`/`location-map-assets.php`
+  (pinned Leaflet 1.9.4 from cdn.jsdelivr.net with SRI — hashes verified
+  by independently re-deriving them from the npm registry tarball, since
+  jsdelivr itself was unreachable from the build sandbox; all four
+  sha384/sha256 digests matched the build spec exactly). New admin pages
+  (`/admin/integrations/{what3words,geocoding}`,
+  `/admin/settings/organisation`) + two session-authed AJAX proxies
+  (`/geo/w3w-suggest`, `/geo/lookup`) outside `api/*`. Wired into Venues,
+  Events (existing `locationGeoLat/locationGeoLng/locationW3W` columns
+  now validated + JSON-LD `geo` + interactive map + canonical `location`
+  object additively emitted by the events REST API create/update/list/
+  detail), Event occurrence overrides (`overrideGeoLat/overrideGeoLng/
+  overrideW3W`, hand-entered, NULL = inherit), Resources, Asset Locations.
+  Migration 180: five-column location block on
+  `tblVenues`/`tblResource`/`tblAssetLocations`, three override columns on
+  `tblEventOccurrenceOverrides`, new `tblGeocodeCache`, 14 settings seeds
+  (all default OFF/empty), 10 route seeds — upgrade is a full no-op. No
+  PII table touched (tblUsers/directory/GiftAid/Salvation are Chunk B).
+  All 11 audit checks green, `php -l` clean on every touched file.
+- **`claude/gap234-shared-mailbox`** (branched off `alpha`) — gap #234:
+  MS365 Graph email via an admin-configured shared mailbox, formalising
+  and hardening the app-only `Mailer::sendViaGraph()` path already in
+  place rather than adding the issue body's delegated `Mail.Send.Shared`
+  auth model (deferred — zero new secrets vs. an entire OAuth refresh
+  surface + a dependency on a licensed human account). New
+  `mail.ms365.sharedMailbox` (empty = off, today's behaviour unchanged)
+  + `Mailer::effectiveSender()` resolver; explicit `message.from` object
+  now built in BOTH modes (benign fix — `mail.defaultFromName` finally
+  works on MS365, not just Google); 401-retry-once / 429-bounded-retry
+  (≤5s `Retry-After` only) / 403-404-Graph-error-code-surfaced / optional
+  opt-in `mail.fallbackProvider='google'` (default off, fail loud). New
+  `tblEmailLog` (migration 176) logs every send from BOTH providers via
+  the new public `Mailer::logSend()` — closes the #230 audit-trail
+  dependency too; opportunistic retention prune, no new cron.
+  `GdprEraser` gained a bespoke (not `catalogue()`) step scrubbing an
+  erased user's address out of the comma-joined `toRecipients` column,
+  captured before the catalogue's own `tblUsers` step nulls it. Admin UI:
+  `/admin/integrations` MS365 Graph card gained a Shared-Mailbox Sending
+  sub-section + CSRF'd save handler (`admin/integrations/ms365-mail-
+  save.php`); Send Test Email now calls the real `Mailer::send()` instead
+  of a duplicated inline cURL flow, closing the test/production drift
+  risk permanently. Fold-in fix: `/admin/integrations/email` was reading
+  a dead `email.provider`/`email.from` vocabulary and always reported
+  "smtp" — now reports `Mailer::provider()` + effective sender, plus a
+  "Recent sends" `portal-data-list`. Shared mailbox is admin-config-only
+  (never request-derived); no secret ever logged. Migration 176:
+  `tblEmailLog` + 5 non-sensitive settings seeds + 1 route seed, folded
+  into `full_schema.sql`. All 11 audit checks green, `php -l` clean.
 - **`claude/gap7-workflow-engine`** (branched off `alpha`) — gap #7
   (#443): Workflow Execution Engine + generic `/approvals` inbox.
   Migration 034 shipped four workflow tables + an admin definition CRUD

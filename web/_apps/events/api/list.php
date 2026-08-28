@@ -20,6 +20,7 @@ declare(strict_types=1);
 use Portal\Core\ApiAuth;
 use Portal\Core\ApiResponse;
 use Portal\Core\App;
+use Portal\Core\GeoLocation;
 use Portal\Core\Site;
 
 ApiAuth::requireRead('events:read');
@@ -49,6 +50,7 @@ $events = [];
 $stmt = $db->prepare(
     'SELECT e.eventID, e.eventName, e.eventSlug, e.startDateTime, e.endDateTime, '
     . 'e.timezone, e.isAllDay, e.locationName, e.status, e.isPublic, e.isFeatured, '
+    . 'e.locationAddress, e.locationGeoLat, e.locationGeoLng, e.locationW3W, '
     . 'c.categoryName, t.typeName '
     . 'FROM tblEvents e '
     . 'LEFT JOIN tblEventCategories c ON c.categoryID = e.categoryID '
@@ -61,6 +63,18 @@ if ($stmt !== false) {
     $stmt->execute();
     $result = $stmt->get_result();
     while ($row = $result->fetch_assoc()) {
+        // 📍 #456 Chunk A — canonical `location` object (cross-repo
+        // contract §2), additive alongside the legacy locationName field
+        // already in the row (backward-compatible — lean list stays lean,
+        // just gains one nested object).
+        $row['location'] = GeoLocation::toLocationObject(
+            [
+                'name' => $row['locationName'], 'addressLine1' => $row['locationAddress'],
+                'latitude' => $row['locationGeoLat'], 'longitude' => $row['locationGeoLng'],
+                'what3words' => $row['locationW3W'],
+            ],
+            ['line1' => 'addressLine1']
+        );
         $events[] = $row;
     }
     $stmt->close();

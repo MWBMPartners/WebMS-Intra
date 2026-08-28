@@ -191,23 +191,21 @@ $selectedRoomId  = (int) ($ev['roomID'] ?? 0);
                value="<?php echo htmlspecialchars($ev['locationEmail'] ?? '', ENT_QUOTES, 'UTF-8'); ?>">
     </div>
 
-    <div class="col-12 col-md-4">
-        <label class="form-label">Latitude</label>
-        <input type="number" class="form-control" name="locationGeoLat" step="0.0000001"
-               value="<?php echo htmlspecialchars((string) ($ev['locationGeoLat'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>">
-    </div>
-
-    <div class="col-12 col-md-4">
-        <label class="form-label">Longitude</label>
-        <input type="number" class="form-control" name="locationGeoLng" step="0.0000001"
-               value="<?php echo htmlspecialchars((string) ($ev['locationGeoLng'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>">
-    </div>
-
-    <div class="col-12 col-md-4">
-        <label class="form-label">what3words</label>
-        <input type="text" class="form-control" name="locationW3W" placeholder="///word.word.word"
-               value="<?php echo htmlspecialchars($ev['locationW3W'] ?? '', ENT_QUOTES, 'UTF-8'); ?>">
-    </div>
+    <?php
+    require_once PORTAL_CORE . DIRECTORY_SEPARATOR . 'partials' . DIRECTORY_SEPARATOR . 'location-input.php';
+    portal_location_input([
+        'values' => [
+            'lat' => $ev['locationGeoLat'] ?? '',
+            'lng' => $ev['locationGeoLng'] ?? '',
+            'w3w' => $ev['locationW3W'] ?? '',
+        ],
+        'names' => ['lat' => 'locationGeoLat', 'lng' => 'locationGeoLng', 'w3w' => 'locationW3W'],
+        'showAddress'         => false,
+        'lookup'              => true,
+        'lookupAddressField'  => 'locationAddress',
+        'w3wSuggest'          => true,
+    ]);
+    ?>
 
     <!-- 🏢 Organisation -->
     <div class="col-12 mt-4">

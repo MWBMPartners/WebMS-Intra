@@ -191,13 +191,13 @@ $renderStatusBadge = static function (string $status): string {
                 </div>
                 <?php foreach ($myRequests as $req): ?>
                     <div class="portal-data-row">
-                        <div class="col-12 col-md-5">
+                        <div class="portal-data-cell col-12 col-md-5" data-label="Subject">
                             <strong><?php echo htmlspecialchars($req['subject'], ENT_QUOTES, 'UTF-8'); ?></strong>
                             <?php if ((int) $req['isAnonymous'] === 1): ?>
                                 <span class="badge bg-secondary ms-1">Anon</span>
                             <?php endif; ?>
                         </div>
-                        <div class="col-6 col-md-2">
+                        <div class="portal-data-cell col-12 col-md-2" data-label="Visibility">
                             <?php if ($req['visibility'] === 'congregation'): ?>
                                 <span class="badge bg-info-subtle text-info-emphasis">
                                     <i class="fa-solid fa-people-group me-1"></i>Congregation
@@ -208,15 +208,15 @@ $renderStatusBadge = static function (string $status): string {
                                 </span>
                             <?php endif; ?>
                         </div>
-                        <div class="col-6 col-md-2">
+                        <div class="portal-data-cell col-12 col-md-2" data-label="Status">
                             <?php echo $renderStatusBadge((string) $req['status']); ?>
                         </div>
-                        <div class="col-6 col-md-2 small text-muted">
+                        <div class="portal-data-cell col-12 col-md-2 small text-muted" data-label="Submitted">
                             <?php echo htmlspecialchars(date('Y-m-d', strtotime((string) $req['createdAt'])), ENT_QUOTES, 'UTF-8'); ?>
                         </div>
-                        <div class="col-6 col-md-1 text-end">
+                        <div class="portal-data-cell col-12 col-md-1 text-md-end" data-label="">
                             <a href="/prayer-requests/view?id=<?php echo (int) $req['requestID']; ?>"
-                               class="btn btn-sm btn-outline-secondary">
+                               class="btn btn-sm btn-outline-secondary" aria-label="View request">
                                 <i class="fa-solid fa-eye"></i>
                             </a>
                         </div>

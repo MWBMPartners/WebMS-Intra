@@ -127,7 +127,17 @@ try {
         . "fullName = 'Deleted user', emailAddress = ?, phoneNumber = NULL, "
         . 'avatarPath = NULL, isActive = 0, '
         . 'isAdmin = 0, isRootAdmin = 0, '
-        . 'totpEnabled = 0, totpSecret = NULL '
+        . 'totpEnabled = 0, totpSecret = NULL, '
+        // 📍 #456 Chunk B — fixes a pre-existing miss (this UPDATE never
+        // nulled the free-text address/phone fields at all) and clears the
+        // new location PII columns (migration 181) in the same statement:
+        // displayAddress/displayPhone were captured on the Directory
+        // profile (#261) but never cleared here; latitude/longitude/
+        // what3words are the member's own map pin; visibilityCoords resets
+        // to 'private' defensively even though the coords themselves are
+        // now NULL (nothing left to gate).
+        . 'displayAddress = NULL, displayPhone = NULL, '
+        . 'latitude = NULL, longitude = NULL, what3words = NULL, visibilityCoords = \'private\' '
         . 'WHERE userID = ?'
     );
     if ($stmt !== false) {

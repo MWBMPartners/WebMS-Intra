@@ -243,6 +243,100 @@
           "typeName": {
             "type": "string",
             "nullable": true
+          },
+          "locationAddress": {
+            "type": "string",
+            "nullable": true
+          },
+          "locationWebURL": {
+            "type": "string",
+            "nullable": true
+          },
+          "locationPhone": {
+            "type": "string",
+            "nullable": true
+          },
+          "locationEmail": {
+            "type": "string",
+            "nullable": true
+          },
+          "locationGeoLat": {
+            "type": "number",
+            "format": "double",
+            "nullable": true,
+            "example": 52.2053
+          },
+          "locationGeoLng": {
+            "type": "number",
+            "format": "double",
+            "nullable": true,
+            "example": 0.1218
+          },
+          "locationW3W": {
+            "type": "string",
+            "nullable": true,
+            "pattern": "^\\p{L}+\\.\\p{L}+\\.\\p{L}+$",
+            "example": "filled.count.soap",
+            "description": "Bare canonical form, no leading ///."
+          },
+          "location": {
+            "$ref": "#/components/schemas/Location",
+            "description": "Canonical cross-repo location object (#456) — additive; the legacy location* fields above are kept for backward compatibility."
+          }
+        }
+      },
+      "Location": {
+        "type": "object",
+        "description": "Canonical location object shared byte-for-byte with the ProjectBookIT/ProjectEPass location contract (#456). Every field may be null; consumers must tolerate a partial object.",
+        "properties": {
+          "name": {
+            "type": "string",
+            "nullable": true
+          },
+          "address": {
+            "type": "object",
+            "properties": {
+              "line1": { "type": "string", "nullable": true },
+              "line2": { "type": "string", "nullable": true },
+              "city": { "type": "string", "nullable": true },
+              "region": { "type": "string", "nullable": true },
+              "postcode": { "type": "string", "nullable": true },
+              "countryCode": { "type": "string", "nullable": true, "example": "GB", "description": "ISO 3166-1 alpha-2, uppercase." }
+            }
+          },
+          "latitude": {
+            "type": "number",
+            "format": "double",
+            "nullable": true,
+            "example": 52.2053
+          },
+          "longitude": {
+            "type": "number",
+            "format": "double",
+            "nullable": true,
+            "example": 0.1218
+          },
+          "what3words": {
+            "type": "string",
+            "nullable": true,
+            "pattern": "^\\p{L}+\\.\\p{L}+\\.\\p{L}+$",
+            "example": "filled.count.soap",
+            "description": "Bare canonical form, no leading ///."
+          },
+          "geocodedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "geocodeSource": {
+            "type": "string",
+            "nullable": true,
+            "enum": [
+              "google",
+              "nominatim",
+              "manual",
+              "w3w"
+            ]
           }
         }
       },
@@ -274,6 +368,45 @@
           "locationName": {
             "type": "string",
             "nullable": true
+          },
+          "locationAddress": {
+            "type": "string",
+            "nullable": true,
+            "description": "Free-text address (#456)."
+          },
+          "locationWebURL": {
+            "type": "string",
+            "nullable": true
+          },
+          "locationPhone": {
+            "type": "string",
+            "nullable": true
+          },
+          "locationEmail": {
+            "type": "string",
+            "nullable": true
+          },
+          "locationGeoLat": {
+            "type": "number",
+            "format": "double",
+            "nullable": true,
+            "minimum": -90,
+            "maximum": 90,
+            "description": "Validated as a pair with locationGeoLng — either both present and valid, or the pair is stored as null (#456)."
+          },
+          "locationGeoLng": {
+            "type": "number",
+            "format": "double",
+            "nullable": true,
+            "minimum": -180,
+            "maximum": 180
+          },
+          "locationW3W": {
+            "type": "string",
+            "nullable": true,
+            "pattern": "^\\p{L}+\\.\\p{L}+\\.\\p{L}+$",
+            "example": "filled.count.soap",
+            "description": "Bare canonical what3words form (no leading ///). A non-empty value that fails this pattern is rejected with a 422 (#456)."
           },
           "categoryID": {
             "type": "integer",
@@ -783,7 +916,7 @@
       },
       "UserCreate": {
         "type": "object",
-        "description": "Passwords are NEVER accepted here — the new account gets a random, unusable password hash and must go through the existing forgot-password flow to set a real one. `isAdmin` (portal-wide) is honoured in session mode only — a bearer key can never mint a portal admin, even with `users:write`; use `isSiteAdmin` (site-scoped) instead.",
+        "description": "Passwords are NEVER accepted here — the new account gets a random, unusable password hash and must go through the existing forgot-password flow to set a real one. `isAdmin` (portal-wide) is honoured in session mode only — a bearer key can never mint a portal admin, even with `users:write`; use `isSiteAdmin` (site-scoped) instead. #456 Chunk B: a member's Directory home coordinates/what3words (`latitude`/`longitude`/`what3words`/`visibilityCoords`, migration 181) are never readable or writable via this API in any mode — a deliberate safest-floor stance, since a bearer/session API caller has no per-viewer visibility-tier context to apply the member's own `visibilityCoords` gate against.",
         "required": [
           "emailAddress",
           "fullName"
@@ -814,7 +947,7 @@
       },
       "UserUpdate": {
         "type": "object",
-        "description": "Editable: fullName, isActive, isAdmin (session mode only), isSiteAdmin. Email address and password are excluded from v1 (silently ignored if present). A session caller can never deactivate their OWN account via this endpoint.",
+        "description": "Editable: fullName, isActive, isAdmin (session mode only), isSiteAdmin. Email address and password are excluded from v1 (silently ignored if present). A session caller can never deactivate their OWN account via this endpoint. Directory location fields are likewise excluded — see the `UserCreate` schema note (#456 Chunk B).",
         "properties": {
           "fullName": {
             "type": "string",

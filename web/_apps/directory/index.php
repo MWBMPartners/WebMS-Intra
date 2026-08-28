@@ -82,8 +82,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
 <form method="get" class="mb-3">
     <div class="input-group">
-        <input type="text" name="q" class="form-control" placeholder="Search by name…" aria-label="Search by name" value="<?php echo htmlspecialchars($q, ENT_QUOTES, 'UTF-8'); ?>">
-        <button type="submit" class="btn btn-primary"><i class="fa-solid fa-magnifying-glass"></i></button>
+        <input type="search" name="q" class="form-control" placeholder="Search by name…" aria-label="Search by name" value="<?php echo htmlspecialchars($q, ENT_QUOTES, 'UTF-8'); ?>">
+        <button type="submit" class="btn btn-primary" aria-label="Search"><i class="fa-solid fa-magnifying-glass"></i></button>
     </div>
 </form>
 
@@ -103,10 +103,10 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                             </a>
                         </h2>
                         <?php if ($can($u['visibilityEmail'], $uid) === true && $u['email'] !== null): ?>
-                            <p class="small text-muted mb-1"><i class="fa-solid fa-envelope me-1"></i><?php echo htmlspecialchars((string) $u['email'], ENT_QUOTES, 'UTF-8'); ?></p>
+                            <p class="small text-muted mb-1 text-break"><i class="fa-solid fa-envelope me-1"></i><?php echo htmlspecialchars((string) $u['email'], ENT_QUOTES, 'UTF-8'); ?></p>
                         <?php endif; ?>
                         <?php if ($can($u['visibilityPhone'], $uid) === true && $u['displayPhone'] !== null): ?>
-                            <p class="small text-muted mb-1"><i class="fa-solid fa-phone me-1"></i><?php echo htmlspecialchars((string) $u['displayPhone'], ENT_QUOTES, 'UTF-8'); ?></p>
+                            <p class="small text-muted mb-1 text-break"><i class="fa-solid fa-phone me-1"></i><?php echo htmlspecialchars((string) $u['displayPhone'], ENT_QUOTES, 'UTF-8'); ?></p>
                         <?php endif; ?>
                     </div>
                 </div>

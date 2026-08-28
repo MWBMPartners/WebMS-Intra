@@ -11,7 +11,11 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\GeoLocation;
 use Portal\Core\Site;
+use Portal\Core\What3Words;
+
+require_once PORTAL_CORE . DIRECTORY_SEPARATOR . 'partials' . DIRECTORY_SEPARATOR . 'location-input.php';
 
 Auth::ensureSession();
 Auth::requireLogin();
@@ -56,15 +60,50 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && Auth::verifyCsrf($_POST['csrf_token
             $desc = $description !== '' ? $description : null;
             $ratePence = ($rate !== '' && is_numeric($rate)) ? (int) round(((float) $rate) * 100) : null;
 
+            // 📍 #456 Chunk A — validated the same as every other new
+            // location field; invalid non-empty W3W throws (caught below,
+            // flashed as an error, nothing saved).
+            $geoCoords = GeoLocation::validateCoords($_POST['latitude'] ?? null, $_POST['longitude'] ?? null);
+            $w3wRaw = trim((string) ($_POST['what3words'] ?? ''));
+            $w3w = null;
+            if ($w3wRaw !== '') {
+                $w3w = GeoLocation::validateW3W($w3wRaw);
+                if ($w3w === null) {
+                    throw new \RuntimeException(t('location.w3w_invalid'));
+                }
+            }
+            $resLat = $geoCoords['lat'] ?? null;
+            $resLng = $geoCoords['lng'] ?? null;
+            $geocodedAt = null;
+            $geocodeSource = null;
+            if ($w3w !== null && What3Words::isConfigured() === true) {
+                $verified = What3Words::convertToCoordinates($w3w);
+                if ($verified !== null && $resLat === null) {
+                    $resLat = $verified['lat'];
+                    $resLng = $verified['lng'];
+                    $geocodedAt = date('Y-m-d H:i:s');
+                    $geocodeSource = 'w3w';
+                }
+            }
+            if ($resLat !== null && $geocodeSource === null) {
+                $geocodeSource = 'manual';
+            }
+
             if ($name === '') {
                 throw new \RuntimeException('Name required');
             }
             $stmt = $db->prepare(
-                'INSERT INTO tblResource (siteID, name, description, category, capacity, location, requiresApproval, hourlyRatePence, bufferMinutes) '
-                . 'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                'INSERT INTO tblResource (siteID, name, description, category, capacity, location, requiresApproval, '
+                . 'hourlyRatePence, bufferMinutes, latitude, longitude, what3words, geocodedAt, geocodeSource) '
+                . 'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
             );
             if ($stmt !== false) {
-                $stmt->bind_param('isssisiii', $siteId, $name, $desc, $category, $cap, $loc, $requiresApproval, $ratePence, $buffer);
+                // 📍 #456 Chunk A: 9 -> 14 placeholders/vars (+lat[d], +lng[d], +w3w[s], +geocodedAt[s], +geocodeSource[s]).
+                $stmt->bind_param(
+                    'isssisiiiddsss',
+                    $siteId, $name, $desc, $category, $cap, $loc, $requiresApproval, $ratePence, $buffer,
+                    $resLat, $resLng, $w3w, $geocodedAt, $geocodeSource
+                );
                 $stmt->execute();
                 $stmt->close();
                 $flash = 'Resource saved.';
@@ -125,6 +164,10 @@ $csrf = Auth::csrfToken();
             <div class="col-md-6"><label class="form-label small">Location</label><input type="text" name="location" class="form-control form-control-sm" maxlength="255"></div>
             <div class="col-md-3"><label class="form-label small">Hourly rate £ (optional)</label><input type="number" step="0.01" name="hourlyRate" min="0" class="form-control form-control-sm"></div>
             <div class="col-md-3"><label class="form-label small">Buffer minutes</label><input type="number" name="bufferMinutes" min="0" max="240" class="form-control form-control-sm" value="<?php echo $defaultBuffer; ?>"></div>
+            <?php portal_location_input([
+                'showAddress' => false,
+                'compact'     => true,
+            ]); ?>
             <div class="col-12"><label class="form-label small">Description</label><textarea name="description" class="form-control form-control-sm" rows="2"></textarea></div>
             <div class="col-12">
                 <div class="form-check">

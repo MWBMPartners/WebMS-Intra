@@ -20,6 +20,7 @@ declare(strict_types=1);
 use Portal\Core\ApiAuth;
 use Portal\Core\ApiResponse;
 use Portal\Core\App;
+use Portal\Core\GeoLocation;
 use Portal\Core\Site;
 
 ApiAuth::requireRead('events:read');
@@ -69,5 +70,17 @@ if ($eventId > 0) {
 if ($event === null) {
     ApiResponse::error('Event not found', 404);
 }
+
+// 📍 #456 Chunk A — canonical `location` object (cross-repo contract §2),
+// additive alongside the existing legacy location* columns already
+// present in $event via `e.*` (backward-compatible — nothing removed).
+$event['location'] = GeoLocation::toLocationObject(
+    [
+        'name' => $event['locationName'], 'addressLine1' => $event['locationAddress'],
+        'latitude' => $event['locationGeoLat'], 'longitude' => $event['locationGeoLng'],
+        'what3words' => $event['locationW3W'],
+    ],
+    ['line1' => 'addressLine1']
+);
 
 ApiResponse::success(['event' => $event]);

@@ -2831,15 +2831,43 @@ class AssetRegister
             $parentLocationId = null; // 🔁 can't be its own parent
         }
 
+        // 📍 #456 Chunk A — validated the same as every other new location
+        // field; invalid non-empty W3W is treated as null here (the HTTP
+        // handler has no dedicated flash for this field yet, so a bad
+        // value simply doesn't persist rather than the whole save failing).
+        $coords = GeoLocation::validateCoords($data['latitude'] ?? null, $data['longitude'] ?? null);
+        $w3w    = GeoLocation::validateW3W($data['what3words'] ?? null);
+        $geocodedAt    = null;
+        $geocodeSource = null;
+        if ($w3w !== null && What3Words::isConfigured() === true) {
+            $verified = What3Words::convertToCoordinates($w3w);
+            if ($verified !== null && $coords === null) {
+                $coords = $verified;
+                $geocodedAt = date('Y-m-d H:i:s');
+                $geocodeSource = 'w3w';
+            }
+        }
+        if ($coords !== null && $geocodeSource === null) {
+            $geocodeSource = 'manual';
+        }
+        $latVal = $coords['lat'] ?? null;
+        $lngVal = $coords['lng'] ?? null;
+
         try {
             if ($locationId > 0) {
                 $stmt = $db->prepare(
-                    'UPDATE tblAssetLocations SET locationName = ?, details = ?, parentLocationID = ? WHERE locationID = ? AND siteID = ?'
+                    'UPDATE tblAssetLocations SET locationName = ?, details = ?, parentLocationID = ?, '
+                    . 'latitude = ?, longitude = ?, what3words = ?, geocodedAt = ?, geocodeSource = ? '
+                    . 'WHERE locationID = ? AND siteID = ?'
                 );
                 if ($stmt === false) {
                     return 0;
                 }
-                $stmt->bind_param('ssiii', $name, $details, $parentLocationId, $locationId, $siteId);
+                // 📍 #456 Chunk A: 5 -> 10 placeholders/vars (+lat[d], +lng[d], +w3w[s], +geocodedAt[s], +geocodeSource[s]).
+                $stmt->bind_param(
+                    'ssiddsssii',
+                    $name, $details, $parentLocationId, $latVal, $lngVal, $w3w, $geocodedAt, $geocodeSource, $locationId, $siteId
+                );
                 $ok = $stmt->execute();
                 $stmt->close();
                 if ($ok === false) {
@@ -2849,11 +2877,16 @@ class AssetRegister
                 return $locationId;
             }
 
-            $stmt = $db->prepare('INSERT INTO tblAssetLocations (siteID, locationName, details, parentLocationID) VALUES (?, ?, ?, ?)');
+            $stmt = $db->prepare(
+                'INSERT INTO tblAssetLocations (siteID, locationName, details, parentLocationID, '
+                . 'latitude, longitude, what3words, geocodedAt, geocodeSource) '
+                . 'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+            );
             if ($stmt === false) {
                 return 0;
             }
-            $stmt->bind_param('issi', $siteId, $name, $details, $parentLocationId);
+            // 📍 #456 Chunk A: 4 -> 9 placeholders/vars (+lat[d], +lng[d], +w3w[s], +geocodedAt[s], +geocodeSource[s]).
+            $stmt->bind_param('issiddsss', $siteId, $name, $details, $parentLocationId, $latVal, $lngVal, $w3w, $geocodedAt, $geocodeSource);
             $ok = $stmt->execute();
             $newId = (int) $stmt->insert_id;
             $stmt->close();

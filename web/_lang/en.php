@@ -397,4 +397,33 @@ return [
     'venues.booking_plural'   => 'Bookings',
     'venues.no_bookings'      => 'No bookings found.',
 
+    // =========================================================================
+    // 📍 Location / Geocoordinates / What3Words (#456 Chunk A)
+    // =========================================================================
+    'location.section'         => 'Location',
+    'location.address'         => 'Address',
+    'location.address_line1'   => 'Address line 1',
+    'location.address_line2'   => 'Address line 2',
+    'location.city'            => 'City / town',
+    'location.region'          => 'County / region',
+    'location.postcode'        => 'Postcode',
+    'location.country'         => 'Country',
+    'location.latitude'        => 'Latitude',
+    'location.longitude'       => 'Longitude',
+    'location.what3words'      => 'what3words',
+    'location.w3w_placeholder' => '///word.word.word',
+    'location.view_on_map'     => 'View on map',
+    'location.get_directions'  => 'Get directions',
+    'location.open_in_osm'     => 'Open in OpenStreetMap',
+    'location.lookup_coords'   => 'Look up coordinates',
+    'location.lookup_failed'   => 'Could not look up coordinates — enter them manually or try again later.',
+    'location.w3w_invalid'     => 'That does not look like a what3words address (///word.word.word).',
+    'location.w3w_unverified'  => 'Saved — but what3words did not recognise that address; double-check the three words.',
+    'location.map_attribution' => 'Map data © OpenStreetMap contributors',
+    'location.coords_approx'   => 'Approximate location',
+
+    // ── #456 Chunk B — member PII visibility (migration 181) ──────────────
+    'location.visibility_coords'    => 'Map location (coordinates)',
+    'location.coords_privacy_hint'  => 'A map pin is more precise than your address text. It stays private unless you explicitly share it.',
+
 ];

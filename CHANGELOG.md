@@ -45,6 +45,137 @@
   coverage badges on calendar grid views; venueID/roomID on the events
   REST write API (read side is automatic via `SELECT e.*`); room-flavouring
   the pre-existing coverage messages.
+- feat(location): #456 Chunk A — full address + geocoordinates + What3Words
+  platform layer (foundation, non-PII, interactive map). New
+  `Portal\Core\GeoLocation` (address normalise/format, DECIMAL(10,7) coord
+  validation, W3W canonicalisation, map link-outs, and the cross-repo
+  `toLocationObject()`/`fromLocationObject()` serializer shared byte-for-
+  byte with ProjectBookIT/ProjectEPass), `Portal\Core\What3Words` (v3 API
+  client — key passed as a query param, never logged; default OFF;
+  `w3w.enabled` gates only the API, the `///word.word.word` input is
+  always present as a stored-field fallback), and `Portal\Core\Geocoder`
+  (Google primary → Nominatim/OSM fallback, policy-compliant User-Agent +
+  ≤1 req/s throttle + `tblGeocodeCache` result cache, `geo.autoGeocode`
+  default OFF). Every new class is a zero-runtime-dependency standalone
+  implementation — no call ever crosses to another repo. Three new shared
+  partials (`web/_core/partials/` — first in the codebase):
+  `location-display.php`, `location-input.php`, `location-map-assets.php`
+  (pinned Leaflet 1.9.4 from cdn.jsdelivr.net with SRI, hashes
+  independently re-derived from the npm registry tarball and matched
+  exactly — see DEV_NOTES). New admin integration pages
+  (`/admin/integrations/what3words`, `/admin/integrations/geocoding`) and
+  a site-HQ address page (`/admin/settings/organisation`); two session-
+  authed AJAX proxies (`/geo/w3w-suggest`, `/geo/lookup`) outside `api/*`
+  so the browser never sees either API key. Wired into Venues (structured
+  address + coords/W3W + interactive map), Events (existing
+  `locationGeoLat/locationGeoLng/locationW3W` columns now validated on
+  save, JSON-LD `geo`, interactive map, canonical `location` object
+  additively emitted by the events REST API create/update/list/detail),
+  Event occurrence overrides (hand-entered `overrideGeoLat/overrideGeoLng/
+  overrideW3W`, NULL = inherit), Resources, and Asset Locations. Migration
+  180: five new columns (`latitude/longitude/what3words/geocodedAt/
+  geocodeSource`) on `tblVenues`/`tblResource`/`tblAssetLocations`, three
+  override columns on `tblEventOccurrenceOverrides`, new `tblGeocodeCache`,
+  14 settings seeds (all default OFF/empty), 10 route seeds — a fresh
+  upgrade is a full no-op until an admin opts in. No PII table touched in
+  this chunk (tblUsers/directory/GiftAid/Salvation land in a later Chunk
+  B PR with the matching GDPR export/erasure wiring in the same commit).
+  All 11 audit checks green, `php -l` clean on every touched file.
+- feat(location): #456 Chunk B — the PII + GDPR half of the location/
+  geocoding platform, branched off Chunk A. Migration 181 adds FOUR
+  columns to `tblUsers` ONLY: `latitude`/`longitude`/`what3words` (member
+  home coordinates, PRIVATE by default, NEVER auto-geocoded — no
+  `geocodedAt`/`geocodeSource` pair, set only by the member's own explicit
+  "Look up coordinates" action or hand entry) and `visibilityCoords`
+  (ENUM, default `'private'`, INDEPENDENT of the existing
+  `visibilityAddress` — sharing address text never implies consent to
+  show a map pin). Directory capture on the owner surface
+  (`directory/me.php`, NOT `/account`): compact coords/W3W trio under the
+  existing Address textarea + a `visibilityCoords` visibility row;
+  `directory/save.php` validates the pair via `GeoLocation::
+  validateCoords()`/`validateW3W()` (10 → 14 bind_param placeholders).
+  Directory display (`directory/profile.php`) gates coords through a
+  SEPARATE `$can($u['visibilityCoords'])` check, stricter than the
+  address text: the owner/admin always sees full precision + the exact
+  what3words; any other viewer permitted by the tier sees coordinates
+  coarsened to 3dp (~110m, `GeoLocation::coarsenCoords()`) with an
+  "Approximate location" badge, and the what3words value is suppressed
+  entirely (a 3m-precise W3W square cannot be meaningfully coarsened).
+  The pre-existing `$can()` "team tier behaves as private" quirk is
+  inherited verbatim, not fixed. GDPR lockstep shipped in the SAME PR:
+  `data-export.php` gained a `giftAidDeclarations` export block (closed a
+  pre-existing address-PII export gap — Gift Aid declarations were never
+  exported at all); `delete-confirm.php`'s tblUsers anonymise UPDATE now
+  also nulls `displayAddress`/`displayPhone` (a separate pre-existing
+  miss) plus the four new columns; `GdprEraser::catalogue()`'s tblUsers
+  `nullCols` extended with `latitude`/`longitude`/`what3words`. GiftAid
+  (`giving/gift-aid.php`) and Salvation (`salvation/card.php`) reuse the
+  Chunk A `location-input` partial in TEXT-ONLY "reduced names map" mode
+  (`showCoords`/`showW3W` both false) mapped onto their EXISTING
+  `address`/`postcode` POST fields — no new columns on
+  `tblGiftAidDeclaration`/`tblSalvationCards`, so no new erasure surface.
+  Kids/Care/Visitors are hard-excluded — zero diff touches those apps
+  (verified by grep). API surface (`UserCreate`/`UserUpdate` schemas)
+  documents that member coordinates/W3W are never readable or writable
+  via the REST API in any mode, regardless of visibility tier — a bearer/
+  session caller has no per-viewer tier context to apply the gate
+  against. All 11 audit checks green, `php -l` clean on every touched
+  file.
+- feat(mail): gap #234 — MS365 Graph email via an admin-configured shared
+  mailbox, plus hardening of the whole `Mailer::sendViaGraph()` path. The
+  portal already sent every email app-only through Microsoft Graph
+  (`/users/{mail.defaultFromAddress}/sendMail`); this formalises and
+  hardens that path rather than adding a new auth model. New
+  `mail.ms365.sharedMailbox` setting (empty = off, today's behaviour
+  unchanged) routes `sendMail` through a dedicated shared mailbox instead
+  — same app-only client-credentials token
+  (`Mailer::accessToken()`, unchanged), explicit `message.from` identity
+  (address + display name), and `saveToSentItems` so a copy lands in the
+  shared mailbox's own Sent Items. New `effectiveSender()` resolver falls
+  back to `mail.defaultFromAddress` when the shared mailbox is empty OR
+  invalid (hand-edited via the generic settings editor) — mail keeps
+  flowing either way. Benign fold-in: the `from` object is now built in
+  **both** modes, so `mail.defaultFromName` finally takes effect on the
+  MS365 path (previously the URL mailbox alone decided the display name;
+  the Google path has always honoured this setting). `sender` is
+  intentionally never set — that is the delegated send-on-behalf field
+  for the `Mail.Send.Shared` model named in the issue body, which is
+  explicitly deferred (app-only + an Application Access Policy covers the
+  same ground with zero new secrets and no dependency on a licensed
+  "delegate" human account). Error handling: 401 clears the cached token
+  and retries once; 429 retries once ONLY when Graph's own `Retry-After`
+  is ≤5s (never an unbounded wait inside a web request); 403/404 parse
+  Graph's own `error.code` for a targeted admin-facing hint instead of a
+  bare HTTP code; an optional `mail.fallbackProvider='google'` (default
+  `''` = fail loudly) makes one fallback attempt via `MailerGoogle::send()`
+  on any Graph failure. New `tblEmailLog` (migration 176) records every
+  send attempt from BOTH providers via the new `Mailer::logSend()` — also
+  closes the #230 audit-trail dependency; opportunistic retention prune
+  (`mail.log.retentionDays`, default 90) piggybacks on ~1-in-50 writes, no
+  new cron endpoint. `GdprEraser` gained a bespoke step scrubbing an
+  erased user's address out of `tblEmailLog.toRecipients` (a comma-joined
+  free-text column, not a catalogue()-shaped `userCol` FK) — captured
+  BEFORE the catalogue's own `tblUsers` anonymisation step nulls it out.
+  Admin UI: `/admin/integrations`' MS365 Graph API card gained a
+  Shared-Mailbox Sending sub-section (status, mode badge, last-send
+  indicator, CSRF'd save form → new `admin/integrations/ms365-mail-save.php`
+  handler); its Send Test Email button now calls the real
+  `Mailer::send()` instead of duplicating the token+sendMail cURL flow
+  inline, permanently closing the test-vs-production drift risk, and
+  surfaces the just-written `tblEmailLog` row as the diagnostic detail.
+  Fold-in fix: `/admin/integrations/email` was reading a dead
+  `email.provider`/`email.from` settings vocabulary (seeded, never
+  written) and always reported "smtp" — now reports the real
+  `Mailer::provider()` + effective sender, plus a new "Recent sends (last
+  10)" `portal-data-list` from `tblEmailLog`. The shared mailbox is
+  ADMIN-CONFIG ONLY — read exclusively from `tblSettings` via
+  `effectiveSender()`, written only by the CSRF'd, admin-gated save
+  handler; no request/user input ever reaches it. No secret is ever
+  logged (`tblEmailLog.errorDetail` holds only Graph's own truncated
+  `error.code`/`error.message`). Migration 176: `tblEmailLog` +
+  5 non-sensitive settings seeds + 1 route seed, folded into
+  `full_schema.sql`. All 11 audit checks green, `php -l` clean on every
+  touched file.
 - feat(workflow): gap #7 (#443) — Workflow Execution Engine +
   generic `/approvals` inbox. Migration 034 shipped four workflow tables
   and an admin definition CRUD, but no code anywhere started, advanced,
