@@ -2,12 +2,14 @@
 
 > 🏷️ **Product brand layer (#296)** — the same codebase ships under
 > several sub-brands picked at install time: `WebMS Intra` (generic),
-> `ChurchMS` (church / place of worship), and placeholder presets for
-> `SchoolMS` / `CharityMS` / `CommunityMS` / `BusinessMS`. Affects only
-> display surfaces (name, tagline, PWA install prompt, X-Powered-By
-> header, footer attribution). Tenant branding (per-site `siteName`,
-> logo, colour) still beats the product layer. See DEV_NOTES "Two-layer
-> brand model" for the resolution cascade.
+> `ChurchMS` (church / place of worship), and `SchoolMS` / `CharityMS` /
+> `CommunityMS` / `BusinessMS` (functional starter artwork shipped #306 —
+> see the dedicated section near the end of this document; wordmark is
+> system-font pending a designer pass). Affects only display surfaces
+> (name, tagline, PWA install prompt + shortcuts, X-Powered-By header,
+> footer attribution). Tenant branding (per-site `siteName`, logo,
+> colour) still beats the product layer. See DEV_NOTES "Two-layer brand
+> model" for the resolution cascade.
 >
 > **Living working summary.** Kept current alongside the codebase. Refer to
 > [CHANGELOG.md](CHANGELOG.md) for chronological history and to [README.md](README.md)
@@ -1268,6 +1270,42 @@ with an optional Google fallback, and a `tblEmailLog` audit trail
 **Schema:** migration 176 — `tblEmailLog` (standard `CREATE TABLE IF NOT
 EXISTS`, no guard idiom needed for a new table), 5 non-sensitive settings
 seeds, 1 route seed, folded into `full_schema.sql`.
+
+---
+
+### PWA install prompt + manifest shortcuts (#141 residual) + sub-brand starter artwork (#306)
+
+Two small, low-risk backlog finishers landed together — no migration in
+either half. #141's push-notification half was already fully shipped as
+#322 (VAPID, service worker `push`/`notificationclick`, `/admin/integrations/push`)
+— only the install-prompt/manifest/iOS-meta pieces below were still open.
+
+| Item | Issue | Status |
+|---|---|---|
+| Self-hosted `assets/js/pwa-install.js` — captures `beforeinstallprompt`, calls `event.preventDefault()` to suppress the browser's own mini-infobar, and reveals a dismissible bottom-sheet banner (`#portal-install-prompt` in footer.php — same visual pattern as the existing cookie-consent banner) with a brand-aware "Install {product name}" heading. No new CDN/external origin | #141 | ✅ |
+| Dismissal remembered in `localStorage` for 30 days; a completed install is remembered permanently via the `appinstalled` event; both storage reads/writes are try/catched (private browsing degrades gracefully, never throws) | #141 | ✅ |
+| `manifest.php` brand-aware `shortcuts[]` (Dashboard / Calendar / Giving / Prayer Requests) — each filtered through `AppRegistry::isEnabled()` so a disabled app's shortcut is silently dropped; any `AppRegistry` exception fails CLOSED (shortcut omitted) rather than breaking the manifest fetch | #141 | ✅ |
+| `header.php` iOS/PWA meta gap-fill: brand-aware `apple-mobile-web-app-title` (was missing entirely — iOS would have captioned every install "Portal" regardless of brand) + the standard-track `mobile-web-app-capable` twin of the pre-existing `apple-mobile-web-app-capable` tag. `apple-touch-icon`, `apple-mobile-web-app-status-bar-style`, and the manifest `<link>` were already present from earlier PWA work | #141 | ✅ |
+| Functional starter SVG brand kits for the four presets that previously fell back to generic WebMS-Intra assets — `assets/images/brandkit/assets/{schoolms,charityms,communityms,businessms}/`, each shipping `icon.svg` + `icon-192.svg` + `icon-512.svg` + `logo.svg`. Distinct geometric emblem per preset (mortarboard/school, heart/charity, interlocking rings/community, ascending bar chart/business) on the same rounded-indigo-tile + gradient-token structure as the WebMS/ChurchMS kits, so all six presets read as one family | #306 | ✅ |
+| `brand-defaults.php`'s four stub presets now point `assetFolder` at their new kits instead of falling back to `webms-intra`; installer Step 1.5 copy + code comment updated to match | #306 | ✅ |
+
+**Known design debt (documented in-repo, not fixed here):** each new
+`logo.svg`'s wordmark line is set with a local system-font stack (`'Segoe
+UI', Roboto, 'Helvetica Neue', Arial, sans-serif`) rather than the
+outlined vector glyphs the WebMS/ChurchMS kits use (no font-outlining
+tool available in this environment) — noted in each `logo.svg`'s own
+`<desc>` and in `brand-defaults.php`'s comments. A designer pass to match
+the outlined-vector treatment is recommended before any of the four
+presets ships to a real customer; `icon.svg`/`icon-192.svg`/`icon-512.svg`
+(the files PWA install actually surfaces) need no such caveat. The
+installer's PNG/`.ico` favicon variants (`icon-32.png` etc.) are also not
+provided for these four presets — those `<link>` tags 404 harmlessly in
+browsers without SVG-favicon support (all evergreen browsers support SVG
+favicons).
+
+**New files:** `web/public_html/assets/js/pwa-install.js`;
+`web/public_html/assets/images/brandkit/assets/{schoolms,charityms,communityms,businessms}/{icon,icon-192,icon-512,logo}.svg`
+(16 files). **Schema:** none.
 
 ---
 

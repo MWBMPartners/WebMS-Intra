@@ -1,0 +1,19 @@
+<?xml version="1.0"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="100%" height="100%" preserveAspectRatio="xMidYMid meet" role="img" aria-label="BusinessMS app icon">
+  <title>BusinessMS app icon</title>
+  <desc>Ascending bar chart — the small-business preset emblem (#306 starter placeholder). White emblem on a rounded indigo tile. HOW TO RECOLOUR: every colour is a named token in <defs> (brand, on-brand) referenced by url(#token). Edit a token&#39;s stop-color(s) once to recolour everywhere it is used.</defs></desc>
+  <defs>
+    <linearGradient id="brand" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="64" y2="64"><desc>BRAND token — primary indigo gradient. Edit these two stop-colors to recolour the brand everywhere it is referenced via fill=&#34;url(#brand)&#34;.</desc><stop offset="0" stop-color="#5e6ad2"></stop><stop offset="1" stop-color="#7a85e8"></stop></linearGradient>
+    <linearGradient id="on-brand"><desc>ON-BRAND token — emblem colour on the indigo tile. Edit the stop-colors to recolour everything referencing url(#on-brand).</desc><stop offset="0" stop-color="#ffffff"></stop><stop offset="1" stop-color="#ffffff"></stop></linearGradient>
+  </defs>
+  <g id="container"><title>App tile</title><desc>Rounded indigo gradient tile.</desc>
+    <rect x="0" y="0" width="64" height="64" rx="14" fill="url(#brand)"></rect>
+  </g>
+  <g id="emblem" fill="url(#on-brand)" transform="translate(12.16 12.16) scale(0.62)">
+    <g id="bars"><title>Bar chart</title><desc>Three ascending bars — a growth / business cue.</desc>
+      <rect x="11" y="34" width="11" height="19" rx="3"></rect>
+      <rect x="26" y="24" width="11" height="29" rx="3"></rect>
+      <rect x="41" y="12" width="11" height="41" rx="3"></rect>
+    </g>
+  </g>
+</svg>

@@ -192,8 +192,16 @@ header("Content-Security-Policy: default-src 'self'; "
     <?php if ($showPoweredByMeta === true): ?>
     <meta name="generator" content="<?php echo htmlspecialchars($productName, ENT_QUOTES, 'UTF-8'); ?>">
     <?php endif; ?>
+    <!-- 📱 PWA / iOS home-screen polish (#141). apple-mobile-web-app-title
+         is brand-aware ($productName, resolved above) — it's the caption
+         iOS shows under the home-screen icon once "Add to Home Screen" is
+         used, so it must never read "WebMS Intra" on a ChurchMS install.
+         mobile-web-app-capable is the non-prefixed standard-track twin of
+         the apple- one, recommended alongside it on modern Chromium too. -->
+    <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="<?php echo htmlspecialchars($productName, ENT_QUOTES, 'UTF-8'); ?>">
     <link rel="manifest" href="/manifest.json">
     <link rel="icon" type="image/svg+xml" href="<?php echo htmlspecialchars($siteFavicon, ENT_QUOTES, 'UTF-8'); ?>">
     <link rel="apple-touch-icon" href="<?php echo htmlspecialchars($brandIconPath, ENT_QUOTES, 'UTF-8'); ?>">

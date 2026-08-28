@@ -80,44 +80,45 @@ return [
         'displayLabel' => 'Church / Place of Worship',
     ],
 
-    // 🏫 School — placeholder preset for v1.x. Assets fall back to generic
-    //    until the school logo set lands.
+    // 🏫 School — starter artwork shipped #306 (mortarboard emblem). Text
+    //    wordmark in logo.svg is system-font, not outlined vectors like the
+    //    WebMS/ChurchMS kits — a designer pass is recommended before this
+    //    preset goes to a real customer (see logo.svg's own <desc> note).
     'school' => [
         'name'        => 'SchoolMS',
         'tagline'     => 'School Management System',
         'publisher'   => 'MWBM Partners Ltd (t/a MWservices)',
-        // Falls back to webms-intra assets until distinct artwork ships (#306).
-        'assetFolder' => 'webms-intra',
+        'assetFolder' => 'schoolms',
         'displayLabel' => 'School / Education',
     ],
 
-    // 🤝 Charity / Non-profit — placeholder preset for v1.x.
+    // 🤝 Charity / Non-profit — starter artwork shipped #306 (heart emblem).
+    //    See the 'school' preset's note above re: designer pass on logo.svg.
     'nonprofit' => [
         'name'        => 'CharityMS',
         'tagline'     => 'Charity Management System',
         'publisher'   => 'MWBM Partners Ltd (t/a MWservices)',
-        // Falls back to webms-intra assets until distinct artwork ships (#306).
-        'assetFolder' => 'webms-intra',
+        'assetFolder' => 'charityms',
         'displayLabel' => 'Charity / Non-profit',
     ],
 
-    // 🏘️ Community group — placeholder preset for v1.x.
+    // 🏘️ Community group — starter artwork shipped #306 (interlocking-rings
+    //    emblem). See the 'school' preset's note above re: designer pass.
     'community' => [
         'name'        => 'CommunityMS',
         'tagline'     => 'Community Management System',
         'publisher'   => 'MWBM Partners Ltd (t/a MWservices)',
-        // Falls back to webms-intra assets until distinct artwork ships (#306).
-        'assetFolder' => 'webms-intra',
+        'assetFolder' => 'communityms',
         'displayLabel' => 'Community / Membership organisation',
     ],
 
-    // 🏢 Small business — placeholder preset for v1.x.
+    // 🏢 Small business — starter artwork shipped #306 (bar-chart emblem).
+    //    See the 'school' preset's note above re: designer pass.
     'small-business' => [
         'name'        => 'BusinessMS',
         'tagline'     => 'Business Management System',
         'publisher'   => 'MWBM Partners Ltd (t/a MWservices)',
-        // Falls back to webms-intra assets until distinct artwork ships (#306).
-        'assetFolder' => 'webms-intra',
+        'assetFolder' => 'businessms',
         'displayLabel' => 'Small business',
     ],
 ];

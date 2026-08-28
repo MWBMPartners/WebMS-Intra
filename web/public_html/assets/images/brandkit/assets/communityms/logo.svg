@@ -1,0 +1,23 @@
+<?xml version="1.0"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 64" width="100%" height="100%" preserveAspectRatio="xMidYMid meet" role="img" aria-label="CommunityMS — COMMUNITY MANAGEMENT SYSTEM">
+  <title>CommunityMS — COMMUNITY MANAGEMENT SYSTEM</title>
+  <desc>Functional starter lockup for the community / membership preset (#306) — icon tile + a system-font text wordmark, NOT outlined vector glyphs like the WebMS / ChurchMS kits. A designer pass to match that outlined-vector treatment is recommended before this preset ships to a real customer. No external font or network reference — the font-family list is local system fonts only. HOW TO RECOLOUR: every colour is a named token in &lt;defs&gt; (brand, on-brand, ink, grey) referenced by url(#token).</desc>
+  <defs>
+    <linearGradient id="brand" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="64" y2="64"><desc>BRAND token — primary indigo gradient.</desc><stop offset="0" stop-color="#5e6ad2"></stop><stop offset="1" stop-color="#7a85e8"></stop></linearGradient>
+    <linearGradient id="on-brand"><desc>ON-BRAND token — emblem colour on the indigo tile.</desc><stop offset="0" stop-color="#ffffff"></stop><stop offset="1" stop-color="#ffffff"></stop></linearGradient>
+    <linearGradient id="ink"><desc>INK token — wordmark prefix (near-black).</desc><stop offset="0" stop-color="#23263a"></stop><stop offset="1" stop-color="#23263a"></stop></linearGradient>
+    <linearGradient id="grey"><desc>GREY token — descriptor / subtag.</desc><stop offset="0" stop-color="#8b90a0"></stop><stop offset="1" stop-color="#8b90a0"></stop></linearGradient>
+  </defs>
+  <g id="icon-tile"><title>App tile</title><desc>Rounded indigo gradient tile with the interlocking-rings emblem.</desc>
+    <rect x="0" y="0" width="64" height="64" rx="14" fill="url(#brand)"></rect>
+    <g fill="none" stroke="url(#on-brand)" stroke-width="4" transform="translate(12.16 12.16) scale(0.62)">
+      <circle cx="24" cy="24" r="15"></circle>
+      <circle cx="42" cy="24" r="15"></circle>
+      <circle cx="33" cy="42" r="15"></circle>
+    </g>
+  </g>
+  <g id="wordmark" font-family="'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif">
+    <text id="wm-prefix" x="78" y="38" font-size="26" font-weight="700" fill="url(#ink)">Community<tspan id="wm-ms" font-weight="800" fill="url(#brand)">MS</tspan></text>
+    <text id="subtag" x="78" y="54" font-size="10" font-weight="600" letter-spacing="1" fill="url(#grey)">COMMUNITY MANAGEMENT SYSTEM</text>
+  </g>
+</svg>

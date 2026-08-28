@@ -5,7 +5,7 @@
 Internal portal platform (PHP 8.5, backward-compatible with 8.4, MySQL 8.0, Bootstrap 5.3.3) hosted on DreamHost shared hosting. No CLI, no Composer.
 
 - **Version:** 1.4.0 (on `main`; bump in `web/_core/version.php` — single source of truth)
-- **Brand layer:** runtime product brand picked at install (#296, PR #297). Presets: `WebMS Intra` (generic, default), `ChurchMS` (church). School/charity/community/small-business stubbed. See `web/_core/brand-defaults.php` + `Site::productName()`. PWA manifest is a brand-aware PHP controller (`manifest.php`); the OpenAPI spec is likewise served brand-aware via `public_html/openapi.php` + `_core/api-spec.json` (#307).
+- **Brand layer:** runtime product brand picked at install (#296, PR #297). Presets: `WebMS Intra` (generic, default), `ChurchMS` (church), `SchoolMS`/`CharityMS`/`CommunityMS`/`BusinessMS` (functional starter SVG kits shipped #306 — logo.svg wordmark is system-font pending a designer pass, icons are full-quality). See `web/_core/brand-defaults.php` + `Site::productName()`. PWA manifest is a brand-aware PHP controller (`manifest.php`, now with brand-aware `shortcuts[]`, #141); the OpenAPI spec is likewise served brand-aware via `public_html/openapi.php` + `_core/api-spec.json` (#307).
 - **Licence:** All Rights Reserved — MWBM Partners Ltd (t/a MWservices)
 - **Repo:** github.com/MWBMPartners/WebMS-Intra
 - **Server:** portal.millrdsdacambridge.uk
@@ -156,6 +156,42 @@ Calendar/Events/Preaching Plan is ONE app ("Events") — `/calendar` covers view
 
 ## Recent ships (chronological)
 
+- **`claude/backlog-pwa-brand`** (branched off `alpha`) — two small,
+  low-risk backlog finishers, one PR: **#141 residual** (the push half
+  was already fully shipped as #322 — only install-prompt/manifest/iOS-meta
+  remained) — self-hosted `assets/js/pwa-install.js` captures
+  `beforeinstallprompt`, suppresses the mini-infobar
+  (`event.preventDefault()`), and reveals a dismissible bottom-sheet
+  banner (`#portal-install-prompt` in footer.php, same visual pattern as
+  the existing cookie-consent banner) with a brand-aware "Install
+  {product name}" heading; dismissal remembered 30 days in localStorage,
+  a real install remembered permanently via `appinstalled`.
+  `manifest.php` gains a brand-aware `shortcuts[]` (Dashboard / Calendar
+  / Giving / Prayer Requests) gated through `AppRegistry::isEnabled()`,
+  failing CLOSED (shortcut dropped) on any registry exception.
+  `header.php` gains the missing `apple-mobile-web-app-title`
+  (brand-aware — was absent entirely) + the standard-track
+  `mobile-web-app-capable` twin of the pre-existing apple- tag. **#306**
+  — functional starter SVG brand kits (`icon.svg`/`icon-192.svg`/
+  `icon-512.svg`/`logo.svg`) for the four presets that previously fell
+  back to generic WebMS-Intra assets:
+  `assets/images/brandkit/assets/{schoolms,charityms,communityms,businessms}/`,
+  each a distinct emblem (mortarboard/heart/interlocking-rings/bar-chart)
+  on the same indigo-tile + gradient-token structure as the WebMS/
+  ChurchMS kits. `brand-defaults.php`'s four stub presets now point
+  `assetFolder` at their new kits. Known design debt (documented in-repo,
+  not fixed — no font-outlining tool available): each `logo.svg`'s
+  wordmark is set with a system-font stack, not the WebMS/ChurchMS kits'
+  outlined vector glyphs — a designer pass is recommended before any of
+  the four ship to a real customer; the PWA-install-facing `icon*.svg`
+  files need no such caveat. Also fixed two stale DEV_NOTES.md doc-drift
+  items found along the way: the "Per-brand assets" section still
+  described the pre-brandkit-move `assets/images/brands/` path, and its
+  #297 deferred-follow-ups list still showed sub-brand artwork and
+  OpenAPI brand-awareness as open when both are now done (#306 here,
+  #307 previously). No migration in either half. All 10 audit checks
+  green, `php -l` clean on every touched PHP file, all 16 new SVGs
+  well-formed XML.
 - **`claude/gap322-webpush`** (branched off `alpha`) — issue #322: Web Push
   notifications ("we're live now" + service-reminder channels). Migration
   111 shipped `tblPushSubscriptions` + the four `push.vapid*`/
