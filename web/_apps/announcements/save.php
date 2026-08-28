@@ -17,7 +17,12 @@
  * one line of this changes; `$isPublished` flows exactly as it always has.
  * Fail-open (#443 decision 4): a gate that's on but has no active/steppable
  * definition NEVER blocks publishing — it publishes directly and logs a
- * platform warning so admins see the misconfiguration in /admin/errors.
+ * platform warning so admins see the misconfiguration in /admin/errors. The
+ * actual gate mechanics (already-pending check, `Workflow::start()`, the
+ * fail-open publish) live in the shared `_workflow-gate.php` in this same
+ * directory — `announcements/api/create.php` and `announcements/api/
+ * update.php` require the identical file so the REST write API can never
+ * bypass this gate (security review SEC-02/SEC-03).
  *
  * @package   Portal\Announcements
  * @author    MWBM Partners Ltd (t/a MWservices)
@@ -36,7 +41,8 @@ use Portal\Core\Auth;
 use Portal\Core\Logger;
 use Portal\Core\Settings;
 use Portal\Core\Site;
-use Portal\Core\Workflow;
+
+require_once __DIR__ . DIRECTORY_SEPARATOR . '_workflow-gate.php';
 
 // 🛡️ POST only
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
@@ -206,9 +212,9 @@ exit();
 
 /**
  * Shared publish-request tail for both the create and update branches
- * above — starts (or notices an already-running) approval workflow, with
- * the #443 fail-open fallback when the gate is on but nothing is actually
- * configured to run.
+ * above — delegates the actual gate mechanics to the shared
+ * `announcements_workflow_gate_publish()` helper (`_workflow-gate.php`,
+ * same directory) and translates its result into a flash message.
  */
 function announcementsHandlePublishRequest(
     \mysqli $mysqli,
@@ -219,44 +225,7 @@ function announcementsHandlePublishRequest(
     string $slug,
     string $verb
 ): void {
-    $already = Workflow::activeInstanceForSubject('tblAnnouncements', $announcementId);
-    if ($already !== null) {
-        $_SESSION['flash_msg']  = 'Announcement ' . $verb . ' — already awaiting approval.';
-        $_SESSION['flash_type'] = 'info';
-        return;
-    }
-
-    $instanceId = Workflow::start(
-        'announcement_publish',
-        'tblAnnouncements',
-        $announcementId,
-        $userId,
-        $title,
-        ['url' => '/announcements/view?slug=' . $slug]
-    );
-
-    if ($instanceId !== null) {
-        $_SESSION['flash_msg']  = 'Announcement ' . $verb . ' — publication submitted for approval.';
-        $_SESSION['flash_type'] = 'success';
-        return;
-    }
-
-    // 🛟 Fail-open (#443 decision 4): no active/steppable definition ⇒
-    // publish directly rather than block the user. Never a security
-    // boundary — an editorial convenience gate only.
-    $pubStmt = $mysqli->prepare('UPDATE tblAnnouncements SET isPublished = 1 WHERE announcementID = ? AND siteID = ?');
-    if ($pubStmt !== false) {
-        $pubStmt->bind_param('ii', $announcementId, $siteId);
-        $pubStmt->execute();
-        $pubStmt->close();
-    }
-    Logger::errorPlatform(
-        'Workflow',
-        'Warning',
-        'WF_MISCONFIG',
-        'workflows.announcements.enabled is on but no active/steppable definition exists — published directly',
-        'announcementID=' . $announcementId . ' siteID=' . $siteId
-    );
-    $_SESSION['flash_msg']  = 'Announcement ' . $verb . ' — approval workflow not configured, published directly.';
-    $_SESSION['flash_type'] = 'warning';
+    $gate = announcements_workflow_gate_publish($mysqli, $siteId, $announcementId, $userId, $title, $slug, $verb);
+    $_SESSION['flash_msg']  = $gate['message'];
+    $_SESSION['flash_type'] = $gate['flashType'];
 }

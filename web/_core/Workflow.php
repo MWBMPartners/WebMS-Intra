@@ -99,15 +99,38 @@ class Workflow
     /**
      * Start a new instance of $definitionKey's active definition (for the
      * CURRENT site, Site::id()) against a subject record. Never throws to
-     * the caller — every failure path returns null so a consumer can apply
-     * its own fallback policy (e.g. fail-open direct publish).
+     * the caller — every failure path returns a result array so a consumer
+     * can apply its own fallback policy (e.g. fail-open direct publish).
      *
-     * Returns null when: no active definition exists for this site/key, the
-     * definition has zero steps (e.g. the dormant seeded expense_approval),
-     * or an active instance already exists for this exact subject row
-     * (duplicate-active guard, race-safe via a single conditional INSERT).
+     * 🛡️ SEC-03 fix: the two very different "didn't start" cases are now
+     * distinguishable via `reason` — they used to both collapse to a bare
+     * `null`, which let a caller's fail-open policy (correct for "no
+     * definition configured") also fire for "a concurrent submit already
+     * has an active instance running", publishing straight past a running
+     * approval on a double-submit race. Only `reason === 'no_definition'`
+     * means "nothing is configured to gate this publish" — a caller's
+     * fail-open branch must check for exactly that string, never merely
+     * `instanceId === null`.
      *
      * @param array<string, mixed> $context Stored as contextJson (e.g. ['url' => '/announcements/view?...']).
+     *
+     * @return array{instanceId: ?int, reason: ?string} `reason` is null on
+     *         success, else one of:
+     *         - 'no_definition'    no active definition exists for this
+     *                               site/key, OR it has zero steps (e.g. the
+     *                               dormant seeded expense_approval) — the
+     *                               ONLY reason a caller should ever fail
+     *                               open and act directly.
+     *         - 'duplicate_active' an active instance already exists for
+     *                               this exact subject row (the race-safe
+     *                               conditional INSERT found one) — a
+     *                               caller MUST treat this exactly like its
+     *                               own pre-checked "already awaiting
+     *                               approval" case, never fail open.
+     *         - 'error'            a prepare() failure or unexpected
+     *                               exception (logged) — we can't prove no
+     *                               definition exists, so this fails
+     *                               CLOSED the same as 'duplicate_active'.
      */
     public static function start(
         string $definitionKey,
@@ -116,7 +139,7 @@ class Workflow
         int $startedById,
         string $subjectLabel,
         array $context = []
-    ): ?int {
+    ): array {
         try {
             $db = App::db();
             $siteId = Site::id();
@@ -126,21 +149,21 @@ class Workflow
                 'SELECT workflowID FROM tblWorkflows WHERE workflowKey = ? AND siteID = ? AND isActive = 1 LIMIT 1'
             );
             if ($stmt === false) {
-                return null;
+                return self::startResult(null, 'error');
             }
             $stmt->bind_param('si', $definitionKey, $siteId);
             $stmt->execute();
             $wf = $stmt->get_result()->fetch_assoc();
             $stmt->close();
             if ($wf === null) {
-                return null;
+                return self::startResult(null, 'no_definition');
             }
             $workflowId = (int) $wf['workflowID'];
 
-            // 2️⃣ Resolve the first step (zero-step definition ⇒ null).
+            // 2️⃣ Resolve the first step (zero-step definition ⇒ no_definition).
             $firstStep = self::firstStep($workflowId);
             if ($firstStep === null) {
-                return null;
+                return self::startResult(null, 'no_definition');
             }
             $firstOrder = (int) $firstStep['stepOrder'];
 
@@ -159,7 +182,7 @@ class Workflow
                 . "SELECT 1 FROM tblWorkflowInstances WHERE tableName = ? AND recordID = ? AND status IN ('pending','in_progress'))"
             );
             if ($stmt === false) {
-                return null;
+                return self::startResult(null, 'error');
             }
             $stmt->bind_param(
                 'iisiiisssi',
@@ -179,7 +202,7 @@ class Workflow
             $stmt->close();
             if ($affected !== 1) {
                 // An active instance already exists for this subject.
-                return null;
+                return self::startResult(null, 'duplicate_active');
             }
             $instanceId = (int) $db->insert_id;
 
@@ -202,11 +225,17 @@ class Workflow
             //    human-facing (approval/review) step.
             self::processAutoSteps($instanceId);
 
-            return $instanceId;
+            return self::startResult($instanceId, null);
         } catch (Throwable $e) {
             Logger::exception($e);
-            return null;
+            return self::startResult(null, 'error');
         }
+    }
+
+    /** Uniform result shape for start() — see its docblock for `reason`'s meaning. */
+    private static function startResult(?int $instanceId, ?string $reason): array
+    {
+        return ['instanceId' => $instanceId, 'reason' => $reason];
     }
 
     /**
@@ -746,13 +775,29 @@ class Workflow
     /* ========================================================================= */
 
     /**
-     * The atomic claim (§3.4 step 6): advances to the next step, or — when
-     * there is none — marks the instance completed with $terminalOutcome and
-     * applies the subject-adapter side effect INSIDE the same caller-owned
-     * transaction. $actionWord is what lands in tblWorkflowActions
+     * The atomic claim (§3.4 step 6): advances to the next step ONLY when
+     * this is an 'approved' decision AND a next step exists; otherwise marks
+     * the instance completed with $terminalOutcome and applies the subject-
+     * adapter side effect INSIDE the same caller-owned transaction.
+     * $actionWord is what lands in tblWorkflowActions
      * ('approved'|'rejected'|'skipped'); $terminalOutcome is what
      * tblWorkflowInstances.outcome gets set to IF this call completes the
      * instance. Caller owns begin_transaction()/commit()/rollback().
+     *
+     * 🛡️ SEC-01 fix: a 'rejected' or 'cancelled' $terminalOutcome must ALWAYS
+     * terminate the instance here, regardless of whether a later step
+     * exists — a reject at step 1 of a 5-step definition must not advance to
+     * step 2 and let a later approve publish the rejected subject. Only
+     * 'approved' may ever consult resolveNextStep() and advance; the next-
+     * step lookup itself is skipped entirely for any non-'approved' outcome
+     * so there's no path back into the advance branch below. Every caller
+     * that decides a *decision* (not the read-only 'commented' short-circuit
+     * in act(), which never reaches this method) passes $terminalOutcome
+     * consistently with the decision word — act()'s approve/reject,
+     * timeoutAutoAct()'s auto-approve/auto-reject, and processAutoSteps()'s
+     * 'auto' step approve/reject all set $actionWord === $terminalOutcome —
+     * so this single gate covers a human reject, a timeout auto-reject, and
+     * an 'auto' step that rejects.
      *
      * @return array{ok: bool, error: ?string, completed: bool, outcome: ?string}
      */
@@ -767,7 +812,9 @@ class Workflow
     ): array {
         $instanceId = (int) $instance['instanceID'];
         $currentStepOrder = (int) $instance['currentStep'];
-        $nextStep = self::resolveNextStep((int) $instance['workflowID'], $currentStepOrder);
+        $nextStep = $terminalOutcome === 'approved'
+            ? self::resolveNextStep((int) $instance['workflowID'], $currentStepOrder)
+            : null;
 
         if ($nextStep !== null) {
             $newStepOrder = (int) $nextStep['stepOrder'];
@@ -789,7 +836,8 @@ class Workflow
             return ['ok' => true, 'error' => null, 'completed' => false, 'outcome' => null];
         }
 
-        // Final step — completes the instance.
+        // Terminal decision ('rejected'/'cancelled' — always; 'approved' only
+        // when there was no next step) — completes the instance here.
         $upd = $db->prepare(
             "UPDATE tblWorkflowInstances SET status = 'completed', outcome = ?, completedAt = NOW() "
             . "WHERE instanceID = ? AND currentStep = ? AND status IN ('pending','in_progress')"

@@ -3322,6 +3322,27 @@ equal the server-resolved current step — a mismatch is `'stale_step'`
 `start()`'s duplicate-active guard is a single conditional
 `INSERT … SELECT … FROM DUAL WHERE NOT EXISTS (...)` gated the same way.
 
+**A `'rejected'`/`'cancelled'` decision always terminates the instance,
+never advances it** — `claimTransition()`'s next-step lookup only ever runs
+for an `'approved'` outcome; any other terminal outcome skips it entirely
+and completes the instance at the CURRENT step, regardless of whether a
+later step exists. This closes a security-review finding (SEC-01): the
+advance-vs-complete branch used to key off "does a next step exist" alone,
+so a reject at step 1 of a multi-step definition would advance to step 2
+and let a later approve publish the very thing that was just rejected. The
+same gate covers a human reject in `act()`, a timeout auto-reject in
+`timeoutAutoAct()`, and an `'auto'`-type step that rejects in
+`processAutoSteps()` — all three pass `$actionWord === $terminalOutcome`
+into `claimTransition()`.
+
+`start()`'s two "didn't start" outcomes are distinguishable via its
+`reason` return value — `'no_definition'` (nothing configured; the only
+case a caller should fail open) vs `'duplicate_active'`/`'error'` (a
+concurrent submit already has an instance running, or an unexpected
+failure — treat exactly like an already-pre-checked "awaiting approval",
+never fail open). See "Announcements wiring" below for why this mattered
+(SEC-03).
+
 **Authorisation lives INSIDE `act()`**, never trusted from the HTTP layer:
 the actor must (a) be an active `tblUserSites` member of the instance's own
 site, AND (b) either match the current step's assignee (role/user/group per
@@ -3403,25 +3424,48 @@ like the token itself); everything else is delegated to
 ### Announcements wiring (the reference consumer)
 
 Per-site flag `workflows.announcements.enabled` (default `'false'`).
-**Flag off ⇒ not one line of today's behaviour changes** — the new branch
-in `announcements/save.php` is never entered. Flag on:
+**Flag off ⇒ not one line of today's behaviour changes** for any of the
+three write paths below. Flag on:
 
-- **Create**: posting `isPublished=1` withholds the flag (`isPublished`
-  forced to 0 before the INSERT) and calls `Workflow::start(...)` instead.
-- **Update**: only a genuine **publish request** (posted `isPublished=1`
-  AND the stored row is currently `isPublished=0`) triggers the same
-  withhold-and-start. Editing an already-published row, or unchecking
-  Published (retract), passes through completely unchanged — no approval
-  needed to edit or unpublish in v1.
+- **Create** (`announcements/save.php` AND `announcements/api/create.php`):
+  posting `isPublished=1` (the API's own default) withholds the flag
+  (`isPublished` forced to 0 before the INSERT) and calls
+  `Workflow::start(...)` instead.
+- **Update** (`announcements/save.php` AND `announcements/api/update.php`):
+  only a genuine **publish request** (posted `isPublished=1` AND the stored
+  row is currently `isPublished=0`) triggers the same withhold-and-start.
+  Editing an already-published row, or unchecking Published (retract),
+  passes through completely unchanged — no approval needed to edit or
+  unpublish in v1.
+- **The REST write API is gated identically to the HTML form** (closes
+  SEC-02): `api/create.php` and `api/update.php` used to write
+  `isPublished` straight to the database with no workflow gate at all,
+  regardless of this setting — a caller with `announcements:write` scope
+  could publish past a running approval process entirely via the API. Both
+  handlers now `require_once` the same `announcements/_workflow-gate.php`
+  helper `save.php` uses, so all three write paths share ONE implementation
+  of the gate rather than three that could drift out of sync again. The API
+  handlers read the flag via `App::settingForSite()` rather than
+  `Settings::get()`'s ambient snapshot, since a bearer-key request's
+  tenant site can differ from the host-detected site the snapshot was
+  frozen for.
 - **Fail-open** (deliberate, not a security boundary): if
-  `Workflow::start()` returns `null` because no active/steppable
-  definition exists for the site, `announcements/save.php` publishes
+  `Workflow::start()` reports `reason === 'no_definition'` (nothing
+  active/steppable configured for the site), the gate helper publishes
   directly anyway and logs a `Logger::errorPlatform` Warning
   (`WF_MISCONFIG`) so admins see the misconfiguration in `/admin/errors` —
   a half-configured gate must never silently block every publish on a
-  site. A `null` because an instance is *already* active for this subject
-  gets a distinct "already awaiting approval" flash instead (checked via
-  `Workflow::activeInstanceForSubject()` first).
+  site. Any OTHER reason an instance didn't start — an instance already
+  active for this subject (checked up front via
+  `Workflow::activeInstanceForSubject()`, and again via `start()`'s own
+  `'duplicate_active'` result if a concurrent submit won that race in
+  between), or `'error'` — gets the same "already awaiting approval"
+  response and NEVER publishes directly. This distinction (SEC-03) matters
+  precisely because of that race: two near-simultaneous submits could both
+  pass the up-front check, one wins `start()`'s atomic insert and a real
+  approval begins, and the loser used to be indistinguishable from "gate
+  misconfigured" — so it fell through the fail-open branch and published
+  the subject anyway, right past the instance its twin had just started.
 - `announcements/delete.php` calls `Workflow::cancelForSubject(...)` after
   the soft-delete so a deleted announcement never lingers in anyone's
   inbox.
@@ -3448,8 +3492,14 @@ logic already appends at `MAX(stepOrder)+1`.
    `workflowKey`, gated behind your own per-site enable flag.
 2. At your consumer's submit point: check the flag, and when on, call
    `Workflow::start($yourKey, $yourTable, $yourId, $userId, $label,
-   ['url' => $viewUrl])` instead of writing your "approved" state directly;
-   handle a `null` return with your own fail-open/fail-closed policy.
+   ['url' => $viewUrl])` instead of writing your "approved" state directly.
+   It returns `['instanceId' => ?int, 'reason' => ?string]` — fail OPEN
+   (act directly) only when `reason === 'no_definition'`; treat
+   `'duplicate_active'` and `'error'` exactly like your own pre-checked
+   "already awaiting approval" case (fail CLOSED — never act directly). Do
+   the same up-front `Workflow::activeInstanceForSubject()` check
+   `announcements/_workflow-gate.php` does before calling `start()` at all —
+   see SEC-03 above for why both matter.
 3. Add one `case '$yourKey':` arm inside
    `Workflow::applySubjectEffect()` for the `'approved'`/`'rejected'`/
    `'cancelled'` side effects. That's the entire integration surface — no
