@@ -2,6 +2,19 @@
 
 
 ## [Unreleased] (alpha)
+- ci: stop the advisory CodeQL ("Analyse JavaScript") and Psalm ("PHP
+  Static Analysis") jobs showing a false red X on every PR. Both jobs
+  complete their analysis fine but then fail at the SARIF-upload step
+  because GitHub Code Scanning (Advanced Security) is not enabled on the
+  repo ("Code Security must be enabled …" / "Resource not accessible by
+  integration"). Added a step-level `continue-on-error: true` to
+  `codeql.yml`'s analyse step and to `php-static-analysis.yml`'s upload
+  step (the Psalm job's existing job-level flag kept the workflow green
+  but left the job's own check run red). These are advisory checks — the
+  hard merge gates are the PHP -l lint job and the migration harness — so
+  a disabled upload target no longer reads as a failure. Each carries an
+  inline comment to remove the flag if/when Code Scanning is enabled, to
+  restore genuine-failure visibility. No application code touched.
 - feat(reports): #156 — Reports Builder: a whitelist-driven custom report
   builder alongside the existing #93 fixed dashboards, built entirely
   around an injection-safe registry architecture. `Portal\Core\
