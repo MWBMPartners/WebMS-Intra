@@ -429,13 +429,24 @@ v1.x follow-up.
 ### Per-brand assets
 
 Per-brand asset folders live at
-`web/public_html/assets/images/brands/<assetFolder>/{logo,icon-192,icon-512}.svg`.
-The brand-aware `manifest.php` controller resolves the active preset's
-`assetFolder` and serves icons from there; it falls back to the existing
-`/assets/images/{logo,icon-192,icon-512}.svg` placeholders if the per-brand
-file isn't present yet. v1 ships placeholder copies for `generic` and
-`church`; designers replace with distinct artwork in a follow-up PR
-without touching code.
+`web/public_html/assets/images/brandkit/assets/<assetFolder>/{icon,icon-192,icon-512,logo}.svg`
+(moved from the original `assets/images/brands/<assetFolder>/` path
+during the WebMS/ChurchMS brand-kit drop — `manifest.php` and
+`header.php` both resolve from `brandkit/assets/` today; `assets/images/brands/`
+no longer exists). The brand-aware `manifest.php` controller resolves the
+active preset's `assetFolder` and serves icons from there; it falls back
+to the top-level `/assets/images/{logo,icon-192,icon-512}.svg`
+placeholders if the per-brand file isn't present (belt-and-braces —
+every preset directory that exists today does have the full set).
+All six presets (`generic`/`webms-intra`, `church`/`churchms`,
+`school`/`schoolms`, `nonprofit`/`charityms`, `community`/`communityms`,
+`small-business`/`businessms`) now have distinct artwork (#306) — see
+FEATURES.md's "PWA install prompt + manifest shortcuts + sub-brand
+starter artwork" section for what's designer-finished (WebMS, ChurchMS —
+outlined-vector wordmarks) vs. functional-starter (the four newer
+presets — `icon*.svg` are full-quality hand-drawn-equivalent emblems on
+the same token structure, but `logo.svg`'s wordmark line is set in a
+system-font stack pending a designer pass).
 
 ### Where the brand is NOT applied
 
@@ -447,32 +458,32 @@ By design, these surfaces stay as `WebMS Intra` regardless of preset:
   for operators reading logs, not user-facing brand.
 - `robots.txt` — comment header is brand-neutral so the static file
   can be served without going through a PHP controller.
-- `openapi.json` `info.title` — developer-facing surface; brand-aware
-  conversion deferred to a v1.x follow-up (see below).
+- ~~`openapi.json` `info.title`~~ — no longer true: this now IS
+  brand-aware via `openapi.php` + `api-spec.json` (#307, see "Deferred
+  follow-ups" item 2 below).
 
 ### Deferred follow-ups from the brand-layer PR (#297)
 
 Tracked as separate issues; called out here so they don't get lost
 between PRs.
 
-1. **Distinct sub-brand artwork** — the `assets/images/brands/<type>/`
-   folders currently contain placeholder copies of the generic SVGs
-   so the `manifest.php` resolver finds something. Designers replace
-   the artwork in a follow-up without touching code; the controller
-   discovers new files at next render. ChurchMS gets the first
-   distinct logo pass; school / charity / community / small-business
-   stay placeholders until those presets need to ship.
+1. **Distinct sub-brand artwork** — ✅ **done (#306)**. All four
+   previously-placeholder presets (`school`/`schoolms`,
+   `nonprofit`/`charityms`, `community`/`communityms`,
+   `small-business`/`businessms`) now have their own
+   `assets/images/brandkit/assets/<assetFolder>/{icon,icon-192,icon-512,logo}.svg`
+   set — the resolver needed no code changes, exactly as anticipated
+   here. Remaining gap: each new `logo.svg`'s wordmark is system-font
+   text, not the WebMS/ChurchMS kits' outlined vector glyphs — a
+   designer pass on that one file per preset is still open (tracked
+   in-repo, not a fresh GitHub issue — see each `logo.svg`'s own
+   `<desc>`).
 
-2. **`openapi.json` brand-aware conversion** — `info.title`,
-   `info.contact.name`, and `info.contact.url` are still hardcoded to
-   `WebMS Intra REST API` / `MWBM Partners Ltd …` regardless of the
-   active brand. Pattern would mirror `manifest.json` → `manifest.php`:
-   move the static spec to `web/_core/api-spec.json`, add
-   `web/public_html/openapi.php` that loads it and rewrites the
-   `info` block before emitting, route via tblRoutes. Deferred because
-   the OpenAPI surface is developer-facing (Swagger UI viewers,
-   integrators) and the same brand value reads cleanly in both
-   contexts.
+2. **`openapi.json` brand-aware conversion** — ✅ **done (#307)**. The
+   spec now lives at `web/_core/api-spec.json` with
+   `web/public_html/openapi.php` rewriting the `info` block per the
+   active brand before emitting, routed via `tblRoutes` — the exact
+   pattern anticipated below stayed accurate.
 
 3. **`prayerRequests.*` → `prayer-requests.*` setting-key naming
    standardisation** — drift dating to the original prayer-requests
@@ -1121,6 +1132,40 @@ up-to-date schema:
   (filename) VALUES (...)` self-record — `filename` is `UNIQUE KEY
   uq_filename`) needs `ON DUPLICATE KEY UPDATE`, `INSERT IGNORE`, or a `WHERE NOT
   EXISTS` guard, or it fails with ERROR 1062 on replay.
+
+### `check_sql_columns.py` false positive: a table name embedding a bare SQL keyword + a short alias (#150)
+
+`tools/audit-checks/check_sql_columns.py`'s `SELECT_RE` locates a query's table
+name with `FROM\s+\`?(tbl\w+)\`?\s*(?:WHERE|ORDER|GROUP|LIMIT|;|…|\s+(?:LEFT|
+INNER|RIGHT|OUTER|JOIN))` — it requires the greedy `\w+` table-name capture to
+be *immediately* followed (mod whitespace) by one of those bare keywords. When
+the SQL text instead puts a short **alias** right after the table name (e.g.
+`FROM tblSmallGroupMembers m INNER JOIN …`), the full-length match fails and
+the regex engine backtracks the `\w+` capture shorter and shorter — and if the
+table name happens to **contain one of those keywords as a bare substring**
+(`tblSmallGroup*` all contain "Group"), the backtrack eventually lands on
+`tblSmall` + `Group…`, which matches the literal `GROUP` alternative (no word
+boundary required) and stops there. The checker then reports the truncated,
+unregistered `tblSmall` as an "unknown table", even though the real table
+(`tblSmallGroupMembers`) is correctly defined in `full_schema.sql`. This is
+NOT a real defect in the SQL — verified by hand-tracing the regex and
+confirmed empirically (`python3 -c '...'` against the exact pattern).
+
+**Workaround** (no audit-script change needed): never put a short alias
+*immediately* after `FROM tblKeywordEmbeddingTable` — either drop the alias
+entirely and qualify columns with the full table name (`tblSmallGroupMembers.
+userID`), or reorder the join so the keyword-embedding table is introduced via
+`JOIN` instead of being the primary `FROM` target (the checker's regex is
+strictly `FROM`-anchored — it never inspects text after `JOIN`, so an alias on
+a *joined* table, however named, is invisible to it and always safe). Both
+forms are semantically identical to the aliased original; MySQL still returns
+the column under its own unqualified name either way. See
+`web/_core/SmallGroups.php` (`listGroups()`, `groupsFor()`, `membersOf()`,
+`pushHeadcountToAttendance()`, `attendanceStats()`) and
+`web/_apps/auth/account/data-export.php`'s `smallGroupMemberships`/
+`smallGroupAttendance` blocks for worked examples. Will recur for any future
+table whose name embeds `GROUP`/`ORDER`/`LIMIT`/`WHERE` as a bare substring
+right after `tbl` — check new table names against this before aliasing them.
 
 ---
 

@@ -149,9 +149,11 @@ $INSTALL_PRODUCT_PUBLISHER = (string) ($INSTALL_BRAND['publisher'] ?? 'MWBM Part
 //    Drives the favicon + apple-touch-icon in the installer head. The default
 //    (webms-intra) ships first; once Step 1.5 saves the picked industry into
 //    $_SESSION['install_industry'], the next render of the wizard automatically
-//    swaps in that brand's icons (ChurchMS → churchms/icon.svg, etc.).
-//    Stub presets (school/charity/community/business) still reference
-//    webms-intra/ in brand-defaults.php until distinct artwork ships.
+//    swaps in that brand's icons (ChurchMS → churchms/icon.svg, etc.). The
+//    school/charity/community/business presets ship starter SVG icon.svg /
+//    icon-192.svg / icon-512.svg sets (#306) but NOT the PNG/.ico variants
+//    below (icon-32.png etc.) — those `<link>`s 404 harmlessly for those
+//    four presets in browsers that don't support SVG favicons.
 $INSTALL_BRAND_ASSET_FOLDER = (string) ($INSTALL_BRAND['assetFolder'] ?? 'webms-intra');
 // Light defensive cleanup — only allow lowercase alphanumerics + dashes in the
 // path segment, even though brand-defaults.php is trusted source. Avoids any
@@ -1527,7 +1529,7 @@ $pageTitle = 'Install — ' . ($stepTitles[$step] ?? $INSTALL_PRODUCT_NAME);
                     <div class="form-text">
                         Picking <em>Generic</em> keeps the historical <strong>WebMS Intra</strong> branding.
                         Picking <em>Church / Place of Worship</em> rebrands the install to <strong>ChurchMS</strong>.
-                        Other sub-brands (School, Charity, Community, Small Business) are placeholders for v1.x — pick them only if you're previewing.
+                        Other sub-brands (School, Charity, Community, Small Business) ship functional starter artwork rather than designer-finished marks (#306) — safe to install, but a designer pass on the wordmark is recommended before using one as your public-facing brand.
                     </div>
                 </div>
 

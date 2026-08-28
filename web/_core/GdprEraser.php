@@ -210,6 +210,19 @@ class GdprEraser
             ['table' => 'tblVenueUsageTypeWindows', 'userCol' => 'createdByID', 'action' => 'anonymise', 'nullCols' => [], 'reason' => 'effective-dated default-hours history retained; author identity detached'],
             ['table' => 'tblVenueImportBatches',    'userCol' => 'createdByID', 'action' => 'anonymise', 'nullCols' => [], 'reason' => 'CSV/XLSX import-wizard batch history retained for audit trail; uploader identity detached'],
 
+            // 👥 Small Groups (#150). The membership row is the subject's
+            // OWN personal data (which group, which role) so it is hard
+            // DELETEd, not retained — unlike the attendance/authorship
+            // rows below, which stay for the GROUP's own continuity with
+            // only the subject's identity detached (mirrors
+            // tblEventAttendance / tblAssetAudit convention above).
+            ['table' => 'tblSmallGroupMembers',           'userCol' => 'userID',       'action' => 'delete'],
+            ['table' => 'tblSmallGroupMembers',           'userCol' => 'addedByID',    'action' => 'anonymise', 'nullCols' => [], 'reason' => 'membership rows retained for the group; assigner identity detached'],
+            ['table' => 'tblSmallGroupMeetingAttendance', 'userCol' => 'userID',       'action' => 'anonymise', 'nullCols' => [], 'reason' => 'aggregate attendance stats retained — userID nulled (tblEventAttendance precedent)'],
+            ['table' => 'tblSmallGroupMeetingAttendance', 'userCol' => 'markedByID',   'action' => 'anonymise', 'nullCols' => [], 'reason' => 'roll history retained; recorder identity detached'],
+            ['table' => 'tblSmallGroupMeetings',          'userCol' => 'recordedByID', 'action' => 'anonymise', 'nullCols' => [], 'reason' => 'meeting history retained; recorder identity detached'],
+            ['table' => 'tblSmallGroups',                 'userCol' => 'createdByID',  'action' => 'anonymise', 'nullCols' => [], 'reason' => 'group retained for the congregation; creator identity detached'],
+
             // Final step — anonymise the user row itself rather than delete,
             // so foreign keys with ON DELETE SET NULL don't cascade-blow
             // historical attributions we wanted to keep.

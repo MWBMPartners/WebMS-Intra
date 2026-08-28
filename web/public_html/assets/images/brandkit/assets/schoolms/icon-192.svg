@@ -1,0 +1,24 @@
+<?xml version="1.0"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="100%" height="100%" preserveAspectRatio="xMidYMid meet" role="img" aria-label="SchoolMS app icon">
+  <title>SchoolMS app icon</title>
+  <desc>Mortarboard graduation cap with a hanging tassel — the education preset emblem (#306 starter placeholder). White emblem on a rounded indigo tile. HOW TO RECOLOUR: every colour is a named token in <defs> (brand, on-brand) referenced by url(#token). Edit a token&#39;s stop-color(s) once to recolour everywhere it is used.</defs></desc>
+  <defs>
+    <linearGradient id="brand" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="64" y2="64"><desc>BRAND token — primary indigo gradient. Edit these two stop-colors to recolour the brand everywhere it is referenced via fill=&#34;url(#brand)&#34;.</desc><stop offset="0" stop-color="#5e6ad2"></stop><stop offset="1" stop-color="#7a85e8"></stop></linearGradient>
+    <linearGradient id="on-brand"><desc>ON-BRAND token — emblem colour on the indigo tile. Edit the stop-colors to recolour everything referencing url(#on-brand).</desc><stop offset="0" stop-color="#ffffff"></stop><stop offset="1" stop-color="#ffffff"></stop></linearGradient>
+  </defs>
+  <g id="container"><title>App tile</title><desc>Rounded indigo gradient tile.</desc>
+    <rect x="0" y="0" width="64" height="64" rx="14" fill="url(#brand)"></rect>
+  </g>
+  <g id="emblem" fill="url(#on-brand)" transform="translate(12.16 12.16) scale(0.62)">
+    <g id="cap-band"><title>Head band</title><desc>Rounded band beneath the mortarboard, peeking out below the cap.</desc>
+      <rect x="21" y="29" width="22" height="15" rx="4"></rect>
+    </g>
+    <g id="cap-top"><title>Mortarboard</title><desc>Flat diamond cap top.</desc>
+      <path d="M32,9 L55,22 L32,35 L9,22 Z"></path>
+    </g>
+    <g id="cap-tassel"><title>Tassel</title><desc>Cord and button hanging from the cap.</desc>
+      <path fill="none" stroke="url(#on-brand)" stroke-width="3" stroke-linecap="round" d="M47,23 L51,42"></path>
+      <circle cx="51" cy="46" r="4"></circle>
+    </g>
+  </g>
+</svg>

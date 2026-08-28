@@ -32,6 +32,79 @@
   `forms.allowPublic`, `forms.responseRetentionDays` stub), 15 route seeds
   (13 protected + 2 public — no `api/*` rows, ApiRouter trap). All 11 audit
   checks green, `php -l` clean on every touched file.
+- feat(small-groups): #150 — new Small Groups app (groups/classes register:
+  Sabbath School classes, home groups, Bible studies). Roster with
+  leader/co-leader/member roles, optional self-service join requests
+  (pending → approve/decline, with a last-active-leader guard on
+  remove/demote/leave), per-meeting roll (`tblSmallGroupMeetingAttendance`,
+  presence-row model mirroring `tblEventAttendance`) with an ADDITIVE
+  headcount push into the existing Attendance app via a group's linked
+  `tblAttendanceServiceTypes` row — several groups can share one service
+  type/session, each contributing its own labelled headcount line; zero
+  changes to Attendance's own schema or code. Meeting location reuses the
+  #456 shared partials byte-identical to migration 180's `tblVenues` block,
+  plus a new `locationVisibility` gate (leaders/members/site, default
+  members, no public tier — groups often meet in a member's home). New
+  `Portal\Core\SmallGroups` class is the tenant-safety choke-point and the
+  stable contract #304 (group messaging) and #321 (watch-party rooms) are
+  expected to consume (`groupID` scope anchor, `status='active'` membership
+  predicate, `isLeader()` leader gate) — the denormalised `siteID` on
+  member/meeting rows is written only after confirming an active
+  `tblUserSites` row for the group's site, making cross-site membership
+  structurally impossible. New `groups_coordinator` role (manages every
+  group at a site without needing to be admin). GDPR lockstep in the same
+  PR: six `GdprEraser::catalogue()` entries, four `data-export.php` blocks,
+  and an `offboarding/do.php` step that ends a leaver's memberships. **v1
+  is adults-only** — membership rows are portal users only; no named-child
+  rows anywhere (the Kids app's `tblKidProfiles` remains the sole place
+  child identity lives; verified zero references). Migration 183: 4 new
+  tables (`tblSmallGroups`/`tblSmallGroupMembers`/`tblSmallGroupMeetings`/
+  `tblSmallGroupMeetingAttendance`), 7 settings seeds (`small-groups.enabled`
+  defaults `'0'`, opt-in), 1 role seed, 13 route seeds, zero ALTERs to any
+  existing table. New help page (`/help/small-groups`) + help-index card.
+  All 11 audit checks green, `php -l` clean on every touched file.
+- feat(pwa): #141 residual + #306 — the two remaining PWA install-prompt
+  pieces (Web Push itself already shipped as #322) plus starter sub-brand
+  artwork. **#141**: a self-hosted `assets/js/pwa-install.js` captures
+  `beforeinstallprompt`, calls `event.preventDefault()` to suppress the
+  browser's own mini-infobar, and reveals a dismissible bottom-sheet banner
+  (`#portal-install-prompt`, footer.php — same visual pattern as the
+  existing cookie-consent banner) with a brand-aware "Install {product
+  name}" heading; a dismissal is remembered in localStorage for 30 days,
+  an actual install is remembered permanently via `appinstalled`, and
+  both reads/writes are try/catched (private browsing never throws).
+  `manifest.php` gains a brand-aware `shortcuts[]` array (Dashboard /
+  Calendar / Giving / Prayer Requests) filtered through
+  `AppRegistry::isEnabled()` — a disabled app's shortcut is silently
+  dropped, and any `AppRegistry` exception fails CLOSED (shortcut
+  omitted) so a manifest fetch can never break. `header.php` gains the
+  missing iOS/PWA meta trio: brand-aware `apple-mobile-web-app-title`
+  (was absent — iOS would have captioned every install "Portal"
+  regardless of brand) plus the standard-track `mobile-web-app-capable`
+  twin of the existing `apple-mobile-web-app-capable` tag (icon,
+  status-bar-style, and manifest link were already present from earlier
+  PWA work). Push notifications, VAPID, and the offline shell were
+  already fully shipped by #322 — not touched here.
+  **#306**: functional starter SVG brand kits (`icon.svg` /
+  `icon-192.svg` / `icon-512.svg` / `logo.svg`) for the four presets that
+  previously fell back to the generic WebMS-Intra assets —
+  `assets/images/brandkit/assets/{schoolms,charityms,communityms,businessms}/`
+  — each a distinct geometric emblem (mortarboard, heart, interlocking
+  rings, ascending bar chart) on the same indigo tile + gradient tokens
+  as the WebMS/ChurchMS kits, so all six presets read as one family.
+  `logo.svg`'s wordmark line is set in a local system-font stack (no
+  outlined vector glyphs, no external font/network reference) — a
+  designer pass to match the WebMS/ChurchMS outlined-vector treatment is
+  recommended before any of these four presets ships to a real customer
+  (documented in each `logo.svg`'s own `<desc>` and in `brand-defaults.php`
+  comments). `brand-defaults.php`'s four stub presets now point
+  `assetFolder` at their new kits instead of falling back to
+  `webms-intra`; the installer's Step 1.5 copy and code comment updated
+  to match (icon/PWA-manifest SVGs ship; the installer's PNG/.ico favicon
+  variants for these four presets do not — those `<link>` tags 404
+  harmlessly in browsers without SVG-favicon support). No migration in
+  either half. All 10 audit checks green, `php -l` clean on every touched
+  PHP file, all 16 new SVGs well-formed XML.
 - feat(push): #322 — Web Push notifications ("we're live now" + service
   reminders). Migration 111 shipped `tblPushSubscriptions` + the VAPID
   settings keys, but the subscribe/unsubscribe handlers sat at

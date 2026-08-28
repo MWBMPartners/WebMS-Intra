@@ -130,6 +130,32 @@ if ($cookieBannerEnabled === true && isset($_COOKIE['portal_consent_cookies']) =
 </script>
 <?php endif; ?>
 
+<!-- 📱 PWA: "Install app" bottom-sheet prompt (#141 residual) — hidden by
+     default (d-none); assets/js/pwa-install.js reveals it once the browser
+     fires `beforeinstallprompt` AND the visitor hasn't dismissed it within
+     the last 30 days (localStorage — see DISMISS_KEY in that file).
+     Chromium-based browsers only: iOS Safari never fires this event, so the
+     banner never shows there — iOS's own "Add to Home Screen" flow is
+     covered by the apple-mobile-web-app-* meta tags in header.php instead. -->
+<aside id="portal-install-prompt"
+       class="position-fixed bottom-0 start-0 end-0 m-3 p-3 shadow-lg rounded-3 d-none"
+       style="background: var(--portal-surface); border: 1px solid var(--portal-border); z-index: 1080; max-width: 420px; margin-inline: auto !important;"
+       role="dialog"
+       aria-labelledby="portal-install-prompt-title"
+       aria-describedby="portal-install-prompt-desc">
+    <h2 id="portal-install-prompt-title" class="h6 mb-2">
+        <i class="fa-solid fa-download me-1"></i>Install <?php echo htmlspecialchars($productName, ENT_QUOTES, 'UTF-8'); ?>
+    </h2>
+    <p id="portal-install-prompt-desc" class="small text-secondary mb-2">
+        Add it to your home screen for quick, full-screen access — works offline too.
+    </p>
+    <div class="d-flex gap-2 flex-wrap">
+        <button type="button" class="btn btn-sm btn-primary" data-portal-install="accept">Install</button>
+        <button type="button" class="btn btn-sm btn-outline-secondary" data-portal-install="dismiss">Not now</button>
+    </div>
+</aside>
+<script defer src="/assets/js/pwa-install.js"></script>
+
 <!-- 📱 PWA: Service Worker registration -->
 <script nonce="<?php echo htmlspecialchars(\Portal\Core\App::cspNonce(), ENT_QUOTES, 'UTF-8'); ?>">
 if ('serviceWorker' in navigator) {

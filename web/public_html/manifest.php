@@ -30,6 +30,7 @@
 declare(strict_types=1);
 
 use Portal\Core\App;
+use Portal\Core\AppRegistry;
 use Portal\Core\Site;
 
 // 🏷️ Resolve the brand-aware fields. Site::productName() / productTagline()
@@ -72,6 +73,48 @@ $logo    = is_readable($brandRoot . DIRECTORY_SEPARATOR . 'logo.svg')
     ? '/assets/images/brandkit/assets/' . $assetDir . '/logo.svg'
     : '/assets/images/logo.svg';
 
+// 🏠 App shortcuts (#141) — long-press (Android) / right-click (desktop
+//    Chromium) entries on the installed home-screen icon; iOS Safari
+//    ignores this field entirely. Filtered through AppRegistry::isEnabled()
+//    so a shortcut never points at an app the site has switched off — fails
+//    CLOSED (shortcut dropped) on any AppRegistry hiccup so a manifest
+//    fetch can never 500 or ship a dead shortcut (same resilience pattern
+//    as the venue-overlay panels — see .claude/CLAUDE.md's #442 note).
+//    Labels are each app's own generic name — already brand-neutral, since
+//    every preset ships the identical app set (see FEATURES.md); only the
+//    product name/tagline/icons above vary by brand. Icons reuse $icon192
+//    resolved above so a shortcut's tile matches the brand-aware app icon.
+$shortcutDefs = [
+    ['slug' => 'dashboard',       'name' => 'Dashboard',       'short_name' => 'Dashboard', 'url' => '/dashboard',       'description' => 'Portal home'],
+    ['slug' => 'calendar',        'name' => 'Calendar',        'short_name' => 'Calendar',  'url' => '/calendar',        'description' => 'Events, series and RSVPs'],
+    ['slug' => 'giving',          'name' => 'Giving',          'short_name' => 'Giving',    'url' => '/giving',          'description' => 'Contributions and Gift Aid'],
+    ['slug' => 'prayer-requests', 'name' => 'Prayer Requests', 'short_name' => 'Prayer',    'url' => '/prayer-requests', 'description' => 'Submit and view prayer requests'],
+];
+$shortcuts = [];
+foreach ($shortcutDefs as $def) {
+    try {
+        $shortcutEnabled = AppRegistry::isEnabled($def['slug']);
+    } catch (\Throwable $e) {
+        $shortcutEnabled = false;
+    }
+    if ($shortcutEnabled === false) {
+        continue;
+    }
+    $shortcuts[] = [
+        'name'        => $def['name'],
+        'short_name'  => $def['short_name'],
+        'description' => $def['description'],
+        'url'         => $def['url'],
+        'icons'       => [
+            [
+                'src'   => $icon192,
+                'sizes' => '192x192',
+                'type'  => 'image/svg+xml',
+            ],
+        ],
+    ];
+}
+
 // 🧱 Build the manifest. Field order kept stable so diff-driven debugging
 //    (Chrome DevTools → Application → Manifest) stays readable.
 $manifest = [
@@ -106,6 +149,7 @@ $manifest = [
             'type'  => 'image/svg+xml',
         ],
     ],
+    'shortcuts'        => $shortcuts,
 ];
 
 // 📡 Emit. Use the official PWA manifest MIME type so browsers recognise
