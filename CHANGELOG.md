@@ -1,6 +1,50 @@
 # Changelog
 
 
+## [Unreleased] (alpha)
+- feat(workflow): gap #7 (#443) — Workflow Execution Engine +
+  generic `/approvals` inbox. Migration 034 shipped four workflow tables
+  and an admin definition CRUD, but no code anywhere started, advanced,
+  completed, or timed out an instance — this ships the engine
+  (`Portal\Core\Workflow`, `web/_core/Workflow.php`): `start()`/`act()`/
+  `cancelForSubject()`/`timeoutSweep()`, each an atomic `begin_transaction`
+  + `SELECT … FOR UPDATE` + `UPDATE … WHERE currentStep=? AND status IN
+  (…)` claim gated on `affected_rows === 1` (the
+  `expenses/approve/save.php` / `Payments::markPaymentSucceeded`
+  discipline) — a losing racer gets `'conflict'` and does nothing.
+  Authorisation (role/user/group match on the current step, plus a
+  default-on `workflows.admin_override` site-admin override) lives INSIDE
+  `act()`, never trusted from the HTTP layer; a cross-tenant instanceID is
+  indistinguishable from a missing one. New generic inbox app
+  `/approvals` (AppRegistry entry, `approvals.enabled` default on) — an
+  "awaiting your decision" queue, a CSRF'd approve/reject/comment
+  handler, and a decision-timeline history view. New token-gated hourly
+  `cron/workflow-timeouts.php` — escalates an overdue step (notify + keep
+  waiting) unless it explicitly sets `autoAction=approve|reject`; NEVER
+  auto-acts on a bare timeout. Reference consumer wired: Announcements
+  publish approval behind per-site `workflows.announcements.enabled`
+  (default OFF — the manual publish path is byte-for-byte unchanged when
+  off); final approval flips `tblAnnouncements.isPublished` inside the
+  SAME transaction as the approval claim, so there is no double-publish
+  and no approved-but-unpublished ghost; a gate that's on but has no
+  active/steppable definition fails OPEN (publishes directly + logs a
+  platform warning) rather than blocking every publish on a
+  half-configured site. Admin CRUD completion at `/admin/workflows`: new
+  per-step delete handler (site-ownership-checked, refuses while the
+  workflow has an active instance, catches the `tblWorkflowActions`
+  RESTRICT FK as a friendly refusal), an `isActive` toggle, and an
+  `autoAction` selector on the Add Step row. The seeded `expense_approval`
+  definition (migration 034) stays intentionally dormant — Expenses keeps
+  its own independent, department-scoped multi-approver system. New
+  `approvalRequests` notification preference (default on) on
+  `/account/notifications`. Migration 174: four additive
+  `tblWorkflowInstances` columns (`subjectLabel`, `contextJson`,
+  `currentStepStartedAt`, `outcome`) + one composite index
+  (`idx_wfi_site_status`) + one `tblWorkflowActions.action` enum value
+  (`'commented'`) — no new tables, no redesign — plus the
+  `announcement_approver` role, the `announcement_publish` definition +
+  step, 8 settings seeds, and 4 route seeds.
+
 ## [1.4.0] - 2026-07-22 (alpha)
 - feat(giving): gap #4 — bulk year-end statements (#440). Treasurer-only
   batch generate + email at `/giving/statements`, built by generalising

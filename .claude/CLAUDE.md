@@ -19,12 +19,12 @@ Internal portal platform (PHP 8.5, backward-compatible with 8.4, MySQL 8.0, Boot
 ```
 repo root/          <- NOT deployed (docs, CI/CD only)
 web/                <- ALL deployable files (synced to server via SFTP)
-  _core/            <- Framework classes (Portal\Core namespace, 63 classes)
+  _core/            <- Framework classes (Portal\Core namespace, 64 classes)
   _apps/            <- App controllers — outside the webroot (#159). Every
                        app's PHP handlers live here; Router resolves
                        tblRoutes.targetFile against PORTAL_APPS = _apps/.
   _vendor/simplejwt/<- Vendored RS256 JWT verifier
-  _sql/             <- Numbered SQL migrations (000-170 + full_schema.sql)
+  _sql/             <- Numbered SQL migrations (000-174 + full_schema.sql)
   _lang/            <- I18n translation files (en.php, cy.php, …)
   _install/         <- Standalone 6-step installation wizard (bootstrap-free)
   public_html/      <- Web root: ONLY the front controller + static assets +
@@ -55,6 +55,7 @@ infrastructure rather than apps).
 | admin | `/admin` | Users, roles, settings, sites, errors, activity, audit, migrations, integrations, workflows, reports, **captcha config** |
 | ai-assist | `/admin/ai-assist` | LLM-assisted drafting for announcements, prayer requests, newsletter (Anthropic / OpenAI / local ollama) |
 | announcements | `/announcements` | Per-site text announcements, pinned + scheduled posts |
+| approvals | `/approvals` | Generic inbox for the Workflow Execution Engine (`Portal\Core\Workflow`) — awaiting-decision queue, approve/reject/comment, decision history (#443) |
 | assets | `/assets` | Physical & digital asset register — ownership/co-ownership, lending & borrowing, maintenance logs, GS1/RFID identifiers, software licence seats, printable QR labels, public lost-and-found page |
 | attendance | `/attendance` | Sessions, headcount by service type, reports, CSV |
 | auth | `/auth/*` | Local + MS365 + Google + WebAuthn + 2FA TOTP; password policy + strength meter; self-service "my account" pages live at `/account/*` |
@@ -153,6 +154,40 @@ Calendar/Events/Preaching Plan is ONE app ("Events") — `/calendar` covers view
 
 ## Recent ships (chronological)
 
+- **`claude/gap7-workflow-engine`** (branched off `alpha`) — gap #7
+  (#443): Workflow Execution Engine + generic `/approvals` inbox.
+  Migration 034 shipped four workflow tables + an admin definition CRUD
+  but no code anywhere started/advanced/completed/timed-out an instance —
+  this ships the engine (`Portal\Core\Workflow`, `web/_core/Workflow.php`).
+  Every mutator (`start`/`act`/`cancelForSubject`/`timeoutSweep`) is
+  atomic: `begin_transaction` + `SELECT … FOR UPDATE` + `UPDATE …
+  WHERE currentStep=? AND status IN (…)` gated on `affected_rows === 1`
+  (the `expenses/approve/save.php` / `Payments::markPaymentSucceeded`
+  discipline) before recording the action row or applying any subject
+  side effect — a losing racer does nothing. Authorisation (role/user/
+  group match on the CURRENT step, or a default-on site-admin override)
+  lives INSIDE `act()`, never trusted from the HTTP layer; a cross-tenant
+  instanceID is indistinguishable from a missing one. New `/approvals`
+  app (AppRegistry entry, default-on) with an awaiting-decision queue,
+  CSRF'd approve/reject/comment handler, and history timeline. New
+  token-gated hourly `cron/workflow-timeouts.php` — escalates an overdue
+  step unless it explicitly sets `autoAction=approve|reject`; never
+  auto-acts on a bare timeout. Reference consumer wired: Announcements
+  publish approval behind default-off per-site
+  `workflows.announcements.enabled` — final approval flips
+  `tblAnnouncements.isPublished` inside the SAME transaction as the
+  approval claim (no double-publish, no approved-but-unpublished ghost);
+  a misconfigured gate fails OPEN (publishes directly + logs a platform
+  warning) rather than blocking publishing. Admin CRUD completion at
+  `/admin/workflows`: per-step delete (FK-aware, refuses with active
+  instances), an `isActive` toggle, an `autoAction` selector. The seeded
+  `expense_approval` definition (034) stays dormant by design — Expenses
+  keeps its own independent multi-approver system. Migration 174: four
+  additive `tblWorkflowInstances` columns + one composite index + one
+  `tblWorkflowActions` enum value (no new tables), plus the
+  `announcement_approver` role/definition/step, 8 settings seeds, 4
+  route seeds. All 11 audit checks green, `php -l` clean on every
+  touched file.
 - **`claude/gap4-bulk-statements`** (this session, branched off `alpha`) —
   gap #4: treasurer-only bulk year-end giving statements at
   `/giving/statements` (#440). Generalised `Portal\Core\Giving::

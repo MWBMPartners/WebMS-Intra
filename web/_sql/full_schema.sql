@@ -1247,23 +1247,30 @@ COMMENT='Ordered steps within a workflow';
 
 
 -- -----------------------------------------------------------------------------
--- 🏃 tblWorkflowInstances — running workflows tied to a source record (034)
+-- 🏃 tblWorkflowInstances — running workflows tied to a source record (034;
+-- subjectLabel/contextJson/currentStepStartedAt/outcome + idx_wfi_site_status
+-- folded in from migration 174, #443)
 -- -----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS `tblWorkflowInstances` (
-    `instanceID`  INT          NOT NULL AUTO_INCREMENT,
-    `workflowID`  INT          NOT NULL,
-    `siteID`      INT          NOT NULL DEFAULT 1,
-    `tableName`   VARCHAR(100) NOT NULL COMMENT 'Source table (e.g. tblExpenseClaims)',
-    `recordID`    INT          NOT NULL COMMENT 'PK of the source record',
-    `currentStep` INT          NOT NULL DEFAULT 1,
-    `status`      ENUM('pending','in_progress','completed','cancelled') NOT NULL DEFAULT 'pending',
-    `startedByID` INT          DEFAULT NULL,
-    `startedAt`   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    `completedAt` DATETIME     DEFAULT NULL,
+    `instanceID`           INT          NOT NULL AUTO_INCREMENT,
+    `workflowID`           INT          NOT NULL,
+    `siteID`               INT          NOT NULL DEFAULT 1,
+    `tableName`            VARCHAR(100) NOT NULL COMMENT 'Source table (e.g. tblExpenseClaims)',
+    `recordID`             INT          NOT NULL COMMENT 'PK of the source record',
+    `subjectLabel`         VARCHAR(255) DEFAULT NULL COMMENT 'Display snapshot of the subject for the inbox (#443)',
+    `contextJson`          TEXT         DEFAULT NULL COMMENT 'JSON context recorded at start(), e.g. {url: ...} (#443)',
+    `currentStep`          INT          NOT NULL DEFAULT 1,
+    `currentStepStartedAt` DATETIME     DEFAULT NULL COMMENT 'When the current step became active — drives the timeout sweep (#443)',
+    `status`               ENUM('pending','in_progress','completed','cancelled') NOT NULL DEFAULT 'pending',
+    `outcome`              ENUM('approved','rejected','cancelled') DEFAULT NULL COMMENT 'Terminal disposition, set alongside status=completed|cancelled (#443)',
+    `startedByID`          INT          DEFAULT NULL,
+    `startedAt`            DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `completedAt`          DATETIME     DEFAULT NULL,
     PRIMARY KEY (`instanceID`),
     KEY `idx_wfi_workflow` (`workflowID`),
     KEY `idx_wfi_record` (`tableName`, `recordID`),
     KEY `idx_wfi_status` (`status`),
+    KEY `idx_wfi_site_status` (`siteID`, `status`),
     CONSTRAINT `fk_wfi_workflow` FOREIGN KEY (`workflowID`) REFERENCES `tblWorkflows` (`workflowID`),
     CONSTRAINT `fk_wfi_starter` FOREIGN KEY (`startedByID`) REFERENCES `tblUsers` (`userID`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
@@ -1271,13 +1278,14 @@ COMMENT='Running workflow instances linked to source records';
 
 
 -- -----------------------------------------------------------------------------
--- 📜 tblWorkflowActions — action log for step completions (migration 034)
+-- 📜 tblWorkflowActions — action log for step completions (migration 034;
+-- 'commented' enum value folded in from migration 174, #443)
 -- -----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS `tblWorkflowActions` (
     `actionID`   INT          NOT NULL AUTO_INCREMENT,
     `instanceID` INT          NOT NULL,
     `stepID`     INT          NOT NULL,
-    `action`     ENUM('approved','rejected','escalated','skipped') NOT NULL,
+    `action`     ENUM('approved','rejected','escalated','skipped','commented') NOT NULL,
     `comment`    TEXT         DEFAULT NULL,
     `actedByID`  INT          DEFAULT NULL,
     `actedAt`    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -7688,4 +7696,57 @@ ON DUPLICATE KEY UPDATE `filename` = `filename`;
 -- (migrations 137-144 block) — nothing further to fold here except this
 -- migration's own self-record.
 INSERT INTO `tblMigrations` (`filename`) VALUES ('173_worship_runsheet_link.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- ── from 174_workflow_engine.sql ─────────────────────────────────────────────
+-- 🔄 Workflow Execution Engine + Generic Approvals Inbox (#443). The four
+-- additive tblWorkflowInstances columns + idx_wfi_site_status + the
+-- tblWorkflowActions 'commented' enum value are already folded inline into
+-- their CREATE TABLE blocks above (SECTION with "migration 034"). This block
+-- carries only the seeds: the announcement_approver role, the
+-- announcement_publish reference-consumer definition + its single step, the
+-- 8 settings keys, and the 4 routes.
+INSERT INTO `tblRoles` (`roleKey`, `roleName`)
+    SELECT 'announcement_approver', 'Announcement Approver'
+    WHERE NOT EXISTS (SELECT 1 FROM `tblRoles` WHERE `roleKey` = 'announcement_approver');
+
+INSERT INTO `tblWorkflows` (`siteID`, `workflowName`, `workflowKey`, `description`)
+VALUES (1, 'Announcement Publish Approval', 'announcement_publish', 'Approve an announcement before it publishes to the whole site')
+ON DUPLICATE KEY UPDATE `workflowName` = VALUES(`workflowName`);
+
+INSERT INTO `tblWorkflowSteps` (`workflowID`, `stepOrder`, `stepName`, `stepType`, `assigneeType`, `assigneeValue`, `autoAction`, `timeoutHours`)
+    SELECT w.workflowID, 1, 'Approve publication', 'approval', 'role', 'announcement_approver', NULL, 72
+    FROM `tblWorkflows` w
+    WHERE NOT EXISTS (
+        SELECT 1 FROM `tblWorkflowSteps` s
+        WHERE s.workflowID = w.workflowID AND s.stepOrder = 1
+    )
+    AND w.workflowKey = 'announcement_publish' AND w.siteID = 1;
+
+-- ⚙️ Settings seed — workflows.cron_token empty + isSensitive=1 (the sweep
+-- endpoint is inert until an admin sets a token); workflows.announcements.
+-- enabled default OFF (manual publish path stays unchanged until a site
+-- opts in); approvals.enabled default ON (nav-discoverable inbox).
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'workflows.cron_token',            '',                  '',                  1),
+    (NULL, 'workflows.enabled',               '1',                 '1',                 0),
+    (NULL, 'workflows.notify_email',          '1',                 '1',                 0),
+    (NULL, 'workflows.admin_override',        '1',                 '1',                 0),
+    (NULL, 'workflows.announcements.enabled', 'false',             'false',             0),
+    (NULL, 'approvals.enabled',               'true',              'true',              0),
+    (NULL, 'approvals.displayName',           'Approvals',         'Approvals',         0),
+    (NULL, 'approvals.displayIcon',           'fa-solid fa-stamp', 'fa-solid fa-stamp', 0)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
+-- 🗺️ Route seed — approvals/* + admin/workflows/step-delete isProtected=1
+-- (session/admin gated); cron/workflow-timeouts isProtected=0 (public but
+-- token-gated), matching cron/user-reminders above.
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('approvals',                   'approvals/index.php',             1),
+    ('approvals/act',               'approvals/act.php',               1),
+    ('admin/workflows/step-delete', 'admin/workflows/step-delete.php', 1),
+    ('cron/workflow-timeouts',      'cron/workflow-timeouts.php',      0)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('174_workflow_engine.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;

@@ -3276,4 +3276,190 @@ neither existing surface's own queries changed at all.
 
 ---
 
+## Workflow Execution Engine + Generic Approvals Inbox (#443)
+
+Migration 034 shipped four tables (`tblWorkflows`, `tblWorkflowSteps`,
+`tblWorkflowInstances`, `tblWorkflowActions`) and an admin definition CRUD at
+`/admin/workflows`, but nothing anywhere ever started, advanced, completed,
+or timed out an instance. Migration 174 adds four additive
+`tblWorkflowInstances` columns (`subjectLabel`, `contextJson`,
+`currentStepStartedAt`, `outcome`) + one composite index
+(`idx_wfi_site_status`) + one `tblWorkflowActions.action` enum value
+(`'commented'`) — no redesign, no new tables — and this PR builds the engine
+on top: `Portal\Core\Workflow` (`web/_core/Workflow.php`), a generic
+`/approvals` inbox app, a token-gated hourly timeout cron, and exactly ONE
+wired reference consumer (announcement publish approval).
+
+### The state machine
+
+A *definition* (`tblWorkflows` row + ordered `tblWorkflowSteps`) instantiates
+into a `tblWorkflowInstances` row via `Workflow::start($definitionKey,
+$subjectTable, $subjectId, $startedById, $subjectLabel, $context)`, which
+walks `currentStep` (a **stepOrder** value, not a stepID) through the step
+sequence via `Workflow::act($instanceId, $stepId, $actorId, $decision,
+$comment)`, records one `tblWorkflowActions` row per decision, and
+terminates with `status='completed'|'cancelled'` + the new `outcome` column
+(`'approved'|'rejected'|'cancelled'`). `Workflow::cancelForSubject(...)`
+closes an active instance out-of-band (e.g. the subject record was
+deleted). `Workflow::timeoutSweep($siteId)` is the per-site timeout pass the
+cron calls.
+
+**Atomicity** — every mutator opens `begin_transaction()`, `SELECT … FOR
+UPDATE`-locks the instance row (site-scoped — the IDOR wall: a foreign
+instanceID is deliberately indistinguishable from a missing one, both
+return `'not_found'`), resolves the CURRENT step fresh
+(`ORDER BY stepOrder ASC, stepID ASC LIMIT 1` — `tblWorkflowSteps` has no
+unique key on `(workflowID, stepOrder)`, so this ordering is how the engine
+deterministically handles the double-submit-race duplicate-order edge
+everywhere), and claims the transition with a single `UPDATE …
+WHERE instanceID=? AND currentStep=? AND status IN ('pending','in_progress')`
+gated on `affected_rows === 1` — the exact discipline
+`expenses/approve/save.php`'s row-lock + reconfirm and
+`Payments::markPaymentSucceeded`'s guarded UPDATE already use. A losing
+racer gets `'conflict'` and does nothing. `act()`'s posted `$stepId` must
+equal the server-resolved current step — a mismatch is `'stale_step'`
+(the form was rendered before someone else advanced the instance).
+`start()`'s duplicate-active guard is a single conditional
+`INSERT … SELECT … FROM DUAL WHERE NOT EXISTS (...)` gated the same way.
+
+**Authorisation lives INSIDE `act()`**, never trusted from the HTTP layer:
+the actor must (a) be an active `tblUserSites` member of the instance's own
+site, AND (b) either match the current step's assignee (role/user/group per
+`tblWorkflowSteps.assigneeType`/`assigneeValue`) OR — when
+`workflows.admin_override` is `'1'` (default on) — be a site admin for that
+site (the same 4-tier test as `App::isAdmin()`, evaluated explicitly for
+the *acting* user + the *instance's* site rather than the session/`Site::
+id()` pair `App::isAdmin()` itself checks).
+
+**Subject-adapter registry** — `Workflow::applySubjectEffect()` is a single
+`match` on `workflowKey`, run **inside the same transaction** as the final
+approval's atomic claim. v1 ships one arm: `'announcement_publish'` flips
+`tblAnnouncements.isPublished = 1` on outcome `'approved'` — so approval and
+publish commit or fail together; there is no "approved but never
+published" ghost, and no double-publish (the UPDATE is idempotent — a
+re-run only matches 0 rows if the announcement was since soft-deleted, in
+which case a `Logger::errorPlatform` Warning is logged but the workflow
+still completes truthfully). Adding a second wired consumer later is one
+new `match` arm here + one `Workflow::start()` call at that consumer's
+submit point + one enable flag — no other engine change.
+
+**Timeout policy — escalate-only unless a step opts in.** `timeoutSweep()`
+NEVER auto-approves/auto-rejects on a bare timeout. Only a step whose
+`autoAction` is explicitly `'approve'` or `'reject'` gets auto-decided
+(`actedByID = NULL`, comment `"Auto-<word> after Nh timeout"`); a `NULL` or
+`'escalate'` `autoAction` only escalates — one `'escalated'` action row per
+`(instanceID, stepID)` (deduped, locked so two overlapping sweep runs can't
+double-escalate) plus an email to the site's admins and the step's own
+assignees, with the instance left active awaiting a human. The seeded
+`announcement_publish` step ships `timeoutHours=72, autoAction=NULL`
+(escalate after 72h, never auto-decide).
+
+### Why the seeded `expense_approval` workflow stays dormant
+
+Migration 034 seeded ONE `tblWorkflows` row (`expense_approval`, zero
+steps) that nothing has ever called `start()` on. It stays exactly that way
+— Expenses already has its own complete, independent, department-scoped
+multi-approver system (`tblExpenseClaimApprovals`,
+`expenses/approve/save.php`'s own `FOR UPDATE` + mandatory-approver logic).
+Mirroring or driving Expenses through the generic engine would double-write
+approval state for zero benefit and risk destabilising a money path with
+stronger semantics than the generic step schema expresses. The admin
+`/admin/workflows` UI carries an info box saying so.
+
+### `/approvals` — the generic inbox
+
+New infrastructure app (`web/_apps/approvals/`, AppRegistry entry
+`web/_core/apps/approvals.php`, default-ON `approvals.enabled` — the inbox
+itself is free to expose; the *consumer* flags that feed it stay
+default-off per-consumer). Three sections, no `<table>`
+(`portal-data-list` throughout):
+
+1. **Awaiting your decision** — `Workflow::actionableForUser()`. Admins see
+   every active instance for the site (with a Mine/All toggle); everyone
+   else only ever sees rows they're actually eligible to act on. This is
+   **display-only filtering** — `Workflow::act()` re-checks authorisation
+   independently on every POST, so a stale/forged row in the DOM can never
+   grant an action the engine wouldn't otherwise allow.
+2. **Action controls** — one CSRF'd POST form per row to `/approvals/act`
+   carrying hidden `instanceID` + `stepID` (the stale-form guard token),
+   Approve/Reject/Comment-only buttons. `approvals/act.php` is transport
+   only — CSRF check, input whitelist, call `Workflow::act()`, translate
+   the result to a flash message. No authorisation logic in the handler.
+3. **History** — last 50 completed/cancelled instances (non-admins: only
+   ones they started or acted on), each row expandable (Bootstrap collapse)
+   to the full `Workflow::actionsForInstance()` timeline.
+
+### Timeout cron
+
+`cron/workflow-timeouts.php` (hourly external cadence — `timeoutHours`
+granularity is hours) — token-gated exactly like `cron/user-reminders.php`:
+`?key=` vs `workflows.cron_token`, `hash_equals()`, **empty stored token
+always 403s** (seeded empty + `isSensitive=1`). Global kill-switch
+`workflows.enabled` read once before the per-site loop (genuinely global,
+like the token itself); everything else is delegated to
+`Workflow::timeoutSweep($siteId)` inside the standard
+`Site::forceContext($siteId)` try/catch-continue loop.
+
+### Announcements wiring (the reference consumer)
+
+Per-site flag `workflows.announcements.enabled` (default `'false'`).
+**Flag off ⇒ not one line of today's behaviour changes** — the new branch
+in `announcements/save.php` is never entered. Flag on:
+
+- **Create**: posting `isPublished=1` withholds the flag (`isPublished`
+  forced to 0 before the INSERT) and calls `Workflow::start(...)` instead.
+- **Update**: only a genuine **publish request** (posted `isPublished=1`
+  AND the stored row is currently `isPublished=0`) triggers the same
+  withhold-and-start. Editing an already-published row, or unchecking
+  Published (retract), passes through completely unchanged — no approval
+  needed to edit or unpublish in v1.
+- **Fail-open** (deliberate, not a security boundary): if
+  `Workflow::start()` returns `null` because no active/steppable
+  definition exists for the site, `announcements/save.php` publishes
+  directly anyway and logs a `Logger::errorPlatform` Warning
+  (`WF_MISCONFIG`) so admins see the misconfiguration in `/admin/errors` —
+  a half-configured gate must never silently block every publish on a
+  site. A `null` because an instance is *already* active for this subject
+  gets a distinct "already awaiting approval" flash instead (checked via
+  `Workflow::activeInstanceForSubject()` first).
+- `announcements/delete.php` calls `Workflow::cancelForSubject(...)` after
+  the soft-delete so a deleted announcement never lingers in anyone's
+  inbox.
+- `announcements/manage.php` relabels the Published checkbox to "Publish
+  (requires approval)" and shows an "Awaiting approval" badge (linking to
+  `/approvals`) on any unpublished row with a running instance.
+
+### Admin CRUD completion
+
+`/admin/workflows` gained the three pieces migration 034's CRUD was always
+missing: per-step **Delete** (new `admin/workflows/step-delete.php` —
+site-ownership-checked, refuses while the workflow has any active
+instance, and catches the `tblWorkflowActions.stepID` RESTRICT FK as a
+friendly "this step has recorded history" refusal rather than a 500), an
+**isActive** toggle on the workflow header form, and an **autoAction**
+select on the Add Step row (feeds the timeout policy above). Step
+*reorder* is deliberately out of scope — delete + re-add reaches the same
+place, since steps are ordered by `stepOrder` and the existing add-step
+logic already appends at `MAX(stepOrder)+1`.
+
+### Extending the engine — adding consumer #2
+
+1. Seed a new `tblWorkflows` definition (+ steps) for the target
+   `workflowKey`, gated behind your own per-site enable flag.
+2. At your consumer's submit point: check the flag, and when on, call
+   `Workflow::start($yourKey, $yourTable, $yourId, $userId, $label,
+   ['url' => $viewUrl])` instead of writing your "approved" state directly;
+   handle a `null` return with your own fail-open/fail-closed policy.
+3. Add one `case '$yourKey':` arm inside
+   `Workflow::applySubjectEffect()` for the `'approved'`/`'rejected'`/
+   `'cancelled'` side effects. That's the entire integration surface — no
+   other engine change.
+
+`'review'` step type behaves identically to `'approval'` in v1 (both block
+awaiting a human); the enum distinction is reserved for a later phase. The
+`delegate` decision verb is deferred to v2 (needs target-picking UI + its
+own authorisation surface) — v1 ships approve/reject/comment only.
+
+---
+
 Last updated: August 2026

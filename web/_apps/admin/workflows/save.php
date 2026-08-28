@@ -49,6 +49,7 @@ $workflowId = (int) ($_POST['workflowID'] ?? 0);
 $name       = trim($_POST['workflowName'] ?? '');
 $key        = trim($_POST['workflowKey'] ?? '');
 $desc       = trim($_POST['description'] ?? '');
+$isActive   = isset($_POST['isActive']) === true ? 1 : 0;
 
 if ($name === '' || $key === '') {
     $_SESSION['flash_msg']  = 'Name and key are required.';
@@ -60,10 +61,10 @@ if ($name === '' || $key === '') {
 if ($workflowId > 0) {
     // 📋 Update existing workflow
     $stmt = $mysqli->prepare(
-        'UPDATE tblWorkflows SET workflowName = ?, workflowKey = ?, description = ? WHERE workflowID = ? AND siteID = ?'
+        'UPDATE tblWorkflows SET workflowName = ?, workflowKey = ?, description = ?, isActive = ? WHERE workflowID = ? AND siteID = ?'
     );
     if ($stmt !== false) {
-        $stmt->bind_param('sssii', $name, $key, $desc, $workflowId, $siteId);
+        $stmt->bind_param('sssiii', $name, $key, $desc, $isActive, $workflowId, $siteId);
         $stmt->execute();
         $stmt->close();
     }
@@ -71,10 +72,10 @@ if ($workflowId > 0) {
 } else {
     // 📋 Create new workflow
     $stmt = $mysqli->prepare(
-        'INSERT INTO tblWorkflows (siteID, workflowName, workflowKey, description) VALUES (?, ?, ?, ?)'
+        'INSERT INTO tblWorkflows (siteID, workflowName, workflowKey, description, isActive) VALUES (?, ?, ?, ?, ?)'
     );
     if ($stmt !== false) {
-        $stmt->bind_param('isss', $siteId, $name, $key, $desc);
+        $stmt->bind_param('isssi', $siteId, $name, $key, $desc, $isActive);
         $stmt->execute();
         $workflowId = (int) $mysqli->insert_id;
         $stmt->close();
@@ -109,6 +110,10 @@ if ($stepName !== '' && $workflowId > 0) {
     $assigneeType  = $_POST['assigneeType'] ?? 'role';
     $assigneeValue = trim($_POST['assigneeValue'] ?? '') !== '' ? trim($_POST['assigneeValue'] ?? '') : null;
     $timeoutHours  = trim($_POST['timeoutHours'] ?? '') !== '' ? (int) $_POST['timeoutHours'] : null;
+    // 🛡️ Whitelist autoAction — empty/unrecognised posted value ⇒ NULL
+    // (timeout falls back to escalate-only, never a silent auto-decide).
+    $autoActionRaw = (string) ($_POST['autoAction'] ?? '');
+    $autoAction    = in_array($autoActionRaw, ['approve', 'reject', 'escalate'], true) === true ? $autoActionRaw : null;
 
     // 📋 Determine next step order
     $maxStmt = $mysqli->prepare('SELECT MAX(stepOrder) AS mx FROM tblWorkflowSteps WHERE workflowID = ?');
@@ -121,11 +126,11 @@ if ($stepName !== '' && $workflowId > 0) {
     }
 
     $sStmt = $mysqli->prepare(
-        'INSERT INTO tblWorkflowSteps (workflowID, stepOrder, stepName, stepType, assigneeType, assigneeValue, timeoutHours) '
-        . 'VALUES (?, ?, ?, ?, ?, ?, ?)'
+        'INSERT INTO tblWorkflowSteps (workflowID, stepOrder, stepName, stepType, assigneeType, assigneeValue, autoAction, timeoutHours) '
+        . 'VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
     );
     if ($sStmt !== false) {
-        $sStmt->bind_param('iissssi', $workflowId, $nextOrder, $stepName, $stepType, $assigneeType, $assigneeValue, $timeoutHours);
+        $sStmt->bind_param('iisssssi', $workflowId, $nextOrder, $stepName, $stepType, $assigneeType, $assigneeValue, $autoAction, $timeoutHours);
         $sStmt->execute();
         $sStmt->close();
     }

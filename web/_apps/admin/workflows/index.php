@@ -98,6 +98,23 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     </a>
 </div>
 
+<!-- ℹ️ Engine wiring info box (#443) — which workflowKeys are actually
+     engine-wired vs. pure sign-off trails, and why expense_approval is
+     dormant. -->
+<div class="alert alert-secondary small">
+    <i class="fa-solid fa-circle-info me-1"></i>
+    <strong>Engine-wired workflowKeys:</strong> <code>announcement_publish</code>
+    (gated by the <code>workflows.announcements.enabled</code> per-site
+    setting — final approval flips the announcement's Published flag).
+    Any other workflow key you create here runs as a pure sign-off trail
+    (steps, decisions, and history are recorded, but nothing else in the
+    portal reacts to the outcome) unless a developer wires a new adapter
+    arm in <code>Portal\Core\Workflow::applySubjectEffect()</code>.
+    The seeded <code>expense_approval</code> workflow is intentionally
+    dormant — Expenses has its own independent, department-scoped
+    multi-approver system and does not use this engine.
+</div>
+
 <?php if ($editId !== null): ?>
     <!-- 📝 Create / Edit Form -->
     <div class="card mb-4">
@@ -121,10 +138,17 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                pattern="[a-z0-9_]+" title="Lowercase letters, numbers, underscores only"
                                value="<?php echo htmlspecialchars($editing['workflowKey'] ?? '', ENT_QUOTES, 'UTF-8'); ?>">
                     </div>
-                    <div class="col-md-5">
+                    <div class="col-md-4">
                         <label for="description" class="form-label">Description</label>
                         <input type="text" class="form-control" id="description" name="description" maxlength="255"
                                value="<?php echo htmlspecialchars($editing['description'] ?? '', ENT_QUOTES, 'UTF-8'); ?>">
+                    </div>
+                    <div class="col-md-1">
+                        <div class="form-check form-switch mt-4">
+                            <input class="form-check-input" type="checkbox" id="isActive" name="isActive" value="1"
+                                   <?php echo (($editing['isActive'] ?? '1') === '1' ? 'checked' : ''); ?>>
+                            <label class="form-check-label" for="isActive">Active</label>
+                        </div>
                     </div>
                 </div>
 
@@ -133,20 +157,33 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     <div class="portal-data-list mb-3">
                         <div class="portal-data-header">
                             <div class="col-1">Order</div>
-                            <div class="col-3">Name</div>
+                            <div class="col-2">Name</div>
                             <div class="col-2">Type</div>
                             <div class="col-2">Assignee Type</div>
                             <div class="col-2">Assignee</div>
-                            <div class="col-2">Timeout</div>
+                            <div class="col-1">Timeout</div>
+                            <div class="col-1">Auto</div>
+                            <div class="col-1 text-end">Delete</div>
                         </div>
                         <?php foreach ($editSteps as $step): ?>
                             <div class="portal-data-row">
                                 <div class="col-1"><?php echo (int) $step['stepOrder']; ?></div>
-                                <div class="col-3"><?php echo htmlspecialchars($step['stepName'], ENT_QUOTES, 'UTF-8'); ?></div>
+                                <div class="col-2"><?php echo htmlspecialchars($step['stepName'], ENT_QUOTES, 'UTF-8'); ?></div>
                                 <div class="col-2"><span class="badge bg-secondary"><?php echo htmlspecialchars($step['stepType'], ENT_QUOTES, 'UTF-8'); ?></span></div>
                                 <div class="col-2"><?php echo htmlspecialchars($step['assigneeType'], ENT_QUOTES, 'UTF-8'); ?></div>
                                 <div class="col-2"><?php echo htmlspecialchars($step['assigneeValue'] ?? '—', ENT_QUOTES, 'UTF-8'); ?></div>
-                                <div class="col-2"><?php echo $step['timeoutHours'] !== null ? (int) $step['timeoutHours'] . 'h' : '—'; ?></div>
+                                <div class="col-1"><?php echo $step['timeoutHours'] !== null ? (int) $step['timeoutHours'] . 'h' : '—'; ?></div>
+                                <div class="col-1"><?php echo htmlspecialchars($step['autoAction'] ?? '—', ENT_QUOTES, 'UTF-8'); ?></div>
+                                <div class="col-1 text-end">
+                                    <form method="post" action="/admin/workflows/step-delete" class="d-inline" data-confirm="Delete this step?" data-confirm-destructive="true">
+                                        <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
+                                        <input type="hidden" name="workflowID" value="<?php echo (int) $editing['workflowID']; ?>">
+                                        <input type="hidden" name="stepID" value="<?php echo (int) $step['stepID']; ?>">
+                                        <button type="submit" class="btn btn-sm btn-outline-danger" title="Delete step">
+                                            <i class="fa-solid fa-trash"></i>
+                                        </button>
+                                    </form>
+                                </div>
                             </div>
                         <?php endforeach; ?>
                     </div>
@@ -172,11 +209,20 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                             <option value="group">Group</option>
                         </select>
                     </div>
-                    <div class="col-md-3">
+                    <div class="col-md-2">
                         <input type="text" class="form-control" name="assigneeValue" placeholder="Assignee value" maxlength="100">
                     </div>
-                    <div class="col-md-2">
+                    <div class="col-md-1">
                         <input type="number" class="form-control" name="timeoutHours" placeholder="Timeout (h)" min="1">
+                    </div>
+                    <div class="col-md-2">
+                        <select class="form-select" name="autoAction">
+                            <option value="">Auto action: —</option>
+                            <option value="approve">Approve</option>
+                            <option value="reject">Reject</option>
+                            <option value="escalate">Escalate</option>
+                        </select>
+                        <small class="text-muted">Applies to 'Auto' steps + timeouts</small>
                     </div>
                 </div>
 
