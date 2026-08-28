@@ -95,7 +95,7 @@ if ($taskId > 0) {
     );
     if ($stmt !== false) {
         $stmt->bind_param(
-            'ssssisisisis',
+            'ssssisisisii',
             $title, $description, $priority, $dueDate,
             $assignedToId, $reminderDate, $isRecurring, $recurrenceType,
             $recurrenceInterval, $recurrenceEndDate, $taskId, $siteId
@@ -114,7 +114,7 @@ if ($taskId > 0) {
     );
     if ($stmt !== false) {
         $stmt->bind_param(
-            'issssiisissss',
+            'issssiisisis',
             $siteId, $title, $description, $priority, $dueDate,
             $assignedToId, $userId, $reminderDate, $isRecurring,
             $recurrenceType, $recurrenceInterval, $recurrenceEndDate
