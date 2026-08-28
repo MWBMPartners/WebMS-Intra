@@ -12,6 +12,7 @@
  *   • Prayer-request moderation (for moderators)
  *   • Announcement notifications
  *   • Task reminders / Rota duty reminders (gap #439, cron/user-reminders)
+ *   • Workflow approval requests (#443, Portal\Core\Workflow)
  *
  * Stored in tblUsers.notifyPrefs (JSON column from migration 026).
  *
@@ -85,6 +86,7 @@ $defaults = [
     'givingStatements'      => true,
     'taskReminders'         => true,
     'rotaReminders'         => true,
+    'approvalRequests'      => true,
 ];
 foreach ($defaults as $k => $v) {
     if (array_key_exists($k, $prefs) === false) {
@@ -188,6 +190,13 @@ $switchRow = static function (string $key, string $label, string $helpText) use 
         <div class="card-body">
             <?php echo $switchRow('taskReminders', 'Task reminders', 'Get notified when a task you\'re assigned to reaches its reminder time.'); ?>
             <?php echo $switchRow('rotaReminders', 'Rota reminders', 'Get notified ahead of duties you\'re rostered on for.'); ?>
+        </div>
+    </div>
+
+    <div class="card shadow-sm mb-3">
+        <div class="card-header"><h2 class="h6 mb-0">Approvals</h2></div>
+        <div class="card-body">
+            <?php echo $switchRow('approvalRequests', 'Approval requests', 'Get notified when a workflow step is waiting on you, or when a request you submitted is approved/rejected.'); ?>
         </div>
     </div>
 

@@ -46,6 +46,7 @@ $allowedKeys = [
     'givingStatements',
     'taskReminders',
     'rotaReminders',
+    'approvalRequests',
 ];
 
 $incoming = $_POST['prefs'] ?? [];

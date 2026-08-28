@@ -6,12 +6,17 @@
  * -----------------------------------------------------------------------------
  * Marks an announcement as deleted (POST only, admin only).
  *
+ * Also cancels any running approval instance for this announcement (#443) —
+ * a deleted announcement must never linger in anyone's /approvals inbox.
+ * Safe no-op when workflows aren't in use for this site.
+ *
  * @package   Portal\Announcements
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   0.8.2
+ * @version   0.9.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/89
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/443
  * -----------------------------------------------------------------------------
  */
 
@@ -21,6 +26,7 @@ use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Logger;
 use Portal\Core\Site;
+use Portal\Core\Workflow;
 
 // 🛡️ POST only
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
@@ -64,6 +70,9 @@ if ($stmt !== false) {
     $stmt->execute();
     $stmt->close();
 }
+
+// 🧹 #443 — a deleted announcement never lingers in anyone's inbox.
+Workflow::cancelForSubject('tblAnnouncements', $announcementId, 'Announcement deleted', $userId);
 
 Logger::activity('AnnouncementDeleted', 'Deleted announcement ID: ' . $announcementId, $userId);
 

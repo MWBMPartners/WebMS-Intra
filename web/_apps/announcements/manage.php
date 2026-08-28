@@ -7,12 +7,18 @@
  * Lists all announcements (including drafts) for admin editing. Shows create/edit
  * form when ?edit= parameter is present.
  *
+ * When `workflows.announcements.enabled` is on (#443), the Published
+ * checkbox is relabelled to make the approval step visible, and any
+ * unpublished row with a running approval instance gets an "Awaiting
+ * approval" badge linking to /approvals.
+ *
  * @package   Portal\Announcements
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   0.8.2
+ * @version   0.9.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/89
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/443
  * -----------------------------------------------------------------------------
  */
 
@@ -21,6 +27,7 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\I18n;
+use Portal\Core\Settings;
 use Portal\Core\Site;
 
 Auth::ensureSession();
@@ -76,6 +83,28 @@ if ($stmt !== false) {
         $announcements[] = $row;
     }
     $stmt->close();
+}
+
+// 🚦 Workflow gate (#443) — relabels the Published checkbox and surfaces
+// an "Awaiting approval" badge on unpublished rows with a running instance.
+$workflowGate = (Settings::get('workflows.announcements.enabled', 'false') === 'true');
+$pendingInstanceIds = [];
+if ($workflowGate === true && count($announcements) > 0) {
+    $ids = array_map(static fn (array $a): int => (int) $a['announcementID'], $announcements);
+    $placeholders = implode(',', array_fill(0, count($ids), '?'));
+    $tableName = 'tblAnnouncements';
+    $pStmt = $mysqli->prepare(
+        "SELECT recordID FROM tblWorkflowInstances WHERE tableName = ? AND recordID IN ({$placeholders}) AND status IN ('pending','in_progress')"
+    );
+    if ($pStmt !== false) {
+        $pStmt->bind_param('s' . str_repeat('i', count($ids)), $tableName, ...$ids);
+        $pStmt->execute();
+        $pResult = $pStmt->get_result();
+        while ($pRow = $pResult->fetch_assoc()) {
+            $pendingInstanceIds[(int) $pRow['recordID']] = true;
+        }
+        $pStmt->close();
+    }
 }
 
 // 📄 Include shared header template
@@ -149,7 +178,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         <div class="form-check form-switch mt-4">
                             <input class="form-check-input" type="checkbox" id="isPublished" name="isPublished" value="1"
                                    <?php echo (($editing['isPublished'] ?? '0') === '1' || $editing === null ? 'checked' : ''); ?>>
-                            <label class="form-check-label" for="isPublished">Published</label>
+                            <label class="form-check-label" for="isPublished"><?php echo $workflowGate === true ? 'Publish (requires approval)' : 'Published'; ?></label>
                         </div>
                     </div>
                 </div>
@@ -201,6 +230,11 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         <span class="badge bg-success">Published</span>
                     <?php else: ?>
                         <span class="badge bg-secondary">Draft</span>
+                    <?php endif; ?>
+                    <?php if (isset($pendingInstanceIds[(int) $ann['announcementID']]) === true): ?>
+                        <a href="/approvals" class="badge bg-warning text-dark text-decoration-none" title="Pending workflow approval">
+                            <i class="fa-solid fa-hourglass-half me-1"></i>Awaiting approval
+                        </a>
                     <?php endif; ?>
                 </div>
                 <div class="col-2 small">

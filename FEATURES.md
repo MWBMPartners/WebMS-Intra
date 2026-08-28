@@ -106,7 +106,7 @@ Central operations hub for admins / site admins.
 | `/admin/migrations` | Web-based migration runner |
 | `/admin/integrations` | Live integration diagnostics (MS365 OAuth/Graph, Google OAuth/Gmail) |
 | `/admin/sites` | Umbrella admin: site CRUD + per-site user management |
-| `/admin/workflows` | Configurable workflow engine config (#94) |
+| `/admin/workflows` | Configurable workflow definition CRUD (#94) — step delete/isActive/autoAction (#443); the running engine is the `/approvals` app below |
 | `/admin/reports` | Reporting / analytics dashboard (#93) |
 | `/admin/captcha` | **Multi-provider captcha config — drag-and-drop priority + per-provider keys (#130)** |
 | `/settings` | Generic dot-notation settings editor |
@@ -306,6 +306,52 @@ Reminder / task system.
 - Complete / dismiss actions.
 
 **Tables:** `tblTasks`, `tblTaskReminders`
+
+---
+
+### ✅🔏 Approvals — `/approvals/` ✅ (#443)
+
+Generic inbox for the Workflow Execution Engine (`Portal\Core\Workflow`,
+`web/_core/Workflow.php`) — migration 034 shipped four workflow tables +
+an `/admin/workflows` definition CRUD, but nothing ran an instance until
+this. See DEV_NOTES.md → "Workflow Execution Engine + Generic Approvals
+Inbox (#443)" for the full state-machine writeup.
+
+- **"Awaiting your decision"** — every active instance the viewer is
+  eligible to act on (role/user/group match on the current step's
+  assignee), admins see all + a Mine/All toggle. Approve / Reject /
+  Comment-only, one CSRF'd POST per row — `Workflow::act()` re-checks
+  authorisation independently of what the page shows.
+- **History** — last 50 completed/cancelled instances with an expandable
+  full decision timeline.
+- **Atomic, authorised, tenant-scoped transitions** — `FOR UPDATE` row
+  lock + `affected_rows === 1` guarded claim UPDATE; a foreign
+  (cross-site) instanceID is indistinguishable from a missing one; a
+  stale posted stepID is refused (`stale_step`).
+- **Timeout escalation, never silent auto-act** — `cron/workflow-
+  timeouts.php` (hourly, token-gated) escalates an overdue step (notify +
+  keep waiting) unless that step explicitly sets `autoAction=approve|
+  reject`.
+- **Reference consumer wired:** Announcements publish approval, behind
+  per-site `workflows.announcements.enabled` (default OFF — manual
+  publish is byte-for-byte unchanged until a site opts in). Final
+  approval flips `tblAnnouncements.isPublished` inside the SAME
+  transaction as the approval claim.
+- **Admin CRUD completion** at `/admin/workflows` — per-step delete
+  (`admin/workflows/step-delete.php`), an `isActive` toggle, and an
+  `autoAction` selector on the Add Step row (all missing from the
+  original #94 CRUD).
+- The seeded `expense_approval` definition (migration 034) stays
+  intentionally dormant — Expenses has its own independent, department-
+  scoped multi-approver system; the generic engine never drives it.
+
+**Tables:** `tblWorkflows`, `tblWorkflowSteps`, `tblWorkflowInstances`,
+`tblWorkflowActions` (all from migration 034; four additive columns + one
+index + one enum value from migration 174)
+**Settings:** `approvals.enabled`, `approvals.displayName`,
+`approvals.displayIcon`, `workflows.enabled`, `workflows.notify_email`,
+`workflows.admin_override`, `workflows.cron_token`,
+`workflows.announcements.enabled`
 
 ---
 
