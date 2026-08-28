@@ -310,6 +310,47 @@ Reminder / task system.
 
 ---
 
+### 👥 Small Groups — `/small-groups/` ✅ (#150)
+
+Groups/classes register — Sabbath School classes, home groups, Bible
+studies. New installable app, opt-in (`small-groups.enabled` defaults
+`'0'`).
+
+- Groups directory + per-group detail page; leader/co-leader/member roster
+  with optional self-service join requests (pending → approve/decline) and
+  a last-active-leader guard on remove/demote/leave.
+- Per-meeting roll (`tblSmallGroupMeetingAttendance`, presence-row model
+  mirroring `tblEventAttendance`) with an ADDITIVE headcount push into the
+  existing Attendance app via a group's linked `tblAttendanceServiceTypes`
+  row — several groups can share one service type/session, each
+  contributing its own labelled headcount line; zero changes to
+  Attendance's own schema/code.
+- Meeting location reuses the #456 shared location partials
+  (`portal_location_input`/`portal_location_display`) byte-identical to
+  migration 180's `tblVenues` shape, plus a `locationVisibility` gate
+  (leaders/members/site, default members — no public tier, since groups
+  often meet in a member's home).
+- `Portal\Core\SmallGroups` is the tenant-safety choke-point and the
+  stable contract #304 (group messaging) and #321 (watch-party rooms) are
+  expected to consume — `groupID` scope anchor, `status='active'`
+  membership predicate, `isLeader()` leader gate. The denormalised
+  `siteID` on member/meeting rows is written only after confirming an
+  active `tblUserSites` row for the group's site — cross-site membership
+  is structurally impossible.
+- New `groups_coordinator` role — manages every group at a site without
+  needing to be admin.
+- Attendance report + CSV export (roster and per-member attendance %).
+- **v1 is adults-only**: membership rows are portal users only, no named
+  child rows anywhere — the Kids app's `tblKidProfiles` remains the sole
+  place child identity lives.
+- GDPR lockstep: `GdprEraser::catalogue()` (6 entries), `data-export.php`
+  (4 blocks), and an `offboarding/do.php` step ending a leaver's
+  memberships.
+
+**Tables:** `tblSmallGroups`, `tblSmallGroupMembers`, `tblSmallGroupMeetings`, `tblSmallGroupMeetingAttendance` (migration 183)
+
+---
+
 ### ✅🔏 Approvals — `/approvals/` ✅ (#443)
 
 Generic inbox for the Workflow Execution Engine (`Portal\Core\Workflow`,

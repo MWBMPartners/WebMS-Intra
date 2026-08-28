@@ -44,9 +44,9 @@ web/                <- ALL deployable files (synced to server via SFTP)
 
 ## Apps (shipped on `main`)
 
-`web/_apps/` holds ~47 top-level entries; `web/_core/apps/*.php` is the
+`web/_apps/` holds ~48 top-level entries; `web/_core/apps/*.php` is the
 AppRegistry — the single source of truth for **installable marketplace
-apps** (toggleable per-site at `/admin/apps`), 43 of them. The table below
+apps** (toggleable per-site at `/admin/apps`), 44 of them. The table below
 is every user-facing app (see note below the table for dirs that are
 infrastructure rather than apps).
 
@@ -90,6 +90,7 @@ infrastructure rather than apps).
 | service-plans | `/service-plans` | Programme run-sheet builder (preacher, scripture, hymns, AV, welcome team); operator → confidence-monitor messaging (#300); local hymnal index + default-off remote lookup + congregation-facing public `/os/{token}` view (gap #128, migration 178) |
 | settings | `/settings` | Generic dot-notation settings editor |
 | site | `/site` | Multi-site switcher handler |
+| small-groups | `/small-groups` | Groups/classes register — leaders, member assignment, join requests, meeting rolls tied to attendance service types (#150) |
 | sms | `/admin/sms` | SMS notifications for critical alerts via Twilio / MessageBird / AWS SNS |
 | tasks | `/tasks` | Reminders / task list |
 | transcription | `/admin/transcription` | Auto-transcribe Recordings via Whisper / AssemblyAI / local whisper.cpp; full-text search |
@@ -156,6 +157,56 @@ Calendar/Events/Preaching Plan is ONE app ("Events") — `/calendar` covers view
 
 ## Recent ships (chronological)
 
+- **`claude/backlog150-groups`** (branched off `alpha`) — issue #150: new
+  Small Groups app (`web/_apps/small-groups/`, slug `small-groups`) —
+  groups/classes register for Sabbath School classes, home groups, Bible
+  studies. Roster with leader/co-leader/member roles + optional
+  self-service join requests (pending → approve/decline, last-active-leader
+  guard on remove/demote/leave); per-meeting roll
+  (`tblSmallGroupMeetingAttendance`, presence-row model mirroring
+  `tblEventAttendance`) with an ADDITIVE headcount push into the existing
+  Attendance app via a group's linked `tblAttendanceServiceTypes` row —
+  several groups can share one service type/session, each contributing its
+  own labelled `tblAttendanceCounts` row matched by `(sessionID,
+  groupLabel)`; zero changes to Attendance's own schema/code. Meeting
+  location reuses the #456 shared partials (`portal_location_input`/
+  `portal_location_display`) with canonical column names, byte-identical
+  to migration 180's `tblVenues` shape, plus a new `locationVisibility`
+  gate (leaders/members/site, default `members` — no public tier, since
+  groups often meet in a member's home). New `Portal\Core\SmallGroups`
+  class is the tenant-safety choke-point AND the stable contract #304
+  (group messaging) and #321 (watch-party rooms) are expected to consume —
+  `groupID` scope anchor, `status='active'` membership predicate,
+  `isLeader()`/`canManage()` gates; the denormalised `siteID` on
+  member/meeting rows is written only by `SmallGroups::upsertMembership()`
+  after confirming an ACTIVE `tblUserSites` row for the group's own site
+  (leadership `assign.php:87-93` join precedent), making cross-site
+  membership structurally impossible. New `groups_coordinator` role. GDPR
+  lockstep in the same PR: 6 `GdprEraser::catalogue()` entries, 4
+  `data-export.php` blocks, 1 `offboarding/do.php` step ending a leaver's
+  memberships. **v1 is adults-only** — membership rows are portal users
+  only; zero named-child rows anywhere (the Kids app's `tblKidProfiles`
+  remains the sole place child identity lives, verified by grep). Migration
+  183 (181 = alpha head at spec time, 182 reserved by #153 Forms in
+  flight): 4 new tables, 7 settings seeds (`small-groups.enabled` defaults
+  `'0'`, opt-in — the pre-existing `'1'`-vs-`'true'` nav/dashboard
+  enable-flag quirk is inherited verbatim, not fixed here), 1 role seed
+  (`WHERE NOT EXISTS` idiom), 13 route seeds (12 app + 1 help,
+  `isProtected=0`), zero ALTERs to any existing table. Also found + fixed
+  along the way: `check_sql_columns.py`'s SELECT-column regex false-
+  positives on any `FROM tblSmallGroup*` clause carrying a short alias
+  immediately after the table name — the bare substring "Group" inside
+  every one of the four new table names lets the regex's own greedy-`\w+`
+  backtracking mis-match "Group…" as a false `GROUP BY` terminator,
+  truncating the captured table name to `tblSmall` and reporting a bogus
+  unknown-table finding; worked around by never aliasing the PRIMARY
+  `FROM tblSmallGroup*` table (using full-name column qualification
+  instead) while still freely aliasing any table introduced via `JOIN`
+  (invisible to that checker's FROM-anchored regex) — documented inline at
+  each call site since the same shape will recur for any future table
+  whose name embeds a bare SQL keyword. New help page (`/help/small-groups`)
+  + help-index card. All 11 audit checks green, `php -l` clean on every
+  touched file, zero raw `<table>` (portal-data-list throughout).
 - **`claude/backlog-pwa-brand`** (branched off `alpha`) — two small,
   low-risk backlog finishers, one PR: **#141 residual** (the push half
   was already fully shipped as #322 — only install-prompt/manifest/iOS-meta
