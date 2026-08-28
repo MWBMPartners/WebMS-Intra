@@ -672,12 +672,58 @@ class Giving
             self::markStatementError($logId, 'opted-out');
             return false;
         }
+
+        // 🚪 SEC-01 — re-check LIVE active membership at SEND time, not
+        // just whatever was true when this row was queued. A donor who
+        // has since left the site is preview/download-only per
+        // statementsPreview()'s own contract (#440 Q3 — "left the site
+        // but gave during the period" rows are flagged `usActive = false`
+        // and never auto-emailed); download stays unaffected — this gate
+        // sits only in the send path, and runs BEFORE the SEC-03 claim
+        // below so a row that will not be sent is never claimed.
+        $stillActive = 0;
+        $stmt = $db->prepare(
+            'SELECT EXISTS(SELECT 1 FROM tblUserSites WHERE userID = ? AND siteID = ? AND isActive = 1)'
+        );
+        if ($stmt !== false) {
+            $stmt->bind_param('ii', $donorId, $siteId);
+            $stmt->execute();
+            $stmt->bind_result($stillActive);
+            $stmt->fetch();
+            $stmt->close();
+        }
+        if ((int) $stillActive !== 1) {
+            self::markStatementError($logId, 'donor-left-site');
+            return false;
+        }
+
         if ($pdfPath === '' || is_file($pdfPath) === false) {
             self::markStatementError($logId, 'pdf-missing');
             return false;
         }
         if (filesize($pdfPath) > 4 * 1024 * 1024) {
             self::markStatementError($logId, 'pdf-too-large');
+            return false;
+        }
+
+        // ⚛️ SEC-03 — claim-then-send. Only the caller that wins this
+        // `WHERE ... AND emailedAt IS NULL` UPDATE proceeds to actually
+        // mail the donor; a concurrent UI+cron race on the same row loses
+        // here (affected_rows !== 1) and does nothing — no double email.
+        // Mirrors Payments::markPaymentSucceeded()'s atomic
+        // `WHERE status = "pending"` transition. If Mailer then fails,
+        // the claim is rolled back (emailedAt reset to NULL) so the row
+        // remains eligible for a future retry.
+        $claimed = 0;
+        $claim = $db->prepare('UPDATE tblGivingStatementLog SET emailedAt = NOW() WHERE logID = ? AND emailedAt IS NULL');
+        if ($claim !== false) {
+            $claim->bind_param('i', $logId);
+            $claim->execute();
+            $claimed = $claim->affected_rows;
+            $claim->close();
+        }
+        if ($claimed !== 1) {
+            // Another caller already claimed (or already sent) this row.
             return false;
         }
 
@@ -711,15 +757,17 @@ class Giving
             $ok = Mailer::sendTemplated($email, $subject, 'giving-statement', $vars, [$pdfPath]);
         } catch (\Throwable $e) {
             Logger::errorPlatform('GivingStatements', 'Error', 'EMAIL_SEND_FAIL', 'Failed to email giving statement', $e->getMessage());
-            self::markStatementError($logId, 'send-exception');
+            self::rollbackStatementClaim($logId, 'send-exception');
             return false;
         }
         if ($ok !== true) {
-            self::markStatementError($logId, 'send-failed');
+            self::rollbackStatementClaim($logId, 'send-failed');
             return false;
         }
 
-        $u = $db->prepare('UPDATE tblGivingStatementLog SET emailedAt = NOW(), emailedTo = ? WHERE logID = ?');
+        // ✅ emailedAt was already stamped by the SEC-03 claim above —
+        // only the actually-mailed address remains to record.
+        $u = $db->prepare('UPDATE tblGivingStatementLog SET emailedTo = ? WHERE logID = ?');
         if ($u !== false) {
             $u->bind_param('si', $email, $logId);
             $u->execute();
@@ -737,6 +785,24 @@ class Giving
     {
         $db = App::db();
         $stmt = $db->prepare('UPDATE tblGivingStatementLog SET errorMsg = ? WHERE logID = ?');
+        if ($stmt !== false) {
+            $stmt->bind_param('si', $message, $logId);
+            $stmt->execute();
+            $stmt->close();
+        }
+    }
+
+    /**
+     * SEC-03 rollback — undo a claim-then-send claim (sendStatementEmail())
+     * when Mailer actually fails AFTER the atomic claim already stamped
+     * `emailedAt`. Resets it back to NULL so the row's claim predicate
+     * (`emailedAt IS NULL`) makes it eligible for a future retry, instead
+     * of being permanently (and falsely) stuck looking "sent".
+     */
+    private static function rollbackStatementClaim(int $logId, string $message): void
+    {
+        $db = App::db();
+        $stmt = $db->prepare('UPDATE tblGivingStatementLog SET emailedAt = NULL, errorMsg = ? WHERE logID = ?');
         if ($stmt !== false) {
             $stmt->bind_param('si', $message, $logId);
             $stmt->execute();
