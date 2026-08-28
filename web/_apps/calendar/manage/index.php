@@ -19,9 +19,11 @@
 declare(strict_types=1);
 
 use Portal\Core\App;
+use Portal\Core\AppRegistry;
 use Portal\Core\Auth;
 use Portal\Core\Router;
 use Portal\Core\Site;
+use Portal\Core\Venues;
 
 // 📌 Page metadata
 $pageTitle   = 'Manage Events';
@@ -112,6 +114,26 @@ if ($stmtSeries !== false) {
         $seriesList[] = $r;
     }
     $stmtSeries->close();
+}
+
+// -----------------------------------------------------------------------------
+// 🏛️ Venue Bookings integration (#429) — Surface A support. Guarded behind
+// AppRegistry::isEnabled('venues') + try/catch so a disabled app, a missing
+// _core/apps/venues.php registry entry, OR any Venues:: exception leaves
+// the event form byte-identical to pre-#429 output (security item 14): no
+// venue field is rendered when $venueOptions stays empty.
+// -----------------------------------------------------------------------------
+$defaultVenueId = 0;
+$venueOptions   = [];
+if (AppRegistry::isEnabled('venues') === true) {
+    try {
+        $defaultVenueId = (int) (App::settings('venues.calendar_default_venue') ?? 0);
+        $venueOptions   = Venues::listVenues($siteId, true);
+    } catch (\Throwable $e) {
+        error_log('Calendar manage: venue integration failed: ' . $e->getMessage());
+        $defaultVenueId = 0;
+        $venueOptions   = [];
+    }
 }
 
 // 📋 Flash message
