@@ -46,8 +46,10 @@
 declare(strict_types=1);
 
 use Portal\Core\App;
+use Portal\Core\AppRegistry;
 use Portal\Core\Auth;
 use Portal\Core\Site;
+use Portal\Core\Venues;
 
 // 📌 Page metadata
 $pageTitle   = 'Calendar';
@@ -313,6 +315,31 @@ if ($view === 'list') {
     }
     $totalRows  = count($events);
     $totalPages = 1;
+}
+
+// -----------------------------------------------------------------------------
+// 🏛️ Venue Bookings overlay (#429) — per-day "is this day booked at an
+// external venue?" strip, consumed by views/_venue_strip.php across the
+// grid views. Guarded behind AppRegistry::isEnabled('venues') + try/catch
+// so a disabled app, a missing _core/apps/venues.php registry entry, OR
+// any Venues:: exception leaves $venueOverlay = [] and the calendar
+// renders byte-identical to pre-#429 output (security item 14 — the hard
+// resilience requirement). List view has no fixed date range, so it never
+// computes an overlay.
+// -----------------------------------------------------------------------------
+$venueOverlay = [];
+if ($view !== 'list' && $rangeStart !== null && $rangeEnd !== null && AppRegistry::isEnabled('venues') === true) {
+    try {
+        $venueOverlay = Venues::availabilityForRange(
+            $siteId,
+            null,
+            $rangeStart->format('Y-m-d'),
+            $rangeEnd->format('Y-m-d')
+        );
+    } catch (\Throwable $e) {
+        error_log('Calendar venue overlay failed: ' . $e->getMessage());
+        $venueOverlay = [];
+    }
 }
 
 // -----------------------------------------------------------------------------

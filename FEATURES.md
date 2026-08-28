@@ -759,6 +759,50 @@ The Payments app's `paypal` branch was previously stubbed ("not-implemented" —
 | Admin config — PayPal column on `/payments` gains Mode (sandbox/live) + Webhook ID fields and a live-mode-while-test-mode-on warning; Client ID becomes password-style keep-if-blank (matches Secret) now that it's encrypted at rest | #268 | 167 | ✅ |
 
 **New settings:** `payments.paypal.webhookId`, `payments.paypal.mode` (`sandbox`\|`live`, default `sandbox`). **Changed:** `payments.paypal.clientId` isSensitive `0`→`1` (predicate-guarded flip on existing installs — only where still empty). **New route:** `giving/give`.
+### Venue Bookings (`/venues`) (#429, migration 170)
+
+Tenant-side register for congregations that RENT their building from another
+organisation — the mirror-image of Resources (rooms you own) and Assets
+(things you own). Records the agreed hire schedule so leaders never plan an
+event into an unbooked or unavailable slot.
+
+- **Year schedule** — one row per hire date (matches the source spreadsheet
+  1:1), month-grouped, with status colours, "times needed" flags and a Today
+  anchor; CSV + PDF exports (cost column manager-only).
+- **Configurable vocabularies** — per-venue usage types ("Regular Hours",
+  "Extended", "Closed - Not Needed", "Building Unavailable") with
+  **effective-dated default time windows** (the hire hours can change per
+  schedule year), and per-site booking statuses each carrying
+  `countsAsConfirmed`/`isAvailable` flags that drive the calendar.
+- **Recurring generator** — weekly/fortnightly/monthly/custom series with
+  preview, duplicate-skip reporting, and per-date window resolution;
+  multi-day runs (e.g. a VBS week) grouped for one-click status/delete.
+- **XLSX/CSV import wizard** — native (no-Composer) parser with zip-bomb
+  hardening, Excel-serial date conversion, vocab map-or-create step,
+  BackingData year-window suggestions, and a CSV fallback path.
+- **Calendar integration** — venue-layer strips on every calendar view
+  (confirmed / proposed / closed / unavailable rendered distinctly) and an
+  "is it booked?" warning on event save + a live event-form check
+  (`/api/venues/check`), keyed off `venues.calendar_default_venue`.
+- **Hire agreements** — standing/ad-hoc terms, rates (pence-integer), renewal
+  + notice-period reminder sweep, document vault with gated downloads.
+- **Payable invoice ledger** — money OUT to the landlord: invoices, per-booking
+  allocation lines, partial payment records, machine-managed status
+  (pending/part-paid/paid), invoice PDF. No card rails — pure tracking.
+- **Reminders cron** — `cron/venue-reminders` (token-gated): un-agreed
+  bookings, agreement renewals, invoices due; single-shot dedupe log.
+- **Roles** — viewer (any logged-in user) vs `venue_manager`/admin (all
+  management + costs); admin-only hard deletes + settings.
+
+**New files:** `web/_core/Venues.php`, `web/_core/apps/venues.php`,
+`web/_apps/venues/*`, `web/_apps/cron/venue-reminders.php`,
+`web/_apps/help/venues.php`. **Schema:** migration 170, 15 new `tblVenue*`
+tables, zero guarded ALTERs. **New seeded settings:** `venues.enabled`,
+`venues.currency`, `venues.maxFileSize`, `venues.unagreed_lead_days`,
+`venues.renewal_lead_days`, `venues.invoice_due_lead_days`,
+`venues.reminders_enabled`, `venues.reminder_roles`, `venues.cron_token`,
+`venues.calendar_default_venue`, `api.venues.check.enabled`,
+`api.venues.availability.enabled`.
 
 ---
 

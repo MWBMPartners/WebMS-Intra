@@ -21,4 +21,5 @@ declare(strict_types=1);
 
 $day = $rangeStart;  // already set to 00:00 of the chosen date
 require __DIR__ . DIRECTORY_SEPARATOR . '_day_columns.php';
-echo render_day_columns([$day], $events);
+// 🏛️ $venueOverlay (#429) — set by the router; [] when disabled/absent/throwing.
+echo render_day_columns([$day], $events, $venueOverlay ?? []);

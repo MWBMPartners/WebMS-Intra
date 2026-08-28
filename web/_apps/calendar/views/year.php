@@ -81,6 +81,15 @@ foreach ($events as $ev) {
     }
 }
 
+// 🏛️ Venue Bookings (#429) — $venueOverlay is set by the router ([] when
+// the app is disabled/absent/throwing). Only require the day-colour
+// helper when there is actually something to show, so a disabled/empty
+// overlay never emits so much as the scoped CSS (byte-identical output).
+$hasVenueOverlay = count($venueOverlay ?? []) > 0;
+if ($hasVenueOverlay === true) {
+    require_once __DIR__ . DIRECTORY_SEPARATOR . '_venue_strip.php';
+}
+
 $today  = (new DateTimeImmutable('today'))->format('Y-m-d');
 $months = [
     1  => 'January',  2  => 'February', 3  => 'March',    4  => 'April',
@@ -215,12 +224,22 @@ $cellBg = static function (array $dayEvents, DateTimeImmutable $dt) use ($cleanH
                     if ($isWeekend === true) {
                         $numClasses[] = $dow === 6 ? 'is-saturday' : 'is-sunday';
                     }
+
+                    // 🏛️ Venue Bookings (#429) — worst-first accent colour for
+                    // this day, rendered as a left-edge bar so the tiny
+                    // year-planner cell stays legible. null = nothing to show.
+                    $venueAccent = $hasVenueOverlay === true
+                        ? venue_strip_day_color($venueOverlay[$cellDate] ?? [])
+                        : null;
+                    $numVenueStyle = $venueAccent !== null
+                        ? ' style="box-shadow: inset 3px 0 0 ' . $esc($venueAccent) . ';"'
+                        : '';
                     ?>
 
                     <!-- Day number + day-of-week initial -->
                     <a class="<?php echo implode(' ', $numClasses); ?>"
                        href="/calendar?view=day&amp;date=<?php echo $esc($cellDate); ?>"
-                       title="<?php echo $esc($dt->format('l, j F Y')); ?>">
+                       title="<?php echo $esc($dt->format('l, j F Y')); ?>"<?php echo $numVenueStyle; ?>>
                         <span class="portal-cal-yearplan-num-day"><?php echo sprintf('%02d', $day); ?></span>
                         <span class="portal-cal-yearplan-num-dow"><?php echo $esc($dowInit); ?></span>
                     </a>

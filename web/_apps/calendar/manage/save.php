@@ -18,10 +18,12 @@
 declare(strict_types=1);
 
 use Portal\Core\App;
+use Portal\Core\AppRegistry;
 use Portal\Core\Auth;
 use Portal\Core\Logger;
 use Portal\Core\Router;
 use Portal\Core\Site;
+use Portal\Core\Venues;
 
 // 🛡️ Admin access check
 if (App::isAdmin() === false) {
@@ -168,6 +170,38 @@ $userId = $_SESSION['user_id'] ?? null;
 $siteId = Site::id();
 
 // -----------------------------------------------------------------------------
+// 🏛️ Venue Bookings (#429) Surface B — guarded post-save "is it booked?"
+// advisory appended to the flash message. NEVER blocks the save (called
+// only after the flash success message is already set); a venueID of 0/
+// invalid/not-found is silently suppressed rather than surfacing the
+// dormant "no venue configured" sentinel in a save-success flash.
+// -----------------------------------------------------------------------------
+$venueCheckID = (int) ($_POST['venueID'] ?? 0);
+$appendVenueCoverageFlash = function (string $eventStart, ?string $eventEnd, string $eventTz) use ($venueCheckID, $siteId): void {
+    if (AppRegistry::isEnabled('venues') === false || $venueCheckID <= 0) {
+        return;
+    }
+    try {
+        if (Venues::getVenue($venueCheckID, $siteId) === null) {
+            // 🚪 getVenue-null ⇒ suppressed — never mention a venue that
+            // doesn't resolve for this site.
+            return;
+        }
+        $coverage = Venues::classifyEventCoverage([
+            'startDateTime' => $eventStart,
+            'endDateTime'   => $eventEnd,
+            'timezone'      => $eventTz,
+        ], $venueCheckID);
+        $coverageMsg = (string) ($coverage['message'] ?? '');
+        if ($coverageMsg !== '') {
+            $_SESSION['flash_msg'] = (string) ($_SESSION['flash_msg'] ?? '') . ' ' . $coverageMsg;
+        }
+    } catch (\Throwable $e) {
+        error_log('Calendar save: venue coverage check failed: ' . $e->getMessage());
+    }
+};
+
+// -----------------------------------------------------------------------------
 // ➕ Create event
 // -----------------------------------------------------------------------------
 if ($action === 'create') {
@@ -229,6 +263,7 @@ if ($action === 'create') {
 
     $_SESSION['flash_msg']  = 'Event "' . $eventName . '" created successfully.';
     $_SESSION['flash_type'] = 'success';
+    $appendVenueCoverageFlash($startDateTime, $endDt, $timezone);
     header('Location: /calendar/manage');
     exit();
 }
@@ -300,6 +335,7 @@ if ($action === 'update') {
 
     $_SESSION['flash_msg']  = 'Event "' . $eventName . '" updated successfully.';
     $_SESSION['flash_type'] = 'success';
+    $appendVenueCoverageFlash($startDateTime, $endDt, $timezone);
     header('Location: /calendar/manage');
     exit();
 }

@@ -29,6 +29,9 @@
 #                                                       rejects with error 1064)
 #  14. PHP table-reference existence                 — tblX referenced in PHP resolves to a
 #                                                       CREATE TABLE in full_schema.sql
+#  15. mysqli bind_param() arity                      — literal type-string length matches
+#                                                       bound-argument count (mismatch throws
+#                                                       an uncaught ValueError on PHP 8)
 #
 # These are HEURISTICS — false positives are expected. Review the findings,
 # don't blindly fail the merge.
@@ -50,6 +53,11 @@
 # files — a wrong table name hard-coded straight into a PHP query string
 # was invisible to every prior check, and that exact gap let the GDPR
 # eraser silently skip a real table.
+# Check 15 (#433) was added after finding two live bind_param() calls
+# whose type-string length didn't match the bound-argument count — a
+# ValueError PHP 8 throws uncaught (it isn't a mysqli_sql_exception, so
+# the repo-wide mysqli_report STRICT setting doesn't catch it), fatally
+# 500ing the calendar occurrence-override save and task creation.
 # The scripts live in tools/audit-checks/ and are runnable locally.
 # =============================================================================
 
@@ -291,6 +299,14 @@ jobs:
           PHP_TABLE_REFS=$(python3 tools/audit-checks/check_php_table_refs.py 2>&1 | tail -n +3 || true)
           if echo "$PHP_TABLE_REFS" | grep -q '•'; then
             add_section "PHP references to tables not in full_schema.sql" "$PHP_TABLE_REFS"
+          fi
+
+          # 15) mysqli bind_param() arity (#433 — catches an uncaught
+          #     ValueError on PHP 8 when the type-string length doesn't
+          #     match the bound-argument count)
+          BIND_ARITY=$(python3 tools/audit-checks/check_bind_param_arity.py 2>&1 | tail -n +3 || true)
+          if echo "$BIND_ARITY" | grep -q '•'; then
+            add_section "mysqli bind_param() arity mismatches (fatal ValueError on PHP 8)" "$BIND_ARITY"
           fi
 
           echo "hits=$HITS" >> "$GITHUB_OUTPUT"

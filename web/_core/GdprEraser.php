@@ -181,6 +181,19 @@ class GdprEraser
             ['table' => 'tblAssetStocktakes',           'userCol' => 'closedByID',           'action' => 'anonymise', 'nullCols' => [], 'reason' => 'stocktake run history retained; closer identity detached'],
             ['table' => 'tblAssetValueHistory',         'userCol' => 'recordedByID',         'action' => 'anonymise', 'nullCols' => [], 'reason' => 'valuation/depreciation history retained for the value dashboard; recorder identity detached'],
 
+            // 🏛️ Venue Bookings (#429). The register's own history — the
+            // hire schedule, effective-dated default-hours windows, and
+            // import-wizard batch runs — is retained exactly like the
+            // authorship-attribution entries above; only the acting user's
+            // identity is detached, mirroring tblAssetAudit/tblAssetScanLog.
+            // All three FK columns are already nullable (ON DELETE SET
+            // NULL), so processEntry()'s anonymise path (SET userCol =
+            // NULL) is a straightforward UPDATE with no schema constraint
+            // to work around.
+            ['table' => 'tblVenueBookings',         'userCol' => 'updatedByID', 'action' => 'anonymise', 'nullCols' => [], 'reason' => 'booking history retained for the venue hire schedule; last-editor identity detached'],
+            ['table' => 'tblVenueUsageTypeWindows', 'userCol' => 'createdByID', 'action' => 'anonymise', 'nullCols' => [], 'reason' => 'effective-dated default-hours history retained; author identity detached'],
+            ['table' => 'tblVenueImportBatches',    'userCol' => 'createdByID', 'action' => 'anonymise', 'nullCols' => [], 'reason' => 'CSV/XLSX import-wizard batch history retained for audit trail; uploader identity detached'],
+
             // Final step — anonymise the user row itself rather than delete,
             // so foreign keys with ON DELETE SET NULL don't cascade-blow
             // historical attributions we wanted to keep.

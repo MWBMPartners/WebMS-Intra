@@ -342,4 +342,51 @@ return [
     'format.thousands_separator'    => ',',
     'format.currency_position'      => 'before',
 
+    // =========================================================================
+    // 🏛️ Venue Bookings (#429)
+    // =========================================================================
+    // Coverage classification messages — built by Portal\Core\Venues::
+    // coverageMessage()/classifyEventCoverage() and surfaced through the
+    // calendar's Surface A (event-form inline check) and Surface B
+    // (post-save flash). Placeholders: :venue, :date, :window are the only
+    // ones classifyEventCoverage() actually populates — :status is
+    // deliberately not referenced below since callers never set it.
+    'venues.coverage.venue_missing'   => 'No external venue is linked to this check, so no booking status is available.',
+    'venues.coverage.no_booking'      => 'No booking found for :venue on :date — this event may need a venue booking.',
+    'venues.coverage.unavailable'     => ':venue is marked unavailable on :date.',
+    'venues.coverage.outside_hours'   => 'This event falls outside the booked hours (:window) at :venue on :date.',
+    'venues.coverage.unconfirmed'     => 'The booking for :venue on :date has not yet been confirmed.',
+    'venues.coverage.closed'          => ':venue is marked closed on :date.',
+    'venues.coverage.confirmed'       => ':venue is confirmed and booked for :date (:window).',
+    'venues.coverage.multi_day_worst' => 'Across :count days, the worst case is: :message',
+
+    // Calendar overlay legend (views/_shared_header.php) — the 4-swatch key
+    // shown whenever a grid view's venue overlay has bookings to explain.
+    'venues.legend.heading'     => 'Venue key:',
+    'venues.legend.confirmed'   => 'Confirmed',
+    'venues.legend.tentative'   => 'Tentative',
+    'venues.legend.closed'      => 'Closed',
+    'venues.legend.unavailable' => 'Unavailable',
+
+    // Event-form "is it booked?" advisory check (manage/_event_form.php
+    // Surface A). Transient UI only — never persisted on tblEvents.
+    'venues.check.heading'            => 'Venue Booking Check',
+    'venues.check.select_label'       => 'External Venue (optional)',
+    'venues.check.select_placeholder' => '— Not applicable —',
+    'venues.check.help_text'          => 'If this event is being held at a hired external building, pick it here to check its booking status.',
+
+    // App-level labels (venue register admin screens).
+    'venues.title'            => 'Venue Bookings',
+    'venues.subtitle'         => 'Record and track the hire of external buildings — schedule, agreements, invoices, payments, and calendar conflict warnings.',
+    'venues.nav_label'        => 'Venue Bookings',
+    'venues.venue_singular'   => 'Venue',
+    'venues.venue_plural'     => 'Venues',
+    'venues.new_venue'        => 'New Venue',
+    'venues.no_venues'        => 'No venues recorded yet.',
+    'venues.room_singular'    => 'Room',
+    'venues.room_plural'      => 'Rooms',
+    'venues.booking_singular' => 'Booking',
+    'venues.booking_plural'   => 'Bookings',
+    'venues.no_bookings'      => 'No bookings found.',
+
 ];

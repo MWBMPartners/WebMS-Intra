@@ -13,11 +13,17 @@
  *
  * Usage:
  *   require __DIR__ . '/_day_columns.php';
- *   echo render_day_columns($days, $events);
+ *   echo render_day_columns($days, $events, $venueOverlay);
  *
  * where:
- *   $days   list<DateTimeImmutable>  — midnights of the days to render
- *   $events list<array>              — already-fetched event rows
+ *   $days         list<DateTimeImmutable>  — midnights of the days to render
+ *   $events       list<array>              — already-fetched event rows
+ *   $venueOverlay array<string,array>      — Venues::availabilityForRange()'s
+ *                 per-date bucket (#429), or [] when the Venue Bookings app
+ *                 is disabled/absent/throwing — see calendar/index.php §5.0.
+ *                 Only ever non-empty when the caller already applied that
+ *                 guard, so this file itself never touches Venues:: or
+ *                 AppRegistry — see views/_venue_strip.php's own header.
  *
  * @package   Portal\Calendar
  * @license   All Rights Reserved
@@ -34,13 +40,22 @@ if (function_exists('render_day_columns') === false) {
      *
      * @param list<DateTimeImmutable> $days
      * @param list<array<string,mixed>> $events
+     * @param array<string,array<int,array<string,mixed>>> $venueOverlay
      *
      * @return string HTML
      */
-    function render_day_columns(array $days, array $events): string
+    function render_day_columns(array $days, array $events, array $venueOverlay = []): string
     {
         if (count($days) === 0) {
             return '<div class="alert alert-info">No days to display.</div>';
+        }
+
+        // 🏛️ Venue Bookings (#429) — only require the strip renderer when
+        // there is actually something to show, so a disabled/empty overlay
+        // never emits so much as the scoped CSS (byte-identical output).
+        $hasVenueOverlay = count($venueOverlay) > 0;
+        if ($hasVenueOverlay === true) {
+            require_once __DIR__ . DIRECTORY_SEPARATOR . '_venue_strip.php';
         }
 
         // 🕔 Hour range. Show full 24 hours for completeness; CSS makes
@@ -109,6 +124,9 @@ if (function_exists('render_day_columns') === false) {
                     <div class="portal-cal-dayhead <?php echo $isToday === true ? 'is-today' : ''; ?>">
                         <div class="small text-muted text-uppercase"><?php echo $esc($d->format('D')); ?></div>
                         <div class="h6 mb-0"><?php echo $esc($d->format('j M')); ?></div>
+                        <?php if ($hasVenueOverlay === true): ?>
+                            <?php echo render_venue_strip($venueOverlay[$d->format('Y-m-d')] ?? []); ?>
+                        <?php endif; ?>
                     </div>
                 <?php endforeach; ?>
             </div>

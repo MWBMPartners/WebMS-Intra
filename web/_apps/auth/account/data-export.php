@@ -21,6 +21,9 @@
  *   tblConsentLog         (your consent history)
  *   tblTrustedDevices     (active + revoked trust cookies)
  *   tblNotificationPreferences (when present)
+ *   tblVenueBookings      (bookings you last edited — #429)
+ *   tblVenueUsageTypeWindows (default-hours windows you created — #429)
+ *   tblVenueImportBatches (CSV/XLSX import batches you uploaded — #429)
  *
  * Sensitive fields (password hashes, TOTP secret, tokenHash etc.) are
  * EXCLUDED — exporting them would be a security regression, not a feature.
@@ -114,6 +117,23 @@ $payload = [
         ),
         'trustedDevices' => $fetchUserRows(
             'SELECT deviceID, label, createdIP, lastSeenAt, expiresAt, revokedAt, createdAt FROM tblTrustedDevices WHERE userID = ?'
+        ),
+        // 🏛️ Venue Bookings (#429) — export↔erasure parity with the three
+        // GdprEraser::catalogue() entries added alongside this block.
+        'venueBookingsEdited' => $fetchUserRows(
+            // tblVenueBookings.updatedByID — bookings this user last edited
+            'SELECT bookingID, siteID, venueID, roomID, bookingDate, startTime, endTime, statusID, notes, updatedAt '
+            . 'FROM tblVenueBookings WHERE updatedByID = ?'
+        ),
+        'venueUsageWindowsCreated' => $fetchUserRows(
+            // tblVenueUsageTypeWindows.createdByID — default-hours windows this user created
+            'SELECT windowID, siteID, usageTypeID, effectiveFrom, defaultStartTime, defaultEndTime, note, createdAt '
+            . 'FROM tblVenueUsageTypeWindows WHERE createdByID = ?'
+        ),
+        'venueImportBatches' => $fetchUserRows(
+            // tblVenueImportBatches.createdByID — CSV/XLSX import batches this user uploaded
+            'SELECT batchID, siteID, venueID, fileName, sourceKind, status, rowCount, importedCount, skippedCount, createdAt, committedAt '
+            . 'FROM tblVenueImportBatches WHERE createdByID = ?'
         ),
     ],
 ];
