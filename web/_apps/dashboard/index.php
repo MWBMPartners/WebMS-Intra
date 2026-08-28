@@ -397,7 +397,7 @@ $firstRunSteps = [
 <!-- 🎴 App Cards Grid -->
 <div class="row g-4">
     <?php foreach ($apps as $app): ?>
-        <div class="col-12 col-sm-6 col-md-4 col-lg-3">
+        <div class="col-6 col-sm-6 col-md-4 col-lg-3">
             <a href="<?php echo htmlspecialchars($app['url'], ENT_QUOTES, 'UTF-8'); ?>" class="text-decoration-none text-reset">
                 <div class="card app-card h-100 shadow-sm" style="border-top:4px solid <?php echo htmlspecialchars($app['color'], ENT_QUOTES, 'UTF-8'); ?>">
                     <div class="card-body text-center">

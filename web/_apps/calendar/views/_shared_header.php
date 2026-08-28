@@ -123,13 +123,13 @@ $viewMeta = [
         <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
             <div class="d-flex align-items-center gap-2 flex-wrap">
                 <a href="<?php echo htmlspecialchars($urlFor(['date' => $prevCursor->format('Y-m-d')]), ENT_QUOTES, 'UTF-8'); ?>"
-                   class="btn btn-sm btn-outline-secondary" title="Previous">
+                   class="btn btn-sm btn-outline-secondary" title="Previous" aria-label="Previous">
                     <i class="fa-solid fa-chevron-left"></i>
                 </a>
                 <a href="<?php echo htmlspecialchars($urlFor(['date' => date('Y-m-d')]), ENT_QUOTES, 'UTF-8'); ?>"
                    class="btn btn-sm btn-outline-secondary">Today</a>
                 <a href="<?php echo htmlspecialchars($urlFor(['date' => $nextCursor->format('Y-m-d')]), ENT_QUOTES, 'UTF-8'); ?>"
-                   class="btn btn-sm btn-outline-secondary" title="Next">
+                   class="btn btn-sm btn-outline-secondary" title="Next" aria-label="Next">
                     <i class="fa-solid fa-chevron-right"></i>
                 </a>
                 <h2 class="h5 mb-0 ms-2"><?php echo $rangeTitle; /* contains a literal &ndash; — safe */ ?></h2>
@@ -184,7 +184,7 @@ $viewMeta = [
                    data-portal-calendar-view="<?php echo htmlspecialchars($key, ENT_QUOTES, 'UTF-8'); ?>"
                    title="<?php echo htmlspecialchars($meta['label'], ENT_QUOTES, 'UTF-8'); ?> view">
                     <i class="fa-solid <?php echo htmlspecialchars($meta['icon'], ENT_QUOTES, 'UTF-8'); ?> me-1"></i>
-                    <span class="d-none d-sm-inline"><?php echo htmlspecialchars($meta['label'], ENT_QUOTES, 'UTF-8'); ?></span>
+                    <span class="d-none d-md-inline"><?php echo htmlspecialchars($meta['label'], ENT_QUOTES, 'UTF-8'); ?></span>
                 </a>
             <?php endforeach; ?>
         </div>

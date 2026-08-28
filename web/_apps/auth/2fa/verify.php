@@ -198,6 +198,20 @@ $pageTitle = 'Two-Factor Verification';
     <title><?php echo htmlspecialchars($pageTitle, ENT_QUOTES, 'UTF-8'); ?></title>
     <link rel="stylesheet" href="/assets/css/bootstrap.min.css">
     <link rel="stylesheet" href="/assets/css/fontawesome/all.min.css">
+
+    <!-- 🌙 Prevent FOUC: apply saved theme before first paint -->
+    <script>
+    (function(){
+        var t = localStorage.getItem('portal-theme');
+        if (t === 'dark' || t === 'light') {
+            document.documentElement.setAttribute('data-bs-theme', t);
+        } else if (t === 'auto' || t === null) {
+            var prefersDark = window.matchMedia
+                && window.matchMedia('(prefers-color-scheme: dark)').matches;
+            document.documentElement.setAttribute('data-bs-theme', prefersDark ? 'dark' : 'light');
+        }
+    })();
+    </script>
 </head>
 <body class="bg-light">
 <div class="container">
@@ -255,7 +269,8 @@ $pageTitle = 'Two-Factor Verification';
                         <div class="mb-2">
                             <label for="backup_code" class="form-label">Backup code</label>
                             <input type="text" class="form-control text-center" id="backup_code" name="code"
-                                   maxlength="8" placeholder="Backup code" required>
+                                   maxlength="8" placeholder="Backup code" required
+                                   autocapitalize="none" autocorrect="off" spellcheck="false" autocomplete="off" inputmode="text">
                         </div>
                         <button type="submit" class="btn btn-outline-secondary w-100 btn-sm">
                             Use Backup Code

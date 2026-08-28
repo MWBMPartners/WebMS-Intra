@@ -11,16 +11,22 @@
  * Tests:
  *   1. MS365 OAuth Login — checks required settings are configured
  *   2. MS365 Graph Token — attempts client-credentials token acquisition
- *   3. MS365 Graph Email — sends a test email from the shared mailbox
+ *   3. MS365 Graph Email — sends a test email via Mailer::send() (the real
+ *      production path — direct or shared-mailbox, whichever is active)
  *   4. Google OAuth — checks configuration status
  *   5. Google Email — checks Gmail API service account config and sends test
+ *
+ * #234 additions: shared-mailbox status/edit sub-section on the Graph API
+ * card (mode badge, last-send indicator from tblEmailLog), and the test
+ * flow now goes through Mailer::send() instead of duplicating the
+ * token+sendMail cURL flow inline.
  *
  * @package   Portal\Admin
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   0.9.0
- * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/48
+ * @version   1.0.0
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/234
  * -----------------------------------------------------------------------------
  */
 
@@ -44,6 +50,11 @@ if (App::isAdmin() === false) {
     Router::renderError(403);
     return;
 }
+
+// 🚩 Flash message from a redirect — e.g. ms365-mail-save.php (#234).
+$flashMsg  = $_SESSION['flash_msg']  ?? '';
+$flashType = $_SESSION['flash_type'] ?? '';
+unset($_SESSION['flash_msg'], $_SESSION['flash_type']);
 
 // ============================================================================
 // 📧 Handle test-email POST
@@ -163,6 +174,28 @@ foreach ($ms365GraphSettings as $key => $label) {
     }
 }
 
+// -- MS365 Graph shared-mailbox sending (#234) --
+$sharedMailboxAddr = trim((string) (App::settings('mail.ms365.sharedMailbox') ?? ''));
+$sharedMailboxName = trim((string) (App::settings('mail.ms365.sharedMailboxName') ?? ''));
+$saveToSentItems    = ((string) (App::settings('mail.ms365.saveToSentItems') ?? 'true')) === 'true';
+$fallbackProvider   = (string) (App::settings('mail.fallbackProvider') ?? '');
+$ms365Mode          = $sharedMailboxAddr !== '' ? 'ms365-shared' : 'ms365';
+// 🔍 Display-only mirror of Mailer::effectiveSender() — read-only, never
+//    used to send; the real resolution lives in _core/Mailer.php.
+$effectiveFromAddr = $sharedMailboxAddr !== '' ? $sharedMailboxAddr : (string) (App::settings('mail.defaultFromAddress') ?? '');
+$effectiveFromName = $sharedMailboxAddr !== ''
+    ? ($sharedMailboxName !== '' ? $sharedMailboxName : (string) (App::settings('mail.defaultFromName') ?? ''))
+    : (string) (App::settings('mail.defaultFromName') ?? '');
+
+// -- Most recent tblEmailLog row — "last send" indicator (#234) --
+$lastSend = null;
+$lsStmt = $mysqli->prepare('SELECT provider, status, httpCode, errorCode, sentAt FROM tblEmailLog ORDER BY emailLogID DESC LIMIT 1');
+if ($lsStmt !== false) {
+    $lsStmt->execute();
+    $lastSend = $lsStmt->get_result()->fetch_assoc();
+    $lsStmt->close();
+}
+
 // -- Google OAuth settings --
 $googleSettings = [
     'auth.google.clientID'      => 'Client ID',
@@ -251,6 +284,12 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <i class="fa-solid fa-arrow-left me-1" aria-hidden="true"></i>Admin Dashboard
     </a>
 </div>
+
+<?php if ($flashMsg !== ''): ?>
+    <div class="alert alert-<?php echo htmlspecialchars($flashType !== '' ? $flashType : 'info', ENT_QUOTES, 'UTF-8'); ?>" role="alert">
+        <?php echo htmlspecialchars($flashMsg, ENT_QUOTES, 'UTF-8'); ?>
+    </div>
+<?php endif; ?>
 
 <!-- ====================================================================== -->
 <!-- 1️⃣ MS365 OAuth Login Configuration                                     -->
@@ -360,6 +399,93 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 </button>
             </form>
         <?php endif; ?>
+
+        <!-- 🏢 Shared-mailbox sending (#234) -->
+        <h6 class="border-bottom pb-2 mb-3 mt-4"><i class="fa-solid fa-users-rectangle me-2" aria-hidden="true"></i>Shared-Mailbox Sending</h6>
+        <p class="text-secondary small mb-3">
+            When set, Graph <code>sendMail</code> is routed through this shared mailbox instead of
+            <code>mail.defaultFromAddress</code> — same app-only client-credentials token, with an
+            explicit <code>from</code> identity. Leave the mailbox blank to keep today's direct-send
+            behaviour (this feature is OFF by default — empty mailbox = off, no separate toggle).
+        </p>
+
+        <div class="portal-data-list mb-3">
+            <div class="portal-data-row">
+                <div class="col-12 col-md-3 fw-semibold">Active mode</div>
+                <div class="col-12 col-md-9">
+                    <span class="badge bg-<?php echo ($ms365Mode === 'ms365-shared') ? 'primary' : 'secondary'; ?>">
+                        <?php echo ($ms365Mode === 'ms365-shared') ? 'Shared mailbox (ms365-shared)' : 'Direct (mail.defaultFromAddress)'; ?>
+                    </span>
+                    <?php if ($effectiveFromAddr !== ''): ?>
+                        <code class="ms-2 small"><?php echo htmlspecialchars($effectiveFromAddr, ENT_QUOTES, 'UTF-8'); ?></code>
+                        <?php if ($effectiveFromName !== ''): ?>
+                            <span class="text-muted small">(<?php echo htmlspecialchars($effectiveFromName, ENT_QUOTES, 'UTF-8'); ?>)</span>
+                        <?php endif; ?>
+                    <?php endif; ?>
+                </div>
+            </div>
+            <?php if ($lastSend !== null): ?>
+                <div class="portal-data-row">
+                    <div class="col-12 col-md-3 fw-semibold">Last send</div>
+                    <div class="col-12 col-md-9">
+                        <span class="badge bg-<?php echo ((string) $lastSend['status'] === 'sent') ? 'success' : 'danger'; ?>">
+                            <?php echo htmlspecialchars(strtoupper((string) $lastSend['status']), ENT_QUOTES, 'UTF-8'); ?>
+                        </span>
+                        <span class="text-muted small ms-2">
+                            <?php echo htmlspecialchars((string) $lastSend['provider'], ENT_QUOTES, 'UTF-8'); ?>
+                            &middot; <?php echo htmlspecialchars((string) $lastSend['sentAt'], ENT_QUOTES, 'UTF-8'); ?>
+                            <?php if ((string) $lastSend['status'] === 'failed' && (string) $lastSend['errorCode'] !== ''): ?>
+                                &middot; <code><?php echo htmlspecialchars((string) $lastSend['errorCode'], ENT_QUOTES, 'UTF-8'); ?></code>
+                            <?php endif; ?>
+                        </span>
+                    </div>
+                </div>
+            <?php else: ?>
+                <div class="portal-data-row">
+                    <div class="col-12 col-md-3 fw-semibold">Last send</div>
+                    <div class="col-12 col-md-9 text-muted small">No sends logged yet.</div>
+                </div>
+            <?php endif; ?>
+        </div>
+
+        <form method="POST" action="/admin/integrations/ms365-mail-save" class="row g-2">
+            <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
+            <div class="col-12 col-md-6">
+                <label for="ms365_shared_mailbox" class="form-label small fw-semibold">Shared mailbox address</label>
+                <input type="email" class="form-control form-control-sm" id="ms365_shared_mailbox" name="sharedMailbox"
+                       placeholder="office@example.org"
+                       value="<?php echo htmlspecialchars($sharedMailboxAddr, ENT_QUOTES, 'UTF-8'); ?>">
+                <div class="form-text small">Blank keeps sending from <code>mail.defaultFromAddress</code> (today's behaviour).</div>
+            </div>
+            <div class="col-12 col-md-6">
+                <label for="ms365_shared_mailbox_name" class="form-label small fw-semibold">Display name</label>
+                <input type="text" class="form-control form-control-sm" id="ms365_shared_mailbox_name" name="sharedMailboxName"
+                       placeholder="Church Office"
+                       value="<?php echo htmlspecialchars($sharedMailboxName, ENT_QUOTES, 'UTF-8'); ?>">
+                <div class="form-text small">Falls back to <code>mail.defaultFromName</code> when left blank.</div>
+            </div>
+            <div class="col-12 col-md-6">
+                <div class="form-check mt-2">
+                    <input type="checkbox" class="form-check-input" id="ms365_save_sent" name="saveToSentItems" value="1"
+                           <?php echo ($saveToSentItems === true) ? 'checked' : ''; ?>>
+                    <label class="form-check-label small" for="ms365_save_sent">
+                        Keep a copy in the shared mailbox's Sent Items
+                    </label>
+                </div>
+            </div>
+            <div class="col-12 col-md-6">
+                <label for="ms365_fallback_provider" class="form-label small fw-semibold">Fallback provider on Graph failure</label>
+                <select class="form-select form-select-sm" id="ms365_fallback_provider" name="fallbackProvider">
+                    <option value="" <?php echo ($fallbackProvider === '') ? 'selected' : ''; ?>>None — fail loudly (recommended)</option>
+                    <option value="google" <?php echo ($fallbackProvider === 'google') ? 'selected' : ''; ?>>Google (Gmail API)</option>
+                </select>
+            </div>
+            <div class="col-12">
+                <button type="submit" class="btn btn-primary btn-sm">
+                    <i class="fa-solid fa-floppy-disk me-1" aria-hidden="true"></i>Save Shared-Mailbox Settings
+                </button>
+            </div>
+        </form>
     </div>
 </div>
 
@@ -372,9 +498,12 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     </div>
     <div class="card-body">
         <p class="text-secondary small mb-3">
-            Send a test email from the configured shared mailbox
-            (<strong><?php echo htmlspecialchars(App::settings('mail.defaultFromAddress') ?? 'not set', ENT_QUOTES, 'UTF-8'); ?></strong>)
-            via Microsoft Graph <code>sendMail</code> API. This verifies SendAs / delegate permissions.
+            Sends via <code>Portal\Core\Mailer::send()</code> — the exact path every portal email
+            takes — from the effective sender
+            (<strong><?php echo htmlspecialchars($effectiveFromAddr !== '' ? $effectiveFromAddr : 'not set', ENT_QUOTES, 'UTF-8'); ?></strong>,
+            <span class="badge bg-<?php echo ($ms365Mode === 'ms365-shared') ? 'primary' : 'secondary'; ?>"><?php echo htmlspecialchars($ms365Mode, ENT_QUOTES, 'UTF-8'); ?></span>).
+            This verifies Graph <code>Mail.Send</code> app-only permissions (and, when a shared mailbox is
+            configured above, that it is inside the Application Access Policy scope).
         </p>
 
         <?php if ($ms365GraphAllSet === false): ?>
@@ -585,6 +714,59 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 </div>
 
 <!-- ====================================================================== -->
+<!-- 6️⃣b what3words — Location addressing (#456)                            -->
+<!-- ====================================================================== -->
+<div class="card mb-4">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <h5 class="mb-0"><i class="fa-solid fa-location-crosshairs me-2" aria-hidden="true"></i>what3words</h5>
+        <?php
+        $w3wEnabled = ((string) (App::settings('w3w.enabled') ?? 'false')) === 'true';
+        ?>
+        <?php if ($w3wEnabled === true): ?>
+            <span class="badge bg-success"><i class="fa-solid fa-circle-check me-1" aria-hidden="true"></i>Enabled</span>
+        <?php else: ?>
+            <span class="badge bg-secondary"><i class="fa-solid fa-circle-minus me-1" aria-hidden="true"></i>Disabled (manual entry always works)</span>
+        <?php endif; ?>
+    </div>
+    <div class="card-body">
+        <p class="text-secondary small mb-3">
+            Address a 3m square with three simple words. The <code>///word.word.word</code> field is
+            always available for manual entry across Events, Venues, Resources and Asset Locations —
+            this integration adds validation, coordinate conversion, and typing autosuggest.
+        </p>
+        <a href="/admin/integrations/what3words" class="btn btn-outline-primary btn-sm">
+            <i class="fa-solid fa-arrow-right me-1" aria-hidden="true"></i>Manage what3words
+        </a>
+    </div>
+</div>
+
+<!-- ====================================================================== -->
+<!-- 6️⃣c Geocoding — Address ↔ coordinates (#456)                          -->
+<!-- ====================================================================== -->
+<div class="card mb-4">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <h5 class="mb-0"><i class="fa-solid fa-earth-europe me-2" aria-hidden="true"></i>Geocoding</h5>
+        <?php
+        $geoHasKey = ((string) (App::settings('geo.google.apiKey') ?? '')) !== '';
+        ?>
+        <?php if ($geoHasKey === true): ?>
+            <span class="badge bg-success"><i class="fa-solid fa-circle-check me-1" aria-hidden="true"></i>Google configured</span>
+        <?php else: ?>
+            <span class="badge bg-secondary"><i class="fa-solid fa-circle-minus me-1" aria-hidden="true"></i>Nominatim only</span>
+        <?php endif; ?>
+    </div>
+    <div class="card-body">
+        <p class="text-secondary small mb-3">
+            Address <i class="fa-solid fa-arrows-left-right"></i> coordinates. Google when a key is set,
+            otherwise OpenStreetMap Nominatim — throttled and cached, one request per second.
+        </p>
+        <a href="/admin/integrations/geocoding" class="btn btn-outline-primary btn-sm">
+            <i class="fa-solid fa-arrow-right me-1" aria-hidden="true"></i>Manage Geocoding
+        </a>
+    </div>
+</div>
+
+<!-- ====================================================================== -->
 <!-- 7️⃣ Webhooks — Outbound Event Notifications (#324)                      -->
 <!-- ====================================================================== -->
 <div class="card mb-4">
@@ -618,13 +800,18 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 <li>API Permissions: <code>openid</code>, <code>email</code>, <code>profile</code>, <code>offline_access</code>, <code>User.Read</code> (Delegated)</li>
                 <li>Redirect URI configured to match <code>auth.ms365.enduser.redirectURI</code></li>
             </ul>
-            <p class="mb-2">For <strong>app-level Graph API email</strong> (shared mailbox / SendAs), the Azure AD app needs:</p>
-            <ul class="mb-0">
+            <p class="mb-2">For <strong>app-level Graph API email</strong> (#234 — direct or shared-mailbox), the Azure AD app needs:</p>
+            <ul class="mb-3">
                 <li>API Permissions: <code>Mail.Send</code> (Application — not Delegated)</li>
                 <li>Admin consent granted for the <code>Mail.Send</code> permission</li>
-                <li>The shared mailbox must grant SendAs or Full Access to the app, or use an
+                <li>No Exchange "Send As" / "Full Access" grant is required on the mailbox itself — application
+                    <code>Mail.Send</code> lets the app send as ANY mailbox in the tenant. That breadth is why an
                     <a href="https://learn.microsoft.com/en-us/graph/auth-limit-mailbox-access" target="_blank" rel="noopener">
-                        Application Access Policy</a> scoped to the mailbox</li>
+                        Application Access Policy</a> (or its RBAC-for-Applications successor) scoped to the shared
+                    mailbox is strongly recommended once one is configured below</li>
+                <li>Set the <strong>Shared-Mailbox Sending</strong> fields above (in the MS365 Graph API card) to
+                    route through a dedicated shared mailbox instead of <code>mail.defaultFromAddress</code> — see
+                    <a href="/help/admin#ms365-shared-mailbox">the admin guide</a> for the full owner runbook</li>
             </ul>
             <p class="mb-2">For <strong>Google Workspace email sending</strong> (Gmail API via service account):</p>
             <ul class="mb-0">
@@ -726,10 +913,15 @@ function testGraphToken(): array
 }
 
 /**
- * 📧 Send a test email via Microsoft Graph using the shared mailbox.
- *
- * Performs the full flow: token acquisition → sendMail API call.
- * Returns diagnostic details rather than a simple bool.
+ * 📧 Send a test email through the REAL production path — `Mailer::send()`
+ * (#234 §6.1 / plan Q8). This used to duplicate the token+sendMail cURL
+ * flow inline, which meant the test could pass while the real path (with
+ * its own from/sender shape, error handling, shared-mailbox routing) had
+ * silently drifted. Routing through Mailer::send() removes that drift
+ * risk permanently — whatever this button proves also proves the real
+ * send path, including the new shared-mailbox mode and its tblEmailLog
+ * row. The standalone Token Acquisition Test above keeps its own
+ * diagnostic value regardless.
  *
  * @param string $recipient The email address to send the test to
  *
@@ -737,63 +929,8 @@ function testGraphToken(): array
  */
 function sendTestEmail(string $recipient): array
 {
-    global $SETTINGS;
+    global $SETTINGS, $mysqli;
 
-    $fromAddr = $SETTINGS['mail']['defaultFromAddress'] ?? '';
-    $fromName = $SETTINGS['mail']['defaultFromName']    ?? 'Portal';
-
-    if ($fromAddr === '') {
-        return ['success' => false, 'message' => 'From address not configured.', 'details' => ''];
-    }
-
-    // 🔑 Step 1: Acquire token
-    $cid    = $SETTINGS['auth']['ms365']['appwide']['clientID'] ?? '';
-    $sec    = $SETTINGS['auth']['ms365']['appwide']['clientSecret'] ?? '';
-    $tenant = $SETTINGS['auth']['ms365']['tenantID'] ?? '';
-
-    if ($cid === '' || $sec === '' || $tenant === '') {
-        return ['success' => false, 'message' => 'Graph API credentials missing.', 'details' => ''];
-    }
-
-    $tokenUrl  = 'https://login.microsoftonline.com/' . $tenant . '/oauth2/v2.0/token';
-    $tokenPost = [
-        'client_id'     => $cid,
-        'client_secret' => $sec,
-        'grant_type'    => 'client_credentials',
-        'scope'         => 'https://graph.microsoft.com/.default',
-    ];
-
-    $ch = curl_init($tokenUrl);
-    if ($ch === false) {
-        return ['success' => false, 'message' => 'curl_init() failed for token request.', 'details' => ''];
-    }
-
-    curl_setopt_array($ch, [
-        CURLOPT_POST           => true,
-        CURLOPT_POSTFIELDS     => http_build_query($tokenPost),
-        CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_TIMEOUT        => 15,
-        CURLOPT_SSL_VERIFYPEER => true,
-        CURLOPT_SSL_VERIFYHOST => 2,
-    ]);
-
-    $tokenResp = curl_exec($ch);
-    $tokenCode = (int) curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
-    curl_close($ch);
-
-    if ($tokenResp === false || $tokenCode < 200 || $tokenCode >= 300) {
-        Logger::activity('IntegrationTest', 'Test email failed — token acquisition returned HTTP ' . $tokenCode);
-        return ['success' => false, 'message' => 'Token acquisition failed (HTTP ' . $tokenCode . ').', 'details' => (string) $tokenResp];
-    }
-
-    $tokenData = json_decode((string) $tokenResp, true);
-    if (isset($tokenData['access_token']) === false) {
-        return ['success' => false, 'message' => 'Token response did not contain access_token.', 'details' => (string) $tokenResp];
-    }
-
-    $accessToken = $tokenData['access_token'];
-
-    // 📧 Step 2: Send the test email
     $siteName  = htmlspecialchars($SETTINGS['site']['name'] ?? 'Portal', ENT_QUOTES, 'UTF-8');
     $timestamp = date('Y-m-d H:i:s T');
 
@@ -804,82 +941,58 @@ function sendTestEmail(string $recipient): array
         . '<h2 style="margin:0;font-size:18px;">Integration Test Email</h2>'
         . '</div>'
         . '<div style="padding:24px;">'
-        . '<p>This is a <strong>test email</strong> sent from the ' . $siteName . ' Integration Diagnostics page.</p>'
-        . '<table style="border-collapse:collapse;margin:1em 0;width:100%;max-width:500px;">'
-        . '<tr><td style="padding:6px 12px;border:1px solid #dee2e6;font-weight:bold;">From (Shared Mailbox)</td>'
-        . '<td style="padding:6px 12px;border:1px solid #dee2e6;">' . htmlspecialchars($fromAddr, ENT_QUOTES, 'UTF-8') . '</td></tr>'
-        . '<tr><td style="padding:6px 12px;border:1px solid #dee2e6;font-weight:bold;">Display Name</td>'
-        . '<td style="padding:6px 12px;border:1px solid #dee2e6;">' . htmlspecialchars($fromName, ENT_QUOTES, 'UTF-8') . '</td></tr>'
-        . '<tr><td style="padding:6px 12px;border:1px solid #dee2e6;font-weight:bold;">Sent At</td>'
-        . '<td style="padding:6px 12px;border:1px solid #dee2e6;">' . $timestamp . '</td></tr>'
-        . '<tr><td style="padding:6px 12px;border:1px solid #dee2e6;font-weight:bold;">API Method</td>'
-        . '<td style="padding:6px 12px;border:1px solid #dee2e6;">Graph API — client_credentials + /users/{mailbox}/sendMail</td></tr>'
-        . '</table>'
-        . '<p style="color:#6c757d;font-size:12px;">If you received this email, Microsoft Graph SendAs from the shared mailbox is working correctly.</p>'
+        . '<p>This is a <strong>test email</strong> sent from the ' . $siteName . ' Integration Diagnostics page, via <code>Portal\\Core\\Mailer::send()</code> — the same path every other portal email takes.</p>'
+        . '<p style="color:#6c757d;font-size:12px;">If you received this email, the configured MS365 Graph identity (direct or shared-mailbox) is working correctly.</p>'
         . '</div>'
         . '<div style="padding:16px 24px;background:#f8f9fa;border-top:1px solid #dee2e6;font-size:12px;color:#6c757d;text-align:center;">'
         . 'Sent by ' . $siteName . ' Integration Diagnostics &mdash; ' . $timestamp
         . '</div>'
         . '</div></body></html>';
 
-    $msg = [
-        'message' => [
-            'subject'      => '[' . ($SETTINGS['site']['name'] ?? 'Portal') . '] Integration Test Email — ' . $timestamp,
-            'body'         => ['contentType' => 'HTML', 'content' => $htmlBody],
-            'toRecipients' => [['emailAddress' => ['address' => $recipient]]],
-        ],
-    ];
+    $subject = '[' . ($SETTINGS['site']['name'] ?? 'Portal') . '] Integration Test Email — ' . $timestamp;
 
-    $sendUrl = 'https://graph.microsoft.com/v1.0/users/' . urlencode($fromAddr) . '/sendMail';
-
-    $ch = curl_init($sendUrl);
-    if ($ch === false) {
-        return ['success' => false, 'message' => 'curl_init() failed for sendMail.', 'details' => ''];
+    $ok = false;
+    $exceptionMsg = '';
+    try {
+        $ok = \Portal\Core\Mailer::send($recipient, $subject, $htmlBody);
+    } catch (\Throwable $ex) {
+        $exceptionMsg = $ex->getMessage();
     }
 
-    curl_setopt_array($ch, [
-        CURLOPT_POST           => true,
-        CURLOPT_HTTPHEADER     => [
-            'Authorization: Bearer ' . $accessToken,
-            'Content-Type: application/json',
-        ],
-        CURLOPT_POSTFIELDS     => json_encode($msg),
-        CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_TIMEOUT        => 20,
-        CURLOPT_SSL_VERIFYPEER => true,
-        CURLOPT_SSL_VERIFYHOST => 2,
-    ]);
-
-    $sendResp = curl_exec($ch);
-    $sendCode = (int) curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
-    $curlErr  = curl_error($ch);
-    curl_close($ch);
-
-    if ($sendResp === false) {
-        Logger::activity('IntegrationTest', 'Test email cURL error: ' . $curlErr);
-        return ['success' => false, 'message' => 'cURL request to sendMail failed.', 'details' => $curlErr];
+    // 🔍 Surface the just-written tblEmailLog row as the diagnostic detail
+    //    — provider/mode, HTTP code, and Graph's own error code, never a
+    //    token or secret (Mailer::logSend() never records either).
+    $detail = '';
+    $lsStmt = $mysqli->prepare('SELECT provider, httpCode, errorCode, errorDetail FROM tblEmailLog ORDER BY emailLogID DESC LIMIT 1');
+    if ($lsStmt !== false) {
+        $lsStmt->execute();
+        $row = $lsStmt->get_result()->fetch_assoc();
+        $lsStmt->close();
+        if ($row !== null) {
+            $detail = 'Provider: ' . $row['provider']
+                . ' | HTTP ' . ($row['httpCode'] ?? '—')
+                . ((string) $row['errorCode'] !== '' ? ' | ' . $row['errorCode'] : '')
+                . ((string) $row['errorDetail'] !== '' ? ' — ' . $row['errorDetail'] : '');
+        }
+    }
+    if ($exceptionMsg !== '') {
+        $detail = trim('Exception: ' . $exceptionMsg . ($detail !== '' ? ' | ' . $detail : ''));
     }
 
-    if ($sendCode >= 200 && $sendCode < 300) {
-        Logger::activity('IntegrationTest', 'Test email sent successfully to ' . $recipient . ' from ' . $fromAddr);
+    if ($ok === true) {
+        Logger::activity('IntegrationTest', 'Test email sent successfully to ' . $recipient);
         return [
             'success' => true,
-            'message' => 'Email sent to ' . $recipient . ' from shared mailbox ' . $fromAddr . ' (HTTP ' . $sendCode . ').',
-            'details' => '',
+            'message' => 'Email sent to ' . $recipient . '.',
+            'details' => $detail,
         ];
     }
 
-    // 🔍 Parse Graph API error response
-    $errData = json_decode((string) $sendResp, true);
-    $errCode = $errData['error']['code'] ?? 'unknown';
-    $errMsg  = $errData['error']['message'] ?? 'No error message provided.';
-
-    Logger::activity('IntegrationTest', 'Test email failed — HTTP ' . $sendCode . ': ' . $errCode . ' — to: ' . $recipient);
-
+    Logger::activity('IntegrationTest', 'Test email failed for ' . $recipient);
     return [
         'success' => false,
-        'message' => 'HTTP ' . $sendCode . ' — ' . $errCode,
-        'details' => $errMsg,
+        'message' => $exceptionMsg !== '' ? 'Mailer threw an exception — see detail below.' : 'Mailer returned false — see detail below.',
+        'details' => $detail,
     ];
 }
 

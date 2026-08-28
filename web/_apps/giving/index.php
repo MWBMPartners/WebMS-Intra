@@ -64,12 +64,12 @@ $breadcrumbs = ['Dashboard' => '/', 'Giving' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 
-<div class="d-flex justify-content-between align-items-center mb-4">
+<div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
     <div>
         <h1 class="mb-1"><i class="fa-solid fa-hand-holding-dollar me-2"></i>My Giving</h1>
         <p class="text-secondary mb-0">Your contribution history. <?php echo (int) $year; ?> total: <strong><?php echo htmlspecialchars(Giving::formatAmount($ytdTotal, $currency), ENT_QUOTES, 'UTF-8'); ?></strong></p>
     </div>
-    <div class="d-flex gap-2">
+    <div class="d-flex gap-2 flex-wrap">
         <?php if ($paymentsEnabled === true): ?>
             <a href="/giving/give" class="btn btn-success btn-sm"><i class="fa-solid fa-heart me-1"></i>Give online</a>
         <?php endif; ?>
@@ -91,13 +91,20 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <div class="card">
         <div class="card-body">
             <div class="portal-data-list">
+                <div class="portal-data-row portal-data-header d-none d-md-flex">
+                    <div class="col-md-2">Date</div>
+                    <div class="col-md-4">Category</div>
+                    <div class="col-md-2">Method</div>
+                    <div class="col-md-2">Reference</div>
+                    <div class="col-md-2 text-end">Amount</div>
+                </div>
                 <?php foreach ($entries as $e): ?>
-                    <div class="row py-2 border-bottom">
-                        <div class="col-md-2 small text-muted"><?php echo htmlspecialchars(date('d/m/Y', (int) strtotime((string) $e['donatedAt'])), ENT_QUOTES, 'UTF-8'); ?></div>
-                        <div class="col-md-4"><strong><?php echo htmlspecialchars((string) $e['categoryName'], ENT_QUOTES, 'UTF-8'); ?></strong></div>
-                        <div class="col-md-2 small text-muted"><?php echo htmlspecialchars((string) $e['method'], ENT_QUOTES, 'UTF-8'); ?></div>
-                        <div class="col-md-2 small text-muted"><?php echo htmlspecialchars((string) ($e['reference'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></div>
-                        <div class="col-md-2 text-end"><strong><?php echo htmlspecialchars(Giving::formatAmount((int) $e['amountPence'], (string) ($e['currency'] ?? $currency)), ENT_QUOTES, 'UTF-8'); ?></strong></div>
+                    <div class="portal-data-row">
+                        <div class="portal-data-cell col-12 col-md-2 small text-muted" data-label="Date"><?php echo htmlspecialchars(date('d/m/Y', (int) strtotime((string) $e['donatedAt'])), ENT_QUOTES, 'UTF-8'); ?></div>
+                        <div class="portal-data-cell col-12 col-md-4" data-label="Category"><strong><?php echo htmlspecialchars((string) $e['categoryName'], ENT_QUOTES, 'UTF-8'); ?></strong></div>
+                        <div class="portal-data-cell col-12 col-md-2 small text-muted" data-label="Method"><?php echo htmlspecialchars((string) $e['method'], ENT_QUOTES, 'UTF-8'); ?></div>
+                        <div class="portal-data-cell col-12 col-md-2 small text-muted" data-label="Reference"><?php echo htmlspecialchars((string) ($e['reference'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></div>
+                        <div class="portal-data-cell col-12 col-md-2 text-md-end" data-label="Amount"><strong><?php echo htmlspecialchars(Giving::formatAmount((int) $e['amountPence'], (string) ($e['currency'] ?? $currency)), ENT_QUOTES, 'UTF-8'); ?></strong></div>
                     </div>
                 <?php endforeach; ?>
             </div>

@@ -17,6 +17,13 @@ use Portal\Core\Auth;
 use Portal\Core\Giving;
 use Portal\Core\Site;
 
+// 📍 #456 Chunk B — structured-input reuse, TEXT-ONLY (no coords/W3W — see
+// the partial call below): the shared location-input partial replaces the
+// bare address/postcode inputs for UI consistency, mapped onto this app's
+// EXISTING single `address` + `postcode` POST fields. No schema change —
+// tblGiftAidDeclaration gains no new columns, so no new erasure surface.
+require_once PORTAL_CORE . DIRECTORY_SEPARATOR . 'partials' . DIRECTORY_SEPARATOR . 'location-input.php';
+
 Auth::ensureSession();
 Auth::requireLogin();
 
@@ -108,16 +115,20 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 an amount of UK Income Tax and/or Capital Gains Tax for the current tax year
                 at least equal to the tax all charities will reclaim on my donations.
             </p>
-            <div class="row g-2">
-                <div class="col-md-8">
-                    <label class="form-label small">Home address (required for HMRC)</label>
-                    <input type="text" class="form-control form-control-sm" name="address" maxlength="500" placeholder="42 Mill Road, Cambridge">
-                </div>
-                <div class="col-md-4">
-                    <label class="form-label small">Postcode</label>
-                    <input type="text" class="form-control form-control-sm" name="postcode" maxlength="20" placeholder="CB1 2AB">
-                </div>
-            </div>
+            <p class="small text-muted mb-2">Required for HMRC.</p>
+            <?php
+            // 📍 #456 Chunk B — text-only (showCoords/showW3W both false):
+            // "reduced names map" mode renders ONLY the two address fields
+            // this app's own `names` override maps (line1 -> address,
+            // postcode -> postcode), onto the EXISTING gad-save.php POST
+            // contract — no field-name change, gad-save.php is unchanged.
+            portal_location_input([
+                'showCoords' => false,
+                'showW3W'    => false,
+                'compact'    => true,
+                'names'      => ['line1' => 'address', 'postcode' => 'postcode'],
+            ]);
+            ?>
             <button class="btn btn-primary btn-sm mt-3" type="submit"><i class="fa-solid fa-check me-1"></i>I accept this declaration</button>
         </form>
     </div>

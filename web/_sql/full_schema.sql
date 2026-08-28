@@ -192,12 +192,23 @@ CREATE TABLE IF NOT EXISTS `tblUsers` (
     `displayPhoto`   VARCHAR(500) DEFAULT NULL COMMENT 'Path under _uploads/ to profile photo',
     `displayPhone`   VARCHAR(50)  DEFAULT NULL,
     `displayAddress` VARCHAR(500) DEFAULT NULL,
+    -- 📍 Member home coordinates + what3words (from migration 181 / #456
+    -- Chunk B) — PRIVATE by default; NEVER auto-geocoded (no geocodedAt/
+    -- geocodeSource pair — set only by the member's own explicit "Look up
+    -- coordinates" action or hand entry, see directory/me.php).
+    `latitude`    DECIMAL(10,7) DEFAULT NULL COMMENT 'Member home coordinates — PRIVATE by default; see visibilityCoords (migration 181)',
+    `longitude`   DECIMAL(10,7) DEFAULT NULL,
+    `what3words`  VARCHAR(100)  DEFAULT NULL COMMENT 'what3words address',
     -- 🔒 Per-field directory visibility (from migration 079 / #261)
     `visibilityName`    ENUM('private','team','members','public') NOT NULL DEFAULT 'members',
     `visibilityRoles`   ENUM('private','team','members','public') NOT NULL DEFAULT 'members',
     `visibilityEmail`   ENUM('private','team','members','public') NOT NULL DEFAULT 'private',
     `visibilityPhone`   ENUM('private','team','members','public') NOT NULL DEFAULT 'private',
     `visibilityAddress` ENUM('private','team','members','public') NOT NULL DEFAULT 'private',
+    -- 🔒 Coordinate visibility — INDEPENDENT of visibilityAddress; consent
+    -- for address text never implies consent for a map pin (migration 181
+    -- / #456 Chunk B).
+    `visibilityCoords`  ENUM('private','team','members','public') NOT NULL DEFAULT 'private' COMMENT 'Coordinate visibility — INDEPENDENT of visibilityAddress; consent for address text never implies consent for a map pin (migration 181)',
     `visibilityBio`     ENUM('private','team','members','public') NOT NULL DEFAULT 'members',
     `visibilityPhoto`   ENUM('private','team','members','public') NOT NULL DEFAULT 'private',
     `createdAt`    DATETIME     DEFAULT CURRENT_TIMESTAMP,
@@ -1065,6 +1076,29 @@ CREATE TABLE IF NOT EXISTS `tblErrors` (
         REFERENCES `tblSites` (`siteID`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
 COMMENT='Centralised error log for all platforms/libraries. See core/Logger.php.';
+
+-- ── from 176_ms365_shared_mailbox.sql (#234) — per-send email audit trail,
+-- BOTH mail providers. Also closes the #230 dependency. See that
+-- migration's header for the full model-decision rationale.
+CREATE TABLE IF NOT EXISTS `tblEmailLog` (
+    `emailLogID`      INT           NOT NULL AUTO_INCREMENT COMMENT 'Unique send-log record identifier',
+    `siteID`          INT           DEFAULT NULL COMMENT 'Site::id() at send time; NULL when sent outside site context (e.g. cron)',
+    `provider`        VARCHAR(20)   NOT NULL COMMENT 'ms365, ms365-shared, or google',
+    `fromAddress`     VARCHAR(255)  NOT NULL DEFAULT '' COMMENT 'Effective sender address at send time',
+    `toRecipients`    TEXT          NOT NULL COMMENT 'Comma-joined recipient address list',
+    `subject`         VARCHAR(500)  NOT NULL DEFAULT '' COMMENT 'Truncated subject line',
+    `attachmentCount` TINYINT UNSIGNED NOT NULL DEFAULT 0 COMMENT 'Number of files actually attached',
+    `status`          ENUM('sent','failed') NOT NULL,
+    `httpCode`        SMALLINT      DEFAULT NULL COMMENT 'Provider HTTP response code, when one was received',
+    `errorCode`       VARCHAR(100)  NOT NULL DEFAULT '' COMMENT 'Provider error code, e.g. Graph ErrorAccessDenied',
+    `errorDetail`     VARCHAR(500)  NOT NULL DEFAULT '' COMMENT 'Truncated error message. Never token or secret material',
+    `sentAt`          DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`emailLogID`),
+    KEY `idx_emaillog_site_sent` (`siteID`, `sentAt`),
+    CONSTRAINT `fk_emaillog_site` FOREIGN KEY (`siteID`)
+        REFERENCES `tblSites` (`siteID`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+COMMENT='Per-send audit trail for outbound email (#234, #230). See _core/Mailer.php::logSend().';
 
 
 -- #############################################################################
@@ -3394,6 +3428,12 @@ CREATE TABLE IF NOT EXISTS `tblResource` (
     `category`          ENUM('room','equipment','vehicle','other') NOT NULL DEFAULT 'room',
     `capacity`          INT          DEFAULT NULL,
     `location`          VARCHAR(255) DEFAULT NULL,
+    -- 📍 from 180_location_geocoding.sql (#456) — standard location block
+    `latitude`          DECIMAL(10,7) DEFAULT NULL,
+    `longitude`         DECIMAL(10,7) DEFAULT NULL,
+    `what3words`        VARCHAR(100)  DEFAULT NULL COMMENT 'what3words address',
+    `geocodedAt`        DATETIME      DEFAULT NULL COMMENT 'When lat/lng last set by the Geocoder (migration 180)',
+    `geocodeSource`     VARCHAR(20)   DEFAULT NULL COMMENT 'google, nominatim, manual or w3w',
     `requiresApproval`  TINYINT(1)   NOT NULL DEFAULT 0,
     `hourlyRatePence`   INT          DEFAULT NULL,
     `bufferMinutes`     INT          NOT NULL DEFAULT 0,
@@ -5617,6 +5657,10 @@ CREATE TABLE IF NOT EXISTS `tblEventOccurrenceOverrides` (
     `overrideStartTime` TIME         DEFAULT NULL COMMENT 'NULL = inherit series time',
     `overrideEndTime`   TIME         DEFAULT NULL,
     `overrideLocation`  VARCHAR(255) DEFAULT NULL,
+    -- 📍 from 180_location_geocoding.sql (#456) — hand-entered only, NULL = inherit parent event
+    `overrideGeoLat`    DECIMAL(10,7) DEFAULT NULL COMMENT 'NULL = inherit parent event coords',
+    `overrideGeoLng`    DECIMAL(10,7) DEFAULT NULL COMMENT 'NULL = inherit parent event coords',
+    `overrideW3W`       VARCHAR(100)  DEFAULT NULL COMMENT 'what3words override — NULL = inherit',
     `notes`             VARCHAR(1000) DEFAULT NULL,
     `createdByID`       INT          DEFAULT NULL,
     `createdAt`         DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -6315,6 +6359,12 @@ CREATE TABLE IF NOT EXISTS `tblAssetLocations` (
     `siteID`           INT          NOT NULL DEFAULT 1,
     `locationName`     VARCHAR(150) NOT NULL,
     `details`          VARCHAR(500) DEFAULT NULL,
+    -- 📍 from 180_location_geocoding.sql (#456) — standard location block
+    `latitude`         DECIMAL(10,7) DEFAULT NULL,
+    `longitude`        DECIMAL(10,7) DEFAULT NULL,
+    `what3words`       VARCHAR(100)  DEFAULT NULL COMMENT 'what3words address',
+    `geocodedAt`       DATETIME      DEFAULT NULL COMMENT 'When lat/lng last set by the Geocoder (migration 180)',
+    `geocodeSource`    VARCHAR(20)   DEFAULT NULL COMMENT 'google, nominatim, manual or w3w',
     `parentLocationID` INT          DEFAULT NULL COMMENT 'Self-FK — nested locations',
     `isActive`         TINYINT(1)   NOT NULL DEFAULT 1,
     PRIMARY KEY (`locationID`),
@@ -6927,6 +6977,12 @@ CREATE TABLE IF NOT EXISTS `tblVenues` (
     `region`         VARCHAR(100) DEFAULT NULL COMMENT 'County / state / province',
     `postcode`       VARCHAR(20)  DEFAULT NULL,
     `countryCode`    CHAR(2)      NOT NULL DEFAULT 'GB' COMMENT 'ISO 3166-1 alpha-2',
+    -- 📍 from 180_location_geocoding.sql (#456) — standard location block
+    `latitude`       DECIMAL(10,7) DEFAULT NULL,
+    `longitude`      DECIMAL(10,7) DEFAULT NULL,
+    `what3words`     VARCHAR(100)  DEFAULT NULL COMMENT 'what3words address',
+    `geocodedAt`     DATETIME      DEFAULT NULL COMMENT 'When lat/lng last set by the Geocoder (migration 180)',
+    `geocodeSource`  VARCHAR(20)   DEFAULT NULL COMMENT 'google, nominatim, manual or w3w',
     `timezone`       VARCHAR(64)  NOT NULL DEFAULT 'Europe/London' COMMENT 'IANA timezone — booking dates/times are wall-clock LOCAL to the venue (§8.4); mirrors tblEvents.eventTimezone style',
     `caretakerName`  VARCHAR(150) DEFAULT NULL COMMENT 'On-site contact for access/keys, when different from the landlord org contact',
     `caretakerPhone` VARCHAR(50)  DEFAULT NULL,
@@ -7865,6 +7921,26 @@ ON DUPLICATE KEY UPDATE `filename` = `filename`;
 INSERT INTO `tblMigrations` (`filename`) VALUES ('175_upce_barcode.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
+-- ── from 176_ms365_shared_mailbox.sql (#234) ─────────────────────────────────
+-- MS365 Graph email via a shared mailbox. The tblEmailLog table itself is
+-- already folded inline above (next to tblErrors, both being platform log
+-- tables). This block carries only the seeds: the 5 settings keys and the
+-- 1 route for the new admin save handler.
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'mail.ms365.sharedMailbox',     '',     '',     0),
+    (NULL, 'mail.ms365.sharedMailboxName', '',     '',     0),
+    (NULL, 'mail.ms365.saveToSentItems',   'true', 'true', 0),
+    (NULL, 'mail.fallbackProvider',        '',     '',     0),
+    (NULL, 'mail.log.retentionDays',       '90',   '90',   0)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('admin/integrations/ms365-mail-save', 'admin/integrations/ms365-mail-save.php', 1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('176_ms365_shared_mailbox.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
 -- ── from 178_hymnal_lookup_public_oos.sql (gap #128 residual) ───────────────
 -- Hymnal lookup + public Order of Service — re-scoped #128 residual on top
 -- of service-plans (#262/#300) + Worship (#308/#355), which already cover
@@ -7876,4 +7952,72 @@ ON DUPLICATE KEY UPDATE `filename` = `filename`;
 -- 3 routes + 7 settings are folded into the service-plans seed block above.
 -- Nothing further to fold here except this migration's own self-record.
 INSERT INTO `tblMigrations` (`filename`) VALUES ('178_hymnal_lookup_public_oos.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- ── from 180_location_geocoding.sql (#456) ───────────────────────────────────
+-- Location / Geocoordinates / What3Words platform layer, Chunk A. The five
+-- standard location columns on tblVenues/tblResource/tblAssetLocations and
+-- the three overrideGeoLat/overrideGeoLng/overrideW3W columns on
+-- tblEventOccurrenceOverrides are already folded inline into their CREATE
+-- TABLE blocks above. This block carries tblGeocodeCache (a global geocode
+-- result cache — never PII, never tenant-scoped), the 14 settings seeds,
+-- the 10 route seeds, and the self-record.
+CREATE TABLE IF NOT EXISTS `tblGeocodeCache` (
+    `cacheID`     INT           NOT NULL AUTO_INCREMENT,
+    `queryHash`   CHAR(64)      NOT NULL COMMENT 'sha256(direction | lowercased query text)',
+    `direction`   ENUM('forward','reverse') NOT NULL DEFAULT 'forward',
+    `queryText`   VARCHAR(500)  NOT NULL,
+    `latitude`    DECIMAL(10,7) DEFAULT NULL,
+    `longitude`   DECIMAL(10,7) DEFAULT NULL,
+    `formatted`   VARCHAR(500)  DEFAULT NULL COMMENT 'Provider display/formatted address',
+    `provider`    VARCHAR(20)   NOT NULL COMMENT 'google or nominatim',
+    `hitCount`    INT           NOT NULL DEFAULT 1,
+    `createdAt`   DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `lastUsedAt`  DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`cacheID`),
+    UNIQUE KEY `uq_geoc_hash` (`queryHash`),
+    KEY `idx_geoc_lastused` (`lastUsedAt`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+COMMENT='Geocoder result cache — an address geocodes once (Nominatim policy) (migration 180)';
+
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'w3w.enabled',              'false', 'false', 0),
+    (NULL, 'w3w.apiKey',               '',      '',      1),
+    (NULL, 'geo.google.apiKey',        '',      '',      1),
+    (NULL, 'geo.autoGeocode',          'false', 'false', 0),
+    (NULL, 'geo.nominatim.lastCallAt', '',      '',      0),
+    (NULL, 'org.address.line1',        '',      '',      0),
+    (NULL, 'org.address.line2',        '',      '',      0),
+    (NULL, 'org.address.city',         '',      '',      0),
+    (NULL, 'org.address.region',       '',      '',      0),
+    (NULL, 'org.address.postcode',     '',      '',      0),
+    (NULL, 'org.address.countryCode',  'GB',    'GB',    0),
+    (NULL, 'org.latitude',             '',      '',      0),
+    (NULL, 'org.longitude',            '',      '',      0),
+    (NULL, 'org.what3words',           '',      '',      0)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('admin/integrations/what3words',      'admin/integrations/what3words/index.php', 1),
+    ('admin/integrations/what3words/save', 'admin/integrations/what3words/save.php',  1),
+    ('admin/integrations/what3words/test', 'admin/integrations/what3words/test.php',  1),
+    ('admin/integrations/geocoding',       'admin/integrations/geocoding/index.php',  1),
+    ('admin/integrations/geocoding/save',  'admin/integrations/geocoding/save.php',   1),
+    ('admin/integrations/geocoding/test',  'admin/integrations/geocoding/test.php',   1),
+    ('admin/settings/organisation',        'admin/settings/organisation/index.php',   1),
+    ('admin/settings/organisation/save',   'admin/settings/organisation/save.php',    1),
+    ('geo/w3w-suggest',                    'geo/w3w-suggest.php',                     1),
+    ('geo/lookup',                         'geo/lookup.php',                          1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('180_location_geocoding.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- ── from 181_location_user_pii.sql (#456) ────────────────────────────────────
+-- Location / Geocoordinates / What3Words platform layer, Chunk B (member
+-- PII + GDPR lockstep). The four new tblUsers columns (latitude, longitude,
+-- what3words, visibilityCoords) are already folded inline into the CREATE
+-- TABLE tblUsers block above. No settings/route seeds — this block carries
+-- only the self-record.
+INSERT INTO `tblMigrations` (`filename`) VALUES ('181_location_user_pii.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;
