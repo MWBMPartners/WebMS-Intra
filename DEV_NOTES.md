@@ -1051,6 +1051,44 @@ SET @sql := IF(@fk_exists = 0,
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 ```
 
+### `full_schema.sql` fold pattern: an ALTER's FK target is created LATER in the file
+
+`full_schema.sql` contains **zero ALTER statements** — every migration's DDL folds
+inline into the relevant `CREATE TABLE` block so a fresh install reproduces the
+end-state of replaying every numbered migration. That's straightforward for a new
+COLUMN or plain KEY index (no cross-table dependency), but breaks down for a FK
+whose *referenced* table is created **further down** the file than the table being
+altered — MySQL raises **errno 1824** ("Failed to open the referenced table") for a
+forward-referencing FK inside a `CREATE TABLE`, and `full_schema.sql` has no
+`FOREIGN_KEY_CHECKS` toggle to paper over it.
+
+**First occurrence: migration 179 (#436)** — `tblEvents` (created at the very top of
+`full_schema.sql`, alongside the earliest core tables) gained nullable
+`venueID`/`roomID` columns whose FKs point at `tblVenues`/`tblVenueRooms`
+(`web/_sql/170_venue_bookings.sql`), created thousands of lines later. `tblEvents`
+itself can't move — dozens of later tables FK it — so the fold splits in two:
+
+- The **columns + their plain KEY indexes** fold inline into `tblEvents`' `CREATE
+  TABLE`, exactly like any other additive column (no cross-table dependency).
+- The **FK constraints are deliberately left OUT of `full_schema.sql` entirely** —
+  a comment at both the altered table's fold point and the referenced table's
+  section explains why and points at the migration. The installer replays every
+  numbered migration **after** loading `full_schema.sql` (see "SQL dialect trap" in
+  `.claude/CLAUDE.md`), so migration 179's own guarded `ADD CONSTRAINT` blocks add
+  both FKs on that replay — by the time they run, `tblVenues`/`tblVenueRooms`
+  already exist (either from a real historical migration 170 run, or from
+  `full_schema.sql`'s own `CREATE TABLE` for them earlier in the same install). End
+  state is identical whether the install was upgraded from a live migration 170+179
+  history or built fresh from `full_schema.sql` + migration replay.
+- `check_schema_seed_parity.py` only compares migration filenames/settings
+  keys/route keys (not FK presence), so this split creates no parity finding; the
+  `179_event_venue_link.sql` filename still needs its own `tblMigrations` seed row
+  in `full_schema.sql`'s seed block, same as any other migration.
+
+Reach for this split pattern whenever a later migration ALTERs a table that sits
+*before* its FK target in `full_schema.sql`'s creation order — it is NOT limited to
+`tblEvents`/venues, just the first time the codebase needed it.
+
 Note: this checks constraint *name* existence only — a same-named FK with a
 different definition is silently accepted (the same tolerance the old
 `IF NOT EXISTS` forms had for columns). Acceptable, but worth knowing.
@@ -2979,6 +3017,67 @@ active venue, skips sites with `venues.enabled` or
 bookings, agreement renewals, invoices due) with a `(refType, refID,
 dueDate)` dedupe key so a re-scheduled item naturally re-reminds without
 spamming on every run.
+
+### Per-event venue/room links + room-aware coverage (gap #436, migration 179)
+
+Additive follow-up: `tblEvents` gains two optional nullable columns
+(`venueID`, `roomID`, FKs `ON DELETE SET NULL`) so an event can declare
+which hired venue — and optionally which room within it — it's actually
+held at, upgrading the calendar manage form's venue picker from a
+transient advisory-only check into a **persisted** link. See the
+`full_schema.sql` fold pattern subsection above ("an ALTER's FK target is
+created LATER in the file") for why the FKs live only in the migration,
+not the fold.
+
+- **`classifyEventCoverage(array $event, int $venueId, ?int $roomId =
+  null)`** — the `$roomId` param is optional and trailing specifically so
+  both pre-#436 call sites (`venues/api/check.php`, `calendar/manage/
+  save.php`) compile and behave **identically** unchanged when they don't
+  pass it. When set, it's re-validated site+venue-scoped via the existing
+  private `validateRoomForVenue()` (no new query) — an unresolvable room
+  (wrong venue/site, deleted, `<= 0`) silently degrades to venue-level
+  coverage rather than erroring, the same "no existence oracle" posture as
+  the pre-existing venue-missing sentinel.
+- **The room filter runs on `availabilityForRange()`'s existing output** —
+  that query already selects `b.roomID` (needed by the calendar strip
+  tooltips), so no schema/query change was needed to make coverage
+  room-aware, only a PHP-side `array_filter()` on rows already in hand:
+  `roomID IS NULL` (whole-venue booking) or `roomID = $roomId` survives the
+  filter; everything else (including that OTHER room's own
+  `unavailable`/`closed` rows) is excluded — a Room B "unavailable" row
+  must never mark a Room A event unavailable, and vice versa a whole-venue
+  `unavailable` row still blocks every room.
+- **New verdict `COVERAGE_ROOM_NOT_COVERED`** (`'room-not-covered'`,
+  severity `danger`) fires when the room-filtered rows have nothing to say
+  (no filtered row reached an earlier cascade branch) but the *unfiltered*
+  day's rows include a confirmed bookable hire — i.e. the venue is
+  genuinely booked that day, just not for this room. Slotted into
+  `WORST_ORDER` immediately after `COVERAGE_NO_BOOKING`; unreachable when
+  `$roomId` is null, so its insertion cannot change any existing
+  (roomless) call's worst-case ordering.
+- **Write-path invariant:** `roomID` never survives without a `venueID` it
+  validated against — `calendar/manage/save.php` always re-validates the
+  room against the *posted* venue (`Venues::getRoom($room, $venue,
+  $site)`), so changing an event's venue automatically drops a stale room
+  from the old venue (the room-belongs-to-venue check simply fails against
+  the new one). The DB-level `ON DELETE SET NULL` FK only covers the
+  narrower case of the room itself being deleted.
+- **Disabled-app symmetry, both directions:** render-side, the picker sits
+  entirely inside the pre-existing `$hasVenueCheck` guard (empty
+  `$venueOptions` ⇒ no venue/room markup at all — the #429 resilience
+  pattern, unchanged). Write-side, `save.php`'s UPDATE **omits**
+  `venueID`/`roomID` from its `SET` list entirely when the Venues guard
+  isn't active, rather than writing NULL — toggling the app off and
+  editing an event must preserve that event's existing link, not silently
+  erase it.
+- **Bug fixed in the same PR:** the event-form's live "is it booked?" JS
+  posted `startDateTime`/`endDateTime`/`timezone`, but `venues/api/
+  check.php` has always read `start`/`end`/`tz` (its own documented
+  header). Every live check 400'd on `invalid-range` and the JS's
+  `.catch()` silently hid the alert — Surface A never actually worked
+  since #429 shipped. Canonicalised on `check.php`'s existing contract
+  (unchanged) and fixed the JS to match, adding `roomID` to the same
+  request.
 
 ## Giving — Bulk year-end statements (gap #4, #440)
 

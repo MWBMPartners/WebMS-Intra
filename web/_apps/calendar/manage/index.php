@@ -12,7 +12,8 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   0.3.0
+ * @version   0.4.0
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/436
  * -----------------------------------------------------------------------------
  */
 
@@ -117,22 +118,39 @@ if ($stmtSeries !== false) {
 }
 
 // -----------------------------------------------------------------------------
-// 🏛️ Venue Bookings integration (#429) — Surface A support. Guarded behind
-// AppRegistry::isEnabled('venues') + try/catch so a disabled app, a missing
-// _core/apps/venues.php registry entry, OR any Venues:: exception leaves
-// the event form byte-identical to pre-#429 output (security item 14): no
-// venue field is rendered when $venueOptions stays empty.
+// 🏛️ Venue Bookings integration (#429, #436) — Surface A support + the
+// persistent venue/room picker. Guarded behind AppRegistry::isEnabled
+// ('venues') + try/catch so a disabled app, a missing _core/apps/venues.php
+// registry entry, OR any Venues:: exception leaves the event form
+// byte-identical to pre-#429 output (security item 14): no venue field is
+// rendered when $venueOptions stays empty.
 // -----------------------------------------------------------------------------
-$defaultVenueId = 0;
-$venueOptions   = [];
+$defaultVenueId   = 0;
+$venueOptions     = [];
+$venueRoomOptions = [];   // #436: venueID => [{roomID, roomName}, …], active rooms only
 if (AppRegistry::isEnabled('venues') === true) {
     try {
         $defaultVenueId = (int) (App::settings('venues.calendar_default_venue') ?? 0);
         $venueOptions   = Venues::listVenues($siteId, true);
+        // 🚪 #436 — one small listRooms() query per venue. Venue counts are
+        // tiny (external hired buildings — typically 1-3 per site), so N
+        // small queries beat standing up a new API endpoint (which would
+        // need its own api.venues.rooms.enabled flag — see the ApiRouter
+        // routing trap).
+        foreach ($venueOptions as $vOpt) {
+            $rooms = Venues::listRooms((int) $vOpt['venueID'], $siteId, true);
+            foreach ($rooms as $r) {
+                $venueRoomOptions[(int) $vOpt['venueID']][] = [
+                    'roomID'   => (int) $r['roomID'],
+                    'roomName' => (string) $r['roomName'],
+                ];
+            }
+        }
     } catch (\Throwable $e) {
         error_log('Calendar manage: venue integration failed: ' . $e->getMessage());
-        $defaultVenueId = 0;
-        $venueOptions   = [];
+        $defaultVenueId   = 0;
+        $venueOptions     = [];
+        $venueRoomOptions = [];
     }
 }
 
