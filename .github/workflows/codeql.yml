@@ -56,6 +56,16 @@ jobs:
         uses: github/codeql-action/autobuild@v4.37.8
 
       - name: Perform CodeQL Analysis
+        # Code Scanning (GitHub Advanced Security) is not currently enabled
+        # on this repo, so the SARIF-upload half of `analyze` fails with a
+        # configuration error ("Code Security must be enabled …") even
+        # though the scan itself completes and finds nothing — turning this
+        # whole advisory job red on every PR. The hard merge gates are the
+        # PHP -l lint + migration harness, NOT this check, so don't let a
+        # disabled upload target show a false failure. Remove this line
+        # if/when Code Scanning is enabled, to surface genuine CodeQL
+        # failures again.
+        continue-on-error: true
         uses: github/codeql-action/analyze@v4.37.8
         with:
           category: "/language:javascript"

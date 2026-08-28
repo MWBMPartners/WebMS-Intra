@@ -107,6 +107,15 @@ jobs:
           fi
 
       - name: Upload SARIF to GitHub Security
+        # Code Scanning (GitHub Advanced Security) is not currently enabled
+        # on this repo, so this upload fails with "Resource not accessible
+        # by integration". The job-level continue-on-error above keeps the
+        # WORKFLOW green, but the Psalm JOB's own check run still shows red
+        # without this step-level flag. Psalm is advisory-only (the hard
+        # gate is the PHP -l lint job below), so don't let a disabled
+        # upload target show a false failure. Remove this line if/when
+        # Code Scanning is enabled, to surface genuine upload failures.
+        continue-on-error: true
         if: always() && hashFiles('psalm.sarif') != ''
         uses: github/codeql-action/upload-sarif@v4.37.8
         with:
