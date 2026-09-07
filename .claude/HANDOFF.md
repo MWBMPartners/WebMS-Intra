@@ -16,7 +16,8 @@ proceeds, so the session can be picked up at any point).
 | Realign the local clone with GitHub | ✅ **Done** — local and remote now match exactly |
 | Self-host Swagger UI + fix the /api-docs page | ✅ **Done** — commit `8f21094`, migration 185 |
 | Install PHP locally + write the setup guide | ✅ **Done** — PHP 8.5.10, guide in `DEV_NOTES.md` |
-| Deep codebase audit (6 sequential Fable agents) | 🔄 **Running** — report 1 of 6 delivered |
+| Deep codebase audit (6 sequential Fable agents) | 🔄 **Running** — reports 1 and 2 of 6 delivered |
+| Fix the defects the audit found so far | ✅ **Done** — commits `6c01c47`, `82241bc`, migration 186 |
 | Update all documentation to match reality | ⏳ Waiting on the audit |
 | Sweep every GitHub issue against the code | ⏳ Waiting on the audit |
 | Propose the next round of work, ranked | ⏳ Waiting on the audit |
@@ -85,10 +86,51 @@ step-by-step instructions for macOS, Windows, Linux and Raspberry Pi.
 
 ---
 
-## 4. Findings from the audit so far — NOT yet fixed
+## 4. What the audit found, and what has been done about it
 
-The first audit report (apps, routes and handlers) is at
-`scratchpad/analysis/01-inventory.md`. These were independently re-verified.
+Audit reports so far, in the session scratchpad under `analysis/`:
+`01-inventory.md` (apps, routes, handlers) and `02-core-schema.md` (core
+classes, migrations, tables, CI). Every finding below was independently
+re-verified before being acted on.
+
+### ✅ Already fixed — commit `6c01c47` (migration 186)
+
+- **The notification preferences page could not be opened.** Two pages were
+  both called "Notification preferences"; migration 093 gave the address to
+  the newsletter-only one, hiding the real page. Browser push opt-in was
+  therefore only reachable from the livestream page. The newsletter checkbox
+  is now a card on the real page, the newsletter-only page is deleted, and
+  the address points back where it belongs.
+- **The livestream channels and schedule page could not be opened** — with it
+  went the only button that tells subscribers "we are live now". It now has
+  its own address, `/admin/livestream/channels`, linked from the analytics
+  page.
+- **Six help guides nobody could find** — Venue Bookings, Forms Builder,
+  Reports, Admin First Steps, Disaster Recovery and Getting Support existed
+  with working addresses but no link anywhere. All 18 guides are now on the
+  Help Centre index.
+- Removed four settings that switched on API endpoints whose handler files do
+  not exist.
+
+### ✅ Already fixed — commit `82241bc`
+
+- **Six menu and dashboard links led to "page not found"** (`/expenses`,
+  `/kids`, `/reports`, `/salvation`, `/worship`, `/webhooks`). New
+  `Router::routeExists()` means a link is never drawn for a page that does
+  not exist, and a new optional `landing` field on an app's registry entry
+  says where to link when the app's own prefix is not a page. The `route`
+  field could not simply be corrected — it is the prefix used to decide which
+  app owns a page for the on/off switch.
+- **An app switched on at `/admin/apps` never appeared in the menu.** That
+  screen writes `'1'`; the menu insisted on `'true'`. Both now accepted.
+- **"Run all pending migrations" would have put demo data into a live site.**
+  `Migrator::allFiles()` accepted any `.sql` file, so `full_schema.sql` and
+  `demo_data.sql` always showed as pending. Both `allFiles()` and `runOne()`
+  now accept only numbered files.
+- **Four of the eleven safety checks were never run by any workflow.** All
+  four now run on every pull request.
+
+### Still outstanding — not yet fixed
 
 ### 🔴 The settings table cannot de-duplicate itself — highest priority
 
