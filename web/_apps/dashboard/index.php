@@ -27,7 +27,9 @@
 declare(strict_types=1);
 
 use Portal\Core\App;
+use Portal\Core\AppRegistry;
 use Portal\Core\AssetRegister;
+use Portal\Core\Router;
 use Portal\Core\Site;
 
 // 📌 Page metadata for the template system
@@ -77,7 +79,10 @@ if (isset($SETTINGS['expenses']['enabled']) === true && $SETTINGS['expenses']['e
                     'value' => $cnt,
                     'icon'  => 'fa-solid fa-file-invoice-dollar',
                     'color' => 'warning',
-                    'url'   => '/expenses',
+                    // There is no /expenses page — this used to lead to
+                    // "page not found". Submit is where a claimant sees
+                    // and raises their own claims.
+                    'url'   => '/expenses/submit',
                 ];
             }
         }
@@ -185,17 +190,48 @@ if ($isAdmin === true) {
 /* -------------------------------------------------------------------------- */
 /* 🏗️ Build app list from $SETTINGS                                          */
 /* -------------------------------------------------------------------------- */
+// The same two corrections the main menu needed (see _core/templates/nav.php
+// for the full explanation):
+//
+//   1. Accept '1' as well as 'true'. The "Apps" screen at /admin/apps writes
+//      '1' when you switch an app on, so an app switched on there never got a
+//      card here, even though it worked if you typed its address.
+//   2. Take the real address from the app registry, and leave out any card
+//      whose address does not exist. Several apps keep their entry page
+//      somewhere else — Decision Card at /decision-card, Reports at
+//      /admin/reports — and Kids has no front page at all, so those cards led
+//      to "page not found".
 $apps = [];
+$appRegistryEntries = AppRegistry::all();
 foreach ($SETTINGS as $key => $arr) {
-    if (is_array($arr) === true && isset($arr['enabled']) === true && $arr['enabled'] === 'true') {
-        $apps[] = [
-            'key'   => $key,
-            'name'  => $arr['displayName'] ?? ucfirst($key),
-            'icon'  => $arr['displayIcon'] ?? 'app.svg',
-            'color' => $arr['brandColor']  ?? '#0d6efd',
-            'url'   => '/' . $key,
-        ];
+    if (is_array($arr) === false || isset($arr['enabled']) === false) {
+        continue;
     }
+
+    $enabledValue = (string) $arr['enabled'];
+    if ($enabledValue !== 'true' && $enabledValue !== '1') {
+        continue;
+    }
+
+    // 'landing' is the page to open; 'route' is only the prefix used to work
+    // out which app owns a page, and for Expenses, Kids and Worship that
+    // prefix is not a page at all.
+    $appRoute = (string) (
+        $appRegistryEntries[$key]['landing']
+        ?? $appRegistryEntries[$key]['route']
+        ?? $key
+    );
+    if (Router::routeExists($appRoute) === false) {
+        continue;
+    }
+
+    $apps[] = [
+        'key'   => $key,
+        'name'  => $arr['displayName'] ?? ($appRegistryEntries[$key]['name'] ?? ucfirst($key)),
+        'icon'  => $arr['displayIcon'] ?? ($appRegistryEntries[$key]['icon'] ?? 'app.svg'),
+        'color' => $arr['brandColor']  ?? ($appRegistryEntries[$key]['color'] ?? '#0d6efd'),
+        'url'   => Router::url($appRoute),
+    ];
 }
 
 /* -------------------------------------------------------------------------- */

@@ -129,10 +129,29 @@ class Migrator
             return [];
         }
 
-        // 📂 Read all .sql files from the directory
+        // 📂 Read the numbered migration files from the directory.
+        //
+        //    ⚠️ The three-digit prefix is REQUIRED, not decoration. Two files
+        //    in this folder are not migrations and must never appear in the
+        //    pending list:
+        //
+        //      full_schema.sql — the complete database, used once when the
+        //          portal is first installed. Running it again on a live site
+        //          would re-apply every default value.
+        //
+        //      demo_data.sql — sample people, announcements and events for
+        //          training. Its own header says it is loaded only from
+        //          Admin → Maintenance → Demo data, and only when demo mode is
+        //          switched on. Running it on a real site puts made-up members
+        //          and events in front of everybody.
+        //
+        //    Neither is ever recorded in tblMigrations, so before this filter
+        //    existed both were listed as "pending" on a perfectly up-to-date
+        //    portal — and "Run all pending" would have run them. This matches
+        //    the pattern the installer already uses when it replays migrations
+        //    (web/_install/index.php: glob('[0-9][0-9][0-9]_*.sql')).
         while (($entry = readdir($handle)) !== false) {
-            // Skip non-SQL files, hidden files, and directories
-            if (str_ends_with(strtolower($entry), '.sql') === false) {
+            if (preg_match('/^\d{3}_.*\.sql$/i', $entry) !== 1) {
                 continue;
             }
             $files[] = $entry;
@@ -194,6 +213,23 @@ class Migrator
      */
     public function runOne(string $filename, ?int $userId = null): array
     {
+        // 🛡️ Only ever run a numbered migration. The same rule as allFiles(),
+        //    repeated here on purpose: this method can be reached by posting a
+        //    filename straight to /admin/migrations, so it must not rely on
+        //    the listing having filtered anything out. Without this, an
+        //    administrator (or anyone who could forge that request) could run
+        //    demo_data.sql and drop sample members and events into a real site.
+        if (preg_match('/^\d{3}_.*\.sql$/i', $filename) !== 1) {
+            return [
+                'success'  => false,
+                'filename' => $filename,
+                'error'    => 'Not a migration file. Only numbered files such as '
+                            . '"186_example.sql" can be run here. full_schema.sql is '
+                            . 'for first-time installation, and demo_data.sql is loaded '
+                            . 'from Admin → Maintenance → Demo data.',
+            ];
+        }
+
         $filePath = $this->sqlDir . DIRECTORY_SEPARATOR . $filename;
 
         // 🛡️ Validate the file exists and is readable

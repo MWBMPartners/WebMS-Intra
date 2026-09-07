@@ -309,6 +309,40 @@ jobs:
             add_section "mysqli bind_param() arity mismatches (fatal ValueError on PHP 8)" "$BIND_ARITY"
           fi
 
+          # 16) Third-party library tags loaded from a public CDN without an
+          #     integrity="sha384-..." hash. Without that hash, a tampered file
+          #     on the CDN would run in every visitor's browser unnoticed.
+          CDN_SRI=$(python3 tools/audit-checks/check_cdn_sri.py 2>&1 | tail -n +3 || true)
+          if echo "$CDN_SRI" | grep -q '•'; then
+            add_section "CDN tags with no integrity hash (a tampered CDN file would run unnoticed)" "$CDN_SRI"
+          fi
+
+          # 17) Migrations that would fail or duplicate data if run a second
+          #     time. The installer replays every migration on top of
+          #     full_schema.sql, so every one has to be safe to re-run. The
+          #     Docker end-to-end harness proves this against a real MySQL,
+          #     but only when web/_sql/ changes; this static check runs on
+          #     every pull request and is far quicker.
+          MIG_IDEMPOTENCY=$(python3 tools/audit-checks/check_migration_idempotency.py 2>&1 | tail -n +3 || true)
+          if echo "$MIG_IDEMPOTENCY" | grep -q '•'; then
+            add_section "Migrations that are not safe to run twice" "$MIG_IDEMPOTENCY"
+          fi
+
+          # 18) Small-screen problems that can be spotted without a device:
+          #     a missing viewport tag, hard-coded wide pixel widths, and so on.
+          MOBILE=$(python3 tools/audit-checks/check_mobile_readiness.py 2>&1 | tail -n +3 || true)
+          if echo "$MOBILE" | grep -q '•'; then
+            add_section "Mobile readiness (static checks only — a real device walk-through is still needed)" "$MOBILE"
+          fi
+
+          # 19) The browser's raw confirm() dialog instead of the portal's own
+          #     themed confirmation. The raw one cannot be styled, ignores the
+          #     dark theme, and is blocked outright by some browsers.
+          NATIVE_CONFIRM=$(python3 tools/audit-checks/check_no_native_confirm.py 2>&1 | tail -n +3 || true)
+          if echo "$NATIVE_CONFIRM" | grep -q '•'; then
+            add_section "Native confirm() used instead of the portal's data-confirm modal" "$NATIVE_CONFIRM"
+          fi
+
           echo "hits=$HITS" >> "$GITHUB_OUTPUT"
           echo "Total finding sections: $HITS"
 
