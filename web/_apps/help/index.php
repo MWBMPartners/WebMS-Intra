@@ -235,6 +235,100 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         </a>
     </div>
 
+    <!-- ⚠️ These six guides already existed and already had working addresses,
+         but nothing on this page linked to them, so nobody could find them
+         unless they knew the address by heart. Added 2026-09-07. -->
+
+    <!-- Venue Bookings -->
+    <div class="col-12 col-sm-6 col-lg-4">
+        <a href="/help/venues" class="text-decoration-none text-reset">
+            <div class="portal-card portal-card-branded h-100 p-4">
+                <div class="d-flex align-items-center gap-3 mb-3">
+                    <span class="d-inline-flex align-items-center justify-content-center rounded-3 bg-primary bg-opacity-10 text-primary" style="width:48px;height:48px;">
+                        <i class="fa-solid fa-building-columns fa-lg"></i>
+                    </span>
+                    <h5 class="mb-0">Venue Bookings</h5>
+                </div>
+                <p class="text-secondary mb-0 small">Recording bookings of a building you hire, hire agreements, invoices, and the "is it booked?" warnings on the calendar.</p>
+            </div>
+        </a>
+    </div>
+
+    <!-- Forms Builder -->
+    <div class="col-12 col-sm-6 col-lg-4">
+        <a href="/help/forms" class="text-decoration-none text-reset">
+            <div class="portal-card portal-card-branded h-100 p-4">
+                <div class="d-flex align-items-center gap-3 mb-3">
+                    <span class="d-inline-flex align-items-center justify-content-center rounded-3 bg-success bg-opacity-10 text-success" style="width:48px;height:48px;">
+                        <i class="fa-solid fa-clipboard-list fa-lg"></i>
+                    </span>
+                    <h5 class="mb-0">Forms Builder</h5>
+                </div>
+                <p class="text-secondary mb-0 small">Building your own forms, publishing them inside the portal or as a public link, and reviewing the answers people send.</p>
+            </div>
+        </a>
+    </div>
+
+    <!-- Reports -->
+    <div class="col-12 col-sm-6 col-lg-4">
+        <a href="/help/reports" class="text-decoration-none text-reset">
+            <div class="portal-card portal-card-branded h-100 p-4">
+                <div class="d-flex align-items-center gap-3 mb-3">
+                    <span class="d-inline-flex align-items-center justify-content-center rounded-3 bg-info bg-opacity-10 text-info" style="width:48px;height:48px;">
+                        <i class="fa-solid fa-chart-bar fa-lg"></i>
+                    </span>
+                    <h5 class="mb-0">Reports</h5>
+                </div>
+                <p class="text-secondary mb-0 small">The ready-made dashboards, and building your own report by choosing columns, filters and totals.</p>
+            </div>
+        </a>
+    </div>
+
+    <!-- Admin First Steps -->
+    <div class="col-12 col-sm-6 col-lg-4">
+        <a href="/help/admin-first-steps" class="text-decoration-none text-reset">
+            <div class="portal-card portal-card-branded h-100 p-4">
+                <div class="d-flex align-items-center gap-3 mb-3">
+                    <span class="d-inline-flex align-items-center justify-content-center rounded-3 bg-danger bg-opacity-10 text-danger" style="width:48px;height:48px;">
+                        <i class="fa-solid fa-screwdriver-wrench fa-lg"></i>
+                    </span>
+                    <h5 class="mb-0">Admin First Steps</h5>
+                </div>
+                <p class="text-secondary mb-0 small">For a brand-new portal: the order to set things up in, so nothing is missed before you invite anyone.</p>
+            </div>
+        </a>
+    </div>
+
+    <!-- Disaster Recovery -->
+    <div class="col-12 col-sm-6 col-lg-4">
+        <a href="/help/disaster-recovery" class="text-decoration-none text-reset">
+            <div class="portal-card portal-card-branded h-100 p-4">
+                <div class="d-flex align-items-center gap-3 mb-3">
+                    <span class="d-inline-flex align-items-center justify-content-center rounded-3 bg-warning bg-opacity-10 text-warning" style="width:48px;height:48px;">
+                        <i class="fa-solid fa-life-ring fa-lg"></i>
+                    </span>
+                    <h5 class="mb-0">Disaster Recovery</h5>
+                </div>
+                <p class="text-secondary mb-0 small">What to do if something goes badly wrong — backups, restoring, and who to contact.</p>
+            </div>
+        </a>
+    </div>
+
+    <!-- Getting Support -->
+    <div class="col-12 col-sm-6 col-lg-4">
+        <a href="/help/support" class="text-decoration-none text-reset">
+            <div class="portal-card portal-card-branded h-100 p-4">
+                <div class="d-flex align-items-center gap-3 mb-3">
+                    <span class="d-inline-flex align-items-center justify-content-center rounded-3 bg-secondary bg-opacity-10 text-secondary" style="width:48px;height:48px;">
+                        <i class="fa-solid fa-headset fa-lg"></i>
+                    </span>
+                    <h5 class="mb-0">Getting Support</h5>
+                </div>
+                <p class="text-secondary mb-0 small">How to report a problem, what information to include, and what happens next.</p>
+            </div>
+        </a>
+    </div>
+
 </div>
 
 <!-- Need more help -->

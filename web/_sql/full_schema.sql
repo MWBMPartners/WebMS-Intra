@@ -3960,7 +3960,10 @@ INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
     ('newsletter/segments/save',  'newsletter/segments-save.php',     1),
     ('newsletter/track/open',     'newsletter/track-open.php',        0),
     ('newsletter/track/click',    'newsletter/track-click.php',       0),
-    ('account/notifications',     'account/notifications.php',        1),
+    -- NOTE: migration 093 originally pointed this at the newsletter-only
+    -- page, which hid the real notification preferences page. Corrected
+    -- here and by migration 186 — see that file for the full story.
+    ('account/notifications',     'auth/account/notifications.php',   1),
     ('unsubscribe',               'newsletter/unsubscribe.php',       0)
 ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 
@@ -8405,4 +8408,26 @@ INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue
 ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
 
 INSERT INTO `tblMigrations` (`filename`) VALUES ('185_api_docs_self_hosted.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- ── from 186_unreachable_pages_fix.sql ───────────────────────────────────────
+-- Gives the livestream channels/schedule page its own address (migration 133
+-- had re-pointed `admin/livestream` at the viewer analytics dashboard, leaving
+-- the setup page unreachable), and removes four settings that switch on API
+-- endpoints whose handler files do not exist. The account/notifications
+-- correction is applied inline in the migration-093 block above.
+
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('admin/livestream/channels', 'admin/livestream/index.php', 1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
+DELETE FROM `tblSettings`
+WHERE `settingKey` IN (
+    'api.expenses.stats.enabled',
+    'api.expenses.attachments.enabled',
+    'api.expenses.update.enabled',
+    'api.expenses.update-status.enabled'
+);
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('186_unreachable_pages_fix.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;

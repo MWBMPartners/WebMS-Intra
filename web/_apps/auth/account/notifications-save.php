@@ -17,6 +17,7 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Logger;
+use Portal\Core\Site;
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     header('Location: /account/notifications', true, 302);
@@ -92,6 +93,41 @@ if ($stmt === false) {
 $stmt->bind_param('ssi', $json, $sabbathHonour, $userId);
 $stmt->execute();
 $stmt->close();
+
+// 📰 Newsletter opt-in — merged in from the old separate page at
+//    /account/notifications, which used to occupy this address and hide the
+//    fuller preferences page behind it.
+//
+//    It is stored in its own table rather than in the preferences JSON above,
+//    because an unsubscribe link at the bottom of a newsletter has to work for
+//    someone who is not signed in, and that needs a token only this table
+//    holds. The token is only ever generated on the FIRST insert; an existing
+//    row keeps the token it already has, so unsubscribe links already sent out
+//    in earlier newsletters keep working.
+//
+//    Only touched when the Newsletter app is switched on for this site — the
+//    checkbox is not shown otherwise, and an absent checkbox must not be read
+//    as "unsubscribe me".
+$newsletterOn = (string) (App::settings()['newsletter']['enabled'] ?? '0');
+if ($newsletterOn === '1' || $newsletterOn === 'true') {
+    $siteId       = Site::id();
+    $optedIn      = isset($_POST['newsletterOptedIn']) === true ? 1 : 0;
+    $freshToken   = bin2hex(random_bytes(20));
+    $nlStmt = $mysqli->prepare(
+        'INSERT INTO tblNewsletterSubscription (siteID, userID, optedIn, unsubToken) '
+        . 'VALUES (?, ?, ?, ?) '
+        . 'ON DUPLICATE KEY UPDATE optedIn = VALUES(optedIn)'
+    );
+    if ($nlStmt !== false) {
+        $nlStmt->bind_param('iiis', $siteId, $userId, $optedIn, $freshToken);
+        $nlStmt->execute();
+        $nlStmt->close();
+    } else {
+        // Not fatal — the preferences above are already saved. Record it so an
+        // administrator can see why a newsletter choice did not stick.
+        Logger::errorPlatform('MySQL', 'Error', 'NEWSLETTER_OPTIN_PREP', $mysqli->error, '');
+    }
+}
 
 Logger::activity('NotificationPrefsUpdated', 'User updated notification preferences');
 $_SESSION['notifications_flash']      = 'Preferences saved.';
