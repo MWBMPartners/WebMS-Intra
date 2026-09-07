@@ -8394,3 +8394,15 @@ ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 
 INSERT INTO `tblMigrations` (`filename`) VALUES ('183_small_groups.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- ── from 185_api_docs_self_hosted.sql ────────────────────────────────────────
+-- Lets a site skip the public CDN for the /api-docs page and load the
+-- self-hosted Swagger UI files directly. Seeded OFF: the automatic
+-- CDN-fails-then-use-local-copy fallback already covers the normal case.
+
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'api.docs.local_assets_only', 'false', 'false', 0)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('185_api_docs_self_hosted.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;

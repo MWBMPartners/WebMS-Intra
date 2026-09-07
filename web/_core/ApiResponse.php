@@ -34,6 +34,47 @@ namespace Portal\Core;
 class ApiResponse
 {
     /**
+     * The `meta` block that goes on every response, success or error.
+     *
+     * Always carries the time the response was produced and the portal
+     * version. It additionally carries `csrfToken` in one specific case: the
+     * request was a write, it was authenticated by the caller's login session
+     * rather than an API key, and its anti-forgery check passed.
+     *
+     * Why that extra field exists: the portal replaces the anti-forgery token
+     * every time it accepts one, so the same token can never be used twice.
+     * A caller that writes more than once without reloading the page would
+     * otherwise be holding a dead token and be refused on its second write.
+     * Handing the replacement back closes that gap. The browsable API
+     * documentation page at /api-docs uses it, and so can any in-page script.
+     *
+     * The token is not a secret from this caller — they already hold the
+     * session it belongs to, and it is useless to anyone else. Requests
+     * authenticated with an API key never get this field, because they carry
+     * no session for a token to protect.
+     *
+     * @return array<string,mixed>
+     */
+    private static function meta(): array
+    {
+        $meta = [
+            'timestamp' => gmdate('c'),
+            'version'   => App::version(),
+        ];
+
+        // `false` for the second argument means "do not try to autoload it" —
+        // handlers that never went through ApiAuth must not drag it in.
+        if (class_exists(ApiAuth::class, false) === true) {
+            $rotated = ApiAuth::rotatedCsrf();
+            if ($rotated !== null) {
+                $meta['csrfToken'] = $rotated;
+            }
+        }
+
+        return $meta;
+    }
+
+    /**
      * Send a JSON success response and terminate.
      *
      * @param mixed $data Payload data to include in the response
@@ -51,10 +92,7 @@ class ApiResponse
         $response = [
             'status' => 'ok',
             'data'   => $data,
-            'meta'   => [
-                'timestamp' => gmdate('c'),
-                'version'   => App::version(),
-            ],
+            'meta'   => self::meta(),
         ];
 
         echo json_encode($response, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
@@ -80,10 +118,7 @@ class ApiResponse
         $response = [
             'status'  => 'error',
             'message' => $message,
-            'meta'    => [
-                'timestamp' => gmdate('c'),
-                'version'   => App::version(),
-            ],
+            'meta'    => self::meta(),
         ];
 
         // 🐛 Include detail only when debug mode is active (admin-only)
