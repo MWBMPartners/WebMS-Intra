@@ -149,6 +149,36 @@ class Asset
     /** @var string Local path for portal script */
     private const LOCAL_PORTAL_JS = '/assets/js/portal.js';
 
+    /*  📚 Swagger UI — self-hosted copies, so the API documentation page at
+     *  /api-docs still works when the jsdelivr CDN is unreachable.
+     *
+     *  Why this matters here more than for the other libraries: the portal is
+     *  sold to organisations that often run it behind a restrictive corporate
+     *  or school network, and some of those networks block public CDNs
+     *  outright. Without a local copy the /api-docs page renders as a blank
+     *  white screen with no explanation. The three files below are committed
+     *  to the repository and deploy with the rest of public_html/, so no
+     *  command line, package manager or build step is ever needed on the
+     *  server — which matters because the portal runs on shared hosting where
+     *  none of those are available.
+     *
+     *  The committed files are byte-identical to what the CDN serves: each one
+     *  hashes to the matching SRI constant above. To refresh after a version
+     *  bump, see DEV_NOTES.md → "Refreshing the self-hosted Swagger UI files".
+     */
+
+    /** @var string Local path for Swagger UI CSS */
+    private const LOCAL_SWAGGER_CSS =
+        '/assets/vendor/swagger-ui/swagger-ui-' . self::SWAGGER_VERSION . '.css';
+
+    /** @var string Local path for Swagger UI bundle */
+    private const LOCAL_SWAGGER_JS =
+        '/assets/vendor/swagger-ui/swagger-ui-bundle-' . self::SWAGGER_VERSION . '.js';
+
+    /** @var string Local path for Swagger UI standalone preset */
+    private const LOCAL_SWAGGER_PRESET =
+        '/assets/vendor/swagger-ui/swagger-ui-standalone-preset-' . self::SWAGGER_VERSION . '.js';
+
     // 🌐 ---------------------------------------------------------------------------
     // CDN URLs
     // -----------------------------------------------------------------------------
@@ -415,33 +445,89 @@ class Asset
     }
 
     /**
-     * Swagger UI CSS via jsdelivr CDN. Used at /api-docs.
+     * Swagger UI CSS — jsdelivr CDN first, self-hosted copy as the fallback.
+     * Used at /api-docs.
      *
      * @return string HTML <link> tag
      */
     public static function swaggerUiCss(): string
     {
-        return self::css(self::CDN_SWAGGER_CSS, '', self::SWAGGER_CSS_INTEGRITY);
+        return self::css(self::CDN_SWAGGER_CSS, self::LOCAL_SWAGGER_CSS, self::SWAGGER_CSS_INTEGRITY);
     }
 
     /**
-     * Swagger UI bundle JS via jsdelivr CDN. Used at /api-docs.
+     * Swagger UI bundle JS — jsdelivr CDN first, self-hosted copy as the
+     * fallback. Used at /api-docs.
      *
      * @return string HTML <script> tag
      */
     public static function swaggerUiJs(): string
     {
-        return self::js(self::CDN_SWAGGER_JS, '', self::SWAGGER_JS_INTEGRITY, 'SwaggerUIBundle');
+        return self::js(
+            self::CDN_SWAGGER_JS,
+            self::LOCAL_SWAGGER_JS,
+            self::SWAGGER_JS_INTEGRITY,
+            'SwaggerUIBundle'
+        );
     }
 
     /**
-     * Swagger UI standalone preset JS via jsdelivr CDN. Used at /api-docs.
+     * Swagger UI standalone preset JS — jsdelivr CDN first, self-hosted copy
+     * as the fallback. Used at /api-docs.
      *
      * @return string HTML <script> tag
      */
     public static function swaggerUiPresetJs(): string
     {
-        return self::js(self::CDN_SWAGGER_PRESET, '', self::SWAGGER_PRESET_INTEGRITY, 'SwaggerUIStandalonePreset');
+        return self::js(
+            self::CDN_SWAGGER_PRESET,
+            self::LOCAL_SWAGGER_PRESET,
+            self::SWAGGER_PRESET_INTEGRITY,
+            'SwaggerUIStandalonePreset'
+        );
+    }
+
+    /**
+     * Force the API documentation page to use only the self-hosted Swagger UI
+     * files, never the CDN.
+     *
+     * Some organisations run the portal on a network that blocks public
+     * content delivery networks. On those networks the browser has to try the
+     * CDN, wait for it to fail, and only then load the local copy — which
+     * makes /api-docs look broken for a few seconds on every visit. Turning
+     * the setting `api.docs.local_assets_only` on removes that wait by
+     * skipping the CDN entirely.
+     *
+     * Off by default, so nothing changes for the majority of installs that
+     * can reach the CDN and benefit from its caching.
+     *
+     * @return bool True when the page should load local files only.
+     */
+    public static function swaggerUiLocalOnly(): bool
+    {
+        // Settings may be unavailable very early in bootstrap; default to the
+        // CDN-first behaviour if we cannot read the setting.
+        if (class_exists('\Portal\Core\Settings') === false) {
+            return false;
+        }
+
+        return Settings::get('api.docs.local_assets_only', 'false') === 'true';
+    }
+
+    /**
+     * The three self-hosted Swagger UI tags, with no CDN reference at all.
+     *
+     * Used by /api-docs when `api.docs.local_assets_only` is turned on.
+     *
+     * @return array{css: string, js: string, preset: string}
+     */
+    public static function swaggerUiLocalTags(): array
+    {
+        return [
+            'css'    => '<link rel="stylesheet" href="' . self::esc(self::LOCAL_SWAGGER_CSS) . '">',
+            'js'     => '<script src="' . self::esc(self::LOCAL_SWAGGER_JS) . '"></script>',
+            'preset' => '<script src="' . self::esc(self::LOCAL_SWAGGER_PRESET) . '"></script>',
+        ];
     }
 
     /**

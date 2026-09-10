@@ -582,6 +582,70 @@ class Router
     }
 
     /**
+     * @var array<string, bool>|null Every route key in the database, loaded
+     * once per request. Null until the first call to routeExists().
+     */
+    private static ?array $routeKeyCache = null;
+
+    /**
+     * Is there actually a page at this address?
+     *
+     * Menus and dashboards build links from the settings table, which knows
+     * which apps are switched on but knows nothing about which addresses
+     * exist. Before this existed, several links were being drawn for apps
+     * whose real entry page sits somewhere else — `/salvation` when the page
+     * is at `/decision-card`, `/reports` when it is at `/admin/reports`,
+     * `/kids` when there is no such page at all, only `/kids/checkin`. Every
+     * one of those links led to "page not found".
+     *
+     * Call this before drawing any link built from a setting name rather than
+     * from a known address.
+     *
+     * Every route key is fetched once and kept for the rest of the request,
+     * so a menu with thirty links still costs a single query. If the query
+     * fails, this returns true — a menu missing every one of its links would
+     * be a far worse outcome than a link that might not work.
+     *
+     * @param string $routeKey The address to check, with no leading slash
+     *                         (for example "decision-card" or "kids/checkin").
+     *
+     * @return bool True when a page is registered at that address.
+     */
+    public static function routeExists(string $routeKey): bool
+    {
+        $routeKey = trim($routeKey, '/');
+        if ($routeKey === '') {
+            return false;
+        }
+
+        if (self::$routeKeyCache === null) {
+            try {
+                $db     = App::db();
+                $result = $db->query('SELECT routeKey FROM tblRoutes');
+                if ($result === false) {
+                    // Leave the cache unset so a later call can try again, and
+                    // say yes for now — a menu missing every one of its links
+                    // is a far worse outcome than a link that might not work.
+                    return true;
+                }
+
+                self::$routeKeyCache = [];
+                while ($row = $result->fetch_assoc()) {
+                    self::$routeKeyCache[(string) $row['routeKey']] = true;
+                }
+                $result->free();
+            } catch (\Throwable $e) {
+                // No database connection yet, or the query threw. Same
+                // reasoning as above: do not hide the menu over it.
+                Logger::errorPlatform('MySQL', 'Error', 'ROUTE_LIST_FAIL', $e->getMessage(), '');
+                return true;
+            }
+        }
+
+        return isset(self::$routeKeyCache[$routeKey]);
+    }
+
+    /**
      * Get the current normalised request path.
      *
      * @return string The current path

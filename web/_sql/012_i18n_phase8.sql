@@ -27,7 +27,12 @@ PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 INSERT INTO tblSettings (settingKey, settingValue, isSensitive) VALUES
     ('i18n.defaultLocale',  'en',   0),
     ('i18n.enabled',        'true', 0)
-ON DUPLICATE KEY UPDATE settingValue = VALUES(settingValue);
+-- Do nothing if the setting already exists. This used to overwrite the value,
+-- which was harmless only because portal-wide settings could never actually
+-- collide (see migration 187). Now that they can, a replay would reset the
+-- default language and the translations on/off choice that an administrator
+-- had set — so it must leave an existing row alone, like every other seed.
+ON DUPLICATE KEY UPDATE settingKey = settingKey;
 
 -- 📋 Track this migration
 INSERT INTO tblMigrations (filename)

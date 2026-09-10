@@ -43,7 +43,17 @@ $pageTitle = 'Livestream Analytics';
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 <div class="container py-3" style="max-width:960px;">
-    <h1 class="h4 mb-3"><i class="fa-solid fa-video me-2 text-primary"></i>Livestream Analytics</h1>
+    <!-- 🔗 The channels and schedule page is a separate page. It used to sit at
+         this same address until migration 133 gave the address to this
+         analytics view, after which nothing linked to it at all — including
+         the button that tells subscribers "we are live now". Migration 186
+         gave it an address of its own; this is the way in. -->
+    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+        <h1 class="h4 mb-0"><i class="fa-solid fa-video me-2 text-primary"></i>Livestream Analytics</h1>
+        <a href="/admin/livestream/channels" class="btn btn-sm btn-outline-primary">
+            <i class="fa-solid fa-sliders me-1"></i> Channels &amp; schedule
+        </a>
+    </div>
 
     <div class="row g-3 mb-4">
         <div class="col-md-6">

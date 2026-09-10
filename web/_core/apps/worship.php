@@ -10,6 +10,11 @@ return [
     'category'    => 'operations',
     'industries'  => ['church', 'events', 'broadcasting'],
     'route'       => 'worship',
+    // 🎯 Where a menu entry or dashboard card should link to.
+    //    'route' above is a PREFIX used to work out which app owns a
+    //    page (for the on/off switch), NOT an address you can visit:
+    //    the prefix `worship` is not a page — the plan list is the way in.
+    'landing'     => 'worship/plans',
     'settingKey'  => 'worship.enabled',
     'isCore'      => false,
     'version'     => '1.0.0',

@@ -35,6 +35,7 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\Site;
 use Portal\Core\WebPush;
 
 Auth::ensureSession();
@@ -98,6 +99,38 @@ $defaults = [
 foreach ($defaults as $k => $v) {
     if (array_key_exists($k, $prefs) === false) {
         $prefs[$k] = $v;
+    }
+}
+
+// 📰 Newsletter opt-in.
+//    This used to live on a separate page of its own, also called
+//    "Notification preferences", which is where the /account/notifications
+//    address actually led — so this page, the fuller one, could not be opened
+//    at all. Both are now one page, and this is the newsletter half of it.
+//
+//    The opt-in is stored in its own table rather than in the preferences
+//    above, because a newsletter unsubscribe link has to work for someone who
+//    is not signed in, which needs a token that only that table holds.
+//
+//    Someone who has never made a choice counts as opted in, matching what
+//    the old page did.
+$newsletterOptedIn = true;
+$newsletterOn      = (string) (App::settings()['newsletter']['enabled'] ?? '0');
+$newsletterOn      = ($newsletterOn === '1' || $newsletterOn === 'true');
+$siteId            = Site::id();
+
+if ($newsletterOn === true) {
+    $stmt = $mysqli->prepare(
+        'SELECT optedIn FROM tblNewsletterSubscription WHERE siteID = ? AND userID = ? LIMIT 1'
+    );
+    if ($stmt !== false) {
+        $stmt->bind_param('ii', $siteId, $userId);
+        $stmt->execute();
+        $nlRow = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+        if ($nlRow !== null) {
+            $newsletterOptedIn = ((int) $nlRow['optedIn'] === 1);
+        }
     }
 }
 
@@ -232,6 +265,27 @@ $switchRow = static function (string $key, string $label, string $helpText) use 
             <?php echo $switchRow('approvalRequests', 'Approval requests', 'Get notified when a workflow step is waiting on you, or when a request you submitted is approved/rejected.'); ?>
         </div>
     </div>
+
+    <?php if ($newsletterOn === true): ?>
+    <!-- 📰 Newsletter opt-in — merged in from the old separate page -->
+    <div class="card shadow-sm mb-3">
+        <div class="card-header"><h2 class="h6 mb-0">Newsletter</h2></div>
+        <div class="card-body">
+            <div class="form-check form-switch py-2">
+                <input class="form-check-input" type="checkbox" role="switch"
+                       name="newsletterOptedIn" value="1" id="np-newsletterOptedIn"
+                       <?php echo $newsletterOptedIn === true ? 'checked' : ''; ?>>
+                <label class="form-check-label" for="np-newsletterOptedIn">
+                    <strong>Receive newsletters from this portal</strong>
+                    <div class="small text-muted">
+                        You can also unsubscribe using the link at the bottom of any
+                        newsletter, without signing in.
+                    </div>
+                </label>
+            </div>
+        </div>
+    </div>
+    <?php endif; ?>
 
     <div class="card shadow-sm mb-3">
         <div class="card-header"><h2 class="h6 mb-0">Other</h2></div>

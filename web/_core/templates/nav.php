@@ -25,6 +25,7 @@
 declare(strict_types=1);
 
 use Portal\Core\App;
+use Portal\Core\AppRegistry;
 use Portal\Core\Auth;
 use Portal\Core\Avatar;
 use Portal\Core\I18n;
@@ -77,27 +78,71 @@ if ($isLoggedIn === true && Site::isMultisiteEnabled() === true && $navUser !== 
                 </li>
 
                 <?php
-                // 📋 Dynamic app links from settings (apps with *.enabled = 'true')
+                // 📋 One menu entry per app that is switched on.
+                //
+                //    Two things used to go wrong here, both fixed below.
+                //
+                //    First, this only accepted the exact word 'true'. But the
+                //    "Apps" screen at /admin/apps writes '1' when you switch an
+                //    app on, and AppRegistry::isEnabled() has always accepted
+                //    either. So an app switched on through that screen worked
+                //    if you typed its address, but never appeared in this menu.
+                //    Whether an app was visible depended on HOW it was switched
+                //    on, which is not something anyone could have guessed.
+                //
+                //    Second, this linked to "/" plus the setting's name, with
+                //    nothing checking that a page exists there. Several apps
+                //    keep their entry page somewhere else — Decision Card is at
+                //    /decision-card, Reports at /admin/reports, Kids has no
+                //    front page at all, only /kids/checkin — so those menu
+                //    entries led straight to "page not found". A few settings
+                //    groups in that list, such as "webhooks", are not apps at
+                //    all and never had a page.
+                //
+                //    Now the real address comes from the app registry, which is
+                //    the list that actually knows it, and any entry whose
+                //    address does not exist is left out rather than drawn as a
+                //    dead link.
                 $allSettings = App::settings();
                 if (is_array($allSettings) === true) {
+                    $registry = AppRegistry::all();
                     foreach ($allSettings as $appKey => $appConf) {
                         if (is_array($appConf) === false) {
                             continue;
                         }
-                        if (($appConf['enabled'] ?? '') !== 'true') {
+                        $enabledValue = (string) ($appConf['enabled'] ?? '');
+                        if ($enabledValue !== 'true' && $enabledValue !== '1') {
                             continue;
                         }
                         // Skip meta-settings that aren't real apps
                         if (in_array($appKey, ['site', 'auth', 'portal', 'features', 'api', 'email', 'i18n'], true) === true) {
                             continue;
                         }
-                        $appName = $appConf['displayName'] ?? ucfirst($appKey);
-                        $appIcon = $appConf['displayIcon'] ?? 'fa-solid fa-cube';
+
+                        // 🎯 The registry knows the real address. 'landing' is
+                        //    the page to open; 'route' is only a prefix used to
+                        //    work out which app owns a page, and for a few apps
+                        //    that prefix is not a page at all (Expenses, Kids,
+                        //    Worship). Fall back to the setting's own name when
+                        //    there is no registry entry.
+                        $appRoute = (string) (
+                            $registry[$appKey]['landing']
+                            ?? $registry[$appKey]['route']
+                            ?? $appKey
+                        );
+
+                        // 🚧 Never draw a link to a page that does not exist.
+                        if (Router::routeExists($appRoute) === false) {
+                            continue;
+                        }
+
+                        $appName = $appConf['displayName'] ?? ($registry[$appKey]['name'] ?? ucfirst($appKey));
+                        $appIcon = $appConf['displayIcon'] ?? ($registry[$appKey]['icon'] ?? 'fa-solid fa-cube');
                         $isActive = ($navSection === $appKey);
                         ?>
                         <li class="nav-item">
                             <a class="nav-link<?php echo $isActive ? ' active' : ''; ?>"
-                               href="/<?php echo htmlspecialchars($appKey, ENT_QUOTES, 'UTF-8'); ?>"
+                               href="<?php echo htmlspecialchars(Router::url($appRoute), ENT_QUOTES, 'UTF-8'); ?>"
                                <?php echo $isActive ? 'aria-current="page"' : ''; ?>>
                                 <i class="<?php echo htmlspecialchars($appIcon, ENT_QUOTES, 'UTF-8'); ?> me-1"></i>
                                 <?php echo htmlspecialchars($appName, ENT_QUOTES, 'UTF-8'); ?>

@@ -60,6 +60,24 @@ final class ApiAuth
     /** @var bool Whether the bearer-key lookup has run (caches the null case too). */
     private static bool $bearerResolved = false;
 
+    /**
+     * @var string|null The anti-forgery token that replaced the one this
+     * request used, or null when no session-mode write happened.
+     *
+     * Auth::verifyCsrf() issues a brand-new token every time it accepts one,
+     * so a token can never be replayed. The consequence is that a caller
+     * making several writes in a row without reloading the page is holding a
+     * dead token the moment its first write succeeds.
+     *
+     * ApiResponse puts this value in the response's `meta` block so such a
+     * caller can pick the new token up and carry on. The browsable API
+     * documentation page at /api-docs relies on it, and so does any in-page
+     * script that posts more than once. It is only ever set for session-mode
+     * requests: a request authenticated with an API key carries no session
+     * cookie, so anti-forgery tokens do not apply to it at all.
+     */
+    private static ?string $rotatedCsrf = null;
+
     /** Fallback per-key rate-limit window (overridden by api.rateLimit.perKey.* settings). */
     private const DEFAULT_MAX_REQUESTS  = 300;
     private const DEFAULT_WINDOW_MINUTES = 5;
@@ -214,6 +232,12 @@ final class ApiAuth
             ApiResponse::error('CSRF check failed', 403);
         }
 
+        // 🔄 The check above consumed the token and issued a replacement.
+        //    Hand the replacement back in the response so a caller making
+        //    several writes without reloading the page does not get rejected
+        //    on its second one. See the $rotatedCsrf property for why.
+        self::$rotatedCsrf = Auth::csrfToken();
+
         self::$source   = 'session';
         self::$resolved = true;
         return $body;
@@ -294,6 +318,20 @@ final class ApiAuth
     public static function source(): string
     {
         return self::$source;
+    }
+
+    /**
+     * The replacement anti-forgery token issued during this request, if any.
+     *
+     * Returns null unless a session-mode write passed its anti-forgery check
+     * on this request — which means it is always null for requests
+     * authenticated with an API key, and for every read.
+     *
+     * @return string|null
+     */
+    public static function rotatedCsrf(): ?string
+    {
+        return self::$rotatedCsrf;
     }
 
     /**

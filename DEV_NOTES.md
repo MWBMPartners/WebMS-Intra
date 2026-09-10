@@ -5,6 +5,215 @@
 
 ---
 
+## Installing PHP on your own machine
+
+### Why you need it
+
+The portal is written in PHP, but PHP is not part of this repository — it is a
+program that has to be installed on whatever computer you are working on. Two
+things stop working without it:
+
+1. **Visual Studio Code cannot check your PHP files as you type.** It shows the
+   message *"Cannot validate since a PHP installation could not be found. Use
+   the setting 'php.validate.executablePath' to configure the PHP executable."*
+2. **You cannot run the same syntax check that the build server runs.** When a
+   pull request is opened, the "PR Security Checks" job runs `php -l` over
+   every PHP file in `web/`, and a single typo fails the whole build. That is a
+   hard gate — nothing merges past it. Running the same check yourself before
+   pushing turns a ten-minute round trip into a two-second one.
+
+You do **not** need a web server, a database, or Composer on your own machine
+for this. You only need the `php` command itself, so it can read your files and
+tell you whether they are valid. The portal is served on shared hosting, which
+supplies its own PHP.
+
+### Which version
+
+The project targets **PHP 8.5** and stays backward compatible with **8.4**.
+Install 8.5 if your system offers it; 8.4 is fine too. Anything older than 8.4
+will report errors on perfectly valid code, because it does not understand the
+newer syntax the project uses.
+
+### macOS
+
+The usual way is Homebrew, a package manager for macOS. Check whether you
+already have it:
+
+```bash
+brew --version
+```
+
+If that prints a version number, install PHP with:
+
+```bash
+brew install php
+php --version          # confirm — expect 8.5.x
+```
+
+If `brew --version` says "command not found", install Homebrew first by
+following the one-line instruction on <https://brew.sh>, then close and reopen
+your terminal and run the two commands above.
+
+Homebrew puts PHP at `/opt/homebrew/bin/php` on Apple Silicon Macs (M1 and
+later) and at `/usr/local/bin/php` on older Intel Macs. Confirm which one with:
+
+```bash
+which php
+```
+
+**If you would rather not use Homebrew**, download a ready-made build from
+<https://php.net/downloads> or use MAMP (<https://www.mamp.info>), which bundles
+PHP with a web server. MAMP hides its copy of PHP inside the application
+folder, at a path like
+`/Applications/MAMP/bin/php/php8.5.0/bin/php` — you will need that full path
+for the Visual Studio Code setting below.
+
+### Windows
+
+1. Go to <https://windows.php.net/download> and download the **Thread Safe**
+   ZIP file for the newest 8.5 release, 64-bit (labelled `x64`).
+2. Unzip it to a folder with no spaces in the name, for example `C:\php`.
+3. In that folder, copy `php.ini-development` and rename the copy to `php.ini`.
+4. Add `C:\php` to your PATH, which is the list of folders Windows searches
+   when you type a command:
+   press the Start button, type *"Edit the system environment variables"*, open
+   it, click **Environment Variables**, select **Path** under *User variables*,
+   click **Edit**, click **New**, and enter `C:\php`. Click OK on every window.
+5. Close and reopen your terminal, then check it worked:
+
+   ```powershell
+   php --version
+   ```
+
+Two alternatives, if you would rather not do the above by hand:
+
+- **Chocolatey** (a package manager for Windows): `choco install php`
+- **Laragon** or **XAMPP**: bundles that install PHP together with a web server
+  and a database. Their PHP lives at a path such as
+  `C:\laragon\bin\php\php-8.5.0\php.exe` or `C:\xampp\php\php.exe`.
+
+### Linux (Debian, Ubuntu, Linux Mint)
+
+The version in the standard Ubuntu and Debian repositories is often older than
+8.4. The usual fix is Ondřej Surý's PPA, a well-known third-party source that
+packages current PHP releases for these systems.
+
+```bash
+sudo apt update
+sudo apt install -y software-properties-common
+sudo add-apt-repository -y ppa:ondrej/php     # Ubuntu / Mint
+sudo apt update
+sudo apt install -y php8.5-cli
+php --version
+```
+
+On **Debian** the PPA command above does not apply. Use Ondřej Surý's Debian
+repository instead — the current instructions are at
+<https://deb.sury.org/> — then `sudo apt install -y php8.5-cli`.
+
+`php8.5-cli` is the command-line build. It is all you need for syntax checking;
+there is no need for `php8.5-fpm`, Apache or Nginx.
+
+### Linux (Fedora, RHEL, Rocky, AlmaLinux)
+
+```bash
+sudo dnf install -y php-cli
+php --version
+```
+
+If that installs something older than 8.4, add the Remi repository, which
+packages current PHP releases for these systems — instructions at
+<https://rpms.remirepo.net/> — then select the 8.5 module and install `php-cli`
+again.
+
+### Raspberry Pi
+
+Raspberry Pi OS is built on Debian, so it follows the Debian instructions
+above. The version that ships in the standard repository is usually too old, so
+use Ondřej Surý's Debian repository:
+
+```bash
+sudo apt update
+sudo apt install -y apt-transport-https lsb-release ca-certificates curl
+curl -sSLo /tmp/debsuryorg-archive-keyring.deb \
+  https://packages.sury.org/debsuryorg-archive-keyring.deb
+sudo dpkg -i /tmp/debsuryorg-archive-keyring.deb
+echo "deb [signed-by=/usr/share/keyrings/deb.sury.org-php.gpg] \
+  https://packages.sury.org/php/ $(lsb_release -sc) main" \
+  | sudo tee /etc/apt/sources.list.d/php.list
+sudo apt update
+sudo apt install -y php8.5-cli
+php --version
+```
+
+This works on both 64-bit and 32-bit Raspberry Pi OS. On a Pi Zero or an older
+Pi the install takes several minutes — that is normal, not a hang.
+
+### Pointing Visual Studio Code at it
+
+Once `php --version` works in a terminal, tell the editor where PHP is. Find
+the full path first:
+
+```bash
+which php        # macOS, Linux, Raspberry Pi
+where php        # Windows
+```
+
+Then open Visual Studio Code's settings (**Code → Settings → Settings**, or
+`Ctrl`/`Cmd` + `,`), search for `php.validate.executablePath`, and paste that
+path in. Typical values:
+
+| System | Typical path |
+| --- | --- |
+| macOS, Apple Silicon (Homebrew) | `/opt/homebrew/bin/php` |
+| macOS, Intel (Homebrew) | `/usr/local/bin/php` |
+| Linux / Raspberry Pi | `/usr/bin/php` |
+| Windows | `C:\php\php.exe` |
+
+Restart Visual Studio Code. The "could not be found" message should be gone.
+
+Do **not** commit this setting to the repository. The right path is different
+on every machine, so it belongs in your personal settings, or in a
+`.vscode/settings.json` inside the project folder — which is deliberately
+listed in `.gitignore` for exactly this reason.
+
+### Running the same check the build server runs
+
+From the repository root:
+
+```bash
+find ./web -type f -name "*.php" \
+  -not -path "*/vendor/*" \
+  -not -path "*/_libraries/*" \
+  -print0 | xargs -0 -n1 -P4 php -l
+```
+
+That is character-for-character the command in
+`.github/workflows/pr-security.yml`. Silence, or a run of "No syntax errors
+detected" lines, means you are clear. Any other output is a real error that
+will fail the build, and it names the file and line number.
+
+On Windows, run that command from Git Bash or Windows Subsystem for Linux
+(WSL), because `find` and `xargs` are not PowerShell commands. The PowerShell
+equivalent is:
+
+```powershell
+Get-ChildItem -Path .\web -Recurse -Filter *.php |
+  Where-Object { $_.FullName -notmatch '\\(vendor|_libraries)\\' } |
+  ForEach-Object { php -l $_.FullName }
+```
+
+### What you still cannot do locally
+
+Installing PHP lets you check that files are *syntactically* valid. It does not
+let you run the portal, because that also needs a web server, a MySQL 8.0
+database, and the credentials in `_auth_keys/` which are never committed. To
+exercise the database migrations, use the end-to-end harness described under
+**End-to-end migration test (#248)** further down this document — it runs in
+CI against a real MySQL 8.0 instance.
+
+---
+
 ## Repository vs Server Structure
 
 The Git repository root contains documentation and CI/CD config. **All deployable
@@ -854,6 +1063,87 @@ These are enforced across the codebase. Follow them in all new code.
 - Use `Portal\Core\App::` methods over `global` keyword in new code
 
 ---
+
+## The settings table: why a save used to add a row instead of changing one
+
+**Read this before touching `tblSettings` or writing a settings seed.**
+
+### What used to happen
+
+A setting that applies to the whole portal is stored with its site left empty
+(`siteID IS NULL`). A setting that applies to one site stores that site's
+number. The table's rule for "no two rows may be the same" covered
+`(settingKey, siteID)`.
+
+That works for a per-site setting. It cannot work for a portal-wide one,
+because **MySQL never treats one empty value as equal to another** — not even
+to itself. Two rows both saying `('site.name', empty)` were not duplicates as
+far as that rule was concerned.
+
+Every save in this codebase uses "insert this, or update it if it is already
+there". For a portal-wide setting the "already there" half never fired. Every
+save added another row. A fresh install started with **479 surplus rows**, and
+every settings save and app toggle added more.
+
+Migration 187 fixed it by adding a derived column `siteScope` (the site number,
+or `-1` for portal-wide) and putting the uniqueness rule on
+`(settingKey, siteScope)`.
+
+### Four rules that now matter
+
+**1. The derived column must be VIRTUAL, never STORED.**
+MySQL refuses a cascading foreign key on the base column of a STORED derived
+column, and `tblSettings.siteID` has `ON DELETE CASCADE`. With STORED,
+`full_schema.sql` will not load at all — *ERROR 1215: Cannot add foreign key
+constraint*.
+
+**2. A seed must never write `settingValue` in its duplicate clause.**
+Before the fix this was harmless, because portal-wide rows never collided. Now
+it would reset a value an administrator chose, every time the installer
+replays. Use one of these instead:
+
+```sql
+ON DUPLICATE KEY UPDATE `settingKey` = `settingKey`          -- do nothing
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`)  -- default only
+```
+
+Migrations 012 and 021 had to be corrected for exactly this. If you add a seed
+that writes `settingValue`, you are resetting somebody's choice on every
+upgrade.
+
+**3. Never assume "the newest row" is the one in use.**
+Several screens — payments, captcha, SMS, translation, integrations — find the
+row to change with an unordered `SELECT ... LIMIT 1` and update that one, which
+in practice is the **oldest** copy. Migration 187's clean-up therefore keeps
+the row that looks edited (its value differs from its own default, compared
+byte for byte), then the most recently written, then the newest.
+
+**4. `SIGNAL` cannot raise a clear error in a migration.**
+These files run through the prepared-statement route, and MySQL 8.0 answers
+`SIGNAL` there with *ERROR 1295: This command is not supported in the prepared
+statement protocol yet*. Migration 187 works around it by selecting from a
+table whose **name** is the message, which fails loudly and readably.
+
+### What the fix deliberately did not do
+
+It changes no value an administrator might have chosen. Two settings were left
+exactly as they are, because a leftover seed and a deliberate choice are
+indistinguishable:
+
+- **The minimum password length.** Existing sites may still require 8 while the
+  project believes 12. `/help/admin` now warns about this and tells the
+  administrator to check.
+- **The expenses delete endpoint.**
+
+Both were corrected at the seed instead, so newly installed portals land on the
+right value without any existing database being touched.
+
+## Migration numbers 168 and 169 do not exist
+
+They were never used. Nothing depends on the numbering being unbroken — both the
+installer and the migration runner list the files and sort them, so a gap is
+invisible. Do not "fill in" the gap: a file numbered 168 today would run before
+169-187 on every replay, which is not where it belongs.
 
 ## SQL Migrations
 
@@ -2004,6 +2294,123 @@ patterns without the `IF NOT EXISTS` clause. These have already run in
 production and the Migrator wrapper skips already-applied files, so
 they're safe. **New migrations must pass cleanly** — drop a non-idempotent
 DDL in a fresh migration and the audit will catch it.
+
+## The browsable API documentation page (/api-docs)
+
+### What the page is
+
+`/api-docs` shows every endpoint of the portal's REST API in a form you can
+read and try out in a browser. It is built by a third-party library called
+Swagger UI, which reads the machine-readable description the portal serves at
+`/openapi.json`. That description comes from `web/_core/api-spec.json`, passed
+through `web/public_html/openapi.php` so the product name matches the active
+brand.
+
+### Self-hosted Swagger UI files
+
+The three Swagger UI files are committed to the repository:
+
+```
+web/public_html/assets/vendor/swagger-ui/swagger-ui-5.17.14.css
+web/public_html/assets/vendor/swagger-ui/swagger-ui-bundle-5.17.14.js
+web/public_html/assets/vendor/swagger-ui/swagger-ui-standalone-preset-5.17.14.js
+```
+
+They deploy with the rest of `public_html/`, so nothing has to be installed or
+built on the server. That matters because the portal runs on shared hosting
+with no command line and no package manager.
+
+The page still asks the jsdelivr CDN for them *first*, because a visitor who
+has already loaded Swagger UI elsewhere gets it instantly from their browser
+cache. The committed copies are the fallback, wired through the existing
+`Asset::css()` / `Asset::js()` machinery — exactly how Bootstrap and Font
+Awesome have always worked. If the CDN cannot be reached, the browser loads the
+local copy and the page works normally.
+
+**Setting `api.docs.local_assets_only`** (migration 185, seeded `false`) skips
+the CDN entirely. Turn it on for a site whose network *blocks* public CDNs
+outright: without it the browser has to attempt the CDN and wait for the
+attempt to fail on every visit, which makes the page look broken for a few
+seconds. When it is on, the page also drops jsdelivr from its
+Content-Security-Policy header, so the policy exactly matches what the page
+actually loads.
+
+### Refreshing the self-hosted Swagger UI files
+
+Do this whenever `Asset::SWAGGER_VERSION` is bumped. The committed files must
+stay byte-identical to what the CDN serves, because both are validated against
+the same SRI hash — if they drift, the CDN copy loads and the local copy
+silently fails the integrity check.
+
+```bash
+V=5.17.14                       # set to the new version
+D=web/public_html/assets/vendor/swagger-ui
+mkdir -p "$D"
+
+for f in swagger-ui.css swagger-ui-bundle.js swagger-ui-standalone-preset.js; do
+  curl -sSL -o "/tmp/$f" "https://cdn.jsdelivr.net/npm/swagger-ui-dist@$V/$f"
+  echo "$f  sha384-$(openssl dgst -sha384 -binary "/tmp/$f" | openssl base64 -A)"
+done
+```
+
+Copy each printed hash into the matching `SWAGGER_*_INTEGRITY` constant in
+`web/_core/Asset.php`, then move the files into place with the version in the
+filename (the same convention the React files under `assets/vendor/react/`
+use, so an old cached copy can never be served for a new version):
+
+```bash
+mv /tmp/swagger-ui.css                    "$D/swagger-ui-$V.css"
+mv /tmp/swagger-ui-bundle.js              "$D/swagger-ui-bundle-$V.js"
+mv /tmp/swagger-ui-standalone-preset.js   "$D/swagger-ui-standalone-preset-$V.js"
+git rm web/public_html/assets/vendor/swagger-ui/*-<OLD VERSION>.*
+```
+
+Finally update `SWAGGER_VERSION` in `Asset.php`. Both the CDN URLs and the
+local paths are built from that one constant, so nothing else needs editing.
+
+To confirm a committed file matches its recorded hash at any time:
+
+```bash
+openssl dgst -sha384 -binary web/public_html/assets/vendor/swagger-ui/swagger-ui-5.17.14.css \
+  | openssl base64 -A
+# compare with SWAGGER_CSS_INTEGRITY in web/_core/Asset.php
+```
+
+The Swagger UI stylesheet embeds all of its images directly, so there are no
+extra image or font files to fetch. Nothing else is needed.
+
+### Trying an endpoint out, and the anti-forgery token
+
+"Try it out" on a POST, PUT, PATCH or DELETE endpoint only works if the request
+carries a valid anti-forgery token — a short random string that proves the
+request came from a real page of this portal, not from another website.
+
+Two things make that work:
+
+1. **The page publishes a token.** `/api-docs` draws its own `<head>` instead of
+   using the shared page template, so it emits its own
+   `<meta name="csrf-token">`. Before this was added the token was always
+   empty, and every write from "Try it out" was refused with "CSRF check
+   failed".
+2. **The reply hands back a replacement.** `Auth::verifyCsrf()` issues a
+   brand-new token every time it accepts one, so a token can never be reused.
+   `ApiAuth::requireWrite()` captures the replacement and `ApiResponse` puts it
+   in the response's `meta.csrfToken` field; the page reads it from there and
+   updates its copy. Without this, only the *first* write of a session would
+   succeed.
+
+`meta.csrfToken` appears **only** on session-authenticated writes. A request
+authenticated with a bearer API key never gets it, because such a request
+carries no session cookie and anti-forgery tokens do not apply to it. The field
+is documented in `api-spec.json` on both `V1SuccessEnvelope` and
+`V1ErrorEnvelope`.
+
+The page also sets `validatorUrl: null`. By default Swagger UI asks
+`validator.swagger.io` to grade the specification and shows a badge with the
+result — which would tell an outside service the address of the install, and is
+blocked by the page's own security policy anyway.
+
+---
 
 ## Adding a new CDN dependency (#161)
 

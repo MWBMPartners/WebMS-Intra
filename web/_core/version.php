@@ -21,9 +21,12 @@
  *   - Bootstrap-free: this file MUST NOT use the Portal\Core\ namespace or
  *     reference any class, constant, or function defined elsewhere. It is
  *     loaded by the installer BEFORE any autoloader is available.
- *   - The runtime can still override this via the `portal.version` setting
- *     in tblSettings (loaded by App::init() after bootstrap), which is
- *     useful only for testing — production should match the constant.
+ *   - This file is the ONLY source of the version. There used to be a
+ *     `portal.version` setting in the database that App::init() would prefer
+ *     whenever it had a value. That quietly defeated the point of this file:
+ *     a stale seed meant the portal reported itself as version 0.1.0. The
+ *     setting is no longer read (see App::init()) and is removed by
+ *     migration 187.
  *
  * @package   Portal\Core
  * @author    MWBM Partners Ltd (t/a MWservices)

@@ -93,6 +93,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $result['rows_restored']
                     );
                     $flashType = 'success';
+                    // ⚠️ Say so if any rows were left out. Reporting "success"
+                    //    while quietly dropping rows would be worse than saying
+                    //    nothing at all.
+                    if (($result['skipped_duplicates'] ?? 0) > 0) {
+                        $flash .= ' ' . ($result['notice'] ?? '');
+                        $flashType = 'warning';
+                    }
                 } else {
                     $flash = 'Restore failed: ' . ($result['error'] ?? 'unknown');
                     $flashType = 'danger';
@@ -118,11 +125,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     : null;
                 $errors = [];
                 $okCount = 0;
+                $skippedTotal = 0;
+                $skippedTables = [];
                 if (is_array($manifest) === true && isset($manifest['tables']) === true) {
                     foreach (array_keys((array) $manifest['tables']) as $t) {
                         $r = $backup->restoreTable($path, (string) $t);
                         if ($r['success'] === true) {
                             $okCount++;
+                            // ⚠️ Keep track of anything left out so the summary
+                            //    below can say so, rather than reporting a clean
+                            //    success when rows were dropped.
+                            if (($r['skipped_duplicates'] ?? 0) > 0) {
+                                $skippedTotal += (int) $r['skipped_duplicates'];
+                                $skippedTables[] = (string) $t;
+                            }
                         } else {
                             $errors[] = $t . ': ' . ($r['error'] ?? 'unknown');
                         }
@@ -134,6 +150,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if (count($errors) === 0) {
                     $flash = sprintf('Full restore complete — %d tables restored.', $okCount);
                     $flashType = 'success';
+                    if ($skippedTotal > 0) {
+                        $flash .= sprintf(
+                            ' %d row(s) across %d table(s) (%s) were left out because '
+                            . 'the database no longer allows two rows the same. This is '
+                            . 'expected for a snapshot taken before that rule was added — '
+                            . 'those duplicates were never meant to be there.',
+                            $skippedTotal,
+                            count($skippedTables),
+                            implode(', ', array_slice($skippedTables, 0, 5))
+                        );
+                        $flashType = 'warning';
+                    }
                 } else {
                     $flash = sprintf(
                         '%d tables restored; %d errors: %s',
@@ -141,6 +169,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         count($errors),
                         implode('; ', array_slice($errors, 0, 3))
                     );
+                    // Rows left out have already been committed, so say so here
+                    // too. Reporting only the errors would hide it.
+                    if ($skippedTotal > 0) {
+                        $flash .= sprintf(
+                            ' Also, %d row(s) across %d table(s) (%s) were left out '
+                            . 'because the database no longer allows two rows the same.',
+                            $skippedTotal,
+                            count($skippedTables),
+                            implode(', ', array_slice($skippedTables, 0, 5))
+                        );
+                    }
                     $flashType = 'warning';
                 }
             }
