@@ -133,6 +133,7 @@ final class DbServer
         '10.11' => '10.11.2',
         '11.4'  => '11.4.2',
         '11.8'  => '11.8.2',
+        '12.3'  => '12.3.2',
     ];
 
     // 🎯 The release line to recommend moving TO, named in the advice text.

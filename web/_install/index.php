@@ -182,12 +182,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($dbHost === '' || $dbUser === '' || $dbName === '') {
             $error = 'Database host, username, and database name are required.';
             $step = 2;
-        } elseif (strlen($dbName) > 64 || preg_match('/[\x00-\x1F\/\\\\.]/', $dbName) === 1) {
+        } elseif (mb_check_encoding($dbName, 'UTF-8') === false
+            || mb_strlen($dbName, 'UTF-8') > 64
+            || preg_match('/[\x00-\x1F\/\\\\.]/', $dbName) === 1
+        ) {
             // 🚧 MySQL will not accept these anyway, and refusing them here means
-            //    a clear message instead of a puzzling database error. 64 is
-            //    MySQL's own limit on the length of a name; the control
-            //    characters, slashes and full stops are the ones it forbids
-            //    because they have a meaning in the files it stores databases in.
+            //    a clear message instead of a puzzling database error. The
+            //    control characters, slashes and full stops are the ones it
+            //    forbids because they have a meaning in the files it stores
+            //    databases in.
+            //
+            //    The length is counted in CHARACTERS, not bytes. MySQL's limit
+            //    of 64 is 64 characters, and a name written in an alphabet with
+            //    accents takes two bytes per letter — so counting bytes would
+            //    have refused a 33-letter name that MySQL is perfectly happy
+            //    with. Ordinary names are unaffected either way; this only
+            //    matters for names outside plain English, which is exactly the
+            //    kind of thing that gets missed.
             $error = 'That database name cannot be used. Database names can be up to 64 '
                    . 'characters long and cannot contain a full stop, a slash, a backslash, '
                    . 'or any invisible control characters. Check the name in your hosting '

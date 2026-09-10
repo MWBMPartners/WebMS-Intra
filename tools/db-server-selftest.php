@@ -107,7 +107,8 @@ $cases = [
 
     // --- MariaDB long-term releases.
     ['11.4.2-MariaDB', 'mariadb.org binary distribution', 'MariaDB', '11.4.2', 'ok'],
-    ['12.3.1-MariaDB', 'mariadb.org binary distribution', 'MariaDB', '12.3.1', 'ok'],
+    ['12.3.2-MariaDB', 'mariadb.org binary distribution', 'MariaDB', '12.3.2', 'ok'],
+    ['12.3.1-MariaDB', 'mariadb.org binary distribution', 'MariaDB', '12.3.1', 'warn'],
 
     // --- The 10.6 line runs this portal fine, but its maintenance ended in
     //     July 2026, so it warns rather than passing silently.
@@ -174,10 +175,41 @@ $cases = [
 ];
 
 // -----------------------------------------------------------------------------
+// 🔗 A check on the CODE ITSELF, not on any one version string.
+// -----------------------------------------------------------------------------
+// Three separate reviews found the same fault three times: a release line was
+// added to the list of supported ones, and nobody added its first finished
+// release to the other table. Each time, a release candidate of that line was
+// then reported as a supported version.
+//
+// Adding the missing row fixes it once. This stops it happening a fourth time,
+// by failing here the moment the two tables disagree. It is the only test in
+// this file that checks the shape of the code rather than an answer it gives.
+// -----------------------------------------------------------------------------
+
+$structuralFailures = 0;
+
+foreach (DbServer::MARIADB_SUPPORTED_SERIES as $series) {
+    if (array_key_exists($series, DbServer::MARIADB_FIRST_STABLE) === false) {
+        printf(
+            "  FAIL  MariaDB %s is listed as supported, but no first finished release is\n"
+            . "        recorded for it. Until one is, a release candidate of that line will\n"
+            . "        be reported as a supported version. Add it to MARIADB_FIRST_STABLE.\n",
+            $series
+        );
+        $structuralFailures++;
+    }
+}
+
+if ($structuralFailures === 0) {
+    echo "  PASS  every supported MariaDB line has a first finished release recorded\n\n";
+}
+
+// -----------------------------------------------------------------------------
 // 🏃 Run them.
 // -----------------------------------------------------------------------------
 
-$failures = 0;
+$failures = $structuralFailures;
 $passes   = 0;
 
 echo "Database version reading — self-test\n";
