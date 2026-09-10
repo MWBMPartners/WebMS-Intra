@@ -1,5 +1,5 @@
 <?php
-// Path: public_html/admin/integrations/monitoring/save.php
+// Path: _apps/admin/integrations/monitoring/save.php
 /**
  * Admin — Error-monitoring settings save handler.
  *

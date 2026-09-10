@@ -1,5 +1,5 @@
 <?php
-// Path: public_html/admin/integrations/monitoring/index.php
+// Path: _apps/admin/integrations/monitoring/index.php
 /**
  * Admin — External error monitoring (Sentry / GlitchTip) config + test.
  *

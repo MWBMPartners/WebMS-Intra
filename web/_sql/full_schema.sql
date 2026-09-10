@@ -4960,7 +4960,6 @@ INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
     ('calendar/event/crews/auto-build',  'calendar/event-crews-auto-build.php',  1),
     ('calendar/event/jobs/auto-assign',  'calendar/event-jobs-auto-assign.php',  1),
     -- 127_embeddable_widgets.sql
-    ('widget',                           'calendar/widget.php',                  0),
     -- 128_event_occurrence_overrides.sql
     ('calendar/event/overrides',         'calendar/event-overrides.php',         1),
     ('calendar/event/overrides/save',    'calendar/event-overrides-save.php',    1),
@@ -8549,4 +8548,22 @@ INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
 ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 
 INSERT INTO `tblMigrations` (`filename`) VALUES ('188_server_information_page.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- ── from 189_unreachable_admin_and_widget.sql ────────────────────────────────
+-- The `widget` address is deliberately absent from the seed block above. It was
+-- a PUBLIC address pointing at a page with no sign-in check, and it never
+-- worked anyway: a real folder called `widget` sits in the web root holding the
+-- countdown script other websites embed, and the web server answers for a real
+-- folder rather than handing the request to this portal. Removing the address
+-- means a future tidy-up of that folder cannot silently publish an
+-- unauthenticated page. See the migration for the full reasoning.
+--
+-- This DELETE is here for the case where an older database already has the row.
+
+DELETE FROM `tblRoutes`
+WHERE `routeKey` = 'widget'
+  AND `targetFile` = 'calendar/widget.php';
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('189_unreachable_admin_and_widget.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;

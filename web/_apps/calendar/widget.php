@@ -11,7 +11,45 @@
  * Permissive frame headers (none set) so the page CAN be iframed from
  * external sites. Output is pure data + brand colour.
  *
+ * -----------------------------------------------------------------------------
+ * THIS PAGE IS NOT REACHABLE, AND THAT IS DELIBERATE. READ BEFORE RE-ENABLING.
+ * -----------------------------------------------------------------------------
+ * There is no web address pointing here. There used to be one — `widget` — but
+ * it never worked, because a real folder called `widget` sits in the web root
+ * (it holds `countdown.js`, the small script other websites embed) and the web
+ * server answers for a real folder itself rather than handing the request to
+ * this portal. So the address existed, and every request to it was answered by
+ * the folder instead. Nobody ever reached this file.
+ *
+ * That dead address was removed in migration 189 rather than repointed, because
+ * of what it would have switched on. This page requires NO SIGN-IN. It was
+ * seeded as a public address. So the day anybody made it reachable — by moving
+ * that folder, or by pointing a new address here — everything below would have
+ * gone straight onto the public internet with no further thought.
+ *
+ * TWO FAULTS WERE FIXED HERE AT THE SAME TIME, so that this file is not a trap
+ * for whoever picks it up next:
+ *
+ *   1. Both queries now require `isPublic = 1`. They did not before. They asked
+ *      only for events that were published and not deleted — which includes
+ *      every INTERNAL event, such as a leadership meeting. Every other
+ *      public-facing page in this app already filtered on that column
+ *      (`_apps/widget/countdown-json.php`, `_apps/calendar/index.php`,
+ *      `_apps/calendar/export.php`); this one was the exception, and it was the
+ *      only one that was unreachable, so nobody noticed.
+ *
+ *   2. It is documented, here, that this page has no access check of its own.
+ *
+ * IF YOU WANT TO TURN THIS ON, do all of the following, not just the first:
+ *   - Give it an address that does NOT collide with a real folder or file in
+ *     `web/public_html/` — `calendar/embed` would work, `widget` will not.
+ *   - Gate it behind the Calendar app being switched on for that site, and
+ *     behind a per-site setting that is off by default.
+ *   - Decide deliberately that publishing public event names, dates, locations
+ *     and descriptions to anybody on the internet is what the customer wants.
+ *
  * @link https://github.com/MWBMPartners/webMS-Intra/issues/336
+ * @link https://github.com/MWBMPartners/WebMS-Intra/issues/478
  * -----------------------------------------------------------------------------
  */
 
@@ -32,7 +70,8 @@ $events = [];
 if ($slug !== '' && preg_match('/^[a-z0-9][a-z0-9\-]{0,79}$/i', $slug) === 1) {
     $stmt = $mysqli->prepare(
         'SELECT eventID, eventName, eventSlug, startDateTime, locationName, description '
-        . 'FROM tblEvents WHERE eventSlug = ? AND siteID = ? AND isDeleted = 0 AND status = "published" LIMIT 1'
+        . 'FROM tblEvents WHERE eventSlug = ? AND siteID = ? AND isDeleted = 0 AND status = "published" '
+        . '  AND isPublic = 1 LIMIT 1'
     );
     $stmt->bind_param('si', $slug, $siteId);
     $stmt->execute();
@@ -43,6 +82,7 @@ if ($slug !== '' && preg_match('/^[a-z0-9][a-z0-9\-]{0,79}$/i', $slug) === 1) {
     $stmt = $mysqli->prepare(
         'SELECT eventID, eventName, eventSlug, startDateTime, locationName '
         . 'FROM tblEvents WHERE siteID = ? AND isDeleted = 0 AND status = "published" '
+        . '  AND isPublic = 1 '
         . '  AND startDateTime >= NOW() ORDER BY startDateTime ASC LIMIT ?'
     );
     $stmt->bind_param('ii', $siteId, $n);

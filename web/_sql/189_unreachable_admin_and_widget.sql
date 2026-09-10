@@ -1,0 +1,100 @@
+-- =============================================================================
+-- Migration 189: the Admin area could not be opened, and a dead public address
+-- =============================================================================
+-- One address removed. No tables, no columns, no settings.
+--
+-- -----------------------------------------------------------------------------
+-- WHY THE ADMIN AREA COULD NOT BE OPENED
+-- -----------------------------------------------------------------------------
+-- This part needs no SQL at all, but it belongs in the same change, so it is
+-- explained here where somebody reading the history will find it.
+--
+-- The web server has a rule: if a web address matches a REAL FOLDER on disk, the
+-- web server answers for that folder itself and never hands the request to this
+-- portal. That rule is in `web/public_html/.htaccess`, written as
+-- `RewriteCond %{REQUEST_FILENAME} !-d`, and it is there for a good reason —
+-- it is what lets genuine files such as stylesheets and images be served
+-- directly without going through the portal.
+--
+-- But a real folder called `admin` existed in the web root. It held three
+-- pages belonging to the error-monitoring screen. So every request to /admin —
+-- the Admin area, the first thing an administrator ever clicks — was answered
+-- by that folder instead of by the portal. Depending on the server's settings
+-- the visitor saw either a bare list of files or a flat refusal.
+--
+-- The cruellest part: nothing appeared in the error log, because no portal code
+-- ever ran. There was nothing to log.
+--
+-- The fix was to move those three pages to `web/_apps/`, where every other page
+-- in this portal already lives. No address had to change, because the router
+-- looks in `_apps/` first and only falls back to the web root. With the folder
+-- gone, /admin reaches the portal again.
+--
+-- -----------------------------------------------------------------------------
+-- WHY THE `widget` ADDRESS IS BEING REMOVED
+-- -----------------------------------------------------------------------------
+-- The same rule caught a second address, and this one was dangerous.
+--
+-- `widget` was seeded as a PUBLIC address — no sign-in required — pointing at
+-- `calendar/widget.php`, a small embeddable list of events meant to be shown
+-- inside another website.
+--
+-- It never worked. A real folder called `widget` sits in the web root, holding
+-- `countdown.js`, the little script that other websites embed. So the web
+-- server answered for the folder every time, and no request ever reached
+-- `calendar/widget.php`.
+--
+-- That is why this address is being REMOVED rather than repaired.
+--
+-- The folder cannot move: other people's websites already load
+-- `/widget/countdown.js` from this server, and changing that address would
+-- break their pages without warning. So the collision cannot be resolved by
+-- moving the folder out of the way.
+--
+-- And the page behind the address is not safe to publish as it stands. It has
+-- no sign-in check of any kind, and — until this same change fixed it — its
+-- queries asked only for events that were published and not deleted. That
+-- includes INTERNAL events, such as a leadership meeting. Every other
+-- public-facing page in the calendar already required an event to be marked
+-- public; this one did not, and because it was unreachable nobody ever noticed.
+--
+-- So had anybody ever "tidied up" that folder, an unauthenticated page listing
+-- internal event names, dates and locations would have gone live on the public
+-- internet in the same moment. Removing the address closes that off. The page
+-- itself has been fixed and carries a long comment explaining what to do if
+-- somebody genuinely wants this feature: give it an address that does not
+-- collide, gate it behind a per-site setting that is off by default, and make
+-- the decision to publish deliberately.
+--
+-- Nothing is lost by removing it. The address has never worked, so nothing and
+-- nobody can be relying on it.
+--
+-- @package   Portal\Core
+-- @author    MWBM Partners Ltd (t/a MWservices)
+-- @copyright 2026-present MWBM Partners Ltd (t/a MWservices)
+-- @license   All Rights Reserved
+-- @link      https://github.com/MWBMPartners/WebMS-Intra/issues/483
+-- @link      https://github.com/MWBMPartners/WebMS-Intra/issues/478
+-- =============================================================================
+
+-- #############################################################################
+-- 🧹 A. Remove the dead public address
+-- #############################################################################
+-- Safe to run again: a second run simply deletes nothing.
+--
+-- Deliberately matched on BOTH the address and where it points. If a future
+-- version of this portal ever adds a genuine, safe `widget` address pointing
+-- somewhere else, replaying this migration must not silently delete it.
+
+DELETE FROM `tblRoutes`
+WHERE `routeKey` = 'widget'
+  AND `targetFile` = 'calendar/widget.php';
+
+-- #############################################################################
+-- 📋 B. Self-record (the installer replays every numbered migration after
+--        full_schema.sql and ignores tblMigrations, so this INSERT has to be
+--        safe to run a second time)
+-- #############################################################################
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('189_unreachable_admin_and_widget.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;

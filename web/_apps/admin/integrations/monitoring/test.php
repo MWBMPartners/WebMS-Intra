@@ -1,5 +1,5 @@
 <?php
-// Path: public_html/admin/integrations/monitoring/test.php
+// Path: _apps/admin/integrations/monitoring/test.php
 /**
  * Admin — Send a smoke-test event to the configured monitor.
  *
