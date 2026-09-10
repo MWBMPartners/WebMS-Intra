@@ -9,6 +9,72 @@ proceeds, so the session can be picked up at any point).
 
 ## Read this first — where we are right now
 
+**Updated 10 September 2026, evening.** Working branch `claude/alpha-wip`, 27+
+commits ahead of `alpha`, nothing open against it. The repository is fully
+aligned with GitHub: no stale local branches, `alpha` in step with the remote,
+and the working branch is ahead-only so a rebase would change nothing.
+
+### THE QUESTION THAT MATTERS: can this go to a first real customer yet?
+
+**Not yet, and there is one reason.** It is not missing features — the product is
+broad and largely built. It is that **there is currently no recovery path anybody
+should trust.**
+
+- **#472** — restoring a backup can DESTROY the data it was protecting.
+  `web/_core/DbBackup.php:596` empties the table with `TRUNCATE`, which commits
+  immediately and cannot be undone. If a row fails half way through, the original
+  contents are already gone. On top of that, MySQL refuses that command outright
+  on any table other tables point at — 71 of 209 — so restoring those has never
+  worked at all.
+- **#488** — the emergency instructions somebody would follow at 2am do not work.
+
+Until both are fixed, a customer with a problem could end up worse off than
+before they asked for help. Everything else on the list can be fixed while live.
+These cannot.
+
+### The agreed order of work
+
+| # | Task | Why this position |
+| --- | --- | --- |
+| 1 | **#472** restore must never destroy data | The go/no-go. Nothing else matters if recovery cannot be trusted. |
+| 2 | **#488** make the emergency instructions true | No point having a safe restore nobody can find in a crisis. |
+| 3 | **#479** data deletion and data download | Legal exposure, and it is cheapest to fix before real data exists. |
+| 4 | **Noticeboard** enhancements | Owner-requested. Sound today, but a noticeboard that cannot be displayed is half a feature. |
+
+### The owner's decisions on data protection, settled 10 September 2026
+
+- **ONE standard for everybody.** Behaviour does NOT vary by where a person
+  lives. Working out somebody's country is itself processing their personal
+  data, it is unreliable, and two sets of rules doubles the chance of a mistake
+  in the sensitive one. The right to have data deleted exists under UK and EU
+  law, and now under Brazilian and Californian law too. One high standard is
+  simpler and holds up everywhere.
+- **Erase by default, with a SHORT NAMED LIST of lawful exceptions.** Deleting
+  everything regardless would break the law in the other direction. Kept:
+  Gift Aid declarations (6 years after the tax year, HMRC), financial and
+  expense records (6 years), safeguarding records (kept and flagged, never
+  silently deleted). Each exception recorded so the organisation can show why.
+- **Event registrations** get linked to an account where one exists, AND are
+  deleted automatically 90 days after the event.
+- **The download** must be ONE file a person can open, holding readable copies
+  plus a machine-readable copy, covering EVERY table with their personal data.
+
+### ⚠️ The deletion list is longer than the issue says
+
+#479 named five tables. It is at least seven: `tblNoticeboardPosters` and
+`tblNoticeboardUploads` were found by ACCIDENT while looking at something else,
+and are in neither the deletion list nor the download.
+
+That is the real lesson, and it changes the fix. **Build the list from the
+database structure itself**, not from tables somebody happens to name, or the
+next table added repeats this exactly. `tblNoticeboardUploads` also points at a
+file on disk — deleting the row is not enough, or the picture outlives every
+record that it existed.
+
+---
+
+
+
 **Updated 10 September 2026, later in the day.** Working branch `claude/alpha-wip`.
 Nothing is open against `alpha`. The owner has NOT installed on the live server
 yet and wants the product fleshed out as much as possible first — that changes
