@@ -3,7 +3,7 @@
   "info": {
     "title": "WebMS Intra REST API",
     "description": "Internal portal platform REST API. Two mutually-exclusive auth modes are accepted on every endpoint: (1) an authenticated portal session (cookie-based) plus a valid CSRF token on write operations (passed via `X-CSRF-TOKEN` header or `csrf_token` body field), or (2) a site-scoped bearer API key (`Authorization: Bearer wbms_…`, minted at Admin → Integrations → API Keys). Bearer requests need NO CSRF token — CSRF protects cookie-based sessions from cross-site forgery and is meaningless for a bearer token that travels in an explicit Authorization header set by the calling code, never by a browser automatically. Bearer requests are tenant-pinned to the key's own site (regardless of the Host header) and are rate-limited per key (see `/api/v1/*` paths below). Every endpoint can be enabled/disabled per-site via the `api.{module}.{action}.enabled` setting; bearer requests resolve that flag against the KEY's site, not the host-detected default. The `/api/v1/{resource}[/{id}]` paths are a thin RESTful facade: each verb maps onto the SAME handler file and the SAME `api.{app}.{action}.enabled` flag as its documented `/api/{app}/{action}` legacy alias — there are no separate permissions to manage.",
-    "version": "1.2.0",
+    "version": "1.4.0",
     "license": {
       "name": "All Rights Reserved",
       "url": "https://github.com/MWBMPartners/WebMS-Intra"
