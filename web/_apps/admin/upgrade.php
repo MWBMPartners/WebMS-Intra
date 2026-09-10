@@ -1,5 +1,5 @@
 <?php
-// Path: public_html/admin/upgrade.php
+// Path: _apps/admin/upgrade.php
 /**
  * -----------------------------------------------------------------------------
  * Admin → Upgrade — front-controller proxy 🪞
@@ -8,8 +8,10 @@
  * public_html/ so it isn't web-accessible directly). The Router serves
  * routeKey `admin/upgrade` from this file; we require the real handler.
  *
- * Why the proxy: route targetFiles are resolved relative to PORTAL_APPS
- * (web/public_html/), so they cannot reference paths outside that root.
+ * Why the proxy: a route's target file is looked for under PORTAL_APPS
+ * (web/_apps/), so it cannot name a path outside that folder. The real
+ * handler deliberately lives in web/_install/, outside the part of the
+ * site the web server hands out, so it cannot be opened directly.
  * A 1-line proxy keeps the upgrade handler's "bootstrap + admin gate"
  * logic in one place while still satisfying the routing model. The route
  * was previously misconfigured with `targetFile = '../install/upgrade.php'`,

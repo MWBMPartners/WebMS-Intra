@@ -382,15 +382,26 @@ against the schema — not against the folder layout, which merely looks similar
 script.** The owner confirmed this on 11 September 2026 as a standing rule for
 all future work, not a one-off.
 
-There are two places, and both must agree:
+It has to reach BOTH of the two ways a customer's database can come into being,
+and they must agree:
 
-1. A **numbered migration** in `web/_sql/`, which upgrades a database that
-   already exists. Safe to run twice: the installer replays `full_schema.sql`
-   and then EVERY numbered migration, ignoring which ones already ran.
-2. **`web/_sql/full_schema.sql`**, which builds a brand-new database from
-   nothing. A change that exists only in a migration means a fresh install is
-   missing it, and the two installations then behave differently in a way
-   nobody notices until a customer hits it.
+1. **THE INSTALLER** — a brand-new database, built from nothing.
+   `web/_sql/full_schema.sql`, run by `web/_install/index.php`.
+2. **THE UPGRADE** — a database that already exists and is being brought up to
+   date. A **numbered migration** in `web/_sql/`, replayed by
+   `web/_core/Migrator.php` through `web/_install/upgrade.php` (which is what
+   the Admin → Upgrade button reaches, via a one-line proxy at
+   `web/_apps/admin/upgrade.php`).
+
+A change that reaches only one of them is the dangerous case, and it is quiet.
+Put it only in a migration and a brand-new install is missing it. Put it only in
+the fresh-install script and every existing customer never gets it. Either way
+two installations of the same version behave differently, and nobody finds out
+until somebody hits it — by which time the difference is old and hard to trace.
+
+Migrations must be safe to run twice, because the installer replays
+`full_schema.sql` and then EVERY numbered migration, ignoring which ones have
+already run.
 
 `tools/audit-checks/check_schema_seed_parity.py` compares the two and fails when
 they disagree, so this is enforced rather than remembered. Run it before
