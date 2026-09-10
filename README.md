@@ -151,9 +151,18 @@ carefully. But **MariaDB is not covered by any automated test in this
 repository**, so its compatibility is unverified. That is not the same as "it
 does not work" — it means nothing here can currently show that it does. The
 same caveat applies to `DbServer`'s own MariaDB judgement: it is checked by a
-dependency-free self-test (`tools/db-server-selftest.php`) against 15 crafted
-version strings, which tests the *logic*, not a live MariaDB server — it is
-not the same claim as "tested on MariaDB".
+dependency-free self-test against version strings that real servers report,
+which tests the *logic*, not a live MariaDB server — it is not the same claim
+as "tested on MariaDB". To see what it covers, run it:
+
+```bash
+php tools/db-server-selftest.php
+```
+
+(That command is given instead of a number on purpose. This sentence used to
+say "15 crafted version strings". The count reached 36 within hours, and the
+sentence did not. A number in prose goes stale the moment somebody improves the
+thing it describes; a command cannot.)
 
 **Where we are heading** — issue #475. Support dates below are quoted with the
 category they belong to, because "supported until" means different things for
