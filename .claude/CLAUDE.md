@@ -10,11 +10,16 @@ Internal portal platform (PHP 8.5, backward-compatible with 8.4, Bootstrap 5.3.3
 > `mysql:8.0.36`.
 >
 > Two things to be precise about, because loose wording has already caused
-> confusion. First, **no database version or compatibility check is enforced** —
-> but the version *is* read and shown (admin dashboard, health page, backup
-> files), so do not build version discovery that already exists. Second,
-> **MariaDB is not covered by any automated test here**, so its compatibility is
-> unverified — which is not the same as saying it does not work.
+> confusion. First, **the version is now read, judged and acted on** — this
+> changed on 10 September 2026 (#489). `Portal\Core\DbServer`
+> (`web/_core/DbServer.php`) is the ONE place that decides whether a version is
+> supported; the admin dashboard, the health page, the Server Information page
+> and the installation wizard all call it, so they agree. The installer refuses
+> to install onto a database too old to run the schema, and warns without
+> blocking on anything else. **Do not write a second version check** — change
+> the constants at the top of that file instead. Second, **MariaDB is not
+> covered by any automated test here**, so its compatibility is unverified —
+> which is not the same as saying it does not work.
 >
 > Moving to MySQL 9.7 / MariaDB 12.3 (with 8.4 / 11.4 as fallbacks) is tracked
 > as **#475**. Until that lands, keep writing SQL to the MySQL 8.0 ∩ MariaDB
@@ -40,12 +45,12 @@ code on **10 September 2026**:
 | --- | --- | --- |
 | App folders | 54 | `ls -d web/_apps/*/ | wc -l` |
 | Installable apps (the on/off list) | 47 | `ls web/_core/apps/*.php | wc -l` |
-| Framework classes | 77 | `ls web/_core/*.php | wc -l` |
-| Numbered database migrations | 186, numbered 000-187 | `ls web/_sql/[0-9][0-9][0-9]_*.sql | wc -l` |
+| Framework classes | 78 | `ls web/_core/*.php | wc -l` |
+| Numbered database migrations | 187, numbered 000-188 | `ls web/_sql/[0-9][0-9][0-9]_*.sql | wc -l` |
 | Database tables | 209 | `grep -c 'CREATE TABLE IF NOT EXISTS' web/_sql/full_schema.sql` |
-| PHP files | 784 | `find web -name '*.php' | wc -l` |
+| PHP files | 788 | `find web -name '*.php' | wc -l` |
 | In-app help guides | 19 | `ls web/_apps/help/*.php | wc -l` |
-| Live addresses the portal answers on | 543 | `python3 tools/audit-checks/check_route_targets.py` |
+| Live addresses the portal answers on | 545 | `python3 tools/audit-checks/check_route_targets.py` |
 | Settings seeded | 566 | `python3 tools/audit-checks/check_settings_keys.py` |
 
 **If a number here disagrees with the code, the code is right.** Numbers 168 and
@@ -57,7 +62,7 @@ depends on the numbering being unbroken.
 ```
 repo root/          <- NOT deployed (docs, CI/CD only)
 web/                <- ALL deployable files (synced to server via SFTP)
-  _core/            <- Framework classes (Portal\Core namespace, 77 classes)
+  _core/            <- Framework classes (Portal\Core namespace, 78 classes)
   _apps/            <- App controllers — outside the webroot (#159). Every
                        app's PHP handlers live here; Router resolves
                        tblRoutes.targetFile against PORTAL_APPS = _apps/.

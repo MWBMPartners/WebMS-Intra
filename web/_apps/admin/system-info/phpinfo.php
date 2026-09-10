@@ -258,4 +258,30 @@ if (is_string($filtered) === false) {
     exit();
 }
 
+// 🔒 Last check before anything is sent: does the reader's own sign-in token
+//    appear anywhere in what we are about to show them?
+//
+//    Everything above is reasoning about WHERE a token could appear — which
+//    sections PHP prints, and what the Apache part adds. This checks the thing
+//    itself. If the token is in the output then some route we did not think of
+//    put it there, and the right answer is to show nothing rather than to
+//    discover the gap later from a screenshot in a support ticket.
+//
+//    It is a short string comparison over the finished page, so it costs
+//    nothing, and unlike the reasoning above it cannot be wrong.
+$sessionToken = session_id();
+if (is_string($sessionToken) === true
+    && strlen($sessionToken) >= 8
+    && strpos($filtered, $sessionToken) !== false
+) {
+    $plainPage(
+        'The full PHP report could not be shown safely',
+        'The report turned out to contain your own sign-in token, which would let '
+        . 'anyone who saw this screen sign in as you. It has not been displayed. '
+        . 'This should not happen, and it is worth reporting. Everything on the '
+        . 'Server Information page still works.'
+    );
+    exit();
+}
+
 echo $filtered;

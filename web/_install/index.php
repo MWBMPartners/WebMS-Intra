@@ -221,13 +221,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if ($dbServer['state'] === 'crit') {
                     $error = $dbServer['headline'] . '. ' . $dbServer['detail'];
                     $step  = 2;
-                    $testConn->close();
+                    // 🚫 Deliberately NOT closing the connection here. The end
+                    //    of this try block already closes it on every path that
+                    //    does not redirect away, and closing a mysqli
+                    //    connection twice throws an `Error` — which is NOT a
+                    //    `mysqli_sql_exception`, so the catch below would miss
+                    //    it and the wizard would die with a blank HTTP 500 on
+                    //    the very screen meant to explain the problem.
                 }
 
-                // 🚧 Everything below needs the connection we may have just
-                //    closed, so all of it is skipped once we have an error.
-                //    Creating a database on a server too old to hold the schema
-                //    would leave an empty database behind for no reason.
+                // 🚧 Everything below is skipped once we have an error. Creating
+                //    a database on a server too old to hold the schema would
+                //    leave an empty database behind for no reason.
                 if ($error === '') {
                     // Try to select the database
                     $dbExists = $testConn->select_db($dbName);

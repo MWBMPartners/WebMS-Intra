@@ -5113,4 +5113,166 @@ application/registration questions only.
 
 ---
 
-Last updated: August 2026
+## Server Information page + a real database-version check (#489, migration 188)
+
+Three places in this codebase already read the database's version and
+print it — the admin dashboard, the health page, and every backup file —
+and none of them said what the number meant. That stopped being a minor
+gap in April 2026, when MySQL 8.0 reached the end of its extended
+support and stopped receiving security fixes. This section is for
+anyone extending `Portal\Core\DbServer` or the Server Information page.
+
+### `Portal\Core\DbServer` — the one place the judgement is made
+
+`web/_core/DbServer.php` reads `VERSION()` and `@@version_comment` from
+the database connection it is given, works out which product it is
+talking to (MySQL, MariaDB, Percona, or "unknown" if it genuinely cannot
+tell), and returns one of three verdicts:
+
+- `'ok'` — inside its maker's own support window.
+- `'warn'` — works fine, but worth knowing about (most often: no longer
+  receiving security fixes). **A warning never blocks anything.**
+- `'crit'` — older than this portal's own `_sql/` migrations can run on.
+  This is the only verdict that stops the installer.
+
+The four version numbers that decide all of this are constants at the
+very top of the file — `MIN_MYSQL` (8.0.0), `MIN_MARIADB` (10.6.0),
+`SUPPORTED_MYSQL` (8.4.0), `SUPPORTED_MARIADB` (11.4.0) — so a future
+policy change (a new minimum, a new "supported" floor as versions age
+out) is a one-line edit in one file, not a hunt through four call sites.
+
+### The bootstrap-free contract — do not break this
+
+`DbServer` is written to depend on **nothing except the `mysqli`
+connection handed to it** — no `App`, no `Site`, no `PORTAL_*` constant,
+no `require` of anything else in `_core/`. This is the same contract
+already used by `version.php` and `brand-defaults.php` (see "Product
+brand presets" above), and it exists for one reason: the installation
+wizard runs *before* the portal's normal start-up code, so it cannot use
+ordinary framework classes. `web/_install/index.php` simply
+`require_once`s `DbServer.php` directly and calls
+`DbServer::inspect($testConn)` on the raw connection it just opened.
+
+**If you add a dependency on `App`, `Site`, `Settings`, or a `PORTAL_*`
+constant to this file, the installer breaks**, because none of those
+exist yet at the point step 2 needs an answer. If a change genuinely
+needs something like that, it does not belong in `DbServer` — put it in
+the page that calls it instead.
+
+### The MariaDB "5.5.5-" prefix trap
+
+MariaDB sometimes reports its version as `5.5.5-10.11.6-MariaDB-…`. The
+fake `5.5.5-` at the front is deliberate on MariaDB's part: it is there
+so that very old MySQL client programs — the kind that refuse to talk to
+anything whose version string starts with "10." — will still agree to
+connect. Read literally, that string looks like ancient MySQL 5.5, and
+every current MariaDB server would be misclassified and wrongly refused.
+`DbServer::extractVersion()` strips the prefix before doing anything
+else with the string. `tools/db-server-selftest.php` checks this
+specifically, alongside 14 other real version strings, and needs no
+database to run:
+
+```bash
+php tools/db-server-selftest.php
+```
+
+### The phpinfo() apache2handler leak — the trap that is not obvious
+
+`web/_apps/admin/system-info/phpinfo.php` calls PHP's own `phpinfo()`
+function, restricted to umbrella administrators, to produce the "give
+this to your hosting provider" report. Two sections are obviously
+dangerous and are simply never asked for: the server's environment
+variables (often holding database passwords on shared hosting) and the
+current request (which contains the reader's own session cookie). PHP is
+asked for `INFO_GENERAL | INFO_CONFIGURATION | INFO_MODULES |
+INFO_LICENSE` only — `INFO_ENVIRONMENT` and `INFO_VARIABLES` are never
+in that list.
+
+**That is not enough on its own.** When PHP runs as an Apache module,
+the `apache2handler` entry inside the *modules* section — which IS
+requested, because the report would be useless without it — prints two
+extra tables of its own accord: "Apache Environment" and "HTTP Headers
+Information". The second of those contains the request's `Cookie`
+header, which is the reader's own session token — the exact leak that
+leaving out the request section was supposed to prevent, arriving
+through a different door entirely.
+
+Be precise about what was and was not checked here, because it matters
+if you are deciding how much to trust this. **What was verified on a
+running server:** that `phpinfo()` masks nothing at all; that the command
+line prints a plain-text report while a web server prints HTML (so a
+filter tested only from the command line silently matches nothing and
+looks like it works); and that the filter removes those two tables,
+along with the values in them, when they are present. **What was not
+verified:** the `apache2handler` behaviour itself, on a real Apache
+server with PHP loaded as a module — there was none to hand. The tables
+were reproduced in PHP's own markup and fed through the filter instead.
+So the defence is tested; the precise trigger for it is taken from how
+PHP is built rather than from a live observation. The session-token
+check at the very end of the file exists partly because of that gap.
+
+The fix: capture the report into a string with `ob_start()`/
+`ob_get_clean()` instead of echoing it straight to the browser, then
+strip out any `<table>` whose heading matches a short deny-list
+(`Apache Environment`, `HTTP Headers Information`, plus `Environment`
+and `PHP Variables` as belt-and-braces) before anything is sent. If you
+ever change what sections are requested, re-check this list — a new PHP
+SAPI integration could print its own extra tables the same way.
+
+**Second line of defence:** any configuration setting whose *name* looks
+like a secret (`pass`, `pwd`, `secret`, `token`, `apikey`, `sendmail`,
+and similar) has its value replaced with "hidden" before display.
+PHP masks nothing on its own — checked against a running server, where
+`mysqli.default_pw` and a `sendmail_path` carrying a password both
+printed in full. Be honest about what name-matching can and cannot do:
+it catches a setting that announces what it holds, which is most of
+them. It cannot catch a secret sitting in a setting with an innocent
+name. The section-removal above is the real defence, because it is
+structural and cannot miss; the name-matching is the backstop.
+
+**Last check before anything is shown:** the finished, filtered page is
+searched for the reader's own current session token. If it is found
+anywhere — meaning some path nobody thought of leaked it — nothing is
+shown at all, rather than trusting the reasoning above to have been
+complete.
+
+### Two deliberate "warn, don't block" decisions
+
+Both of these were considered and chosen on purpose — please do not
+"fix" them without re-reading the reasoning first.
+
+1. **The installer warns but does not block on an out-of-support
+   database version.** It blocks only on `'crit'` (too old to install
+   onto at all). Most installs of this portal are on shared hosting,
+   where the person installing it cannot change the database version
+   themselves. Blocking on "unsupported but working" would just lock
+   them out of their own portal over something they have no way to fix.
+
+2. **The health page's traffic light stays green on an ageing-but-working
+   database.** That page is polled by uptime monitors. A database past
+   its security-fix date is worth knowing about, but it is not an
+   incident happening right now — it will be equally true tomorrow, and
+   every day after. Turning the light amber for that would make it a
+   *permanent* amber, which is a light everybody quickly learns to
+   ignore — and a real problem arriving later would then land in a
+   warning nobody reads any more. The light only turns amber for
+   `'crit'`, a genuine fault. The database version and its support
+   position are still reported in the text beside the light; they are
+   just not allowed to move the light itself.
+
+### Where the verdict is shown
+
+| Where | Who can see it | Notes |
+| --- | --- | --- |
+| `_install/index.php` (step 2, and the banner on later steps) | Anyone installing the portal | Only place that can block, and only on `'crit'` |
+| `/admin` dashboard | Signed-in admins | |
+| `/admin/maintenance/health` | Admins (also machine-readable, for uptime monitors) | Traffic light never moves for a `'warn'` |
+| `/admin/system-info` | Any administrator | New — also shows PHP version/limits/extensions and connection facts (never the password — it is asked of the live connection, not read from the credentials file, so it is never loaded into the page) |
+| `/admin/system-info/phpinfo` | Umbrella administrators only | New — full PHP report, filtered as described above |
+
+Every one of these calls the same `DbServer::inspect()`, so there is
+exactly one place to fix if the judgement is ever wrong, not four.
+
+---
+
+Last updated: September 2026

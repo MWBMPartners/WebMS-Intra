@@ -126,6 +126,7 @@ Central operations hub for admins / site admins.
 | `/admin/workflows` | Configurable workflow definition CRUD (#94) — step delete/isActive/autoAction (#443); the running engine is the `/approvals` app below |
 | `/admin/reports` | Reporting / analytics dashboard (#93) + custom report builder (#156, see subsection below) |
 | `/admin/captcha` | **Multi-provider captcha config — drag-and-drop priority + per-provider keys (#130)** |
+| `/admin/system-info` (+ `/phpinfo`) | **Server Information — what this install is actually running on, and whether the database version is still supported (#489, see subsection below)** |
 | `/settings` | Generic dot-notation settings editor |
 
 ---
@@ -177,6 +178,60 @@ safely" for the extension guide.
 **Tables:** `tblReportDefinitions`
 **Settings:** `reports.enabled`, `reports.builder.maxRows`, `reports.builder.pageSize`
 **AppRegistry slug:** `reports` (folds the pre-existing #93 dashboards under the same toggle, seeded ON)
+
+---
+
+### 🖥️ Server Information — `/admin/system-info` ✅ (#489)
+
+Answers, in one place, "what is this portal actually running on, and is
+the database a version we still support?" Most installs sit on shared
+hosting where the owner has no command line and cannot check the server
+directly — before this, the answer was scattered across three admin
+screens and didn't say what it meant.
+
+- **New `Portal\Core\DbServer`** asks the database its product and version
+  and judges it **ok** (fully supported), **warn** (works fine, but worth
+  knowing about — usually that the MySQL 8.0 line stopped getting
+  security fixes in April 2026), or **crit** (too old for this portal's
+  own database changes to run on). Written to the same **bootstrap-free**
+  contract as `version.php` and `brand-defaults.php` — it depends on
+  nothing but the database connection handed to it — so the installation
+  wizard, which runs before the rest of the portal exists, can use the
+  exact same judgement.
+- **The installer checks it the moment it first connects** to the
+  database (step 2 — the earliest point it can, since nobody has typed
+  database details in before that) and refuses to continue only when the
+  verdict is `crit`. Anything else is shown and never blocks, because on
+  shared hosting the customer usually cannot change the database version.
+- **Admin → Server Information** (`/admin/system-info`, any
+  administrator): PHP version, the database verdict, connection facts
+  asked of the live connection itself rather than read from the
+  credentials file — the database password is never loaded into the page
+  at all, not merely hidden — hosting limits (upload size, memory, etc.),
+  and which optional parts of PHP are installed.
+- **The full PHP report** (`/admin/system-info/phpinfo`, umbrella
+  administrators only, since it describes the whole server rather than
+  one organisation on a shared install) leaves out the server's
+  environment variables and the current request, and also strips two
+  tables PHP's own Apache integration prints regardless of what was
+  asked for — one of them carries the reader's own session cookie.
+  Settings whose name looks like a secret are hidden as a backstop, and a
+  final check refuses to show the page at all if the reader's own
+  session token turns up anywhere in the finished output.
+- **The admin dashboard and the health page now read the same verdict**
+  instead of disagreeing — one of them used to print the word "MySQL" in
+  front of whatever the database reported, which was wrong on a MariaDB
+  server. The health page's traffic light deliberately stays green on an
+  ageing-but-working database, since that page is polled by uptime
+  monitors and a permanently amber light is one everyone learns to
+  ignore.
+- **`tools/db-server-selftest.php`** — dependency-free, no database
+  needed — checks 15 real version strings (including MariaDB's own
+  "5.5.5-" prefix quirk) against the real class.
+
+**Tables:** none. **Settings:** none.
+**Schema:** migration 188 — two route seeds only (`admin/system-info`,
+`admin/system-info/phpinfo`).
 
 ---
 

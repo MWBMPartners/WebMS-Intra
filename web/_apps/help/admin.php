@@ -52,6 +52,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <a href="#logs" class="badge text-bg-secondary text-decoration-none">Viewing Logs</a>
             <a href="#csv-export" class="badge text-bg-secondary text-decoration-none">CSV Export</a>
             <a href="#ms365-shared-mailbox" class="badge text-bg-secondary text-decoration-none">MS365 Shared Mailbox</a>
+            <a href="#server-info" class="badge text-bg-secondary text-decoration-none">Server Information</a>
             <a href="#developer" class="badge text-bg-secondary text-decoration-none">Developer Tools</a>
         </div>
     </div>
@@ -597,6 +598,106 @@ Test-ApplicationAccessPolicy -AppId &lt;clientID&gt; -Identity office@yourchurch
 </div>
 
 <!-- Section 6: Developer Tools -->
+<!-- Section: Server Information -->
+<div class="portal-card p-4 mb-4" id="server-info">
+    <h2 class="h4 mb-3"><i class="fa-solid fa-server me-2 text-primary"></i>Server Information</h2>
+
+    <p>
+        <a href="/admin/system-info">/admin/system-info</a> answers one question:
+        what is this portal actually running on? It is the page to open when a
+        hosting company asks you which version of something you are using, or
+        when you are trying to work out why an upload will not go through.
+    </p>
+
+    <p>Everything on it is gathered in one place so you do not have to hunt:</p>
+
+    <ul>
+        <li>
+            <strong>The database.</strong> Which database software your hosting
+            runs, which version, and &mdash; the useful part &mdash; whether that
+            version is still supported by the people who make it. A version that
+            no longer receives security fixes still runs the portal perfectly
+            well, but it is worth knowing about and worth asking your hosting
+            company about.
+        </li>
+        <li>
+            <strong>The database connection.</strong> Which server, which
+            database, which username, which character set, and so on. These are
+            the details a support desk asks for.
+        </li>
+        <li>
+            <strong>PHP.</strong> The version, whether it is still supported, and
+            the limits your hosting has set &mdash; how large a file you may
+            upload, how long a page is allowed to take, how much memory it may
+            use. A surprising number of puzzling problems turn out to be one of
+            these limits.
+        </li>
+        <li>
+            <strong>Optional parts of PHP.</strong> A list of the add-ons this
+            portal relies on and whether your hosting installed them. Each one
+            says what it is used for, so if something is missing you can tell
+            your hosting company exactly which feature it breaks.
+        </li>
+    </ul>
+
+    <div class="alert alert-success d-flex gap-2" role="alert">
+        <i class="fa-solid fa-lock mt-1"></i>
+        <div>
+            <strong>Your database password is not on that page.</strong> It is
+            not hidden behind dots or stars either &mdash; it is genuinely not
+            there. All the connection details shown are asked of the live
+            connection itself rather than read out of the file that holds the
+            password, so the password never reaches the page in the first place.
+            That is deliberate, and it is safer than showing it and covering it up.
+        </div>
+    </div>
+
+    <h3 class="h5 mt-4 mb-2">The full PHP report</h3>
+
+    <p>
+        At the bottom of the page there is a link to PHP&rsquo;s own complete
+        report about itself. That is the report a hosting company will usually
+        ask you to send them when they are diagnosing an awkward problem. It
+        opens in a new tab.
+    </p>
+
+    <p>
+        Two differences from the rest of the page are worth knowing about:
+    </p>
+
+    <ul>
+        <li>
+            <strong>Only umbrella administrators can open it.</strong> The rest
+            of the Server Information page is open to any administrator. This one
+            report describes the whole server rather than your one organisation,
+            so on an install shared by several organisations it is limited to the
+            people who look after the whole thing. If your portal is used by one
+            organisation, you are the umbrella administrator and this makes no
+            difference to you.
+        </li>
+        <li>
+            <strong>Parts of it are deliberately left out.</strong> PHP will
+            happily print the server&rsquo;s stored passwords and your own
+            sign-in token along with everything else. Those parts are removed
+            before the report is shown to you. This matters precisely because
+            people paste this report into support tickets &mdash; which is the
+            main reason the page exists, and would otherwise be a good way to
+            hand your sign-in token to a stranger.
+        </li>
+    </ul>
+
+    <div class="alert alert-info d-flex gap-2" role="alert">
+        <i class="fa-solid fa-circle-info mt-1"></i>
+        <div>
+            <strong>If the report will not open</strong>, some hosting companies
+            switch off the PHP feature that produces it, across their whole
+            server. The page will tell you if that is what has happened. It
+            cannot be changed from inside the portal, and everything else on the
+            Server Information page still works.
+        </div>
+    </div>
+</div>
+
 <div class="portal-card p-4 mb-4" id="developer">
     <h2 class="h4 mb-3"><i class="fa-solid fa-code me-2 text-primary"></i>Developer Tools</h2>
 

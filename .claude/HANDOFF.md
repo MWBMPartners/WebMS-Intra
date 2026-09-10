@@ -37,6 +37,75 @@ issue.** The index is `.claude/plans/work-queue.md`; the issues carry the detail
 | Re-verify the database structure before the first customer | **#487** |
 | *(added)* Translation is a shell | **#485** |
 
+### Latest task: the database version question, answered from inside the product
+
+**Shipped 10 September 2026, commit `64ad87a`, issue #489.** The owner asked
+three things: check DreamHost's MySQL version again against their own sources;
+add a database check to the installation wizard; and add an admin-only page
+showing server information — database version, connection details and the PHP
+report.
+
+**On the first**: DreamHost's own documentation says only **"MySQL 8"** and
+never a point release, and explicitly answers *"Can I update the MySQL
+version?"* with *"No"*. Their pages were checked again on 10 September 2026.
+**So the documents cannot answer this**, and waiting for them to is pointless.
+One earlier assumption corrected: **DreamHost shared hosting does not offer
+MariaDB.**
+
+**So the product now asks the server itself.** That is what unblocks #475.
+Somebody needs to open `/admin/system-info` on the live site and report the
+version; then #475 can be planned properly.
+
+What was built:
+
+| Piece | Where | What it does |
+| --- | --- | --- |
+| The judgement | `web/_core/DbServer.php` | Reads the database product and version and says: supported, worth knowing about, or too old to run on. **The one place that decides.** Rules are constants at the top of the file. |
+| Its self-test | `tools/db-server-selftest.php` | 15 real version strings, no database needed. `php tools/db-server-selftest.php` |
+| Wizard check | `web/_install/index.php` (the `db_config` handler) + `db_server_banner.php` | Asks the moment it first connects — the earliest it can be known, since before that nobody has typed any database details in. |
+| The page | `web/_apps/admin/system-info/index.php` | Route `/admin/system-info`. Any administrator. |
+| The PHP report | `web/_apps/admin/system-info/phpinfo.php` | Route `/admin/system-info/phpinfo`. Umbrella administrators only. |
+| Routes | `web/_sql/188_server_information_page.sql` | Two route seeds. Folded into `full_schema.sql`. |
+
+**Three decisions worth not re-litigating:**
+
+1. **The installer warns but does not block** on an out-of-support database. It
+   stops only when the database is genuinely too old to hold the schema. On
+   shared hosting the customer cannot change the version, so blocking would
+   only lock them out of their own portal.
+2. **The health page's traffic light stays green** on an ageing database. That
+   page is polled by uptime monitors, and a permanently amber light is one
+   everybody learns to ignore — so a real problem arriving later would land in
+   a warning nobody reads.
+3. **The database password is not on the Server Information page and is not
+   redacted** — it is never loaded into the page at all. Connection facts are
+   asked of the live connection rather than read from the credentials file, so
+   no future edit to that page can print something it never had.
+
+**The one real defect found and fixed during this work**, worth reading because
+it would have been easy to ship: leaving `INFO_ENVIRONMENT` and
+`INFO_VARIABLES` out of `phpinfo()` is **not enough**. When PHP runs as an
+Apache module, the `apache2handler` entry inside the components section prints
+"Apache Environment" and "HTTP Headers Information" **of its own accord** — and
+the second contains the request's `Cookie` header, which is the reader's
+session token. It would have arrived by a different door, on the page most
+likely to be pasted into a support ticket. The report is now captured and those
+tables removed before anything reaches the browser, and as a final check the
+page refuses to render at all if `session_id()` appears in the output.
+
+Two related things checked rather than assumed: `phpinfo()` masks nothing (a
+`mysqli.default_pw` and a `sendmail_path` carrying a password both printed in
+full), and the command line prints plain **text** not HTML, so a filter tested
+only from the command line silently matches nothing and looks like it works.
+Verified through `php -S` instead.
+
+**Verified:** `php -l` clean on every touched file · all 11 audit checks pass ·
+the new self-test passes 15 of 15 · the end-to-end migration harness passes
+every phase against MySQL 8.0.36. **The Codex round for this work has not run
+yet** — the account was still rate-limited. See the section below.
+
+---
+
 ### ⏸️ One thing left undone: a final Codex review round
 
 The review rule says keep going until a round finds nothing. Four rounds ran on

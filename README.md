@@ -141,7 +141,7 @@ Browser -> .htaccess -> index.php -> bootstrap.php -> Router::dispatch()
 | | What actually happens | What is covered by automated tests |
 | --- | --- | --- |
 | PHP | The installer's first screen checks for 8.4 or newer and hides "Continue" if it fails. **This can be bypassed** by going straight to a later step of the installer, so treat it as a warning rather than a barrier. The live server was confirmed on **8.5.5** in September 2026. | 8.4 only |
-| Database version | The version is **read and displayed** — on the admin dashboard, on the health page, and in every backup file. **Nothing acts on it.** There is no minimum, and no compatibility check. | MySQL 8.0.36 only |
+| Database version | The version is now **read, judged, and acted on** (#489). New `Portal\Core\DbServer` classifies whatever is connected as supported, worth knowing about, or too old for this portal's own database changes to run on. The installer checks it the moment it first connects and **refuses to continue only when the database is too old to install onto** — anything else is shown and never blocks. **Admin → Server Information** (new) reports the same verdict. The admin dashboard and the health page now read that same judgement too, so the three screens that used to disagree — two of them printing the word "MySQL" whatever the database actually was — now agree. Backup files are deliberately left alone: a snapshot records the raw version string the server reported at the time, because a verdict like "supported" would be stale the moment it was written to an archive. | MySQL 8.0.36 only |
 | MariaDB | — | **Not covered.** No MariaDB appears in any workflow or test configuration in this repository. |
 
 On that last row, be careful what you conclude. Every database change here is
@@ -149,7 +149,11 @@ written to a convention meant to work on both MySQL and MariaDB
 (`DEV_NOTES.md` → "Portable DDL convention"), and that rule is followed
 carefully. But **MariaDB is not covered by any automated test in this
 repository**, so its compatibility is unverified. That is not the same as "it
-does not work" — it means nothing here can currently show that it does.
+does not work" — it means nothing here can currently show that it does. The
+same caveat applies to `DbServer`'s own MariaDB judgement: it is checked by a
+dependency-free self-test (`tools/db-server-selftest.php`) against 15 crafted
+version strings, which tests the *logic*, not a live MariaDB server — it is
+not the same claim as "tested on MariaDB".
 
 **Where we are heading** — issue #475. Support dates below are quoted with the
 category they belong to, because "supported until" means different things for

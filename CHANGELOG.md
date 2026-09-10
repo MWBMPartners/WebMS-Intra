@@ -2,6 +2,57 @@
 
 
 ## [Unreleased] (alpha)
+- feat(admin): #489 — a straight answer, in one place, to "what is this
+  portal running on, and is it a version we still support?" New
+  `Portal\Core\DbServer` asks the database what product and version it is
+  and judges it: **ok** (still receiving security fixes), **warn** (works
+  fine, but worth knowing about — most often that the whole MySQL 8.0 line
+  stopped getting security fixes in April 2026), or **crit** (too old for
+  this portal's own database changes to run on). It knows nothing about
+  the rest of the portal — no `App`, no `Site`, no `PORTAL_*` constant —
+  because the installation wizard runs before any of that exists and needs
+  to ask the same question the same way, exactly like `version.php` and
+  `brand-defaults.php` already do. It also strips MariaDB's own fake
+  "5.5.5-" version prefix (there so very old MySQL client programs will
+  still agree to connect); without that, every current MariaDB server
+  would be misread as fifteen-year-old MySQL and wrongly refused. A new
+  dependency-free check, `tools/db-server-selftest.php`, runs 15 real
+  version strings past the class with no database needed
+  (`php tools/db-server-selftest.php`).
+  The installation wizard now asks this question the moment it first
+  connects (step 2 — the earliest point it can, since nobody has typed in
+  any database details before that) and stops **only** when the verdict is
+  'crit'; anything else is shown and never blocks, because on shared
+  hosting the customer usually cannot change the database version and
+  blocking would just lock them out of their own portal. The admin
+  dashboard and the health page now read the same verdict instead of each
+  showing something different — one of them was printing the word "MySQL"
+  in front of whatever the database actually reported, which is wrong on a
+  MariaDB server. The health page's traffic light deliberately stays green
+  on an ageing-but-working database: that page is polled by uptime
+  monitors, and a permanently amber light is one everybody learns to
+  ignore, so a real problem arriving later would land in a warning nobody
+  reads. New page, Admin → Server Information (`/admin/system-info`, any
+  administrator): PHP version, the database verdict, connection facts
+  asked of the live connection rather than read from the credentials file
+  (so the password is never loaded into the page at all, not merely
+  hidden), hosting limits, and which optional parts of PHP are installed.
+  A linked full PHP report (`/admin/system-info/phpinfo`, umbrella
+  administrators only, since it describes the whole server rather than one
+  organisation on it) leaves out the server's environment variables and
+  the current request — and also strips two tables that PHP's own Apache
+  integration prints regardless of what was asked for ("Apache
+  Environment", "HTTP Headers Information"), because the second of those
+  carries the reader's own session cookie; simply not asking for the
+  request section on its own is not enough to stop it. Settings whose name
+  looks like a secret have their value hidden as a backstop — PHP masks
+  nothing on its own, checked against a live server — and a last check
+  before anything is shown refuses the whole page if the reader's own
+  session token turns up anywhere in it. Migration 188 seeds the two new
+  addresses only — no tables, no settings. `php -l` clean on every touched
+  file, all 11 audit checks pass, the new self-test passes 15 of 15, and
+  the end-to-end migration harness passes every phase against MySQL
+  8.0.36.
 - fix(settings): saving a portal-wide setting now changes it instead of
   adding another copy. The table's uniqueness rule covered (setting name,
   site), and a portal-wide setting stores no site — and MySQL never treats
