@@ -246,6 +246,29 @@ column, SQL that only works on MariaDB, a route pointing at a missing file.
 They cannot judge whether the design is right or whether a change has an
 unintended consequence. That is what the second reviewer is for.
 
+## Deep analysis: sequential, one run at a time (STANDING RULE)
+
+Deep analysis and deep planning use **sequential agents, never parallel** — and
+this applies **on Opus too**, not just on Fable. Confirmed by the owner on
+10 September 2026.
+
+Two parts, and the second is the one that gets missed:
+
+1. Within a run, each agent waits for the previous one and builds on what it
+   found. A second opinion formed without seeing the first is worth much less.
+2. **Never have two analysis runs going at once.** Ordering the agents correctly
+   inside each run and then starting two runs together defeats the purpose. That
+   exact mistake was made and corrected on 10 September 2026.
+
+Stopping a run to keep the order is cheap: relaunch with `resumeFromRunId` and
+the script path, and every agent that already finished returns its cached answer
+immediately.
+
+**Always try Fable first**, on every deep run, even if it failed last time. Fall
+back to Opus only when Fable is unavailable, and put the fallback in the script
+rather than deciding by hand. Implementation stays on Sonnet or Haiku — or Opus
+when the work is genuinely complex.
+
 ## Code Style (MUST FOLLOW)
 
 - `declare(strict_types=1)` in every PHP file
