@@ -2,6 +2,85 @@
 
 
 ## [Unreleased] (alpha)
+- fix(routing): four faults fixed, none of them the fault its issue title
+  said — all four were found by checking the code itself, not by trusting
+  the report. Two of them share one cause: `web/public_html/.htaccess`
+  has a rule saying that if a web address matches a REAL FOLDER on disk,
+  the web server answers for that folder itself and never hands the
+  request to the portal at all. That rule is a good one — it is what lets
+  stylesheets and pictures load directly — but two folders in the web
+  root were quietly swallowing addresses the portal needed.
+  **The Admin area could not be opened (#483, now closed).** A real
+  folder, `web/public_html/admin/`, held three pages belonging to the
+  error-monitoring screen. So every visit to `/admin` — the first thing
+  an administrator ever clicks — was answered by that folder instead of
+  by the portal, showing a bare file listing or a flat refusal. Nothing
+  showed up in the error log, because no portal code ever ran to log
+  anything. Fixed by moving those three files to
+  `web/_apps/admin/integrations/monitoring/`; the address itself did not
+  change, because the router already looks under `web/_apps/` before it
+  looks in the web root. One move fixed three addresses at once:
+  `/admin`, `/admin/integrations` and `/admin/integrations/monitoring`.
+  **A dead public address that would have published internal events
+  (#478, partly).** The address `widget` was open to anyone, no sign-in
+  needed, and pointed at `calendar/widget.php`. It never actually worked,
+  because a real folder, `web/public_html/widget/`, held `countdown.js` —
+  a script other people's websites already embed, so that folder cannot
+  be moved without breaking their pages. The address was removed rather
+  than repaired, because the page behind it was not safe to switch on:
+  it had no sign-in check of its own, and its two database queries asked
+  for every event that was published and not deleted — which includes
+  INTERNAL events such as a leadership meeting. Every other public
+  calendar page already required an event to be marked public; this one
+  did not, and because nobody could reach it, nobody had noticed. Both
+  queries now also require `isPublic = 1`, and the file explains what it
+  is and what would need doing before anyone points a safe address at it
+  again. Migration 189 removes the address, matched on both its name and
+  where it pointed, so a genuinely safe future `widget` address cannot be
+  deleted by accident on replay. Every other seeded address was checked
+  against the web root; the only two remaining collisions (`assets`,
+  `api-docs`) are deliberate.
+  **Administrators were locked out during every upgrade (#477, partly).**
+  The portal's maintenance-mode holding page keeps a short list of
+  addresses that still work while everything else is closed. That list
+  is compared against the ADDRESS a visitor types, but it contained
+  `auth/login` and `auth/logout` — fragments of FILE PATHS, not
+  addresses. The sign-in page's real address is `login`; the file that
+  answers it is `auth/login/index.php`. Neither entry ever matched
+  anything, so the sign-in page was shut along with everything else — and
+  maintenance mode switches itself on automatically whenever the code is
+  newer than the database, which is every single upgrade. The holding
+  page's own "sign in" link pointed at the same address that did not
+  exist. Fixed to the real addresses: `login`, `logout`,
+  `forgot-password`, `reset-password`. The first attempt at this fix was
+  only half a fix: it reopened the sign-in page but not the two-factor
+  step after it, so an administrator with two-factor switched on could
+  type the right password and then hit exactly the same wall. Found by
+  checking every address to do with signing in, not just the one named in
+  the report; `auth/2fa/verify` is now allowed too, while the account
+  housekeeping pages `auth/2fa/setup` and `auth/2fa/disable` deliberately
+  stay blocked.
+  **Five Export CSV buttons crashed before producing anything (#482,
+  partly).** When the portal loads a page, it hands that page exactly two
+  things: the database connection (`$mysqli`) and the settings
+  (`$SETTINGS`) — see the `global` line in `web/_core/Router.php` just
+  before a page is loaded. Anything else a page reaches for simply is not
+  there. Five export files reached for `$db` instead, which nobody ever
+  sets, so each one stopped dead the instant its button was pressed, with
+  no file produced and nothing shown on screen. Fixed to use `$mysqli`,
+  the connection every other working page in the same folders already
+  uses, on the members list, the audit trail, the attendance register,
+  the leadership roster and the expenses queue. Every other file under
+  `web/_apps/` reaching for a database variable it never defined was also
+  checked; one more turned up
+  (`web/_apps/announcements/_workflow-gate.php`) and is fine — it takes
+  the connection as a parameter instead.
+  `php -l` is clean on every touched file and all 11 audit checks pass.
+  The end-to-end migration harness has not run — it needs Docker, and
+  Docker is unavailable because the development machine is out of disk
+  space — and Codex has not yet reviewed these fixes, because its usage
+  limit was reached. Neither of those checks should be treated as done
+  until they actually run.
 - feat(admin): #489 — a straight answer, in one place, to "what is this
   portal running on, and is it a version we still support?" New
   `Portal\Core\DbServer` asks the database what product and version it is

@@ -272,6 +272,19 @@ jobs:
             add_section "Route targetFile missing (tblRoutes points at a file that doesn't exist)" "$ROUTES"
           fi
 
+          # 10b) Addresses hidden by a real file or folder in the web root.
+          #      A DIFFERENT fault from 10 above: there the file is missing;
+          #      here the address and the file are both perfectly correct, and
+          #      the web server answers for a same-named folder instead and
+          #      never asks the portal. Nothing reaches the error log, so it is
+          #      invisible until somebody clicks the link. Caught the whole
+          #      Admin area being unreachable (#483) and a public, sign-in-free
+          #      address being hidden (#478).
+          SHADOW=$(python3 tools/audit-checks/check_webroot_shadowing.py 2>&1 || true)
+          if echo "$SHADOW" | grep -q '•'; then
+            add_section "Addresses hidden by a real file or folder in the web root (the portal never runs)" "$SHADOW"
+          fi
+
           # 11) Settings key consistency (catches the class #203/#208 were
           #     filed under; both turned out to be FP but this script
           #     walks the entire schema so it won't repeat the agent's miss)

@@ -232,7 +232,7 @@ codex exec --skip-git-repo-check "<what you want reviewed>"
   MySQL 8.0, would anything here break on shared hosting with no command line.
 
 **When to run it.** After the work is written and the mechanical checks pass
-(`php -l`, the eleven scripts in `tools/audit-checks/`, and the end-to-end
+(`php -l`, the twelve scripts in `tools/audit-checks/`, and the end-to-end
 migration harness where the database is involved), but **before committing**.
 
 **How to treat the result.** As a second opinion, not a verdict. Check each
@@ -305,11 +305,21 @@ This has already bitten twice, found 10 September 2026:
 `RewriteRule ^assets/?$ index.php` ahead of the folder rule, and `api-docs` is
 meant to be served directly by the web server.
 
-**Before adding a route or a web-root file**, check the other side:
+**There is now an automatic check for this** — `check_webroot_shadowing.py`,
+wired into the pull-request checks. It compares every seeded address against
+what really exists in the web root and reports any that the portal will never
+see. Run it directly with:
 
 ```bash
-ls -d web/public_html/*/          # folders that will win over any address
+python3 tools/audit-checks/check_webroot_shadowing.py
 ```
+
+Note it compares the WHOLE address, because that is what the web server does.
+`/admin` is hidden by a folder called `admin`, but `/admin/activity` is not —
+there is no such folder, so that request gets through perfectly well even while
+`/admin` is broken. The first draft compared only the first segment and reported
+a dozen addresses that were entirely fine; a check that cries wolf gets switched
+off, and then it catches nothing.
 
 ## Two variables, and only two (apply on every page under _apps/)
 
@@ -429,7 +439,7 @@ against the schema — not against the folder layout, which merely looks similar
   = forever) for a future auto-purge cron. Migration 182: 3 new tables
   (`tblForms`/`tblFormFields`/`tblFormResponses`), 3 settings seeds, 15
   route seeds (13 protected + 2 public, no `api/*` rows — ApiRouter trap).
-  All 11 audit checks green, `php -l` clean on every touched file.
+  All 12 audit checks green, `php -l` clean on every touched file.
 - **`claude/backlog150-groups`** (branched off `alpha`) — issue #150: new
   Small Groups app (`web/_apps/small-groups/`, slug `small-groups`) —
   groups/classes register for Sabbath School classes, home groups, Bible
@@ -478,7 +488,7 @@ against the schema — not against the folder layout, which merely looks similar
   (invisible to that checker's FROM-anchored regex) — documented inline at
   each call site since the same shape will recur for any future table
   whose name embeds a bare SQL keyword. New help page (`/help/small-groups`)
-  + help-index card. All 11 audit checks green, `php -l` clean on every
+  + help-index card. All 12 audit checks green, `php -l` clean on every
   touched file, zero raw `<table>` (portal-data-list throughout).
 - **`claude/backlog-pwa-brand`** (branched off `alpha`) — two small,
   low-risk backlog finishers, one PR: **#141 residual** (the push half
@@ -548,7 +558,7 @@ against the schema — not against the folder layout, which merely looks similar
   175, #234's shared-mailbox took 176): 3 additive `tblPushSubscriptions`
   columns (dead-subscription pruning), settings seeds, 4 route seeds, no
   new tables (reuses `tblUserReminderLog` / `tblEventReminderLog` for
-  dedupe). All 11 audit checks green, `php -l` clean on every touched file.
+  dedupe). All 12 audit checks green, `php -l` clean on every touched file.
 - **`claude/gap128-oos`** (branched off `alpha`) — gap #128 residual
   (re-scoped #128 "Order of Service planner with iHymns integration"):
   service-plans (#262/#300) + Worship (#308/#355) already covered
@@ -642,7 +652,7 @@ against the schema — not against the folder layout, which merely looks similar
   surface. Kids/Care/Visitors hard-excluded, verified by grep (zero
   matches). `UserCreate`/`UserUpdate` API schemas document that member
   coordinates/W3W are never readable or writable via the REST API in any
-  mode. All 11 audit checks green, `php -l` clean on every touched file.
+  mode. All 12 audit checks green, `php -l` clean on every touched file.
 - **`claude/gap456-location-chunkA`** (branched off `alpha`) — #456 Chunk A:
   full address + geocoordinates + what3words platform layer (foundation,
   non-PII, interactive map — Chunk B lands the PII/GDPR half in a later
@@ -680,7 +690,7 @@ against the schema — not against the folder layout, which merely looks similar
   `tblEventOccurrenceOverrides`, new `tblGeocodeCache`, 14 settings seeds
   (all default OFF/empty), 10 route seeds — upgrade is a full no-op. No
   PII table touched (tblUsers/directory/GiftAid/Salvation are Chunk B).
-  All 11 audit checks green, `php -l` clean on every touched file.
+  All 12 audit checks green, `php -l` clean on every touched file.
 - **`claude/gap234-shared-mailbox`** (branched off `alpha`) — gap #234:
   MS365 Graph email via an admin-configured shared mailbox, formalising
   and hardening the app-only `Mailer::sendViaGraph()` path already in
@@ -709,7 +719,7 @@ against the schema — not against the folder layout, which merely looks similar
   "Recent sends" `portal-data-list`. Shared mailbox is admin-config-only
   (never request-derived); no secret ever logged. Migration 176:
   `tblEmailLog` + 5 non-sensitive settings seeds + 1 route seed, folded
-  into `full_schema.sql`. All 11 audit checks green, `php -l` clean.
+  into `full_schema.sql`. All 12 audit checks green, `php -l` clean.
 - **`claude/gap7-workflow-engine`** (branched off `alpha`) — gap #7
   (#443): Workflow Execution Engine + generic `/approvals` inbox.
   Migration 034 shipped four workflow tables + an admin definition CRUD
@@ -742,7 +752,7 @@ against the schema — not against the folder layout, which merely looks similar
   additive `tblWorkflowInstances` columns + one composite index + one
   `tblWorkflowActions` enum value (no new tables), plus the
   `announcement_approver` role/definition/step, 8 settings seeds, 4
-  route seeds. All 11 audit checks green, `php -l` clean on every
+  route seeds. All 12 audit checks green, `php -l` clean on every
   touched file.
 - **`claude/gap4-bulk-statements`** (this session, branched off `alpha`) —
   gap #4: treasurer-only bulk year-end giving statements at

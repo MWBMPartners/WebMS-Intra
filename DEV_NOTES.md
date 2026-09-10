@@ -5275,4 +5275,148 @@ exactly one place to fix if the judgement is ever wrong, not four.
 
 ---
 
+## Routing traps found 2026-09-10 (#483, #478, #477, #482)
+
+Four faults were fixed on the same day, and none of them was what its
+issue title said. All four were found by checking the actual code
+against the actual web root and the actual list of addresses, not by
+reading the reports. The first two below share one root cause; the other
+two are separate mistakes worth knowing about because the same shape of
+mistake can easily happen again somewhere else.
+
+### A real file or folder in `web/public_html/` always beats a seeded address of the same name
+
+`web/public_html/.htaccess` contains this rule:
+
+```apache
+RewriteCond %{REQUEST_FILENAME} !-d
+```
+
+In plain words: if the address somebody typed matches a REAL FOLDER that
+actually exists on disk, the web server answers for that folder itself —
+serving a file listing, or refusing outright — and the request never
+reaches the portal at all. This rule exists for a good reason: it is
+what lets a stylesheet or an image be served directly, quickly, without
+the portal's own routing code getting involved. But it also means a
+folder placed in the web root can silently swallow a seeded address that
+happens to share its name, and the portal never even finds out the
+request happened.
+
+This is exactly what happened twice. A real folder called `admin/`
+sat in the web root holding three unrelated pages, so every visit to
+`/admin` — the first thing an administrator ever clicks — was answered
+by that folder instead of by the portal. And a real folder called
+`widget/` (holding `countdown.js`, a script other people's websites
+already embed) sat in the web root too, so the seeded public address
+`widget` never once reached the page it was supposed to point at.
+Neither case left anything in the error log, because no portal code ever
+ran to log anything. That is the dangerous part: it does not look like a
+crash, it looks like the address was never registered.
+
+**How to spot this before it ships.** Compare every seeded `routeKey` in
+`web/_sql/full_schema.sql` (or a new migration's `tblRoutes` INSERT)
+against everything that actually exists in `web/public_html/`:
+
+```bash
+ls -1 web/public_html/
+```
+
+If a seeded address's first path segment matches a real file or folder
+name in that list, it will not be reached — test it by requesting the
+address directly rather than trusting that a route exists because a row
+in the database says so.
+
+**Two collisions are deliberate and correct, not bugs:** `assets` has its
+own explicit `RewriteRule` ahead of the folder-check in `.htaccess`,
+carving out an exception on purpose, and `api-docs` is meant to be served
+directly by the web server rather than by the portal. Do not "fix" either
+of those.
+
+**When the folder cannot move** (because something outside this
+codebase already depends on its exact address — the countdown script
+case above), the seeded address has to be removed instead, not repaired.
+Removing a route and fixing the orphaned page behind it should happen in
+the same change, not two: while the page is still reachable in principle
+by some future re-point but has not yet had its own access rules
+checked, leaving it half-fixed is worse than leaving it broken. In the
+`widget` case, the orphaned page's own database queries turned out to be
+missing a check for `isPublic = 1` — meaning that if it had ever quietly
+become reachable, it would have shown a member of the public a list of
+internal, non-public events. That was fixed at the same time the address
+was removed, and the file now carries a comment explaining why it has no
+address and what would need to be true before anyone gives it one again.
+
+### An address is what a visitor types; a file path is where the code that answers it lives — do not confuse the two
+
+`web/_core/Maintenance.php` keeps a short allow-list of addresses that
+still work while the portal has switched itself into maintenance mode
+(which it does automatically whenever the code is newer than the
+database — in other words, on every single upgrade). That list is
+compared against the ADDRESS a visitor typed.
+
+It used to contain `'auth/login'` and `'auth/logout'`. Those look like
+addresses, but they are not — they are fragments of the FILE PATH that
+answers the sign-in page. The sign-in page's actual address is `login`;
+the file that answers it happens to live at `auth/login/index.php`. The
+two are usually related but they are never guaranteed to be the same
+string, and here they were not. Because neither entry ever matched what
+a visitor's browser actually requested, the sign-in page itself was
+blocked during every maintenance window — including the maintenance
+window's own holding page, whose "sign in" link pointed at an address
+that did not exist either.
+
+**The lesson generalises beyond this one file.** Anywhere in this
+codebase that compares against "the address", check what a visitor
+actually typed (the seeded `routeKey` in `tblRoutes`) — never the name of
+the file that happens to answer it. When adding to a list like this one,
+check each entry against the seeded addresses in
+`web/_sql/full_schema.sql`, not against the folder layout of `_apps/`.
+
+One more thing worth knowing before you touch this list: the match is a
+PREFIX match, not an exact match, and that is deliberate rather than
+sloppy. `login` also has to allow `login/webauthn` (passkey sign-in), and
+both password-reset entries have to allow their own `/save` submit
+handlers. Narrow any entry to an exact match and the form will load but
+silently fail to submit — a more confusing half-broken state than either
+being fully open or fully blocked.
+
+A related trap surfaced while fixing this one: a first attempt corrected
+the sign-in page itself but missed the second step of signing in — the
+two-factor code screen a visitor with two-factor switched on is sent to
+after a correct password. That is a half-fix that looks like a whole
+one: it was only found by listing every address that plays a part in
+signing in and checking each one individually, rather than assuming that
+fixing the page named in the report was the entire journey a visitor
+takes.
+
+### `$db` does not exist — the router only ever hands a page two things
+
+When the portal loads a page, it hands that page exactly two things:
+the database connection, in a variable called `$mysqli`, and the site's
+settings, in a variable called `$SETTINGS` (see the `global` line in
+`web/_core/Router.php`, immediately before the page file is loaded).
+Anything else a page reaches for simply is not there — PHP does not
+raise an error for using an undefined variable in the way many other
+languages would; it silently treats it as empty, and then the very next
+line that tries to *use* that empty value as if it were a real
+connection stops the page dead.
+
+Five CSV export handlers reached for a variable called `$db` instead of
+`$mysqli`. Each one looked correct to read and passed a syntax check
+(`php -l` cannot catch this — the variable name is syntactically valid,
+it is simply never set). The fault only ever showed up at the moment a
+real visitor pressed the real "Export CSV" button: no file appeared, and
+nothing was written to the error log, because the page died before it
+reached any of the code that would have logged something.
+
+**How to spot this before it ships:** grep any new or touched file under
+`web/_apps/` for a variable that looks like a database handle, and
+confirm it is either `$mysqli` (the one the router actually provides) or
+explicitly passed in as a function parameter from a caller that itself
+has `$mysqli`. `web/_apps/announcements/_workflow-gate.php` is a correct
+example of the second pattern — it takes the connection as a parameter
+rather than assuming a global variable exists — and is not a bug.
+
+---
+
 Last updated: September 2026
