@@ -116,6 +116,19 @@ $cases = [
     // --- A short-lived MariaDB line between two long-term ones.
     ['11.2.3-MariaDB', 'mariadb.org binary distribution', 'MariaDB', '11.2.3', 'warn'],
 
+    // --- Preview and release-candidate builds. Both projects publish these
+    //     under the SAME version number as the finished release that follows,
+    //     so the number alone cannot tell them apart. A server running a trial
+    //     build must not be told it is on something supported.
+    ['11.4.0-MariaDB-rc', 'mariadb.org binary distribution', 'MariaDB', '11.4.0', 'warn'],
+    ['11.4.0-MariaDB-preview', 'mariadb.org binary distribution', 'MariaDB', '11.4.0', 'warn'],
+    ['9.7.0-rc', 'MySQL Community Server - GPL', 'MySQL', '9.7.0', 'warn'],
+    ['8.4.0-beta', 'MySQL Community Server - GPL', 'MySQL', '8.4.0', 'warn'],
+
+    // --- But an ordinary release whose packaging string merely CONTAINS those
+    //     letters inside a longer word must NOT be mistaken for a preview.
+    ['8.4.3-1.el9', 'MySQL Community Server - GPL', 'MySQL', '8.4.3', 'ok'],
+
     // --- MariaDB too old for this portal's database changes.
     ['10.3.39-MariaDB', 'mariadb.org binary distribution', 'MariaDB', '10.3.39', 'crit'],
 

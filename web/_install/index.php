@@ -290,6 +290,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         //    shared hosting a refusal here is the NORMAL case —
                         //    most accounts are not allowed to create databases —
                         //    so this is the message people most need to see.
+                        //    Catch only the refusals that mean "you are not
+                        //    allowed to do this", and let anything else through.
+                        //    An earlier version caught everything, which turned a
+                        //    lost connection or a disk problem into the words
+                        //    "you were not allowed" — hiding the real cause and
+                        //    sending the reader off to fix the wrong thing.
+                        //
+                        //      1044 / 1045 / 1142  the account is not permitted
+                        //      1006               the server could not create it
+                        //      1007               it already exists (a second
+                        //                         person got there first, or the
+                        //                         earlier check was refused
+                        //                         rather than answered)
                         $createResult = false;
                         try {
                             $createResult = $testConn->query(
@@ -297,7 +310,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                 . 'CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci'
                             );
                         } catch (\mysqli_sql_exception $e) {
-                            $createResult = false;
+                            $code = $e->getCode();
+
+                            if ($code === 1007) {
+                                // It is there after all. Use it.
+                                $testConn->select_db($dbName);
+                                $createResult = true;
+                            } elseif (in_array($code, [1044, 1045, 1006, 1142], true) === true) {
+                                $createResult = false;
+                            } else {
+                                // Something genuinely different. Let the outer
+                                // handler report it as itself.
+                                throw $e;
+                            }
                         }
                         if ($createResult === false) {
                             $error = 'The database "' . $dbName . '" could not be used. '

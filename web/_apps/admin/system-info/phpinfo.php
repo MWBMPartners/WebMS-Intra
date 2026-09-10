@@ -4,97 +4,74 @@
  * -----------------------------------------------------------------------------
  * Admin — the full PHP report 📋
  * -----------------------------------------------------------------------------
- * The detailed description of PHP on this server: its version, every setting it
- * is running with, and every optional part that is installed. This is the report
- * a hosting company asks for when they are diagnosing an awkward problem.
+ * A description of PHP on this server: its version, the settings that decide how
+ * it behaves, and every optional part that is installed. This is what a hosting
+ * company asks for when diagnosing an awkward problem, and the plain text
+ * version of it is meant to be pasted straight into a support ticket.
  *
- * WHY THIS DOES NOT USE PHP'S OWN phpinfo() FUNCTION
- * --------------------------------------------------
- * The obvious way to build this page is to call PHP's built-in `phpinfo()` and
- * send what it produces straight to the browser. **That is not safe, and this
- * page deliberately does not do it.** The reasoning is worth reading before
- * anyone changes it back.
+ * =============================================================================
+ * READ THIS BEFORE CHANGING ANYTHING HERE
+ * =============================================================================
+ * This page has been rewritten three times, because three independent reviews
+ * each got past the version before it. Every one of those attempts looked
+ * reasonable when it was written. The history is short and worth knowing,
+ * because the obvious change is the one that keeps failing.
  *
- * `phpinfo()` prints things that must never appear on a screen:
+ * ATTEMPT 1 — call PHP's own phpinfo() and cut the dangerous parts out.
+ *   Broken. phpinfo() prints the server's environment variables (which on shared
+ *   hosting hold database passwords) and the current request (which holds the
+ *   reader's own sign-in cookie). You can ask it to omit those two sections, but
+ *   that is not enough: when PHP runs as an Apache module, the "apache2handler"
+ *   entry inside the installed-parts section prints "Apache Environment" and
+ *   "HTTP Headers Information" of its own accord, and the second carries the
+ *   Cookie header. Worse, the filter written to remove them never matched
+ *   anything at all, because PHP puts those headings in <h2> elements OUTSIDE
+ *   the tables, not inside them.
  *
- *   - The server's environment variables. On shared hosting these frequently
- *     hold database passwords and service keys.
- *   - The current request, including the browser's cookies — which contain the
- *     reader's own sign-in token. Anyone who saw that screen could sign in as
- *     them. That is not far-fetched: pasting this report into a support ticket
- *     is the main reason the page exists.
+ * ATTEMPT 2 — build the report ourselves, and hide values that LOOK secret.
+ *   Broken. There is always another shape. The one that got through was a Redis
+ *   cache address written the documented way, with auth[]= array parameters,
+ *   which no "auth=" pattern matches. A value can also be pulled in from the
+ *   server's environment using PHP's ${NAME} syntax, arriving here as an
+ *   ordinary string with nothing to mark it as a password.
  *
- * You can ask `phpinfo()` to leave those two sections out. **It is not enough.**
- * When PHP runs as an Apache module, the "apache2handler" entry inside the
- * list-of-installed-parts section prints two further tables of its own accord —
- * "Apache Environment" and "HTTP Headers Information" — and the second contains
- * the request's Cookie header. The leak arrives through a different door.
+ * ATTEMPT 3 — only show settings on an approved list of NAMES.
+ *   Still broken, in two ways. Approving whole families by prefix (opcache.,
+ *   zend.) silently approved every future setting in those families, and several
+ *   existing ones holding file paths and account names — opcache.preload_user
+ *   and opcache.error_log among them. And approving a name says nothing about
+ *   its value: a setting as innocent as arg_separator.output can be set to any
+ *   string at all, and in testing it was.
  *
- * A first version of this page tried to solve that by capturing `phpinfo()`'s
- * output and cutting the dangerous parts out of it with pattern matching. An
- * independent review took that apart in minutes, and it was wrong in two ways
- * that are worth recording, because both look fine until someone checks:
+ * WHAT IS HERE NOW — approve the name AND check the value
+ * -------------------------------------------------------
+ * Every setting shown is named individually below, together with the KIND of
+ * value it is expected to hold: a number, a switch, a size, a time zone, and so
+ * on. The value is shown only if it actually looks like that kind of thing. A
+ * number that is not a number, or a separator that is not one or two punctuation
+ * marks, is withheld.
  *
- *   1. The section headings are `<h2>` elements that sit OUTSIDE the tables they
- *      introduce, not inside them. A filter that removed tables containing a
- *      heading removed nothing at all. (Verified by rendering a report through a
- *      real web server and looking at the markup, which is how it should have
- *      been checked the first time.)
- *   2. Even a filter that searched for the reader's sign-in token could be
- *      slipped past, because PHP decodes percent-escapes in cookies. A token
- *      sent as `%61bc...` reads as `abc...` inside PHP but stays as `%61bc...`
- *      in the Apache table, so the two never matched.
+ * That is what finally closes the hole, because it no longer depends on
+ * recognising secrets. A secret placed in arg_separator.output fails the check
+ * for "one to four punctuation marks" and never appears, without anybody having
+ * had to imagine that particular hiding place.
  *
- * The lesson is that cutting dangerous parts out of a large block of text
- * somebody else produced is a losing game. Every new version of PHP, and every
- * different way of running it, can add something new to that block, and the
- * filter finds out last.
- *
- * SO THIS PAGE BUILDS THE REPORT ITSELF
- * -------------------------------------
- * Everything below is assembled from a small number of PHP functions that return
- * plain data — `ini_get_all()` for the settings, `get_loaded_extensions()` for
- * the installed parts, and a handful of constants. Nothing is asked for that
- * could contain the environment or the request, so there is nothing to cut out.
- * Anything new that a future PHP adds simply does not appear, rather than
- * appearing and having to be caught.
- *
- * The information is the same information. A hosting company gets what they
- * need. Use the "plain text" link to copy the whole thing into a support ticket.
- *
- * WHICH VALUES ARE SHOWN, AND WHY IT IS AN ALLOWLIST
- * ---------------------------------------------------
- * PHP hides nothing on its own — checked against a running server, not assumed.
- * A `mysqli.default_pw` and a `sendmail_path` carrying a password in its
- * arguments both print in full.
- *
- * A first attempt hid values that LOOKED like secrets. A second review showed
- * why that can never be trusted: a Redis cache address written the documented
- * way, `tcp://cache:6379?auth[]=user&auth[]=SECRET`, slips past any "auth="
- * pattern. And a setting's value can be pulled in from the server's environment
- * with PHP's `${VARIABLE}` syntax, arriving here as an ordinary-looking string
- * with nothing to mark it as a password.
- *
- * So the rule is inverted. **A value is shown only if its setting is on an
- * allowlist** of settings known not to carry credentials. Everything else shows
- * the name and withholds the value. A setting introduced by a future PHP is
- * therefore withheld by default rather than displayed until somebody notices.
- * Names are always shown, because knowing a setting exists is useful and cannot
- * hurt.
+ * Rules for adding a setting here: name it individually, never by prefix; give
+ * it the tightest kind that fits; and never add one whose natural value is a
+ * file path, because on shared hosting a path contains the customer's account
+ * name.
  *
  * WHO CAN SEE IT
  * --------------
  * Umbrella administrators only. This describes the whole SERVER rather than one
- * organisation on it, so on an install shared by several organisations an
- * administrator of one of them should not necessarily see it. On an ordinary
- * single-organisation install the owner is the umbrella administrator, so
- * nothing is taken away from anybody.
+ * organisation on it. On an ordinary single-organisation install the owner is
+ * the umbrella administrator, so nothing is taken away from anybody.
  *
  * @package   Portal\Admin
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2026-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   2.0.0
+ * @version   3.0.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/489
  * -----------------------------------------------------------------------------
  */
@@ -112,205 +89,255 @@ if (App::isUmbrellaAdmin() === false) {
     exit('Forbidden');
 }
 
-// 📄 Two ways to read the same report: a normal page, or plain text for pasting
-//    into a support ticket.
+// 📄 Two ways to read the same report: a normal page, or plain text. The plain
+//    text one is the version meant for sending to somebody else.
 $asText = isset($_GET['format']) === true && $_GET['format'] === 'text';
 
 // -----------------------------------------------------------------------------
-// 🙈 Hiding secrets
+// ✅ Which settings are reported, and what each one is allowed to look like
 // -----------------------------------------------------------------------------
+// The kinds:
+//   int      a whole number
+//   bytes    a size, such as 512M or 64K or -1
+//   bool     a switch: On, Off, 1, 0, empty, or one of PHP's word forms
+//   sep      one to four punctuation marks (argument separators)
+//   order    a short run of the letters G P C S E (which inputs PHP reads)
+//   tz       a real time-zone name, checked against PHP's own list
+//   charset  a character-set name
+//   funcs    a comma-separated list of function or class names
+//   samesite one of the four values PHP accepts for the cookie SameSite rule
+//   savehandler  one of the session storage back-ends PHP knows about
+//   mblang   one of the language names the mbstring extension accepts
+//   jit      one of the accepted just-in-time compiler modes, or its number form
+//   word     a short plain word or simple path
+//
+// A note on the two settings that use 'word'. Both session.name and
+// session.cookie_path are sent to EVERY visitor's browser in the cookie itself,
+// so neither can hold anything secret by its very nature — there is nowhere for
+// a secret to hide in a value the browser is already told. Every other setting
+// that once used this loose kind now has an explicit list of accepted values
+// instead, because "a short run of letters" is a shape a password can also have.
+//
+// Deliberately absent: anything whose value is naturally a file path. On shared
+// hosting a path contains the customer's account name and private directory
+// layout, which is nobody else's business and is not needed to diagnose
+// anything.
 
-/**
- * ✅ The settings whose VALUES are safe to display, listed by exact name.
- *
- * This is an ALLOWLIST, and it is deliberately the other way round from the
- * obvious design. Two independent reviews took apart two earlier versions that
- * tried to spot secrets and hide them, and the second review put the reason
- * plainly: a list of every setting, filtered by patterns that look for
- * secret-shaped values, cannot promise secrecy. There is always another shape.
- * The one that got through was a cache address written as
- * `tcp://cache:6379?auth[]=user&auth[]=SECRET` — a documented way to configure
- * Redis, and one no "auth=" pattern would match.
- *
- * A setting's value can also be pulled in from the server's environment, using
- * PHP's `${VARIABLE}` syntax in its configuration file. By the time it reaches
- * this page it is an ordinary-looking string, with nothing to say it began life
- * as a password.
- *
- * So the rule is inverted. A value is shown only if the setting is named below.
- * Everything else shows the setting's NAME — which is useful and harmless — and
- * withholds the value. A setting added by a future version of PHP is therefore
- * withheld by default, rather than displayed until somebody notices.
- *
- * The list covers what people actually need when diagnosing a problem: the size
- * and time limits, how errors are handled, the performance cache, and the
- * session cookie settings. Add to it when something is genuinely needed AND
- * genuinely cannot carry a credential.
- */
-const SAFE_SETTING_NAMES = [
-    // Size and time limits — the usual explanation for a puzzling failure
-    'memory_limit', 'max_execution_time', 'max_input_time', 'upload_max_filesize',
-    'post_max_size', 'max_file_uploads', 'max_input_vars', 'max_input_nesting_level',
-    'default_socket_timeout', 'file_uploads', 'enable_post_data_reading',
-    // Errors and logging behaviour (not the log's location, which is a path)
-    'display_errors', 'display_startup_errors', 'error_reporting', 'log_errors',
-    'log_errors_max_len', 'ignore_repeated_errors', 'html_errors', 'track_errors',
-    'zend.exception_ignore_args', 'zend.assertions', 'assert.active',
-    // Language and output behaviour
-    'default_charset', 'internal_encoding', 'output_buffering', 'implicit_flush',
-    'precision', 'serialize_precision', 'short_open_tag', 'expose_php',
-    'zlib.output_compression', 'zlib.output_compression_level',
-    'variables_order', 'request_order', 'arg_separator.input', 'arg_separator.output',
-    // What the host has switched off — important, and not a secret
-    'disable_functions', 'disable_classes', 'allow_url_fopen', 'allow_url_include',
-    // Dates
-    'date.timezone', 'date.default_latitude', 'date.default_longitude',
-    // Mail transport, but never the sendmail command line, which takes arguments
-    'SMTP', 'smtp_port', 'mail.add_x_header',
-    // Sessions: everything except save_path, which is where a cache password lives
-    'session.name', 'session.auto_start', 'session.use_strict_mode',
-    'session.use_cookies', 'session.use_only_cookies', 'session.use_trans_sid',
-    'session.cookie_lifetime', 'session.cookie_path', 'session.cookie_domain',
-    'session.cookie_secure', 'session.cookie_httponly', 'session.cookie_samesite',
-    'session.gc_probability', 'session.gc_divisor', 'session.gc_maxlifetime',
-    'session.sid_length', 'session.sid_bits_per_character', 'session.lazy_write',
-    'session.save_handler',
-    // Uploads and character handling
-    'mbstring.language', 'mbstring.internal_encoding', 'mbstring.http_input',
-    'mbstring.http_output', 'mbstring.detect_order', 'mbstring.func_overload',
-    'iconv.input_encoding', 'iconv.output_encoding', 'iconv.internal_encoding',
-    // Pattern matching limits — these decide whether a big page can be processed
-    'pcre.backtrack_limit', 'pcre.recursion_limit', 'pcre.jit',
-    // Images and documents
-    'gd.jpeg_ignore_warning', 'exif.encode_unicode', 'exif.decode_unicode_motorola',
-    'libxml.streams_custom', 'soap.wsdl_cache_enabled', 'soap.wsdl_cache_ttl',
+const REPORT_SETTINGS = [
+    // — Size and time limits. The usual explanation for a puzzling failure. —
+    'memory_limit'                   => 'bytes',
+    'upload_max_filesize'            => 'bytes',
+    'post_max_size'                  => 'bytes',
+    'max_execution_time'             => 'int',
+    'max_input_time'                 => 'int',
+    'max_file_uploads'               => 'int',
+    'max_input_vars'                 => 'int',
+    'max_input_nesting_level'        => 'int',
+    'default_socket_timeout'         => 'int',
+    'file_uploads'                   => 'bool',
+    'enable_post_data_reading'       => 'bool',
+
+    // — How errors are handled. Never where they are written, which is a path. —
+    'display_errors'                 => 'bool',
+    'display_startup_errors'         => 'bool',
+    'log_errors'                     => 'bool',
+    'error_reporting'                => 'int',
+    'log_errors_max_len'             => 'int',
+    'ignore_repeated_errors'         => 'bool',
+    'html_errors'                    => 'bool',
+    'zend.exception_ignore_args'     => 'bool',
+    'zend.assertions'                => 'int',
+
+    // — Output and language behaviour —
+    'default_charset'                => 'charset',
+    'internal_encoding'              => 'charset',
+    'output_buffering'               => 'bytes',
+    'implicit_flush'                 => 'bool',
+    'precision'                      => 'int',
+    'serialize_precision'            => 'int',
+    'short_open_tag'                 => 'bool',
+    'expose_php'                     => 'bool',
+    'zlib.output_compression'        => 'bool',
+    'arg_separator.input'            => 'sep',
+    'arg_separator.output'           => 'sep',
+    'variables_order'                => 'order',
+    'request_order'                  => 'order',
+
+    // — What the host has switched off. Important, and not a secret. —
+    'allow_url_fopen'                => 'bool',
+    'allow_url_include'              => 'bool',
+    'disable_functions'              => 'funcs',
+    'disable_classes'                => 'funcs',
+
+    // — Dates —
+    'date.timezone'                  => 'tz',
+
+    // — Sessions. Never save_path: that is where a cache password lives. —
+    'session.name'                   => 'word',
+    'session.save_handler'           => 'savehandler',
+    'session.auto_start'             => 'bool',
+    'session.use_strict_mode'        => 'bool',
+    'session.use_cookies'            => 'bool',
+    'session.use_only_cookies'       => 'bool',
+    'session.use_trans_sid'          => 'bool',
+    'session.cookie_lifetime'        => 'int',
+    'session.cookie_path'            => 'word',
+    'session.cookie_secure'          => 'bool',
+    'session.cookie_httponly'        => 'bool',
+    'session.cookie_samesite'        => 'samesite',
+    'session.gc_probability'         => 'int',
+    'session.gc_divisor'             => 'int',
+    'session.gc_maxlifetime'         => 'int',
+    'session.sid_length'             => 'int',
+    'session.sid_bits_per_character' => 'int',
+    'session.lazy_write'             => 'bool',
+
+    // — Character handling —
+    'mbstring.language'              => 'mblang',
+    'mbstring.internal_encoding'     => 'charset',
+    'mbstring.http_input'            => 'charset',
+    'mbstring.http_output'           => 'charset',
+    'mbstring.detect_order'          => 'charset',
+    'iconv.input_encoding'           => 'charset',
+    'iconv.output_encoding'          => 'charset',
+    'iconv.internal_encoding'        => 'charset',
+
+    // — Pattern-matching limits. These decide whether a big page can be
+    //   processed at all, so they are worth seeing. —
+    'pcre.backtrack_limit'           => 'int',
+    'pcre.recursion_limit'           => 'int',
+    'pcre.jit'                       => 'bool',
+
+    // — The performance cache. Named one at a time on purpose: the same family
+    //   also contains preload_user, error_log, file_cache, blacklist_filename
+    //   and lockfile_path, every one of which is a path or an account name. —
+    'opcache.enable'                  => 'bool',
+    'opcache.enable_cli'              => 'bool',
+    'opcache.memory_consumption'      => 'int',
+    'opcache.interned_strings_buffer' => 'int',
+    'opcache.max_accelerated_files'   => 'int',
+    'opcache.max_wasted_percentage'   => 'int',
+    'opcache.use_cwd'                 => 'bool',
+    'opcache.validate_timestamps'     => 'bool',
+    'opcache.revalidate_freq'         => 'int',
+    'opcache.save_comments'           => 'bool',
+    'opcache.huge_code_pages'         => 'bool',
+    'opcache.jit'                     => 'jit',
+    'opcache.jit_buffer_size'         => 'bytes',
+
+    // — Images and documents —
+    'gd.jpeg_ignore_warning'         => 'bool',
+    'soap.wsdl_cache_enabled'        => 'bool',
+    'soap.wsdl_cache_ttl'            => 'int',
 ];
 
 /**
- * ✅ Whole families of settings that are safe by their prefix.
+ * 🚦 Does this value actually look like the kind of thing we expect?
  *
- * The performance cache in particular has dozens of settings, all of them
- * numbers and switches, and all of them worth seeing when a page is slow.
+ * This is the check that finally makes the report safe, and it works because it
+ * does not try to recognise a secret. It only asks whether the value is the
+ * shape it is supposed to be. A password put into a setting that should hold a
+ * number is not a number, so it is withheld — and nobody had to think of that
+ * particular hiding place in advance.
+ *
+ * @param string $kind  One of the kinds listed above.
+ * @param string $value The value as PHP reports it.
+ *
+ * @return bool True if the value may be displayed.
  */
-const SAFE_SETTING_PREFIXES = [
-    'opcache.',
-    'apcu.',
-    'zend.',
-    'assert.',
-];
-
-/**
- * 🚦 May this setting's value be displayed?
- *
- * @param string $name The setting's name.
- *
- * @return bool True only if the setting is on the allowlist above.
- */
-function portalSettingValueIsShowable(string $name): bool
+function portalValueMatchesKind(string $kind, string $value): bool
 {
-    if (in_array($name, SAFE_SETTING_NAMES, true) === true) {
+    // An empty value is always safe to show as "no value".
+    if ($value === '') {
         return true;
     }
-    foreach (SAFE_SETTING_PREFIXES as $prefix) {
-        if (str_starts_with($name, $prefix) === true) {
-            return true;
-        }
+
+    // Nothing legitimate in this report is long. A very long value is a strong
+    // sign that something unexpected has been put there.
+    if (strlen($value) > 300) {
+        return false;
     }
-    return false;
+
+    switch ($kind) {
+        case 'int':
+            return preg_match('/^-?\d{1,20}$/', $value) === 1;
+
+        case 'bytes':
+            return preg_match('/^-?\d{1,20}[KMGkmg]?$/', $value) === 1;
+
+        case 'bool':
+            return in_array(
+                strtolower($value),
+                ['0', '1', 'on', 'off', 'true', 'false', 'yes', 'no', 'stderr', 'stdout'],
+                true
+            );
+
+        case 'sep':
+            return preg_match('/^[&;,|]{1,4}$/', $value) === 1;
+
+        case 'order':
+            return preg_match('/^[GPCSE]{1,5}$/i', $value) === 1;
+
+        case 'tz':
+            return in_array($value, timezone_identifiers_list(), true) === true
+                || strtoupper($value) === 'UTC';
+
+        case 'charset':
+            return preg_match('/^[A-Za-z0-9_.:\/-]{1,40}(,[A-Za-z0-9_.:\/-]{1,40}){0,9}$/', $value) === 1;
+
+        case 'funcs':
+            return preg_match('/^[A-Za-z0-9_\\\\,\s:]{1,300}$/', $value) === 1;
+
+        case 'samesite':
+            return in_array(strtolower($value), ['lax', 'strict', 'none'], true);
+
+        case 'savehandler':
+            return in_array(
+                strtolower($value),
+                ['files', 'user', 'redis', 'rediscluster', 'memcached', 'memcache', 'sqlite', 'mm'],
+                true
+            );
+
+        case 'mblang':
+            return in_array(
+                strtolower($value),
+                [
+                    'neutral', 'english', 'uni', 'japanese', 'ja', 'korean', 'ko',
+                    'simplified chinese', 'zh-cn', 'traditional chinese', 'zh-tw',
+                    'russian', 'ru', 'armenian', 'hy', 'turkish', 'tr', 'german', 'de',
+                ],
+                true
+            );
+
+        case 'jit':
+            return in_array(strtolower($value), ['off', 'disable', 'on', 'tracing', 'function'], true)
+                || preg_match('/^\d{1,4}$/', $value) === 1;
+
+        case 'word':
+            // Only used for session.name and session.cookie_path, both of which
+            // the browser is told anyway. See the note above the settings list.
+            return preg_match('/^[A-Za-z0-9_.\/-]{1,64}$/', $value) === 1;
+
+        default:
+            // An unknown kind means somebody added a setting without saying what
+            // it should look like. Withhold it rather than guess.
+            return false;
+    }
 }
 
 // -----------------------------------------------------------------------------
-// 📊 Gather the report
+// 🔒 Last line of defence
 // -----------------------------------------------------------------------------
-
-// 🧾 General facts about PHP itself. Every one of these is chosen by name, so
-//    nothing unexpected can arrive here.
-$general = [
-    'PHP version'                 => PHP_VERSION,
-    'How PHP is being run'        => PHP_SAPI,
-    'Operating system'            => PHP_OS_FAMILY,
-    'Engine version'              => zend_version(),
-    'Integer size (bytes)'        => (string) PHP_INT_SIZE,
-    'Main settings file'          => (string) (php_ini_loaded_file() !== false ? php_ini_loaded_file() : 'none found'),
-    'Extra settings files'        => (string) (php_ini_scanned_files() !== false ? trim((string) php_ini_scanned_files()) : 'none'),
-    'Default time zone'           => date_default_timezone_get(),
-    'Maximum uploaded file size'  => (string) ini_get('upload_max_filesize'),
-    'Maximum form submission'     => (string) ini_get('post_max_size'),
-    'Memory limit'                => (string) ini_get('memory_limit'),
-    'Longest a page may run'      => (string) ini_get('max_execution_time') . ' seconds',
-];
-
-// 📦 Which optional parts of PHP are installed, and what version each one is.
-$extensions = [];
-if (function_exists('get_loaded_extensions') === true) {
-    $names = get_loaded_extensions();
-    sort($names, SORT_NATURAL | SORT_FLAG_CASE);
-    foreach ($names as $ext) {
-        $ver = phpversion($ext);
-        $extensions[(string) $ext] = ($ver === false || $ver === '') ? '(no version reported)' : (string) $ver;
-    }
-}
-
-// ⚙️ Every configuration setting, with the value in force here and the server's
-//    own default. This is the bulk of what a hosting company wants to see.
-//
-//    A few hosts switch ini_get_all() off. Say so plainly rather than showing an
-//    empty list that looks like "there are no settings".
-$settingsAvailable = function_exists('ini_get_all');
-$settings          = [];
-$withheldCount     = 0;
-
-if ($settingsAvailable === true) {
-    $raw = ini_get_all(null, true);
-    if (is_array($raw) === true) {
-        ksort($raw, SORT_NATURAL | SORT_FLAG_CASE);
-        foreach ($raw as $name => $info) {
-            $name  = (string) $name;
-            $local = $info['local_value'] ?? '';
-            $globl = $info['global_value'] ?? '';
-
-            // An array-valued setting is rare but real; flatten it for display.
-            $local = is_array($local) === true ? implode(', ', $local) : (string) $local;
-            $globl = is_array($globl) === true ? implode(', ', $globl) : (string) $globl;
-
-            if (portalSettingValueIsShowable($name) === true) {
-                $settings[$name] = ['local' => $local, 'global' => $globl, 'shown' => true];
-            } else {
-                $settings[$name] = ['local' => '', 'global' => '', 'shown' => false];
-                $withheldCount++;
-            }
-        }
-    }
-}
-
-// -----------------------------------------------------------------------------
-// 🔒 Last line of defence, applied to the finished report
-// -----------------------------------------------------------------------------
-// Everything above is reasoning about where a secret could appear. This checks
-// the one thing that would be worst to get wrong: the reader's own sign-in
-// token. It is a plain text search over the finished report, so unlike the
-// reasoning it cannot be mistaken.
-//
-// The token is checked in BOTH its plain and its percent-escaped forms. PHP
-// decodes percent-escapes in cookies, so a token that reads as `abc...` inside
-// PHP can sit in a server table as `%61bc...`. Checking only one form is exactly
-// the gap an earlier version of this page had.
 
 /**
  * 🔎 Does the finished report contain the reader's own sign-in token?
  *
- * This is the last line of defence. Everything else on this page is reasoning
- * about where a secret could appear; this checks the one thing that would be
- * worst to get wrong, by looking for it.
- *
- * IT SEARCHES THE DECODED REPORT, NOT AN ENCODED TOKEN — and that distinction
- * is the whole point. A first version encoded the token and searched for that,
- * which does nothing at all: a session token is letters and digits, so
- * percent-encoding it returns the very same string. Meanwhile a token can
- * appear in a report percent-escaped, as `%61bc...` where the real token is
- * `abc...`. The two never meet. Decoding the REPORT closes that gap, because
- * however the token was escaped on the way in, decoding brings it back to the
- * form we are looking for.
+ * IT SEARCHES THE DECODED REPORT, NOT AN ENCODED TOKEN, and that distinction is
+ * the whole point. An earlier version encoded the token and searched for that,
+ * which does nothing: a session token is letters and digits, so encoding it
+ * returns the identical string. Meanwhile the token can appear in a report
+ * escaped, as %61bc... where the real one is abc... . Decoding the REPORT closes
+ * that gap, whichever way it was escaped on the way in.
  *
  * @param string $haystack The finished report, exactly as it would be sent.
  *
@@ -323,11 +350,7 @@ function portalReportLeaksSessionToken(string $haystack): bool
         return false;
     }
 
-    // The report as-is, and the report with any percent-escapes undone. The two
-    // decoders differ only in how they treat a plus sign, so both are checked.
-    $forms = [$haystack, rawurldecode($haystack), urldecode($haystack)];
-
-    foreach ($forms as $form) {
+    foreach ([$haystack, rawurldecode($haystack), urldecode($haystack)] as $form) {
         if (strpos($form, $token) !== false) {
             return true;
         }
@@ -336,11 +359,80 @@ function portalReportLeaksSessionToken(string $haystack): bool
 }
 
 // -----------------------------------------------------------------------------
+// 📊 Gather the report
+// -----------------------------------------------------------------------------
+
+// 🧾 General facts. Every one is chosen individually.
+//
+//    Note what is NOT here: the location of PHP's settings files. Those are full
+//    paths, and on shared hosting a path such as /home/{account}/private/php.ini
+//    gives away the customer's account name and directory layout. Whether the
+//    files exist, and how many there are, answers the diagnostic question
+//    without any of that.
+$scanned      = php_ini_scanned_files();
+$scannedCount = ($scanned === false || trim((string) $scanned) === '')
+    ? 0
+    : count(array_filter(array_map('trim', explode(',', (string) $scanned))));
+
+$general = [
+    'PHP version'          => PHP_VERSION,
+    'How PHP is being run' => PHP_SAPI,
+    'Operating system'     => PHP_OS_FAMILY,
+    'Engine version'       => zend_version(),
+    'Integer size (bytes)' => (string) PHP_INT_SIZE,
+    'Main settings file'   => php_ini_loaded_file() !== false ? 'loaded' : 'none found',
+    'Extra settings files' => (string) $scannedCount,
+    'Default time zone'    => date_default_timezone_get(),
+];
+
+// 📦 Which optional parts of PHP are installed, and their versions.
+$extensions = [];
+if (function_exists('get_loaded_extensions') === true) {
+    $names = get_loaded_extensions();
+    sort($names, SORT_NATURAL | SORT_FLAG_CASE);
+    foreach ($names as $ext) {
+        $ver = phpversion($ext);
+        $extensions[(string) $ext] = ($ver === false || $ver === '') ? '(no version reported)' : (string) $ver;
+    }
+}
+
+// ⚙️ The settings, filtered as described at the top of this file.
+$settingsAvailable = function_exists('ini_get_all');
+$settings          = [];
+$withheldCount     = 0;
+
+if ($settingsAvailable === true) {
+    $raw = ini_get_all(null, true);
+    if (is_array($raw) === true) {
+        foreach (REPORT_SETTINGS as $name => $kind) {
+            if (array_key_exists($name, $raw) === false) {
+                continue;
+            }
+
+            $local = $raw[$name]['local_value'] ?? '';
+            $globl = $raw[$name]['global_value'] ?? '';
+            $local = is_array($local) === true ? implode(', ', $local) : (string) $local;
+            $globl = is_array($globl) === true ? implode(', ', $globl) : (string) $globl;
+
+            if (portalValueMatchesKind($kind, $local) === false
+                || portalValueMatchesKind($kind, $globl) === false
+            ) {
+                $settings[$name] = ['local' => '', 'global' => '', 'shown' => false];
+                $withheldCount++;
+                continue;
+            }
+
+            $settings[$name] = ['local' => $local, 'global' => $globl, 'shown' => true];
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
 // 📝 Render
 // -----------------------------------------------------------------------------
 
 if ($asText === true) {
-    $lines = [];
+    $lines   = [];
     $lines[] = 'PHP report — ' . date('Y-m-d H:i:s T');
     $lines[] = str_repeat('=', 70);
     $lines[] = '';
@@ -357,27 +449,34 @@ if ($asText === true) {
     if ($settingsAvailable === false) {
         $lines[] = 'SETTINGS: not available — this hosting has switched off the function that lists them.';
     } else {
-        $lines[] = 'SETTINGS (' . count($settings) . ') — name, value in force here, server default';
+        $lines[] = 'SETTINGS (' . count($settings) . ') — value here | server default';
         foreach ($settings as $k => $v) {
             if ($v['shown'] === false) {
-                $lines[] = sprintf('  %-44s [value not shown]', $k);
+                $lines[] = sprintf('  %-40s [value not shown]', $k);
                 continue;
             }
-            $lines[] = sprintf('  %-44s %s | %s', $k, $v['local'], $v['global']);
+            $lines[] = sprintf(
+                '  %-40s %s | %s',
+                $k,
+                $v['local'] === '' ? '(no value)' : $v['local'],
+                $v['global'] === '' ? '(no value)' : $v['global']
+            );
         }
     }
     $lines[] = '';
-    $lines[] = 'ABOUT THE VALUES THAT ARE NOT SHOWN';
-    $lines[] = sprintf('  %d of %d settings show their name only.', $withheldCount, count($settings));
-    $lines[] = '  Values are shown only for settings that are known not to hold a password';
-    $lines[] = '  or a key. Anything else shows its name and withholds its value, so that';
-    $lines[] = '  this report is safe to send to somebody else. If your hosting provider';
-    $lines[] = '  needs one of the withheld values, they can ask you for that one setting.';
+    $lines[] = 'WHAT THIS REPORT LEAVES OUT, ON PURPOSE';
+    $lines[] = '  This is a chosen list of settings, not every setting PHP has. Each one is';
+    $lines[] = '  also checked against the kind of value it should hold, and withheld if it';
+    $lines[] = '  does not match. File locations are left out entirely, because on shared';
+    $lines[] = '  hosting a file path gives away the account name.';
+    if ($withheldCount > 0) {
+        $lines[] = sprintf('  %d setting(s) did not match their expected kind and were withheld.', $withheldCount);
+    }
+    $lines[] = '  If your hosting provider needs something that is not here, they can ask you';
+    $lines[] = '  for that one setting.';
 
     $body = implode("\n", $lines);
 
-    // 🛑 Refuse rather than risk it. Nothing above should be able to contain the
-    //    sign-in token, but "should not" is not "cannot".
     if (portalReportLeaksSessionToken($body) === true) {
         http_response_code(500);
         header('Content-Type: text/plain; charset=utf-8');
@@ -396,6 +495,24 @@ if ($asText === true) {
 header('X-Robots-Tag: noindex, nofollow, noarchive');
 header('Cache-Control: no-store, no-cache, must-revalidate, private');
 
+// 🛑 A guard around everything drawn below. It throws away whatever it is given
+//    unless the page has been explicitly approved.
+//
+//    Why it is built this way. The check that matters happens AFTER the page is
+//    drawn. If drawing it fails half way — an exception, or an error that stops
+//    PHP altogether — that check is never reached, and PHP sends whatever is
+//    sitting in the buffer as it shuts down. A partly-drawn, unchecked report
+//    would go out. Wrapping the drawing in try/finally does not help, because a
+//    fatal error runs neither.
+//
+//    This does hold, because the buffer's own handler decides what is allowed
+//    out and refuses by default. It runs during shutdown as well, so the failure
+//    path sends nothing rather than something unchecked.
+$reportApproved = false;
+ob_start(static function (string $chunk) use (&$reportApproved): string {
+    return $reportApproved === true ? $chunk : '';
+});
+
 $pageTitle   = 'Full PHP report';
 $pageSection = 'admin';
 $breadcrumbs = [
@@ -404,11 +521,9 @@ $breadcrumbs = [
     'Server Information' => '/admin/system-info',
     'Full PHP report'    => '',
 ];
-// 🛑 Build the whole page into memory rather than sending it as it is drawn.
-//    The check at the bottom has to see EXACTLY what the reader would see —
-//    including the shared header, navigation and footer. An earlier version
-//    checked a separate string built from the gathered data, which left every
-//    part of the page drawn by the template unchecked.
+
+// A second, ordinary buffer, so the finished page can be inspected before the
+// guard above is told to let it through.
 ob_start();
 
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
@@ -418,8 +533,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <div>
         <h1 class="mb-1"><i class="fa-solid fa-file-lines me-2"></i>Full PHP report</h1>
         <p class="text-secondary mb-0">
-            Everything about the version of PHP running this portal. This is what a
-            hosting company usually asks for.
+            How PHP is set up on this server. This is what a hosting company usually
+            asks to see.
         </p>
     </div>
     <div class="d-flex gap-2">
@@ -431,18 +546,25 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 </div>
 
 <div class="alert alert-info">
-    <p class="mb-1">
-        <strong>This report is built to be safe to send to somebody else.</strong>
-    </p>
+    <p class="mb-1"><strong>Send the plain text version, not this page.</strong></p>
     <p class="mb-0 small">
-        Setting names are always shown. Their <em>values</em> are shown only for
-        settings that are known not to hold a password or a key &mdash; everything else
-        shows its name and withholds the value. That is deliberately cautious: a
-        harmless-sounding setting really can hold a database or cache password, and this
-        report is meant to be pasted into a support ticket without a second thought. If
-        your hosting provider needs one of the withheld values, they can ask you for
-        that one setting. Use the <strong>Plain text</strong> button to copy the whole
-        report.
+        The <strong>Plain text</strong> button gives you a copy built to be safe to hand
+        to somebody else. This web page is an ordinary signed-in admin screen, so a saved
+        copy of it carries the same hidden security details every admin page does &mdash;
+        harmless while it stays with you, but not something to email or paste into a
+        public forum. The plain text version has none of that.
+    </p>
+</div>
+
+<div class="alert alert-secondary">
+    <p class="mb-1"><strong>This is a chosen list of settings, not every setting.</strong></p>
+    <p class="mb-0 small">
+        Each setting below is also checked against the kind of value it ought to hold
+        &mdash; a number, a switch, a size &mdash; and withheld if it does not match.
+        That is deliberately strict: it means a password stored somewhere unexpected
+        cannot appear here, without anybody having to guess where somebody might hide
+        one. File locations are left out entirely, because on shared hosting a file path
+        gives away your account name.
     </p>
 </div>
 
@@ -464,7 +586,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <!-- 📦 Installed parts -->
 <div class="card mb-4">
     <div class="card-header">
-        <h2 class="h5 mb-0">Installed parts of PHP (<?php echo count($extensions); ?>)</h2>
+        <h2 class="h5 mb-0">Installed parts of PHP (<?php echo htmlspecialchars((string) count($extensions), ENT_QUOTES, 'UTF-8'); ?>)</h2>
     </div>
     <div class="card-body">
         <div class="portal-data-list">
@@ -482,7 +604,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <div class="card mb-4">
     <div class="card-header">
         <h2 class="h5 mb-0">
-            Settings<?php echo $settingsAvailable === true ? ' (' . count($settings) . ')' : ''; ?>
+            Settings<?php echo $settingsAvailable === true ? ' (' . htmlspecialchars((string) count($settings), ENT_QUOTES, 'UTF-8') . ')' : ''; ?>
         </h2>
     </div>
     <div class="card-body">
@@ -505,7 +627,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     <div class="col-12 col-md-4 fw-semibold"><code><?php echo htmlspecialchars((string) $name, ENT_QUOTES, 'UTF-8'); ?></code></div>
                     <?php if ($row['shown'] === false): ?>
                         <div class="col-12 col-md-8 text-muted small">
-                            <i class="fa-solid fa-eye-slash me-1"></i>Value not shown
+                            <i class="fa-solid fa-eye-slash me-1"></i>Value not shown &mdash; it is not the kind of value this setting should hold
                         </div>
                     <?php else: ?>
                         <div class="col-12 col-md-4">
@@ -535,14 +657,15 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
 $html = (string) ob_get_clean();
 
-// 🛑 Refuse rather than risk it. Nothing gathered above should be able to hold
-//    the reader's sign-in token, but "should not" is not "cannot", and this is
-//    the page most likely to be photographed or pasted somewhere.
+// 🛑 The last check, on exactly what would be sent.
 if (portalReportLeaksSessionToken($html) === true) {
     http_response_code(500);
-    exit('This report was not shown, because it turned out to contain your own '
-       . 'sign-in token. That should not be possible and is worth reporting.');
+    $reportApproved = true;
+    echo 'This report was not shown, because it turned out to contain your own '
+       . 'sign-in token. That should not be possible and is worth reporting.';
+    exit();
 }
 
+// ✅ Approve, then release. Nothing reaches the browser before this line.
+$reportApproved = true;
 echo $html;
-

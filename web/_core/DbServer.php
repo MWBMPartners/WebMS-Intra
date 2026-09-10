@@ -306,6 +306,23 @@ final class DbServer
             ];
         }
 
+        // 🚧 A preview or release-candidate build. MariaDB and MySQL both put
+        //    out builds like these before a release line is ready for real use,
+        //    and they carry the same version number as the stable one that
+        //    follows. Belonging to a supported release line therefore does NOT
+        //    mean a build is a finished one.
+        if (self::looksPreRelease($raw) === true) {
+            return $base + [
+                'state'    => 'warn',
+                'headline' => 'MariaDB ' . $version . ' — a preview build, not a finished release',
+                'detail'   => 'The version this server reports is marked as a preview or a '
+                            . 'release candidate. Those are published for testing before a '
+                            . 'release is ready, and are not meant to hold real data. Ask '
+                            . 'your hosting provider to move you to a finished release of '
+                            . 'the same line.' . $caveat,
+            ];
+        }
+
         $series = self::series($version);
 
         // ✅ A release line that is genuinely still maintained.
@@ -381,6 +398,18 @@ final class DbServer
             ];
         }
 
+        if (self::looksPreRelease($raw) === true) {
+            return $base + [
+                'state'    => 'warn',
+                'headline' => $engine . ' ' . $version . ' — a preview build, not a finished release',
+                'detail'   => 'The version this server reports is marked as a preview or a '
+                            . 'release candidate. Those are published for testing before a '
+                            . 'release is ready, and are not meant to hold real data. Ask '
+                            . 'your hosting provider to move you to a finished release of '
+                            . 'the same line.',
+            ];
+        }
+
         $series = self::series($version);
 
         // ✅ A release line that is genuinely still supported.
@@ -446,6 +475,24 @@ final class DbServer
                         . self::SUPPORTED_MYSQL . ' is a long-term release supported into 2032, '
                         . 'and is the one to ask for.',
         ];
+    }
+
+    /**
+     * 🧪 Does this version string say it is a preview build?
+     *
+     * Both MySQL and MariaDB publish preview, alpha, beta and release-candidate
+     * builds under the SAME version number as the finished release that follows.
+     * So checking the number alone cannot tell a tested release from a trial one,
+     * and a server running a trial build should not be told it is on something
+     * supported. The words below are the markers both projects actually use.
+     *
+     * @param string $raw The complete version string from the server.
+     *
+     * @return bool True if it is marked as a pre-release.
+     */
+    private static function looksPreRelease(string $raw): bool
+    {
+        return preg_match('/(?:^|[-_.\s])(alpha|beta|rc\d*|preview|snapshot|unstable)(?:[-_.\s]|$)/i', $raw) === 1;
     }
 
     /**
