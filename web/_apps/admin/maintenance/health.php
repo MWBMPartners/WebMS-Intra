@@ -90,15 +90,21 @@ try {
         $probe->free();
     }
 
-    $dbInfo  = \Portal\Core\DbServer::inspect($db);
-    $shownAs = trim($dbInfo['engine'] . ' ' . $dbInfo['version']);
+    $dbInfo = \Portal\Core\DbServer::inspect($db);
 
+    // 📣 Show DbServer's OWN wording rather than writing a shorter version here.
+    //    That matters more than it looks. DbServer answers 'ok' both for a
+    //    version it knows is supported AND for one newer than anything it has
+    //    been told about — and in the second case its wording deliberately says
+    //    it cannot vouch for the support position. Rewriting every 'ok' as "a
+    //    supported version" here threw that distinction away and put back the
+    //    false reassurance the whole class exists to remove.
     $probes['Database'] = [
         'state'  => $dbInfo['state'] === 'crit' ? 'warn' : 'ok',
         'label'  => 'Connected',
         'detail' => $dbInfo['state'] === 'ok'
-            ? $shownAs . ' — a supported version'
-            : $shownAs . ' — see Admin → Server Information',
+            ? (string) $dbInfo['headline']
+            : (string) $dbInfo['headline'] . ' — see Admin → Server Information',
     ];
 } catch (\Throwable $e) {
     $probes['Database'] = ['state' => 'crit', 'label' => 'Connection failed', 'detail' => $e->getMessage()];

@@ -251,30 +251,66 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     //    behaviour. Any other database error is deliberately left
                     //    to the outer catch, because "it is missing" and "the
                     //    server refused us" need different answers.
+                    //    TWO error numbers matter here, not one, and the second
+                    //    is the one that actually turns up on shared hosting:
+                    //
+                    //      1049  "Unknown database" — what an account with full
+                    //            rights sees when the database is not there.
+                    //
+                    //      1044  "Access denied for user ... to database ..." —
+                    //            what a NORMAL shared-hosting account sees, for
+                    //            the same situation. A restricted account is not
+                    //            allowed to know whether the database exists, so
+                    //            the server refuses rather than saying "missing".
+                    //            Tested against a deliberately limited account:
+                    //            this, not 1049, is what comes back.
+                    //
+                    //    Both mean the same thing to us — we cannot use that
+                    //    database — so both fall through to the attempt to create
+                    //    it, which then either works or produces its own clear
+                    //    message. Every other error is a genuinely different
+                    //    problem and is left to the outer catch.
                     $dbExists = false;
                     try {
                         $dbExists = $testConn->select_db($dbName);
                     } catch (\mysqli_sql_exception $e) {
-                        // MySQL error 1049 is "Unknown database". Anything else
-                        // is a real problem and belongs to the outer catch.
-                        if ($e->getCode() !== 1049) {
+                        if (in_array($e->getCode(), [1049, 1044], true) === false) {
                             throw $e;
                         }
                         $dbExists = false;
                     }
 
                     if ($dbExists === false) {
-                        // Try to create the database
-                        $createResult = $testConn->query(
-                            'CREATE DATABASE `' . $testConn->real_escape_string($dbName) . '` '
-                            . 'CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci'
-                        );
+                        // 🏗️ Try to create it.
+                        //
+                        //    Same trap as select_db() above: in strict mode a
+                        //    refusal THROWS rather than returning false, so the
+                        //    helpful "create it yourself in your hosting control
+                        //    panel" message below could never be reached. On
+                        //    shared hosting a refusal here is the NORMAL case —
+                        //    most accounts are not allowed to create databases —
+                        //    so this is the message people most need to see.
+                        $createResult = false;
+                        try {
+                            $createResult = $testConn->query(
+                                'CREATE DATABASE `' . $testConn->real_escape_string($dbName) . '` '
+                                . 'CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci'
+                            );
+                        } catch (\mysqli_sql_exception $e) {
+                            $createResult = false;
+                        }
                         if ($createResult === false) {
-                            $error = 'Database "' . $dbName
-                                   . '" does not exist and could not be created. '
-                                   . 'On shared hosting, you may need to create the database '
-                                   . 'manually via your hosting control panel (e.g. cPanel, DreamHost Panel) '
-                                   . 'before proceeding.';
+                            $error = 'The database "' . $dbName . '" could not be used. '
+                                   . 'Either it does not exist, or this database user is not '
+                                   . 'allowed to open it — the database server does not say '
+                                   . 'which, on purpose. This portal then tried to create it '
+                                   . 'and was not allowed to do that either. '
+                                   . 'On shared hosting that is completely normal: most '
+                                   . 'accounts cannot create databases. Please create the '
+                                   . 'database in your hosting control panel (for example the '
+                                   . 'DreamHost panel, or cPanel), give this user permission '
+                                   . 'to use it, then come back and try again. Also check the '
+                                   . 'database name above for a typo.';
                             $step = 2;
                         } else {
                             $testConn->select_db($dbName);
