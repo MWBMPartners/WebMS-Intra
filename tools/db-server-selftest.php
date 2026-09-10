@@ -137,6 +137,8 @@ $cases = [
     ['11.4.0-MariaDB', 'mariadb.org binary distribution', 'MariaDB', '11.4.0', 'warn'],
     ['11.4.1-MariaDB', 'mariadb.org binary distribution', 'MariaDB', '11.4.1', 'warn'],
     ['10.11.1-MariaDB', 'mariadb.org binary distribution', 'MariaDB', '10.11.1', 'warn'],
+    ['11.8.1-MariaDB', 'mariadb.org binary distribution', 'MariaDB', '11.8.1', 'warn'],
+    ['11.8.2-MariaDB', 'mariadb.org binary distribution', 'MariaDB', '11.8.2', 'ok'],
 
     // --- ...and the first finished build of that same line must pass.
     ['11.4.2-MariaDB', 'mariadb.org binary distribution', 'MariaDB', '11.4.2', 'ok'],

@@ -125,9 +125,14 @@ final class DbServer
     //    about, and only lines we positively know had pre-release builds carry
     //    a threshold.
     //    Source: https://mariadb.org/mariadb-11-4-2-and-mariadb-11-5-1-now-available/
+    //    ⚠️ KEEP THIS IN STEP WITH MARIADB_SUPPORTED_SERIES ABOVE. A line listed
+    //       as supported but missing from here is treated as though all its
+    //       builds were finished ones, which is how 11.8.1 — a release
+    //       candidate — was briefly being reported as a supported version.
     public const MARIADB_FIRST_STABLE = [
         '10.11' => '10.11.2',
         '11.4'  => '11.4.2',
+        '11.8'  => '11.8.2',
     ];
 
     // 🎯 The release line to recommend moving TO, named in the advice text.

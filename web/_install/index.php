@@ -182,6 +182,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($dbHost === '' || $dbUser === '' || $dbName === '') {
             $error = 'Database host, username, and database name are required.';
             $step = 2;
+        } elseif (strlen($dbName) > 64 || preg_match('/[\x00-\x1F\/\\\\.]/', $dbName) === 1) {
+            // 🚧 MySQL will not accept these anyway, and refusing them here means
+            //    a clear message instead of a puzzling database error. 64 is
+            //    MySQL's own limit on the length of a name; the control
+            //    characters, slashes and full stops are the ones it forbids
+            //    because they have a meaning in the files it stores databases in.
+            $error = 'That database name cannot be used. Database names can be up to 64 '
+                   . 'characters long and cannot contain a full stop, a slash, a backslash, '
+                   . 'or any invisible control characters. Check the name in your hosting '
+                   . 'control panel and enter it exactly as it appears there.';
+            $step = 2;
         } else {
             // Test connection without database first
             mysqli_report(MYSQLI_REPORT_STRICT | MYSQLI_REPORT_ERROR);
@@ -304,8 +315,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         //                         rather than answered)
                         $createResult = false;
                         try {
+                            // 🔐 A database NAME is an identifier, not a piece of
+                            //    text, and the two are escaped differently.
+                            //
+                            //    This used to call real_escape_string(), which is
+                            //    the tool for text inside quotes. It escapes
+                            //    quotes and backslashes and leaves the backtick
+                            //    alone — and the backtick is exactly the
+                            //    character that ends an identifier. A name
+                            //    containing one therefore broke straight out of
+                            //    the surrounding backticks, so a name like
+                            //    evil`;DROP DATABASE something;-- would have run
+                            //    as its own statement.
+                            //
+                            //    MySQL's own rule for identifiers is to double
+                            //    any backtick inside them, which is what this
+                            //    does. A legitimate name containing a backtick
+                            //    now also works, where before it simply failed.
+                            //    See: https://dev.mysql.com/doc/refman/8.0/en/identifiers.html
+                            $quotedName = '`' . str_replace('`', '``', $dbName) . '`';
+
                             $createResult = $testConn->query(
-                                'CREATE DATABASE `' . $testConn->real_escape_string($dbName) . '` '
+                                'CREATE DATABASE ' . $quotedName . ' '
                                 . 'CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci'
                             );
                         } catch (\mysqli_sql_exception $e) {
