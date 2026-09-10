@@ -102,6 +102,21 @@ final class DbServer
     // 📅 The newest MySQL release line this file knows anything about. A version
     //    above this is too new for the list to judge, so it is reported as fine
     //    with an honest note rather than wrongly warned about.
+    //
+    //    ⏳ THESE LISTS GO OUT OF DATE. Last checked: 10 September 2026.
+    //
+    //    That is not a defect so much as a fact about version tables, and the
+    //    design already allows for it: a version newer than anything listed here
+    //    is reported as fine, with wording that says plainly we cannot vouch for
+    //    its support position and that the hosting provider is the one to ask.
+    //    So going stale makes this LESS informative, never wrong.
+    //
+    //    A review reported that Oracle has since moved MySQL to a year-based
+    //    numbering scheme and shipped a 26.x line. That has NOT been confirmed
+    //    here, so it is deliberately not written into these lists: putting an
+    //    unverified version number in would risk telling somebody their database
+    //    is supported when it is not, which is the exact fault this class exists
+    //    to prevent. It is recorded on issue #475 for the owner to confirm.
     public const MYSQL_NEWEST_KNOWN = '9.7';
 
     // ✅ The same list for MariaDB. 10.11 runs to February 2028, 11.4 to May

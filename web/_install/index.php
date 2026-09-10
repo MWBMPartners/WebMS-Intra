@@ -182,8 +182,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($dbHost === '' || $dbUser === '' || $dbName === '') {
             $error = 'Database host, username, and database name are required.';
             $step = 2;
-        } elseif (mb_check_encoding($dbName, 'UTF-8') === false
-            || mb_strlen($dbName, 'UTF-8') > 64
+        } elseif (preg_match('//u', $dbName) !== 1
+            || preg_match_all('/./us', $dbName) > 64
             || preg_match('/[\x00-\x1F\/\\\\.]/', $dbName) === 1
         ) {
             // 🚧 MySQL will not accept these anyway, and refusing them here means
@@ -199,6 +199,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             //    with. Ordinary names are unaffected either way; this only
             //    matters for names outside plain English, which is exactly the
             //    kind of thing that gets missed.
+            //
+            //    ⚠️ COUNTED WITHOUT mbstring, ON PURPOSE. The obvious way to do
+            //    this is mb_strlen() and mb_check_encoding(). Both live in an
+            //    OPTIONAL part of PHP, and this wizard has to work on a server
+            //    that does not have it — that is one of the things it exists to
+            //    tell you about. Calling a function that is not there raises an
+            //    error the handler below cannot catch, so the wizard would die
+            //    with a blank page on exactly the server whose owner most needs
+            //    to be told what is wrong.
+            //
+            //    The first screen does check for mbstring, but that is a screen,
+            //    not a gate: this handler runs whether or not anybody looked at
+            //    it. So the check below uses pattern matching instead, which is
+            //    always built into PHP. The `u` at the end of a pattern means
+            //    "treat this as UTF-8", and a pattern with it fails outright on
+            //    text that is not valid UTF-8 — which gives us both answers we
+            //    need, with nothing optional involved. Checked against the
+            //    mbstring versions: they agree on every case.
             $error = 'That database name cannot be used. Database names can be up to 64 '
                    . 'characters long and cannot contain a full stop, a slash, a backslash, '
                    . 'or any invisible control characters. Check the name in your hosting '
