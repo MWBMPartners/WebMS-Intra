@@ -1080,10 +1080,16 @@ because **MySQL never treats one empty value as equal to another** — not even
 to itself. Two rows both saying `('site.name', empty)` were not duplicates as
 far as that rule was concerned.
 
-Every save in this codebase uses "insert this, or update it if it is already
-there". For a portal-wide setting the "already there" half never fired. Every
-save added another row. A fresh install started with **479 surplus rows**, and
-every settings save and app toggle added more.
+Most saves in this codebase use "insert this, or update it if it is already
+there". For a portal-wide setting the "already there" half never fired, so those
+saves added another row instead of changing one — the settings-group screen and
+the app on/off switch both behaved that way. (The separate dot-notation settings
+editor was unaffected: it looks the row up by its identity number and updates
+it.)
+
+Counted from the seed files, a fresh install would begin with about **479
+surplus rows**, and each affected save added more. That figure comes from
+counting the seeds, not from measuring a real database.
 
 Migration 187 fixed it by adding a derived column `siteScope` (the site number,
 or `-1` for portal-wide) and putting the uniqueness rule on
@@ -1126,9 +1132,15 @@ table whose **name** is the message, which fails loudly and readably.
 
 ### What the fix deliberately did not do
 
-It changes no value an administrator might have chosen. Two settings were left
-exactly as they are, because a leftover seed and a deliberate choice are
-indistinguishable:
+It does not set out to change any value an administrator chose — but that is a
+preference, not a guarantee. The clean-up keeps ONE copy of each portal-wide
+setting and deletes the rest, choosing by judgement (does the value differ from
+its own recorded default). Where several copies held different chosen values,
+only one survives.
+
+What it deliberately does NOT do is impose a NEW value on an existing site.
+Two settings are never written to at all, because a leftover seed and a
+deliberate choice cannot be told apart:
 
 - **The minimum password length.** Existing sites may still require 8 while the
   project believes 12. `/help/admin` now warns about this and tells the
@@ -1205,14 +1217,40 @@ the web-based Migrator (admin-only) and tracked in `tblMigrations`.
 
 ## Portable DDL convention (MySQL 8.0 ∩ MariaDB)
 
-**Supported engines:** MySQL 8.0+ (production target, DreamHost) and MariaDB 10.4+
-(compatible). MySQL-wire-compatible managed/cloud databases — AWS RDS MySQL 8,
-Aurora MySQL 3.x, Azure Database for MySQL (Flexible Server 8.0), GCP Cloud SQL for
-MySQL — are covered for free by MySQL-8 compatibility, since they accept the same
-DDL and reject the same MariaDB-only extensions. PostgreSQL, SQL Server, and
-Vitess-based platforms (PlanetScale/TiDB/SingleStore — limited FOREIGN KEY support)
-are explicitly **not supported**; the entire data layer is mysqli (no PDO
-abstraction), so supporting them would be a platform port, not a SQL tweak.
+**Supported engines — read the qualification, it matters.** This convention was
+written for the overlap between MySQL 8.0 and MariaDB 10.4. Both of those are
+now past their support dates: MySQL 8.0's extended support ended in April 2026,
+MariaDB 10.4's maintenance ended in June 2024.
+
+**Keep following the convention.** It avoids the syntax the two engines
+genuinely disagree on, so it is the sensible thing to write while the target is
+unsettled. But be clear about what it is and is not:
+
+- It is a **coding rule**, not evidence. Following it does not show that any
+  particular migration works on MariaDB, or on a newer MySQL.
+- **No MariaDB version is covered by any automated test in this repository**, so
+  MariaDB compatibility is unverified.
+- Neither MySQL 8.0 nor MariaDB 10.4 is a supported version to be targeting.
+
+Choosing and testing the versions we actually support is issue **#475**. Until
+that lands, this convention is the safest thing to write — not a guarantee that
+what you write will run everywhere.
+
+Historic wording, kept so the original intent is readable. **Treat the
+compatibility statements in it as claims that nothing here backs up, not as
+current guidance:** MySQL 8.0+ (the production target at the time) and MariaDB 10.4+
+(described at the time as compatible). MySQL-wire-compatible managed/cloud
+databases — AWS RDS MySQL 8, Aurora MySQL 3.x, Azure Database for MySQL
+(Flexible Server 8.0), GCP Cloud SQL for MySQL — were assumed to follow from
+MySQL-8 compatibility on the reasoning that they accept the same DDL and reject
+the same MariaDB-only extensions. **None of those platforms is covered by an
+automated test in this repository either.** PostgreSQL, SQL Server, and
+and MySQL-protocol-compatible platforms that are not MySQL — PlanetScale (built
+on Vitess), TiDB and SingleStore — are explicitly **not supported**. They are
+grouped here for a practical reason rather than a shared architecture: each
+differs from MySQL in ways that would need assessing one at a time, foreign-key
+handling among them. Supporting any of them would mean testing against it, not
+just adjusting some SQL.
 
 **Rule: never use `IF [NOT] EXISTS` on `ADD`/`DROP COLUMN`, `ADD`/`CREATE`/`DROP
 INDEX`/`KEY`, or `CHANGE`/`MODIFY COLUMN`.** That clause is a MariaDB-only DDL

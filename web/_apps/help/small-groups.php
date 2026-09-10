@@ -63,7 +63,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <p class="text-muted small mb-0">
         <strong>Adults only in this version.</strong> Small Groups records portal user memberships — it does not hold
         named child rows. Children's classes can still exist here as groups (with visitor/headcount-only rolls), but
-        a child's own identity, allergies, and safeguarding information live exclusively in the <a href="/kids">Kids</a>
+        a child's own identity, allergies, and safeguarding information live exclusively in the <a href="/kids/checkin">Kids</a>
         app, which has its own safeguarding model.
     </p>
 </section>

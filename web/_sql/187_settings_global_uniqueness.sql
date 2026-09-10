@@ -33,8 +33,9 @@
 --     adds a row.
 --   * The installer. It loads full_schema.sql and then replays all 186
 --     numbered migrations on top. 469 of the 565 portal-wide settings are
---     seeded in both places, so a brand-new install starts life with 479
---     surplus rows.
+--     seeded in both places, so a brand-new install would begin with about
+--     479 surplus rows. (That figure is counted from the seed files, not
+--     measured on a real database.)
 --
 -- WHY IT HAS NOT BEEN OBVIOUS
 -- ---------------------------
@@ -69,9 +70,18 @@
 --
 -- WHAT THIS MIGRATION DOES
 -- ------------------------
---   A. Removes the surplus copies, keeping the newest of each — which is the
---      copy that is in effect today, so nothing changes for anyone.
---   B. Puts those three settings onto their intended values.
+--   A. Removes the surplus copies, keeping ONE of each. Which one is chosen
+--      carefully — see section B below. It is NOT simply "the newest": that
+--      would have deleted settings an administrator had actually saved.
+--   B. Stops storing the portal version as a setting, so version.php is once
+--      again the only place the version comes from.
+--
+--      The other two settings named above — the minimum password length and
+--      the expenses delete endpoint — are deliberately NOT changed on an
+--      existing database. A leftover seed and a deliberate choice cannot be
+--      told apart from the data, and quietly overriding somebody's real
+--      decision would be worse than leaving a stale one. Both are corrected
+--      at the seed instead, so a NEW install lands on the right value.
 --   C. Adds a small derived column, `siteScope`, that is the site number for
 --      a per-site setting and -1 for a portal-wide one, and puts the "no two
 --      rows may be the same" rule on (settingKey, siteScope) instead. -1 can

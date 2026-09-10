@@ -12,7 +12,7 @@ A modular internal portal platform for organisations, providing centralised acce
 
 | Layer              | Choice                                                                           | Rationale                                        |
 | ------------------ | -------------------------------------------------------------------------------- | ------------------------------------------------ |
-| **Backend**        | PHP 8.5 (strict types, backward-compatible with 8.4), MySQL 8.0 (MariaDB 10.4+ compatible) | Ubiquitous LAMP stack; DreamHost-friendly        |
+| **Backend**        | PHP 8.5 (strict types, backward-compatible with 8.4), MySQL — see **Supported versions** below | Ubiquitous LAMP stack; DreamHost-friendly        |
 | **Routing**        | Front-controller + DB-backed router (tblRoutes)                                  | Clean URLs, app isolation, easy overrides        |
 | **Auth**           | Local accounts, MS365 OAuth, Google OAuth, WebAuthn/PassKeys, account linking    | Multi-provider SSO, passwordless support         |
 | **Multi-Site**     | Umbrella multi-site with subdomain, path-prefix, and session detection modes     | One install serves multiple locations/divisions  |
@@ -129,8 +129,45 @@ Browser -> .htaccess -> index.php -> bootstrap.php -> Router::dispatch()
 
 ### Prerequisites
 
+### Supported versions
+
+> ⚠️ **MySQL 8.0 reached the end of its extended support in April 2026** and
+> receives no further fixes. Moving off it is tracked as
+> [#475](https://github.com/MWBMPartners/WebMS-Intra/issues/475). **The table
+> below describes what is true today, not what we would recommend.**
+
+**What the code does today, stated precisely:**
+
+| | What actually happens | What is covered by automated tests |
+| --- | --- | --- |
+| PHP | The installer's first screen checks for 8.4 or newer and hides "Continue" if it fails. **This can be bypassed** by going straight to a later step of the installer, so treat it as a warning rather than a barrier. | 8.4 only |
+| Database version | The version is **read and displayed** — on the admin dashboard, on the health page, and in every backup file. **Nothing acts on it.** There is no minimum, and no compatibility check. | MySQL 8.0.36 only |
+| MariaDB | — | **Not covered.** No MariaDB appears in any workflow or test configuration in this repository. |
+
+On that last row, be careful what you conclude. Every database change here is
+written to a convention meant to work on both MySQL and MariaDB
+(`DEV_NOTES.md` → "Portable DDL convention"), and that rule is followed
+carefully. But **MariaDB is not covered by any automated test in this
+repository**, so its compatibility is unverified. That is not the same as "it
+does not work" — it means nothing here can currently show that it does.
+
+**Where we are heading** — issue #475. Support dates below are quoted with the
+category they belong to, because "supported until" means different things for
+each product:
+
+| | Target | Fallback |
+| --- | --- | --- |
+| MySQL | **9.7 LTS** — premier support now, extended to April 2034 | **8.4 LTS** — premier to April 2029, extended to April 2032 |
+| MariaDB | **12.3 LTS** — community maintenance to 12 June 2029 | **11.4 LTS** — community maintenance to 29 May 2029 |
+| PHP | **8.5** — active to 31 Dec 2027, security to 31 Dec 2029 | **8.4** — active to **31 Dec 2026**, security to 31 Dec 2028 |
+
+Two notes. MySQL **9.7 is a long-term release** despite the 9.x numbering, not
+one of the short-lived quarterly ones. And **PHP 8.4 stops receiving anything
+but security fixes at the end of December 2026**, so treat it as contingency
+rather than a destination.
+
 - PHP 8.4+ with extensions: `mysqli`, `openssl`, `sodium`, `curl`, `mbstring`
-- MySQL 8.0+ (MariaDB 10.4+ compatible)
+- A MySQL or MariaDB database — see **Supported versions** below
 - Apache with `mod_rewrite`
 
 ### Fresh Installation

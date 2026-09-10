@@ -741,7 +741,8 @@ another repo, ever**.
 
 ### 🧱 Stack baseline
 
-- PHP 8.5 (BC with 8.4), MySQL 8.0+, Apache + mod_rewrite, DreamHost shared.
+- PHP 8.5 (backward compatible with 8.4), MySQL 8 on DreamHost shared hosting
+  (which MySQL 8 is unconfirmed — see #475), Apache + mod_rewrite.
 - Bootstrap 5.3.3, Font Awesome 6.5.1.
 - dompdf 3.1.5 (fetched at deploy time by `tools/download-dompdf.sh`).
 - Microsoft Graph for email + OAuth (SendAs from a shared mailbox).
@@ -828,7 +829,8 @@ setting seeds.
 | Item | Issue | Migration | Status |
 |---|---|---|---|
 | Transcription (Whisper / AssemblyAI / local; FULLTEXT search; click-to-timestamp) | #276 | 098 | ✅ |
-| Translation (Anthropic / OpenAI / Google / DeepL / LibreTranslate; content-addressable cache) | #278 | 099 | ✅ |
+| Translation (Anthropic / OpenAI / Google / DeepL / LibreTranslate; content-addressable cache) | #278 | 099 | ⚠️ **NOT WORKING — see #485** |
+| ↳ The engine, the admin configuration page and the member opt-in all exist. But automatic translation of **user-written content** has no reachable way in — the only caller sits at an address the router cannot resolve. Interface translation (`I18n` / `t()`) is a separate system and works normally. Verified 10 September 2026. | #485 | — | 🔴 |
 | AI Assist (Anthropic / OpenAI / ollama; editable prompt templates; cap + daily limit + audit) | #277 | 100 | ✅ |
 | GDPR Article 17 erasure engine (19-table catalogue, sealed audit chain, 1-month SLA queue) | #235 | 101 | ✅ |
 | Photos (4-tier visibility, moderation queue, EXIF-aware GD re-encode for non-privileged downloads) | #236 | 102 | ✅ |

@@ -2,7 +2,24 @@
 
 ## Project
 
-Internal portal platform (PHP 8.5, backward-compatible with 8.4, MySQL 8.0, Bootstrap 5.3.3) hosted on DreamHost shared hosting. No CLI, no Composer.
+Internal portal platform (PHP 8.5, backward-compatible with 8.4, Bootstrap 5.3.3) hosted on DreamHost shared hosting. No CLI, no Composer.
+
+> ⚠️ **Database versions are in flux — read this before writing any SQL.**
+> **MySQL 8.0 reached the end of its extended support in April 2026.**
+> Everything here still assumes it, and the automated database test only covers
+> `mysql:8.0.36`.
+>
+> Two things to be precise about, because loose wording has already caused
+> confusion. First, **no database version or compatibility check is enforced** —
+> but the version *is* read and shown (admin dashboard, health page, backup
+> files), so do not build version discovery that already exists. Second,
+> **MariaDB is not covered by any automated test here**, so its compatibility is
+> unverified — which is not the same as saying it does not work.
+>
+> Moving to MySQL 9.7 / MariaDB 12.3 (with 8.4 / 11.4 as fallbacks) is tracked
+> as **#475**. Until that lands, keep writing SQL to the MySQL 8.0 ∩ MariaDB
+> convention below. It remains the sensible choice while the target is unsettled
+> — but following a convention is not the same as proving compatibility.
 
 - **Version:** 1.4.0 (on `main`; bump in `web/_core/version.php` — single source of truth)
 - **Brand layer:** runtime product brand picked at install (#296, PR #297). Presets: `WebMS Intra` (generic, default), `ChurchMS` (church), `SchoolMS`/`CharityMS`/`CommunityMS`/`BusinessMS` (functional starter SVG kits shipped #306 — logo.svg wordmark is system-font pending a designer pass, icons are full-quality). See `web/_core/brand-defaults.php` + `Site::productName()`. PWA manifest is a brand-aware PHP controller (`manifest.php`, now with brand-aware `shortcuts[]`, #141); the OpenAPI spec is likewise served brand-aware via `public_html/openapi.php` + `_core/api-spec.json` (#307).
@@ -117,7 +134,7 @@ infrastructure rather than apps).
 | sms | `/admin/sms` | SMS notifications for critical alerts via Twilio / MessageBird / AWS SNS |
 | tasks | `/tasks` | Reminders / task list |
 | transcription | `/admin/transcription` | Auto-transcribe Recordings via Whisper / AssemblyAI / local whisper.cpp; full-text search |
-| translation | `/admin/translation` | Auto-translate user content via Anthropic / OpenAI / Google / DeepL / LibreTranslate, cached after first translate |
+| translation | `/admin/translation` | ⚠️ **NOT REACHABLE (#485).** The engine, the admin configuration page (provider, API keys, monthly spend cap) and the member opt-in at `/account/translation` all exist. But nothing a user can reach ever calls it: the only caller of `Translation::translate()` is `_apps/api/translate.php`, at an address ApiRouter cannot resolve. **Separate from interface translation** (`I18n` / `t()`), which works normally. Do not describe content translation as working. |
 | venues | `/venues` | Tenant-side venue-hire register — schedule of agreed bookings of a rented building, configurable statuses/usage types, recurring generator, XLSX import, calendar overlay + "is it booked?" warnings, hire agreements + renewal reminders, payable invoice/payment ledger (#429); persisted per-event venue/room links + room-aware coverage verdicts (#436) |
 | visitors | `/visitors` | First-time visitor capture with follow-up cadence + kanban workflow |
 | worship | `/worship/*` | Live presentation layer for Service Plans — operator console, public projector display, song library + CCLI usage log (#308) |
@@ -255,7 +272,7 @@ unintended consequence. That is what the second reviewer is for.
 
 ## SQL dialect trap (apply on every migration)
 
-- **Production is MySQL 8.0.** MariaDB-only `IF [NOT] EXISTS` on `ADD`/`DROP COLUMN`, `ADD`/`CREATE`/`DROP INDEX`/`KEY`, or `CHANGE`/`MODIFY COLUMN` is rejected with **ERROR 1064** on MySQL 8 — `CREATE TABLE IF NOT EXISTS` / `DROP TABLE IF EXISTS` are standard MySQL and stay fine.
+- **Production runs MySQL 8** (DreamHost shared hosting offers no other engine and no version choice). **Which** MySQL 8 is not confirmed — 8.0's support ended April 2026, 8.4 LTS runs to 2029; see #475. Either way it is MySQL, so MariaDB-only `IF [NOT] EXISTS` on `ADD`/`DROP COLUMN`, `ADD`/`CREATE`/`DROP INDEX`/`KEY`, or `CHANGE`/`MODIFY COLUMN` is rejected with **ERROR 1064** — `CREATE TABLE IF NOT EXISTS` / `DROP TABLE IF EXISTS` are standard MySQL and stay fine.
 - **Use the `information_schema` + `PREPARE`/`EXECUTE` guard idiom** instead (see DEV_NOTES.md → "Portable DDL convention (MySQL 8.0 ∩ MariaDB)" for the full templates). House examples already shipped this way: migrations **037**, **112**, **138**.
 - **Migrations must replay as no-ops** on an up-to-date schema — the installer replays every numbered migration after `full_schema.sql`, ignoring `tblMigrations`.
 - **CI**: `tools/audit-checks/check_mariadb_only_ddl.py` + the `e2e-migrations` harness enforce this.

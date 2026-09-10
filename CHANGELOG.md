@@ -2,6 +2,93 @@
 
 
 ## [Unreleased] (alpha)
+- fix(settings): saving a portal-wide setting now changes it instead of
+  adding another copy. The table's uniqueness rule covered (setting name,
+  site), and a portal-wide setting stores no site — and MySQL never treats
+  one empty value as equal to another. So "insert, or update if it already
+  exists" never updated; it always inserted — so the settings-group screen
+  and the app on/off switch added a row each time instead of changing one.
+  (The separate dot-notation settings editor was unaffected: it looks the row
+  up and updates it.) Counted from the seed files, a fresh install would begin
+  with about 479 surplus rows. Two consequences had
+  been live for months: an installation could still be enforcing an
+  8-character minimum password while the code's own fallback, `/help/admin`
+  and migration 041 all said 12; and
+  a fresh install reported itself as version 0.1.0, because a stale setting
+  overrode `version.php`. Fixed by a derived column (`siteScope` — the site
+  number, or -1 for portal-wide) with the uniqueness rule moved onto it. It
+  is VIRTUAL, not STORED, because MySQL refuses a cascading foreign key on
+  the base column of a STORED derived column. Choosing which duplicate to
+  keep could not be "the newest": several screens find their row with an
+  unordered `SELECT … LIMIT 1` and update that one, in practice the oldest,
+  so keeping the newest would have deleted saved payment credentials. The
+  rule prefers the row that looks edited (its value differs from its own
+  recorded default), then the most recently written, then the newest. That is
+  a judgement, not proof: where several copies hold different chosen values,
+  only one survives. What the migration deliberately does NOT do is impose a
+  new password minimum or a new expenses setting on an existing site.
+  Migration 187, issue #466.
+- fix(routing): three finished features had no way in. The notification
+  preferences page could not be opened — migration 093 gave its address to
+  a newsletter-only page — which meant browser push opt-in was reachable
+  only from the livestream page, so members could not subscribe to service
+  reminders at all. The livestream channels and schedule page lost its
+  address to migration 133, taking with it the only button that tells
+  subscribers "we are live now". Six help guides existed with working
+  addresses and no link from anywhere. Migration 186, issue #467.
+- fix(ui): six menu and dashboard links led to "page not found" on a fresh
+  install (`/expenses`, `/kids`, `/reports`, `/salvation`, `/worship`,
+  `/webhooks`). New `Router::routeExists()` means those generated links are
+  left out when a successful lookup finds no registered address, and a new optional `landing` field
+  on an app's registry entry says where to link when the app's own prefix is
+  not a page. The check covers those menu and dashboard links only; it looks
+  at registered addresses rather than at files on disk, and answers "yes" if
+  it cannot reach the database, so a menu is never emptied by a database
+  hiccup. Separately, an app switched on at `/admin/apps` never appeared in
+  the menu, because that screen writes `1` and the menu insisted on `true`.
+  Issue #468.
+- fix(admin): "Run all pending migrations" would have loaded demo data into
+  a live site. The list accepted any `.sql` file, so `demo_data.sql` and
+  `full_schema.sql` always showed as pending on a perfectly healthy portal.
+  Issue #469.
+- fix(core): every migration from 180 onwards reported failure after
+  succeeding. Each records itself, then `Migrator::runOne()` tried to record
+  it again against a unique key and threw. Also, a migration that stops
+  deliberately now returns its explanation instead of a blank error page.
+- feat(api-docs): Swagger UI is now committed inside the portal, so
+  `/api-docs` works with no internet access — several customer networks
+  block public content delivery networks, and the page was a blank white
+  screen on those. Each committed file was verified to hash to the
+  integrity value already recorded. New setting
+  `api.docs.local_assets_only` skips the network entirely. "Try it out"
+  could never save anything, because the page bypasses the template that
+  publishes the anti-forgery token; it now publishes its own, and the
+  replacement token is returned as `meta.csrfToken` so a second save works.
+  The page no longer sends the address of the install to an outside
+  service. Migration 185, issue #470.
+- ci: all eleven checks in `tools/audit-checks/` now run on every pull
+  request — four of them were called by no workflow at all. The end-to-end
+  database test no longer breaks on a folder name containing a space, which
+  had made it unusable on a developer's own machine. Issue #471.
+- docs: counts corrected across `.claude/CLAUDE.md`, `README.md`,
+  `FEATURES.md` and the schema header, with the commands to re-derive them
+  so they can be checked rather than trusted. New `DEV_NOTES.md` sections on
+  installing PHP locally (macOS, Windows, Linux, Raspberry Pi), the
+  settings-table trap, and refreshing the self-hosted Swagger UI files.
+  `README.md` gains an honest "Supported versions" section recording that
+  **MySQL 8.0 reached the end of its extended support in April 2026**, that
+  no minimum database version is enforced (the version is read and shown in
+  three places, but nothing acts on it), and that MariaDB is not covered by
+  any automated test here, so its compatibility is unverified. Issue #475
+  tracks moving to supported versions.
+- docs: automatic translation of **user-written content** is recorded as
+  unreachable in `FEATURES.md` and `.claude/CLAUDE.md`. The engine, the
+  admin configuration page (provider, API keys, monthly spend cap) and the
+  member opt-in all exist, but nothing a user can reach ever calls it: the
+  only caller of `Translation::translate()` sits at an address the router
+  cannot resolve. This is separate from translation of the portal's own
+  screens (`I18n` / the `t()` helper), which works normally. Issue #485.
+
 - ci: stop the advisory CodeQL ("Analyse JavaScript") and Psalm ("PHP
   Static Analysis") jobs showing a false red X on every PR. Both jobs
   complete their analysis fine but then fail at the SARIF-upload step

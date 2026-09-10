@@ -3,7 +3,9 @@
 Exercises `web/_sql/` against a real MySQL 8.0.36 container the same way the
 real installer does: `full_schema.sql` first, then every numbered migration
 replayed on top of it, ignoring `tblMigrations` (`web/_install/index.php:360-466`)
-— production is confirmed MySQL 8, and the harness image was always correct;
+— production runs MySQL 8, so the harness image is the right family; note the
+harness pins 8.0.36 specifically, and which MySQL 8 production runs is not
+confirmed (see #475);
 the harness previously applied migrations in the wrong order relative to the
 installer's actual flow. See the SQL portability fix spec for the full
 rationale.

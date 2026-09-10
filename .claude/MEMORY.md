@@ -31,9 +31,14 @@ codebase ships under different names.
   no Docker, no build step. Anything proposed has to work as plain PHP files
   copied onto the server.
 - **PHP 8.5**, staying backward compatible with 8.4.
-- **MySQL 8.0 in production.** MariaDB-only SQL syntax — `IF NOT EXISTS` on
-  `ADD COLUMN`, `ADD INDEX`, `MODIFY COLUMN` and friends — is a hard error
-  there. (`CREATE TABLE IF NOT EXISTS` and `DROP TABLE IF EXISTS` are fine.)
+- **MySQL 8 in production** — DreamHost shared hosting runs MySQL 8, offers no
+  MariaDB, and does not let a customer choose the version. **Which** MySQL 8 has
+  not been confirmed, and it matters: 8.0's support ended April 2026, while
+  8.4 LTS runs to 2029. The portal shows the version on the admin dashboard.
+  Issue #475. Write SQL to the MySQL 8 ∩ MariaDB intersection meanwhile:
+  MariaDB-only syntax — `IF NOT EXISTS` on `ADD COLUMN`, `ADD INDEX`,
+  `MODIFY COLUMN` and friends — is a hard error on MySQL. (`CREATE TABLE IF NOT
+  EXISTS` and `DROP TABLE IF EXISTS` are fine.)
 - **Anything fetched from the public internet at page-load time needs a local
   copy to fall back on**, because some customer networks block public content
   delivery networks outright.

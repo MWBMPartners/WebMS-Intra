@@ -9,72 +9,111 @@ proceeds, so the session can be picked up at any point).
 
 ## Read this first — where we are right now
 
-**Updated 10 September 2026, after the merge.**
+**Updated 10 September 2026.** Working branch `claude/alpha-wip`, cut from the
+updated `alpha`. **Nothing is open against `alpha`** — pull request #473 merged
+and deployed earlier today.
 
-**Pull request #473 is MERGED into `alpha`** (squashed as `b2c42b4`), the deploy
-to the alpha site ran, and the local clone is realigned. The previous working
-branch was deleted on GitHub and locally. This branch, `claude/alpha-wip`, is a
-fresh one cut from the updated `alpha`, ready for whatever comes next. **Nothing
-is open against `alpha`.**
+### This session, part two: the work queue
 
-### Everything asked for in this session is done
+Fifteen items were agreed and added to the queue. **Every one now has a GitHub
+issue.** The index is `.claude/plans/work-queue.md`; the issues carry the detail.
 
-| Task | State |
+| Item | Issue |
 | --- | --- |
-| Audit and delete the six stale branches | ✅ `.claude/plans/branch-audit-2026-09-07.md` |
-| Single work-in-progress branch, local clone realigned | ✅ |
-| Self-host Swagger UI + fix `/api-docs` | ✅ migration 185, closed #470 |
-| Install PHP locally + write the setup guide | ✅ PHP 8.5.10 |
-| Reach three features that had no way in | ✅ migration 186, closed #467 |
-| Dead menu links, demo-data hazard, unwired checks | ✅ closed #468 #469 #471 |
-| Settings duplicated instead of saving | ✅ migration 187, closed #466 |
-| Codex review as a standing rule | ✅ memory + `.claude/CLAUDE.md` |
-| GitHub issue sweep | ✅ 8 opened (#466–#472, #474), 6 closed, 6 updated |
-| Documentation update | ✅ counts, README, FEATURES, DEV_NOTES, `/help/admin` |
-| Ranked list of proposed next work | ✅ `.claude/plans/proposed-next-work-2026-09-10.md` |
-| Pull request into `alpha`, all checks green, merged | ✅ #473 |
-| Deploy to alpha | ✅ started automatically after the merge |
+| Drop end-of-life MySQL 8.0; target MySQL 9.7 / MariaDB 12.3 / PHP 8.5 | **#475** ⛔ blocked |
+| Repair version + changelog automation on `alpha` | **#476** |
+| "Check my portal" page for administrators | **#477** |
+| Make switching an app off actually switch it off | **#478** |
+| Prove the "delete my data" list is complete | **#479** |
+| Decide the minimum password length | **#480** ⛔ needs a decision |
+| Stop three migrations switching apps back on | **#481** |
+| Document the other 29 data endpoints | **#482** |
+| Finish the mobile pass on a real phone | #225 (existing) |
+| Small clean-ups worth doing together | **#483** |
+| Warn when a deploy is about to remove files | #107 (existing) |
+| Keep a history of settings changes | **#484** |
+| In-app messaging | #304 (existing) |
+| Update the self-hosted Swagger UI | **#486** |
+| Re-verify the database structure before the first customer | **#487** |
+| *(added)* Translation is a shell | **#485** |
 
-### Two decisions waiting on the owner
+### ⛔ Two things are blocked on the owner
 
-1. **The minimum password length.** Existing sites may still require 8
-   characters while the project believes 12. Migration 187 deliberately does not
-   change it: a leftover seed and a deliberate choice cannot be told apart. New
-   installs are correct, and `/help/admin` now warns administrators to check
-   their own value. Raise existing sites automatically, or leave it to them?
-2. **What to work on next** — twelve ranked proposals in
-   `.claude/plans/proposed-next-work-2026-09-10.md`. The one worth pressing for
-   is **a "check my portal" page for administrators**, because almost every
-   problem found in this audit was invisible from inside the product.
+**1. Which MySQL 8 the live site is running** — this decides most of #475.
 
-### Two things found late that are worth knowing
+DreamHost's published documentation says shared hosting runs **MySQL version 8**,
+offers no MariaDB, and does **not** let a customer choose the version — a newer
+one needs a Dedicated or DreamCompute plan. (An earlier draft of this note
+guessed MariaDB. That was wrong, and it was corrected after a review.)
 
-- **#474 — no check has to pass before merging to `alpha`.** The only rules on
-  it are "cannot delete" and "cannot force-push". Automatic merging therefore
-  does not wait for anything; it has been merging on open for months. `main`
-  requires exactly one check, and it is **not** the PHP syntax gate the
-  project's own documentation calls "the only hard gate".
-- **#472 — 71 of the 209 tables have never been restorable from a backup.**
-  MySQL refuses the method used to empty a table when other tables point at it.
-  Nobody had noticed, which suggests restore has rarely been used in earnest —
-  worth knowing, because it is the safety net the upgrade process relies on.
+So "target MySQL 9.7" cannot mean what customers on shared hosting will run. It
+can only mean what the code supports. Still worth having, but forward planning
+rather than a fix.
 
-### Still true and still unfixed: the version number on `alpha`
+**The question that matters is which MySQL 8.** On **8.4 LTS**, support runs to
+2029 and there is no urgent problem. On **8.0**, the product is on a database
+that stopped receiving security fixes in April 2026 — an owner decision: stay
+put, move hosting tier, or support other hosts.
 
-`Version Bump` and `Changelog` have not run on `alpha` since 7 July 2026. The
-merge just made will not have changed that. `alpha` still reports **1.4.0**
-while `beta` and `main` report 1.4.1. This is proposal number 1 and is about an
-hour's work — the cause is understood and the fix follows a pattern already
-proven in the same file.
+**Quick to check:** the portal already reads and shows the database version on
+the admin dashboard. Look at the live site.
 
-### The four analysis agents that failed
+Still true either way: no minimum database version is enforced, the automated
+test covers only MySQL 8.0.36, and MariaDB is not covered by any test here.
 
-The deep audit was planned as six sequential agents. Two finished
-(`01-inventory.md`, `02-core-schema.md`, in the session scratchpad under
-`analysis/`). The other four — documentation drift, GitHub issues, API drift,
-new-work proposals — **failed because the account hit its monthly spend limit**
-on 7 September. That work was done directly instead, which for verifying issues
-against code is more reliable anyway.
+Also unsettled: how far #475 should go. Raising the minimums and testing against
+the new versions is a few days. Adding conditional code so one codebase runs
+correctly on old and new versions is considerably more and adds a branch to
+maintain forever. Recommendation recorded in #475: do the first stage on its
+own, because it is the foundation the second would need anyway.
+
+**2. The minimum password length** — #480. An existing site could still be
+enforcing an 8-character minimum while the documentation, the help page and the
+code's own fallback all say 12. Raise them automatically, or tell administrators
+and let them choose? Recommendation in the issue: tell them. The 8 is almost
+certainly the ghost of an old seed rather than anybody's decision, but that
+cannot be shown for any particular site.
+
+### 🔴 The finding worth reading before anything else
+
+**#485 — automatic translation of user-written content has no way in.** An
+administrator can pick a paid provider (Anthropic, OpenAI, Google, DeepL), enter
+an API key and set a spending cap. A member can go to their account page and opt
+in. **Neither does anything**, because nothing a user can reach ever calls the
+translation code.
+
+Be precise about two things here, because loose wording caused a false claim in
+the first draft of this note. The only caller of `Translation::translate()` is
+`web/_apps/api/translate.php` — so it is not true that there is "no caller
+anywhere". That file simply cannot be reached: addresses starting `api/` go to
+ApiRouter, which needs `api/{app}/{action}` and looks elsewhere. And this is
+**separate from interface translation** (`I18n` and the `t()` function), which
+works normally — the portal does translate its own screens.
+
+Two reasons it is urgent rather than merely wrong. It goes to a first customer
+soon, and somebody could enter a billable credential for something that will
+never make a request. And it must be settled **before** #483, because that
+clean-up deletes the unreachable file that is the only surviving description of
+how it was meant to work.
+
+Note migration 158 removed that file's routing-table row, but the address was
+**already** unreachable — `api/` paths never consult the routing table. So 158
+tidied a dead row; it did not break a working feature.
+
+Issue #278 was closed as delivering this. It has been commented, not reopened.
+
+**This is the fourth time this pattern has appeared** — #322 web push, #273
+livestream, #278 translation, and six unreachable help guides. Built, reviewed,
+merged, closed; nobody could reach it. Recorded in memory as
+`webms-shipped-but-unreachable`. It is the strongest argument for #477.
+
+### Suggested order when work resumes
+
+1. **#476** — about an hour, and stops `alpha` reporting the wrong version.
+2. **#485** — decide before #483 destroys the evidence.
+3. **#477** — widest reach; would have caught most of this audit.
+4. **#481, #483** — small and mechanical.
+5. **#475** once the hosting question is answered, then **#487** after it.
 
 ## 1. The branch clean-up (done)
 
@@ -167,8 +206,8 @@ re-verified before being acted on.
 
 - **Six menu and dashboard links led to "page not found"** (`/expenses`,
   `/kids`, `/reports`, `/salvation`, `/worship`, `/webhooks`). New
-  `Router::routeExists()` means a link is never drawn for a page that does
-  not exist, and a new optional `landing` field on an app's registry entry
+  `Router::routeExists()` means those generated links are left out when a
+  successful lookup finds no registered address for them, and a new optional `landing` field on an app's registry entry
   says where to link when the app's own prefix is not a page. The `route`
   field could not simply be corrected — it is the prefix used to decide which
   app owns a page for the on/off switch.
@@ -181,125 +220,35 @@ re-verified before being acted on.
 - **Four of the eleven safety checks were never run by any workflow.** All
   four now run on every pull request.
 
-### Still outstanding — not yet fixed
+### ⚠️ SUPERSEDED — this section described problems that are now FIXED
 
-### 🔴 The settings table cannot de-duplicate itself — highest priority
+**Everything that used to be listed here has shipped**, in pull request #473
+(merged 10 September 2026). The section has been removed rather than left in
+place, because it did more than go stale: it recommended an approach that was
+later tried and **proved wrong**.
 
-`tblSettings` has `UNIQUE KEY uq_setting_key_site (settingKey, siteID)`, and
-every global setting is stored with `siteID = NULL`. MySQL allows any number of
-rows whose indexed value is NULL, so two rows for the same global setting are
-**not** duplicates as far as that key is concerned. The project already knows
-this — migration `015_multisite.sql` says so in its own comment — but only
-noted it as the reason per-site overrides work, not as a problem.
+For the record, so nobody repeats it:
 
-The consequence is that `INSERT … ON DUPLICATE KEY UPDATE` **never fires** for a
-global setting. It always inserts another row. Verified places this happens:
+- It proposed de-duplicating the settings table by **keeping the newest row**.
+  That would have deleted saved payment credentials. Several screens find their
+  row with an unordered `SELECT … LIMIT 1` and update that one, which in
+  practice is the OLDEST copy. The rule that shipped prefers the row that looks
+  edited, then the most recently written, then the newest.
+- It proposed a **STORED** derived column. MySQL refuses a cascading foreign key
+  on the base column of a STORED derived column, and `tblSettings.siteID` has
+  one, so `full_schema.sql` would not load at all. The column that shipped is
+  **VIRTUAL**.
+- It proposed `COALESCE(siteID, 0)`. The value that shipped is **-1**, because a
+  site numbered 0 is not impossible on an imported database, and 0 would then be
+  confused with "applies to every site".
 
-- `web/_apps/admin/settings/group.php:129` — the main admin settings editor.
-  **Every save of any settings group adds new rows** instead of updating.
-- `web/_apps/admin/apps/index.php:52` — the app on/off switch. Every toggle
-  adds a row.
-- The installer: 392 of the 434 global settings are seeded in both
-  `full_schema.sql` and at least one numbered migration, and the installer runs
-  `full_schema.sql` and then replays every migration. So a **fresh install
-  starts with at least two rows for each of those 392 settings.**
+Both mistakes were caught by the Codex review, not by any automated check —
+every one of those checks passed on the wrong version. That is the argument for
+the review rule in `.claude/CLAUDE.md`.
 
-Which value actually applies depends on which row `bootstrap.php` reads last —
-its query orders only by `siteID IS NULL DESC`, so among the duplicates the
-order is whatever the storage engine returns. In practice that is usually
-primary-key order, so the newest row wins, which is accidentally the right
-answer. It is not guaranteed by SQL.
-
-**Not yet verified on a real database.** There is no MySQL on this machine. Run
-this on the server to see the real damage:
-
-```sql
-SELECT settingKey, COUNT(*) AS copies
-FROM tblSettings WHERE siteID IS NULL
-GROUP BY settingKey HAVING copies > 1 ORDER BY copies DESC;
-```
-
-**Proposed fix** (not applied — it touches the most-read table in the product
-and deserves its own careful change): de-duplicate global rows keeping the
-newest per key, then add a stored generated column
-`siteKey = COALESCE(siteID, 0)` and a unique key on `(settingKey, siteKey)`, so
-`ON DUPLICATE KEY UPDATE` starts working. No application code would need to
-change. The end-to-end migration harness runs against a real MySQL 8.0 in CI
-and can prove both the de-duplication and the new constraint.
-
-### 🔴 The notification preferences page cannot be opened
-
-`_apps/auth/account/notifications.php` is the page for choosing digest emails,
-event reminders, expense updates, task and rota reminders, workflow approval
-requests, **and web-push opt-in**. No route points at it.
-
-`/account/notifications` — the URL every link in the product uses — points at
-`_apps/account/notifications.php`, which only handles newsletter opt-in.
-Migration `093_newsletter.sql:79` re-seeded that route key with the newsletter
-page and the fuller page lost its only way in. Its saver
-(`auth/account/notifications-save.php`) is still routed, so the form handler for
-a page nobody can reach is still live.
-
-The practical loss: **web-push opt-in is only reachable from the livestream
-page**, so members cannot subscribe to service reminders at all.
-
-### 🟠 Menu and dashboard links that lead to "page not found"
-
-`_core/templates/nav.php:81-100` and `_apps/dashboard/index.php:189-199` build
-links from settings groups whose value is exactly `'true'`, without checking
-that a matching route exists. With the seeded defaults, `/expenses`, `/kids`,
-`/worship`, `/salvation`, `/reports` and `/webhooks` are all rendered and all
-return "page not found". The dashboard also hard-codes `/expenses` for its "My
-Pending Claims" panel.
-
-### 🟠 Two different spellings of "switched on"
-
-`/admin/apps` writes `'1'` or `'0'`. `AppRegistry::isEnabled()` accepts `'1'`
-or `'true'`. But the menu and the dashboard require exactly `'true'`. So an app
-switched on through the admin screen works when you type its address, but never
-appears in the menu or as a dashboard card. Whether an app is visible depends on
-*how* it was switched on.
-
-### 🟠 Livestream channel and schedule management cannot be opened
-
-`_apps/admin/livestream/index.php` lost its route when
-`133_livestream_analytics.sql:24` re-pointed `admin/livestream` at the viewer
-analytics dashboard. `cron/push-golive.php` depends on that page's "notify
-subscribers we are live" action, which now has no reachable button.
-
-### 🟡 Smaller items
-
-- Three dead files in `_apps/api/` (`ai-improve.php`, `translate.php`,
-  `livestream-ping.php`) whose routes were removed in migration 158. Nothing
-  calls them. `translate.php` describes a "translate this content" link that
-  does not exist anywhere in the product.
-- Six help pages exist and are routed but the Help Centre index does not link
-  to any of them, so they are invisible: `admin-first-steps`,
-  `disaster-recovery`, `forms`, `reports`, `support`, `venues`.
-- Four settings flags point at API handlers that do not exist
-  (`api.expenses.stats/attachments/update/update-status.enabled`).
-  `api.expenses.delete.enabled` is seeded twice with opposite values.
-- Three PHP handlers live in the web root
-  (`public_html/admin/integrations/monitoring/*`) rather than in `_apps/`.
-- API endpoints are not covered by the app on/off switch — switching an app off
-  hides its pages but leaves its API answering.
-
-### 🟠 Two build jobs have not run on `alpha` since 7 July
-
-`Version Bump` and `Changelog` are both triggered by a push to `alpha`. Neither
-has run since 7 July 2026, across roughly thirty merged pull requests. The cause
-is GitHub's rule that anything done using the built-in build token does not
-trigger further jobs — and `alpha` merges are performed by the auto-merge job
-using exactly that token. The auto-merge job already works around this for the
-deploy job, by starting it explicitly; the other two never got the same
-treatment, and neither can be started by hand because neither offers a manual
-trigger.
-
-Effects: `alpha` still reports version **1.4.0** while `beta` and `main` report
-1.4.1, and the changelog for `alpha` is only up to date because people have been
-editing it by hand inside each pull request.
-
----
+What actually shipped is described in the changelog, in migration 187, and in
+`DEV_NOTES.md` under "The settings table". Issues #466, #467, #468, #469, #470
+and #471 are all closed with evidence.
 
 ## 5. Verified-clean baseline
 

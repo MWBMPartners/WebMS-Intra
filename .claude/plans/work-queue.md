@@ -31,7 +31,7 @@ file is the customer's chosen order** and takes precedence.
 
 | Item | Issue | Why |
 | --- | --- | --- |
-| Translation is a shell — an administrator can configure a paid provider and a member can opt in, but nothing ever translates anything | [#485](https://github.com/MWBMPartners/WebMS-Intra/issues/485) | Found while writing #483. Should be settled **before** #483 deletes the only surviving description of how it was meant to work. Matters before a first customer: somebody could enter a billable API key for a feature that never makes a request. |
+| Automatic translation of user-written content has no way in — an administrator can configure a paid provider and a member can opt in, but nothing reachable ever calls it. (Interface translation is a separate system and works.) | [#485](https://github.com/MWBMPartners/WebMS-Intra/issues/485) | Found while writing #483. Should be settled **before** #483 deletes the only surviving description of how it was meant to work. Matters before a first customer: somebody could enter a billable API key for a feature that never makes a request. |
 
 ## Two decisions waiting
 
