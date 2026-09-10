@@ -97,7 +97,8 @@ $asText = isset($_GET['format']) === true && $_GET['format'] === 'text';
 // ✅ Which settings are reported, and what each one is allowed to look like
 // -----------------------------------------------------------------------------
 // The kinds:
-//   int      a whole number
+//   int      a whole number. Written as int:min:max so each setting carries the
+//            range that makes sense for it — a percentage is not a memory limit
 //   bytes    a size, such as 512M or 64K or -1
 //   bool     a switch: On, Off, 1, 0, empty, or one of PHP's word forms
 //   sep      one to four punctuation marks (argument separators)
@@ -131,12 +132,12 @@ const REPORT_SETTINGS = [
     'memory_limit'                   => 'bytes',
     'upload_max_filesize'            => 'bytes',
     'post_max_size'                  => 'bytes',
-    'max_execution_time'             => 'int',
-    'max_input_time'                 => 'int',
-    'max_file_uploads'               => 'int',
-    'max_input_vars'                 => 'int',
-    'max_input_nesting_level'        => 'int',
-    'default_socket_timeout'         => 'int',
+    'max_execution_time'             => 'int:-1:86400',
+    'max_input_time'                 => 'int:-1:86400',
+    'max_file_uploads'               => 'int:0:100000',
+    'max_input_vars'                 => 'int:0:10000000',
+    'max_input_nesting_level'        => 'int:0:100000',
+    'default_socket_timeout'         => 'int:-1:86400',
     'file_uploads'                   => 'bool',
     'enable_post_data_reading'       => 'bool',
 
@@ -144,20 +145,20 @@ const REPORT_SETTINGS = [
     'display_errors'                 => 'bool',
     'display_startup_errors'         => 'bool',
     'log_errors'                     => 'bool',
-    'error_reporting'                => 'int',
-    'log_errors_max_len'             => 'int',
+    'error_reporting'                => 'int:-1:2147483647',
+    'log_errors_max_len'             => 'int:0:1073741824',
     'ignore_repeated_errors'         => 'bool',
     'html_errors'                    => 'bool',
     'zend.exception_ignore_args'     => 'bool',
-    'zend.assertions'                => 'int',
+    'zend.assertions'                => 'int:-1:1',
 
     // — Output and language behaviour —
     'default_charset'                => 'charset',
     'internal_encoding'              => 'charset',
     'output_buffering'               => 'bytes',
     'implicit_flush'                 => 'bool',
-    'precision'                      => 'int',
-    'serialize_precision'            => 'int',
+    'precision'                      => 'int:-1:100',
+    'serialize_precision'            => 'int:-1:100',
     'short_open_tag'                 => 'bool',
     'expose_php'                     => 'bool',
     'zlib.output_compression'        => 'boolorbytes',
@@ -182,15 +183,15 @@ const REPORT_SETTINGS = [
     'session.use_cookies'            => 'bool',
     'session.use_only_cookies'       => 'bool',
     'session.use_trans_sid'          => 'bool',
-    'session.cookie_lifetime'        => 'int',
+    'session.cookie_lifetime'        => 'int:0:315360000',
     'session.cookie_secure'          => 'bool',
     'session.cookie_httponly'        => 'bool',
     'session.cookie_samesite'        => 'samesite',
-    'session.gc_probability'         => 'int',
-    'session.gc_divisor'             => 'int',
-    'session.gc_maxlifetime'         => 'int',
-    'session.sid_length'             => 'int',
-    'session.sid_bits_per_character' => 'int',
+    'session.gc_probability'         => 'int:0:1000000',
+    'session.gc_divisor'             => 'int:0:1000000',
+    'session.gc_maxlifetime'         => 'int:0:315360000',
+    'session.sid_length'             => 'int:22:256',
+    'session.sid_bits_per_character' => 'int:4:6',
     'session.lazy_write'             => 'bool',
 
     // — Character handling —
@@ -205,8 +206,8 @@ const REPORT_SETTINGS = [
 
     // — Pattern-matching limits. These decide whether a big page can be
     //   processed at all, so they are worth seeing. —
-    'pcre.backtrack_limit'           => 'int',
-    'pcre.recursion_limit'           => 'int',
+    'pcre.backtrack_limit'           => 'int:0:1000000000000',
+    'pcre.recursion_limit'           => 'int:0:1000000000000',
     'pcre.jit'                       => 'bool',
 
     // — The performance cache. Named one at a time on purpose: the same family
@@ -214,13 +215,13 @@ const REPORT_SETTINGS = [
     //   and lockfile_path, every one of which is a path or an account name. —
     'opcache.enable'                  => 'bool',
     'opcache.enable_cli'              => 'bool',
-    'opcache.memory_consumption'      => 'int',
-    'opcache.interned_strings_buffer' => 'int',
-    'opcache.max_accelerated_files'   => 'int',
-    'opcache.max_wasted_percentage'   => 'int',
+    'opcache.memory_consumption'      => 'int:0:65536',
+    'opcache.interned_strings_buffer' => 'int:0:65536',
+    'opcache.max_accelerated_files'   => 'int:0:10000000',
+    'opcache.max_wasted_percentage'   => 'int:0:100',
     'opcache.use_cwd'                 => 'bool',
     'opcache.validate_timestamps'     => 'bool',
-    'opcache.revalidate_freq'         => 'int',
+    'opcache.revalidate_freq'         => 'int:0:86400',
     'opcache.save_comments'           => 'bool',
     'opcache.huge_code_pages'         => 'bool',
     'opcache.jit'                     => 'jit',
@@ -229,7 +230,7 @@ const REPORT_SETTINGS = [
     // — Images and documents —
     'gd.jpeg_ignore_warning'         => 'bool',
     'soap.wsdl_cache_enabled'        => 'bool',
-    'soap.wsdl_cache_ttl'            => 'int',
+    'soap.wsdl_cache_ttl'            => 'int:0:31536000',
 ];
 
 /**
@@ -259,18 +260,44 @@ function portalValueMatchesKind(string $kind, string $value): bool
         return false;
     }
 
+    // 🔢 A kind may carry its own range, written as "int:min:max". Each numeric
+    //    setting has one, because the sensible range for a percentage is not the
+    //    sensible range for a memory limit.
+    //
+    //    A single blanket cap was tried first and was wrong in both directions:
+    //    too loose to be worth much, and tight enough to withhold real values —
+    //    a 16 GiB memory limit and a three-billion backtrack limit are both
+    //    perfectly ordinary on a 64-bit server, and both were being hidden.
+    $bounds = explode(':', $kind);
+    $kind   = $bounds[0];
+    $min    = isset($bounds[1]) === true ? (int) $bounds[1] : null;
+    $max    = isset($bounds[2]) === true ? (int) $bounds[2] : null;
+
     switch ($kind) {
         case 'int':
-            // Bounded, not merely "is a number". A long digit string is a shape
-            // a secret can have too — an account number, a numeric key — and
-            // nothing this report shows legitimately needs sixteen digits.
-            // Anything outside a sensible range is withheld.
-            return preg_match('/^-?\d{1,10}$/', $value) === 1
-                && (int) $value >= -1
-                && (int) $value <= 2147483647;
+            if (preg_match('/^-?\d{1,19}$/', $value) !== 1) {
+                return false;
+            }
+            $number = (int) $value;
+            if ($min !== null && $number < $min) {
+                return false;
+            }
+            if ($max !== null && $number > $max) {
+                return false;
+            }
+            return true;
 
         case 'bytes':
-            return preg_match('/^-?\d{1,10}[KMGkmg]?$/', $value) === 1;
+            // A size, either a plain number of bytes or one with a K, M or G on
+            // the end. -1 means "no limit" and is normal. The ceiling is one
+            // terabyte, which no real setting reaches and which still leaves
+            // every legitimate value — including a 16 GiB memory limit — visible.
+            if (preg_match('/^(-?\d{1,19})([KMGkmg]?)$/', $value, $m) !== 1) {
+                return false;
+            }
+            $multiplier = ['' => 1, 'k' => 1024, 'm' => 1048576, 'g' => 1073741824];
+            $asBytes    = (int) $m[1] * $multiplier[strtolower($m[2])];
+            return $asBytes >= -1 && $asBytes <= 1099511627776;
 
         case 'boolorbytes':
             // This one is genuinely either. Switching it on with a number sets
@@ -292,7 +319,10 @@ function portalValueMatchesKind(string $kind, string $value): bool
             return preg_match('/^[GPCSE]{1,5}$/i', $value) === 1;
 
         case 'tz':
-            return in_array($value, timezone_identifiers_list(), true) === true
+            // ALL_WITH_BC includes the older compatibility names that PHP still
+            // accepts, such as US/Eastern. Without it a perfectly valid setting
+            // was being withheld as though it were suspicious.
+            return in_array($value, timezone_identifiers_list(\DateTimeZone::ALL_WITH_BC), true) === true
                 || strtoupper($value) === 'UTC';
 
         case 'charset':
