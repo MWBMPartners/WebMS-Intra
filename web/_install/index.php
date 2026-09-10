@@ -189,24 +189,65 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $testConn = new mysqli($dbHost, $dbUser, $dbPass, '', $dbPort);
                 $testConn->set_charset('utf8mb4');
 
-                // Try to select the database
-                $dbExists = $testConn->select_db($dbName);
+                // 🛢️ Now that we are actually talking to a database server, ask
+                //    it which product and version it is, and whether that is one
+                //    this portal can run on.
+                //
+                //    This cannot be part of the first screen's checks, because
+                //    at that point nobody has typed any database details in yet.
+                //    Here is the first moment the answer exists.
+                //
+                //    Portal\Core\DbServer is written to the same bootstrap-free
+                //    contract as version.php and brand-defaults.php — it depends
+                //    on nothing but the connection — so this wizard can use it
+                //    directly. See the file header there before adding to it.
+                require_once INSTALL_ROOT
+                    . DIRECTORY_SEPARATOR . '_core'
+                    . DIRECTORY_SEPARATOR . 'DbServer.php';
+                $dbServer = \Portal\Core\DbServer::inspect($testConn);
+                $_SESSION['install_db_server'] = $dbServer;
 
-                if ($dbExists === false) {
-                    // Try to create the database
-                    $createResult = $testConn->query(
-                        'CREATE DATABASE `' . $testConn->real_escape_string($dbName) . '` '
-                        . 'CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci'
-                    );
-                    if ($createResult === false) {
-                        $error = 'Database "' . $dbName
-                               . '" does not exist and could not be created. '
-                               . 'On shared hosting, you may need to create the database '
-                               . 'manually via your hosting control panel (e.g. cPanel, DreamHost Panel) '
-                               . 'before proceeding.';
-                        $step = 2;
-                    } else {
-                        $testConn->select_db($dbName);
+                // 🛑 'crit' means the database is older than this portal's own
+                //    database changes can run on. Carrying on would fail
+                //    part-way through and leave a half-built database behind,
+                //    with an error message that explains nothing. Stop here
+                //    instead and say why, in words.
+                //
+                //    Only 'crit' stops. A 'warn' — most often "this version no
+                //    longer gets security fixes" — is shown on the next screen
+                //    and never blocks: on shared hosting the customer usually
+                //    cannot change the database version at all, so refusing to
+                //    install would simply lock them out of their own portal.
+                if ($dbServer['state'] === 'crit') {
+                    $error = $dbServer['headline'] . '. ' . $dbServer['detail'];
+                    $step  = 2;
+                    $testConn->close();
+                }
+
+                // 🚧 Everything below needs the connection we may have just
+                //    closed, so all of it is skipped once we have an error.
+                //    Creating a database on a server too old to hold the schema
+                //    would leave an empty database behind for no reason.
+                if ($error === '') {
+                    // Try to select the database
+                    $dbExists = $testConn->select_db($dbName);
+
+                    if ($dbExists === false) {
+                        // Try to create the database
+                        $createResult = $testConn->query(
+                            'CREATE DATABASE `' . $testConn->real_escape_string($dbName) . '` '
+                            . 'CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci'
+                        );
+                        if ($createResult === false) {
+                            $error = 'Database "' . $dbName
+                                   . '" does not exist and could not be created. '
+                                   . 'On shared hosting, you may need to create the database '
+                                   . 'manually via your hosting control panel (e.g. cPanel, DreamHost Panel) '
+                                   . 'before proceeding.';
+                            $step = 2;
+                        } else {
+                            $testConn->select_db($dbName);
+                        }
                     }
                 }
 
@@ -1564,6 +1605,14 @@ $pageTitle = 'Install — ' . ($stepTitles[$step] ?? $INSTALL_PRODUCT_NAME);
                 </tbody>
             </table>
 
+            <p class="text-muted small">
+                Your database is checked separately, at the next step. It cannot be
+                checked here, because the wizard has to connect to it first and it does
+                not yet know where it is or how to sign in. Once it connects it will
+                tell you which database product and version you are running, and whether
+                it is one this portal supports.
+            </p>
+
             <?php if ($allPrereqsPassed === true): ?>
                 <a href="?step=1.5" class="btn btn-primary">Continue &rarr;</a>
             <?php else: ?>
@@ -1640,6 +1689,15 @@ $pageTitle = 'Install — ' . ($stepTitles[$step] ?? $INSTALL_PRODUCT_NAME);
                 : 'DROP';
             ?>
             <h2 class="h5 mb-3">Existing Database Detected</h2>
+
+            <?php
+            // 🛢️ Same database version panel as step 3 — shown here too, because
+            //    an upgrade onto an unsupported database is worth knowing about
+            //    before you commit to it, not after.
+            require INSTALL_ROOT
+                . DIRECTORY_SEPARATOR . '_install'
+                . DIRECTORY_SEPARATOR . 'db_server_banner.php';
+            ?>
 
             <?php if ($isUpgrade === true): ?>
                 <div class="alert alert-info">
@@ -1738,6 +1796,15 @@ $pageTitle = 'Install — ' . ($stepTitles[$step] ?? $INSTALL_PRODUCT_NAME);
             <!-- STEP 3: Install Schema -->
             <h2 class="h5 mb-3">Install Database Schema</h2>
             <p>The database connection was successful. Click the button below to create all tables and seed initial data.</p>
+
+            <?php
+            // 🛢️ What database did we actually connect to, and is it a version
+            //    this portal supports? Worked out in step 2; see the file header
+            //    in _install/db_server_banner.php.
+            require INSTALL_ROOT
+                . DIRECTORY_SEPARATOR . '_install'
+                . DIRECTORY_SEPARATOR . 'db_server_banner.php';
+            ?>
 
             <div class="alert alert-info">
                 <strong>What will happen:</strong>

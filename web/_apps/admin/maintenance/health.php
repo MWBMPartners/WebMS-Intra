@@ -52,13 +52,38 @@ $db = App::db();
 $probes = [];
 
 // 1. Database
+//    Two separate things are being reported here, and they used to be muddled
+//    together. "Can we reach the database at all?" is the health question. "Is
+//    the version we reached still supported?" is a different question, and this
+//    page used to answer it by printing the word "MySQL" in front of whatever
+//    version string came back — which was simply wrong on a MariaDB server, and
+//    said nothing about whether the version still receives security fixes.
+//
+//    Portal\Core\DbServer answers the second question, and is the SAME code the
+//    installation wizard and the Server Information page use, so all three
+//    always agree.
+//    On the traffic light itself, note what this probe does NOT do. A database
+//    that is past its security-fix date is worth knowing about, but it is not
+//    an incident: it will be equally true tomorrow and every day after. This
+//    page is polled by uptime monitors, so turning it amber for that would mean
+//    a permanent alert that everyone quickly learns to ignore — and a real
+//    problem arriving later would land in a warning nobody reads any more.
+//
+//    So the light stays green while the database is reachable, and the version
+//    and its support position are reported in the text beside it. The one
+//    exception is a database too old to run this portal properly, which is a
+//    real fault happening right now and does turn the light amber.
 try {
-    $rs = $db->query('SELECT VERSION() AS v');
-    $v  = $rs !== false ? ($rs->fetch_assoc()['v'] ?? '?') : '?';
-    if ($rs !== false) {
-        $rs->free();
-    }
-    $probes['Database'] = ['state' => 'ok', 'label' => 'Connected', 'detail' => 'MySQL ' . $v];
+    $dbInfo  = \Portal\Core\DbServer::inspect($db);
+    $shownAs = trim($dbInfo['engine'] . ' ' . $dbInfo['version']);
+
+    $probes['Database'] = [
+        'state'  => $dbInfo['state'] === 'crit' ? 'warn' : 'ok',
+        'label'  => 'Connected',
+        'detail' => $dbInfo['state'] === 'ok'
+            ? $shownAs . ' — a supported version'
+            : $shownAs . ' — see Admin → Server Information',
+    ];
 } catch (\Throwable $e) {
     $probes['Database'] = ['state' => 'crit', 'label' => 'Connection failed', 'detail' => $e->getMessage()];
 }

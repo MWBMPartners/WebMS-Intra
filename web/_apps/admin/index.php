@@ -129,8 +129,15 @@ foreach ($sqlFiles as $file) {
 }
 
 // 🖥️ System info
+//    The database line used to read the raw version string straight off the
+//    connection and print it with the word "MySQL" in front. That was wrong on
+//    a MariaDB server, and it said nothing about whether the version still
+//    receives security fixes. Portal\Core\DbServer answers both, and is the
+//    same code the installation wizard, the health page and the Server
+//    Information page use — so all four always agree.
 $phpVersion = PHP_VERSION;
-$dbVersion  = $mysqli->server_info ?? 'Unknown';
+$dbInfo     = \Portal\Core\DbServer::inspect($mysqli);
+$dbVersion  = trim($dbInfo['engine'] . ' ' . $dbInfo['version']);
 $portalEnv  = PORTAL_ENV ?? 'production';
 
 // 📄 Include shared header template
@@ -257,8 +264,13 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 <div class="col-12 col-md-8"><?php echo htmlspecialchars($phpVersion, ENT_QUOTES, 'UTF-8'); ?></div>
             </div>
             <div class="portal-data-row">
-                <div class="col-12 col-md-4 fw-semibold">MySQL Version</div>
-                <div class="col-12 col-md-8"><?php echo htmlspecialchars($dbVersion, ENT_QUOTES, 'UTF-8'); ?></div>
+                <div class="col-12 col-md-4 fw-semibold">Database</div>
+                <div class="col-12 col-md-8">
+                    <?php echo htmlspecialchars($dbVersion, ENT_QUOTES, 'UTF-8'); ?>
+                    <?php if ($dbInfo['state'] !== 'ok'): ?>
+                        <a href="/admin/system-info" class="badge bg-warning text-decoration-none ms-1">Needs a look</a>
+                    <?php endif; ?>
+                </div>
             </div>
             <div class="portal-data-row">
                 <div class="col-12 col-md-4 fw-semibold">Portal Version</div>
@@ -337,6 +349,12 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 <a href="/admin/maintenance/retention" class="btn btn-outline-warning w-100 d-flex flex-column align-items-center gap-1 py-3">
                     <i class="fa-solid fa-broom fa-lg"></i>
                     <span class="small">Retention</span>
+                </a>
+            </div>
+            <div class="col-6 col-md-4 col-lg-2">
+                <a href="/admin/system-info" class="btn btn-outline-secondary w-100 d-flex flex-column align-items-center gap-1 py-3">
+                    <i class="fa-solid fa-server fa-lg"></i>
+                    <span class="small">Server Info</span>
                 </a>
             </div>
             <div class="col-6 col-md-4 col-lg-2">

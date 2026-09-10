@@ -1,0 +1,179 @@
+<?php
+// Path: tools/db-server-selftest.php
+/**
+ * -----------------------------------------------------------------------------
+ * Database version reading self-test 🛢️ (#475)
+ * -----------------------------------------------------------------------------
+ * Standalone and dependency-free — no database, no start-up code, no network.
+ * It runs the real Portal\Core\DbServer class against a list of version strings
+ * that real database servers actually report, and checks the answer.
+ *
+ * WHY THIS IS WORTH HAVING
+ * ------------------------
+ * Getting this wrong fails silently and looks fine. Two traps in particular:
+ *
+ *   1. MariaDB sometimes puts a fake `5.5.5-` on the front of its version
+ *      string, purely so that very old MySQL client programs will agree to
+ *      talk to it. Read that literally and every modern MariaDB install looks
+ *      like ancient MySQL 5.5 — so the installation wizard would refuse to run
+ *      on a perfectly good server, and nobody would understand why.
+ *
+ *   2. The version number decides whether the wizard STOPS or merely warns.
+ *      A rule that is one step out in either direction either blocks a working
+ *      install or lets a doomed one start and fail half-way through, leaving a
+ *      part-built database behind.
+ *
+ * Neither mistake throws an error. Only a test like this catches them.
+ *
+ * The version strings below are real formats, not invented ones — Ubuntu's
+ * packaged MySQL, MariaDB with and without the compatibility prefix, Percona
+ * Server, and the two-part version some builds report.
+ *
+ * Usage:  php tools/db-server-selftest.php
+ * Exit:   0 if every check passes, 1 if any check fails.
+ *
+ * @package   Portal\Tools
+ * @author    MWBM Partners Ltd (t/a MWservices)
+ * @copyright 2026 MWBM Partners Ltd (t/a MWservices)
+ * @license   All Rights Reserved
+ * @version   1.0.0
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/475
+ * -----------------------------------------------------------------------------
+ */
+
+declare(strict_types=1);
+
+require __DIR__ . '/../web/_core/DbServer.php';
+
+use Portal\Core\DbServer;
+
+// -----------------------------------------------------------------------------
+// 📋 The cases. Each one is: what VERSION() said, what @@version_comment said,
+//    then the three things we expect back — product name, version number, and
+//    whether it is fine ('ok'), worth mentioning ('warn'), or too old to run
+//    on at all ('crit').
+// -----------------------------------------------------------------------------
+
+$cases = [
+    // --- MySQL, the line everything here is tested against. Supported by this
+    //     portal, but Oracle stopped issuing security fixes in April 2026, so
+    //     it warns rather than passing silently.
+    ['8.0.36', 'MySQL Community Server - GPL', 'MySQL', '8.0.36', 'warn'],
+
+    // Ubuntu and Debian append their own packaging version. The numbers after
+    // the first three must be ignored, or this reads as version 22.
+    ['8.0.36-0ubuntu0.22.04.1', '', 'MySQL', '8.0.36', 'warn'],
+
+    // --- MySQL long-term releases: the versions to move to.
+    ['8.4.3', 'MySQL Community Server - GPL', 'MySQL', '8.4.3', 'ok'],
+    ['9.7.0', 'MySQL Community Server - GPL', 'MySQL', '9.7.0', 'ok'],
+
+    // --- The short-lived 8.1/8.2/8.3 releases. Each was replaced within about
+    //     three months and none is supported now, so they warn.
+    ['8.2.0', 'MySQL Community Server - GPL', 'MySQL', '8.2.0', 'warn'],
+
+    // --- Too old to run this portal at all. This is the ONLY case where the
+    //     installation wizard stops rather than warning.
+    ['5.7.44', 'MySQL Community Server (GPL)', 'MySQL', '5.7.44', 'crit'],
+
+    // --- MariaDB WITH the fake compatibility prefix. If the prefix is not
+    //     stripped this reads as MySQL 5.5.5 and is wrongly refused. This is
+    //     the single most important case in this file.
+    [
+        '5.5.5-10.11.6-MariaDB-1:10.11.6+maria~ubu2204',
+        'mariadb.org binary distribution',
+        'MariaDB',
+        '10.11.6',
+        'warn',
+    ],
+
+    // --- The same MariaDB without the prefix, which is what a direct
+    //     connection usually sees. Must reach the identical verdict.
+    ['10.11.6-MariaDB', 'mariadb.org binary distribution', 'MariaDB', '10.11.6', 'warn'],
+
+    // --- MariaDB long-term releases.
+    ['11.4.2-MariaDB', 'mariadb.org binary distribution', 'MariaDB', '11.4.2', 'ok'],
+    ['12.3.1-MariaDB', 'mariadb.org binary distribution', 'MariaDB', '12.3.1', 'ok'],
+
+    // --- MariaDB too old for this portal's database changes.
+    ['10.3.39-MariaDB', 'mariadb.org binary distribution', 'MariaDB', '10.3.39', 'crit'],
+
+    // --- Percona Server is a MySQL fork and uses MySQL's own version numbers,
+    //     so it is judged by the MySQL rules. The trailing release number is
+    //     Percona's own and is not part of the MySQL version.
+    ['8.0.36-28', 'Percona Server (GPL), Release 28', 'Percona Server', '8.0.36', 'warn'],
+
+    // --- Some builds report only two parts. Treat as x.y.0 rather than
+    //     failing to read it at all.
+    ['11.4-MariaDB', 'mariadb.org binary distribution', 'MariaDB', '11.4.0', 'ok'],
+
+    // --- Nothing readable. Must NOT guess a product, and must never block.
+    ['', '', 'Unknown', '', 'warn'],
+    ['some-custom-build', 'A database we have never heard of', 'Unknown', '', 'warn'],
+];
+
+// -----------------------------------------------------------------------------
+// 🏃 Run them.
+// -----------------------------------------------------------------------------
+
+$failures = 0;
+$passes   = 0;
+
+echo "Database version reading — self-test\n";
+echo str_repeat('=', 78) . "\n\n";
+
+foreach ($cases as [$raw, $comment, $wantEngine, $wantVersion, $wantState]) {
+    $got = DbServer::classify($raw, $comment);
+
+    $problems = [];
+    if ($got['engine'] !== $wantEngine) {
+        $problems[] = sprintf('product: expected "%s", got "%s"', $wantEngine, $got['engine']);
+    }
+    if ($got['version'] !== $wantVersion) {
+        $problems[] = sprintf('version: expected "%s", got "%s"', $wantVersion, $got['version']);
+    }
+    if ($got['state'] !== $wantState) {
+        $problems[] = sprintf('verdict: expected "%s", got "%s"', $wantState, $got['state']);
+    }
+
+    // 📣 Every answer must carry a headline and an explanation. A blank one
+    //    would leave the wizard and the admin page showing an empty box.
+    if (trim((string) $got['headline']) === '') {
+        $problems[] = 'the one-line summary was empty';
+    }
+    if (trim((string) $got['detail']) === '') {
+        $problems[] = 'the explanation was empty';
+    }
+
+    // 🍃 Every MariaDB answer must admit that nothing here is tested against
+    //    MariaDB. Dropping that caveat would overstate what this project knows.
+    if ($got['family'] === 'mariadb' && $got['untested'] !== true) {
+        $problems[] = 'a MariaDB answer did not carry the "not tested here" caveat';
+    }
+
+    $label = $raw === '' ? '(nothing returned)' : $raw;
+
+    if (count($problems) === 0) {
+        $passes++;
+        printf("  PASS  %s\n", $label);
+        continue;
+    }
+
+    $failures++;
+    printf("  FAIL  %s\n", $label);
+    foreach ($problems as $p) {
+        printf("          %s\n", $p);
+    }
+}
+
+echo "\n" . str_repeat('=', 78) . "\n";
+printf("%d passed, %d failed\n", $passes, $failures);
+
+if ($failures > 0) {
+    echo "\nSomething about how this portal reads the database version has changed.\n";
+    echo "Check web/_core/DbServer.php before releasing.\n";
+    exit(1);
+}
+
+echo "\nAll good. The database version is read and judged correctly.\n";
+exit(0);

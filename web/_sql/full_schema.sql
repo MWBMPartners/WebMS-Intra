@@ -8534,3 +8534,19 @@ PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
 INSERT INTO `tblMigrations` (`filename`) VALUES ('187_settings_global_uniqueness.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- ── from 188_server_information_page.sql ─────────────────────────────────────
+-- Registers the Server Information page, which gathers the PHP version, the
+-- database product and version, the connection settings and the hosting limits
+-- into one place — and says whether the database version is still supported.
+-- The second address is PHP's own full report about itself; both pages make
+-- their own access checks (administrator, and umbrella administrator
+-- respectively), so isProtected = 1 here is only the "must be signed in" half.
+
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('admin/system-info',         'admin/system-info/index.php',   1),
+    ('admin/system-info/phpinfo', 'admin/system-info/phpinfo.php', 1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('188_server_information_page.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
