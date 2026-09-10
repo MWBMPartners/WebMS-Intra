@@ -13,7 +13,7 @@
  *
  * SECURITY (CWE-1236 — CSV/formula/DDE injection): every cell (header and
  * data) is passed through neutraliseFormulaCell() immediately before it is
- * handed to fputcsv(). A cell whose first character is one of = + - @ TAB
+ * handed to fputcsv(, ',', '"', ''). A cell whose first character is one of = + - @ TAB
  * or CR is a live formula/DDE trigger in Excel/LibreOffice/Sheets when the
  * exported file is opened — it is neutralised by prefixing a single
  * leading apostrophe, which forces spreadsheet apps to treat the cell as
@@ -72,7 +72,7 @@ class CsvExporter
 
         // 📋 Write header row (CWE-1236: same formula-cell neutralisation as data rows)
         if (count($headers) > 0) {
-            fputcsv($output, array_map([self::class, 'neutraliseFormulaCell'], array_map('strval', $headers)));
+            fputcsv($output, array_map([self::class, 'neutraliseFormulaCell'], array_map('strval', $headers)), ',', '"', '');
         }
 
         // 📋 Write data rows
@@ -85,13 +85,13 @@ class CsvExporter
                     //     before the value is placed into the row for fputcsv().
                     $orderedRow[] = self::neutraliseFormulaCell((string) ($row[$key] ?? ''));
                 }
-                fputcsv($output, $orderedRow);
+                fputcsv($output, $orderedRow, ',', '"', '');
             } else {
                 // 🛡️ CWE-1236: same neutralisation for the no-explicit-headers path.
                 fputcsv($output, array_map(
                     static fn ($value): string => self::neutraliseFormulaCell((string) $value),
                     array_values($row)
-                ));
+                ), ',', '"', '');
             }
         }
 

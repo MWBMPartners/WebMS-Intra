@@ -188,6 +188,22 @@ class Router
      */
     private static function handleSpecialRoutes(string &$path): bool
     {
+        // 🔌 Hand these pages the same two things dispatch() hands an ordinary
+        //    page. Without this line they get NOTHING, because a file loaded
+        //    from inside a method sees only that method's own local variables —
+        //    and this method had none to give.
+        //
+        //    Two pages were broken by that and nobody had noticed:
+        //    `auth/login/webauthn.php` (signing in with a passkey) and
+        //    `calendar/public-landing.php` (the public page for a single event,
+        //    at /e/{name}). Both ask the database for things using `$mysqli`,
+        //    and `$mysqli` was simply not there, so both stopped dead.
+        //
+        //    Both of the other two routers already do exactly this — see
+        //    `dispatch()` below and `ApiRouter::dispatch()`. This one was the
+        //    odd one out, which is why the pages it loads were the broken ones.
+        global $mysqli, $SETTINGS;
+
         // 🏠 Empty path → dashboard (default home page). Rewriting $path
         //    here (by reference) then returning false lets dispatch()
         //    fall through to the normal tblRoutes lookup using routeKey

@@ -134,7 +134,7 @@ class Giving
             'Title', 'First name', 'Last name', 'House name or number',
             'Postcode', 'Aggregated donations', 'Sponsored event',
             'Donation date', 'Amount',
-        ]);
+        ], ',', '"', '');
         foreach ($rows as $r) {
             $name = trim((string) $r['fullName']);
             $parts = explode(' ', $name, 2);
@@ -154,7 +154,7 @@ class Giving
                 '',
                 date('d/m/Y', (int) strtotime((string) $r['donatedAt'])),
                 number_format(((int) $r['amountPence']) / 100, 2, '.', ''),
-            ]);
+            ], ',', '"', '');
         }
         rewind($out);
         $csv = stream_get_contents($out);

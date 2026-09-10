@@ -56,9 +56,9 @@ if (($_GET['format'] ?? '') === 'csv' && count($rows) > 0) {
     header('Content-Type: text/csv; charset=utf-8');
     header('Content-Disposition: attachment; filename="ccli-' . $quarter . '.csv"');
     $out = fopen('php://output', 'w');
-    fputcsv($out, ['Song Title', 'Author', 'CCLI #', 'Copyright', 'Plays']);
+    fputcsv($out, ['Song Title', 'Author', 'CCLI #', 'Copyright', 'Plays'], ',', '"', '');
     foreach ($rows as $r) {
-        fputcsv($out, [$r['title'], $r['author'] ?? '', $r['ccliNumber'] ?? '', $r['copyrightLine'] ?? '', (int) $r['plays']]);
+        fputcsv($out, [$r['title'], $r['author'] ?? '', $r['ccliNumber'] ?? '', $r['copyrightLine'] ?? '', (int) $r['plays']], ',', '"', '');
     }
     fclose($out);
     exit();

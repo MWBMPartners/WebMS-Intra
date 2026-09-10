@@ -57,21 +57,24 @@ $sql = "SELECT
         WHERE s.siteID = ?
         ORDER BY s.sessionDate DESC";
 
-// 🔌 The database connection is called $mysqli here, not $db.
+// 🔌 Use $mysqli rather than $db, because $mysqli works under BOTH routers.
 //
-//    This line used to say $db, and every one of these export pages crashed the
-//    instant somebody pressed the button. Nothing was ever produced and no file
-//    was ever downloaded.
+//    This line used to say $db. That was NOT broken — a review corrected an
+//    earlier claim here that it was, and the correction was right. Router's
+//    method signature is `dispatch(mysqli $db)`, and the page is loaded from
+//    inside that method, so a page loaded that way inherits $db along with
+//    everything else local to it. Checked by experiment, not by reading.
 //
-//    The reason is worth knowing, because it is not obvious from reading this
-//    file alone. When the portal opens a page, it hands it exactly two things:
-//    $mysqli and $SETTINGS (see Router.php, the `global` line just before the
-//    page is loaded). Anything else a page reaches for simply is not there. $db
-//    was never one of the two, so it was empty, and asking an empty thing to
-//    prepare a query stops the page dead.
+//    The reason to prefer $mysqli is narrower and real. There are two routers.
+//    Router::dispatch takes $db as a parameter AND imports $mysqli. But
+//    ApiRouter::dispatch takes only a path, and imports $mysqli alone — so a
+//    page loaded by that one has no $db at all.
 //
-//    It failed silently in the way that matters: the button looked fine, and
-//    the fault only appeared at the moment somebody actually used it.
+//    So $db works today for pages reached through an ordinary address, and
+//    stops working the moment a page is reached through the data interface
+//    instead. $mysqli works in both places. Using it costs nothing and removes
+//    a way for this page to break later for a reason nobody would connect to
+//    this line.
 $stmt = $mysqli->prepare($sql);
 $stmt->bind_param('i', $siteId);
 $stmt->execute();

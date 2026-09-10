@@ -100,8 +100,8 @@ if ($report !== '' && ($_GET['format'] ?? '') === 'csv' && count($data['rows']) 
     header('Content-Type: text/csv; charset=utf-8');
     header('Content-Disposition: attachment; filename="report-' . $report . '-' . date('Y-m-d') . '.csv"');
     $out = fopen('php://output', 'w');
-    fputcsv($out, $data['columns']);
-    foreach ($data['rows'] as $row) { fputcsv($out, $row); }
+    fputcsv($out, $data['columns'], ',', '"', '');
+    foreach ($data['rows'] as $row) { fputcsv($out, $row, ',', '"', ''); }
     fclose($out);
     exit();
 }

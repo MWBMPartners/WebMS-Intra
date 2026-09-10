@@ -77,16 +77,23 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             </div>
             <div class="col-12">
                 <button class="btn btn-primary" type="submit">Save</button>
-                <?php if ($hasDsn === true): ?>
-                    <form method="post" action="/admin/integrations/monitoring/test" class="d-inline ms-2">
-                        <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
-                        <button class="btn btn-outline-warning" type="submit">
-                            <i class="fa-solid fa-paper-plane me-1"></i>Send test event
-                        </button>
-                    </form>
-                <?php endif; ?>
             </div>
         </form>
+
+        <?php if ($hasDsn === true): ?>
+            <!-- 📮 A SEPARATE form, deliberately OUTSIDE the one above.
+                 It used to sit inside it. A form cannot contain another form —
+                 browsers do not nest them, they discard the inner one — so the
+                 "Send test event" button was silently attached to the SAVE form
+                 instead. Pressing it saved the settings rather than sending a
+                 test, and there was nothing on screen to say so. -->
+            <form method="post" action="/admin/integrations/monitoring/test" class="mt-3">
+                <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
+                <button class="btn btn-outline-warning" type="submit">
+                    <i class="fa-solid fa-paper-plane me-1"></i>Send test event
+                </button>
+            </form>
+        <?php endif; ?>
     </div>
 </div>
 
