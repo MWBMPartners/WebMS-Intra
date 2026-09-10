@@ -9,59 +9,72 @@ proceeds, so the session can be picked up at any point).
 
 ## Read this first — where we are right now
 
-**Updated 10 September 2026.** Pull request **#473** is open as a DRAFT against
-`alpha`. It is a draft on purpose: `auto-merge-alpha.yml` merges non-draft alpha
-pull requests automatically, and this must not merge until the checks have been
-read. Marking it ready for review is what starts the merge.
+**Updated 10 September 2026, after the merge.**
+
+**Pull request #473 is MERGED into `alpha`** (squashed as `b2c42b4`), the deploy
+to the alpha site ran, and the local clone is realigned. The previous working
+branch was deleted on GitHub and locally. This branch, `claude/alpha-wip`, is a
+fresh one cut from the updated `alpha`, ready for whatever comes next. **Nothing
+is open against `alpha`.**
+
+### Everything asked for in this session is done
 
 | Task | State |
 | --- | --- |
 | Audit and delete the six stale branches | ✅ `.claude/plans/branch-audit-2026-09-07.md` |
-| Single work-in-progress branch, local clone realigned | ✅ `claude/alpha-wip` |
-| Self-host Swagger UI + fix `/api-docs` | ✅ `8f21094`, migration 185, closed #470 |
+| Single work-in-progress branch, local clone realigned | ✅ |
+| Self-host Swagger UI + fix `/api-docs` | ✅ migration 185, closed #470 |
 | Install PHP locally + write the setup guide | ✅ PHP 8.5.10 |
-| Reach three features that had no way in | ✅ `6c01c47`, migration 186, closed #467 |
-| Dead menu links, demo-data hazard, unwired checks | ✅ `82241bc`, closed #468 #469 #471 |
-| Settings duplicated instead of saving | ✅ `df6e827`, migration 187, closed #466 |
+| Reach three features that had no way in | ✅ migration 186, closed #467 |
+| Dead menu links, demo-data hazard, unwired checks | ✅ closed #468 #469 #471 |
+| Settings duplicated instead of saving | ✅ migration 187, closed #466 |
 | Codex review as a standing rule | ✅ memory + `.claude/CLAUDE.md` |
-| GitHub issue sweep | ✅ 7 opened (#466–#472), 6 closed, 6 existing updated |
+| GitHub issue sweep | ✅ 8 opened (#466–#472, #474), 6 closed, 6 updated |
 | Documentation update | ✅ counts, README, FEATURES, DEV_NOTES, `/help/admin` |
 | Ranked list of proposed next work | ✅ `.claude/plans/proposed-next-work-2026-09-10.md` |
-| Pull request into `alpha` | 🔄 **#473 open as draft; checks running** |
-| Watch checks to green, then mark ready | ⏳ **next action** |
-| Realign local clone onto the updated `alpha` | ⏳ after merge |
-
-### The next action, precisely
-
-1. `gh pr checks 473` — read them all.
-2. Fix anything real. CodeQL and Psalm are advisory and fail repo-wide on the
-   upload step because Code Scanning is not switched on for this repository;
-   that is a known, benign condition documented in the changelog, not a fault in
-   this change.
-3. `gh pr ready 473` — this triggers the automatic merge.
-4. After it merges: `git checkout alpha && git pull`, then delete
-   `claude/alpha-wip` locally and on GitHub.
+| Pull request into `alpha`, all checks green, merged | ✅ #473 |
+| Deploy to alpha | ✅ started automatically after the merge |
 
 ### Two decisions waiting on the owner
 
-1. **The minimum password length.** Existing sites may still require 8 while the
-   project believes 12. Migration 187 deliberately does not change it: a
-   leftover seed and a deliberate choice cannot be told apart. New installs are
-   correct, and `/help/admin` now warns administrators to check their own value.
-   Raise existing sites automatically, or leave it to them?
+1. **The minimum password length.** Existing sites may still require 8
+   characters while the project believes 12. Migration 187 deliberately does not
+   change it: a leftover seed and a deliberate choice cannot be told apart. New
+   installs are correct, and `/help/admin` now warns administrators to check
+   their own value. Raise existing sites automatically, or leave it to them?
 2. **What to work on next** — twelve ranked proposals in
-   `.claude/plans/proposed-next-work-2026-09-10.md`. The one I would press for
-   is a "check my portal" page for administrators, because almost every problem
-   found in this audit was invisible from inside the product.
+   `.claude/plans/proposed-next-work-2026-09-10.md`. The one worth pressing for
+   is **a "check my portal" page for administrators**, because almost every
+   problem found in this audit was invisible from inside the product.
+
+### Two things found late that are worth knowing
+
+- **#474 — no check has to pass before merging to `alpha`.** The only rules on
+  it are "cannot delete" and "cannot force-push". Automatic merging therefore
+  does not wait for anything; it has been merging on open for months. `main`
+  requires exactly one check, and it is **not** the PHP syntax gate the
+  project's own documentation calls "the only hard gate".
+- **#472 — 71 of the 209 tables have never been restorable from a backup.**
+  MySQL refuses the method used to empty a table when other tables point at it.
+  Nobody had noticed, which suggests restore has rarely been used in earnest —
+  worth knowing, because it is the safety net the upgrade process relies on.
+
+### Still true and still unfixed: the version number on `alpha`
+
+`Version Bump` and `Changelog` have not run on `alpha` since 7 July 2026. The
+merge just made will not have changed that. `alpha` still reports **1.4.0**
+while `beta` and `main` report 1.4.1. This is proposal number 1 and is about an
+hour's work — the cause is understood and the fix follows a pattern already
+proven in the same file.
 
 ### The four analysis agents that failed
 
-The deep audit was six sequential agents. Two finished (`01-inventory.md`,
-`02-core-schema.md`, in the session scratchpad under `analysis/`). The other
-four — documentation drift, GitHub issues, API drift, new-work proposals —
-**failed because the account hit its monthly spend limit** on 7 September. That
-work was done directly instead, which for issue verification is more reliable
-anyway.
+The deep audit was planned as six sequential agents. Two finished
+(`01-inventory.md`, `02-core-schema.md`, in the session scratchpad under
+`analysis/`). The other four — documentation drift, GitHub issues, API drift,
+new-work proposals — **failed because the account hit its monthly spend limit**
+on 7 September. That work was done directly instead, which for verifying issues
+against code is more reliable anyway.
 
 ## 1. The branch clean-up (done)
 
