@@ -81,8 +81,19 @@ rather than a fix.
 that stopped receiving security fixes in April 2026 — an owner decision: stay
 put, move hosting tier, or support other hosts.
 
+**PHP is settled.** A `phpinfo()` page from the server was shared on
+10 September 2026 showing `mysqlnd 8.5.5` — and mysqlnd's version number is
+PHP's own, because it is the driver bundled inside PHP. (Checked rather than
+assumed: a local PHP 8.5.10 reports `mysqlnd 8.5.10`.) So the server runs
+**PHP 8.5.5**, which is the target version. Nothing to do there.
+
+That same page does **not** reveal the database server version — `mysqlnd`
+describes the client library inside PHP, not the server it talks to. The same
+driver version appears whether the server is 5.7, 8.0, 8.4 or 9.x.
+
 **Quick to check:** the portal already reads and shows the database version on
-the admin dashboard. Look at the live site.
+the admin dashboard (`web/_apps/admin/index.php:133`) and on the health page.
+Sign in to the live site and look.
 
 Still true either way: no minimum database version is enforced, the automated
 test covers only MySQL 8.0.36, and MariaDB is not covered by any test here.

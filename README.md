@@ -140,7 +140,7 @@ Browser -> .htaccess -> index.php -> bootstrap.php -> Router::dispatch()
 
 | | What actually happens | What is covered by automated tests |
 | --- | --- | --- |
-| PHP | The installer's first screen checks for 8.4 or newer and hides "Continue" if it fails. **This can be bypassed** by going straight to a later step of the installer, so treat it as a warning rather than a barrier. | 8.4 only |
+| PHP | The installer's first screen checks for 8.4 or newer and hides "Continue" if it fails. **This can be bypassed** by going straight to a later step of the installer, so treat it as a warning rather than a barrier. The live server was confirmed on **8.5.5** in September 2026. | 8.4 only |
 | Database version | The version is **read and displayed** — on the admin dashboard, on the health page, and in every backup file. **Nothing acts on it.** There is no minimum, and no compatibility check. | MySQL 8.0.36 only |
 | MariaDB | — | **Not covered.** No MariaDB appears in any workflow or test configuration in this repository. |
 
