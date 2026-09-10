@@ -9,80 +9,59 @@ proceeds, so the session can be picked up at any point).
 
 ## Read this first — where we are right now
 
-**Updated 10 September 2026.**
+**Updated 10 September 2026.** Pull request **#473** is open as a DRAFT against
+`alpha`. It is a draft on purpose: `auto-merge-alpha.yml` merges non-draft alpha
+pull requests automatically, and this must not merge until the checks have been
+read. Marking it ready for review is what starts the merge.
 
 | Task | State |
 | --- | --- |
-| Audit and delete the six stale branches | ✅ Done — `.claude/plans/branch-audit-2026-09-07.md` |
-| Single work-in-progress branch, local clone realigned | ✅ Done — `claude/alpha-wip` |
-| Self-host Swagger UI + fix `/api-docs` | ✅ Done — commit `8f21094`, migration 185, issue #470 |
-| Install PHP locally + write the setup guide | ✅ Done — PHP 8.5.10 |
-| Reach three features that had no way in | ✅ Done — commit `6c01c47`, migration 186, issue #467 |
-| Dead menu links, demo-data hazard, unwired checks | ✅ Done — commit `82241bc`, issues #468 #469 #471 |
-| **Settings duplicate-rows fix** | 🔄 **Built and proven on MySQL 8.0.36; Codex round 1 found 6 HIGH, all fixed; round 2 pending** — issue #466 |
-| Codex review as a standing rule | ✅ Done — memory + `.claude/CLAUDE.md` |
-| GitHub issue sweep | 🔄 6 new (#466–#471), 6 existing updated (#47 #97 #107 #225 #273 #322) |
-| Update all documentation to match reality | ⏳ Queued |
-| Ranked list of proposed new work | ⏳ Queued |
-| One pull request into `alpha`, watch CI | ⏳ Last step |
+| Audit and delete the six stale branches | ✅ `.claude/plans/branch-audit-2026-09-07.md` |
+| Single work-in-progress branch, local clone realigned | ✅ `claude/alpha-wip` |
+| Self-host Swagger UI + fix `/api-docs` | ✅ `8f21094`, migration 185, closed #470 |
+| Install PHP locally + write the setup guide | ✅ PHP 8.5.10 |
+| Reach three features that had no way in | ✅ `6c01c47`, migration 186, closed #467 |
+| Dead menu links, demo-data hazard, unwired checks | ✅ `82241bc`, closed #468 #469 #471 |
+| Settings duplicated instead of saving | ✅ `df6e827`, migration 187, closed #466 |
+| Codex review as a standing rule | ✅ memory + `.claude/CLAUDE.md` |
+| GitHub issue sweep | ✅ 7 opened (#466–#472), 6 closed, 6 existing updated |
+| Documentation update | ✅ counts, README, FEATURES, DEV_NOTES, `/help/admin` |
+| Ranked list of proposed next work | ✅ `.claude/plans/proposed-next-work-2026-09-10.md` |
+| Pull request into `alpha` | 🔄 **#473 open as draft; checks running** |
+| Watch checks to green, then mark ready | ⏳ **next action** |
+| Realign local clone onto the updated `alpha` | ⏳ after merge |
+
+### The next action, precisely
+
+1. `gh pr checks 473` — read them all.
+2. Fix anything real. CodeQL and Psalm are advisory and fail repo-wide on the
+   upload step because Code Scanning is not switched on for this repository;
+   that is a known, benign condition documented in the changelog, not a fault in
+   this change.
+3. `gh pr ready 473` — this triggers the automatic merge.
+4. After it merges: `git checkout alpha && git pull`, then delete
+   `claude/alpha-wip` locally and on GitHub.
+
+### Two decisions waiting on the owner
+
+1. **The minimum password length.** Existing sites may still require 8 while the
+   project believes 12. Migration 187 deliberately does not change it: a
+   leftover seed and a deliberate choice cannot be told apart. New installs are
+   correct, and `/help/admin` now warns administrators to check their own value.
+   Raise existing sites automatically, or leave it to them?
+2. **What to work on next** — twelve ranked proposals in
+   `.claude/plans/proposed-next-work-2026-09-10.md`. The one I would press for
+   is a "check my portal" page for administrators, because almost every problem
+   found in this audit was invisible from inside the product.
 
 ### The four analysis agents that failed
 
 The deep audit was six sequential agents. Two finished (`01-inventory.md`,
-`02-core-schema.md`, both in the session scratchpad under `analysis/`). The
-other four — documentation drift, GitHub issues, API drift, and new-work
-proposals — **failed because the account hit its monthly spend limit** on
-7 September. That work is being done directly instead of re-spawning them.
-
-### The Codex review loop — what it caught
-
-New standing rule: every change gets a second opinion from Codex before it is
-committed (`codex exec --skip-git-repo-check "<brief>"`, with standard input
-closed — otherwise it hangs waiting for more).
-
-**Four rounds were needed on the settings fix.** Every round found real
-problems in work that had already passed the PHP syntax check, all eleven audit
-scripts, and the full end-to-end database test against real MySQL 8.0.36. Worth
-remembering: those checks catch mechanical faults, not wrong thinking.
-
-**Round 1 — six HIGH, two of which destroyed data:**
-
-1. The backup fix would have wiped every timestamp. It filtered columns on
-   `EXTRA LIKE '%GENERATED%'`; MySQL uses that same word for ordinary columns
-   declared `DEFAULT CURRENT_TIMESTAMP`, so every `createdAt` and `updatedAt`
-   across 209 tables would have been silently dropped from every backup.
-   Now tests `GENERATION_EXPRESSION`.
-2. The clean-up would have deleted saved payment credentials. It kept "the
-   newest copy", but `web/_apps/payments/save.php:38` and the captcha, SMS,
-   translation and integration screens pick a row with an unordered
-   `SELECT … LIMIT 1` and update that one — in practice the oldest.
-3. The corrections overrode deliberate choices (no `siteID IS NULL`
-   restriction). Both value-changing steps removed; seeds fixed instead.
-4. Loading `full_schema.sql` onto an existing database recorded 187 as done
-   without applying it, permanently preventing the fix.
-5. A failed restore destroyed the data it was protecting (`TRUNCATE` commits
-   and cannot be undone).
-6. Migration 021 would have reset an administrator's chosen date format.
-
-**Round 2 — four more HIGH.** Migration 012 would have reset the chosen
-language; `SIGNAL` is not allowed in these files (MySQL error 1295, confirmed);
-the "has this been edited?" test ignored capitalisation; and **every migration
-from 180 onwards reported failure after succeeding**, because each records
-itself and then `Migrator::runOne()` tried to record it again against a
-uniqueness rule.
-
-**Round 3 — told me to undo my own work, and was right.** Swapping `TRUNCATE`
-for `DELETE` (the round-1 fix) set off the database's automatic tidying of
-related records: restoring expense claims would delete every claim line.
-Switching that checking off stopped the cascade but allowed a restore to commit
-records pointing at nothing, and report success — a silent failure worse than
-the loud one. **The response was to revert, not patch.** Redesigning restore
-does not belong in a settings change, and nothing references `tblSettings`, so
-the simple approach works for the only table this needed. The three genuine
-restore faults are now **issue #472** — including that 71 of the 209 tables have
-never been restorable at all.
-
-**Round 4** — running at the time of writing.
+`02-core-schema.md`, in the session scratchpad under `analysis/`). The other
+four — documentation drift, GitHub issues, API drift, new-work proposals —
+**failed because the account hit its monthly spend limit** on 7 September. That
+work was done directly instead, which for issue verification is more reliable
+anyway.
 
 ## 1. The branch clean-up (done)
 
