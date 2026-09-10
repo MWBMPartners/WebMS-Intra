@@ -438,9 +438,44 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         is_file(INSTALL_LOCK_FILE)
                     );
                     $_SESSION['install_db_state'] = $state;
+
+                    // 🔐 THERE IS ALREADY A PORTAL HERE. WHO IS ASKING?
+                    //
+                    //    Everything from this point on either upgrades an
+                    //    existing installation or destroys it. Neither is
+                    //    something a passer-by should be able to set off.
+                    //
+                    //    On a FRESH install there is nobody to check - no users
+                    //    exist yet - and that is the only case where this
+                    //    question cannot be asked. So it is asked in exactly the
+                    //    cases where it CAN be: when tables are already there.
+                    //
+                    //    The check is for an UMBRELLA administrator, not merely
+                    //    "an administrator". A site administrator looks after one
+                    //    organisation; wiping or reshaping the database affects
+                    //    every organisation on the installation, and everybody's
+                    //    data. On an ordinary single-organisation portal the
+                    //    owner is the umbrella administrator anyway.
+                    //
+                    //    Done here with a plain query rather than the portal's
+                    //    usual helpers, because this wizard deliberately runs
+                    //    without the portal's start-up code - that is what lets
+                    //    it work on a broken installation.
+                    if ($state['state'] !== DB_STATE_EMPTY) {
+                        $whoIsAsking = installElevatedAdminCheck($testConn);
+                        if ($whoIsAsking !== '') {
+                            $testConn->close();
+                            $error = $whoIsAsking;
+                            $step  = 2;
+                        }
+                    }
+
                     $testConn->close();
 
-                    if ($state['state'] === DB_STATE_EMPTY) {
+                    if ($error !== '') {
+                        // The gate above refused. Fall through to redraw step 2
+                        // with the explanation; change nothing.
+                    } elseif ($state['state'] === DB_STATE_EMPTY) {
                         // Fresh install — straight to schema install.
                         $_SESSION['install_action'] = 'fresh';
                         header('Location: ?step=3');
@@ -1031,6 +1066,76 @@ function installClearDirectory(string $dir): void
         }
         @unlink($path);
     }
+}
+
+/**
+ * 🔐 Is the person at the keyboard allowed to change an existing portal?
+ *
+ * Called only when a portal is ALREADY installed. From that point the wizard can
+ * only upgrade the database or destroy it, and neither should be possible for
+ * somebody who simply found the address.
+ *
+ * Deliberately written with a plain database query rather than the portal's own
+ * sign-in helpers. This wizard runs WITHOUT the portal's start-up code, on
+ * purpose - that is exactly what lets it work when the portal itself is too
+ * broken to start. Reaching for those helpers here would mean the wizard could
+ * only run when the thing it exists to repair is already working.
+ *
+ * It reads the session the portal itself writes, so somebody who signed in
+ * normally is recognised.
+ *
+ * @param \mysqli $conn An open connection to the portal's database.
+ *
+ * @return string An empty string when the person may continue. Otherwise a
+ *                sentence explaining, in plain words, why not.
+ */
+function installElevatedAdminCheck(\mysqli $conn): string
+{
+    $userId = (int) ($_SESSION['user_id'] ?? 0);
+
+    if ($userId <= 0) {
+        return 'There is already a portal installed on this database, so this '
+             . 'wizard can only be used to upgrade it or to wipe it and start '
+             . 'again. Both are serious, so you have to be signed in first. '
+             . 'Please sign in to the portal as an umbrella administrator, then '
+             . 'come back to this page. Nothing has been changed.';
+    }
+
+    try {
+        $stmt = $conn->prepare(
+            'SELECT isRootAdmin, isActive FROM tblUsers WHERE userID = ? LIMIT 1'
+        );
+        if ($stmt === false) {
+            return 'This portal\'s list of users could not be read, so there is no '
+                 . 'way to confirm you are allowed to do this. Nothing has been '
+                 . 'changed.';
+        }
+        $stmt->bind_param('i', $userId);
+        $stmt->execute();
+        $row = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+    } catch (\mysqli_sql_exception $e) {
+        return 'This portal\'s list of users could not be read, so there is no way '
+             . 'to confirm you are allowed to do this. Nothing has been changed.';
+    }
+
+    if ($row === null) {
+        return 'The account you are signed in with no longer exists on this '
+             . 'portal. Nothing has been changed.';
+    }
+    if ((string) ($row['isActive'] ?? '0') !== '1') {
+        return 'The account you are signed in with has been switched off, so it '
+             . 'cannot make changes of this kind. Nothing has been changed.';
+    }
+    if ((string) ($row['isRootAdmin'] ?? '0') !== '1') {
+        return 'You are signed in, but this needs an UMBRELLA administrator - the '
+             . 'person who looks after the whole installation, rather than one '
+             . 'organisation within it. Upgrading or wiping the database affects '
+             . 'everybody using this portal, which is why it is kept to that one '
+             . 'role. Nothing has been changed.';
+    }
+
+    return '';
 }
 
 function installGetDb(): ?mysqli

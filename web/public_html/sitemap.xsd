@@ -1,0 +1,142 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  =============================================================================
+  The rules a sitemap file has to follow
+  =============================================================================
+  This is the official description of the sitemap format, published by
+  sitemaps.org and used unchanged by Google, Bing and the others. It is kept
+  here, beside the page that produces our sitemap, for two reasons:
+
+    1. It is the definition. Anybody changing web/public_html/sitemap.php can
+       read this to see exactly what is and is not allowed, without going
+       looking on the internet for it.
+    2. It is used as a test. tools/sitemap-selftest.php checks what our page
+       actually produces against these rules, so a mistake is caught here rather
+       than by a search engine quietly giving up on us.
+
+  A schema nobody ever runs is a document, not a check. This one is run.
+
+  Two things worth knowing when reading it:
+
+    * <changefreq> and <priority> are part of the standard, and we deliberately
+      do not produce either. Every major search engine ignores them - Google has
+      said so publicly - so they add bytes to every entry and imply a precision
+      that nothing honours.
+
+    * <lastmod> uses the date format from the W3C's "Date and Time Formats"
+      note. PHP's date('c') produces exactly that, which is what our page uses.
+
+  Source: https://www.sitemaps.org/schemas/sitemap/0.9/sitemap.xsd
+  Licence: Creative Commons Attribution-ShareAlike 2.5 (sitemaps.org)
+  =============================================================================
+-->
+<xsd:schema xmlns:xsd="http://www.w3.org/2001/XMLSchema"
+            xmlns:sitemap="http://www.sitemaps.org/schemas/sitemap/0.9"
+            targetNamespace="http://www.sitemaps.org/schemas/sitemap/0.9"
+            elementFormDefault="qualified">
+
+  <xsd:element name="urlset">
+    <xsd:annotation>
+      <xsd:documentation>
+        The whole file. Holds one entry per page.
+      </xsd:documentation>
+    </xsd:annotation>
+    <xsd:complexType>
+      <xsd:sequence>
+        <xsd:element name="url" type="sitemap:tUrl" minOccurs="1" maxOccurs="unbounded"/>
+      </xsd:sequence>
+    </xsd:complexType>
+  </xsd:element>
+
+  <xsd:complexType name="tUrl">
+    <xsd:annotation>
+      <xsd:documentation>
+        One page. Only the address is required; everything else is optional.
+      </xsd:documentation>
+    </xsd:annotation>
+    <xsd:all>
+
+      <xsd:element name="loc" type="sitemap:tLocation" minOccurs="1" maxOccurs="1">
+        <xsd:annotation>
+          <xsd:documentation>
+            The page's full web address, including https:// and the site name.
+            A path on its own is not allowed - whatever reads this file has no
+            way to work out the rest.
+          </xsd:documentation>
+        </xsd:annotation>
+      </xsd:element>
+
+      <xsd:element name="lastmod" type="sitemap:tLastmod" minOccurs="0" maxOccurs="1">
+        <xsd:annotation>
+          <xsd:documentation>
+            When the page last changed. Lets a search engine skip pages it has
+            already read and which have not moved on since.
+          </xsd:documentation>
+        </xsd:annotation>
+      </xsd:element>
+
+      <xsd:element name="changefreq" type="sitemap:tChangeFreq" minOccurs="0" maxOccurs="1">
+        <xsd:annotation>
+          <xsd:documentation>
+            How often the page is expected to change. Allowed by the standard,
+            ignored in practice by every major search engine. We do not produce
+            it.
+          </xsd:documentation>
+        </xsd:annotation>
+      </xsd:element>
+
+      <xsd:element name="priority" type="sitemap:tPriority" minOccurs="0" maxOccurs="1">
+        <xsd:annotation>
+          <xsd:documentation>
+            How important this page is compared with others on the same site,
+            from 0.0 to 1.0. Allowed by the standard, ignored in practice. We do
+            not produce it.
+          </xsd:documentation>
+        </xsd:annotation>
+      </xsd:element>
+
+    </xsd:all>
+  </xsd:complexType>
+
+  <xsd:simpleType name="tLocation">
+    <xsd:annotation>
+      <xsd:documentation>
+        A web address, at most 2048 characters.
+      </xsd:documentation>
+    </xsd:annotation>
+    <xsd:restriction base="xsd:anyURI">
+      <xsd:minLength value="12"/>
+      <xsd:maxLength value="2048"/>
+    </xsd:restriction>
+  </xsd:simpleType>
+
+  <xsd:simpleType name="tLastmod">
+    <xsd:annotation>
+      <xsd:documentation>
+        A date, optionally with a time. Either a plain date (2026-09-11) or a
+        full date and time with a time zone (2026-09-11T14:30:00+01:00).
+      </xsd:documentation>
+    </xsd:annotation>
+    <xsd:union memberTypes="xsd:date xsd:dateTime"/>
+  </xsd:simpleType>
+
+  <xsd:simpleType name="tChangeFreq">
+    <xsd:restriction base="xsd:string">
+      <xsd:enumeration value="always"/>
+      <xsd:enumeration value="hourly"/>
+      <xsd:enumeration value="daily"/>
+      <xsd:enumeration value="weekly"/>
+      <xsd:enumeration value="monthly"/>
+      <xsd:enumeration value="yearly"/>
+      <xsd:enumeration value="never"/>
+    </xsd:restriction>
+  </xsd:simpleType>
+
+  <xsd:simpleType name="tPriority">
+    <xsd:restriction base="xsd:decimal">
+      <xsd:minInclusive value="0.0"/>
+      <xsd:maxInclusive value="1.0"/>
+    </xsd:restriction>
+  </xsd:simpleType>
+
+</xsd:schema>

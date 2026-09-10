@@ -11,7 +11,8 @@
  * This file bootstraps the portal normally (requires a working config) and
  * uses the existing Migrator class to run pending migrations.
  *
- * Access: Admin only — uses the standard App::isAdmin() check.
+ * Access: UMBRELLA administrators only. This reshapes the database for the
+ *         whole installation, so a site administrator is not enough.
  *
  * @package   Portal\Install
  * @author    MWBM Partners Ltd (t/a MWservices)
@@ -34,7 +35,21 @@ use Portal\Core\Router;
 
 // Require authentication and admin access
 Auth::requireLogin();
-if (App::isAdmin() === false) {
+
+// 🔐 UMBRELLA ADMINISTRATORS ONLY - not simply "an administrator".
+//
+//    This page changes the shape of the database for the WHOLE installation.
+//    On a portal shared by several organisations, an administrator of one of
+//    them has no business reshaping the database underneath all the others.
+//
+//    App::isAdmin() would have allowed exactly that: it returns true for a site
+//    administrator, and for the older plain "admin" flag, as well as for an
+//    umbrella administrator. App::isUmbrellaAdmin() is the narrow check, and it
+//    is the right one here.
+//
+//    On the ordinary single-organisation install the owner IS the umbrella
+//    administrator, so nothing is taken away from anybody in practice.
+if (App::isUmbrellaAdmin() === false) {
     Router::renderError(403);
     return;
 }

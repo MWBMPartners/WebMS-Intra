@@ -8567,3 +8567,20 @@ WHERE `routeKey` = 'widget'
 
 INSERT INTO `tblMigrations` (`filename`) VALUES ('189_unreachable_admin_and_widget.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- ── from 190_sitemap_and_dynamic_robots.sql ───────────────────────────────
+-- A list of pages for search engines (/sitemap.xml), and a robots.txt that is
+-- generated from the site's own settings instead of being a fixed file.
+--
+-- The fixed file said "no crawler may look at anything here", which a setting
+-- could not change - so a site that opted in to being listed said one thing on
+-- every page and the opposite in robots.txt, and the opt-in silently did
+-- nothing. Both addresses are public, because a crawler cannot sign in.
+
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('sitemap.xml', 'sitemap.php', 0),
+    ('robots.txt',  'robots.php',  0)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('190_sitemap_and_dynamic_robots.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
