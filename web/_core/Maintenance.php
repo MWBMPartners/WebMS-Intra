@@ -81,6 +81,23 @@ class Maintenance
         'logout',
         'forgot-password',
         'reset-password',
+
+        // 🔐 The second step of signing in, for anybody using a code from their
+        //    phone. Leaving this out is a half-fix that looks like a whole one:
+        //    the administrator reaches the sign-in page, types the right
+        //    password, and is then sent here — straight into the wall the fix
+        //    was supposed to remove. Found by listing every address involved in
+        //    signing in and checking each one, rather than by assuming the
+        //    sign-in page was the whole journey.
+        //
+        //    Three separate places send people here after a correct password:
+        //    auth/login/index.php, auth/login/webauthn.php and Auth.php.
+        //
+        //    Only `verify` is listed. Setting up two-factor and turning it OFF
+        //    are account housekeeping, not part of getting back in, and
+        //    `auth/2fa/disable` in particular has no business being reachable
+        //    while the portal is closed.
+        'auth/2fa/verify',
         'admin/upgrade',
         'admin/maintenance',
         // 🎯 Static asset subdirs ONLY (#393) — deliberately NOT a bare
