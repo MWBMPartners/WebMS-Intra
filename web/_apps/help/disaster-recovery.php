@@ -49,6 +49,21 @@ must-know shortcuts.</p>
         <p class="small">Toggle maintenance mode immediately to show a friendly "we'll be back" page.</p>
         <a class="btn btn-warning btn-sm" href="/admin/maintenance/health">Maintenance mode</a>
     </div></div></div>
+    <div class="col-md-4"><div class="card h-100 border-info"><div class="card-body">
+        <h5><i class="fa-solid fa-key me-1"></i>You can still get back in</h5>
+        <p class="small">
+            While maintenance mode is on, everybody else sees the holding page &mdash;
+            but <strong>signing in still works</strong>, and so does resetting a
+            forgotten password. If you use a code from your phone or a passkey, those
+            work too.
+        </p>
+        <p class="small mb-0">
+            Worth knowing because maintenance mode also switches itself on by
+            itself, whenever the portal's files are newer than its database. That
+            happens on every update. If it catches you signed out, you are not
+            stuck.
+        </p>
+    </div></div></div>
     <div class="col-md-4"><div class="card h-100"><div class="card-body">
         <h5><i class="fa-solid fa-2 me-1"></i>Diagnose</h5>
         <p class="small">Check probes, error log, and activity.</p>
