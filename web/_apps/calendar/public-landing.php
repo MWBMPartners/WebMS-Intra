@@ -40,7 +40,20 @@ $siteId = Site::id();
 $stmt = $mysqli->prepare(
     'SELECT eventID, eventName, eventSlug, description, startDateTime, endDateTime, '
     . '       locationName, locationAddress, status, capacityCount '
-    . 'FROM tblEvents WHERE eventSlug = ? AND siteID = ? AND isDeleted = 0 AND status = "published" LIMIT 1'
+    . 'FROM tblEvents WHERE eventSlug = ? AND siteID = ? AND isDeleted = 0 AND status = "published" '
+        // 🔒 AND it must be marked public. This page needs no sign-in, so
+        //    without this line an INTERNAL event - a leadership meeting, a
+        //    pastoral visit - would be shown in full to anybody who guessed or
+        //    was given its address.
+        //
+        //    This page was unreachable until 11 September 2026, because the part
+        //    of the router that loads it was never handing it a database
+        //    connection. Fixing that made the page work, and in the same moment
+        //    would have made this gap live. The identical gap was found in the
+        //    calendar widget the day before: a page nobody can open is a page
+        //    nobody has checked, so making one reachable is a security change,
+        //    not a repair.
+        . '  AND isPublic = 1 LIMIT 1'
 );
 $stmt->bind_param('si', $slug, $siteId);
 $stmt->execute();

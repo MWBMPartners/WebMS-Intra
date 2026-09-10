@@ -464,7 +464,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     if ($state['state'] !== DB_STATE_EMPTY) {
                         $whoIsAsking = installElevatedAdminCheck($testConn);
                         if ($whoIsAsking !== '') {
-                            $testConn->close();
+                            // 🚫 THROW THE CREDENTIALS AWAY, not just the page.
+                            //
+                            //    Refusing to show the next page is not enough.
+                            //    The database details had already been kept in
+                            //    the session by the lines above, and the step
+                            //    that actually builds or wipes the database
+                            //    reads them from there. So somebody refused here
+                            //    could simply send the next step directly and it
+                            //    would run, using the details this step had
+                            //    helpfully stored for them.
+                            //
+                            //    Removing them means the refused visitor has
+                            //    nothing to carry forward: every later step
+                            //    finds no connection details and stops.
+                            unset($_SESSION['install_db'], $_SESSION['install_db_state'],
+                                  $_SESSION['install_action']);
+
+                            // Deliberately NOT closed here. The line below closes
+                            // it on every path, and closing a mysqli connection
+                            // twice throws an Error - which is not a
+                            // mysqli_sql_exception, so the catch below would miss
+                            // it and the wizard would die with a blank page
+                            // instead of showing the explanation.
                             $error = $whoIsAsking;
                             $step  = 2;
                         }

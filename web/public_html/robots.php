@@ -155,7 +155,29 @@ if ($allowAiIndexing === false) {
 }
 foreach (AI_CRAWLERS as $bot) {
     echo 'User-agent: ' . $bot . "\n";
-    echo 'Disallow: ' . ($allowAiIndexing === true ? '' : '/') . "\n\n";
+
+    if ($allowAiIndexing === false) {
+        echo "Disallow: /\n\n";
+        continue;
+    }
+
+    // ⚠️ A crawler named in its own group does NOT also follow the
+    //    "User-agent: *" group further down. That is how robots.txt works: a
+    //    crawler obeys the most specific group that names it, and ignores the
+    //    rest entirely.
+    //
+    //    So simply allowing these bots here would have let them into the
+    //    members' areas, the addresses that receive forms, and the background
+    //    jobs - all of which the general group carefully keeps everybody else
+    //    out of. Permission to read the public pages is not permission to read
+    //    everything.
+    //
+    //    The exclusions therefore have to be repeated inside each permitted
+    //    group.
+    foreach (ALWAYS_DISALLOWED as $path) {
+        echo 'Disallow: ' . $path . "\n";
+    }
+    echo "Allow: /\n\n";
 }
 
 // -----------------------------------------------------------------------------
