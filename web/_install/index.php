@@ -447,15 +447,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         exit();
                     }
                     if ($state['state'] === DB_STATE_INSTALLED_CURRENT) {
-                        // Lock file + tables already at code version. The
-                        // top-of-file lockout would have caught the lock
-                        // file; this path means the lock was deleted but
-                        // the DB is already current. Re-write the lock
-                        // and redirect to portal.
-                        @touch(INSTALL_LOCK_FILE);
-                        header('Location: /');
+                        // 🔄 Already installed, and already at this exact
+                        //    version. There is nothing to upgrade.
+                        //
+                        //    This used to write the lock file back and bounce
+                        //    the visitor straight to the portal, which was
+                        //    unhelpful in the one situation where somebody has
+                        //    deliberately come to the installer: they want to
+                        //    start again from nothing.
+                        //
+                        //    So show them the choice page instead. It offers
+                        //    going back to the portal, and it offers wiping
+                        //    everything and reinstalling - behind the same
+                        //    confirmation as every other destructive path here.
+                        //    Nothing is decided for them.
+                        header('Location: ?step=2.5');
                         exit();
                     }
+
                     // PARTIAL, INSTALLED_UPGRADE, or FRESH_REQUIRED →
                     // render the step-2.5 choice page.
                     header('Location: ?step=2.5');
@@ -553,6 +562,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $rs->free();
                     }
                     $db->query('SET FOREIGN_KEY_CHECKS = 1');
+
+                    // 🗑️ Now the files. Emptying the database on its own
+                    //    leaves every uploaded photograph, document, poster and
+                    //    receipt sitting on the disk - with nothing left in the
+                    //    database that refers to them.
+                    //
+                    //    That is worse than untidy. Those files hold real
+                    //    personal information: photographs of people, scanned
+                    //    receipts, documents about members. After a wipe there
+                    //    is no record they exist, so nobody knows to remove
+                    //    them, and no "delete my data" request can ever reach
+                    //    them because nothing points at them any more.
+                    //
+                    //    So a wipe means a wipe. Anybody who has reached this
+                    //    point has already typed their own site's address to
+                    //    confirm they mean it.
+                    //
+                    //    Backups in _backups/ are deliberately NOT touched. If
+                    //    somebody wipes the wrong installation, the snapshots
+                    //    are the only way back, and destroying them at the same
+                    //    moment would remove the last line of defence.
+                    $uploadsDir = INSTALL_ROOT . DIRECTORY_SEPARATOR . '_uploads';
+                    if (is_dir($uploadsDir) === true) {
+                        installClearDirectory($uploadsDir);
+                    }
                 } catch (\mysqli_sql_exception $e) {
                     $error = 'Drop-and-rebuild failed during table drop: '
                            . $e->getMessage();
@@ -951,6 +985,54 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
  *
  * @return mysqli|null
  */
+/**
+ * 🗑️ Empty a folder, leaving the folder itself in place.
+ *
+ * Used when somebody has asked to wipe an installation and start again. It
+ * removes what is inside `_uploads/` so that no orphaned personal information
+ * is left on the disk.
+ *
+ * Two deliberate safety measures, because this deletes real files:
+ *
+ *   - It refuses to follow a symbolic link OUT of the folder it was given. A
+ *     link pointing somewhere else entirely is unlinked, never followed. Without
+ *     that, one stray link could turn "empty the uploads folder" into something
+ *     far worse.
+ *   - It never removes the folder it was given, only the contents. The portal
+ *     expects that folder to exist.
+ *
+ * @param string $dir The folder to empty. Must already exist.
+ *
+ * @return void
+ */
+function installClearDirectory(string $dir): void
+{
+    $entries = @scandir($dir);
+    if (is_array($entries) === false) {
+        return;
+    }
+
+    foreach ($entries as $entry) {
+        if ($entry === '.' || $entry === '..') {
+            continue;
+        }
+        $path = $dir . DIRECTORY_SEPARATOR . $entry;
+
+        // A link is removed as a link. It is never followed, so a link
+        // pointing outside this folder cannot lead the deletion astray.
+        if (is_link($path) === true) {
+            @unlink($path);
+            continue;
+        }
+        if (is_dir($path) === true) {
+            installClearDirectory($path);
+            @rmdir($path);
+            continue;
+        }
+        @unlink($path);
+    }
+}
+
 function installGetDb(): ?mysqli
 {
     $creds = $_SESSION['install_db'] ?? null;
@@ -1843,6 +1925,10 @@ $pageTitle = 'Install — ' . ($stepTitles[$step] ?? $INSTALL_PRODUCT_NAME);
             $isUpgrade  = ($stateCode === DB_STATE_INSTALLED_UPGRADE);
             $isPartial  = ($stateCode === DB_STATE_PARTIAL);
             $isForce    = ($stateCode === DB_STATE_FRESH_REQUIRED);
+            // 🔄 Already installed, and already at exactly this version. There
+            //    is nothing to upgrade, so the only reasons to be here are to go
+            //    back to the portal or to start again from nothing.
+            $isCurrent  = ($stateCode === DB_STATE_INSTALLED_CURRENT);
             $policyArr  = (array) (require INSTALL_ROOT
                 . DIRECTORY_SEPARATOR . '_install'
                 . DIRECTORY_SEPARATOR . 'upgrade-policy.php');
@@ -1850,7 +1936,9 @@ $pageTitle = 'Install — ' . ($stepTitles[$step] ?? $INSTALL_PRODUCT_NAME);
                 ? ($_SERVER['HTTP_HOST'] ?? 'DROP')
                 : 'DROP';
             ?>
-            <h2 class="h5 mb-3">Existing Database Detected</h2>
+            <h2 class="h5 mb-3"><?php echo $isCurrent === true
+                ? 'This portal is already installed and up to date'
+                : 'Existing Database Detected'; ?></h2>
 
             <?php
             // 🛢️ Same database version panel as step 3 — shown here too, because
@@ -1861,7 +1949,29 @@ $pageTitle = 'Install — ' . ($stepTitles[$step] ?? $INSTALL_PRODUCT_NAME);
                 . DIRECTORY_SEPARATOR . 'db_server_banner.php';
             ?>
 
-            <?php if ($isUpgrade === true): ?>
+            <?php if ($isCurrent === true): ?>
+                <div class="alert alert-success">
+                    <strong>Everything is already up to date.</strong>
+                    This portal is installed at version
+                    <code><?php echo htmlspecialchars((string) $installedV, ENT_QUOTES, 'UTF-8'); ?></code>,
+                    which is the same version as the files on the server. There is
+                    nothing to upgrade.
+                </div>
+                <p>
+                    You have two choices. Most people want the first one.
+                </p>
+                <ul>
+                    <li>
+                        <strong>Go back to the portal.</strong> Nothing is changed.
+                        This is almost certainly what you want.
+                    </li>
+                    <li>
+                        <strong>Wipe everything and install again from nothing.</strong>
+                        This is for starting over on a test installation, or before
+                        handing a portal to somebody else. It cannot be undone.
+                    </li>
+                </ul>
+            <?php elseif ($isUpgrade === true): ?>
                 <div class="alert alert-info">
                     <strong>This portal is already installed</strong> at version
                     <code><?php echo htmlspecialchars((string) $installedV, ENT_QUOTES, 'UTF-8'); ?></code>.

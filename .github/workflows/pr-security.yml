@@ -285,6 +285,17 @@ jobs:
             add_section "Addresses hidden by a real file or folder in the web root (the portal never runs)" "$SHADOW"
           fi
 
+          # 10c) Web addresses ending in .php. Broken AND a giveaway: .htaccess
+          #      answers 404 for every one of them, so such a link simply does
+          #      not work, while the page it sits on looks perfectly normal.
+          #      Caught three live Expenses forms (submit, approve, treasury)
+          #      that would have shown "page not found" on Save, and the upgrade
+          #      page redirecting to a 404 on an expired form token.
+          PHPURL=$(python3 tools/audit-checks/check_no_php_in_urls.py 2>&1 || true)
+          if echo "$PHPURL" | grep -q '•'; then
+            add_section "Web addresses ending in .php (broken, and they reveal what the site is built with)" "$PHPURL"
+          fi
+
           # 11) Settings key consistency (catches the class #203/#208 were
           #     filed under; both turned out to be FP but this script
           #     walks the entire schema so it won't repeat the agent's miss)

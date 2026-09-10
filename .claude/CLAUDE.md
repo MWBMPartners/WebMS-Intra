@@ -232,7 +232,7 @@ codex exec --skip-git-repo-check "<what you want reviewed>"
   MySQL 8.0, would anything here break on shared hosting with no command line.
 
 **When to run it.** After the work is written and the mechanical checks pass
-(`php -l`, the twelve scripts in `tools/audit-checks/`, and the end-to-end
+(`php -l`, the thirteen scripts in `tools/audit-checks/`, and the end-to-end
 migration harness where the database is involved), but **before committing**.
 
 **How to treat the result.** As a second opinion, not a verdict. Check each
@@ -268,6 +268,59 @@ immediately.
 back to Opus only when Fable is unavailable, and put the fallback in the script
 rather than deciding by hand. Implementation stays on Sonnet or Haiku — or Opus
 when the work is genuinely complex.
+
+## Never put ".php" in a web address (STANDING RULE, all projects)
+
+Links, form targets, redirects and background requests use the **clean address**
+the portal registers, never the file that answers it.
+
+    /expenses/submit/save          yes
+    /expenses/submit/save.php      no
+
+Two reasons. It tells a stranger what the site is built with, which narrows down
+for them which weaknesses are worth trying — a free advantage, given away for
+nothing. And **in this portal such an address does not work at all**:
+`.htaccess` answers 404 for every address ending in `.php`, except the three
+pages that genuinely live in the web root (`/index.php`, `/error.php`,
+`/api-docs/index.php`).
+
+That second point is not theoretical. On 11 September 2026 this rule immediately
+uncovered **three live Expenses forms** — submit, approve and treasury — every
+one posting to an address ending in `.php`. Filling in a claim and pressing Save
+would have produced "page not found". The correct addresses were already
+registered and working; the forms simply named the wrong ones. It also found the
+database upgrade page redirecting to a 404 whenever a form token expired,
+stranding an administrator half way through an upgrade.
+
+Nothing else caught it, because every file existed and every address was
+registered. The mistake was in what the pages pointed AT.
+
+`tools/audit-checks/check_no_php_in_urls.py` now checks this on every pull
+request.
+
+## Comment everything, in every language (STANDING RULE, all projects)
+
+Detailed comments in HTML, PHP, CSS, JavaScript, XML, JSON and SQL. Specifically:
+
+- **Explain the WHY, not the what.** "This runs after the save, because before
+  the save the row has no identity number yet" beats "increments the counter".
+- **Record what was tried and rejected.** The most valuable comment is often
+  "this used to do X, which was wrong because Y" — it stops the next person
+  reintroducing the fault, or tidying away something load-bearing.
+- **Say what code CANNOT do** where that is not obvious. An overstated guarantee
+  is worse than none.
+- **JSON has no comments.** Never put `//` in a `.json` file — it stops being
+  valid JSON. Put the explanation in the schema instead, where JSON Schema gives
+  you `description` on every property and `$comment` for maintainer notes.
+
+## A schema for every JSON and XML format (STANDING RULE, all projects)
+
+Where this project produces or consumes JSON or XML, the schema describing it
+lives beside it: a JSON Schema file (`*.schema.json`) or an XSD. Give every
+property a `description` — the schema is the documentation as well as the
+validator, which is exactly why the descriptions matter. Wire the validation
+into a check so it actually runs; a schema nothing executes is a document, not a
+check.
 
 ## Code Style (MUST FOLLOW)
 
@@ -499,7 +552,7 @@ and the safety of every multi-step database change in the portal.
   = forever) for a future auto-purge cron. Migration 182: 3 new tables
   (`tblForms`/`tblFormFields`/`tblFormResponses`), 3 settings seeds, 15
   route seeds (13 protected + 2 public, no `api/*` rows — ApiRouter trap).
-  All 12 audit checks green, `php -l` clean on every touched file.
+  All 13 audit checks green, `php -l` clean on every touched file.
 - **`claude/backlog150-groups`** (branched off `alpha`) — issue #150: new
   Small Groups app (`web/_apps/small-groups/`, slug `small-groups`) —
   groups/classes register for Sabbath School classes, home groups, Bible
@@ -548,7 +601,7 @@ and the safety of every multi-step database change in the portal.
   (invisible to that checker's FROM-anchored regex) — documented inline at
   each call site since the same shape will recur for any future table
   whose name embeds a bare SQL keyword. New help page (`/help/small-groups`)
-  + help-index card. All 12 audit checks green, `php -l` clean on every
+  + help-index card. All 13 audit checks green, `php -l` clean on every
   touched file, zero raw `<table>` (portal-data-list throughout).
 - **`claude/backlog-pwa-brand`** (branched off `alpha`) — two small,
   low-risk backlog finishers, one PR: **#141 residual** (the push half
@@ -618,7 +671,7 @@ and the safety of every multi-step database change in the portal.
   175, #234's shared-mailbox took 176): 3 additive `tblPushSubscriptions`
   columns (dead-subscription pruning), settings seeds, 4 route seeds, no
   new tables (reuses `tblUserReminderLog` / `tblEventReminderLog` for
-  dedupe). All 12 audit checks green, `php -l` clean on every touched file.
+  dedupe). All 13 audit checks green, `php -l` clean on every touched file.
 - **`claude/gap128-oos`** (branched off `alpha`) — gap #128 residual
   (re-scoped #128 "Order of Service planner with iHymns integration"):
   service-plans (#262/#300) + Worship (#308/#355) already covered
@@ -712,7 +765,7 @@ and the safety of every multi-step database change in the portal.
   surface. Kids/Care/Visitors hard-excluded, verified by grep (zero
   matches). `UserCreate`/`UserUpdate` API schemas document that member
   coordinates/W3W are never readable or writable via the REST API in any
-  mode. All 12 audit checks green, `php -l` clean on every touched file.
+  mode. All 13 audit checks green, `php -l` clean on every touched file.
 - **`claude/gap456-location-chunkA`** (branched off `alpha`) — #456 Chunk A:
   full address + geocoordinates + what3words platform layer (foundation,
   non-PII, interactive map — Chunk B lands the PII/GDPR half in a later
@@ -750,7 +803,7 @@ and the safety of every multi-step database change in the portal.
   `tblEventOccurrenceOverrides`, new `tblGeocodeCache`, 14 settings seeds
   (all default OFF/empty), 10 route seeds — upgrade is a full no-op. No
   PII table touched (tblUsers/directory/GiftAid/Salvation are Chunk B).
-  All 12 audit checks green, `php -l` clean on every touched file.
+  All 13 audit checks green, `php -l` clean on every touched file.
 - **`claude/gap234-shared-mailbox`** (branched off `alpha`) — gap #234:
   MS365 Graph email via an admin-configured shared mailbox, formalising
   and hardening the app-only `Mailer::sendViaGraph()` path already in
@@ -779,7 +832,7 @@ and the safety of every multi-step database change in the portal.
   "Recent sends" `portal-data-list`. Shared mailbox is admin-config-only
   (never request-derived); no secret ever logged. Migration 176:
   `tblEmailLog` + 5 non-sensitive settings seeds + 1 route seed, folded
-  into `full_schema.sql`. All 12 audit checks green, `php -l` clean.
+  into `full_schema.sql`. All 13 audit checks green, `php -l` clean.
 - **`claude/gap7-workflow-engine`** (branched off `alpha`) — gap #7
   (#443): Workflow Execution Engine + generic `/approvals` inbox.
   Migration 034 shipped four workflow tables + an admin definition CRUD
@@ -812,7 +865,7 @@ and the safety of every multi-step database change in the portal.
   additive `tblWorkflowInstances` columns + one composite index + one
   `tblWorkflowActions` enum value (no new tables), plus the
   `announcement_approver` role/definition/step, 8 settings seeds, 4
-  route seeds. All 12 audit checks green, `php -l` clean on every
+  route seeds. All 13 audit checks green, `php -l` clean on every
   touched file.
 - **`claude/gap4-bulk-statements`** (this session, branched off `alpha`) —
   gap #4: treasurer-only bulk year-end giving statements at

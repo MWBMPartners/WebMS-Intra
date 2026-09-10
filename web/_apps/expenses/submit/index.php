@@ -44,7 +44,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <!-- 💸 Expense Claim Submission Form -->
 <h1 class="mb-4">Submit Expense Claim</h1>
 
-<form method="post" action="/expenses/submit/save.php" enctype="multipart/form-data" novalidate>
+<form method="post" action="/expenses/submit/save" enctype="multipart/form-data" novalidate>
     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
 
     <div class="mb-3">

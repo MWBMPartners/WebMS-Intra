@@ -50,7 +50,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
         $_SESSION['flash_msg']  = 'Invalid or expired form token. Please try again.';
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /install/upgrade.php');
+        // 🔁 Back to the page the visitor is actually on.
+        //
+        //    This used to send them to /install/upgrade.php, which is wrong
+        //    twice over. The folder is _install, not install - and no address
+        //    ending in .php is served at all, because .htaccess answers 404 for
+        //    every one of them. So a mistyped or expired form token sent the
+        //    administrator to a "page not found" instead of back to the form,
+        //    in the middle of upgrading their database.
+        //
+        //    This file is reached at /admin/upgrade, through a one-line proxy
+        //    at _apps/admin/upgrade.php. That is the address to return to.
+        header('Location: /admin/upgrade');
         exit();
     }
 
