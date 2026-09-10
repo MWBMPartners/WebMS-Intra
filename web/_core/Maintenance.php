@@ -22,7 +22,9 @@
  * gets bumped; the explicit flag is cleared by whoever set it.
  *
  * Allow-list (always pass through, even when gated):
- *   • /auth/login*           — admins need to sign in to fix it
+ *   • /login, /logout        — admins need to sign in to fix it
+ *   • /forgot-password,
+ *     /reset-password        — and to get back in if they have forgotten it
  *   • /admin/upgrade*        — the upgrader itself
  *   • /admin/maintenance*    — backup / restore UI
  *   • /assets/css/* /js/* /images/* /fonts/* /vendor/* /noticeboard/*
@@ -52,8 +54,33 @@ class Maintenance
      * Path prefixes — checked with `str_starts_with`.
      */
     private const ALLOW_LIST = [
-        'auth/login',
-        'auth/logout',
+        // 🚪 THE WAY BACK IN. Get these wrong and an administrator is locked out
+        //    of their own portal with no way to fix it, which is exactly what
+        //    happened here.
+        //
+        //    These are compared against the ADDRESS a visitor typed — the
+        //    routeKey — not against the file that answers it. The two are not
+        //    the same, and the difference is easy to miss because they look
+        //    alike. The sign-in page is a good example: its address is `login`,
+        //    while the file that answers it is `auth/login/index.php`.
+        //
+        //    This list used to say `auth/login` and `auth/logout`. Those are
+        //    fragments of FILE PATHS. Neither is an address, so neither ever
+        //    matched anything, and the sign-in page was blocked along with
+        //    everything else.
+        //
+        //    That mattered more than it sounds, because maintenance mode
+        //    switches itself on whenever the code is newer than the database —
+        //    which is every single upgrade. A signed-out administrator during an
+        //    upgrade was shut out completely, and the holding page's own
+        //    "sign in" link pointed at the same address that did not exist.
+        //
+        //    Before adding anything here, check it against the seeded addresses
+        //    in web/_sql/full_schema.sql, not against the folder layout.
+        'login',
+        'logout',
+        'forgot-password',
+        'reset-password',
         'admin/upgrade',
         'admin/maintenance',
         // 🎯 Static asset subdirs ONLY (#393) — deliberately NOT a bare
@@ -250,7 +277,7 @@ class Maintenance
            . '<p><span class="dot"></span><span class="dot"></span><span class="dot"></span></p>'
            . '<p style="font-size:.85em;color:var(--muted);">'
            . 'This page will reload automatically.<br>'
-           . 'Administrators can <a href="/auth/login">sign in</a> to complete the upgrade.'
+           . 'Administrators can <a href="/login">sign in</a> to complete the upgrade.'
            . '</p>'
            . '</div></body></html>';
         exit();

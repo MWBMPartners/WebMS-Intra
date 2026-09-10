@@ -53,7 +53,22 @@ $sql = "SELECT
           AND (a.endDate IS NULL OR a.endDate >= CURDATE())
         ORDER BY r.sortOrder, r.roleName, a.startDate";
 
-$stmt = $db->prepare($sql);
+// 🔌 The database connection is called $mysqli here, not $db.
+//
+//    This line used to say $db, and every one of these export pages crashed the
+//    instant somebody pressed the button. Nothing was ever produced and no file
+//    was ever downloaded.
+//
+//    The reason is worth knowing, because it is not obvious from reading this
+//    file alone. When the portal opens a page, it hands it exactly two things:
+//    $mysqli and $SETTINGS (see Router.php, the `global` line just before the
+//    page is loaded). Anything else a page reaches for simply is not there. $db
+//    was never one of the two, so it was empty, and asking an empty thing to
+//    prepare a query stops the page dead.
+//
+//    It failed silently in the way that matters: the button looked fine, and
+//    the fault only appeared at the moment somebody actually used it.
+$stmt = $mysqli->prepare($sql);
 $stmt->bind_param('i', $siteId);
 $stmt->execute();
 $result = $stmt->get_result();

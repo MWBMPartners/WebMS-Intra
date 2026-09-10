@@ -62,7 +62,22 @@ $sql = "SELECT
         ORDER BY l.timestamp DESC
         LIMIT 5000";
 
-$stmt = $db->prepare($sql);
+// 🔌 The database connection is called $mysqli here, not $db.
+//
+//    This line used to say $db, and every one of these export pages crashed the
+//    instant somebody pressed the button. Nothing was ever produced and no file
+//    was ever downloaded.
+//
+//    The reason is worth knowing, because it is not obvious from reading this
+//    file alone. When the portal opens a page, it hands it exactly two things:
+//    $mysqli and $SETTINGS (see Router.php, the `global` line just before the
+//    page is loaded). Anything else a page reaches for simply is not there. $db
+//    was never one of the two, so it was empty, and asking an empty thing to
+//    prepare a query stops the page dead.
+//
+//    It failed silently in the way that matters: the button looked fine, and
+//    the fault only appeared at the moment somebody actually used it.
+$stmt = $mysqli->prepare($sql);
 if ($stmt === false) {
     $_SESSION['flash_msg']  = t('error.db_export_activity');
     $_SESSION['flash_type'] = 'danger';
