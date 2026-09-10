@@ -46,11 +46,11 @@ code on **10 September 2026**:
 | App folders | 54 | `ls -d web/_apps/*/ | wc -l` |
 | Installable apps (the on/off list) | 47 | `ls web/_core/apps/*.php | wc -l` |
 | Framework classes | 78 | `ls web/_core/*.php | wc -l` |
-| Numbered database migrations | 187, numbered 000-188 | `ls web/_sql/[0-9][0-9][0-9]_*.sql | wc -l` |
+| Numbered database migrations | 188, numbered 000-189 | `ls web/_sql/[0-9][0-9][0-9]_*.sql | wc -l` |
 | Database tables | 209 | `grep -c 'CREATE TABLE IF NOT EXISTS' web/_sql/full_schema.sql` |
 | PHP files | 788 | `find web -name '*.php' | wc -l` |
 | In-app help guides | 19 | `ls web/_apps/help/*.php | wc -l` |
-| Live addresses the portal answers on | 545 | `python3 tools/audit-checks/check_route_targets.py` |
+| Live addresses the portal answers on | 544 | `python3 tools/audit-checks/check_route_targets.py` |
 | Settings seeded | 566 | `python3 tools/audit-checks/check_settings_keys.py` |
 
 **If a number here disagrees with the code, the code is right.** Numbers 168 and
@@ -274,6 +274,74 @@ unintended consequence. That is what the second reviewer is for.
 - **Don't register `api/...` routes in `tblRoutes`** — either the handler is at the convention path (settings flag does the gating) or it's dead code.
 - **Adjacent gotcha**: the `ApiResponse` class exposes `::success()`, NOT `::ok()`. `::setJsonHeaders()` is `private`. Grep `_core/ApiResponse.php` for method names before calling.
 - **v1 facade (#323 Phase 2)**: the `/api/v1/{resource}` facade maps REST verbs onto the same `{app}/{action}` handler files + `api.{app}.{action}.enabled` flags (`ApiRouter::dispatchV1`) — no separate gating vocabulary, nothing registered in `tblRoutes` for it either.
+
+## Web-root shadowing trap (check whenever you add an address or a file)
+
+**A real file or folder in `web/public_html/` silently beats any seeded address
+of the same name.** `web/public_html/.htaccess` contains
+`RewriteCond %{REQUEST_FILENAME} !-d` (and the same for `-f`), which means the
+web server answers for anything that really exists on disk and never hands the
+request to the portal. That rule is correct and necessary — it is what serves
+stylesheets and images directly.
+
+**It fails silently and invisibly.** No portal code runs, so nothing is written
+to the error log. The visitor gets a bare folder listing or a flat refusal, and
+there is nothing anywhere to explain it.
+
+This has already bitten twice, found 10 September 2026:
+
+- A folder `web/public_html/admin/` made the whole **Admin area** unreachable
+  (#483). Fixed by moving its three files to `web/_apps/`, which needed no
+  address change because `Router::dispatch` looks under `PORTAL_APPS` first and
+  only falls back to the web root.
+- A folder `web/public_html/widget/` hid a **public, sign-in-free** address
+  (#478). That one was the dangerous shape: the address was unreachable, so
+  nobody had noticed that the page behind it had no access check AND returned
+  internal events. Removing the folder as a "tidy-up" would have published it.
+  The address was deleted instead (migration 189); the folder holds
+  `countdown.js`, which other people's websites embed, so it cannot move.
+
+**Two collisions remain and both are deliberate:** `assets` has its own
+`RewriteRule ^assets/?$ index.php` ahead of the folder rule, and `api-docs` is
+meant to be served directly by the web server.
+
+**Before adding a route or a web-root file**, check the other side:
+
+```bash
+ls -d web/public_html/*/          # folders that will win over any address
+```
+
+## Two variables, and only two (apply on every page under _apps/)
+
+`web/_core/Router.php` does `global $mysqli, $SETTINGS;` immediately before it
+loads a page. **Those two are the only things a page inherits.** Anything else
+it reaches for is simply not there, and PHP does not complain until the moment
+it is used.
+
+Five Export CSV buttons were dead because their pages used `$db` (#482) — the
+members list, the audit trail, the attendance register, the leadership roster
+and the expenses queue. Each crashed the instant somebody pressed the button:
+no file, no message on screen. Use `$mysqli`.
+
+A helper that receives the connection as a **function parameter** is a different
+thing and is fine — `web/_apps/announcements/_workflow-gate.php` does that
+correctly.
+
+## Name things by the right identifier (the shape behind several bugs)
+
+Three separate faults on 10 September 2026 were the same mistake: something was
+named by the wrong kind of identifier, and nothing caught it.
+
+- `Maintenance.php`'s allow list is compared against the **address** a visitor
+  typed. It contained `auth/login`, which is a **file path**. The sign-in page's
+  address is `login`. So administrators were locked out during every upgrade,
+  and the holding page's own sign-in link pointed at the same non-address.
+- A search for `tblActivityLog` found nothing, because the table is
+  `tblActivityLogs`. "Nothing found" reads exactly like "nothing to fix".
+
+**When checking whether a name is right, check it against the thing that
+actually uses it** — seeded addresses against `full_schema.sql`, table names
+against the schema — not against the folder layout, which merely looks similar.
 
 ## SQL dialect trap (apply on every migration)
 

@@ -20,13 +20,41 @@ data exists is at its cheapest moment.
 | # | Task | Issue | Status |
 | --- | --- | --- | --- |
 | 1 | Deep analysis and plan (Fable, run one after another) | — | in progress |
-| 2 | Admin area unreachable + widget must be gated in the SAME commit | #483, #478 | queued |
-| 3 | Maintenance mode locks administrators out | #477 | queued |
-| 4 | Five Export CSV buttons crash before producing anything | #482 | queued |
-| 5 | Codex review loop until a round comes back clean | — | queued |
-| 6 | Documentation sweep (.md, in-app help, OpenAPI/Swagger) | — | queued |
-| 7 | GitHub issue sweep, open and closed | — | queued |
-| 8 | Memory, context and this handoff | — | continuous |
+| 2 | Admin area unreachable + widget gated in the SAME commit | #483, #478 | ✅ `20d7a05` |
+| 3 | Maintenance mode locks administrators out | #477 | ✅ `f0eb9d5` + `bf2399e` |
+| 4 | Five Export CSV buttons crash before producing anything | #482 | ✅ `f0eb9d5` |
+| 5 | Codex review loop until a round comes back clean | — | ⏸️ queued for 18:33, limit hit |
+| 6 | Documentation sweep (.md, in-app help, OpenAPI/Swagger) | — | in progress |
+| 7 | GitHub issue sweep, open and closed | — | in progress |
+| 8 | Memory, context and this handoff | — | ✅ updated |
+
+### ⏸️ BOTH review systems hit their limits today
+
+- **Fable** reached its MONTHLY SPEND limit. Deep analysis fell back to Opus,
+  which is what the owner's standing instruction says to do. Retry Fable on the
+  next deep-analysis run.
+- **Codex** reached its usage limit at about 15:40, resets **18:32**. A review of
+  commits `20d7a05`, `f0eb9d5` and `bf2399e` is queued to run automatically and
+  retry every five minutes. **Those three commits are NOT yet reviewed** and must
+  not be treated as signed off until that round has run and come back clean.
+
+### What was fixed, and the one thing that was nearly missed
+
+The four faults are described further down. Two things worth carrying forward:
+
+**The widget could not be fixed the way the plan assumed.** The plan said delete
+the shadowing folder. But `/widget/countdown.js` is a script other people's
+websites already load from this server — moving it breaks their pages with no
+warning. So the folder stays and the dead ADDRESS was removed instead. That
+turned out better anyway, because it exposed a second fault: the page's queries
+returned INTERNAL events, since it lacked the `isPublic = 1` filter every other
+public calendar page already had.
+
+**The maintenance fix was a half-fix at first.** Opening the sign-in page was not
+enough: anyone with two-factor turned on typed the right password and was sent to
+`/auth/2fa/verify`, straight back into the same wall. Fixed in `bf2399e`. Signing
+in is a journey, not a page — and a half-fix that looks whole is worse than none,
+because it fails only for the administrators careful enough to use two-factor.
 
 ### Four faults confirmed against the code, not taken from issue text
 
