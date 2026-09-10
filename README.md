@@ -182,10 +182,30 @@ Everything else inside `web/` (`_core/`, `_vendor/`, `_sql/`, `_lang/`,
 Workflows in `.github/workflows/`:
 
 - `deploy.yml` — SFTP sync; key-first / password-fallback auth
-- `version-bump.yml` — updates `web/_core/App.php` on alpha/beta pushes
+- `version-bump.yml` — raises the version number in `web/_core/version.php`
+  on pushes to `alpha` or `beta`
 - `changelog.yml` — appends commit-message entries to CHANGELOG.md
 - `release.yml` — creates a GitHub Release on `v*` tag push
 - `auto-merge-alpha.yml` — enables auto-merge on PRs whose base is `alpha`
+- `pr-security.yml` — the hard gate. Checks every PHP file for syntax errors,
+  scans for committed secrets, and runs all eleven checks in
+  `tools/audit-checks/`
+- `e2e-migrations.yml` — loads the database from scratch and replays every
+  change on top, against a real MySQL 8.0, to prove nothing breaks on upgrade
+- `codeql.yml`, `php-static-analysis.yml`, `lint.yml`, `repo-config-audit.yml`
+  — advisory checks
+
+> ⚠️ **Known problem: `version-bump.yml` and `changelog.yml` have not run on
+> `alpha` since 7 July 2026**, across roughly thirty merged pull requests. Both
+> are triggered by a push. Pull requests into `alpha` are merged automatically
+> by `auto-merge-alpha.yml` using the build service's own token, and GitHub
+> deliberately does not let one automated job start another that way. The
+> auto-merge job already works around this for deployment, by starting it
+> explicitly; the other two never got the same treatment, and neither offers a
+> manual trigger. The visible effect is that `alpha` still reports version
+> 1.4.0 while `beta` and `main` report 1.4.1, and the changelog for `alpha` is
+> only current because people have been editing it by hand in each pull
+> request.
 
 dompdf is fetched at deploy time by `tools/download-dompdf.sh` (pinned
 version) and uploaded as part of the shared sync. Other server-managed

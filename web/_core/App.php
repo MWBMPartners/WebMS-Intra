@@ -68,14 +68,19 @@ class App
         self::$db       = $db;
         self::$settings = $settings;
 
-        // 📌 Load version from settings if available, else from _core/version.php
-        // (the single source of truth shared with the bootstrap-free installer).
-        $settingsVersion = self::settings('portal.version');
-        if ($settingsVersion !== null && $settingsVersion !== '') {
-            self::$version = $settingsVersion;
-        } else {
-            self::$version = self::loadVersionFile();
-        }
+        // 📌 The version always comes from _core/version.php. That file is the
+        //    single source of truth, shared with the installer, which cannot
+        //    load this framework at all and so could never read a database
+        //    setting.
+        //
+        //    This used to prefer a `portal.version` setting whenever one had a
+        //    value, which quietly defeated the point. Because of a separate
+        //    fault in how portal-wide settings were stored (see migration 187),
+        //    the copy that won on a fresh install was the one seeded by
+        //    migration 003 — '0.1.0'. So the portal reported itself as version
+        //    0.1.0 no matter what version.php said. Migration 187 removes the
+        //    setting; this makes sure it can never take precedence again.
+        self::$version = self::loadVersionFile();
     }
 
     /**

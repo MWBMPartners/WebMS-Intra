@@ -15,7 +15,22 @@
 > [CHANGELOG.md](CHANGELOG.md) for chronological history and to [README.md](README.md)
 > for setup, deployment, and licence info.
 >
-> **Snapshot:** 2026-06-21 · **Version on `main`:** 1.2.1
+> **Snapshot:** 2026-09-10 · **Version:** `main` and `beta` 1.4.1, `alpha` 1.4.0
+>
+> ⚠️ **Everything below this line, from "Phase 1 ships sitting on PR #358"
+> onwards, is HISTORY.** It was written while those pull requests were still
+> open and has not been rewritten since. Several things it calls "in flight"
+> shipped months ago. Read it as a record of how the product got here, not as a
+> statement of what is true today.
+>
+> **For what is actually true today, check the code.** The counts and the
+> commands to re-derive them are in `.claude/CLAUDE.md` under "Counts, and when
+> they were last checked". As of 10 September 2026: 54 app folders, 47 of them
+> switchable on and off per site, 77 framework classes, 186 database changes
+> numbered 000-187, 209 tables, 19 in-app help guides.
+>
+> **Original snapshot line, kept for reference:** 2026-06-21 · Version on
+> `main`: 1.2.1
 >
 > **Phase 1 ships sitting on PR #358 — Discipleship Pathway Tracker (#303) + COP Live Chat (#313).** The latter shipped with structural reworks the adversarial review caught (file relocation to ApiRouter's 3-segment convention; CSRF dropped on public /send replaced with sessionToken-exists guard; first-message-only captcha; rate-limit fail-CLOSED). **Discipleship Phase 2 (per-user progress + auto-completion, migration 153) has since landed** — see the dedicated section near the end of this document.
 >

@@ -48,12 +48,97 @@ class DbBackup
     private mysqli $db;
     private string $backupsRoot;
 
+    /**
+     * @var array<string, array<string>>|null Cache of table name → the names
+     * of its derived columns. Null until the first lookup.
+     */
+    private ?array $generatedColumnCache = null;
+
     public function __construct(mysqli $db, string $backupsRoot = '')
     {
         $this->db          = $db;
         $this->backupsRoot = $backupsRoot !== ''
             ? rtrim($backupsRoot, DIRECTORY_SEPARATOR)
             : PORTAL_ROOT . DIRECTORY_SEPARATOR . '_backups';
+    }
+
+    /**
+     * The names of any columns in this table whose value the database works
+     * out for itself.
+     *
+     * Such a column cannot be written to. Trying to include one in an INSERT
+     * is refused outright with "The value specified for generated column …
+     * is not allowed", which would abandon the whole restore.
+     *
+     * `tblSettings.siteScope` (added in migration 187) is the first of these
+     * in this product, but the lookup is deliberately generic so any future
+     * one is handled without anybody having to remember this.
+     *
+     * The answer is read once per table and kept for the life of this object;
+     * a snapshot touches every table, so re-asking each time would be wasteful.
+     *
+     * @param string $table Table name, already validated by the caller.
+     *
+     * @return array<string>|null Column names to leave out of any INSERT, or
+     *                            null when the database could not be asked. A
+     *                            caller that is about to destroy data MUST
+     *                            treat null as "stop", because guessing wrong
+     *                            here means either losing a real column or
+     *                            failing part-way through a restore.
+     */
+    private function generatedColumns(string $table): ?array
+    {
+        if ($this->generatedColumnCache === null) {
+            $this->generatedColumnCache = [];
+
+            try {
+                // ⚠️ Test GENERATION_EXPRESSION, NOT `EXTRA LIKE '%GENERATED%'`.
+                //
+                //    That looks like the obvious test and is badly wrong. MySQL
+                //    puts the word GENERATED in EXTRA for ordinary columns too:
+                //    a column declared `DEFAULT CURRENT_TIMESTAMP` gets
+                //    EXTRA = 'DEFAULT_GENERATED', and one that also has
+                //    `ON UPDATE CURRENT_TIMESTAMP` gets
+                //    'DEFAULT_GENERATED on update CURRENT_TIMESTAMP'.
+                //
+                //    Matching on the word alone would therefore treat every
+                //    `createdAt` and `updatedAt` column in the product as
+                //    something to skip — quietly dropping them from every
+                //    backup and every restore, across all 209 tables. That
+                //    would be far worse than the problem this method exists to
+                //    solve. (Confirmed on MySQL 8.0.36.)
+                //
+                //    GENERATION_EXPRESSION holds the formula, and is empty for
+                //    everything except a genuinely derived column, so it is the
+                //    precise test.
+                $rs = $this->db->query(
+                    'SELECT TABLE_NAME, COLUMN_NAME FROM information_schema.COLUMNS '
+                    . 'WHERE TABLE_SCHEMA = DATABASE() '
+                    . "AND GENERATION_EXPRESSION IS NOT NULL "
+                    . "AND GENERATION_EXPRESSION <> ''"
+                );
+                if ($rs === false) {
+                    // Not every mysqli setup throws on failure; some return
+                    // false instead. Treat that the same way — do not record an
+                    // empty answer as if the question had been answered.
+                    $this->generatedColumnCache = null;
+                    return null;
+                }
+                while (($row = $rs->fetch_assoc()) !== null) {
+                    $t = (string) $row['TABLE_NAME'];
+                    $this->generatedColumnCache[$t][] = (string) $row['COLUMN_NAME'];
+                }
+                $rs->free();
+            } catch (\mysqli_sql_exception $e) {
+                // Do NOT cache a failure as "there are none". Leaving the cache
+                // unset means the next call tries again, and returning null
+                // tells the caller to stop rather than act on a guess.
+                $this->generatedColumnCache = null;
+                return null;
+            }
+        }
+
+        return $this->generatedColumnCache[$table] ?? [];
     }
 
     /**
@@ -231,8 +316,30 @@ class DbBackup
             $columns[] = (string) $f->name;
         }
 
+        // 🚫 Do not record columns the database works out for itself. They
+        //    cannot be written back on a restore, and keeping them would only
+        //    make the snapshot bigger and invite confusion.
+        $generated = $this->generatedColumns($table);
+        if ($generated === null) {
+            $rs->free();
+            return [
+                'success' => false,
+                'columns' => [],
+                'rows'    => 0,
+                'sha256'  => '',
+                'error'   => 'Could not read the shape of ' . $table
+                           . ' from the database, so this table was not backed up.',
+            ];
+        }
+        if (count($generated) > 0) {
+            $columns = array_values(array_diff($columns, $generated));
+        }
+
         $rows = [];
         while (($row = $rs->fetch_assoc()) !== null) {
+            foreach ($generated as $genCol) {
+                unset($row[$genCol]);
+            }
             $rows[] = $row;
         }
         $rs->free();
@@ -439,14 +546,111 @@ class DbBackup
             ];
         }
 
+        // 🚫 Work out which columns the database fills in for itself BEFORE
+        //    anything is emptied. Two reasons this has to happen here rather
+        //    than only when the snapshot is taken: an older snapshot, made
+        //    before this existed, still contains such a column; and the
+        //    database refuses an INSERT that names one, which would abandon
+        //    the restore half way through.
+        //
+        //    Doing it first also means a failure to read the table's shape
+        //    stops us before we have destroyed anything.
+        $generated = $this->generatedColumns($table);
+        if ($generated === null) {
+            return [
+                'success'       => false,
+                'rows_restored' => 0,
+                'error'         => 'Could not read the shape of ' . $table
+                                 . ' from the database, so the restore was not '
+                                 . 'started. Nothing has been changed.',
+            ];
+        }
+
+        // 🧹 Empty the table, then put the snapshot's rows back.
+        //
+        //    TRUNCATE is used deliberately, and it has two known limits that
+        //    are LEFT ALONE here on purpose:
+        //
+        //      1. It commits immediately and cannot be undone, so the
+        //         transaction below cannot recover the old contents if a row
+        //         fails part way through.
+        //      2. MySQL refuses it outright on any table that other tables
+        //         point at — 71 of the 209 tables here. Restoring one of those
+        //         has therefore never worked.
+        //
+        //    Both are real faults and both predate this change. An earlier
+        //    version of this work swapped in DELETE with the database's
+        //    related-record checking switched off, which fixed them — and
+        //    introduced something worse: with that checking off, a restore
+        //    could leave records pointing at things that are no longer there,
+        //    and report success. Properly fixing restore means validating
+        //    relationships before committing and treating a full restore as
+        //    one all-or-nothing operation, which is its own piece of work and
+        //    does not belong in a settings change. It is written up as its own
+        //    issue.
+        //
+        //    Nothing points at tblSettings, so TRUNCATE works fine for the one
+        //    table this change actually needs to be restorable.
         try {
             $this->db->begin_transaction();
             $this->db->query('TRUNCATE TABLE `' . $table . '`');
 
             $rows = $payload['rows'];
+
+            // 📑 A snapshot of the settings table taken before migration 187
+            //    contains duplicate portal-wide rows. Only one of each can go
+            //    back in, so the order they are offered in decides which one
+            //    survives — and the snapshot has no order at all.
+            //
+            //    Sort them by the same rule migration 187 uses, so the row an
+            //    administrator actually changed goes in first and the leftover
+            //    seed is the one turned away. Without this, whichever copy
+            //    happened to be listed first would win, which could quietly
+            //    replace a real setting with an untouched default.
+            if ($table === 'tblSettings') {
+                // Must match migration 187's rule EXACTLY, or the row kept
+                // here differs from the row the migration would have kept.
+                // Two details matter and are easy to get wrong:
+                //
+                //   * "no value at all" and "an empty value" are different
+                //     things. Casting both to text would make them look the
+                //     same, and a row whose value is empty while its default
+                //     is absent HAS been edited.
+                //   * a missing timestamp counts as the very beginning of
+                //     1970, the same stand-in the migration uses, so the two
+                //     agree about which row is newer.
+                $looksEdited = static function (array $r): int {
+                    $v = $r['settingValue'] ?? null;
+                    $d = $r['defaultValue'] ?? null;
+                    if ($v === null || $d === null) {
+                        return ($v === $d) ? 0 : 1;
+                    }
+                    // Exact text, so a change of capitalisation counts.
+                    return ((string) $v === (string) $d) ? 0 : 1;
+                };
+                $stamp = static function (array $r): string {
+                    $u = $r['updatedAt'] ?? null;
+                    return ($u === null || $u === '') ? '1970-01-01 00:00:00' : (string) $u;
+                };
+                usort($rows, static function ($a, $b) use ($looksEdited, $stamp): int {
+                    if (is_array($a) === false || is_array($b) === false) {
+                        return 0;
+                    }
+                    return [$looksEdited($b), $stamp($b), (int) ($b['settingID'] ?? 0)]
+                       <=> [$looksEdited($a), $stamp($a), (int) ($a['settingID'] ?? 0)];
+                });
+            }
             $inserted = 0;
+            $skippedDuplicates = 0;
+
             foreach ($rows as $row) {
                 if (is_array($row) === false || count($row) === 0) {
+                    continue;
+                }
+                foreach ($generated as $genCol) {
+                    unset($row[$genCol]);
+                }
+                if (count($row) === 0) {
                     continue;
                 }
                 $cols   = array_keys($row);
@@ -476,13 +680,55 @@ class DbBackup
                     static fn ($v) => is_scalar($v) || $v === null ? $v : json_encode($v),
                     $values
                 ));
-                $stmt->execute();
+
+                // 🔁 A snapshot taken BEFORE a "no two rows may be the same"
+                //    rule was added can contain rows that the rule now refuses.
+                //    The pre-upgrade snapshot is exactly that case: it is taken
+                //    before the migrations run, so a settings snapshot from
+                //    before migration 187 still holds the duplicate rows that
+                //    migration was written to remove.
+                //
+                //    Refusing the whole restore would leave an administrator
+                //    with no way back at the very moment they need one. So a
+                //    row the rule rejects is counted and skipped, and the count
+                //    is reported at the end. Every other kind of failure still
+                //    stops the restore.
+                //
+                //    1062 is the database's number for "that would be a
+                //    duplicate"; 1586 is the same thing worded differently.
+                try {
+                    $stmt->execute();
+                    $inserted++;
+                } catch (\mysqli_sql_exception $rowError) {
+                    if ($rowError->getCode() === 1062 || $rowError->getCode() === 1586) {
+                        $skippedDuplicates++;
+                    } else {
+                        // Any other failure stops the restore. Be careful what
+                        // you take that to mean: the rollback below CANNOT put
+                        // the table's old contents back, because emptying it
+                        // used TRUNCATE, which commits straight away and cannot
+                        // be undone. The table is left part-restored. That is a
+                        // long-standing fault in this restore, tracked as its
+                        // own issue — not something introduced here.
+                        $stmt->close();
+                        throw $rowError;
+                    }
+                }
                 $stmt->close();
-                $inserted++;
             }
             $this->db->commit();
 
-            return ['success' => true, 'rows_restored' => $inserted];
+            $result = ['success' => true, 'rows_restored' => $inserted];
+            if ($skippedDuplicates > 0) {
+                $result['skipped_duplicates'] = $skippedDuplicates;
+                $result['notice'] = $skippedDuplicates . ' row(s) in this snapshot '
+                    . 'were left out because the database no longer allows two rows '
+                    . 'the same. This is expected when restoring a snapshot taken '
+                    . 'before that rule was introduced — the duplicates were never '
+                    . 'meant to be there. Everything else was restored.';
+            }
+
+            return $result;
         } catch (\mysqli_sql_exception $e) {
             try {
                 $this->db->rollback();

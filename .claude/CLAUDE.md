@@ -14,17 +14,39 @@ Internal portal platform (PHP 8.5, backward-compatible with 8.4, MySQL 8.0, Boot
 - **Chronological history:** [CHANGELOG.md](../CHANGELOG.md)
 - **Dev-facing technical notes:** [DEV_NOTES.md](../DEV_NOTES.md)
 
+## Counts, and when they were last checked
+
+These numbers go stale quickly and have been wrong before. Verified against the
+code on **10 September 2026**:
+
+| What | Count | How to re-check |
+| --- | --- | --- |
+| App folders | 54 | `ls -d web/_apps/*/ | wc -l` |
+| Installable apps (the on/off list) | 47 | `ls web/_core/apps/*.php | wc -l` |
+| Framework classes | 77 | `ls web/_core/*.php | wc -l` |
+| Numbered database migrations | 186, numbered 000-187 | `ls web/_sql/[0-9][0-9][0-9]_*.sql | wc -l` |
+| Database tables | 209 | `grep -c 'CREATE TABLE IF NOT EXISTS' web/_sql/full_schema.sql` |
+| PHP files | 784 | `find web -name '*.php' | wc -l` |
+| In-app help guides | 19 | `ls web/_apps/help/*.php | wc -l` |
+| Live addresses the portal answers on | 543 | `python3 tools/audit-checks/check_route_targets.py` |
+| Settings seeded | 566 | `python3 tools/audit-checks/check_settings_keys.py` |
+
+**If a number here disagrees with the code, the code is right.** Numbers 168 and
+169 are missing from the migration sequence: they were never used, and nothing
+depends on the numbering being unbroken.
+
 ## Directory Layout
 
 ```
 repo root/          <- NOT deployed (docs, CI/CD only)
 web/                <- ALL deployable files (synced to server via SFTP)
-  _core/            <- Framework classes (Portal\Core namespace, 69 classes)
+  _core/            <- Framework classes (Portal\Core namespace, 77 classes)
   _apps/            <- App controllers — outside the webroot (#159). Every
                        app's PHP handlers live here; Router resolves
                        tblRoutes.targetFile against PORTAL_APPS = _apps/.
   _vendor/simplejwt/<- Vendored RS256 JWT verifier
-  _sql/             <- Numbered SQL migrations (000-179 + full_schema.sql)
+  _sql/             <- Numbered SQL migrations (000-187 + full_schema.sql).
+                     186 files, not 188: 168 and 169 were never used.
   _lang/            <- I18n translation files (en.php, cy.php, …)
   _install/         <- Standalone 6-step installation wizard (bootstrap-free)
   public_html/      <- Web root: ONLY the front controller + static assets +
@@ -44,9 +66,9 @@ web/                <- ALL deployable files (synced to server via SFTP)
 
 ## Apps (shipped on `main`)
 
-`web/_apps/` holds ~48 top-level entries; `web/_core/apps/*.php` is the
+`web/_apps/` holds 54 top-level entries; `web/_core/apps/*.php` is the
 AppRegistry — the single source of truth for **installable marketplace
-apps** (toggleable per-site at `/admin/apps`), 44 of them. The table below
+apps** (toggleable per-site at `/admin/apps`), 47 of them. The table below
 is every user-facing app (see note below the table for dirs that are
 infrastructure rather than apps).
 
@@ -162,6 +184,45 @@ precision stay exactly as rigorous. Only the way it is explained changes.
 **When reporting on work done**, be direct about what is finished, what is not,
 what was not checked, and what went wrong. Say "I could not test this because
 there is no database on this machine" rather than implying it was verified.
+
+## Codex review (STANDING RULE — every change, before it is committed)
+
+**Every piece of work done here must also be reviewed by a different system —
+Codex — before it counts as finished.** The customer asked for this on
+2026-09-10 as a standing task, not a one-off.
+
+The point is a genuinely independent second opinion. Claude plans and builds;
+Codex reviews. If Codex built something, Claude reviews it instead. Two
+different systems rarely make the same mistake in the same place, so this
+catches things one reviewer alone would wave through. It supports the project's
+stated aim of getting things right first time.
+
+**How to run it.** Codex is installed and signed in on the development machine:
+
+```bash
+codex exec --skip-git-repo-check "<what you want reviewed>"
+```
+
+- `codex exec` is the non-interactive mode: it prints its answer and exits.
+- It runs read-only by default, which is exactly what a review needs.
+- Give it the real change — a diff, or the paths of the files — and ask for
+  specific things: is it correct, is it safe, would anything here fail on
+  MySQL 8.0, would anything here break on shared hosting with no command line.
+
+**When to run it.** After the work is written and the mechanical checks pass
+(`php -l`, the eleven scripts in `tools/audit-checks/`, and the end-to-end
+migration harness where the database is involved), but **before committing**.
+
+**How to treat the result.** As a second opinion, not a verdict. Check each
+point against the code before acting on it. Codex will sometimes be wrong;
+saying so plainly, with the evidence, is the right response. Record in the
+commit message that Codex reviewed the change and what came of it.
+
+**Why this sits alongside the other checks, not instead of them.** The eleven
+audit scripts and the migration harness catch mechanical faults — a mistyped
+column, SQL that only works on MariaDB, a route pointing at a missing file.
+They cannot judge whether the design is right or whether a change has an
+unintended consequence. That is what the second reviewer is for.
 
 ## Code Style (MUST FOLLOW)
 

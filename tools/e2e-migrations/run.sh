@@ -178,7 +178,15 @@ run_all_migrations() {
     local applied=0
     local skipped=0
     local failed=0
-    for file in $(ls "${SQL_DIR}"/[0-9]*.sql 2>/dev/null | sort); do
+    # NOTE: a plain glob, deliberately — NOT `$(ls … | sort)`.
+    #
+    # Command substitution splits its result on spaces, so a checkout whose
+    # path contains a space (for example "…/Coding & Development/…") was torn
+    # into fragments and every migration reported as FAILED. A glob does not
+    # split, and bash already returns glob matches in sorted order, which for
+    # three-digit-prefixed names is the same order the installer uses.
+    for file in "${SQL_DIR}"/[0-9]*.sql; do
+        [[ -e "${file}" ]] || continue
         local name; name="$(basename "${file}")"
         local already; already=$(mysql_q "SELECT COUNT(*) FROM tblMigrations WHERE filename = '${name}';" 2>/dev/null || echo 0)
         if [[ "${already}" -gt 0 ]]; then
@@ -207,7 +215,15 @@ run_all_migrations() {
 replay_all_migrations() {
     local applied=0
     local failed=0
-    for file in $(ls "${SQL_DIR}"/[0-9]*.sql 2>/dev/null | sort); do
+    # NOTE: a plain glob, deliberately — NOT `$(ls … | sort)`.
+    #
+    # Command substitution splits its result on spaces, so a checkout whose
+    # path contains a space (for example "…/Coding & Development/…") was torn
+    # into fragments and every migration reported as FAILED. A glob does not
+    # split, and bash already returns glob matches in sorted order, which for
+    # three-digit-prefixed names is the same order the installer uses.
+    for file in "${SQL_DIR}"/[0-9]*.sql; do
+        [[ -e "${file}" ]] || continue
         if mysql_file "${file}"; then
             applied=$((applied + 1))
         else
@@ -368,7 +384,8 @@ echo "  base loaded: $(count_tables) tables, $(count_columns) columns, $(count_i
 
 if [[ "${SKIP_STALE}" -eq 0 ]]; then
     echo "  Simulating a behind install: clearing the newest half of tblMigrations marks …"
-    all_files=( $(ls "${SQL_DIR}"/[0-9]*.sql | sort) )
+    # Plain glob, same reason as above — a path with a space must survive.
+    all_files=( "${SQL_DIR}"/[0-9]*.sql )
     total=${#all_files[@]}
     half=$(( total / 2 ))
     cleared=0

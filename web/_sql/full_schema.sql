@@ -13,7 +13,7 @@
 -- present in web/_sql/ are marked as executed in tblMigrations so the
 -- web-based Migrator won't re-run them.
 --
--- Covers migrations: 000-158 (DDL + settings/routes seeds + tblMigrations
+-- Covers migrations: 000-187 (DDL + settings/routes seeds + tblMigrations
 -- marks). When you add a new migration, port its DDL/seeds into the
 -- appropriate section here AND add its filename to the seed block at the
 -- end of this file. CI enforces this via
@@ -23,7 +23,7 @@
 -- @author    MWBM Partners Ltd (t/a MWservices)
 -- @copyright 2025-2026 MWBM Partners Ltd (t/a MWservices)
 -- @license   All Rights Reserved
--- @version   1.2.1
+-- @version   1.4.0
 -- =============================================================================
 
 
@@ -95,8 +95,11 @@ CREATE TABLE IF NOT EXISTS `tblSettings` (
                    COMMENT 'Boolean: if 1, value is encrypted at rest',
     `defaultValue` MEDIUMTEXT   CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
                    COMMENT 'Optional default value for this setting',
+    `siteScope`    INT AS (COALESCE(`siteID`, -1)) VIRTUAL
+                   COMMENT 'Worked out by the database: the site number, or -1 when the setting applies to every site. Exists so uq_setting_key_scope below can cover portal-wide settings, which siteID alone cannot because MySQL never treats one empty value as equal to another. VIRTUAL not STORED: MySQL forbids a cascading foreign key on the base column of a STORED derived column, and siteID has one. See migration 187.',
     PRIMARY KEY (`settingID`),
     UNIQUE KEY `uq_setting_key_site` (`settingKey`, `siteID`),
+    UNIQUE KEY `uq_setting_key_scope` (`settingKey`, `siteScope`),
     KEY `idx_settings_site` (`siteID`),
     CONSTRAINT `fk_settings_site` FOREIGN KEY (`siteID`)
         REFERENCES `tblSites` (`siteID`) ON DELETE CASCADE
@@ -1797,8 +1800,14 @@ INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isSensitive`, `default
 VALUES ('api.expenses.update-status.enabled', 'false', 0, 'false')
 ON DUPLICATE KEY UPDATE `settingKey` = `settingKey`;
 
+-- NOTE: seeded 'true' to match migration 147, which added the version 1 write
+-- endpoints and deliberately switched this on. It used to be seeded 'false'
+-- here and 'true' there; because portal-wide settings could not be
+-- de-duplicated (see migration 187) the later row simply won, so 'true' is
+-- what every install has actually been running. Seeding it correctly here
+-- means no migration has to reach in and change an existing value.
 INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isSensitive`, `defaultValue`)
-VALUES ('api.expenses.delete.enabled', 'false', 0, 'false')
+VALUES ('api.expenses.delete.enabled', 'true', 0, 'true')
 ON DUPLICATE KEY UPDATE `settingKey` = `settingKey`;
 
 -- ─── Future app toggles (disabled by default) ────────────────────────────────
@@ -8430,4 +8439,98 @@ WHERE `settingKey` IN (
 );
 
 INSERT INTO `tblMigrations` (`filename`) VALUES ('186_unreachable_pages_fix.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- from 187_settings_global_uniqueness.sql ------------------------------------
+-- On a BRAND-NEW database the derived `siteScope` column and the
+-- `uq_setting_key_scope` rule come from the tblSettings CREATE TABLE far above,
+-- so everything seeded after it already updates rather than duplicates.
+--
+-- On an EXISTING database that is not the case. `CREATE TABLE IF NOT EXISTS`
+-- skips the whole statement when the table is already there, so neither the
+-- column nor the rule would be added -- yet the line at the bottom of this
+-- block records migration 187 as done, which would stop the normal migration
+-- runner from ever fixing it. The guarded blocks below close that gap: they
+-- add the column and the rule if missing, and do nothing if not.
+-- See migration 187 for why any of this is needed.
+
+-- Same two safety checks as migration 187: refuse to touch anything if a site
+-- is numbered 0 or below (it would collide with the -1 "every site" marker), or
+-- if per-site settings are already duplicated (which means the original
+-- uniqueness rule is missing). Each failing check selects from a table whose
+-- name is the message, because MySQL will not allow SIGNAL here.
+SET @badSites := (SELECT COUNT(*) FROM `tblSites` WHERE `siteID` <= 0);
+SET @sql := IF(@badSites > 0,
+    'SELECT 1 FROM `SCHEMA_LOAD_STOPPED__A_SITE_IS_NUMBERED_ZERO_OR_BELOW__RENUMBER_IT_THEN_RUN_AGAIN`',
+    'SELECT 1');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+SET @dupSite := (
+    SELECT COUNT(*) FROM (
+        SELECT 1 FROM `tblSettings`
+         WHERE `siteID` IS NOT NULL
+         GROUP BY `settingKey`, `siteID`
+        HAVING COUNT(*) > 1
+    ) AS `d`
+);
+SET @sql := IF(@dupSite > 0,
+    'SELECT 1 FROM `SCHEMA_LOAD_STOPPED__PER_SITE_SETTINGS_ARE_DUPLICATED__RESTORE_uq_setting_key_site_THEN_RUN_AGAIN`',
+    'SELECT 1');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+-- Surplus portal-wide copies have to go first: the rule cannot be added while
+-- duplicates remain. Same winner rule as migration 187 -- a row that looks
+-- edited beats one still on its default, then the most recently written, then
+-- the higher row number. The comparison is byte for byte, so a change that
+-- only altered capitalisation still counts as edited.
+DELETE `loser`
+  FROM `tblSettings` AS `loser`
+ INNER JOIN `tblSettings` AS `winner`
+    ON `winner`.`settingKey` = `loser`.`settingKey`
+   AND `winner`.`siteID` IS NULL
+   AND (
+            ((CAST(`winner`.`settingValue` AS BINARY) <=> CAST(`winner`.`defaultValue` AS BINARY)) = 0),
+            COALESCE(`winner`.`updatedAt`, '1970-01-01 00:00:00'),
+            `winner`.`settingID`
+       ) > (
+            ((CAST(`loser`.`settingValue` AS BINARY) <=> CAST(`loser`.`defaultValue` AS BINARY)) = 0),
+            COALESCE(`loser`.`updatedAt`, '1970-01-01 00:00:00'),
+            `loser`.`settingID`
+       )
+ WHERE `loser`.`siteID` IS NULL
+   AND NOT EXISTS (SELECT 1 FROM `tblSites` WHERE `siteID` <= 0)
+   AND NOT EXISTS (
+        SELECT 1 FROM (
+            SELECT 1 FROM `tblSettings`
+             WHERE `siteID` IS NOT NULL
+             GROUP BY `settingKey`, `siteID`
+            HAVING COUNT(*) > 1
+        ) AS `perSiteDupes`
+   );
+
+DELETE FROM `tblSettings` WHERE `settingKey` = 'portal.version';
+
+SET @col_exists := (
+    SELECT COUNT(*) FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE()
+       AND TABLE_NAME   = 'tblSettings'
+       AND COLUMN_NAME  = 'siteScope'
+);
+SET @sql := IF(@col_exists = 0,
+    'ALTER TABLE `tblSettings` ADD COLUMN `siteScope` INT AS (COALESCE(`siteID`, -1)) VIRTUAL',
+    'SELECT 1');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+SET @idx_exists := (
+    SELECT COUNT(*) FROM information_schema.STATISTICS
+     WHERE TABLE_SCHEMA = DATABASE()
+       AND TABLE_NAME   = 'tblSettings'
+       AND INDEX_NAME   = 'uq_setting_key_scope'
+);
+SET @sql := IF(@idx_exists = 0,
+    'ALTER TABLE `tblSettings` ADD UNIQUE KEY `uq_setting_key_scope` (`settingKey`, `siteScope`)',
+    'SELECT 1');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('187_settings_global_uniqueness.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;

@@ -272,6 +272,28 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         Defaults follow OWASP ASVS L1.
     </p>
 
+    <div class="alert alert-warning d-flex align-items-start gap-2">
+        <i class="fa-solid fa-triangle-exclamation mt-1"></i>
+        <div>
+            <strong>Check your own minimum length before relying on the figure below.</strong>
+            The values here are what a newly installed portal uses. On a portal
+            that was upgraded rather than freshly installed, the minimum length
+            may still be sitting at <strong>8</strong>.
+            <br><br>
+            The reason: the change that raised it from 8 to 12 could only alter
+            the recorded <em>default</em>, so as not to overwrite a length an
+            administrator had deliberately chosen. A separate fault meant an
+            older copy of the setting kept winning, so the working value stayed
+            at 8 while everything else said 12. That fault is fixed, but the
+            value itself was left alone on purpose, because there is no way to
+            tell a leftover from a deliberate choice.
+            <br><br>
+            Look at <code>auth.password.minLength</code> in
+            <a href="/settings">Settings</a>. If it says 8 and you did not
+            choose that, change it to 12.
+        </div>
+    </div>
+
     <div class="list-group list-group-flush">
         <div class="list-group-item d-flex justify-content-between"><span><code>auth.password.minLength</code></span><strong>12</strong></div>
         <div class="list-group-item d-flex justify-content-between"><span><code>auth.password.maxLength</code></span><strong>128</strong></div>

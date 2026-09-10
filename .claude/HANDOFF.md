@@ -9,21 +9,80 @@ proceeds, so the session can be picked up at any point).
 
 ## Read this first — where we are right now
 
+**Updated 10 September 2026.**
+
 | Task | State |
 | --- | --- |
-| Audit and delete the six stale branches | ✅ **Done** — evidence in `.claude/plans/branch-audit-2026-09-07.md` |
-| Create the single work-in-progress branch | ✅ **Done** — `claude/alpha-wip`, pushed |
-| Realign the local clone with GitHub | ✅ **Done** — local and remote now match exactly |
-| Self-host Swagger UI + fix the /api-docs page | ✅ **Done** — commit `8f21094`, migration 185 |
-| Install PHP locally + write the setup guide | ✅ **Done** — PHP 8.5.10, guide in `DEV_NOTES.md` |
-| Deep codebase audit (6 sequential Fable agents) | 🔄 **Running** — reports 1 and 2 of 6 delivered |
-| Fix the defects the audit found so far | ✅ **Done** — commits `6c01c47`, `82241bc`, migration 186 |
-| Update all documentation to match reality | ⏳ Waiting on the audit |
-| Sweep every GitHub issue against the code | ⏳ Waiting on the audit |
-| Propose the next round of work, ranked | ⏳ Waiting on the audit |
-| Open the pull request into `alpha` and watch CI | ⏳ Last step |
+| Audit and delete the six stale branches | ✅ Done — `.claude/plans/branch-audit-2026-09-07.md` |
+| Single work-in-progress branch, local clone realigned | ✅ Done — `claude/alpha-wip` |
+| Self-host Swagger UI + fix `/api-docs` | ✅ Done — commit `8f21094`, migration 185, issue #470 |
+| Install PHP locally + write the setup guide | ✅ Done — PHP 8.5.10 |
+| Reach three features that had no way in | ✅ Done — commit `6c01c47`, migration 186, issue #467 |
+| Dead menu links, demo-data hazard, unwired checks | ✅ Done — commit `82241bc`, issues #468 #469 #471 |
+| **Settings duplicate-rows fix** | 🔄 **Built and proven on MySQL 8.0.36; Codex round 1 found 6 HIGH, all fixed; round 2 pending** — issue #466 |
+| Codex review as a standing rule | ✅ Done — memory + `.claude/CLAUDE.md` |
+| GitHub issue sweep | 🔄 6 new (#466–#471), 6 existing updated (#47 #97 #107 #225 #273 #322) |
+| Update all documentation to match reality | ⏳ Queued |
+| Ranked list of proposed new work | ⏳ Queued |
+| One pull request into `alpha`, watch CI | ⏳ Last step |
 
----
+### The four analysis agents that failed
+
+The deep audit was six sequential agents. Two finished (`01-inventory.md`,
+`02-core-schema.md`, both in the session scratchpad under `analysis/`). The
+other four — documentation drift, GitHub issues, API drift, and new-work
+proposals — **failed because the account hit its monthly spend limit** on
+7 September. That work is being done directly instead of re-spawning them.
+
+### The Codex review loop — what it caught
+
+New standing rule: every change gets a second opinion from Codex before it is
+committed (`codex exec --skip-git-repo-check "<brief>"`, with standard input
+closed — otherwise it hangs waiting for more).
+
+**Four rounds were needed on the settings fix.** Every round found real
+problems in work that had already passed the PHP syntax check, all eleven audit
+scripts, and the full end-to-end database test against real MySQL 8.0.36. Worth
+remembering: those checks catch mechanical faults, not wrong thinking.
+
+**Round 1 — six HIGH, two of which destroyed data:**
+
+1. The backup fix would have wiped every timestamp. It filtered columns on
+   `EXTRA LIKE '%GENERATED%'`; MySQL uses that same word for ordinary columns
+   declared `DEFAULT CURRENT_TIMESTAMP`, so every `createdAt` and `updatedAt`
+   across 209 tables would have been silently dropped from every backup.
+   Now tests `GENERATION_EXPRESSION`.
+2. The clean-up would have deleted saved payment credentials. It kept "the
+   newest copy", but `web/_apps/payments/save.php:38` and the captcha, SMS,
+   translation and integration screens pick a row with an unordered
+   `SELECT … LIMIT 1` and update that one — in practice the oldest.
+3. The corrections overrode deliberate choices (no `siteID IS NULL`
+   restriction). Both value-changing steps removed; seeds fixed instead.
+4. Loading `full_schema.sql` onto an existing database recorded 187 as done
+   without applying it, permanently preventing the fix.
+5. A failed restore destroyed the data it was protecting (`TRUNCATE` commits
+   and cannot be undone).
+6. Migration 021 would have reset an administrator's chosen date format.
+
+**Round 2 — four more HIGH.** Migration 012 would have reset the chosen
+language; `SIGNAL` is not allowed in these files (MySQL error 1295, confirmed);
+the "has this been edited?" test ignored capitalisation; and **every migration
+from 180 onwards reported failure after succeeding**, because each records
+itself and then `Migrator::runOne()` tried to record it again against a
+uniqueness rule.
+
+**Round 3 — told me to undo my own work, and was right.** Swapping `TRUNCATE`
+for `DELETE` (the round-1 fix) set off the database's automatic tidying of
+related records: restoring expense claims would delete every claim line.
+Switching that checking off stopped the cascade but allowed a restore to commit
+records pointing at nothing, and report success — a silent failure worse than
+the loud one. **The response was to revert, not patch.** Redesigning restore
+does not belong in a settings change, and nothing references `tblSettings`, so
+the simple approach works for the only table this needed. The three genuine
+restore faults are now **issue #472** — including that 71 of the 209 tables have
+never been restorable at all.
+
+**Round 4** — running at the time of writing.
 
 ## 1. The branch clean-up (done)
 

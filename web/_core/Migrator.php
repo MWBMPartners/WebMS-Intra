@@ -251,36 +251,84 @@ class Migrator
             ];
         }
 
-        // 🚀 Execute the SQL (multi_query supports multiple statements)
-        // We use multi_query because migration files may contain multiple statements
-        if ($this->db->multi_query($sql) === true) {
-            // 🔄 Consume all result sets from multi_query to prevent "commands out of sync"
-            // See: https://www.php.net/manual/en/mysqli.multi-query.php
-            do {
-                $result = $this->db->store_result();
-                if ($result !== false) {
-                    $result->free();
-                }
-            } while ($this->db->next_result());
+        // 🚀 Run the file. A migration may hold many statements, so they are
+        //    sent together.
+        //
+        //    ⚠️ The try/catch matters. This portal asks the database driver to
+        //    throw on error, so a failing statement does NOT quietly set an
+        //    error number for the checks below — it throws, straight past
+        //    them, out of this method, past the migrations page, and the
+        //    visitor gets a blank error page with nothing useful on it.
+        //
+        //    That hid real information. Migration 187, for example, stops
+        //    deliberately if it finds the database in a shape it cannot safely
+        //    fix, and says why. Without this, that explanation never reached
+        //    the person who needed it. Catching here turns any failure back
+        //    into an ordinary result the page already knows how to display.
+        try {
+            if ($this->db->multi_query($sql) === true) {
+                // 🔄 Read every result through, or the connection is left
+                //    mid-conversation and the next query fails with
+                //    "commands out of sync".
+                //    See: https://www.php.net/manual/en/mysqli.multi-query.php
+                do {
+                    $result = $this->db->store_result();
+                    if ($result !== false) {
+                        $result->free();
+                    }
+                } while ($this->db->next_result());
 
-            // ✅ Check for errors after consuming all results
-            if ($this->db->errno !== 0) {
+                // ✅ For drivers that report by error number rather than by
+                //    throwing.
+                if ($this->db->errno !== 0) {
+                    return [
+                        'success'  => false,
+                        'filename' => $filename,
+                        'error'    => 'SQL error during migration: ' . $this->db->error,
+                    ];
+                }
+            } else {
                 return [
                     'success'  => false,
                     'filename' => $filename,
-                    'error'    => 'SQL error during migration: ' . $this->db->error,
+                    'error'    => 'SQL execution failed: ' . $this->db->error,
                 ];
             }
-        } else {
+        } catch (\mysqli_sql_exception $e) {
+            // 🧹 Drain anything still queued, so the connection stays usable
+            //    for the rest of the request (the page still has to render).
+            try {
+                while ($this->db->more_results() === true && $this->db->next_result() === true) {
+                    $drained = $this->db->store_result();
+                    if ($drained !== false) {
+                        $drained->free();
+                    }
+                }
+            } catch (\Throwable $ignored) {
+                // Already failing; nothing useful to add.
+            }
+
             return [
                 'success'  => false,
                 'filename' => $filename,
-                'error'    => 'SQL execution failed: ' . $this->db->error,
+                'error'    => 'SQL error during migration: ' . $e->getMessage(),
             ];
         }
 
-        // 📌 Record the migration as executed
-        $stmt = $this->db->prepare('INSERT INTO tblMigrations (filename, executedByID) VALUES (?, ?)');
+        // 📌 Record the migration as executed.
+        //
+        //    "or leave it alone if it is already recorded" matters here. Every
+        //    migration in this project ends by recording itself, because the
+        //    installer replays them all and each one has to be safe to run
+        //    twice. So by the time we get here the row usually exists already.
+        //    A plain INSERT would hit the "no two rows the same" rule on
+        //    `filename` and throw — reporting a failure for a migration that
+        //    had in fact just succeeded, and stopping the rest of the run.
+        //    That affected every migration from 180 onwards.
+        $stmt = $this->db->prepare(
+            'INSERT INTO tblMigrations (filename, executedByID) VALUES (?, ?) '
+            . 'ON DUPLICATE KEY UPDATE executedByID = COALESCE(VALUES(executedByID), executedByID)'
+        );
         if ($stmt !== false) {
             $stmt->bind_param('si', $filename, $userId);
             $stmt->execute();

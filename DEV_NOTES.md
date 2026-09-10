@@ -1064,6 +1064,87 @@ These are enforced across the codebase. Follow them in all new code.
 
 ---
 
+## The settings table: why a save used to add a row instead of changing one
+
+**Read this before touching `tblSettings` or writing a settings seed.**
+
+### What used to happen
+
+A setting that applies to the whole portal is stored with its site left empty
+(`siteID IS NULL`). A setting that applies to one site stores that site's
+number. The table's rule for "no two rows may be the same" covered
+`(settingKey, siteID)`.
+
+That works for a per-site setting. It cannot work for a portal-wide one,
+because **MySQL never treats one empty value as equal to another** — not even
+to itself. Two rows both saying `('site.name', empty)` were not duplicates as
+far as that rule was concerned.
+
+Every save in this codebase uses "insert this, or update it if it is already
+there". For a portal-wide setting the "already there" half never fired. Every
+save added another row. A fresh install started with **479 surplus rows**, and
+every settings save and app toggle added more.
+
+Migration 187 fixed it by adding a derived column `siteScope` (the site number,
+or `-1` for portal-wide) and putting the uniqueness rule on
+`(settingKey, siteScope)`.
+
+### Four rules that now matter
+
+**1. The derived column must be VIRTUAL, never STORED.**
+MySQL refuses a cascading foreign key on the base column of a STORED derived
+column, and `tblSettings.siteID` has `ON DELETE CASCADE`. With STORED,
+`full_schema.sql` will not load at all — *ERROR 1215: Cannot add foreign key
+constraint*.
+
+**2. A seed must never write `settingValue` in its duplicate clause.**
+Before the fix this was harmless, because portal-wide rows never collided. Now
+it would reset a value an administrator chose, every time the installer
+replays. Use one of these instead:
+
+```sql
+ON DUPLICATE KEY UPDATE `settingKey` = `settingKey`          -- do nothing
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`)  -- default only
+```
+
+Migrations 012 and 021 had to be corrected for exactly this. If you add a seed
+that writes `settingValue`, you are resetting somebody's choice on every
+upgrade.
+
+**3. Never assume "the newest row" is the one in use.**
+Several screens — payments, captcha, SMS, translation, integrations — find the
+row to change with an unordered `SELECT ... LIMIT 1` and update that one, which
+in practice is the **oldest** copy. Migration 187's clean-up therefore keeps
+the row that looks edited (its value differs from its own default, compared
+byte for byte), then the most recently written, then the newest.
+
+**4. `SIGNAL` cannot raise a clear error in a migration.**
+These files run through the prepared-statement route, and MySQL 8.0 answers
+`SIGNAL` there with *ERROR 1295: This command is not supported in the prepared
+statement protocol yet*. Migration 187 works around it by selecting from a
+table whose **name** is the message, which fails loudly and readably.
+
+### What the fix deliberately did not do
+
+It changes no value an administrator might have chosen. Two settings were left
+exactly as they are, because a leftover seed and a deliberate choice are
+indistinguishable:
+
+- **The minimum password length.** Existing sites may still require 8 while the
+  project believes 12. `/help/admin` now warns about this and tells the
+  administrator to check.
+- **The expenses delete endpoint.**
+
+Both were corrected at the seed instead, so newly installed portals land on the
+right value without any existing database being touched.
+
+## Migration numbers 168 and 169 do not exist
+
+They were never used. Nothing depends on the numbering being unbroken — both the
+installer and the migration runner list the files and sort them, so a gap is
+invisible. Do not "fill in" the gap: a file numbered 168 today would run before
+169-187 on every replay, which is not where it belongs.
+
 ## SQL Migrations
 
 Migrations live in `web/_sql/` as numbered `.sql` files. They are executed via
