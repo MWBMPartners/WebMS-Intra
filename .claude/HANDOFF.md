@@ -24,9 +24,32 @@ data exists is at its cheapest moment.
 | 3 | Maintenance mode locks administrators out | #477 | ✅ `f0eb9d5` + `bf2399e` |
 | 4 | Five Export CSV buttons crash before producing anything | #482 | ✅ `f0eb9d5` |
 | 5 | Codex review loop until a round comes back clean | — | ⏸️ queued for 18:33, limit hit |
-| 6 | Documentation sweep (.md, in-app help, OpenAPI/Swagger) | — | in progress |
+| 6 | Documentation sweep (.md, in-app help, OpenAPI/Swagger) | — | ✅ done |
 | 7 | GitHub issue sweep, open and closed | — | in progress |
 | 8 | Memory, context and this handoff | — | ✅ updated |
+| 9 | *(added)* A twelfth automatic check for the shadowing fault | #483 | ✅ `be9afcd` |
+| 10 | *(added)* The API was reporting version 1.2.0, not 1.4.0 | #482 | ✅ `eb0443c` |
+
+### A note on commit `be9afcd`, so the history makes sense
+
+That commit's message describes the new automatic check. It ALSO contains a
+documentation agent's edits to `CHANGELOG.md` and `DEV_NOTES.md`, which the
+message does not mention. The cause was mine: `git add -A` while a background
+agent was still writing in the same working folder. Everything landed intact and
+was checked afterwards, but the commit boundary is not what the message implies.
+
+The practice that avoids it — stage by explicit path while any agent is running,
+never `git add -A` — is written into the memory notes.
+
+### What was checked and deliberately NOT changed
+
+- `FEATURES.md` needed no change. The only mention of embeddable widgets sits
+  inside a dated historical snapshot of what an earlier release contained, not a
+  claim about today, and the countdown widget genuinely still works. Verified
+  rather than taken on the agent's word.
+- Both remaining widget addresses (`/widget/countdown` and
+  `/widget/countdown.json`) reach the portal correctly. Only the calendar one
+  was removed.
 
 ### ⏸️ BOTH review systems hit their limits today
 
