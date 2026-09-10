@@ -129,6 +129,19 @@ $cases = [
     //     letters inside a longer word must NOT be mistaken for a preview.
     ['8.4.3-1.el9', 'MySQL Community Server - GPL', 'MySQL', '8.4.3', 'ok'],
 
+    // --- Pre-release builds that carry NO marker in the version string. This
+    //     is the case a word-matching check cannot catch: MariaDB 11.4.0 and
+    //     11.4.1 were release candidates of a supported line, published under
+    //     ordinary-looking version numbers. Only knowing the first finished
+    //     release of the line (11.4.2) separates them.
+    ['11.4.0-MariaDB', 'mariadb.org binary distribution', 'MariaDB', '11.4.0', 'warn'],
+    ['11.4.1-MariaDB', 'mariadb.org binary distribution', 'MariaDB', '11.4.1', 'warn'],
+    ['10.11.1-MariaDB', 'mariadb.org binary distribution', 'MariaDB', '10.11.1', 'warn'],
+
+    // --- ...and the first finished build of that same line must pass.
+    ['11.4.2-MariaDB', 'mariadb.org binary distribution', 'MariaDB', '11.4.2', 'ok'],
+    ['10.11.2-MariaDB', 'mariadb.org binary distribution', 'MariaDB', '10.11.2', 'ok'],
+
     // --- MariaDB too old for this portal's database changes.
     ['10.3.39-MariaDB', 'mariadb.org binary distribution', 'MariaDB', '10.3.39', 'crit'],
 

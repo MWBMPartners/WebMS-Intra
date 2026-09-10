@@ -111,6 +111,25 @@ final class DbServer
     // 📅 The newest MariaDB release line this file knows about.
     public const MARIADB_NEWEST_KNOWN = '12.3';
 
+    // 🚧 The first FINISHED release of each supported MariaDB line.
+    //
+    //    MariaDB publishes release candidates carrying the ordinary version
+    //    number of the line they belong to — 11.4.0 and 11.4.1 were both
+    //    pre-release builds, and 11.4.2 was the first one meant for real use.
+    //    Some of those builds do not put "rc" anywhere in the version string, so
+    //    looking for that word is not enough on its own. Belonging to a
+    //    supported line does not make a build a finished one.
+    //
+    //    A line that is not listed here is treated as finished, which is the
+    //    right way round: it means a new line is trusted rather than warned
+    //    about, and only lines we positively know had pre-release builds carry
+    //    a threshold.
+    //    Source: https://mariadb.org/mariadb-11-4-2-and-mariadb-11-5-1-now-available/
+    public const MARIADB_FIRST_STABLE = [
+        '10.11' => '10.11.2',
+        '11.4'  => '11.4.2',
+    ];
+
     // 🎯 The release line to recommend moving TO, named in the advice text.
     public const SUPPORTED_MYSQL = '8.4';
     public const SUPPORTED_MARIADB = '11.4';
@@ -325,6 +344,23 @@ final class DbServer
 
         $series = self::series($version);
 
+        // 🚧 A build from before the line was finished. See MARIADB_FIRST_STABLE.
+        if (array_key_exists($series, self::MARIADB_FIRST_STABLE) === true
+            && self::hasPatchLevel($raw) === true
+            && version_compare($version, self::MARIADB_FIRST_STABLE[$series], '<') === true
+        ) {
+            return $base + [
+                'state'    => 'warn',
+                'headline' => 'MariaDB ' . $version . ' — an unfinished build of an otherwise good release line',
+                'detail'   => 'The ' . $series . ' line is a long-term MariaDB release, but this '
+                            . 'particular build came before it was finished: '
+                            . self::MARIADB_FIRST_STABLE[$series] . ' was the first one meant '
+                            . 'for real use. Earlier builds in a line are release candidates, '
+                            . 'published for testing. Ask your hosting provider to move you to '
+                            . self::MARIADB_FIRST_STABLE[$series] . ' or newer.' . $caveat,
+            ];
+        }
+
         // ✅ A release line that is genuinely still maintained.
         if (in_array($series, self::MARIADB_SUPPORTED_SERIES, true) === true) {
             return $base + [
@@ -475,6 +511,31 @@ final class DbServer
                         . self::SUPPORTED_MYSQL . ' is a long-term release supported into 2032, '
                         . 'and is the one to ask for.',
         ];
+    }
+
+    /**
+     * 🔢 Did the server actually tell us a patch level?
+     *
+     * Some builds report only two parts, such as "11.4". We fill in a third part
+     * so the number can be compared, but that filled-in zero is a guess, not
+     * something the server said.
+     *
+     * That distinction matters for one check only: whether a build came before
+     * its release line was finished. A server reporting "11.4" might be running
+     * 11.4.8; treating the guessed "11.4.0" as real would warn every such server
+     * that it is on an unfinished build, which we have no basis for saying. So
+     * that check is skipped when the patch level is a guess.
+     *
+     * @param string $raw The complete version string from the server.
+     *
+     * @return bool True if a three-part version number was actually reported.
+     */
+    private static function hasPatchLevel(string $raw): bool
+    {
+        if (strpos($raw, '5.5.5-') === 0) {
+            $raw = substr($raw, 6);
+        }
+        return preg_match('/\d+\.\d+\.\d+/', $raw) === 1;
     }
 
     /**

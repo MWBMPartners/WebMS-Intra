@@ -104,19 +104,22 @@ $asText = isset($_GET['format']) === true && $_GET['format'] === 'text';
 //   order    a short run of the letters G P C S E (which inputs PHP reads)
 //   tz       a real time-zone name, checked against PHP's own list
 //   charset  a character-set name
-//   funcs    a comma-separated list of function or class names
+//   blocked  a list of blocked function or class names — reported by counting
+//            them and naming only the ones from a fixed list we recognise,
+//            never by printing the list back
 //   samesite one of the four values PHP accepts for the cookie SameSite rule
 //   savehandler  one of the session storage back-ends PHP knows about
 //   mblang   one of the language names the mbstring extension accepts
 //   jit      one of the accepted just-in-time compiler modes, or its number form
-//   word     a short plain word or simple path
 //
-// A note on the two settings that use 'word'. Both session.name and
-// session.cookie_path are sent to EVERY visitor's browser in the cookie itself,
-// so neither can hold anything secret by its very nature — there is nowhere for
-// a secret to hide in a value the browser is already told. Every other setting
-// that once used this loose kind now has an explicit list of accepted values
-// instead, because "a short run of letters" is a shape a password can also have.
+// There is deliberately NO general "short word" kind any more. It was used for
+// session.name and session.cookie_path, on the argument that a cookie's own name
+// and path are told to every browser anyway and so cannot be secret. That
+// argument was wrong in one direction nobody had noticed: the SERVER'S DEFAULT
+// for those settings is not the value in use — this portal overrides the path
+// with "/" when it starts a session — so the default can be some other path
+// entirely, and on shared hosting a path contains the account name. Both
+// settings were dropped rather than special-cased. They were worth very little.
 //
 // Deliberately absent: anything whose value is naturally a file path. On shared
 // hosting a path contains the customer's account name and private directory
@@ -166,14 +169,13 @@ const REPORT_SETTINGS = [
     // — What the host has switched off. Important, and not a secret. —
     'allow_url_fopen'                => 'bool',
     'allow_url_include'              => 'bool',
-    'disable_functions'              => 'funcs',
-    'disable_classes'                => 'funcs',
+    'disable_functions'              => 'blocked',
+    'disable_classes'                => 'blocked',
 
     // — Dates —
     'date.timezone'                  => 'tz',
 
     // — Sessions. Never save_path: that is where a cache password lives. —
-    'session.name'                   => 'word',
     'session.save_handler'           => 'savehandler',
     'session.auto_start'             => 'bool',
     'session.use_strict_mode'        => 'bool',
@@ -181,7 +183,6 @@ const REPORT_SETTINGS = [
     'session.use_only_cookies'       => 'bool',
     'session.use_trans_sid'          => 'bool',
     'session.cookie_lifetime'        => 'int',
-    'session.cookie_path'            => 'word',
     'session.cookie_secure'          => 'bool',
     'session.cookie_httponly'        => 'bool',
     'session.cookie_samesite'        => 'samesite',
@@ -283,10 +284,30 @@ function portalValueMatchesKind(string $kind, string $value): bool
                 || strtoupper($value) === 'UTC';
 
         case 'charset':
-            return preg_match('/^[A-Za-z0-9_.:\/-]{1,40}(,[A-Za-z0-9_.:\/-]{1,40}){0,9}$/', $value) === 1;
+            // Checked against the list of character sets PHP itself knows,
+            // rather than against a pattern. A pattern that merely allowed
+            // "letters, digits and punctuation" also allowed
+            // /home/{account}/private — an actual path, which is exactly what
+            // must never appear. A name either is one of PHP's encodings or it
+            // is not, and there is no argument about it.
+            if (function_exists('mb_list_encodings') === false) {
+                return false;
+            }
+            $known = array_map('strtolower', mb_list_encodings());
+            $known[] = 'auto';
+            $known[] = 'pass';
+            foreach (explode(',', $value) as $part) {
+                if (in_array(strtolower(trim($part)), $known, true) === false) {
+                    return false;
+                }
+            }
+            return true;
 
-        case 'funcs':
-            return preg_match('/^[A-Za-z0-9_\\\\,\s:]{1,300}$/', $value) === 1;
+        case 'blocked':
+            // Never validated for display, because this value is never
+            // displayed. See portalDescribeBlocked() below for what is shown
+            // instead and why.
+            return true;
 
         case 'samesite':
             return in_array(strtolower($value), ['lax', 'strict', 'none'], true);
@@ -313,16 +334,81 @@ function portalValueMatchesKind(string $kind, string $value): bool
             return in_array(strtolower($value), ['off', 'disable', 'on', 'tracing', 'function'], true)
                 || preg_match('/^\d{1,4}$/', $value) === 1;
 
-        case 'word':
-            // Only used for session.name and session.cookie_path, both of which
-            // the browser is told anyway. See the note above the settings list.
-            return preg_match('/^[A-Za-z0-9_.\/-]{1,64}$/', $value) === 1;
 
         default:
             // An unknown kind means somebody added a setting without saying what
             // it should look like. Withhold it rather than guess.
             return false;
     }
+}
+
+/**
+ * 🚫 Describe a list of blocked functions or classes WITHOUT printing it back.
+ *
+ * `disable_functions` is genuinely useful to see — knowing that `exec` is blocked
+ * explains a great many failures. But PHP keeps whatever it is given in that
+ * setting, including names that are not functions at all, so printing the list
+ * back means printing arbitrary text somebody put there. In testing, a value of
+ * `PRIVATE_SECRET_abc` survived and would have been shown.
+ *
+ * So the list is never printed. Instead each entry is checked against a fixed
+ * list of the functions people actually block, and the answer is: which of those
+ * are blocked, and how many other entries there are. That answers the real
+ * question — "is this why my upload/shell/mail call is failing?" — and cannot
+ * disclose anything, because every word that reaches the page comes from the
+ * fixed list below rather than from the setting.
+ *
+ * @param string $value The raw comma-separated setting value.
+ *
+ * @return string A sentence describing it, safe to display.
+ */
+function portalDescribeBlocked(string $value): string
+{
+    $value = trim($value);
+    if ($value === '') {
+        return 'nothing is blocked';
+    }
+
+    // The functions hosting companies commonly switch off. Every word that can
+    // reach the page comes from HERE, never from the setting itself.
+    $wellKnown = [
+        'exec', 'shell_exec', 'system', 'passthru', 'popen', 'proc_open',
+        'proc_close', 'proc_get_status', 'proc_nice', 'proc_terminate',
+        'pcntl_exec', 'pcntl_fork', 'dl', 'putenv', 'getenv',
+        'symlink', 'link', 'chown', 'chgrp', 'chmod',
+        'posix_kill', 'posix_getpwuid', 'posix_uname', 'posix_setuid',
+        'apache_child_terminate', 'apache_setenv', 'apache_get_modules',
+        'ini_alter', 'ini_restore', 'openlog', 'syslog', 'escapeshellcmd',
+        'escapeshellarg', 'show_source', 'highlight_file', 'phpinfo',
+        'mail', 'curl_exec', 'curl_multi_exec', 'parse_ini_file',
+    ];
+
+    $entries = array_filter(array_map('trim', explode(',', $value)), static fn (string $e): bool => $e !== '');
+    $named   = [];
+    $others  = 0;
+
+    foreach ($entries as $entry) {
+        $lower = strtolower($entry);
+        if (in_array($lower, $wellKnown, true) === true) {
+            $named[$lower] = true;
+            continue;
+        }
+        $others++;
+    }
+
+    $parts = [];
+    if (count($named) > 0) {
+        $list = array_keys($named);
+        sort($list);
+        $parts[] = 'blocked: ' . implode(', ', $list);
+    }
+    if ($others > 0) {
+        $parts[] = sprintf('%d other entr%s not shown', $others, $others === 1 ? 'y' : 'ies');
+    }
+    if (count($parts) === 0) {
+        return sprintf('%d entr%s, none recognised', count($entries), count($entries) === 1 ? 'y' : 'ies');
+    }
+    return implode('; ', $parts);
 }
 
 // -----------------------------------------------------------------------------
@@ -413,6 +499,16 @@ if ($settingsAvailable === true) {
             $globl = $raw[$name]['global_value'] ?? '';
             $local = is_array($local) === true ? implode(', ', $local) : (string) $local;
             $globl = is_array($globl) === true ? implode(', ', $globl) : (string) $globl;
+
+            // 🚫 The blocked-function lists are summarised, never echoed.
+            if ($kind === 'blocked') {
+                $settings[$name] = [
+                    'local'  => portalDescribeBlocked($local),
+                    'global' => portalDescribeBlocked($globl),
+                    'shown'  => true,
+                ];
+                continue;
+            }
 
             if (portalValueMatchesKind($kind, $local) === false
                 || portalValueMatchesKind($kind, $globl) === false
@@ -508,10 +604,42 @@ header('Cache-Control: no-store, no-cache, must-revalidate, private');
 //    This does hold, because the buffer's own handler decides what is allowed
 //    out and refuses by default. It runs during shutdown as well, so the failure
 //    path sends nothing rather than something unchecked.
+// 🛑 One guard around everything drawn below, which decides — for the WHOLE
+//    page at once — whether any of it may be sent.
+//
+//    Two things had to be true, and an earlier version only managed one.
+//
+//    First, it must refuse by default. The check that matters happens after the
+//    page is drawn; if drawing fails half way, that check is never reached and
+//    PHP flushes whatever is in the buffer as it shuts down. Wrapping the
+//    drawing in try/finally does not help, because a fatal error runs neither.
+//
+//    Second, it must check what is ACTUALLY going to be sent. The earlier
+//    version captured the page in a second, inner buffer and checked that. A
+//    review showed the gap: if anything during rendering closed that inner
+//    buffer and opened another, the already-flushed part sat unchecked in the
+//    outer buffer and went out with the approval. Nothing in this page does
+//    that today, but relying on "nothing does that today" is how the previous
+//    three attempts failed.
+//
+//    Doing the check inside the guard itself settles both. Whatever ends up
+//    here, however it got here, is inspected as one piece before anything
+//    leaves. There is no inner buffer to outmanoeuvre.
 $reportApproved = false;
-ob_start(static function (string $chunk) use (&$reportApproved): string {
-    return $reportApproved === true ? $chunk : '';
-});
+ob_start(static function (string $buffer) use (&$reportApproved): string {
+    // Not approved — the page did not finish drawing. Send nothing.
+    if ($reportApproved !== true) {
+        return '';
+    }
+
+    // Approved, but check the finished article before it goes anywhere.
+    if (portalReportLeaksSessionToken($buffer) === true) {
+        return 'This report was not shown, because it turned out to contain your own '
+             . 'sign-in token. That should not be possible and is worth reporting.';
+    }
+
+    return $buffer;
+}, 0);
 
 $pageTitle   = 'Full PHP report';
 $pageSection = 'admin';
@@ -521,10 +649,6 @@ $breadcrumbs = [
     'Server Information' => '/admin/system-info',
     'Full PHP report'    => '',
 ];
-
-// A second, ordinary buffer, so the finished page can be inspected before the
-// guard above is told to let it through.
-ob_start();
 
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
@@ -655,17 +779,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <?php
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'footer.php';
 
-$html = (string) ob_get_clean();
-
-// 🛑 The last check, on exactly what would be sent.
-if (portalReportLeaksSessionToken($html) === true) {
-    http_response_code(500);
-    $reportApproved = true;
-    echo 'This report was not shown, because it turned out to contain your own '
-       . 'sign-in token. That should not be possible and is worth reporting.';
-    exit();
-}
-
-// ✅ Approve, then release. Nothing reaches the browser before this line.
+// ✅ The page finished drawing. Approving it lets the guard above run its check
+//    and, if that passes, release the page. Nothing has reached the browser
+//    before this line.
 $reportApproved = true;
-echo $html;

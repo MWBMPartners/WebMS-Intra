@@ -298,7 +298,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         //    sending the reader off to fix the wrong thing.
                         //
                         //      1044 / 1045 / 1142  the account is not permitted
-                        //      1006               the server could not create it
                         //      1007               it already exists (a second
                         //                         person got there first, or the
                         //                         earlier check was refused
@@ -316,11 +315,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                 // It is there after all. Use it.
                                 $testConn->select_db($dbName);
                                 $createResult = true;
-                            } elseif (in_array($code, [1044, 1045, 1006, 1142], true) === true) {
+                            } elseif (in_array($code, [1044, 1045, 1142], true) === true) {
                                 $createResult = false;
                             } else {
                                 // Something genuinely different. Let the outer
                                 // handler report it as itself.
+                                //
+                                //    Error 1006 ("can't create database") lives
+                                //    here on purpose, though at a glance it
+                                //    looks like it belongs above. It carries an
+                                //    underlying operating-system error — a full
+                                //    disk, a read-only filesystem, a permissions
+                                //    problem on the server's own data directory.
+                                //    Calling any of those "your account is not
+                                //    allowed" would send the reader to their
+                                //    hosting control panel to fix something that
+                                //    is not broken there.
                                 throw $e;
                             }
                         }
