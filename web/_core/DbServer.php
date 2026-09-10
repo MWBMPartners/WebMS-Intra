@@ -212,7 +212,9 @@ final class DbServer
         $raw     = trim($raw);
         $comment = trim($comment);
 
-        $version = self::extractVersion($raw);
+        $parsed   = self::parseVersion($raw);
+        $version  = $parsed['version'];
+        $hasPatch = $parsed['hasPatch'];
 
         // 🏷️ Which product is this? MariaDB and Percona both announce
         //    themselves by name, either in the version string or in the
@@ -261,7 +263,7 @@ final class DbServer
         }
 
         if ($family === 'mariadb') {
-            return self::judgeMariaDb($engine, $raw, $version, $comment);
+            return self::judgeMariaDb($engine, $raw, $version, $comment, $hasPatch);
         }
 
         if ($family === 'mysql') {
@@ -288,12 +290,14 @@ final class DbServer
      *
      * @param string $engine  Display name of the product.
      * @param string $raw     The full version string.
-     * @param string $version The three-part version number.
-     * @param string $comment The server's own description of itself.
+     * @param string $version  The three-part version number.
+     * @param string $comment  The server's own description of itself.
+     * @param bool   $hasPatch Whether the server actually stated a patch level,
+     *                         rather than us filling in a zero.
      *
      * @return array<string, mixed>
      */
-    private static function judgeMariaDb(string $engine, string $raw, string $version, string $comment): array
+    private static function judgeMariaDb(string $engine, string $raw, string $version, string $comment, bool $hasPatch): array
     {
         // 📌 The same sentence goes on every MariaDB answer, whatever the
         //    verdict. It is the honest limit of what this project can claim.
@@ -346,7 +350,7 @@ final class DbServer
 
         // 🚧 A build from before the line was finished. See MARIADB_FIRST_STABLE.
         if (array_key_exists($series, self::MARIADB_FIRST_STABLE) === true
-            && self::hasPatchLevel($raw) === true
+            && $hasPatch === true
             && version_compare($version, self::MARIADB_FIRST_STABLE[$series], '<') === true
         ) {
             return $base + [
@@ -514,31 +518,6 @@ final class DbServer
     }
 
     /**
-     * 🔢 Did the server actually tell us a patch level?
-     *
-     * Some builds report only two parts, such as "11.4". We fill in a third part
-     * so the number can be compared, but that filled-in zero is a guess, not
-     * something the server said.
-     *
-     * That distinction matters for one check only: whether a build came before
-     * its release line was finished. A server reporting "11.4" might be running
-     * 11.4.8; treating the guessed "11.4.0" as real would warn every such server
-     * that it is on an unfinished build, which we have no basis for saying. So
-     * that check is skipped when the patch level is a guess.
-     *
-     * @param string $raw The complete version string from the server.
-     *
-     * @return bool True if a three-part version number was actually reported.
-     */
-    private static function hasPatchLevel(string $raw): bool
-    {
-        if (strpos($raw, '5.5.5-') === 0) {
-            $raw = substr($raw, 6);
-        }
-        return preg_match('/\d+\.\d+\.\d+/', $raw) === 1;
-    }
-
-    /**
      * 🧪 Does this version string say it is a preview build?
      *
      * Both MySQL and MariaDB publish preview, alpha, beta and release-candidate
@@ -576,36 +555,60 @@ final class DbServer
     }
 
     /**
-     * 🔢 Pull a plain three-part version number out of whatever the server said.
+     * 🔢 Read the version number out of whatever the server said.
      *
-     * MariaDB sometimes puts a fake `5.5.5-` on the front of its version string.
-     * It does that so that very old MySQL client programs, which refuse to talk
-     * to anything whose version starts with "10.", will still connect. The real
-     * version is the part after that prefix, so it has to be removed first or
-     * every MariaDB 10.x and 11.x install would be misread as ancient MySQL
-     * 5.5 and wrongly refused.
+     * Returns both the number and whether the server actually stated a patch
+     * level, because the two are needed together and working them out
+     * separately is what caused a bug worth remembering.
+     *
+     * TWO TRAPS LIVE IN THIS ONE SMALL METHOD.
+     *
+     * The first is MariaDB's fake `5.5.5-` prefix. It is there so that very old
+     * MySQL client programs, which refuse to talk to anything whose version
+     * starts with "10.", will still connect. Read literally, every modern
+     * MariaDB looks like ancient MySQL 5.5 and gets refused.
+     *
+     * The second is subtler and was live in this file until a review found it.
+     * The version must be read from the FRONT of the string and nowhere else.
+     * Linux distributions append their own packaging version, so a server can
+     * report `11.4-MariaDB-0ubuntu0.24.04.1`. An earlier version of this method
+     * looked for the first three-part number ANYWHERE in the string. There is no
+     * three-part number at the front of that one — the server version is only
+     * two parts — so the search ran on and found `0.24.04` in Ubuntu's packaging
+     * suffix. That reads as version zero, which is below every minimum, so the
+     * installer refused to install onto a perfectly good MariaDB 11.4 and gave a
+     * reason that made no sense.
+     *
+     * Anchoring the match at the start, with the third part optional, fixes both:
+     * whatever is appended afterwards cannot win, and a two-part version is read
+     * as two parts instead of dragging in digits from somewhere else.
      *
      * See: https://mariadb.com/kb/en/mariadb-vs-mysql-compatibility/
      *
      * @param string $raw Whatever VERSION() returned.
      *
-     * @return string A version like '8.0.36', or an empty string if none found.
+     * @return array{version: string, hasPatch: bool} The version as three parts
+     *                                                (a missing patch becomes 0),
+     *                                                and whether the patch was
+     *                                                actually stated.
      */
-    private static function extractVersion(string $raw): string
+    private static function parseVersion(string $raw): array
     {
         if (strpos($raw, '5.5.5-') === 0) {
             $raw = substr($raw, 6);
         }
 
-        if (preg_match('/(\d+)\.(\d+)\.(\d+)/', $raw, $m) === 1) {
-            return $m[1] . '.' . $m[2] . '.' . $m[3];
+        // ⚓ Anchored at the start. Any leading non-digits are skipped, but once
+        //    the number is found nothing later in the string can replace it.
+        if (preg_match('/^\D*(\d+)\.(\d+)(?:\.(\d+))?/', $raw, $m) !== 1) {
+            return ['version' => '', 'hasPatch' => false];
         }
 
-        // Some builds report only two parts, e.g. "11.4". Treat that as x.y.0.
-        if (preg_match('/(\d+)\.(\d+)/', $raw, $m) === 1) {
-            return $m[1] . '.' . $m[2] . '.0';
-        }
+        $hasPatch = isset($m[3]) === true && $m[3] !== '';
 
-        return '';
+        return [
+            'version'  => $m[1] . '.' . $m[2] . '.' . ($hasPatch === true ? $m[3] : '0'),
+            'hasPatch' => $hasPatch,
+        ];
     }
 }

@@ -160,7 +160,7 @@ const REPORT_SETTINGS = [
     'serialize_precision'            => 'int',
     'short_open_tag'                 => 'bool',
     'expose_php'                     => 'bool',
-    'zlib.output_compression'        => 'bool',
+    'zlib.output_compression'        => 'boolorbytes',
     'arg_separator.input'            => 'sep',
     'arg_separator.output'           => 'sep',
     'variables_order'                => 'order',
@@ -261,10 +261,22 @@ function portalValueMatchesKind(string $kind, string $value): bool
 
     switch ($kind) {
         case 'int':
-            return preg_match('/^-?\d{1,20}$/', $value) === 1;
+            // Bounded, not merely "is a number". A long digit string is a shape
+            // a secret can have too — an account number, a numeric key — and
+            // nothing this report shows legitimately needs sixteen digits.
+            // Anything outside a sensible range is withheld.
+            return preg_match('/^-?\d{1,10}$/', $value) === 1
+                && (int) $value >= -1
+                && (int) $value <= 2147483647;
 
         case 'bytes':
-            return preg_match('/^-?\d{1,20}[KMGkmg]?$/', $value) === 1;
+            return preg_match('/^-?\d{1,10}[KMGkmg]?$/', $value) === 1;
+
+        case 'boolorbytes':
+            // This one is genuinely either. Switching it on with a number sets
+            // the buffer size, so 4096 is as valid as "On".
+            return portalValueMatchesKind('bool', $value) === true
+                || portalValueMatchesKind('bytes', $value) === true;
 
         case 'bool':
             return in_array(
@@ -293,9 +305,44 @@ function portalValueMatchesKind(string $kind, string $value): bool
             if (function_exists('mb_list_encodings') === false) {
                 return false;
             }
-            $known = array_map('strtolower', mb_list_encodings());
-            $known[] = 'auto';
-            $known[] = 'pass';
+            // mb_list_encodings() returns only the CANONICAL name of each
+            // encoding. Everyday spellings like "utf8" are aliases and are not
+            // in that list, so checking against it alone withheld perfectly
+            // ordinary values. Ask for each encoding's aliases too.
+            //
+            // Built once and remembered. Without that, this walks about eighty
+            // encodings on every single page view for no benefit.
+            //
+            // Four entries are skipped on purpose. mbstring's list includes some
+            // things that are not really character sets — Base64, Uuencode, HTML
+            // entities and quoted-printable — and asking for THEIR aliases
+            // raises a deprecation notice on PHP 8.5. That notice would be
+            // written to the server's error log every time this page was opened,
+            // which is a silly thing to do to somebody's log file. None of the
+            // four is a plausible value for a character-set setting anyway.
+            static $known = null;
+
+            if ($known === null) {
+                // These are the names as mb_list_encodings() actually returns
+                // them, lowercased. Note that the deprecation message calls the
+                // last one "QPrint" while the list calls it "Quoted-Printable";
+                // matching the message rather than the list is what left one
+                // notice still firing the first time round.
+                $notReallyEncodings = ['base64', 'uuencode', 'html-entities', 'quoted-printable'];
+                $known = [];
+                foreach (mb_list_encodings() as $enc) {
+                    $known[] = strtolower($enc);
+                    if (in_array(strtolower($enc), $notReallyEncodings, true) === true) {
+                        continue;
+                    }
+                    foreach (mb_encoding_aliases($enc) as $alias) {
+                        $known[] = strtolower($alias);
+                    }
+                }
+                $known[] = 'auto';
+                $known[] = 'pass';
+                $known   = array_values(array_unique($known));
+            }
             foreach (explode(',', $value) as $part) {
                 if (in_array(strtolower(trim($part)), $known, true) === false) {
                     return false;
@@ -625,7 +672,8 @@ header('Cache-Control: no-store, no-cache, must-revalidate, private');
 //    Doing the check inside the guard itself settles both. Whatever ends up
 //    here, however it got here, is inspected as one piece before anything
 //    leaves. There is no inner buffer to outmanoeuvre.
-$reportApproved = false;
+$reportApproved    = false;
+$guardLevelBefore  = ob_get_level();
 ob_start(static function (string $buffer) use (&$reportApproved): string {
     // Not approved — the page did not finish drawing. Send nothing.
     if ($reportApproved !== true) {
@@ -639,7 +687,28 @@ ob_start(static function (string $buffer) use (&$reportApproved): string {
     }
 
     return $buffer;
-}, 0);
+}, 0, 0);
+
+// 🛑 Note the two zeros above, because they are doing real work.
+//
+//    The second is the chunk size: 0 means "do not hand me the page in pieces,
+//    give me the whole thing once", which is what makes checking it as one piece
+//    possible.
+//
+//    The third is the flags, and 0 there means this buffer cannot be flushed,
+//    cleaned or REMOVED by anything else. Without that, a single ob_end_flush()
+//    anywhere in the shared page template would delete this guard and everything
+//    printed afterwards would go straight out unchecked — a review reproduced
+//    exactly that. Nothing in the template does it today, but "nothing does that
+//    today" is the reasoning that has already failed here four times.
+//
+//    And if the buffer could not be created at all, there is no protection, so
+//    nothing is drawn.
+if (ob_get_level() === $guardLevelBefore) {
+    http_response_code(500);
+    exit('This report could not be shown safely: the protection around it could '
+       . 'not be set up. Nothing has been displayed.');
+}
 
 $pageTitle   = 'Full PHP report';
 $pageSection = 'admin';

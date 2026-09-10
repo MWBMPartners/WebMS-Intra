@@ -154,6 +154,18 @@ $cases = [
     //     failing to read it at all.
     ['11.4-MariaDB', 'mariadb.org binary distribution', 'MariaDB', '11.4.0', 'ok'],
 
+    // --- PACKAGING SUFFIXES ON A TWO-PART VERSION. The nastiest case found in
+    //     this whole exercise. Linux distributions append their own packaging
+    //     version, so a server can report 11.4-MariaDB-0ubuntu0.24.04.1. There
+    //     is no three-part number at the FRONT of that, and a search that looked
+    //     anywhere in the string found "0.24.04" in Ubuntu's suffix instead —
+    //     version zero, below every minimum, so the installer refused to install
+    //     onto a perfectly good MariaDB 11.4 and gave a reason that made no
+    //     sense. The version must be read from the front and nowhere else.
+    ['11.4-MariaDB-0ubuntu0.24.04.1', 'mariadb.org binary distribution', 'MariaDB', '11.4.0', 'ok'],
+    ['10.11-MariaDB-1:10.11+maria~deb12', 'mariadb.org binary distribution', 'MariaDB', '10.11.0', 'ok'],
+    ['8.0-0ubuntu0.22.04.1', '', 'MySQL', '8.0.0', 'warn'],
+
     // --- Nothing readable. Must NOT guess a product, and must never block.
     ['', '', 'Unknown', '', 'warn'],
     ['some-custom-build', 'A database we have never heard of', 'Unknown', '', 'warn'],
