@@ -37,6 +37,32 @@ issue.** The index is `.claude/plans/work-queue.md`; the issues carry the detail
 | Re-verify the database structure before the first customer | **#487** |
 | *(added)* Translation is a shell | **#485** |
 
+### ⏸️ One thing left undone: a final Codex review round
+
+The review rule says keep going until a round finds nothing. Four rounds ran on
+this documentation and each found something real. **The account hit its usage
+limit part-way through round four** (resets 1:30 PM). Everything round four
+surfaced before stopping has been fixed, but **a clean pass has not been
+observed** — so treat this documentation as reviewed-and-corrected rather than
+signed off.
+
+Re-run when the limit clears:
+
+```bash
+codex exec --skip-git-repo-check "$(cat <the brief>)" < /dev/null
+```
+
+The briefs used are in the session scratchpad as `codex-brief-5.txt` through
+`codex-brief-8.txt`, and the reviews as `codex-review-5.txt` onward.
+
+**What the four rounds caught is worth reading**, because the pattern was mine
+rather than random: narrow a search, then state the result as an absolute. That
+produced one flatly false claim that reached a GitHub issue
+(`Translation::translate()` "has no caller anywhere" — the unreachable file does
+call it), then the same mistake a second time, plus several guarantees the
+evidence did not support. It also caught that migration 187's own header — which
+had already merged — still described the approach that was tried and rejected.
+
 ### ⛔ Two things are blocked on the owner
 
 **1. Which MySQL 8 the live site is running** — this decides most of #475.
