@@ -376,6 +376,32 @@ named by the wrong kind of identifier, and nothing caught it.
 actually uses it** — seeded addresses against `full_schema.sql`, table names
 against the schema — not against the folder layout, which merely looks similar.
 
+## Every database change goes in the install script too (STANDING RULE)
+
+**Any change to the shape of the database must ALSO appear in the fresh-install
+script.** The owner confirmed this on 11 September 2026 as a standing rule for
+all future work, not a one-off.
+
+There are two places, and both must agree:
+
+1. A **numbered migration** in `web/_sql/`, which upgrades a database that
+   already exists. Safe to run twice: the installer replays `full_schema.sql`
+   and then EVERY numbered migration, ignoring which ones already ran.
+2. **`web/_sql/full_schema.sql`**, which builds a brand-new database from
+   nothing. A change that exists only in a migration means a fresh install is
+   missing it, and the two installations then behave differently in a way
+   nobody notices until a customer hits it.
+
+`tools/audit-checks/check_schema_seed_parity.py` compares the two and fails when
+they disagree, so this is enforced rather than remembered. Run it before
+committing anything that touches `web/_sql/`.
+
+**The storage engine is InnoDB and should stay that way.** All 209 tables use
+it. It is what makes transactions and links between tables possible — and it is
+what makes an all-or-nothing restore possible at all (#472). The alternative,
+MyISAM, supports neither. Moving away from InnoDB would break the backup restore
+and the safety of every multi-step database change in the portal.
+
 ## SQL dialect trap (apply on every migration)
 
 - **Production runs MySQL 8** (DreamHost shared hosting offers no other engine and no version choice). **Which** MySQL 8 is not confirmed — 8.0's support ended April 2026, 8.4 LTS runs to 2029; see #475. Either way it is MySQL, so MariaDB-only `IF [NOT] EXISTS` on `ADD`/`DROP COLUMN`, `ADD`/`CREATE`/`DROP INDEX`/`KEY`, or `CHANGE`/`MODIFY COLUMN` is rejected with **ERROR 1064** — `CREATE TABLE IF NOT EXISTS` / `DROP TABLE IF EXISTS` are standard MySQL and stay fine.

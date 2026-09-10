@@ -486,6 +486,144 @@ class DbBackup
      *
      * @return array{success: bool, rows_restored: int, error?: string}
      */
+    /**
+     * 🔗 Work out which tables point at which, straight from the live database.
+     *
+     * Read from the database itself rather than from the schema file on disk,
+     * because what matters during a restore is how THIS database is actually
+     * put together — which may differ from the file if a migration has not been
+     * run, or if somebody has changed something by hand.
+     *
+     * @return array<string, array<int, string>>|null  Each table, mapped to the
+     *         tables it points AT (its parents). Null if the database would not
+     *         say, in which case the caller must refuse to restore rather than
+     *         guess at an order.
+     */
+    private function foreignKeyGraph(): ?array
+    {
+        try {
+            $rs = $this->db->query(
+                'SELECT TABLE_NAME, REFERENCED_TABLE_NAME '
+                . 'FROM information_schema.KEY_COLUMN_USAGE '
+                . 'WHERE TABLE_SCHEMA = DATABASE() '
+                . '  AND REFERENCED_TABLE_NAME IS NOT NULL'
+            );
+        } catch (\mysqli_sql_exception $e) {
+            return null;
+        }
+        if ($rs === false) {
+            return null;
+        }
+
+        $graph = [];
+        while ($row = $rs->fetch_assoc()) {
+            $child  = (string) $row['TABLE_NAME'];
+            $parent = (string) $row['REFERENCED_TABLE_NAME'];
+            if ($child === $parent) {
+                // A table pointing at itself does not affect the ORDER tables
+                // are handled in — it only constrains rows within one table.
+                continue;
+            }
+            $graph[$child][] = $parent;
+        }
+        $rs->free();
+        return $graph;
+    }
+
+    /**
+     * 📚 Put tables in an order where every parent comes before its children.
+     *
+     * Emptying and refilling tables in a sensible order is what makes a restore
+     * work at all. A child row cannot be written before the parent row it
+     * points at exists, and a parent cannot be emptied while children still
+     * point at it.
+     *
+     * So: EMPTY in reverse of this order (children first), and REFILL in this
+     * order (parents first).
+     *
+     * @param array<int, string>                 $tables The tables to order.
+     * @param array<string, array<int, string>>  $graph  From foreignKeyGraph().
+     *
+     * @return array<int, string>|null  The ordered tables, or null if they
+     *         cannot be ordered because some point at each other in a circle.
+     */
+    private function restoreOrder(array $tables, array $graph): ?array
+    {
+        $remaining = array_fill_keys($tables, true);
+        $ordered   = [];
+
+        // Peel off, repeatedly, every table whose parents are all already
+        // placed. If a pass places nothing, the rest form a circle.
+        while ($remaining !== []) {
+            $ready = [];
+            foreach (array_keys($remaining) as $table) {
+                $parents = $graph[$table] ?? [];
+                $waiting = false;
+                foreach ($parents as $parent) {
+                    if (isset($remaining[$parent]) === true && $parent !== $table) {
+                        $waiting = true;
+                        break;
+                    }
+                }
+                if ($waiting === false) {
+                    $ready[] = $table;
+                }
+            }
+
+            if ($ready === []) {
+                // Tables pointing at each other in a circle. The live database
+                // has none today, but a future one might, and guessing an order
+                // would mean a restore that half works.
+                return null;
+            }
+
+            sort($ready);
+            foreach ($ready as $table) {
+                $ordered[] = $table;
+                unset($remaining[$table]);
+            }
+        }
+
+        return $ordered;
+    }
+
+    /**
+     * 🧾 Check a snapshot file is exactly the file that was written.
+     *
+     * Every snapshot has recorded a checksum for each table since the day this
+     * class was written — and until now nothing has ever looked at one. A file
+     * that has been truncated by a failed copy, damaged in storage, or edited
+     * by hand would have been fed into the database without a murmur.
+     *
+     * @param string $file        The snapshot file for one table.
+     * @param array  $manifestRow That table's entry in the snapshot's manifest.
+     *
+     * @return string  An empty string when the file is sound, otherwise a
+     *                 sentence explaining what is wrong with it.
+     */
+    private function checksumProblem(string $file, array $manifestRow): string
+    {
+        $expected = (string) ($manifestRow['sha256'] ?? '');
+        if ($expected === '') {
+            // Snapshots taken by a much older version may not have recorded
+            // one. Not being able to check is not the same as failing a check.
+            return '';
+        }
+
+        $raw = file_get_contents($file);
+        if ($raw === false) {
+            return 'The file could not be read.';
+        }
+
+        $actual = hash('sha256', $raw);
+        if (hash_equals($expected, $actual) === false) {
+            return 'This file is not the file that was saved. It has been changed '
+                 . 'or damaged since the snapshot was taken, so it is not safe to '
+                 . 'put back into the database.';
+        }
+        return '';
+    }
+
     public function restoreTable(string $snapshotPath, string $table): array
     {
         // 🛡️ Validate the table identifier FIRST — before it is ever used
@@ -546,6 +684,35 @@ class DbBackup
             ];
         }
 
+        // 🧾 Is this the file that was actually saved?
+        //
+        //    Every snapshot has recorded a checksum for each table since the day
+        //    this class was written, and until now nothing ever looked at one. A
+        //    file cut short by a failed copy, damaged sitting on a disk, or
+        //    edited by hand would have been fed straight into the database
+        //    without a murmur - during a recovery, which is exactly when
+        //    somebody is least able to cope with a second problem.
+        //
+        //    Checked BEFORE anything is emptied, so a damaged file costs
+        //    nothing. A snapshot from a much older version may not have recorded
+        //    a checksum at all; not being able to check is not the same as
+        //    failing a check, so that case is allowed through.
+        $manifestFile = $resolvedSnapshot . DIRECTORY_SEPARATOR . '_manifest.json';
+        if (is_readable($manifestFile) === true) {
+            $manifestRaw = file_get_contents($manifestFile);
+            $manifest    = $manifestRaw === false ? null : json_decode($manifestRaw, true);
+            if (is_array($manifest) === true && isset($manifest['tables'][$table]) === true) {
+                $problem = $this->checksumProblem($file, (array) $manifest['tables'][$table]);
+                if ($problem !== '') {
+                    return [
+                        'success'       => false,
+                        'rows_restored' => 0,
+                        'error'         => $problem . ' Nothing has been changed.',
+                    ];
+                }
+            }
+        }
+
         // 🚫 Work out which columns the database fills in for itself BEFORE
         //    anything is emptied. Two reasons this has to happen here rather
         //    than only when the snapshot is taken: an older snapshot, made
@@ -568,32 +735,75 @@ class DbBackup
 
         // 🧹 Empty the table, then put the snapshot's rows back.
         //
-        //    TRUNCATE is used deliberately, and it has two known limits that
-        //    are LEFT ALONE here on purpose:
+        //    THIS USED TO SAY `TRUNCATE`, AND THAT WAS THE WHOLE BUG (#472).
         //
-        //      1. It commits immediately and cannot be undone, so the
-        //         transaction below cannot recover the old contents if a row
-        //         fails part way through.
-        //      2. MySQL refuses it outright on any table that other tables
-        //         point at — 71 of the 209 tables here. Restoring one of those
-        //         has therefore never worked.
+        //    `TRUNCATE` looks like a faster way to empty a table, and it is.
+        //    But it commits by itself. The moment it runs, the old contents are
+        //    gone for good and the transaction wrapped around it is already
+        //    over. So when a row failed half way through the refill, there was
+        //    nothing left to go back to: the table was left part-filled with the
+        //    original contents destroyed. A restore could leave somebody worse
+        //    off than the problem they were trying to recover from.
         //
-        //    Both are real faults and both predate this change. An earlier
-        //    version of this work swapped in DELETE with the database's
-        //    related-record checking switched off, which fixed them — and
-        //    introduced something worse: with that checking off, a restore
-        //    could leave records pointing at things that are no longer there,
-        //    and report success. Properly fixing restore means validating
-        //    relationships before committing and treating a full restore as
-        //    one all-or-nothing operation, which is its own piece of work and
-        //    does not belong in a settings change. It is written up as its own
-        //    issue.
+        //    It had a second fault too. MySQL refuses `TRUNCATE` outright on any
+        //    table that other tables point at - 69 of the 209 here - so
+        //    restoring any of those had never worked at all.
         //
-        //    Nothing points at tblSettings, so TRUNCATE works fine for the one
-        //    table this change actually needs to be restorable.
+        //    `DELETE FROM` fixes both. It is slower, which does not matter in a
+        //    recovery, and it takes part in the transaction properly: if
+        //    anything goes wrong afterwards everything is put back exactly as it
+        //    was, and the table is left untouched.
+        //
+        //    An earlier attempt switched the database's own relationship
+        //    checking OFF to make this work. That fixed these two faults and
+        //    introduced a worse one - a restore could leave records pointing at
+        //    rows that no longer existed and still report success. It was
+        //    reverted, rightly. Nothing here switches that checking off.
+        //
+        //    Instead, a table that other tables point at is refused for a
+        //    single-table restore, because emptying it on its own genuinely is
+        //    unsafe: depending on how the link was set up the database will
+        //    either refuse outright, or quietly delete the linked rows in those
+        //    other tables as well. Restoring the whole snapshot handles those
+        //    tables properly, in an order that keeps the links intact.
+        $graph = $this->foreignKeyGraph();
+        if ($graph === null) {
+            return [
+                'success'       => false,
+                'rows_restored' => 0,
+                'error'         => 'The database would not say how its tables are linked '
+                                 . 'together, so the restore was not started. Nothing has '
+                                 . 'been changed.',
+            ];
+        }
+
+        $pointedAtBy = [];
+        foreach ($graph as $child => $parents) {
+            foreach ($parents as $parent) {
+                $pointedAtBy[$parent][] = $child;
+            }
+        }
+
+        if (isset($pointedAtBy[$table]) === true) {
+            $others = array_unique($pointedAtBy[$table]);
+            sort($others);
+            return [
+                'success'       => false,
+                'rows_restored' => 0,
+                'error'         => 'This table cannot be put back on its own, because other '
+                                 . 'tables point at it: ' . implode(', ', array_slice($others, 0, 6))
+                                 . (count($others) > 6 ? ', and others' : '') . '. Emptying it '
+                                 . 'by itself would either be refused by the database, or would '
+                                 . 'silently delete the linked rows in those other tables too. '
+                                 . 'Restore the whole snapshot instead - that puts every table '
+                                 . 'back in an order that keeps the links intact. Nothing has '
+                                 . 'been changed.',
+            ];
+        }
+
         try {
             $this->db->begin_transaction();
-            $this->db->query('TRUNCATE TABLE `' . $table . '`');
+            $this->db->query('DELETE FROM `' . $table . '`');
 
             $rows = $payload['rows'];
 
