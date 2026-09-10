@@ -9,6 +9,87 @@ proceeds, so the session can be picked up at any point).
 
 ## Read this first — where we are right now
 
+**Updated 10 September 2026, later in the day.** Working branch `claude/alpha-wip`.
+Nothing is open against `alpha`. The owner has NOT installed on the live server
+yet and wants the product fleshed out as much as possible first — that changes
+what is worth doing, because anything cheap now and expensive once real customer
+data exists is at its cheapest moment.
+
+### The current queue
+
+| # | Task | Issue | Status |
+| --- | --- | --- | --- |
+| 1 | Deep analysis and plan (Fable, run one after another) | — | in progress |
+| 2 | Admin area unreachable + widget must be gated in the SAME commit | #483, #478 | queued |
+| 3 | Maintenance mode locks administrators out | #477 | queued |
+| 4 | Five Export CSV buttons crash before producing anything | #482 | queued |
+| 5 | Codex review loop until a round comes back clean | — | queued |
+| 6 | Documentation sweep (.md, in-app help, OpenAPI/Swagger) | — | queued |
+| 7 | GitHub issue sweep, open and closed | — | queued |
+| 8 | Memory, context and this handoff | — | continuous |
+
+### Four faults confirmed against the code, not taken from issue text
+
+A 35-agent assessment checked every open work-queue issue against the actual
+code, then challenged each assessment. Four faults came out of it, and **none of
+them is what its issue title says**. Every one below was then re-verified by
+hand before being acted on.
+
+1. **The Admin area never reaches the portal (#483).** The web server's rule
+   says a request matching a REAL FOLDER is answered by the web server itself
+   and never handed to the portal (`RewriteCond %{REQUEST_FILENAME} !-d`).
+   `web/public_html/admin/` is a real folder, and there is a seeded address
+   `admin`. So an administrator clicking Admin gets a folder listing or a
+   refusal, and nothing appears in the error log because no portal code ran.
+
+2. **Fixing that on its own would publish something to the internet (#478).**
+   `web/public_html/widget/` shadows the seeded address `widget`, which points
+   at `calendar/widget.php` with **no login required**. That file contains no
+   access check of any kind — verified. Right now nobody can reach it BECAUSE
+   the folder is in the way. Delete the folder as a tidy-up and it goes live.
+   **These two must land in one commit.**
+
+3. **Maintenance mode locks administrators out of their own portal (#477).**
+   The seeded sign-in address is `login`. `Maintenance.php:55` allows
+   `auth/login`, which is the target FILE PATH, not an address. The holding
+   page's own sign-in link points at the same non-address. Maintenance mode
+   switches itself on whenever the code is newer than the database — every
+   upgrade. One line to fix.
+
+4. **Five Export CSV buttons crash instantly (#482).** `Router.php:138` puts
+   only `$mysqli` and `$SETTINGS` into a page's scope. These five reach for
+   `$db`, which is never defined: `attendance/export.php`,
+   `admin/users/export.php`, `admin/activity/export.php`,
+   `leadership/export.php`, `expenses/api/export.php`.
+
+### Decisions taken without asking
+
+- The public calendar widget will be **off by default**, opt-in per site.
+  Nothing depends on it today because it is unreachable, and switching
+  something public on by default during a bug fix is the wrong direction.
+- #480 (minimum password length) is still the owner's decision and is not in
+  this batch.
+
+### Not verified, and not claimed
+
+- The GDPR erasure gap (#479) — reportedly five tables missed. Not checked here.
+- The database compatibility result that downgraded #475. The assessment itself
+  flagged this as unverified.
+- The end-to-end migration harness has not run since the disk filled up (see
+  below).
+
+### ⚠️ This machine has run out of disk space
+
+926 GB disk, about 2 GB free. Docker's daemon is down as a result, so the
+end-to-end migration harness CANNOT run. `~/_ENCODES` is 301 GB and is the
+obvious candidate, but it is the owner's data and has been left alone. Only
+temporary files created by this session were removed. Any commit made while
+this is true says plainly that the harness did not run.
+
+---
+
+
+
 **Updated 10 September 2026.** Working branch `claude/alpha-wip`, cut from the
 updated `alpha`. **Nothing is open against `alpha`** — pull request #473 merged
 and deployed earlier today.
