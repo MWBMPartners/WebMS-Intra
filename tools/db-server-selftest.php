@@ -72,6 +72,20 @@ $cases = [
     //     three months and none is supported now, so they warn.
     ['8.2.0', 'MySQL Community Server - GPL', 'MySQL', '8.2.0', 'warn'],
 
+    // --- THE TRAP A REVIEW CAUGHT. A first version of this check said "8.4 or
+    //     newer is fine", which told anyone on 9.0 they were still getting
+    //     security fixes. They are not: 9.0 through 9.6 are short-lived
+    //     releases, each replaced within months. Only 9.7 is long-term. A
+    //     higher number is NOT automatically better supported, and these two
+    //     cases exist to stop that rule ever coming back.
+    ['9.0.1', 'MySQL Community Server - GPL', 'MySQL', '9.0.1', 'warn'],
+    ['9.6.0', 'MySQL Community Server - GPL', 'MySQL', '9.6.0', 'warn'],
+
+    // --- Newer than anything this code knows about. Must NOT warn — being
+    //     newer than our list is not evidence of a problem — but the wording
+    //     must not claim to know its support status either.
+    ['10.2.0', 'MySQL Community Server - GPL', 'MySQL', '10.2.0', 'ok'],
+
     // --- Too old to run this portal at all. This is the ONLY case where the
     //     installation wizard stops rather than warning.
     ['5.7.44', 'MySQL Community Server (GPL)', 'MySQL', '5.7.44', 'crit'],
@@ -84,16 +98,23 @@ $cases = [
         'mariadb.org binary distribution',
         'MariaDB',
         '10.11.6',
-        'warn',
+        'ok',
     ],
 
     // --- The same MariaDB without the prefix, which is what a direct
     //     connection usually sees. Must reach the identical verdict.
-    ['10.11.6-MariaDB', 'mariadb.org binary distribution', 'MariaDB', '10.11.6', 'warn'],
+    ['10.11.6-MariaDB', 'mariadb.org binary distribution', 'MariaDB', '10.11.6', 'ok'],
 
     // --- MariaDB long-term releases.
     ['11.4.2-MariaDB', 'mariadb.org binary distribution', 'MariaDB', '11.4.2', 'ok'],
     ['12.3.1-MariaDB', 'mariadb.org binary distribution', 'MariaDB', '12.3.1', 'ok'],
+
+    // --- The 10.6 line runs this portal fine, but its maintenance ended in
+    //     July 2026, so it warns rather than passing silently.
+    ['10.6.18-MariaDB', 'mariadb.org binary distribution', 'MariaDB', '10.6.18', 'warn'],
+
+    // --- A short-lived MariaDB line between two long-term ones.
+    ['11.2.3-MariaDB', 'mariadb.org binary distribution', 'MariaDB', '11.2.3', 'warn'],
 
     // --- MariaDB too old for this portal's database changes.
     ['10.3.39-MariaDB', 'mariadb.org binary distribution', 'MariaDB', '10.3.39', 'crit'],

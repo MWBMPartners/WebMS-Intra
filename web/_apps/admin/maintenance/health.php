@@ -74,6 +74,22 @@ $probes = [];
 //    exception is a database too old to run this portal properly, which is a
 //    real fault happening right now and does turn the light amber.
 try {
+    // 🩺 Prove the connection actually works BEFORE asking what version it is.
+    //
+    //    This order matters and was got wrong once. DbServer::inspect() is
+    //    deliberately forgiving: if a query fails it falls back to the version
+    //    string the driver recorded when the connection was first opened, so it
+    //    returns a sensible-looking answer even from a connection that has since
+    //    died. Calling it first therefore turned a dead database into a green
+    //    "Connected" light — the exact opposite of what this page is for.
+    //
+    //    A plain 'SELECT 1' has no such fallback. If the database is not there,
+    //    this throws, and the catch below reports it as a real fault.
+    $probe = $db->query('SELECT 1');
+    if ($probe !== false) {
+        $probe->free();
+    }
+
     $dbInfo  = \Portal\Core\DbServer::inspect($db);
     $shownAs = trim($dbInfo['engine'] . ' ' . $dbInfo['version']);
 

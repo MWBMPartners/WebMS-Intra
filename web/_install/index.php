@@ -234,8 +234,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 //    a database on a server too old to hold the schema would
                 //    leave an empty database behind for no reason.
                 if ($error === '') {
-                    // Try to select the database
-                    $dbExists = $testConn->select_db($dbName);
+                    // 🔎 Is the database there already?
+                    //
+                    //    This looks like it should be a simple true/false, and it
+                    //    used to be written that way. It is not. Line 187 above
+                    //    puts mysqli into its strict mode, where a failure raises
+                    //    an exception instead of returning false. So on a server
+                    //    where the database does not exist yet, select_db() THROWS
+                    //    — it never returns false — and the create-it-for-you code
+                    //    below could never run. The outer catch then reported
+                    //    "Database connection failed", which is both wrong and
+                    //    unhelpful: the sign-in worked perfectly, and the account
+                    //    may well have been allowed to create the database.
+                    //
+                    //    Catching it here, and only here, restores the intended
+                    //    behaviour. Any other database error is deliberately left
+                    //    to the outer catch, because "it is missing" and "the
+                    //    server refused us" need different answers.
+                    $dbExists = false;
+                    try {
+                        $dbExists = $testConn->select_db($dbName);
+                    } catch (\mysqli_sql_exception $e) {
+                        // MySQL error 1049 is "Unknown database". Anything else
+                        // is a real problem and belongs to the outer catch.
+                        if ($e->getCode() !== 1049) {
+                            throw $e;
+                        }
+                        $dbExists = false;
+                    }
 
                     if ($dbExists === false) {
                         // Try to create the database

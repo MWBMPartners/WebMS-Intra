@@ -84,15 +84,36 @@ final class DbServer
     // 🚧 The same line for MariaDB.
     public const MIN_MARIADB = '10.6.0';
 
-    // ✅ The oldest MySQL still inside its maker's support window. MySQL 8.0
-    //    reached the end of its extended support in April 2026; 8.4 is a
-    //    long-term release supported into 2032. Anything at or above 8.4 —
-    //    including the 9.x line — is fine.
-    public const SUPPORTED_MYSQL = '8.4.0';
+    // ✅ The MySQL release lines that are actually still supported.
+    //
+    //    This is a LIST, not a "newer than X" rule, and the difference matters.
+    //    MySQL ships two kinds of release. A long-term one is supported for
+    //    years. An "innovation" one is replaced roughly every three months and
+    //    stops receiving fixes as soon as its successor arrives. They share the
+    //    same numbering, so 9.0 is NOT automatically better supported than 8.4 —
+    //    8.4 is a long-term release running to 2032, and 9.0 was superseded
+    //    within months.
+    //
+    //    An earlier version of this file used "anything at or above 8.4 is
+    //    fine", which told anyone on 9.0 that they were still getting security
+    //    fixes when they were not. Keep this as a list.
+    public const MYSQL_SUPPORTED_SERIES = ['8.4', '9.7'];
 
-    // ✅ The same line for MariaDB. 11.4 is a long-term release maintained by
-    //    the community until May 2029.
-    public const SUPPORTED_MARIADB = '11.4.0';
+    // 📅 The newest MySQL release line this file knows anything about. A version
+    //    above this is too new for the list to judge, so it is reported as fine
+    //    with an honest note rather than wrongly warned about.
+    public const MYSQL_NEWEST_KNOWN = '9.7';
+
+    // ✅ The same list for MariaDB. 10.11 runs to February 2028, 11.4 to May
+    //    2029, 11.8 and 12.3 later still. The 10.6 line ended in July 2026.
+    public const MARIADB_SUPPORTED_SERIES = ['10.11', '11.4', '11.8', '12.3'];
+
+    // 📅 The newest MariaDB release line this file knows about.
+    public const MARIADB_NEWEST_KNOWN = '12.3';
+
+    // 🎯 The release line to recommend moving TO, named in the advice text.
+    public const SUPPORTED_MYSQL = '8.4';
+    public const SUPPORTED_MARIADB = '11.4';
 
     /**
      * 🔍 Ask the database what it is.
@@ -263,13 +284,18 @@ final class DbServer
                 . 'test here proves it. That is not the same as saying it is broken; it means '
                 . 'nobody has checked.';
 
+        $base = [
+            'engine'   => $engine,
+            'family'   => 'mariadb',
+            'raw'      => $raw,
+            'version'  => $version,
+            'comment'  => $comment,
+            'untested' => true,
+        ];
+
+        // 🛑 Too old to hold this portal's schema at all.
         if (version_compare($version, self::MIN_MARIADB, '<') === true) {
-            return [
-                'engine'   => $engine,
-                'family'   => 'mariadb',
-                'raw'      => $raw,
-                'version'  => $version,
-                'comment'  => $comment,
+            return $base + [
                 'state'    => 'crit',
                 'headline' => 'MariaDB ' . $version . ' is too old for this portal',
                 'detail'   => 'This portal needs MariaDB ' . self::MIN_MARIADB . ' or newer. '
@@ -277,39 +303,47 @@ final class DbServer
                             . ' does not have, so installing would fail part-way through. '
                             . 'Ask your hosting provider to move you to a newer database '
                             . 'server before going any further.' . $caveat,
-                'untested' => true,
             ];
         }
 
-        if (version_compare($version, self::SUPPORTED_MARIADB, '<') === true) {
-            return [
-                'engine'   => $engine,
-                'family'   => 'mariadb',
-                'raw'      => $raw,
-                'version'  => $version,
-                'comment'  => $comment,
-                'state'    => 'warn',
-                'headline' => 'MariaDB ' . $version . ' — older than we would like',
-                'detail'   => 'This portal expects to work on MariaDB ' . $version . ', and '
-                            . 'there is nothing here that needs a newer one. But MariaDB '
-                            . self::SUPPORTED_MARIADB . ' is a long-term release maintained '
-                            . 'until May 2029, so it is the version worth asking your hosting '
-                            . 'provider for when you next have the chance.' . $caveat,
-                'untested' => true,
+        $series = self::series($version);
+
+        // ✅ A release line that is genuinely still maintained.
+        if (in_array($series, self::MARIADB_SUPPORTED_SERIES, true) === true) {
+            return $base + [
+                'state'    => 'ok',
+                'headline' => 'MariaDB ' . $version . ' — a supported version',
+                'detail'   => 'The ' . $series . ' line is a long-term MariaDB release and is '
+                            . 'still receiving security fixes from its makers.' . $caveat,
             ];
         }
 
-        return [
-            'engine'   => $engine,
-            'family'   => 'mariadb',
-            'raw'      => $raw,
-            'version'  => $version,
-            'comment'  => $comment,
-            'state'    => 'ok',
-            'headline' => 'MariaDB ' . $version . ' — a supported version',
-            'detail'   => 'This is a current MariaDB release and it is still receiving '
-                        . 'security fixes from its makers.' . $caveat,
-            'untested' => true,
+        // 🔭 Newer than anything this file knows about.
+        if (version_compare($series . '.0', self::MARIADB_NEWEST_KNOWN . '.0', '>') === true) {
+            return $base + [
+                'state'    => 'ok',
+                'headline' => 'MariaDB ' . $version . ' — newer than this portal knows about',
+                'detail'   => 'This is newer than any MariaDB release this portal has been told '
+                            . 'about, so it will almost certainly run everything here without '
+                            . 'trouble. What this portal cannot tell you is whether the '
+                            . $series . ' line is one of the long-term releases. If you want to '
+                            . 'be sure you are still getting security fixes, that is the '
+                            . 'question to put to your hosting provider.' . $caveat,
+            ];
+        }
+
+        // ⚠️ Old enough to run, but its line is no longer maintained. MariaDB
+        //    10.6 is the common case here: its maintenance ended in July 2026.
+        return $base + [
+            'state'    => 'warn',
+            'headline' => 'MariaDB ' . $version . ' — works, but its release line is no longer maintained',
+            'detail'   => 'This portal expects to run on MariaDB ' . $version . ' without '
+                        . 'trouble, and there is nothing here that needs a newer one. But the '
+                        . $series . ' line is past the end of its maintenance, so security '
+                        . 'fixes are no longer being issued for it. MariaDB '
+                        . self::SUPPORTED_MARIADB . ' is a long-term release maintained until '
+                        . 'May 2029, and is the version worth asking your hosting provider for '
+                        . 'when you next have the chance.' . $caveat,
         ];
     }
 
@@ -325,13 +359,18 @@ final class DbServer
      */
     private static function judgeMySql(string $engine, string $raw, string $version, string $comment): array
     {
+        $base = [
+            'engine'   => $engine,
+            'family'   => 'mysql',
+            'raw'      => $raw,
+            'version'  => $version,
+            'comment'  => $comment,
+            'untested' => false,
+        ];
+
+        // 🛑 Too old to hold this portal's schema at all.
         if (version_compare($version, self::MIN_MYSQL, '<') === true) {
-            return [
-                'engine'   => $engine,
-                'family'   => 'mysql',
-                'raw'      => $raw,
-                'version'  => $version,
-                'comment'  => $comment,
+            return $base + [
                 'state'    => 'crit',
                 'headline' => $engine . ' ' . $version . ' is too old for this portal',
                 'detail'   => 'This portal needs MySQL ' . self::MIN_MYSQL . ' or newer. Its '
@@ -339,20 +378,46 @@ final class DbServer
                             . 'not have, so installing would fail part-way through and leave '
                             . 'you with a half-built database. Ask your hosting provider to '
                             . 'move you to a newer database server before going any further.',
-                'untested' => false,
             ];
         }
 
-        // ⚠️ The 8.0 line. This is the important one: it is far and away the
-        //    most common version on shared hosting, and it stopped receiving
-        //    security fixes in April 2026.
-        if (version_compare($version, '8.1.0', '<') === true) {
-            return [
-                'engine'   => $engine,
-                'family'   => 'mysql',
-                'raw'      => $raw,
-                'version'  => $version,
-                'comment'  => $comment,
+        $series = self::series($version);
+
+        // ✅ A release line that is genuinely still supported.
+        if (in_array($series, self::MYSQL_SUPPORTED_SERIES, true) === true) {
+            return $base + [
+                'state'    => 'ok',
+                'headline' => $engine . ' ' . $version . ' — a supported version',
+                'detail'   => 'The ' . $series . ' line is a long-term MySQL release, so it '
+                            . 'receives security fixes for years rather than months. This is a '
+                            . 'good version to be on. Note that this portal\'s own automated '
+                            . 'tests run against the MySQL 8.0 line, so if you are on something '
+                            . 'newer you are ahead of what is routinely tested here — which is '
+                            . 'the right direction to be ahead in, but worth knowing.',
+            ];
+        }
+
+        // 🔭 Newer than anything this file has been told about. Do not warn:
+        //    being newer than our list is not evidence of a problem. But do not
+        //    claim to know its support status either.
+        if (version_compare($series . '.0', self::MYSQL_NEWEST_KNOWN . '.0', '>') === true) {
+            return $base + [
+                'state'    => 'ok',
+                'headline' => $engine . ' ' . $version . ' — newer than this portal knows about',
+                'detail'   => 'This is newer than any MySQL release this portal has been told '
+                            . 'about, so it will almost certainly run everything here without '
+                            . 'trouble. What this portal cannot tell you is whether the '
+                            . $series . ' line is a long-term release or one of the short-lived '
+                            . 'ones that MySQL replaces every few months. If you want to be '
+                            . 'sure you are still getting security fixes, that is the question '
+                            . 'to put to your hosting provider.',
+            ];
+        }
+
+        // ⚠️ The 8.0 line. By far the most common on shared hosting, and the
+        //    reason this whole class exists.
+        if ($series === '8.0') {
+            return $base + [
                 'state'    => 'warn',
                 'headline' => $engine . ' ' . $version . ' — works, but no longer getting security fixes',
                 'detail'   => 'The whole MySQL 8.0 line reached the end of its support life in '
@@ -363,44 +428,43 @@ final class DbServer
                             . 'this yourself. It is worth asking your hosting provider when '
                             . 'they plan to move to MySQL ' . self::SUPPORTED_MYSQL . ', which '
                             . 'is a long-term release supported into 2032.',
-                'untested' => false,
             ];
         }
 
-        // ⚠️ 8.1, 8.2 and 8.3 were short-lived "innovation" releases. Each was
-        //    superseded within about three months and none is supported now.
-        if (version_compare($version, self::SUPPORTED_MYSQL, '<') === true) {
-            return [
-                'engine'   => $engine,
-                'family'   => 'mysql',
-                'raw'      => $raw,
-                'version'  => $version,
-                'comment'  => $comment,
-                'state'    => 'warn',
-                'headline' => $engine . ' ' . $version . ' — a short-lived release, now unsupported',
-                'detail'   => 'MySQL 8.1, 8.2 and 8.3 were each replaced within about three '
-                            . 'months and none of them receives fixes any more. This portal '
-                            . 'should run on it without trouble, but MySQL ' . self::SUPPORTED_MYSQL
-                            . ' is the long-term release to move to — it is supported into 2032.',
-                'untested' => false,
-            ];
-        }
-
-        return [
-            'engine'   => $engine,
-            'family'   => 'mysql',
-            'raw'      => $raw,
-            'version'  => $version,
-            'comment'  => $comment,
-            'state'    => 'ok',
-            'headline' => $engine . ' ' . $version . ' — a supported version',
-            'detail'   => 'This is a current MySQL release and it is still receiving security '
-                        . 'fixes. Note that this portal\'s automated tests run against the '
-                        . 'MySQL 8.0 line, so this version is newer than the one everything is '
-                        . 'checked against. That is the right direction to be wrong in, but it '
-                        . 'is worth knowing.',
-            'untested' => false,
+        // ⚠️ Everything else below the newest line we know about is one of the
+        //    short-lived "innovation" releases — replaced within about three
+        //    months and unsupported from that moment.
+        return $base + [
+            'state'    => 'warn',
+            'headline' => $engine . ' ' . $version . ' — a short-lived release, now unsupported',
+            'detail'   => 'MySQL puts out two kinds of release. Long-term ones are supported '
+                        . 'for years. Short-lived ones — and the ' . $series . ' line is one of '
+                        . 'those — are replaced roughly every three months and stop receiving '
+                        . 'fixes as soon as the next one arrives. The numbering does not tell '
+                        . 'you which is which, which is why a higher number is not always '
+                        . 'better. This portal should run on it without trouble, but MySQL '
+                        . self::SUPPORTED_MYSQL . ' is a long-term release supported into 2032, '
+                        . 'and is the one to ask for.',
         ];
+    }
+
+    /**
+     * 🔢 Reduce a version number to its release line — "8.0.36" becomes "8.0".
+     *
+     * A release line (MySQL and MariaDB both call these "series") is what
+     * support dates actually attach to. Support is never promised for one exact
+     * build; it is promised for the line, and every patch release within it.
+     *
+     * @param string $version A three-part version number.
+     *
+     * @return string The first two parts, or an empty string if it cannot be read.
+     */
+    private static function series(string $version): string
+    {
+        if (preg_match('/^(\d+)\.(\d+)/', $version, $m) === 1) {
+            return $m[1] . '.' . $m[2];
+        }
+        return '';
     }
 
     /**

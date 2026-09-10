@@ -40,14 +40,21 @@
  *                       administrator anyway, so nothing is lost. See the file
  *                       header of phpinfo.php for the full reasoning.
  *
- * THE DATABASE PASSWORD IS NEVER ON THIS PAGE
- * -------------------------------------------
- * Not redacted — genuinely absent. Every connection fact below is asked of the
- * live connection itself (which host, which database, which user, which
- * character set) rather than read out of the credentials file. The password is
- * never loaded into this page's memory in the first place, so no future edit
- * here can accidentally print it. That is a stronger guarantee than being
- * careful with a value you are holding.
+ * THE DATABASE PASSWORD IS NEVER IN THIS REPORT
+ * ---------------------------------------------
+ * Every connection fact below is asked of the LIVE CONNECTION itself — which
+ * host, which database, which user, which character set — rather than read out
+ * of the credentials file. This page therefore never reads the password and
+ * never prints it.
+ *
+ * Be precise about what that does and does not claim, because an earlier version
+ * of this comment overstated it and a review caught that. It does NOT mean the
+ * password is absent from the running program: the portal's start-up code
+ * (`_core/bootstrap.php`) reads the credentials file into memory and uses the
+ * password to open the connection, long before this page runs. What it means is
+ * that this page never goes near that value, so no future edit HERE can print
+ * it by accident. That is a real and useful property. It is just a smaller one
+ * than "the password is never loaded at all", which was not true.
  *
  * @package   Portal\Admin
  * @author    MWBM Partners Ltd (t/a MWservices)
@@ -297,10 +304,11 @@ $colourFor = static function (string $state): string {
         <p class="small text-muted mt-3 mb-0">
             A dash means your hosting account is not permitted to read that particular
             setting. That is normal on shared hosting and is not a fault.
-            The database password is not redacted on this page &mdash; it is never
-            loaded into it at all. It lives in
-            <code>web/_auth_keys/auth_creds.php</code>, which sits outside the part of
-            the site the web server will hand out.
+            The database password is not shown here and is not hidden behind dots
+            either &mdash; this page never reads it. Every detail above is asked of the
+            live connection rather than taken from the file that holds the password.
+            That file is <code>web/_auth_keys/auth_creds.php</code>, which sits outside
+            the part of the site the web server will hand out.
         </p>
     </div>
 </div>
@@ -405,10 +413,11 @@ $colourFor = static function (string $state): string {
                 problem.
             </p>
             <p class="small text-muted">
-                It opens in a new tab. Two sections are deliberately left out of it: the
-                server's environment variables, and the contents of the current request.
-                Those can contain passwords, keys and your own session token, and none of
-                that belongs on a screen. Everything else is included.
+                The report is built here rather than handed straight over from PHP, so
+                that the parts which can contain passwords, keys and your own sign-in
+                token are never gathered in the first place. Values that look like a
+                secret are hidden; the setting names are always shown. There is a plain
+                text version for pasting into a support ticket.
             </p>
             <a href="/admin/system-info/phpinfo" class="btn btn-outline-primary" target="_blank" rel="noopener">
                 <i class="fa-solid fa-up-right-from-square me-1"></i>Open the full PHP report
