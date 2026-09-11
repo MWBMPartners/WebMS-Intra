@@ -60,7 +60,11 @@ use Portal\Core\Site;
 $slug     = trim((string) ($_GET['slug'] ?? ''));
 $upcoming = (int) ($_GET['upcoming'] ?? 0);
 $siteId   = Site::id();
-$primary  = (string) (Site::branding()['primaryColor'] ?? '#5e6ad2');
+// 🛑 Called Site::branding() with no argument and used the result as a
+//    list. It takes one required argument and returns a single piece of text,
+//    so this threw on every request. This page currently has no address of its
+//    own (migration 189 removed it), so nobody could reach it to find out.
+$primary  = (string) (Site::branding('color') ?? '#5e6ad2');
 
 header('X-Frame-Options: ALLOWALL'); // explicitly opt-in to embedding
 header_remove('Content-Security-Policy');

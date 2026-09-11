@@ -37,6 +37,19 @@ $isLoggedIn   = isset($_SESSION['user_id']) === true && (int) $_SESSION['user_id
 $allowAnon    = (App::settings('calendar.publicSubmit.allowAnonymous') ?? 'true') === 'true';
 $requireCap   = (App::settings('calendar.publicSubmit.requireCaptcha')  ?? 'true') === 'true';
 
+// 🤖 Is there actually a working anti-robot check to show?
+//
+//    Three things have to be true: an administrator asked for one, the class is
+//    present, and a provider has genuinely been set up. The last one matters -
+//    without it the box would render with nothing behind it.
+//
+//    This page used to test only that the CLASS existed, which it always does,
+//    and then call a method on it that does not exist. See the note further
+//    down at the point of use.
+$captchaOn = $requireCap === true
+    && class_exists(Captcha::class) === true
+    && Captcha::isConfigured() === true;
+
 if ($isLoggedIn === false && $allowAnon === false) {
     header('Location: /auth/login?redirect=' . urlencode('/calendar/submit'), true, 302);
     exit();
@@ -65,6 +78,14 @@ $csrf        = htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8');
 $success     = isset($_GET['submitted']) === true;
 
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
+
+// 📦 The anti-robot provider's own script. Missing entirely until now, so
+//    even once the box below is drawn correctly there would be nothing behind
+//    it. Goes after the page header and before the form, matching
+//    calendar/event-register and forms/public.
+if ($captchaOn === true) {
+    echo Captcha::scriptTag();
+}
 ?>
 
 <div class="container py-4" style="max-width: 720px;">
@@ -133,9 +154,27 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         <div class="form-text">We'll email you when the submission is reviewed.</div>
                     </div>
 
-                    <?php if ($requireCap === true && class_exists(Captcha::class) === true): ?>
+                    <?php
+                    /*
+                     * 🛑 This called Captcha::renderWidget(), which does not exist.
+                     *    The class offers widget() and verify(). Because this page is
+                     *    PUBLIC and the setting that switches it on is seeded "true",
+                     *    an ordinary visitor opening /calendar/submit hit a fatal
+                     *    error while the page was still drawing - not on pressing
+                     *    Send, but on simply arriving.
+                     *
+                     *    The guard above it tested class_exists(), which is always
+                     *    true, so it gave every appearance of being careful while
+                     *    checking nothing that could fail.
+                     *
+                     *    Written to match the working pages (calendar/event-register
+                     *    and forms/public): the provider's script goes in once, near
+                     *    the top, and the box itself goes here.
+                     */
+                    ?>
+                    <?php if ($captchaOn === true): ?>
                         <div class="col-12">
-                            <?php echo Captcha::renderWidget(); ?>
+                            <?php echo Captcha::widget(); ?>
                         </div>
                     <?php endif; ?>
                 <?php endif; ?>

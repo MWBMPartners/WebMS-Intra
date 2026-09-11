@@ -65,8 +65,21 @@ if ($event === null) { http_response_code(404); exit('Event not found.'); }
 $showQr        = ((string) Settings::get('public_landing.show_qr',        '1')) === '1';
 $showCountdown = ((string) Settings::get('public_landing.show_countdown', '1')) === '1';
 $brandName     = method_exists(Site::class, 'productName') === true ? (string) Site::productName() : 'Portal';
-$siteName      = (string) Site::name();
-$primaryColor  = (string) (Site::branding()['primaryColor'] ?? '#5e6ad2');
+// 🛑 These two used to call Site::name() and Site::branding() with no
+//    argument. Neither exists. Site has no name() method at all, and
+//    branding() takes one required argument and returns a single piece of
+//    text, not a list.
+//
+//    Both throw, and because they sit AFTER the lookup that handles a bad
+//    request, the failure only happened on the SUCCESS path: a wrong address
+//    correctly showed "not found", while a perfectly good one returned an
+//    error page. So the page never worked for anybody, and nothing in the
+//    error log distinguished it from an ordinary missing page.
+//
+//    Left as ordinary text with a sensible fallback, because branding()
+//    returns nothing at all when no site has been loaded.
+$siteName      = (string) (Site::branding('name')  ?? 'Portal');
+$primaryColor  = (string) (Site::branding('color') ?? '#5e6ad2');
 
 $startTs   = strtotime((string) $event['startDateTime']);
 $startIso  = date('c', $startTs);

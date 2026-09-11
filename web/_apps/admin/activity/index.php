@@ -18,6 +18,14 @@
 declare(strict_types=1);
 
 use Portal\Core\App;
+// 🛑 Auth was missing from this list while the page calls Auth::csrfToken()
+//    lower down, on the "Export as CSV" link. Without the line below, PHP looks
+//    for a class called Auth at the top level, finds nothing, and stops with a
+//    fatal error - so the whole Activity Log page failed to draw.
+//
+//    Nothing caught it because every class it names really does exist; the only
+//    thing missing was the line saying WHICH Auth was meant.
+use Portal\Core\Auth;
 use Portal\Core\Router;
 use Portal\Core\Site;
 

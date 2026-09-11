@@ -52,13 +52,48 @@ if ($isLoggedIn === false && $allowAnon === false) {
     exit();
 }
 
-// 🛡️ Captcha for anonymous submissions.
-if ($isLoggedIn === false && $requireCap === true && class_exists(Captcha::class) === true) {
-    if (Captcha::verifyFromPost($_POST) === false) {
+// 🛡️ Anti-robot check for submissions from somebody not signed in.
+//
+//    This called Captcha::verifyFromPost(), which does not exist - the class
+//    offers verify(). So the moment an anonymous visitor sent the form, it
+//    stopped with a fatal error instead of saving anything.
+//
+//    The old guard tested class_exists(), which is always true. It now tests
+//    that a provider has actually been SET UP, matching
+//    calendar/event-register-save.
+$captchaUsable = class_exists(Captcha::class) === true && Captcha::isConfigured() === true;
+
+if ($isLoggedIn === false && $requireCap === true && $captchaUsable === true) {
+    if (Captcha::verify($_POST) === false) {
         Logger::activity('EventSubmitRejected', 'Failed captcha on /calendar/submit-save');
         header('Location: /calendar/submit?err=captcha', true, 302);
         exit();
     }
+}
+
+// ⚠️ An administrator asked for an anti-robot check and there is no provider
+//    set up to do it.
+//
+//    The submission is allowed to CONTINUE - refusing would make a public form
+//    unusable because of a setting the visitor can neither see nor fix, and
+//    every other public form in this portal behaves the same way (Captcha::verify
+//    itself returns true when nothing is configured). What arrives is a draft
+//    awaiting review, not a published event.
+//
+//    But it must not pass silently, because the administrator believes a door is
+//    closed that is in fact wide open to automated spam.
+//
+//    This says SKIPPED rather than accepted, deliberately. It is written before
+//    the submission has been checked or saved, so at this point nothing has been
+//    accepted yet and the entry would otherwise claim something untrue about
+//    submissions that go on to fail validation.
+if ($isLoggedIn === false && $requireCap === true && $captchaUsable === false) {
+    Logger::activity(
+        'EventSubmitCaptchaNotConfigured',
+        'Anti-robot check SKIPPED on a public event submission: it is switched '
+        . 'on in the settings but no provider has been set up. Configure one at '
+        . '/admin/captcha.'
+    );
 }
 
 $eventName       = trim((string) ($_POST['eventName']      ?? ''));

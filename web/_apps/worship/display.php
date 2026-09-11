@@ -34,8 +34,21 @@ $plan = $stmt->get_result()->fetch_assoc() ?: null;
 $stmt->close();
 if ($plan === null) { http_response_code(404); exit('Display not found.'); }
 
-$brandPrimary = (string) (Site::branding()['primaryColor'] ?? '#5e6ad2');
-$siteName     = (string) Site::name();
+// 🛑 These two used to call Site::name() and Site::branding() with no
+//    argument. Neither exists. Site has no name() method at all, and
+//    branding() takes one required argument and returns a single piece of
+//    text, not a list.
+//
+//    Both throw, and because they sit AFTER the lookup that handles a bad
+//    request, the failure only happened on the SUCCESS path: a wrong address
+//    correctly showed "not found", while a perfectly good one returned an
+//    error page. So the page never worked for anybody, and nothing in the
+//    error log distinguished it from an ordinary missing page.
+//
+//    Left as ordinary text with a sensible fallback, because branding()
+//    returns nothing at all when no site has been loaded.
+$brandPrimary = (string) (Site::branding('color') ?? '#5e6ad2');
+$siteName     = (string) (Site::branding('name')  ?? 'Portal');
 ?><!DOCTYPE html>
 <html lang="en">
 <head>
