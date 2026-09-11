@@ -44,7 +44,11 @@ class GdprEraser
      */
     public static function catalogue(): array
     {
-        return [
+        // 📋 The entries written by hand, below, say HOW to erase a particular
+        //    table - which column links a row to a person, and what to do with
+        //    it. They are kept because several need special handling that no
+        //    general rule could work out.
+        $handWritten = [
             // Direct user-row anonymisation last; do dependents first.
             // NOTE: per-user event check-ins live in `tblEventAttendance`
             // (migration 116, multi-day attendance grid) — there is no
@@ -263,6 +267,172 @@ class GdprEraser
              'overrides' => ['fullName' => self::TOMBSTONE_NAME, 'isActive' => 0],
              'reason' => 'user row retained for historical FK integrity; PII removed'],
         ];
+
+        // 📚 Everything else comes from the one written list of where
+        //    personal information lives: _core/personal-data-catalogue.php.
+        //
+        //    Before this, the two were separate, and they drifted. When the
+        //    difference was measured on 11 September 2026, 77 of the 126 tables
+        //    holding personal information were in neither the erasure list nor
+        //    the download. Two were found by accident.
+        //
+        //    Reading from the same list means a table can no longer be in one
+        //    and missing from the other, and the automatic check
+        //    (check_personal_data_coverage.py) refuses to let a new table go
+        //    unsorted.
+        return array_merge($handWritten, self::fromPersonalDataCatalogue($handWritten));
+    }
+
+    /**
+     * 📚 Turn the written list of personal data into erasure instructions.
+     *
+     * The written list says WHICH tables hold personal information and WHAT
+     * should happen to each. This works out HOW: which column ties a row to a
+     * person, and which of the eraser's own actions matches the decision.
+     *
+     * The four decisions map like this:
+     *
+     *   erase        -> delete     remove the rows outright
+     *   unlink       -> anonymise  keep the row, empty the column naming the person
+     *   retain       -> retain     keep it, and record in the audit trail that it
+     *                              was kept and why
+     *   not-personal -> skipped    nothing to do
+     *
+     * A table already handled by hand is left alone: the hand-written entry
+     * wins, because it was written for a reason.
+     *
+     * @param array<int, array<string, mixed>> $handWritten Already-handled entries.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    private static function fromPersonalDataCatalogue(array $handWritten): array
+    {
+        $file = __DIR__ . DIRECTORY_SEPARATOR . 'personal-data-catalogue.php';
+        if (is_readable($file) === false) {
+            return [];
+        }
+        $catalogue = require $file;
+        if (is_array($catalogue) === false) {
+            return [];
+        }
+
+        $alreadyHandled = [];
+        foreach ($handWritten as $entry) {
+            $alreadyHandled[(string) ($entry['table'] ?? '')] = true;
+        }
+
+        // Columns that tie a row to a person. Ordered: the ones that mean "this
+        // record is ABOUT them" come before the ones that mean "they made this",
+        // because when a table has both, the first is what identifies the person
+        // the record concerns.
+        $linkColumns = [
+            'userID', 'memberID', 'donorID', 'submitterID', 'recipientUserID',
+            'assignedToID', 'targetUserID', 'convertedUserID', 'uploadedByUserID',
+            'leaderID', 'approverID', 'reviewedByID', 'startedByID',
+            'createdByID', 'updatedByID',
+        ];
+
+        $entries = [];
+
+        foreach ($catalogue as $table => $meta) {
+            $table = (string) $table;
+            if (isset($alreadyHandled[$table]) === true) {
+                continue;
+            }
+
+            $decision = (string) ($meta['decision'] ?? '');
+            if ($decision === 'not-personal') {
+                continue;
+            }
+
+            $columns = (array) ($meta['columns'] ?? []);
+            $reason  = (string) ($meta['reason'] ?? '');
+
+            if ($decision === 'retain') {
+                // No column needed: nothing is being changed. The point of the
+                // entry is that the audit trail records the decision.
+                $entries[] = [
+                    'table'    => $table,
+                    'userCol'  => 'userID',
+                    'action'   => 'retain',
+                    'nullCols' => [],
+                    'reason'   => $reason . (isset($meta['period']) === true
+                        ? ' (kept for ' . (string) $meta['period'] . ')'
+                        : ''),
+                ];
+                continue;
+            }
+
+            // Which column ties this row to a person?
+            $link = '';
+            foreach ($linkColumns as $candidate) {
+                if (in_array($candidate, $columns, true) === true) {
+                    $link = $candidate;
+                    break;
+                }
+            }
+
+            if ($link === '') {
+                // No link to an account at all. Event registrations are the
+                // important example: a child's name, date of birth, allergies
+                // and medical notes, with nothing tying them to anybody's
+                // account. Those cannot be found by this route and are handled
+                // separately - see the erasure page and issue #479.
+                continue;
+            }
+
+            if ($decision === 'erase') {
+                $entries[] = [
+                    'table'    => $table,
+                    'userCol'  => $link,
+                    'action'   => 'delete',
+                    'nullCols' => [],
+                    'reason'   => $reason,
+                ];
+                continue;
+            }
+
+            // 'unlink' - keep what was made, remove who made it. Every
+            //  person-linking column this table has is emptied, not only the
+            //  one matched on, or a second column would still name them.
+            $nullCols = array_values(array_intersect($linkColumns, $columns));
+            $entries[] = [
+                'table'    => $table,
+                'userCol'  => $link,
+                'action'   => 'anonymise',
+                'nullCols' => $nullCols,
+                'reason'   => $reason,
+            ];
+        }
+
+        return $entries;
+    }
+
+    /**
+     * 📏 How many tables the written list covers, and how they break down.
+     *
+     * Used by the erasure page so an administrator can see the scale of what is
+     * about to happen before they agree to it.
+     *
+     * @return array<string, int>
+     */
+    public static function catalogueSummary(): array
+    {
+        $file = __DIR__ . DIRECTORY_SEPARATOR . 'personal-data-catalogue.php';
+        if (is_readable($file) === false) {
+            return [];
+        }
+        $catalogue = require $file;
+        if (is_array($catalogue) === false) {
+            return [];
+        }
+
+        $counts = [];
+        foreach ($catalogue as $meta) {
+            $decision = (string) ($meta['decision'] ?? 'unknown');
+            $counts[$decision] = ($counts[$decision] ?? 0) + 1;
+        }
+        return $counts;
     }
 
     /**
@@ -416,9 +586,29 @@ class GdprEraser
             return false;
         }
 
+        // 🔒 KEEP means keep. Handled FIRST, and explicitly.
+        //
+        //    Some records must be kept even after somebody asks to be
+        //    forgotten: Gift Aid declarations, financial records, safeguarding
+        //    records. Each is kept deliberately, with a reason, and the fact
+        //    that it was kept is written into the audit trail - so the
+        //    organisation can show exactly what it did and why, rather than
+        //    quietly keeping things.
+        if ($action === 'retain') {
+            self::logAudit(
+                $db,
+                $requestId,
+                'retain',
+                $table,
+                null,
+                'kept as the law requires: ' . (string) ($entry['reason'] ?? 'no reason recorded')
+            );
+            return true;
+        }
+
         if ($action === 'delete') {
             $sql = 'DELETE FROM `' . $table . '` WHERE `' . $col . '` = ?';
-        } else { // anonymise
+        } elseif ($action === 'anonymise') {
             $nulls = (array) ($entry['nullCols'] ?? []);
             $overrides = (array) ($entry['overrides'] ?? []);
             $sets = [];
@@ -442,6 +632,25 @@ class GdprEraser
                 $sets[] = '`' . $col . '` = NULL';
                 $sql = 'UPDATE `' . $table . '` SET ' . implode(', ', $sets) . ' WHERE `' . $col . '` = ?';
             }
+        } else {
+            // 🛑 An action nobody recognises. STOP, do not guess.
+            //
+            //    This used to be a plain "else", which meant anything that was
+            //    not "delete" was quietly treated as "anonymise" - including a
+            //    typo, and including any new action somebody added later. For a
+            //    record the law says to KEEP, that would have destroyed the very
+            //    thing that had to be preserved, and reported success.
+            //
+            //    Refusing is always recoverable. Guessing is not.
+            self::logAudit(
+                $db,
+                $requestId,
+                'skip',
+                $table,
+                null,
+                'refused: unrecognised instruction "' . $action . '" - nothing was changed'
+            );
+            return false;
         }
 
         try {
