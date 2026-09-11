@@ -112,75 +112,49 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $flash = 'Missing or invalid snapshot name.';
                 $flashType = 'danger';
             } else {
-                Maintenance::setActive(
-                    true,
-                    sprintf('Full restore from snapshot %s in progress.', $name)
-                );
                 $path = rtrim(PORTAL_ROOT, DIRECTORY_SEPARATOR)
                       . DIRECTORY_SEPARATOR . '_backups'
                       . DIRECTORY_SEPARATOR . $name;
-                $manifestPath = $path . DIRECTORY_SEPARATOR . '_manifest.json';
-                $manifest = is_readable($manifestPath) === true
-                    ? json_decode((string) file_get_contents($manifestPath), true)
-                    : null;
-                $errors = [];
-                $okCount = 0;
-                $skippedTotal = 0;
-                $skippedTables = [];
-                if (is_array($manifest) === true && isset($manifest['tables']) === true) {
-                    foreach (array_keys((array) $manifest['tables']) as $t) {
-                        $r = $backup->restoreTable($path, (string) $t);
-                        if ($r['success'] === true) {
-                            $okCount++;
-                            // ⚠️ Keep track of anything left out so the summary
-                            //    below can say so, rather than reporting a clean
-                            //    success when rows were dropped.
-                            if (($r['skipped_duplicates'] ?? 0) > 0) {
-                                $skippedTotal += (int) $r['skipped_duplicates'];
-                                $skippedTables[] = (string) $t;
-                            }
-                        } else {
-                            $errors[] = $t . ': ' . ($r['error'] ?? 'unknown');
-                        }
-                    }
-                } else {
-                    $errors[] = 'Manifest missing or unreadable.';
-                }
+
+                // 🔄 ONE operation for the whole snapshot, not a loop over tables.
+                //
+                //    This used to walk the manifest and restore each table on
+                //    its own. That could not work, for two reasons:
+                //
+                //      * Each table finished before the next began. If the
+                //        twentieth failed, the first nineteen were already done
+                //        and could not be taken back - leaving a database that
+                //        was part one thing and part another.
+                //
+                //      * Sixty-nine of the tables are pointed at by other
+                //        tables, and a table cannot be emptied on its own while
+                //        something still points at it. Those had never been
+                //        restorable at all.
+                //
+                //    DbBackup::restoreAll() checks every file first, works out
+                //    an order from how the database is actually put together,
+                //    and does the whole thing inside one transaction. If
+                //    anything fails, nothing changes.
+                Maintenance::setActive(
+                    true,
+                    sprintf('Putting snapshot %s back. The portal is closed while this runs.', $name)
+                );
+                $result = $backup->restoreAll($path);
                 Maintenance::setActive(false);
-                if (count($errors) === 0) {
-                    $flash = sprintf('Full restore complete — %d tables restored.', $okCount);
-                    $flashType = 'success';
-                    if ($skippedTotal > 0) {
-                        $flash .= sprintf(
-                            ' %d row(s) across %d table(s) (%s) were left out because '
-                            . 'the database no longer allows two rows the same. This is '
-                            . 'expected for a snapshot taken before that rule was added — '
-                            . 'those duplicates were never meant to be there.',
-                            $skippedTotal,
-                            count($skippedTables),
-                            implode(', ', array_slice($skippedTables, 0, 5))
-                        );
-                        $flashType = 'warning';
-                    }
-                } else {
+
+                if ($result['success'] === true) {
                     $flash = sprintf(
-                        '%d tables restored; %d errors: %s',
-                        $okCount,
-                        count($errors),
-                        implode('; ', array_slice($errors, 0, 3))
+                        'Snapshot put back in full: %d tables, %d rows.',
+                        $result['tables_restored'],
+                        $result['rows_restored']
                     );
-                    // Rows left out have already been committed, so say so here
-                    // too. Reporting only the errors would hide it.
-                    if ($skippedTotal > 0) {
-                        $flash .= sprintf(
-                            ' Also, %d row(s) across %d table(s) (%s) were left out '
-                            . 'because the database no longer allows two rows the same.',
-                            $skippedTotal,
-                            count($skippedTables),
-                            implode(', ', array_slice($skippedTables, 0, 5))
-                        );
-                    }
-                    $flashType = 'warning';
+                    $flashType = 'success';
+                } else {
+                    // The message already explains, in plain words, that nothing
+                    // was changed. Show it as it is rather than wrapping it in
+                    // something vaguer.
+                    $flash = $result['error'];
+                    $flashType = 'danger';
                 }
             }
         } elseif ($action === 'delete') {

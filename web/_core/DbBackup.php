@@ -624,6 +624,238 @@ class DbBackup
         return '';
     }
 
+    /**
+     * 🔄 Put a WHOLE snapshot back, as one all-or-nothing operation.
+     *
+     * This is the method to use for a real recovery. Putting tables back one at
+     * a time cannot work, for two reasons that only show up on a real database:
+     *
+     *   1. Tables point at each other. A row in one table refers to a row in
+     *      another, and the database refuses to let you empty the second while
+     *      the first still points at it. Sixty-nine of the tables here are
+     *      pointed at by something. Restoring them individually has never been
+     *      possible.
+     *
+     *   2. Doing them one at a time means each is finished before the next
+     *      begins. If the twentieth fails, the first nineteen are already done
+     *      and cannot be taken back. You are left with a database that is part
+     *      one thing and part another - arguably worse than the state you were
+     *      trying to recover from, and much harder to reason about.
+     *
+     * So this does the lot inside a SINGLE transaction. Everything is checked
+     * before anything is touched; every table is emptied and refilled; and only
+     * then is any of it made permanent. If ANYTHING goes wrong at any point,
+     * the whole thing is abandoned and the database is exactly as it was.
+     *
+     * The order matters and is worked out rather than assumed. Tables are
+     * emptied children-first, so nothing is left pointing at a row that has
+     * gone, and refilled parents-first, so nothing is written before the row it
+     * points at exists.
+     *
+     * @param string $snapshotPath Folder holding the snapshot.
+     * @param bool   $dryRun       When true, check everything and report what
+     *                             WOULD happen, changing nothing at all. Worth
+     *                             doing first: a recovery is a bad moment to
+     *                             discover the snapshot is damaged.
+     *
+     * @return array{success: bool, tables_restored: int, rows_restored: int,
+     *               error: string, warnings: array<int, string>}
+     */
+    public function restoreAll(string $snapshotPath, bool $dryRun = false): array
+    {
+        $fail = static function (string $why): array {
+            return [
+                'success'         => false,
+                'tables_restored' => 0,
+                'rows_restored'   => 0,
+                'error'           => $why,
+                'warnings'        => [],
+            ];
+        };
+
+        // 🛡️ Same containment guard as the single-table restore: resolve the
+        //    path and refuse anything that does not land inside the backups
+        //    folder.
+        $resolvedRoot     = realpath($this->backupsRoot);
+        $resolvedSnapshot = realpath(rtrim($snapshotPath, DIRECTORY_SEPARATOR));
+        if ($resolvedRoot === false
+            || $resolvedSnapshot === false
+            || str_starts_with($resolvedSnapshot . DIRECTORY_SEPARATOR, $resolvedRoot . DIRECTORY_SEPARATOR) === false
+        ) {
+            return $fail('That snapshot is not in the backups folder, so it was not opened. '
+                       . 'Nothing has been changed.');
+        }
+
+        $manifestFile = $resolvedSnapshot . DIRECTORY_SEPARATOR . '_manifest.json';
+        if (is_readable($manifestFile) === false) {
+            return $fail('This snapshot has no manifest, so there is no way to know what it '
+                       . 'should contain. Nothing has been changed.');
+        }
+        $manifest = json_decode((string) file_get_contents($manifestFile), true);
+        if (is_array($manifest) === false || isset($manifest['tables']) === false) {
+            return $fail('This snapshot\'s manifest could not be read. Nothing has been '
+                       . 'changed.');
+        }
+
+        $tables = array_keys((array) $manifest['tables']);
+        if ($tables === []) {
+            return $fail('This snapshot contains no tables. Nothing has been changed.');
+        }
+
+        // ---------------------------------------------------------------
+        // 🔍 CHECK EVERYTHING FIRST. Nothing below touches the database.
+        // ---------------------------------------------------------------
+        // A damaged file found half way through a restore is a disaster. Found
+        // beforehand, it costs nothing at all.
+        $warnings = [];
+        $payloads = [];
+
+        foreach ($tables as $table) {
+            $table = (string) $table;
+            if (preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/', $table) !== 1) {
+                return $fail('This snapshot names a table in a form that is not valid: '
+                           . $table . '. Nothing has been changed.');
+            }
+
+            $file = $resolvedSnapshot . DIRECTORY_SEPARATOR . $table . '.json';
+            if (is_readable($file) === false) {
+                return $fail('The snapshot is incomplete: it lists ' . $table . ' but that '
+                           . 'file is missing. Nothing has been changed.');
+            }
+
+            $problem = $this->checksumProblem($file, (array) $manifest['tables'][$table]);
+            if ($problem !== '') {
+                return $fail('The saved copy of ' . $table . ' is damaged. ' . $problem
+                           . ' Nothing has been changed.');
+            }
+
+            $payload = json_decode((string) file_get_contents($file), true);
+            if (is_array($payload) === false || is_array($payload['rows'] ?? null) === false) {
+                return $fail('The saved copy of ' . $table . ' could not be read. Nothing '
+                           . 'has been changed.');
+            }
+            $payloads[$table] = $payload;
+        }
+
+        // 🔗 Work out the order, from how the LIVE database is put together
+        //    rather than from the snapshot - the database is what the writes
+        //    have to satisfy.
+        $graph = $this->foreignKeyGraph();
+        if ($graph === null) {
+            return $fail('The database would not say how its tables are linked together, so '
+                       . 'there is no safe order to put them back in. Nothing has been '
+                       . 'changed.');
+        }
+
+        $order = $this->restoreOrder($tables, $graph);
+        if ($order === null) {
+            return $fail('These tables point at each other in a circle, so there is no order '
+                       . 'that works. This needs a person to look at it. Nothing has been '
+                       . 'changed.');
+        }
+
+        if ($dryRun === true) {
+            $rowTotal = 0;
+            foreach ($payloads as $payload) {
+                $rowTotal += count($payload['rows']);
+            }
+            return [
+                'success'         => true,
+                'tables_restored' => count($order),
+                'rows_restored'   => $rowTotal,
+                'error'           => '',
+                'warnings'        => ['This was a check only. Nothing was changed.'],
+            ];
+        }
+
+        // ---------------------------------------------------------------
+        // 🔄 One transaction. All of it, or none of it.
+        // ---------------------------------------------------------------
+        $tablesDone = 0;
+        $rowsDone   = 0;
+
+        try {
+            $this->db->begin_transaction();
+
+            // Empty children first, so nothing is ever left pointing at a row
+            // that has just gone.
+            foreach (array_reverse($order) as $table) {
+                $this->db->query('DELETE FROM `' . $table . '`');
+            }
+
+            // Refill parents first, so nothing is written before the row it
+            // points at exists.
+            foreach ($order as $table) {
+                $rows = $payloads[$table]['rows'];
+                if ($rows === []) {
+                    $tablesDone++;
+                    continue;
+                }
+
+                // The database fills some columns in for itself and refuses an
+                // INSERT that names one. Work out which, per table.
+                $generated = $this->generatedColumns($table);
+                if ($generated === null) {
+                    throw new \RuntimeException(
+                        'Could not read the shape of ' . $table . '.'
+                    );
+                }
+
+                foreach ($rows as $row) {
+                    if (is_array($row) === false) {
+                        continue;
+                    }
+                    $cols = array_values(array_diff(array_keys($row), $generated));
+                    if ($cols === []) {
+                        continue;
+                    }
+
+                    $placeholders = implode(', ', array_fill(0, count($cols), '?'));
+                    $quoted       = '`' . implode('`, `', $cols) . '`';
+                    $stmt = $this->db->prepare(
+                        'INSERT INTO `' . $table . '` (' . $quoted . ') VALUES (' . $placeholders . ')'
+                    );
+                    if ($stmt === false) {
+                        throw new \RuntimeException('Could not prepare an insert for ' . $table . '.');
+                    }
+
+                    $values = [];
+                    foreach ($cols as $col) {
+                        $values[] = $row[$col];
+                    }
+                    $stmt->bind_param(str_repeat('s', count($values)), ...$values);
+                    $stmt->execute();
+                    $stmt->close();
+                    $rowsDone++;
+                }
+                $tablesDone++;
+            }
+
+            $this->db->commit();
+        } catch (\Throwable $e) {
+            // 🔙 Put everything back. Because nothing was made permanent along the
+            //    way, this really does return the database to exactly the state
+            //    it was in before this method was called.
+            try {
+                $this->db->rollback();
+            } catch (\Throwable $ignored) {
+                unset($ignored);
+            }
+
+            return $fail('The restore was stopped and everything has been put back as it '
+                       . 'was. Nothing in the database has changed. The reason it stopped: '
+                       . $e->getMessage());
+        }
+
+        return [
+            'success'         => true,
+            'tables_restored' => $tablesDone,
+            'rows_restored'   => $rowsDone,
+            'error'           => '',
+            'warnings'        => $warnings,
+        ];
+    }
+
     public function restoreTable(string $snapshotPath, string $table): array
     {
         // 🛡️ Validate the table identifier FIRST — before it is ever used
