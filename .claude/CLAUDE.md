@@ -269,6 +269,74 @@ back to Opus only when Fable is unavailable, and put the fallback in the script
 rather than deciding by hand. Implementation stays on Sonnet or Haiku — or Opus
 when the work is genuinely complex.
 
+## When one system runs out: handing over, and handing back (STANDING RULE, all projects)
+
+**If the system doing a piece of work becomes unavailable — out of credit, rate
+limited, or simply down — hand the work to another one rather than stopping.**
+Then go back to the usual one as soon as it will take work again.
+
+Deliberately written without naming particular tools. Today that means Claude Code
+and Codex, and within Claude Code it means falling back from one model to another.
+Tomorrow it may mean something else. The rule is about the situation, not the
+brand.
+
+### When to hand over
+
+- The service refuses the work: out of credit, a spend cap reached, rate limited,
+  a quota exhausted, or an outage.
+- Retrying has already failed once and the reason is not going to change by
+  itself.
+
+Do **not** hand over merely because something is slow, or because another system
+might do it better. That is a different decision.
+
+### The one condition that has to be met first
+
+**The work must survive the move.** Hand over only when enough of the situation
+can go with it that the result will be as good. In practice that means the other
+system is given: what is being attempted, what has been established so far, which
+files matter, what has already been tried and rejected, and how the result will be
+checked.
+
+If that cannot be carried across, do not hand over. Say plainly that the work is
+blocked and why. A confident answer produced without the context that made the
+question answerable is worse than no answer, because nobody can tell the
+difference by looking at it.
+
+### Go back to the usual system promptly
+
+A fallback is a detour, not a new route. Try the usual system again at the next
+natural break — the next task, the next planning run, the next review. Do not
+settle onto the fallback because it happens to be working.
+
+**Always retry the preferred system first on each new run, even if it failed the
+last time.** Limits reset, outages end, and credit gets topped up. Trying costs
+one failed call; assuming costs the whole benefit of the preferred system.
+
+### The one place a hand-over must NOT happen silently
+
+Reviewing. The value of a second system checking the first is that two different
+systems rarely make the same mistake in the same place. **If the reviewer is
+unavailable and the builder reviews its own work, that value is gone** — and the
+result looks identical from the outside.
+
+So when the usual reviewer cannot run:
+
+1. Say so plainly, in the report and in the commit message. Never let silence
+   imply an independent review happened.
+2. Get what independence is available — a different model, or a fresh agent with
+   no memory of building the thing — and say which was used.
+3. Treat the change as **not yet fully reviewed**, and run the proper review when
+   the usual reviewer is available again.
+
+### Write down what happened
+
+Whenever a fallback is used, record it where the work is recorded — the commit
+message, the handoff note, the progress report. Two reasons. Somebody reading it
+later needs to know which parts had the usual level of checking. And a pattern of
+repeated fallbacks is worth noticing: it usually means a limit needs raising, not
+that the work needs re-planning.
+
 ## Never put ".php" in a web address (STANDING RULE, all projects)
 
 Links, form targets, redirects and background requests use the **clean address**
