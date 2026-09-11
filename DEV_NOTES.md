@@ -504,6 +504,104 @@ runs three web roots from one parent, so the arrangement is already proven here.
 Serving the public pages at a path on a **separate main domain**
 (`example.org/noticeboard`) needs nothing deployed and no extra setting. That is a
 different mechanism — see `.claude/plans/public-door-3-build-plan.md`.
+
+---
+
+### 3c. Changing over a server that already has the old layout (#493)
+
+> 🛑 **Do not deploy until the #493 work has landed.** The deployment does not yet
+> know about `admin_html/`, so the shared upload would copy the entire management
+> portal into the shared folder, where a misconfigured web address could serve it.
+
+#### Does the deployment clean up after itself?
+
+Mostly yes, and it is worth knowing exactly where.
+
+Both uploads run `lftp mirror --reverse --delete`, so **a file removed from the
+repository is removed from the server on the next deployment**. That means the old
+management-portal files sitting in `public_html/` would be cleared out when the
+new public website is uploaded there.
+
+Relying on that alone is still the wrong call for this particular change, for one
+reason: `public_html` is changing **meaning**, not just contents. If a deployment
+stops half way, or an exclusion happens to match, what survives is an
+admin-portal file in a folder the whole world can now read. Deleting the folder
+beforehand removes that possibility rather than guarding against it.
+
+#### What to delete, and what to never touch
+
+| On the server | Do this | Why |
+| --- | --- | --- |
+| `public_html/` | **Delete the whole folder** | Every file in it is the old management portal. Under the new layout this folder is the PUBLIC website. |
+| `public_html_beta/` | **Delete the whole folder** | Same. |
+| `public_html_dev/` | **Delete the whole folder** | Same. |
+| `admin_html/` etc. | Nothing — they do not exist yet | The deployment creates them. |
+| `_core/` `_apps/` `_sql/` `_lang/` `_vendor/` `_install/` | Leave, or delete — either is fine | Fully replaced from the repository every time. |
+| `_libraries/` | Leave alone | Holds dompdf, fetched during the build. |
+| **`_auth_keys/`** | **🚨 NEVER DELETE** | See below. |
+| **`_uploads/`** | **🚨 NEVER DELETE** | Everything anybody has uploaded through the portal — documents, photos, pastoral attachments, expense receipts. |
+| **`_backups/`** | **🚨 NEVER DELETE** | The database snapshots. Deleting these at the same moment as a big structural change removes the one thing that could put it right. |
+
+#### Why `_auth_keys/` is the one that cannot be recovered
+
+It holds two things: the database connection details, and `enc.key` — the key used
+to scramble sensitive settings before they are stored.
+
+The database details can be typed in again. **The key cannot.** Everything
+scrambled with it becomes permanently unreadable if it is lost: saved API keys for
+payments, email and text messaging; every member's two-factor authentication
+secret; the browser-notification signing key; Gift Aid and integration
+credentials. There is no recovery, because that is the entire point of it.
+
+The deployment never uploads or deletes this folder — it is excluded from every
+mirror. The danger is a person tidying up by hand.
+
+#### So: wipe everything, or wipe selectively?
+
+**If the server has never had a real installation** — no database set up, nothing
+uploaded, no `_auth_keys/enc.key` — then wiping the whole base folder is simplest
+and carries no risk. Check for the key file first:
+
+```bash
+ls -la /home/USER/portal.millrdsdacambridge.uk/_auth_keys/
+```
+
+If that folder is missing or empty, there is nothing to lose.
+
+**If there IS a real installation**, delete only the three web-root folders and
+leave the rest:
+
+```bash
+cd /home/USER/portal.millrdsdacambridge.uk/
+# Take a copy of the irreplaceable folder first, somewhere outside the web base.
+cp -a _auth_keys ~/auth_keys_backup_before_public_door
+
+rm -rf public_html public_html_beta public_html_dev
+# _auth_keys, _uploads and _backups are deliberately NOT in that line.
+```
+
+#### The order to do it in
+
+1. Land the #493 work so the deployment understands the new layout.
+2. Copy `_auth_keys/` somewhere safe, outside the web base folder.
+3. Delete the three old web-root folders.
+4. Set the six new settings; delete the three old ones.
+5. Re-point `portal.millrdsdacambridge.uk` at `admin_html` in the DreamHost panel,
+   and point the new public address at `public_html`.
+6. Deploy **alpha first**, with the dry-run option switched on, and read what it
+   says it would delete before letting it run for real.
+7. Check the alpha management portal still signs in, then check the alpha public
+   address answers "not found" for everything — because nothing is published yet.
+8. Only then do beta, then main.
+
+#### One thing the deployment gets wrong today
+
+The comment above `WEB_ROOT_EXCLUDES` says the shared upload "runs without
+`--delete`, so any other server-managed contents of `_libraries/` are preserved".
+**That is not true** — the shared upload does use `--delete`, and `_libraries/` is
+not excluded. So anything placed in `_libraries/` by hand, other than what the
+build puts there, is removed on the next deployment. Worth knowing before putting
+anything there.
 ```
 
 **Shared-base note.** The shared `_core/`, `_vendor/`, `_sql/` etc. upload to
