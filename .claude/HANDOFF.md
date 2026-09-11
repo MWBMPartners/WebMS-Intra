@@ -9,6 +9,82 @@ proceeds, so the session can be picked up at any point).
 
 ## Read this first — where we are right now
 
+## LATEST — 11 September 2026, late. RESUME FROM HERE.
+
+### Where things stand
+
+| Item | State |
+| --- | --- |
+| Deployment secrets | ✅ **Set by the owner** under the final names `SFTP_PATH_ROOT_DIR` + `SFTP_PATH_<LIVE\|BETA\|ALPHA>_<ADMIN\|PUBLIC>_DIR`. Verified with the GitHub API. Retired names are gone at repo AND org level. Password authentication (no `SFTP_KEY`); `SFTP_PORT` inherited from the organisation. See DEV_NOTES 3b. |
+| #493 Step 1 — pre-existing defects | 🟡 Built. All 15 checks + 5 self-tests green. **NOT committed, NOT yet reviewed** — Codex review started. Files: `web/_apps/settings/{save,index}.php`, `web/_apps/admin/settings/group.php`, `web/_core/{AppRegistry,Gatekeeper,Logger,RateLimiter}.php`, `web/public_html/index.php`, `web/_sql/full_schema.sql`, `web/_sql/193_trusted_proxies_and_channel_gate.sql`. |
+| Hardened `tools/audit-checks/check_static_calls.py` | 🟡 Untracked, 1,486 lines. **Verified working** with 7 fixtures (see below). **Not yet wired into `.github/workflows/pr-security.yml`.** |
+| 22 admin pages writing portal-wide settings | 🔴 **Live privilege problem**: any site administrator can change the payment keys (Stripe, PayPal), text-message and mail credentials used by EVERY organisation. Fix relaunched; issue opened. |
+| #493 Steps 2–9 | ⬜ Not started. |
+
+### What happened with the AI services — read this if something has failed
+
+- **Fable refused on every attempt all day** (monthly spend limit). Every deep
+  analysis ran on Opus instead, via the fallback written into each workflow.
+- **Late on, two build agents died mid-task** with "monthly spend limit … weekly
+  limit resets Sep 13 at 4pm (Europe/London)", on `claude-opus-5` and
+  `claude-sonnet-5`.
+- Straight afterwards a `haiku` probe succeeded and Codex answered, so the limit
+  was not total. Always retry the preferred model first on each new task.
+- **One dead agent HAD rewritten `check_static_calls.py`** (902 → 1,486 lines)
+  but stopped before running its own proofs. It was then verified by hand with
+  seven fixtures, all passing: a trait method is not accused; a class with an
+  unknown parent is skipped; `\Vendor\Site::x()` is not checked as the core
+  `Site`; a call inside `"{$a["Site::x()"]}"` is not accused; a call AFTER a
+  heredoc ending `TXT);` IS reported; `Site::name()` IS reported; a core class
+  used with no `use` line IS reported. If that file ever changes again, re-run
+  these before trusting it.
+- The other dead agent (the 22 pages) changed nothing — verified with `git diff`.
+
+### Tried and rejected — do not redo these
+
+- **Refusing a deployment when a retired secret is visible.** Wrong for this
+  organisation: organisation secrets are inherited by every repository, and SFTP
+  settings are already shared between the organisation's repositories. Another
+  repository adding `SFTP_LIVE_PATH` at organisation level would have stopped
+  every WebMS-Intra deployment. Downgraded to a warning in the build plan.
+  Nothing reads the old names, so a leftover cannot misdirect anything.
+- **Making every `siteID = NULL` writer root-only.** The four under
+  `web/_apps/cron/` are token-gated scheduled jobs, never reached by a signed-in
+  person. They are correctly different. Leave them.
+- **Intermediate secret names** `SFTP_ROOT_DIR`, `SFTP_ADMIN_DIR_*`,
+  `SFTP_ADMIN_PATH_*` — superseded the same evening, never set.
+
+### Decisions the owner took today — do not re-open
+
+- Two front doors: `web/admin_html/` + `web/public_html/`. Server folders mirror
+  the repository exactly.
+- All three public delivery routes, own subdomain first.
+- A global administrator enables publishing, and may delegate tuning of it to
+  selected administrators — not to all of them.
+- Portal-wide settings are global-administrator only.
+- A child's Kids record survives a parent's erasure; only the parent link goes.
+- Legally-kept records are LISTED in a data download, not handed over.
+- Standing rule (project AND device-wide): hand over when a service or agent runs
+  out, return promptly, run a full catch-up review on return, and keep this file
+  current as the work happens.
+
+### Next, in order
+
+1. Read the Codex review of Step 1, act on it, commit.
+2. Wire `check_static_calls.py` into `pr-security.yml`; commit it with the checker.
+3. Land the 22-page fix; Codex review; commit.
+4. Close the two per-address limits that still trust forged headers —
+   `AssetRegister.php:1111` (via `assets/found-save.php:202`) and
+   `LiveChat.php:212` (via `livechat/api/send.php:105`) — by delegating to
+   `RateLimiter::clientIp()`.
+5. #493 Step 2 onwards. **Step 5's migration is 194, not 193**, and must not
+   seed `portal.trustedProxies` again.
+6. Then: Noticeboard, #479 full data download, #488 runbook, closed-issue sweep,
+   documentation sweep, one PR into `alpha`.
+
+---
+
+
 ## ARCHITECTURE CONSTRAINT ADDED 11 September 2026 — read before touching the Noticeboard
 
 The owner set a requirement that changes the shape of the Noticeboard work and

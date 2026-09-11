@@ -423,53 +423,64 @@ settings were quietly left pointing at the old place, the next deployment would
 copy **the entire management portal into the public web folder** — and it would
 look like it had worked.
 
-A setting that no longer exists makes the deployment **stop with a clear error**.
-A setting that still exists but now means something different fails silently, in
-the worst possible direction. So all three go, and six clearly-named ones replace
-them.
+A required setting that has not been created yet makes the deployment **stop
+with a clear error**. A setting that still exists but now means something
+different fails silently, in the worst possible direction. So all three go, and
+new, clearly-named ones replace them — ones the deployment insists on, so a missed
+step stops it rather than sending files to the wrong place.
 
 **One setting names the base folder. The rest name only their own folder.**
 
-`SFTP_ROOT_DIR` holds the shared base — the folder everything else sits inside.
+`SFTP_PATH_ROOT_DIR` holds the shared base — the folder everything else sits inside.
 The six front-door settings hold **just a folder name**, not a full path. The
 deployment joins them.
 
 This is not only tidier. It makes the "both folders must share a parent" rule
 **impossible to break** rather than something the deployment has to check: every
-folder is placed inside `SFTP_ROOT_DIR` by construction. It also means moving the
+folder is placed inside `SFTP_PATH_ROOT_DIR` by construction. It also means moving the
 whole installation is a one-setting change.
 
 | Setting | Value (example) |
 | --- | --- |
-| `SFTP_ROOT_DIR` | `/home/dh_abcd1234/portal.millrdsdacambridge.uk/` |
+| `SFTP_PATH_ROOT_DIR` | `/home/dh_abcd1234/portal.millrdsdacambridge.uk/` |
 
-| Branch  | Front door        | Setting                 | Value              |
-| ------- | ----------------- | ----------------------- | ------------------ |
-| `main`  | Management portal | `SFTP_ADMIN_DIR_LIVE`   | `admin_html/`      |
-| `main`  | Public website    | `SFTP_PUBLIC_DIR_LIVE`  | `public_html/`     |
-| `beta`  | Management portal | `SFTP_ADMIN_DIR_BETA`   | `admin_html_beta/` |
-| `beta`  | Public website    | `SFTP_PUBLIC_DIR_BETA`  | `public_html_beta/`|
-| `alpha` | Management portal | `SFTP_ADMIN_DIR_ALPHA`  | `admin_html_dev/`  |
-| `alpha` | Public website    | `SFTP_PUBLIC_DIR_ALPHA` | `public_html_dev/` |
+| Branch  | Front door        | Setting                      | Value               |
+| ------- | ----------------- | ---------------------------- | ------------------- |
+| `main`  | Management portal | `SFTP_PATH_LIVE_ADMIN_DIR`   | `admin_html/`       |
+| `main`  | Public website    | `SFTP_PATH_LIVE_PUBLIC_DIR`  | `public_html/`      |
+| `beta`  | Management portal | `SFTP_PATH_BETA_ADMIN_DIR`   | `admin_html_beta/`  |
+| `beta`  | Public website    | `SFTP_PATH_BETA_PUBLIC_DIR`  | `public_html_beta/` |
+| `alpha` | Management portal | `SFTP_PATH_ALPHA_ADMIN_DIR`  | `admin_html_dev/`   |
+| `alpha` | Public website    | `SFTP_PATH_ALPHA_PUBLIC_DIR` | `public_html_dev/`  |
 
-**Why `DIR` and not `PATH`.** These used to be called `..._PATH_...` and held a
-full path. They now hold only a folder name. A setting that keeps its name while
-its meaning changes is the exact trap this whole piece of work exists to avoid —
-so the name changes with the meaning. If an old `SFTP_ADMIN_PATH_LIVE` is still
-set somewhere it is simply ignored, and the deployment stops because the setting
-it actually wants is missing.
+**How the names are built.** Every one of these starts `SFTP_PATH_`, so in
+GitHub's settings list — which sorts alphabetically — they sit together in one
+block instead of being scattered among the other `SFTP_` settings. Inside that
+block they then fall into order by channel:
 
-**The ending names the CHANNEL** — `LIVE`, `BETA`, `ALPHA` — not the branch. The
-deployment already thinks in channels (`deploy.yml` sets `channel=live` for the
-`main` branch, `channel=beta`, `channel=alpha`), so this uses the same word for
-the same thing rather than inventing a third one. `main` is the branch; `live` is
-what it deploys to.
+```text
+SFTP_PATH_ROOT_DIR                          the base folder, one for every channel
+SFTP_PATH_<CHANNEL>_<FRONT DOOR>_DIR        for example SFTP_PATH_LIVE_ADMIN_DIR
+```
+
+- **`<CHANNEL>`** is `LIVE`, `BETA` or `ALPHA` — the channel, not the branch. The
+  deployment already thinks in channels (`deploy.yml` sets `channel=live` for the
+  `main` branch, `channel=beta`, `channel=alpha`), so this uses the same word for
+  the same thing. `main` is the branch; `live` is what it deploys to.
+- **`_DIR` at the end** says the value is a **folder name**, not a full path. That
+  matters: the old settings held full paths, and a setting that keeps its name
+  while its meaning changes is the exact trap this whole piece of work exists to
+  avoid.
+
+Names from earlier drafts of this plan — `SFTP_ROOT_DIR`, `SFTP_ADMIN_DIR_LIVE`, `SFTP_ADMIN_PATH_LIVE` and so on — were
+never set and are not read. If one turns up somewhere it is simply ignored, and
+the deployment stops for the setting it actually wants.
 
 One deliberate mismatch, so it does not look like a mistake: the alpha settings
-end `_ALPHA`, but the folder is still named `..._dev`. The folder keeps its
-existing name so the server needs no renaming for a channel nobody outside the
-team visits. Rename it to `..._alpha` if you prefer — just change the value of the
-two `_ALPHA` settings to match.
+say `ALPHA`, but the folders are still named `..._dev`. They keep their existing
+names so the server needs no renaming for a channel nobody outside the team
+visits. Rename them to `..._alpha` if you prefer — just change the values of the
+two `SFTP_PATH_ALPHA_*` settings to match.
 
 #### Slashes: where they belong, and where they break things
 
@@ -478,15 +489,15 @@ somewhere plausible-looking rather than failing outright. The rules are short.
 
 | Setting | Must START with `/`? | May END with `/`? | May contain `/` in the middle? |
 | --- | --- | --- | --- |
-| `SFTP_ROOT_DIR` | **Yes — required** | Yes, optional (trimmed) | Yes, it is a full path |
-| `SFTP_ADMIN_DIR_*` | **No** | Yes, optional (trimmed) | **No — refused** |
-| `SFTP_PUBLIC_DIR_*` | **No** | Yes, optional (trimmed) | **No — refused** |
+| `SFTP_PATH_ROOT_DIR` | **Yes — required** | Yes, optional (trimmed) | Yes, it is a full path |
+| `SFTP_PATH_*_ADMIN_DIR` | **No** | Yes, optional (trimmed) | **No — refused** |
+| `SFTP_PATH_*_PUBLIC_DIR` | **No** | Yes, optional (trimmed) | **No — refused** |
 | `SFTP_HOST` | **No** | **No** | **No** |
 | `SFTP_USER` | **No** | **No** | **No** |
 
 **In plain terms:**
 
-- **`SFTP_ROOT_DIR` is a full path and must start with `/`.** A trailing slash is
+- **`SFTP_PATH_ROOT_DIR` is a full path and must start with `/`.** A trailing slash is
   fine either way — the deployment trims it before joining.
 - **The six folder settings are a NAME, not a path.** Just `admin_html` or
   `admin_html/`. No leading slash, and nothing with another folder inside it.
@@ -495,23 +506,23 @@ somewhere plausible-looking rather than failing outright. The rules are short.
 **Right:**
 
 ```text
-SFTP_ROOT_DIR         /home/dh_abcd1234/portal.millrdsdacambridge.uk/
-SFTP_ROOT_DIR         /home/dh_abcd1234/portal.millrdsdacambridge.uk      ← also fine
-SFTP_ADMIN_DIR_LIVE   admin_html/
-SFTP_ADMIN_DIR_LIVE   admin_html                                          ← also fine
-SFTP_HOST             iad1-shared-12-34.dreamhost.com
+SFTP_PATH_ROOT_DIR         /home/dh_abcd1234/portal.millrdsdacambridge.uk/
+SFTP_PATH_ROOT_DIR         /home/dh_abcd1234/portal.millrdsdacambridge.uk   ← also fine
+SFTP_PATH_LIVE_ADMIN_DIR   admin_html/
+SFTP_PATH_LIVE_ADMIN_DIR   admin_html                                       ← also fine
+SFTP_HOST                  iad1-shared-12-34.dreamhost.com
 ```
 
 **Wrong, and what actually happens:**
 
 | What somebody types | What goes wrong |
 | --- | --- |
-| `SFTP_ROOT_DIR` = `home/dh_abcd1234/portal...` (no leading slash) | **Refused, with a message.** Without that check it would be treated as relative to wherever the SFTP session starts, and could create a whole `home/dh_abcd1234/...` tree *inside* your home folder — a second copy of everything, in the wrong place, that looks like it worked. |
-| `SFTP_ADMIN_DIR_LIVE` = `/home/dh_abcd1234/portal.../admin_html` (the old full-path style) | **Refused, with a message.** Joined to the base it would build `/home/dh_abcd1234/portal...//home/dh_abcd1234/portal.../admin_html`. |
-| `SFTP_ADMIN_DIR_LIVE` = `admin_html/public` | **Refused** — a folder name cannot contain another folder. |
-| `SFTP_ADMIN_DIR_LIVE` = `/admin_html/` | Accepted. Both slashes are trimmed, leaving `admin_html`. Untidy but unambiguous, so it is allowed rather than refused. |
+| `SFTP_PATH_ROOT_DIR` = `home/dh_abcd1234/portal...` (no leading slash) | **Refused, with a message.** Without that check it would be treated as relative to wherever the SFTP session starts, and could create a whole `home/dh_abcd1234/...` tree *inside* your home folder — a second copy of everything, in the wrong place, that looks like it worked. |
+| `SFTP_PATH_LIVE_ADMIN_DIR` = `/home/dh_abcd1234/portal.../admin_html` (the old full-path style) | **Refused, with a message.** Joined to the base it would build `/home/dh_abcd1234/portal...//home/dh_abcd1234/portal.../admin_html`. |
+| `SFTP_PATH_LIVE_ADMIN_DIR` = `admin_html/public` | **Refused** — a folder name cannot contain another folder. |
+| `SFTP_PATH_LIVE_ADMIN_DIR` = `/admin_html/` | Accepted. Both slashes are trimmed, leaving `admin_html`. Untidy but unambiguous, so it is allowed rather than refused. |
 | `SFTP_HOST` = `sftp://iad1-shared-12-34.dreamhost.com/` | **Connection fails.** The host is put straight into `sftp://USER@HOST:PORT`, so this becomes `sftp://user@sftp://iad1-...com/:22`. |
-| `SFTP_ROOT_DIR` ends `//` | Harmless — trimmed to one. |
+| `SFTP_PATH_ROOT_DIR` ends `//` | Harmless — trimmed to one. |
 
 **Why the deployment refuses rather than tidying up the first two.** Both are the
 signature of somebody pasting the old style into a new setting. Quietly correcting
@@ -522,26 +533,59 @@ folder can publish the management portal.
 **Unchanged:** `SFTP_HOST`, `SFTP_USER`, `SFTP_PORT`, and `SFTP_KEY` or
 `SFTP_PASSWORD`.
 
-**Retired — delete these:** `SFTP_LIVE_PATH`, `SFTP_BETA_PATH`, `SFTP_DEV_PATH`.
+**Retired:** `SFTP_LIVE_PATH`, `SFTP_BETA_PATH`, `SFTP_DEV_PATH`. Confirmed gone
+from this repository and not inherited from the organisation — checked with the
+GitHub API on 11 September 2026.
 
 ```bash
-gh secret set SFTP_ROOT_DIR         --body '/home/dh_abcd1234/portal.millrdsdacambridge.uk/'
+gh secret set SFTP_PATH_ROOT_DIR         --body '/home/dh_abcd1234/portal.millrdsdacambridge.uk/'
 
-gh secret set SFTP_ADMIN_DIR_LIVE   --body 'admin_html/'
-gh secret set SFTP_PUBLIC_DIR_LIVE  --body 'public_html/'
-gh secret set SFTP_ADMIN_DIR_BETA   --body 'admin_html_beta/'
-gh secret set SFTP_PUBLIC_DIR_BETA  --body 'public_html_beta/'
-gh secret set SFTP_ADMIN_DIR_ALPHA  --body 'admin_html_dev/'
-gh secret set SFTP_PUBLIC_DIR_ALPHA --body 'public_html_dev/'
+gh secret set SFTP_PATH_LIVE_ADMIN_DIR   --body 'admin_html/'
+gh secret set SFTP_PATH_LIVE_PUBLIC_DIR  --body 'public_html/'
+gh secret set SFTP_PATH_BETA_ADMIN_DIR   --body 'admin_html_beta/'
+gh secret set SFTP_PATH_BETA_PUBLIC_DIR  --body 'public_html_beta/'
+gh secret set SFTP_PATH_ALPHA_ADMIN_DIR  --body 'admin_html_dev/'
+gh secret set SFTP_PATH_ALPHA_PUBLIC_DIR --body 'public_html_dev/'
 
-# Retire the old three, so a missed step stops the deployment
-# rather than publishing the management portal.
+# Only needed when converting an OLDER installation. Done here on 11 September 2026.
 gh secret delete SFTP_LIVE_PATH
 gh secret delete SFTP_BETA_PATH
 gh secret delete SFTP_DEV_PATH
 ```
 
-**Where the shared code goes.** Straight into `SFTP_ROOT_DIR`. The deployment used
+#### What is set up right now (checked 11 September 2026)
+
+Checked with the GitHub API, not from memory. A secret can be set on this
+repository or inherited from the organisation, and from inside a workflow the two
+look identical — so the only way to know is to ask.
+
+| Setting | Where it is set | Note |
+| --- | --- | --- |
+| The seven `SFTP_PATH_*` | This repository | as in the tables above |
+| `SFTP_HOST`, `SFTP_USER`, `SFTP_PASSWORD` | This repository, **overriding** an organisation value of the same name | see the warning below |
+| `SFTP_PORT` | The organisation only | inherited |
+| `SFTP_KEY` | **Not set anywhere** | this installation signs in with the password |
+| `SFTP_LIVE_PATH`, `SFTP_BETA_PATH`, `SFTP_DEV_PATH` | **Not visible at either level** | the changeover is complete |
+
+> ⚠️ **Change the repository's `SFTP_HOST`, `SFTP_USER` and `SFTP_PASSWORD` — never
+> delete them.** Each one overrides an organisation-wide value that other
+> repositories share. Delete one here and the deployment does NOT stop: it
+> quietly falls back to the organisation's value, which may belong to a different
+> account or a different server. That is the worst way for it to fail — a
+> deployment that reports success against the wrong place.
+
+**Why a leftover retired setting is warned about, not refused.** An earlier draft
+of the deployment refused to run at all if it could see one of the three retired
+names. That would have been wrong here. Organisation secrets are visible to every
+repository in the organisation, and this organisation already shares its SFTP
+settings between repositories. Another repository adding `SFTP_LIVE_PATH` at the
+organisation level would then have stopped every WebMS-Intra deployment, for a
+reason that has nothing to do with WebMS-Intra — and a check that cries wolf gets
+switched off. Nothing reads the retired names any more, so a leftover one cannot
+send a deployment anywhere. The protection that actually matters is the checking
+of the new settings, and that does stop the deployment when something is wrong.
+
+**Where the shared code goes.** Straight into `SFTP_PATH_ROOT_DIR`. The deployment used
 to work this out by taking the folder above the web root, which meant a typo in a
 path quietly relocated the shared code somewhere plausible-looking. Now it is
 stated outright, and an empty setting fails loudly.
@@ -549,11 +593,11 @@ stated outright, and an empty setting fails loudly.
 #### Where everything ends up
 
 The public front door finds the shared code by looking **one folder up** from
-itself. Because every folder is placed inside `SFTP_ROOT_DIR`, that is always
+itself. Because every folder is placed inside `SFTP_PATH_ROOT_DIR`, that is always
 true — there is nothing to get wrong and nothing for the deployment to check.
 
 ```text
-/home/dh_abcd1234/portal.millrdsdacambridge.uk/      <- SFTP_ROOT_DIR
+/home/dh_abcd1234/portal.millrdsdacambridge.uk/      <- SFTP_PATH_ROOT_DIR
 ├── _core/  _apps/  _sql/  _lang/  _vendor/  _install/   <- shared code
 ├── _auth_keys/  _uploads/  _backups/                     <- server-managed, never touched
 ├── admin_html/          <- main  : the management portal
@@ -667,7 +711,8 @@ rm -rf public_html public_html_beta public_html_dev
 1. Land the #493 work so the deployment understands the new layout.
 2. Copy `_auth_keys/` somewhere safe, outside the web base folder.
 3. Delete the three old web-root folders.
-4. Set the six new settings; delete the three old ones.
+4. Set `SFTP_PATH_ROOT_DIR` and the six `SFTP_PATH_*_DIR` settings, and delete the
+   three old ones. **Done on 11 September 2026** — see 3b.
 5. Re-point `portal.millrdsdacambridge.uk` at `admin_html` in the DreamHost panel,
    and point the new public address at `public_html`.
 6. Deploy **alpha first**, with the dry-run option switched on, and read what it
