@@ -1,6 +1,6 @@
 # Handoff — branch clean-up, full audit, documentation refresh
 
-**Updated:** 2026-09-07 (session in progress — this file is kept current as work
+**Updated:** 2026-09-11 (session in progress — this file is kept current as work
 proceeds, so the session can be picked up at any point).
 **Working branch:** `claude/alpha-wip` — the single work-in-progress branch.
 **Target:** one pull request into `alpha` at the end. No stacked pull requests.
@@ -8,6 +8,75 @@ proceeds, so the session can be picked up at any point).
 ---
 
 ## Read this first — where we are right now
+
+## LATEST: children's registration privacy shipped (11 September 2026)
+
+Commit `9c77216`, pushed. Part of #479. Issues #490 and #491 opened from what it
+turned up.
+
+`tblEventRegistrations` — a child's name, date of birth, allergies and medical
+notes, beside a parent's telephone number and email — was the one table a
+"delete everything you hold about me" request could never reach, and it was
+missing from the data download too. There was no link to any account to match a
+person against, so adding it to the list would have changed nothing.
+
+Now: the submitter's account is recorded when they are signed in (empty
+otherwise, which is normal — a parent must not have to create an account to
+bring their child to a holiday club), and everything else is covered by a time
+limit of 90 days after the event, per site, with a per-event override. Zero means
+keep indefinitely and must be set deliberately. Migration 191, folded into
+`full_schema.sql` with matching column order.
+
+### Three things it turned up, all worse than the task itself
+
+1. **Any administrator could have destroyed every site's registrations.** The
+   clear-out read one site's settings then deleted portal-wide, and the page is
+   open to any administrator. Fixed for registrations. **The activity-log and
+   error clear-outs still have the same shape — that is #491, and it needs a
+   decision rather than a guess.**
+2. **The safety net had a hole the size of the bug.** The first version referred
+   to `e.recurrenceRule`, a column that has never existed, and all fourteen
+   checks passed — because none of them ever read a `DELETE`. Now fixed: 90
+   statements, 176 column names. Four wrong accusations Codex found in that fix
+   are also fixed. That is #490.
+3. **An event could be saved ending before it started.** So anything measuring
+   "how long ago did this finish" read a past date for a future event. Now
+   refused at the save, and the clear-out takes whichever time is later anyway.
+
+### Worth remembering from the review
+
+Comparing two wall-clock times by converting them to moments in time **breaks
+once a year**. On the morning the clocks go forward PHP reads 01:45 as 02:45, so
+an event starting 02:30 and ending 01:45 passed validation. Compare the text.
+Codex found this; it was my own bug in the fix for someone else's.
+
+### #479 is NOT finished
+
+The written list names **123 tables** holding personal information. The download
+covers **23**.
+
+| | Count | Note |
+| --- | --- | --- |
+| In the download already | 23 | |
+| Missing, findable by account | **81** | Buildable now |
+| Missing, no link to any account | 15 | Cannot be found by person; need a time limit each |
+| Kept for legal reasons | 4 | Should be *listed*, not handed over |
+
+**Do not hand-write 81 more query blocks.** That is exactly the drift that caused
+this issue in the first place. Drive the download from
+`web/_core/personal-data-catalogue.php` — the same written list the erasure
+already reads — so the two can never disagree again.
+
+Groundwork already checked: all 102 linkable tables exist and every link column
+is real, so a catalogue-driven download will work. The sensitive-column rule to
+use: **block by name pattern, but allow integers.** Credentials are text;
+`sessionID` is `VARCHAR(255)` in the activity log (a real session string, block)
+but `INT` in attendance sessions (a row number, harmless). That one rule
+correctly handles `totpSecret` vs `totpEnabled`, `token` vs `tokenID`,
+`inputTokens`, and `isDeptSecretary` — which a pattern alone gets wrong.
+
+---
+
 
 **Updated 10 September 2026, evening.** Working branch `claude/alpha-wip`, 27+
 commits ahead of `alpha`, nothing open against it. The repository is fully
