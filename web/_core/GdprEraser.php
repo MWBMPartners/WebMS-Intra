@@ -121,7 +121,24 @@ class GdprEraser
             // `ON DELETE CASCADE` from `tblKidProfiles`.`childID`, so
             // deleting the profile here also sweeps its check-in history —
             // no separate catalogue entry is needed for `tblKidCheckins`.
-            ['table' => 'tblKidProfiles',      'userCol' => 'parentUserID', 'action' => 'delete'],
+            // 🛑 CHANGED 11 September 2026, on the owner's explicit decision.
+            //    This used to DELETE the child's record outright.
+            //
+            //    A parent's right to be forgotten is their own. It is not their
+            //    child's, and it is not the right of a second parent or carer
+            //    who never agreed to it. A child in current safeguarding
+            //    arrangements must not disappear from the register because one
+            //    adult closed their account - group leaders and other parents
+            //    may still depend on that record existing.
+            //
+            //    So the parent link is emptied and the child's record stays.
+            //    It is still removed on a time limit in the ordinary way.
+            //
+            //    NOTE: pickupAuthorisedNames is free text and may still name
+            //    the departing parent. That is NOT handled here and is tracked
+            //    separately - emptying it wholesale would remove every OTHER
+            //    authorised adult too, which would be unsafe.
+            ['table' => 'tblKidProfiles',      'userCol' => 'parentUserID', 'action' => 'anonymise', 'nullCols' => ['parentUserID']],
 
             // #257 Pastoral Care Register. personUserID is the case SUBJECT
             // (the person being cared for) — anonymise rather than delete so
@@ -305,6 +322,70 @@ class GdprEraser
      *
      * @return array<int, array<string, mixed>>
      */
+    /**
+     * ⚠️ Columns that say the person ACTED on a record, rather than that the
+     *     record is about them.
+     *
+     * This distinction is the difference between removing somebody's name and
+     * destroying somebody else's records.
+     *
+     * Seven tables were set to "delete the whole row" while the only thing
+     * tying them to a person was one of these columns. Had those links simply
+     * been switched on to improve coverage, asking to be forgotten would have:
+     * deleted a venue invoice PAYMENT because of who typed it in; deleted a
+     * small group's attendance register because of who took it; deleted a room
+     * booking because of who approved it; and deleted a child's profile because
+     * of who their parent was. Financial records and other people's records,
+     * destroyed on one person's request.
+     *
+     * So a table whose ONLY link is one of these should almost always keep the
+     * record and drop the name. `tools/gdpr-coverage-selftest.php` refuses any
+     * table that says otherwise unless it appears on its short, deliberately
+     * reviewed list - event registrations being the one real exception, where a
+     * child's medical notes genuinely must go.
+     *
+     * @var string[]
+     */
+    /**
+     * 🔗 Every column name in this portal that ties a record to a person.
+     *
+     * Shared, rather than written out twice, because the two copies drifted
+     * before: five names were missing from one of them, and seven tables were
+     * reported as having no link to anybody when they had a perfectly good one.
+     *
+     * @var string[]
+     */
+    public const LINK_COLUMNS = [
+        'userID', 'memberID', 'donorID', 'submitterID', 'recipientUserID',
+        'assignedToID', 'targetUserID', 'convertedUserID', 'leaderID',
+        'uploadedByUserID', 'approverID', 'reviewedByID', 'startedByID',
+        'submittedByUserID', 'createdByID', 'updatedByID',
+        'parentUserID', 'counterpartyUserID', 'recordedByID',
+        'approvedByID', 'assignedByID',
+        'addedByID', 'markedByID', 'openedByID', 'closedByID',
+        'moderatedByID', 'moderatorID', 'presenterID', 'scannedByID',
+        'bookedByID', 'requestedByID', 'acceptedByID', 'revokedByID',
+        'counter1ID', 'counter2ID', 'offboardedByID', 'rehiredByID',
+        'grantedByID', 'enrolledByID', 'linkedByID', 'releasedByID',
+        'processedByID',
+    ];
+
+    public const ACTOR_COLUMNS = [
+        'uploadedByUserID', 'approverID', 'reviewedByID', 'startedByID',
+        'submittedByUserID', 'createdByID', 'updatedByID',
+        'parentUserID', 'counterpartyUserID', 'recordedByID',
+        'approvedByID', 'assignedByID',
+        // A further twenty-one found by Codex on 11 September 2026. Every one
+        // of them names somebody who DID something to a record rather than
+        // somebody the record is about.
+        'addedByID', 'markedByID', 'openedByID', 'closedByID',
+        'moderatedByID', 'moderatorID', 'presenterID', 'scannedByID',
+        'bookedByID', 'requestedByID', 'acceptedByID', 'revokedByID',
+        'counter1ID', 'counter2ID', 'offboardedByID', 'rehiredByID',
+        'grantedByID', 'enrolledByID', 'linkedByID', 'releasedByID',
+        'processedByID',
+    ];
+
     private static function fromPersonalDataCatalogue(array $handWritten): array
     {
         $file = __DIR__ . DIRECTORY_SEPARATOR . 'personal-data-catalogue.php';
@@ -326,10 +407,21 @@ class GdprEraser
         // because when a table has both, the first is what identifies the person
         // the record concerns.
         $linkColumns = [
+            // Records ABOUT the person. Listed first so that when a table has
+            // both kinds, the person the record concerns wins.
             'userID', 'memberID', 'donorID', 'submitterID', 'recipientUserID',
-            'assignedToID', 'targetUserID', 'convertedUserID', 'uploadedByUserID',
-            'leaderID', 'approverID', 'reviewedByID', 'startedByID',
+            'assignedToID', 'targetUserID', 'convertedUserID', 'leaderID',
+
+            // The person ACTED on this, or is merely named on it. See
+            // ACTOR_COLUMNS below for why the difference matters so much.
+            'uploadedByUserID', 'approverID', 'reviewedByID', 'startedByID',
             'submittedByUserID', 'createdByID', 'updatedByID',
+            // Five that were missing entirely until 11 September 2026. Seven
+            // tables had a perfectly good link to a person and were reported as
+            // having none, simply because nobody had listed these names - among
+            // them a child's profile, reachable through the parent.
+            'parentUserID', 'counterpartyUserID', 'recordedByID',
+            'approvedByID', 'assignedByID',
         ];
 
         $entries = [];
@@ -416,6 +508,65 @@ class GdprEraser
         }
 
         return $entries;
+    }
+
+    /**
+     * 🔍 Which of a table's columns the database will actually allow to be empty.
+     *
+     * Asked of the database rather than read from the schema file, because the
+     * database is what will refuse. A schema file can be out of step with a
+     * customer's actual database - an upgrade that half ran, a column somebody
+     * changed by hand - and being wrong here means an erasure request stops
+     * part way through.
+     *
+     * Answers are remembered for the life of the request. An erasure walks more
+     * than a hundred tables, and asking the same question twice for each of
+     * them would be wasteful on shared hosting.
+     *
+     * Returns an empty list if the question cannot be asked at all. That is the
+     * safe direction: nothing is emptied, nothing throws, and the audit trail
+     * records that nothing could be done.
+     *
+     * @param \mysqli $db    Open database connection.
+     * @param string  $table The table to ask about.
+     *
+     * @return string[] Column names that are allowed to be empty.
+     */
+    private static function nullableColumns(\mysqli $db, string $table): array
+    {
+        static $remembered = [];
+
+        if (isset($remembered[$table]) === true) {
+            return $remembered[$table];
+        }
+
+        $columns = [];
+
+        try {
+            $stmt = $db->prepare(
+                'SELECT COLUMN_NAME FROM information_schema.COLUMNS '
+                . 'WHERE TABLE_SCHEMA = DATABASE() '
+                . '  AND TABLE_NAME = ? '
+                . "  AND IS_NULLABLE = 'YES'"
+            );
+            if ($stmt !== false) {
+                $stmt->bind_param('s', $table);
+                $stmt->execute();
+                $result = $stmt->get_result();
+                while ($row = $result->fetch_assoc()) {
+                    $columns[] = (string) $row['COLUMN_NAME'];
+                }
+                $stmt->close();
+            }
+        } catch (\Throwable $e) {
+            // Deliberately swallowed. An empty list means "empty nothing",
+            // which is safe; the caller writes that fact into the audit trail.
+            $columns = [];
+        }
+
+        $remembered[$table] = $columns;
+
+        return $columns;
     }
 
     /**
@@ -616,13 +767,59 @@ class GdprEraser
             return true;
         }
 
+        // Values bound before the one the WHERE clause uses. Only the
+        // anonymise path adds any; declared here so every path has it.
+        $extraBind = [];
+
         if ($action === 'delete') {
             $sql = 'DELETE FROM `' . $table . '` WHERE `' . $col . '` = ?';
         } elseif ($action === 'anonymise') {
             $nulls = (array) ($entry['nullCols'] ?? []);
             $overrides = (array) ($entry['overrides'] ?? []);
-            $sets = [];
+
+            // 🚫 Only empty a column the database allows to be empty.
+            //
+            //    Thirteen of these columns are marked in the schema as never
+            //    allowed to be empty - `createdByID` on the venue register, the
+            //    asset register, invoices and several more. Emptying one throws,
+            //    and because that happens part way through a request, the person
+            //    is left with some of their information removed, some of it
+            //    still there, and no record of which was which. A half-finished
+            //    erasure is worse than one that never started.
+            //
+            //    Asked of the database itself rather than assumed from the
+            //    schema file, because the database is what will actually refuse.
+            $canBeEmptied = self::nullableColumns($db, $table);
+
+            $sets    = [];
+            $refused = [];
             foreach ($nulls as $c) {
+                $c = (string) $c;
+                if (in_array($c, $canBeEmptied, true) === false) {
+                    $refused[] = $c;
+                    continue;
+                }
+
+                // 👥 Empty this column ONLY where it names THIS person.
+                //
+                //    It used to be emptied outright on every matching row, and
+                //    that quietly removed other people. A venue created by
+                //    Ann and later edited by Ben carries both names. Ann asks
+                //    to be forgotten, the row matches on her, and Ben's name
+                //    was wiped as well - on a request that was never his, and
+                //    with nothing recording that it had happened.
+                //
+                //    Asking "is this column this person?" for each column
+                //    separately means only their own name goes.
+                if (in_array($c, self::LINK_COLUMNS, true) === true) {
+                    $sets[]      = '`' . $c . '` = IF(`' . $c . '` = ?, NULL, `' . $c . '`)';
+                    $extraBind[] = $userId;
+                    continue;
+                }
+
+                // Not a link to an account - free text describing whoever the
+                // row is about, such as a name typed in by hand. The row was
+                // matched on this person, so it does belong to them.
                 $sets[] = '`' . $c . '` = NULL';
             }
             foreach ($overrides as $c => $v) {
@@ -638,9 +835,49 @@ class GdprEraser
                 $sets[] = "`emailAddress` = '" . $db->real_escape_string(str_replace('{rid}', (string) $requestId, self::TOMBSTONE_EMAIL)) . "'";
                 $sql = 'UPDATE `' . $table . '` SET ' . implode(', ', array_unique($sets)) . ' WHERE `' . $col . '` = ?';
             } else {
-                // Anonymise = drop the user link too.
-                $sets[] = '`' . $col . '` = NULL';
+                // Anonymise = drop the link to the person as well, where the
+                // database allows it to be dropped.
+                if (in_array($col, $canBeEmptied, true) === true) {
+                    $sets[] = '`' . $col . '` = NULL';
+                } else {
+                    $refused[] = (string) $col;
+                }
+
+                // Nothing left to change. Say so plainly rather than running an
+                // UPDATE with an empty SET, which is not valid SQL anyway.
+                if ($sets === []) {
+                    self::logAudit(
+                        $db,
+                        $requestId,
+                        'skip',
+                        $table,
+                        null,
+                        'nothing could be emptied: the database does not allow '
+                        . implode(', ', $refused) . ' to be empty. The account '
+                        . 'they point at has itself been anonymised, so the row '
+                        . 'no longer names anybody - but the link remains. See '
+                        . 'migration 192.'
+                    );
+                    return false;
+                }
+
                 $sql = 'UPDATE `' . $table . '` SET ' . implode(', ', $sets) . ' WHERE `' . $col . '` = ?';
+            }
+
+            // 📝 Anything that had to be left alone is written down, so the
+            //    organisation can show exactly what it did and what it could
+            //    not do. Quietly leaving a link in place would be the worst
+            //    outcome: it looks like a completed erasure and is not one.
+            if ($refused !== []) {
+                self::logAudit(
+                    $db,
+                    $requestId,
+                    'partial',
+                    $table,
+                    null,
+                    'left in place because the database does not allow them to be '
+                    . 'empty: ' . implode(', ', $refused)
+                );
             }
         } else {
             // 🛑 An action nobody recognises. STOP, do not guess.
@@ -669,7 +906,14 @@ class GdprEraser
                 self::logAudit($db, $requestId, 'failed', $table, null, $db->error);
                 return false;
             }
-            $stmt->bind_param('i', $userId);
+
+            // 📌 One value for each "is this column this person?" test, then
+            //    the one the WHERE clause matches on. All whole numbers, so the
+            //    letters are simply that many i's. Built from the same list that
+            //    produced the SQL, so the two cannot fall out of step.
+            $bindValues = $extraBind;
+            $bindValues[] = $userId;
+            $stmt->bind_param(str_repeat('i', count($bindValues)), ...$bindValues);
             $stmt->execute();
             $affected = $stmt->affected_rows;
             $stmt->close();

@@ -102,13 +102,13 @@ return [
         'columns'  => ['userAgent'],
     ],
     'tblAssetEventAssignments' => [
-        'decision' => 'erase',
-        'reason'   => 'Holds information about the person themselves',
-        'columns'  => ['notes'],
+        'decision' => 'unlink',
+        'reason'   => 'Who assigned equipment to an event. The assignment is the organisation\'s record, not the person\'s. Deleting it because a volunteer left would lose the event\'s kit list.',
+        'columns'  => ['notes', 'assignedByID'],
     ],
     'tblAssetIdentifiers' => [
-        'decision' => 'erase',
-        'reason'   => 'Holds information about the person themselves',
+        'decision' => 'unlink',
+        'reason'   => 'Barcodes and tags identifying the organisation\'s property.',
         'columns'  => ['notes', 'createdByID'],
     ],
     'tblAssetKioskPins' => [
@@ -117,14 +117,14 @@ return [
         'columns'  => ['userID'],
     ],
     'tblAssetLicenseAssignments' => [
-        'decision' => 'erase',
-        'reason'   => 'Holds information about the person themselves',
+        'decision' => 'unlink',
+        'reason'   => 'Who a software licence seat was allotted to. The organisation still needs to know how many seats are in use.',
         'columns'  => ['userID', 'notes'],
     ],
     'tblAssetLoans' => [
-        'decision' => 'erase',
-        'reason'   => 'Holds information about the person themselves',
-        'columns'  => ['notes'],
+        'decision' => 'unlink',
+        'reason'   => 'Who borrowed an item. Deleting the loan would erase the item\'s history, and the organisation still needs to know where its property went. The name goes, the loan stays.',
+        'columns'  => ['notes', 'counterpartyUserID'],
     ],
     'tblAssetOrgs' => [
         'decision' => 'erase',
@@ -137,13 +137,13 @@ return [
         'columns'  => ['userID', 'notes'],
     ],
     'tblAssetStocktakeItems' => [
-        'decision' => 'erase',
-        'reason'   => 'Holds information about the person themselves',
+        'decision' => 'unlink',
+        'reason'   => 'An item counted during a stocktake. An audit record; deleting it would leave a gap in the count.',
         'columns'  => ['notes'],
     ],
     'tblAssetStocktakes' => [
-        'decision' => 'erase',
-        'reason'   => 'Holds information about the person themselves',
+        'decision' => 'unlink',
+        'reason'   => 'A stocktake of the organisation\'s property - an audit record.',
         'columns'  => ['startedByID', 'notes'],
     ],
     'tblAttendanceCounts' => [
@@ -152,8 +152,8 @@ return [
         'columns'  => ['sessionID'],
     ],
     'tblAttendanceSessions' => [
-        'decision' => 'erase',
-        'reason'   => 'Holds information about the person themselves',
+        'decision' => 'unlink',
+        'reason'   => 'An attendance session. Deleting it would destroy the record of who came, for everybody who came.',
         'columns'  => ['sessionID', 'notes', 'createdByID', 'updatedByID'],
     ],
     'tblConsentLog' => [
@@ -162,14 +162,14 @@ return [
         'columns'  => ['userID', 'sessionID', 'ipAddress', 'userAgent'],
     ],
     'tblCountSessions' => [
-        'decision' => 'erase',
-        'reason'   => 'Holds information about the person themselves',
+        'decision' => 'unlink',
+        'reason'   => 'A two-person offering count - a FINANCIAL control record, deliberately requiring two people. Deleting it on one person\'s request defeats the whole point of it.',
         'columns'  => ['notes', 'createdByID'],
     ],
     'tblDecisionMoments' => [
-        'decision' => 'erase',
-        'reason'   => 'Holds information about the person themselves',
-        'columns'  => ['notes'],
+        'decision' => 'unlink',
+        'reason'   => 'Who wrote the entry down, not who it is about. Deleting it would destroy somebody else\'s record because the person holding the pen asked to be forgotten.',
+        'columns'  => ['notes', 'recordedByID'],
     ],
     'tblErasureRequest' => [
         'decision' => 'erase',
@@ -177,8 +177,8 @@ return [
         'columns'  => ['userID', 'notes'],
     ],
     'tblEventAttendance' => [
-        'decision' => 'erase',
-        'reason'   => 'Holds information about the person themselves',
+        'decision' => 'unlink',
+        'reason'   => 'Attendance at an event. The record of who was there matters to the organisation, so the row stays and the name goes.',
         'columns'  => ['userID', 'notes'],
     ],
     'tblEventCoordinators' => [
@@ -197,8 +197,8 @@ return [
         'columns'  => ['userID'],
     ],
     'tblEventOccurrenceOverrides' => [
-        'decision' => 'erase',
-        'reason'   => 'Holds information about the person themselves',
+        'decision' => 'unlink',
+        'reason'   => 'A change to one date of a repeating event. Deleting it would silently move the event back to its original time for everybody.',
         'columns'  => ['notes', 'createdByID'],
     ],
     'tblEventPeople' => [
@@ -207,8 +207,8 @@ return [
         'columns'  => ['userID'],
     ],
     'tblEventRSVPInvites' => [
-        'decision' => 'erase',
-        'reason'   => 'Holds information about the person themselves',
+        'decision' => 'unlink',
+        'reason'   => 'Invitations sent for an event. They concern the people invited, not the person who sent them.',
         'columns'  => ['email', 'displayName', 'createdByID'],
     ],
     'tblEventRSVPs' => [
@@ -221,9 +221,21 @@ return [
         'reason'   => 'Holds information about the person themselves',
         'columns'  => ['fullName', 'dateOfBirth', 'gender', 'allergies', 'medicalNotes', 'parentName', 'parentPhone', 'parentEmail', 'emergencyContactName', 'emergencyContactPhone', 'submittedByUserID'],
     ],
+    // 🛑 tblExpenseClaimApprovals said "delete" until 11 September 2026, and
+    //    the column it matched on is named userID - which everywhere else in
+    //    this portal means "the person this record is about". Here it does not.
+    //    The column's own description in the schema says so: "the approver".
+    //
+    //    So an approver asking to be forgotten would have deleted the approval
+    //    history of every claim they had ever signed off - destroying the audit
+    //    trail of a FINANCIAL decision, belonging to the claimant, on somebody
+    //    else's request.
+    //
+    //    Nothing based on column NAMES could have caught this. It was found by
+    //    reading what the schema says the column actually means.
     'tblExpenseClaimApprovals' => [
-        'decision' => 'erase',
-        'reason'   => 'Holds information about the person themselves',
+        'decision' => 'unlink',
+        'reason'   => 'Who approved an expense claim. The approval belongs to the claim and its audit trail, not to the approver, so it is kept and the approver\'s name is removed.',
         'columns'  => ['userID'],
     ],
     'tblFormResponses' => [
@@ -237,19 +249,19 @@ return [
         'columns'  => ['donorID', 'address', 'postcode', 'notes'],
     ],
     'tblGivingEntry' => [
-        'decision' => 'erase',
-        'reason'   => 'Holds information about the person themselves',
+        'decision' => 'unlink',
+        'reason'   => 'A contribution record. Financial records must be kept, so the entry stays and the donor\'s name is removed.',
         'columns'  => ['donorID', 'donorName', 'notes'],
     ],
     'tblInvitation' => [
-        'decision' => 'erase',
-        'reason'   => 'Holds information about the person themselves',
+        'decision' => 'unlink',
+        'reason'   => 'An invitation for somebody else to join. It is about the person invited.',
         'columns'  => ['email', 'createdByID'],
     ],
     'tblKidProfiles' => [
-        'decision' => 'erase',
-        'reason'   => 'Holds information about the person themselves',
-        'columns'  => ['fullName', 'dateOfBirth', 'allergies', 'medicalNotes'],
+        'decision' => 'unlink',
+        'reason'   => 'A CHILD\'S record, reached through the parent. The parent\'s right to erasure is their own and not their child\'s, and a child in current safeguarding arrangements must not disappear because an adult closed their account. The parent link is emptied; the child\'s record stays, and is covered by the time limit instead.',
+        'columns'  => ['fullName', 'dateOfBirth', 'allergies', 'medicalNotes', 'parentUserID'],
     ],
     'tblLeadershipAssignments' => [
         'decision' => 'erase',
@@ -282,8 +294,8 @@ return [
         'columns'  => ['userID'],
     ],
     'tblNoticeboardUploads' => [
-        'decision' => 'erase',
-        'reason'   => 'Holds information about the person themselves',
+        'decision' => 'unlink',
+        'reason'   => 'Posters and media on the notice board. The organisation\'s material.',
         'columns'  => ['storedName', 'createdByID'],
     ],
     'tblOffboarding' => [
@@ -307,8 +319,8 @@ return [
         'columns'  => ['userID', 'notes'],
     ],
     'tblPayment' => [
-        'decision' => 'erase',
-        'reason'   => 'Holds information about the person themselves',
+        'decision' => 'unlink',
+        'reason'   => 'A payment record. Financial records must be kept, so the payment stays and the payer\'s name is removed.',
         'columns'  => ['userID'],
     ],
     'tblPaymentMethod' => [
@@ -322,8 +334,8 @@ return [
         'columns'  => ['userID'],
     ],
     'tblPrayerRequests' => [
-        'decision' => 'erase',
-        'reason'   => 'Holds information about the person themselves',
+        'decision' => 'unlink',
+        'reason'   => 'A prayer request. The request itself is kept for the people praying; the name and contact details are removed.',
         'columns'  => ['submitterID'],
     ],
     'tblProjectPledge' => [
@@ -347,9 +359,9 @@ return [
         'columns'  => ['userID'],
     ],
     'tblResourceBooking' => [
-        'decision' => 'erase',
-        'reason'   => 'Holds information about the person themselves',
-        'columns'  => ['notes'],
+        'decision' => 'unlink',
+        'reason'   => 'Who approved a room or equipment booking. The booking belongs to whoever made it. Deleting it because the approver left would cancel other people\'s bookings.',
+        'columns'  => ['notes', 'approvedByID'],
     ],
     'tblRotaSlot' => [
         'decision' => 'erase',
@@ -377,28 +389,28 @@ return [
         'columns'  => ['slideNotes'],
     ],
     'tblServicePlans' => [
-        'decision' => 'erase',
-        'reason'   => 'Holds information about the person themselves',
+        'decision' => 'unlink',
+        'reason'   => 'A service running order. The organisation\'s own working document.',
         'columns'  => ['notes', 'createdByID'],
     ],
     'tblSmallGroupMeetingAttendance' => [
-        'decision' => 'erase',
-        'reason'   => 'Holds information about the person themselves',
+        'decision' => 'unlink',
+        'reason'   => 'Attendance at a group meeting. Deleting it would leave the register wrong for everybody else who was there.',
         'columns'  => ['userID'],
     ],
     'tblSmallGroupMeetings' => [
-        'decision' => 'erase',
-        'reason'   => 'Holds information about the person themselves',
-        'columns'  => ['notes'],
+        'decision' => 'unlink',
+        'reason'   => 'Who took the register at a meeting. Deleting it would destroy the attendance record for everybody who was there, because one person asked to be forgotten.',
+        'columns'  => ['notes', 'recordedByID'],
     ],
     'tblSmallGroupMembers' => [
         'decision' => 'erase',
-        'reason'   => 'Holds information about the person themselves',
+        'reason'   => 'Somebody\'s own membership of a group - which group, which role. That is about them, so it goes. Note the table ALSO carries addedByID, saying who put them in the group; that is a separate instruction, and it only removes the name.',
         'columns'  => ['userID'],
     ],
     'tblSmallGroups' => [
-        'decision' => 'erase',
-        'reason'   => 'Holds information about the person themselves',
+        'decision' => 'unlink',
+        'reason'   => 'The group itself - its name, its purpose, its members. Deleting it because its founder left would dissolve the group and remove everybody else from it.',
         'columns'  => ['postcode', 'latitude', 'longitude', 'what3words', 'createdByID'],
     ],
     'tblSmsMessage' => [
@@ -461,19 +473,44 @@ return [
         'reason'   => 'Holds information about the person themselves',
         'columns'  => ['userID'],
     ],
-    'tblUsers' => [
+    'tblRecording' => [
+        'decision' => 'unlink',
+        'reason'   => 'Who uploaded a recording. The recording is the organisation\'s, so it stays and the name goes.',
+        'columns'  => ['createdByID'],
+    ],
+    'tblCareAccessLog' => [
         'decision' => 'erase',
-        'reason'   => 'Holds information about the person themselves',
+        'reason'   => 'A record of this person opening somebody\'s pastoral file. It is about their own actions and is removed with them.',
+        'columns'  => ['userID'],
+    ],
+    'tblAssetAudit' => [
+        'decision' => 'unlink',
+        'reason'   => 'Who changed something in the asset register. The change history stays; the name goes.',
+        'columns'  => ['userID'],
+    ],
+    'tblAssetScanLog' => [
+        'decision' => 'unlink',
+        'reason'   => 'Who scanned an asset label. The scan history stays; the name goes.',
+        'columns'  => ['userID'],
+    ],
+    'tblAssetValueHistory' => [
+        'decision' => 'unlink',
+        'reason'   => 'Who recorded a change in an item\'s value. A financial history, so it stays; the name goes.',
+        'columns'  => ['createdByID'],
+    ],
+    'tblUsers' => [
+        'decision' => 'unlink',
+        'reason'   => 'The account itself. It is emptied rather than deleted: hundreds of records point at it, and deleting the row would drag them all down with it. Name, email, telephone, address and coordinates are all cleared, and the account is left as a tombstone that names nobody.',
         'columns'  => ['userID', 'fullName', 'emailAddress', 'displayAddress', 'latitude', 'longitude', 'what3words'],
     ],
     'tblVenueAgreements' => [
-        'decision' => 'erase',
-        'reason'   => 'Holds information about the person themselves',
+        'decision' => 'unlink',
+        'reason'   => 'A hire agreement with a venue owner - a contract. It does not stop existing because the person who recorded it left.',
         'columns'  => ['notes', 'createdByID'],
     ],
     'tblVenueBookings' => [
-        'decision' => 'erase',
-        'reason'   => 'Holds information about the person themselves',
+        'decision' => 'unlink',
+        'reason'   => 'Agreed bookings of a hired building. They belong to the organisation and the venue owner, not to whoever entered them.',
         'columns'  => ['notes', 'createdByID', 'updatedByID'],
     ],
     'tblVenueImportRows' => [
@@ -482,23 +519,23 @@ return [
         'columns'  => ['rawNotes'],
     ],
     'tblVenueInvoicePayments' => [
-        'decision' => 'erase',
-        'reason'   => 'Holds information about the person themselves',
-        'columns'  => ['notes'],
+        'decision' => 'unlink',
+        'reason'   => 'Who recorded a payment. This is a FINANCIAL record. Deleting it because the person who typed it in left would put the organisation\'s accounts out of balance.',
+        'columns'  => ['notes', 'recordedByID'],
     ],
     'tblVenueInvoices' => [
-        'decision' => 'erase',
-        'reason'   => 'Holds information about the person themselves',
+        'decision' => 'unlink',
+        'reason'   => 'A FINANCIAL record of money owed for venue hire. Deleting it because of who entered it would put the accounts out of balance.',
         'columns'  => ['notes', 'createdByID'],
     ],
     'tblVenueUsageTypeWindows' => [
-        'decision' => 'erase',
-        'reason'   => 'Holds information about the person themselves',
+        'decision' => 'unlink',
+        'reason'   => 'Default hours a venue may be used. Organisation-wide settings, not personal information.',
         'columns'  => ['note', 'createdByID'],
     ],
     'tblVenues' => [
-        'decision' => 'erase',
-        'reason'   => 'Holds information about the person themselves',
+        'decision' => 'unlink',
+        'reason'   => 'The venue register itself. Deleting it because of who typed it in would remove every hired building the organisation uses, and take its bookings, invoices and hire agreements with it.',
         'columns'  => ['postcode', 'latitude', 'longitude', 'what3words', 'caretakerName', 'caretakerPhone', 'notes', 'createdByID'],
     ],
     'tblVisitor' => [
@@ -793,9 +830,8 @@ return [
     // 5 tables.
 
     'tblCareCase' => [
-        'decision' => 'retain',
-        'reason'   => 'Safeguarding and pastoral record',
-        'period'   => 'as required by safeguarding policy',
+        'decision' => 'unlink',
+        'reason'   => 'A pastoral or wellbeing case. Safeguarding continuity matters to the remaining team, so the case stays and the person\'s name and details are removed. Kept rather than deleted because safeguarding records carry their own retention obligations.',
         'columns'  => ['personName'],
     ],
     'tblCareVisit' => [
@@ -811,9 +847,8 @@ return [
         'columns'  => ['userID', 'notes'],
     ],
     'tblExpenseClaims' => [
-        'decision' => 'retain',
-        'reason'   => 'Financial records for tax and charity accounting',
-        'period'   => '6 years',
+        'decision' => 'unlink',
+        'reason'   => 'An expense claim. Financial records must be kept for six years for HMRC, so the claim and its amounts stay and the claimant\'s name is removed.',
         'columns'  => ['userID'],
     ],
     'tblGivingStatementLog' => [

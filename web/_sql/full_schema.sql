@@ -472,7 +472,7 @@ CREATE TABLE IF NOT EXISTS `tblExpenseClaimFiles` (
 CREATE TABLE IF NOT EXISTS `tblExpenseClaimApprovals` (
     `approvalID` INT          NOT NULL AUTO_INCREMENT COMMENT 'Unique approval record identifier',
     `claimID`    INT          NOT NULL                COMMENT 'FK to tblExpenseClaims.claimID',
-    `userID`     INT          NOT NULL                COMMENT 'FK to tblUsers.userID — the approver',
+    `userID`     INT          DEFAULT NULL            COMMENT 'FK to tblUsers.userID — the approver. Empty once they have asked to be forgotten; the approval is kept.',
     `decision`     ENUM('Approved','Rejected') NOT NULL COMMENT 'Approver decision for this claim',
     `comments`     TEXT         DEFAULT NULL             COMMENT 'Optional comments from the approver',
     `approverRole` VARCHAR(50)  DEFAULT 'approver'       COMMENT 'Role context (admin, dept_lead, mandatory_approver, dept_approver)',
@@ -3388,7 +3388,7 @@ CREATE TABLE IF NOT EXISTS `tblInvitation` (
     `acceptedByID`  INT          DEFAULT NULL,
     `revokedAt`     DATETIME     DEFAULT NULL,
     `revokedByID`   INT          DEFAULT NULL,
-    `createdByID`   INT          NOT NULL,
+    `createdByID`   INT          DEFAULT NULL COMMENT 'Empty once this person has asked to be forgotten. The record is kept; only the name is removed.',
     `createdAt`     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (`invitationID`),
     UNIQUE KEY `uq_invite_token` (`tokenHash`),
@@ -6499,7 +6499,7 @@ CREATE TABLE IF NOT EXISTS `tblAssets` (
     `labelSymbology`      ENUM('qr','code128','ean13','ean8','upca','upce','itf14','qr+code128') NOT NULL DEFAULT 'qr'
                           COMMENT 'Preferred symbology for this asset''s printed label (labels sub-issue) — widened for ean8/upce, migration 175 (#423)',
     `parentAssetID`       INT           DEFAULT NULL COMMENT 'Self-FK — bundles/kits/component relationships',
-    `createdByID`         INT           NOT NULL,
+    `createdByID`         INT           DEFAULT NULL COMMENT 'Empty once this person has asked to be forgotten. The record is kept; only the name is removed.',
     `createdAt`           DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
     `updatedAt`           DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     `isDeleted`           TINYINT(1)    NOT NULL DEFAULT 0,
@@ -6599,7 +6599,7 @@ CREATE TABLE IF NOT EXISTS `tblAssetMaintenance` (
     `performedAt`        DATE         DEFAULT NULL,
     `nextDueDate`        DATE         DEFAULT NULL,
     `status`             ENUM('scheduled','completed','cancelled') NOT NULL DEFAULT 'completed',
-    `createdByID`        INT          NOT NULL,
+    `createdByID`        INT          DEFAULT NULL COMMENT 'Empty once this person has asked to be forgotten. The record is kept; only the name is removed.',
     `createdAt`          DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (`maintID`),
     KEY `idx_astmnt_asset_performed` (`assetID`, `performedAt`),
@@ -6680,7 +6680,7 @@ CREATE TABLE IF NOT EXISTS `tblAssetIdentifiers` (
     `verifiedAt`    DATETIME     DEFAULT NULL COMMENT 'Timestamp of the last #415 GEPIR verify-cache lookup for this identifier -- 161 (#415)',
     `verifyNote`    VARCHAR(255) DEFAULT NULL COMMENT 'Human-readable result of the last #415 GEPIR verify-cache lookup -- 161 (#415)',
     `notes`         VARCHAR(500) DEFAULT NULL,
-    `createdByID`   INT          NOT NULL,
+    `createdByID`   INT          DEFAULT NULL COMMENT 'Empty once this person has asked to be forgotten. The record is kept; only the name is removed.',
     `createdAt`     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (`identifierID`),
     KEY `idx_astid_site` (`siteID`),
@@ -6753,7 +6753,7 @@ CREATE TABLE IF NOT EXISTS `tblAssetEventAssignments` (
     `siteID`         INT          NOT NULL DEFAULT 1,
     `assetID`        INT          NOT NULL,
     `eventID`        INT          NOT NULL,
-    `assignedByID`   INT          NOT NULL,
+    `assignedByID`   INT          DEFAULT NULL COMMENT 'Empty once this person has asked to be forgotten. The record is kept; only the name is removed.',
     `assignedFrom`   DATETIME     DEFAULT NULL COMMENT 'NULL = defaults to the event''s own startDateTime',
     `assignedUntil`  DATETIME     DEFAULT NULL COMMENT 'NULL = defaults to the event''s own endDateTime',
     `notes`          VARCHAR(500) DEFAULT NULL,
@@ -6818,7 +6818,7 @@ CREATE TABLE IF NOT EXISTS `tblAssetStocktakes` (
     `status`        ENUM('open','closed') NOT NULL DEFAULT 'open',
     `locationID`    INT          DEFAULT NULL COMMENT 'NULL = not scoped to a single location',
     `categoryID`    INT          DEFAULT NULL COMMENT 'NULL = not scoped to a single category',
-    `startedByID`   INT          NOT NULL,
+    `startedByID`   INT          DEFAULT NULL COMMENT 'Empty once this person has asked to be forgotten. The record is kept; only the name is removed.',
     `startedAt`     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     `closedByID`    INT          DEFAULT NULL,
     `closedAt`      DATETIME     DEFAULT NULL,
@@ -6880,7 +6880,7 @@ CREATE TABLE IF NOT EXISTS `tblAssetKioskTokens` (
     `label`        VARCHAR(150) NOT NULL COMMENT 'Human-readable name for the physical terminal, e.g. "AV cupboard tablet"',
     `token`        CHAR(32)     NOT NULL COMMENT '32-char hex per-device credential — never displayed again after creation (#414)',
     `isActive`     TINYINT(1)   NOT NULL DEFAULT 1,
-    `createdByID`  INT          NOT NULL,
+    `createdByID`  INT          DEFAULT NULL COMMENT 'Empty once this person has asked to be forgotten. The record is kept; only the name is removed.',
     `createdAt`    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     `lastSeenAt`   DATETIME     DEFAULT NULL,
     PRIMARY KEY (`tokenID`),
@@ -7060,7 +7060,7 @@ CREATE TABLE IF NOT EXISTS `tblVenues` (
     `caretakerPhone` VARCHAR(50)  DEFAULT NULL,
     `notes`          TEXT         DEFAULT NULL COMMENT 'Access arrangements, parking, alarm codes go in a vault doc NOT here — free operational notes only',
     `isActive`       TINYINT(1)   NOT NULL DEFAULT 1,
-    `createdByID`    INT          NOT NULL,
+    `createdByID`    INT          DEFAULT NULL COMMENT 'Empty once this person has asked to be forgotten. The record is kept; only the name is removed.',
     `createdAt`      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     `updatedAt`      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (`venueID`),
@@ -7208,7 +7208,7 @@ CREATE TABLE IF NOT EXISTS `tblVenueAgreements` (
     `status`           ENUM('draft','active','expired','terminated','superseded') NOT NULL DEFAULT 'draft',
     `supersededByID`   INT          DEFAULT NULL COMMENT 'Self-FK — renewal chain (mirrors tblAssetLoans.parentLoanID pattern)',
     `notes`            TEXT         DEFAULT NULL,
-    `createdByID`      INT          NOT NULL,
+    `createdByID`      INT          DEFAULT NULL COMMENT 'Empty once this person has asked to be forgotten. The record is kept; only the name is removed.',
     `createdAt`        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     `updatedAt`        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (`agreementID`),
@@ -7271,7 +7271,7 @@ CREATE TABLE IF NOT EXISTS `tblVenueBookingGroups` (
     `daysOfWeek`  VARCHAR(20)  DEFAULT NULL COMMENT 'CSV of days 0=Sun..6=Sat — same encoding as tblRecurrenceRules.dayOfWeek',
     `dateFrom`    DATE         DEFAULT NULL COMMENT 'Generation range start (recurring) / run start (multi-day)',
     `dateTo`      DATE         DEFAULT NULL COMMENT 'Generation range end / run end — "extend series" re-runs the generator from dateTo+1',
-    `createdByID` INT          NOT NULL,
+    `createdByID` INT          DEFAULT NULL COMMENT 'Empty once this person has asked to be forgotten. The record is kept; only the name is removed.',
     `createdAt`   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (`groupID`),
     KEY `idx_vengrp_site` (`siteID`),
@@ -7310,7 +7310,7 @@ CREATE TABLE IF NOT EXISTS `tblVenueBookings` (
     `costPence`       INT        DEFAULT NULL COMMENT 'Integer minor units — house pence convention (#266). NULL = not costed / derive from agreement rate',
     `currency`        CHAR(3)    NOT NULL DEFAULT 'GBP' COMMENT 'ISO 4217',
     `isDeleted`       TINYINT(1) NOT NULL DEFAULT 0 COMMENT 'Soft delete — cancellations are normally a STATUS change; this is for true mistakes',
-    `createdByID`     INT        NOT NULL,
+    `createdByID`     INT        DEFAULT NULL COMMENT 'Empty once this person has asked to be forgotten. The record is kept; only the name is removed.',
     `updatedByID`     INT        DEFAULT NULL,
     `createdAt`       DATETIME   NOT NULL DEFAULT CURRENT_TIMESTAMP,
     `updatedAt`       DATETIME   NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -7365,7 +7365,7 @@ CREATE TABLE IF NOT EXISTS `tblVenueInvoices` (
     `fileSize`    INT          DEFAULT NULL,
     `mimeType`    VARCHAR(100) DEFAULT NULL,
     `notes`       TEXT         DEFAULT NULL,
-    `createdByID` INT          NOT NULL,
+    `createdByID` INT          DEFAULT NULL COMMENT 'Empty once this person has asked to be forgotten. The record is kept; only the name is removed.',
     `createdAt`   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     `updatedAt`   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (`invoiceID`),
@@ -7421,7 +7421,7 @@ CREATE TABLE IF NOT EXISTS `tblVenueInvoicePayments` (
     `method`       ENUM('bank-transfer','standing-order','cash','cheque','card','online','other') NOT NULL DEFAULT 'bank-transfer',
     `reference`    VARCHAR(100) DEFAULT NULL COMMENT 'Bank ref / cheque number',
     `notes`        VARCHAR(500) DEFAULT NULL,
-    `recordedByID` INT          NOT NULL,
+    `recordedByID` INT          DEFAULT NULL COMMENT 'Empty once this person has asked to be forgotten. The record is kept; only the name is removed.',
     `createdAt`    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (`payID`),
     KEY `idx_venip_invoice` (`invoiceID`),
@@ -8639,4 +8639,20 @@ INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue
 ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
 
 INSERT INTO `tblMigrations` (`filename`) VALUES ('191_event_registration_privacy.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- ── from 192_removable_creator_links.sql (#479) ───────────────────────
+-- Thirteen "who created this" columns changed from "must always be filled in"
+-- to "may be empty", so that a person who asks to be forgotten can actually
+-- have their name removed from records the organisation keeps.
+--
+-- A rule that every record must always name somebody, and a right to stop
+-- being named, cannot both be satisfied. Emptying one of these used to be
+-- refused by the database PART WAY THROUGH a request, leaving some of the
+-- person's information removed and some of it still there.
+--
+-- The thirteen columns themselves are changed inline in their own tables
+-- above rather than repeated here.
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('192_removable_creator_links.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;

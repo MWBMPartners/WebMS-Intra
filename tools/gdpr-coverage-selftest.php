@@ -190,9 +190,35 @@ check(
 // -----------------------------------------------------------------------------
 $linkColumns = [
     'userID', 'memberID', 'donorID', 'submitterID', 'recipientUserID',
-    'assignedToID', 'targetUserID', 'convertedUserID', 'uploadedByUserID',
-    'leaderID', 'approverID', 'reviewedByID', 'startedByID',
+    'assignedToID', 'targetUserID', 'convertedUserID', 'leaderID',
+    'uploadedByUserID', 'approverID', 'reviewedByID', 'startedByID',
     'submittedByUserID', 'createdByID', 'updatedByID',
+    'parentUserID', 'counterpartyUserID', 'recordedByID',
+    'approvedByID', 'assignedByID',
+];
+
+// Columns that say the person ACTED on a record, rather than that the record is
+// about them. Kept in step with GdprEraser::ACTOR_COLUMNS.
+$actorColumns = [
+    'uploadedByUserID', 'approverID', 'reviewedByID', 'startedByID',
+    'submittedByUserID', 'createdByID', 'updatedByID',
+    'parentUserID', 'counterpartyUserID', 'recordedByID',
+    'approvedByID', 'assignedByID',
+    'addedByID', 'markedByID', 'openedByID', 'closedByID',
+    'moderatedByID', 'moderatorID', 'presenterID', 'scannedByID',
+    'bookedByID', 'requestedByID', 'acceptedByID', 'revokedByID',
+    'counter1ID', 'counter2ID', 'offboardedByID', 'rehiredByID',
+    'grantedByID', 'enrolledByID', 'linkedByID', 'releasedByID',
+    'processedByID',
+];
+
+// Tables that DO delete the whole record even though the only link is one of
+// those columns. Every entry here has been looked at deliberately and needs a
+// reason. Adding to this list should feel uncomfortable.
+$deliberateDeletes = [
+    // A parent signs a child up. The record holds the CHILD's name, date of
+    // birth, allergies and medical notes - deleting it is the entire point.
+    'tblEventRegistrations' => 'A child\'s medical details; deletion is the purpose',
 ];
 $unreachable = [];
 foreach ($catalogue as $table => $meta) {
@@ -204,6 +230,139 @@ foreach ($catalogue as $table => $meta) {
         $unreachable[] = (string) $table;
     }
 }
+
+// -----------------------------------------------------------------------------
+// 8. THE ONE THAT WOULD DESTROY SOMEBODY ELSE'S RECORDS. A table set to delete
+//    the whole row, where the only thing tying it to a person is that they
+//    ACTED on it - who recorded it, who approved it, who their parent was.
+//
+//    Seven tables were in exactly that state. Deleting on those links would
+//    have destroyed a venue invoice payment because of who typed it in, a small
+//    group's attendance register because of who took it, and a child's profile
+//    because of who their parent was.
+//
+//    This FAILS rather than warns. Getting it wrong destroys other people's
+//    records on one person's request, and it cannot be undone.
+// -----------------------------------------------------------------------------
+$dangerous = [];
+foreach ($catalogue as $table => $meta) {
+    if ((string) ($meta['decision'] ?? '') !== 'erase') {
+        continue;
+    }
+    $columns = (array) ($meta['columns'] ?? []);
+    $links   = array_values(array_intersect($linkColumns, $columns));
+    if ($links === []) {
+        continue;
+    }
+    // Does it have ANY link meaning "this record is about them"?
+    if (array_diff($links, $actorColumns) !== []) {
+        continue;
+    }
+    if (isset($deliberateDeletes[(string) $table]) === true) {
+        continue;
+    }
+    $dangerous[] = (string) $table . ' (only link: ' . implode(', ', $links) . ')';
+}
+check(
+    'nothing deletes a whole record just because somebody acted on it',
+    $dangerous === [],
+    implode('; ', $dangerous)
+    . ' -- keep the record and drop the name, or add it to $deliberateDeletes '
+    . 'with a reason'
+);
+
+// -----------------------------------------------------------------------------
+// 9. THE ONE THAT MAKES THIS WHOLE FILE WORTH HAVING. There are TWO lists, and
+//    until today they disagreed about 17 tables without anybody noticing.
+//
+//    GdprEraser holds a hand-written list of instructions. The written
+//    catalogue holds the complete inventory. The hand-written one silently
+//    WINS: any table it mentions is skipped when the catalogue is read.
+//
+//    So for those 17 tables the catalogue said one thing and the portal did
+//    another. It said DELETE the account row (which would have dragged
+//    hundreds of records down with it) while the code emptied it. It said KEEP
+//    a pastoral case as the law requires while the code emptied it. And a
+//    correction made to the catalogue for a child's profile had no effect
+//    whatsoever, because the hand-written entry overrode it.
+//
+//    Two lists that can disagree are not a list. They are a guess. This makes
+//    disagreement impossible: every hand-written instruction must match the
+//    catalogue's decision for the same table, and every hand-written table must
+//    appear in the catalogue at all.
+// -----------------------------------------------------------------------------
+$handWrittenPart = substr($eraser, 0, (int) strpos($eraser, 'private static function fromPersonalDataCatalogue'));
+preg_match_all(
+    "/'table'\s*=>\s*'(\w+)'\s*,\s*'userCol'\s*=>\s*'(\w+)'\s*,\s*'action'\s*=>\s*'(\w+)'/s",
+    $handWrittenPart,
+    $handMatches,
+    PREG_SET_ORDER
+);
+
+// The two vocabularies for the same four decisions.
+$sameThing = [
+    'erase'  => 'delete',
+    'unlink' => 'anonymise',
+    'retain' => 'retain',
+];
+
+// One table may legitimately carry TWO instructions, and this has to allow for
+// it. A group membership row is DELETED for the person it is about, while the
+// same table's "who added them" column is only unlinked. Both are right.
+//
+// So the catalogue's decision is compared against the instruction for the
+// SUBJECT - the one not keyed on an actor column - and any actor-keyed
+// instruction is checked separately for the thing that would actually do harm.
+$disagreements = [];
+$notListed     = [];
+$actorDeletes  = [];
+foreach ($handMatches as $entry) {
+    $table   = (string) $entry[1];
+    $userCol = (string) $entry[2];
+    $action  = (string) $entry[3];
+
+    if (isset($catalogue[$table]) === false) {
+        $notListed[] = $table;
+        continue;
+    }
+
+    $decision = (string) ($catalogue[$table]['decision'] ?? '');
+
+    if (in_array($userCol, $actorColumns, true) === true) {
+        // Keyed on "they did this". Deleting the whole record here would
+        // destroy somebody else's record on this person's request.
+        if ($action === 'delete' && isset($deliberateDeletes[$table]) === false) {
+            $actorDeletes[] = $table . '.' . $userCol;
+        }
+        continue;
+    }
+
+    $expected = $sameThing[$decision] ?? '';
+    if ($expected !== $action) {
+        $disagreements[] = $table . '.' . $userCol . ': the list says "'
+            . $decision . '" but the code does "' . $action . '"';
+    }
+}
+
+check(
+    'the code never deletes a record just because somebody acted on it',
+    $actorDeletes === [],
+    implode(', ', $actorDeletes)
+);
+
+check(
+    'the written list and the code agree about every table',
+    $disagreements === [],
+    implode('; ', array_slice($disagreements, 0, 6))
+);
+
+check(
+    'every table the code touches appears in the written list',
+    $notListed === [],
+    implode(', ', array_slice($notListed, 0, 8))
+    . ' -- a table handled by the code but absent from the list is invisible to '
+    . 'every count, every review and every report'
+);
 
 echo "\n" . str_repeat('-', 78) . "\n";
 if ($unreachable !== []) {
