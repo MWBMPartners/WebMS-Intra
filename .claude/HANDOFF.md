@@ -9,6 +9,55 @@ proceeds, so the session can be picked up at any point).
 
 ## Read this first — where we are right now
 
+## ARCHITECTURE CONSTRAINT ADDED 11 September 2026 — read before touching the Noticeboard
+
+The owner set a requirement that changes the shape of the Noticeboard work and
+everything public that follows it. Tracked as **#493**.
+
+**The portal is the back office.** It lives on its own subdomain and that is
+where content is managed. But public content must be viewable from the
+organisation's **main website** — at a path on the main domain
+(`example.org/noticeboard`) or on a separate subdomain — not by sending the
+public to the portal.
+
+This is not Noticeboard-specific. Public events, service programmes and
+lost-and-found will all want the same path, so it needs one reusable structure.
+
+**Four things make it harder than it first appears:**
+
+1. The main website is usually **somebody else's system** — WordPress, Wix,
+   Squarespace. Some website builders forbid script tags or frames outright.
+2. **The deploy cannot reach it.** `deploy.yml` only writes to three directories
+   under the portal subdomain's own base path. Anything on the main domain is
+   installed by the customer, by hand, once. Any design must be honest about that.
+3. **No session, unrelated hostname.** Site identity normally comes from
+   `tblSites.hostPattern`, falling back to site 1. That is wrong here, and on a
+   multi-organisation install it would show one organisation's content to
+   another's visitors. The site must be named explicitly and safely.
+4. **The same database** holds pastoral care notes, safeguarding records,
+   children's medical details, financial records and the member directory. The
+   boundary has to be structural, not a filter. Note this project's own history:
+   making an unreachable page reachable has TWICE turned out to publish something
+   with no access check, because nobody checks a page nobody can open.
+
+**Reuse, do not reinvent.** `web/public_html/widget/countdown.js` plus
+`web/_apps/widget/countdown-json.php` is a working cross-site embed (#319).
+`web/_apps/calendar/widget.php` is an iframe embed — but it sets
+`X-Frame-Options: ALLOWALL`, which is **not a valid value**; it works only
+because browsers ignore what they do not recognise. Review it rather than copy it.
+
+**The Noticeboard cannot be finished until this is settled.** Its view page
+currently REQUIRES A LOGIN (`('noticeboard','noticeboard/index.php',1)`), which
+is the opposite of the owner's specification: the board is public, only managing
+it needs a login, and the foyer slideshow is reached by a secret link with no
+login at all.
+
+A design pass is running. The decision and build plan go on #493 before any code
+is written.
+
+---
+
+
 ## LATEST: children's registration privacy shipped (11 September 2026)
 
 Commit `9c77216`, pushed. Part of #479. Issues #490 and #491 opened from what it
