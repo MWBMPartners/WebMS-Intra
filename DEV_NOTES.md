@@ -428,15 +428,26 @@ A setting that still exists but now means something different fails silently, in
 the worst possible direction. So all three go, and six clearly-named ones replace
 them.
 
-**The settings, one per branch per front door.** They are named after the
-branches, because that is how you think about them when setting them up. (The old
-names used `LIVE` and `DEV` for `main` and `alpha`, which was one translation step
-with no benefit.)
+**The settings, one per branch per front door.** The ending names the CHANNEL —
+`LIVE`, `BETA`, `ALPHA` — not the branch. That is deliberate: the deployment
+already thinks in channels internally (`deploy.yml` sets `channel=live` for the
+`main` branch, `channel=beta`, `channel=alpha`), so this uses the same word for
+the same thing rather than inventing a third one. `main` is the branch; `live` is
+what it deploys to.
+
+The old `SFTP_DEV_PATH` used `DEV` for the `alpha` channel, which was a second
+name for the same thing and is not carried forward.
+
+One deliberate mismatch, so it does not look like a mistake: the alpha channel's
+secret ends `_ALPHA`, but the folder it points at is still named `..._dev`. The
+folder keeps its existing name so the server does not need renaming for a channel
+nobody outside the team ever visits. Rename it to `..._alpha` if you prefer — just
+change the value of the two `_ALPHA` settings to match.
 
 | Branch  | Front door         | Secret name              | Value (example)                                                        |
 | ------- | ------------------ | ------------------------ | ---------------------------------------------------------------------- |
-| `main`  | Management portal  | `SFTP_ADMIN_PATH_MAIN`   | `/home/dh_abcd1234/portal.millrdsdacambridge.uk/admin_html`             |
-| `main`  | Public website     | `SFTP_PUBLIC_PATH_MAIN`  | `/home/dh_abcd1234/portal.millrdsdacambridge.uk/public_html`            |
+| `main`  | Management portal  | `SFTP_ADMIN_PATH_LIVE`   | `/home/dh_abcd1234/portal.millrdsdacambridge.uk/admin_html`             |
+| `main`  | Public website     | `SFTP_PUBLIC_PATH_LIVE`  | `/home/dh_abcd1234/portal.millrdsdacambridge.uk/public_html`            |
 | `beta`  | Management portal  | `SFTP_ADMIN_PATH_BETA`   | `/home/dh_abcd1234/portal.millrdsdacambridge.uk/admin_html_beta`        |
 | `beta`  | Public website     | `SFTP_PUBLIC_PATH_BETA`  | `/home/dh_abcd1234/portal.millrdsdacambridge.uk/public_html_beta`       |
 | `alpha` | Management portal  | `SFTP_ADMIN_PATH_ALPHA`  | `/home/dh_abcd1234/portal.millrdsdacambridge.uk/admin_html_dev`         |
@@ -450,8 +461,8 @@ with no benefit.)
 ```bash
 BASE='/home/dh_abcd1234/portal.millrdsdacambridge.uk'
 
-gh secret set SFTP_ADMIN_PATH_MAIN   --body "$BASE/admin_html"
-gh secret set SFTP_PUBLIC_PATH_MAIN  --body "$BASE/public_html"
+gh secret set SFTP_ADMIN_PATH_LIVE   --body "$BASE/admin_html"
+gh secret set SFTP_PUBLIC_PATH_LIVE  --body "$BASE/public_html"
 gh secret set SFTP_ADMIN_PATH_BETA   --body "$BASE/admin_html_beta"
 gh secret set SFTP_PUBLIC_PATH_BETA  --body "$BASE/public_html_beta"
 gh secret set SFTP_ADMIN_PATH_ALPHA  --body "$BASE/admin_html_dev"

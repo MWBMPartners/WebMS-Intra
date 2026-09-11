@@ -1148,10 +1148,10 @@ Retire `SFTP_LIVE_PATH`, `SFTP_BETA_PATH` and `SFTP_DEV_PATH` completely — do 
 | --- | --- |
 | `SFTP_ADMIN_PATH_LIVE` | `/home/USER/portal.example.org/public_html` |
 | `SFTP_ADMIN_PATH_BETA` | `/home/USER/portal.example.org/public_html_beta` |
-| `SFTP_ADMIN_PATH_DEV` | `/home/USER/portal.example.org/public_html_dev` |
+| `SFTP_ADMIN_PATH_ALPHA` | `/home/USER/portal.example.org/public_html_dev` |
 | `SFTP_PUBLIC_PATH_LIVE` | `/home/USER/portal.example.org/public_site` |
 | `SFTP_PUBLIC_PATH_BETA` | `/home/USER/portal.example.org/public_site_beta` |
-| `SFTP_PUBLIC_PATH_DEV` | `/home/USER/portal.example.org/public_site_dev` |
+| `SFTP_PUBLIC_PATH_ALPHA` | `/home/USER/portal.example.org/public_site_dev` |
 | `SFTP_SHARED_PATH_LIVE` | `/home/USER/portal.example.org` |
 | `SFTP_SHARED_PATH_BETA` | `/home/USER/portal.example.org` |
 | `SFTP_SHARED_PATH_DEV` | `/home/USER/portal.example.org` |
@@ -1203,10 +1203,10 @@ Retire `SFTP_LIVE_PATH`, `SFTP_BETA_PATH` and `SFTP_DEV_PATH` completely — do 
         env:
           ADMIN_LIVE:  ${{ secrets.SFTP_ADMIN_PATH_LIVE }}
           ADMIN_BETA:  ${{ secrets.SFTP_ADMIN_PATH_BETA }}
-          ADMIN_DEV:   ${{ secrets.SFTP_ADMIN_PATH_DEV }}
+          ADMIN_DEV:   ${{ secrets.SFTP_ADMIN_PATH_ALPHA }}
           PUBLIC_LIVE: ${{ secrets.SFTP_PUBLIC_PATH_LIVE }}
           PUBLIC_BETA: ${{ secrets.SFTP_PUBLIC_PATH_BETA }}
-          PUBLIC_DEV:  ${{ secrets.SFTP_PUBLIC_PATH_DEV }}
+          PUBLIC_DEV:  ${{ secrets.SFTP_PUBLIC_PATH_ALPHA }}
           SHARED_LIVE: ${{ secrets.SFTP_SHARED_PATH_LIVE }}
           SHARED_BETA: ${{ secrets.SFTP_SHARED_PATH_BETA }}
           SHARED_DEV:  ${{ secrets.SFTP_SHARED_PATH_DEV }}

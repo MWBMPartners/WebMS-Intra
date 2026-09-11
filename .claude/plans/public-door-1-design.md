@@ -508,10 +508,10 @@ Deriving with `dirname()` also hides mistakes: a typo in a web-root secret quiet
 | --- | --- |
 | `SFTP_ADMIN_PATH_LIVE` | `/home/USER/portal.example.org/admin_html` |
 | `SFTP_ADMIN_PATH_BETA` | `/home/USER/portal.example.org/admin_html_beta` |
-| `SFTP_ADMIN_PATH_DEV` | `/home/USER/portal.example.org/admin_html_dev` |
+| `SFTP_ADMIN_PATH_ALPHA` | `/home/USER/portal.example.org/admin_html_dev` |
 | `SFTP_PUBLIC_PATH_LIVE` | `/home/USER/public.example.org/public_html` |
 | `SFTP_PUBLIC_PATH_BETA` | `/home/USER/public.example.org/public_html_beta` |
-| `SFTP_PUBLIC_PATH_DEV` | `/home/USER/public.example.org/public_html_dev` |
+| `SFTP_PUBLIC_PATH_ALPHA` | `/home/USER/public.example.org/public_html_dev` |
 | `SFTP_SHARED_PATH_LIVE` | `/home/USER/portal.example.org` |
 | `SFTP_SHARED_PATH_BETA` | `/home/USER/portal.example.org` |
 | `SFTP_SHARED_PATH_DEV` | `/home/USER/portal.example.org` |
