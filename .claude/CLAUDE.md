@@ -318,6 +318,30 @@ blocked and why. A confident answer produced without the context that made the
 question answerable is worse than no answer, because nobody can tell the
 difference by looking at it.
 
+### This is what makes the handoff document load-bearing
+
+The condition above — *the work must survive the move* — is only ever met because
+something wrote down what was going on. **That something is the handoff
+document.** It stops being a courtesy for the next session and becomes the
+mechanism the whole rule depends on.
+
+So it is kept current **as the work happens**, not tidied up at the end:
+
+- After each piece of work, before moving to the next.
+- Immediately when something is learned that would change how somebody continues —
+  a wrong assumption, a trap found, a decision taken.
+- Before starting anything long-running, so an interruption in the middle is
+  survivable.
+
+What it has to carry is exactly what a replacement needs: what is being attempted
+and why, what has been established so far, which files matter, **what was already
+tried and rejected** (the most valuable part, and the first thing lost), what is
+verified versus assumed, and what to do next.
+
+A handoff written an hour ago describes a situation that no longer exists. When
+the moment comes, nobody gets to go back and write it properly — that moment is
+precisely when the system that knew is the one that has stopped answering.
+
 ### Go back to the usual one promptly
 
 A fallback is a detour, not a new route. Return at the next natural break — the
