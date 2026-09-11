@@ -22,9 +22,9 @@ There are **15** scripts in `tools/audit-checks/`, not thirteen or fourteen.
 
 It also has to be this way. `web/public_html/index.php` finds the shared code with `dirname(__DIR__) . '/_core/bootstrap.php'`. If the public web root sits under a different parent, `_core` is not there and every public request 500s. The alternatives are uploading `_core` twice (which duplicates the database credentials in `_auth_keys/`) or inventing a runtime path-discovery mechanism. Neither is worth it.
 
-**So: the public web root is a sibling of the admin web root**, named `public_site` / `public_site_beta` / `public_site_dev` on the server. The workflow asserts the equality and fails loudly. Route (c3) — the one-line include from another domain — passes an absolute path and is unaffected.
+**SUPERSEDED 11 September 2026.** The owner decided the server folders mirror the repository exactly, so the public web root is `public_html` / `public_html_beta` / `public_html_dev` and the management portal's server folder IS renamed to `admin_html` / `admin_html_beta` / `admin_html_dev`. The equality assertion is also gone: every folder is joined onto `SFTP_ROOT_DIR`, so sharing a parent is structural rather than checked. See section 7. Route (c3) — the one-line include from another domain — passes a full path and is unaffected either way.
 
-**C3 — `PORTAL_ENV` cannot be sniffed from the directory name any more, and it cannot come from `_auth_keys/` either.** The review proposed reading the channel from `_auth_keys/`. That does not work: `_auth_keys/` lives under the *shared* base, so all three channels read the same file. The directory sniff also breaks on the new name `public_site_dev` (it contains neither `public_html_dev` nor `public_html`).
+**C3 — `PORTAL_ENV` cannot be sniffed from the directory name any more, and it cannot come from `_auth_keys/` either.** The review proposed reading the channel from `_auth_keys/`. That does not work: `_auth_keys/` lives under the *shared* base, so all three channels read the same file. The directory sniff breaks anyway on `admin_html`, which contains neither `public_html_dev` nor `public_html` — see N2.
 
 **So: the deploy workflow writes a one-line `.channel` file into each web root** (`live`, `beta`, `dev`), the front controller reads it, and bootstrap refuses to run without it. Deterministic, per-channel, written by the thing that knows the answer.
 
@@ -1140,25 +1140,61 @@ public static function grantsFor(string $slug, int $siteId): array;
 
 # 7. THE DEPLOYMENT CHANGE
 
-### The nine secrets
+### The seven secrets
 
-Retire `SFTP_LIVE_PATH`, `SFTP_BETA_PATH` and `SFTP_DEV_PATH` completely — do not leave them set.
+> UPDATED 11 September 2026 on the owner's instruction. This replaces the nine
+> secrets originally proposed here. Two changes: one `SFTP_ROOT_DIR` replaces the
+> three identical `SFTP_SHARED_PATH_*` secrets, and the six front-door secrets now
+> hold **a folder name only**, not a full path. They are renamed `..._DIR_...`
+> because their meaning changed — a setting that keeps its name while its meaning
+> changes is the exact hazard this whole piece of work exists to avoid.
+>
+> Also note: the owner decided the SERVER folders mirror the repository exactly.
+> The management portal's server folder IS renamed to `admin_html`, and the
+> `public_site` naming proposed earlier is not used.
 
-| Secret name | What to put in it (substituting your own user name and domain) |
+Retire `SFTP_LIVE_PATH`, `SFTP_BETA_PATH` and `SFTP_DEV_PATH` completely.
+
+| Secret | Value (substituting the real user name and domain) |
 | --- | --- |
-| `SFTP_ADMIN_PATH_LIVE` | `/home/USER/portal.example.org/public_html` |
-| `SFTP_ADMIN_PATH_BETA` | `/home/USER/portal.example.org/public_html_beta` |
-| `SFTP_ADMIN_PATH_ALPHA` | `/home/USER/portal.example.org/public_html_dev` |
-| `SFTP_PUBLIC_PATH_LIVE` | `/home/USER/portal.example.org/public_site` |
-| `SFTP_PUBLIC_PATH_BETA` | `/home/USER/portal.example.org/public_site_beta` |
-| `SFTP_PUBLIC_PATH_ALPHA` | `/home/USER/portal.example.org/public_site_dev` |
-| `SFTP_SHARED_PATH_LIVE` | `/home/USER/portal.example.org` |
-| `SFTP_SHARED_PATH_BETA` | `/home/USER/portal.example.org` |
-| `SFTP_SHARED_PATH_DEV` | `/home/USER/portal.example.org` |
+| `SFTP_ROOT_DIR` | `/home/USER/portal.example.org/` |
+| `SFTP_ADMIN_DIR_LIVE` | `admin_html/` |
+| `SFTP_ADMIN_DIR_BETA` | `admin_html_beta/` |
+| `SFTP_ADMIN_DIR_ALPHA` | `admin_html_dev/` |
+| `SFTP_PUBLIC_DIR_LIVE` | `public_html/` |
+| `SFTP_PUBLIC_DIR_BETA` | `public_html_beta/` |
+| `SFTP_PUBLIC_DIR_ALPHA` | `public_html_dev/` |
 
-`SFTP_HOST`, `SFTP_USER`, `SFTP_PORT`, `SFTP_KEY` / `SFTP_PASSWORD` and the `SFTP_ENABLED` variable are unchanged.
+`SFTP_HOST`, `SFTP_USER`, `SFTP_PORT`, `SFTP_KEY` / `SFTP_PASSWORD` and the
+`SFTP_ENABLED` variable are unchanged.
 
-**Two things to notice.** The admin path keeps the server directory name it already has — the management portal's directory on the server does **not** have to be renamed, and renaming it would mean changing the web directory in the hosting panel and risking downtime for no gain. Only the *repository* directory is renamed. And the shared path is a secret of its own rather than being worked out with `dirname()`, because a typo in a path secret would otherwise quietly relocate the shared code somewhere plausible-looking, whereas an empty secret fails loudly.
+**What this buys.** The rule that both web roots must sit inside the shared
+directory stops being something the workflow checks and becomes something that
+cannot be otherwise — every folder is joined onto `SFTP_ROOT_DIR`. The shared
+upload target is `SFTP_ROOT_DIR` itself rather than `dirname()` of a web root, so
+a typo can no longer quietly relocate the shared code somewhere plausible.
+
+**What the workflow must validate, and fail loudly on:**
+
+1. `SFTP_ROOT_DIR` is set and starts with `/`. Empty or relative → stop.
+2. Each of the six folder settings is set. Empty → stop, naming which one.
+3. No folder setting looks like a full path — refuse a value starting with `/`
+   or containing an inner `/`. This catches somebody pasting the old full-path
+   style into the new setting, which would otherwise build
+   `/home/u/d//home/u/d/admin_html` and mirror into nowhere useful.
+4. Any of the three retired secrets still being set → stop, with a message saying
+   to delete them. A leftover is a sign the changeover was done half way.
+5. Trim a trailing slash from `SFTP_ROOT_DIR` and any slashes from the folder
+   name, then join with exactly one `/`, so every spelling works.
+
+Worked example for the `alpha` channel:
+
+```
+ROOT=/home/USER/portal.example.org        (trailing slash trimmed)
+ADMIN=$ROOT/admin_html_dev                (from SFTP_ADMIN_DIR_ALPHA)
+PUBLIC=$ROOT/public_html_dev              (from SFTP_PUBLIC_DIR_ALPHA)
+SHARED=$ROOT                              (no dirname() guesswork)
+```
 
 ### The diff to `.github/workflows/deploy.yml`
 
@@ -1201,40 +1237,50 @@ Retire `SFTP_LIVE_PATH`, `SFTP_BETA_PATH` and `SFTP_DEV_PATH` completely — do 
       - name: Determine target channel
         id: target
         env:
-          ADMIN_LIVE:  ${{ secrets.SFTP_ADMIN_PATH_LIVE }}
-          ADMIN_BETA:  ${{ secrets.SFTP_ADMIN_PATH_BETA }}
-          ADMIN_DEV:   ${{ secrets.SFTP_ADMIN_PATH_ALPHA }}
-          PUBLIC_LIVE: ${{ secrets.SFTP_PUBLIC_PATH_LIVE }}
-          PUBLIC_BETA: ${{ secrets.SFTP_PUBLIC_PATH_BETA }}
-          PUBLIC_DEV:  ${{ secrets.SFTP_PUBLIC_PATH_ALPHA }}
-          SHARED_LIVE: ${{ secrets.SFTP_SHARED_PATH_LIVE }}
-          SHARED_BETA: ${{ secrets.SFTP_SHARED_PATH_BETA }}
-          SHARED_DEV:  ${{ secrets.SFTP_SHARED_PATH_DEV }}
+          ROOT_DIR:    ${{ secrets.SFTP_ROOT_DIR }}
+          ADMIN_LIVE:  ${{ secrets.SFTP_ADMIN_DIR_LIVE }}
+          ADMIN_BETA:  ${{ secrets.SFTP_ADMIN_DIR_BETA }}
+          ADMIN_ALPHA: ${{ secrets.SFTP_ADMIN_DIR_ALPHA }}
+          PUBLIC_LIVE: ${{ secrets.SFTP_PUBLIC_DIR_LIVE }}
+          PUBLIC_BETA: ${{ secrets.SFTP_PUBLIC_DIR_BETA }}
+          PUBLIC_ALPHA:${{ secrets.SFTP_PUBLIC_DIR_ALPHA }}
           OLD_LIVE:    ${{ secrets.SFTP_LIVE_PATH }}
           OLD_BETA:    ${{ secrets.SFTP_BETA_PATH }}
           OLD_DEV:     ${{ secrets.SFTP_DEV_PATH }}
         run: |
-          # ── Guard 2: the old secrets must be gone, not merely ignored. ──
-          # A half-finished secret change is the state in which somebody is
-          # most likely to have updated one thing and not another. Stopping
-          # the whole pipeline is better than running half of it.
+          # ── Guard 1: the old settings must be GONE, not merely ignored. ──
+          # A half-finished change is exactly the state in which somebody has
+          # updated one thing and not another. Stopping the whole run beats
+          # running half of it.
           if [[ -n "$OLD_LIVE" || -n "$OLD_BETA" || -n "$OLD_DEV" ]]; then
             echo "::error::SFTP_LIVE_PATH / SFTP_BETA_PATH / SFTP_DEV_PATH are retired and must be DELETED."
-            echo "::error::Replace them with the nine new secrets: SFTP_{ADMIN,PUBLIC,SHARED}_PATH_{LIVE,BETA,DEV}."
+            echo "::error::Replace them with SFTP_ROOT_DIR plus SFTP_{ADMIN,PUBLIC}_DIR_{LIVE,BETA,ALPHA}."
             exit 1
           fi
 
-          # ── Guard: this must be a tree that has had the rename. ──
+          # ── Guard 2: this must be a tree that has had the rename. ──
           # A branch cut from before the rename still has the whole management
-          # portal sitting at web/public_html/. Pointed at the public remote
-          # path by this workflow, that would publish every management page to
-          # the open internet. This is the single most dangerous mistake
-          # available, so it is checked structurally and not by a path string.
+          # portal sitting at web/public_html/. Pointed at the public folder by
+          # this workflow, that would publish every management page to the open
+          # internet. The single most dangerous mistake available here, so it is
+          # checked structurally rather than by reading a path string.
           if [[ ! -f web/admin_html/index.php ]]; then
             echo "::error::web/admin_html/index.php is missing — this branch predates the two-door rename."
             echo "::error::Refusing to deploy: web/public_html/ in this tree is the MANAGEMENT PORTAL, not the public site."
             exit 1
           fi
+
+          # ── Guard 3: the base folder. ──
+          if [[ -z "$ROOT_DIR" ]]; then
+            echo "::error::SFTP_ROOT_DIR is not set. It holds the folder everything else sits inside,"
+            echo "::error::for example /home/USER/portal.example.org/"
+            exit 1
+          fi
+          if [[ "$ROOT_DIR" != /* ]]; then
+            echo "::error::SFTP_ROOT_DIR must be a full path starting with / — got '$ROOT_DIR'"
+            exit 1
+          fi
+          ROOT_DIR="${ROOT_DIR%/}"
 
           MANUAL_TARGET="${{ github.event.inputs.target }}"
           if [[ -n "$MANUAL_TARGET" && "$MANUAL_TARGET" != "auto" ]]; then
@@ -1244,18 +1290,39 @@ Retire `SFTP_LIVE_PATH`, `SFTP_BETA_PATH` and `SFTP_DEV_PATH` completely — do 
           fi
 
           case "$CHANNEL" in
-            main)  REMOTE_ADMIN="$ADMIN_LIVE"; REMOTE_PUBLIC="$PUBLIC_LIVE"; REMOTE_SHARED="$SHARED_LIVE"; CHAN=live ;;
-            beta)  REMOTE_ADMIN="$ADMIN_BETA"; REMOTE_PUBLIC="$PUBLIC_BETA"; REMOTE_SHARED="$SHARED_BETA"; CHAN=beta ;;
-            alpha) REMOTE_ADMIN="$ADMIN_DEV";  REMOTE_PUBLIC="$PUBLIC_DEV";  REMOTE_SHARED="$SHARED_DEV";  CHAN=dev  ;;
+            main)  ADMIN_DIR="$ADMIN_LIVE";  PUBLIC_DIR="$PUBLIC_LIVE";  CHAN=live  ;;
+            beta)  ADMIN_DIR="$ADMIN_BETA";  PUBLIC_DIR="$PUBLIC_BETA";  CHAN=beta  ;;
+            alpha) ADMIN_DIR="$ADMIN_ALPHA"; PUBLIC_DIR="$PUBLIC_ALPHA"; CHAN=alpha ;;
             *) echo "::error::Unknown channel: $CHANNEL"; exit 1 ;;
           esac
 
-          for pair in "SFTP_ADMIN_PATH:$REMOTE_ADMIN" "SFTP_PUBLIC_PATH:$REMOTE_PUBLIC" "SFTP_SHARED_PATH:$REMOTE_SHARED"; do
-            if [[ -z "${pair#*:}" ]]; then
-              echo "::error::${pair%%:*}_$(echo "$CHAN" | tr a-z A-Z) is empty. All nine path secrets must be set."
+          # ── Guard 4: each folder setting is present, and is a FOLDER NAME. ──
+          # Refusing a full path here catches somebody pasting the old style
+          # into the new setting. Joined to the base that would build
+          # /home/u/d//home/u/d/admin_html and mirror into nowhere useful.
+          UPPER="$(echo "$CHAN" | tr a-z A-Z)"
+          for pair in "SFTP_ADMIN_DIR_${UPPER}:${ADMIN_DIR}" "SFTP_PUBLIC_DIR_${UPPER}:${PUBLIC_DIR}"; do
+            NAME="${pair%%:*}"; VALUE="${pair#*:}"
+            if [[ -z "$VALUE" ]]; then
+              echo "::error::${NAME} is empty. Set it to a folder name such as 'admin_html/'."
+              exit 1
+            fi
+            TRIMMED="${VALUE%/}"; TRIMMED="${TRIMMED#/}"
+            if [[ "$TRIMMED" == */* ]]; then
+              echo "::error::${NAME} should be a FOLDER NAME only, not a path — got '${VALUE}'."
+              echo "::error::The base folder lives in SFTP_ROOT_DIR. Set this to e.g. 'admin_html/'."
               exit 1
             fi
           done
+
+          ADMIN_DIR="${ADMIN_DIR%/}";  ADMIN_DIR="${ADMIN_DIR#/}"
+          PUBLIC_DIR="${PUBLIC_DIR%/}"; PUBLIC_DIR="${PUBLIC_DIR#/}"
+
+          # Both web roots are placed INSIDE the base folder by construction, so
+          # the rule that they share a parent cannot be broken and needs no check.
+          REMOTE_ADMIN="${ROOT_DIR}/${ADMIN_DIR}"
+          REMOTE_PUBLIC="${ROOT_DIR}/${PUBLIC_DIR}"
+          REMOTE_SHARED="${ROOT_DIR}"
 
           REMOTE_ADMIN="${REMOTE_ADMIN%/}"; REMOTE_PUBLIC="${REMOTE_PUBLIC%/}"; REMOTE_SHARED="${REMOTE_SHARED%/}"
 
@@ -1275,17 +1342,13 @@ Retire `SFTP_LIVE_PATH`, `SFTP_BETA_PATH` and `SFTP_DEV_PATH` completely — do 
             echo "::error::A web root cannot be the shared directory itself — that would publish the whole codebase."; exit 1
           fi
 
-          # ── Both web roots must sit directly inside the shared directory. ──
-          # See the header comment. The public front controller finds the shared
-          # code one level up from itself; if it is not there, nothing works.
-          if [[ "$(dirname "$REMOTE_ADMIN")" != "$REMOTE_SHARED" ]]; then
-            echo "::error::SFTP_ADMIN_PATH must sit directly inside SFTP_SHARED_PATH."
-            echo "::error::  admin : $REMOTE_ADMIN"; echo "::error::  shared: $REMOTE_SHARED"; exit 1
-          fi
-          if [[ "$(dirname "$REMOTE_PUBLIC")" != "$REMOTE_SHARED" ]]; then
-            echo "::error::SFTP_PUBLIC_PATH must sit directly inside SFTP_SHARED_PATH."
-            echo "::error::  public: $REMOTE_PUBLIC"; echo "::error::  shared: $REMOTE_SHARED"; exit 1
-          fi
+          # ── No "must sit inside the shared directory" check is needed. ──
+          # Both web roots are built as "$ROOT_DIR/$FOLDER", so they sit inside
+          # it by construction. This used to be three separate path settings that
+          # could disagree with each other, and the workflow had to check they
+          # did not. One base setting removes the possibility instead of
+          # policing it. The only thing still worth refusing is a folder name
+          # that resolves back to the base itself, which the check above does.
 
           { echo "channel=$CHAN"
             echo "remote_admin=$REMOTE_ADMIN"
@@ -1355,7 +1418,7 @@ Retire `SFTP_LIVE_PATH`, `SFTP_BETA_PATH` and `SFTP_DEV_PATH` completely — do 
         type: boolean
         default: false
       confirm_public_path:
-        description: "Required when first_run is ticked: type the SFTP_PUBLIC_PATH value again, exactly."
+        description: "Required when first_run is ticked: type the SFTP_PUBLIC_DIR_* value again, exactly."
         required: false
         type: string
 ```

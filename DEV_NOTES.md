@@ -428,30 +428,55 @@ A setting that still exists but now means something different fails silently, in
 the worst possible direction. So all three go, and six clearly-named ones replace
 them.
 
-**The settings, one per branch per front door.** The ending names the CHANNEL —
-`LIVE`, `BETA`, `ALPHA` — not the branch. That is deliberate: the deployment
-already thinks in channels internally (`deploy.yml` sets `channel=live` for the
+**One setting names the base folder. The rest name only their own folder.**
+
+`SFTP_ROOT_DIR` holds the shared base — the folder everything else sits inside.
+The six front-door settings hold **just a folder name**, not a full path. The
+deployment joins them.
+
+This is not only tidier. It makes the "both folders must share a parent" rule
+**impossible to break** rather than something the deployment has to check: every
+folder is placed inside `SFTP_ROOT_DIR` by construction. It also means moving the
+whole installation is a one-setting change.
+
+| Setting | Value (example) |
+| --- | --- |
+| `SFTP_ROOT_DIR` | `/home/dh_abcd1234/portal.millrdsdacambridge.uk/` |
+
+| Branch  | Front door        | Setting                 | Value              |
+| ------- | ----------------- | ----------------------- | ------------------ |
+| `main`  | Management portal | `SFTP_ADMIN_DIR_LIVE`   | `admin_html/`      |
+| `main`  | Public website    | `SFTP_PUBLIC_DIR_LIVE`  | `public_html/`     |
+| `beta`  | Management portal | `SFTP_ADMIN_DIR_BETA`   | `admin_html_beta/` |
+| `beta`  | Public website    | `SFTP_PUBLIC_DIR_BETA`  | `public_html_beta/`|
+| `alpha` | Management portal | `SFTP_ADMIN_DIR_ALPHA`  | `admin_html_dev/`  |
+| `alpha` | Public website    | `SFTP_PUBLIC_DIR_ALPHA` | `public_html_dev/` |
+
+**Why `DIR` and not `PATH`.** These used to be called `..._PATH_...` and held a
+full path. They now hold only a folder name. A setting that keeps its name while
+its meaning changes is the exact trap this whole piece of work exists to avoid —
+so the name changes with the meaning. If an old `SFTP_ADMIN_PATH_LIVE` is still
+set somewhere it is simply ignored, and the deployment stops because the setting
+it actually wants is missing.
+
+**The ending names the CHANNEL** — `LIVE`, `BETA`, `ALPHA` — not the branch. The
+deployment already thinks in channels (`deploy.yml` sets `channel=live` for the
 `main` branch, `channel=beta`, `channel=alpha`), so this uses the same word for
 the same thing rather than inventing a third one. `main` is the branch; `live` is
 what it deploys to.
 
-The old `SFTP_DEV_PATH` used `DEV` for the `alpha` channel, which was a second
-name for the same thing and is not carried forward.
+One deliberate mismatch, so it does not look like a mistake: the alpha settings
+end `_ALPHA`, but the folder is still named `..._dev`. The folder keeps its
+existing name so the server needs no renaming for a channel nobody outside the
+team visits. Rename it to `..._alpha` if you prefer — just change the value of the
+two `_ALPHA` settings to match.
 
-One deliberate mismatch, so it does not look like a mistake: the alpha channel's
-secret ends `_ALPHA`, but the folder it points at is still named `..._dev`. The
-folder keeps its existing name so the server does not need renaming for a channel
-nobody outside the team ever visits. Rename it to `..._alpha` if you prefer — just
-change the value of the two `_ALPHA` settings to match.
-
-| Branch  | Front door         | Secret name              | Value (example)                                                        |
-| ------- | ------------------ | ------------------------ | ---------------------------------------------------------------------- |
-| `main`  | Management portal  | `SFTP_ADMIN_PATH_LIVE`   | `/home/dh_abcd1234/portal.millrdsdacambridge.uk/admin_html`             |
-| `main`  | Public website     | `SFTP_PUBLIC_PATH_LIVE`  | `/home/dh_abcd1234/portal.millrdsdacambridge.uk/public_html`            |
-| `beta`  | Management portal  | `SFTP_ADMIN_PATH_BETA`   | `/home/dh_abcd1234/portal.millrdsdacambridge.uk/admin_html_beta`        |
-| `beta`  | Public website     | `SFTP_PUBLIC_PATH_BETA`  | `/home/dh_abcd1234/portal.millrdsdacambridge.uk/public_html_beta`       |
-| `alpha` | Management portal  | `SFTP_ADMIN_PATH_ALPHA`  | `/home/dh_abcd1234/portal.millrdsdacambridge.uk/admin_html_dev`         |
-| `alpha` | Public website     | `SFTP_PUBLIC_PATH_ALPHA` | `/home/dh_abcd1234/portal.millrdsdacambridge.uk/public_html_dev`        |
+**Trailing slashes do not matter.** The deployment trims them from both halves
+before joining, so `admin_html`, `admin_html/` and `/admin_html/` all work. What
+it will **refuse** is a value that looks like a full path — anything starting with
+`/home` or containing more than one folder level — because that is somebody
+pasting the old style into the new setting, and joining it to the base would
+produce nonsense like `/home/u/d//home/u/d/admin_html`.
 
 **Unchanged:** `SFTP_HOST`, `SFTP_USER`, `SFTP_PORT`, and `SFTP_KEY` or
 `SFTP_PASSWORD`.
@@ -459,14 +484,14 @@ change the value of the two `_ALPHA` settings to match.
 **Retired — delete these:** `SFTP_LIVE_PATH`, `SFTP_BETA_PATH`, `SFTP_DEV_PATH`.
 
 ```bash
-BASE='/home/dh_abcd1234/portal.millrdsdacambridge.uk'
+gh secret set SFTP_ROOT_DIR         --body '/home/dh_abcd1234/portal.millrdsdacambridge.uk/'
 
-gh secret set SFTP_ADMIN_PATH_LIVE   --body "$BASE/admin_html"
-gh secret set SFTP_PUBLIC_PATH_LIVE  --body "$BASE/public_html"
-gh secret set SFTP_ADMIN_PATH_BETA   --body "$BASE/admin_html_beta"
-gh secret set SFTP_PUBLIC_PATH_BETA  --body "$BASE/public_html_beta"
-gh secret set SFTP_ADMIN_PATH_ALPHA  --body "$BASE/admin_html_dev"
-gh secret set SFTP_PUBLIC_PATH_ALPHA --body "$BASE/public_html_dev"
+gh secret set SFTP_ADMIN_DIR_LIVE   --body 'admin_html/'
+gh secret set SFTP_PUBLIC_DIR_LIVE  --body 'public_html/'
+gh secret set SFTP_ADMIN_DIR_BETA   --body 'admin_html_beta/'
+gh secret set SFTP_PUBLIC_DIR_BETA  --body 'public_html_beta/'
+gh secret set SFTP_ADMIN_DIR_ALPHA  --body 'admin_html_dev/'
+gh secret set SFTP_PUBLIC_DIR_ALPHA --body 'public_html_dev/'
 
 # Retire the old three, so a missed step stops the deployment
 # rather than publishing the management portal.
@@ -475,15 +500,21 @@ gh secret delete SFTP_BETA_PATH
 gh secret delete SFTP_DEV_PATH
 ```
 
-#### Both folders must sit side by side
+**Where the shared code goes.** Straight into `SFTP_ROOT_DIR`. The deployment used
+to work this out by taking the folder above the web root, which meant a typo in a
+path quietly relocated the shared code somewhere plausible-looking. Now it is
+stated outright, and an empty setting fails loudly.
 
-This is a requirement, not a preference. The public front door finds the shared
-code by looking **one folder up** from itself. Put the public folder anywhere else
-and the shared code is not there, so every public page fails.
+#### Where everything ends up
+
+The public front door finds the shared code by looking **one folder up** from
+itself. Because every folder is placed inside `SFTP_ROOT_DIR`, that is always
+true — there is nothing to get wrong and nothing for the deployment to check.
 
 ```text
-/home/dh_abcd1234/portal.millrdsdacambridge.uk/      <- shared code lands here
-├── _core/  _apps/  _sql/  _lang/  _vendor/  _install/
+/home/dh_abcd1234/portal.millrdsdacambridge.uk/      <- SFTP_ROOT_DIR
+├── _core/  _apps/  _sql/  _lang/  _vendor/  _install/   <- shared code
+├── _auth_keys/  _uploads/  _backups/                     <- server-managed, never touched
 ├── admin_html/          <- main  : the management portal
 ├── admin_html_beta/     <- beta  : the management portal
 ├── admin_html_dev/      <- alpha : the management portal
@@ -492,9 +523,8 @@ and the shared code is not there, so every public page fails.
 └── public_html_dev/     <- alpha : the public website
 ```
 
-The deployment checks that the two folders for a branch really do share a parent,
-and refuses rather than uploading something that cannot work. This account already
-runs three web roots from one parent, so the arrangement is already proven here.
+This account already runs three web roots from one base folder, so the
+arrangement is already proven here.
 
 #### What to set in the DreamHost panel
 
