@@ -471,12 +471,53 @@ existing name so the server needs no renaming for a channel nobody outside the
 team visits. Rename it to `..._alpha` if you prefer — just change the value of the
 two `_ALPHA` settings to match.
 
-**Trailing slashes do not matter.** The deployment trims them from both halves
-before joining, so `admin_html`, `admin_html/` and `/admin_html/` all work. What
-it will **refuse** is a value that looks like a full path — anything starting with
-`/home` or containing more than one folder level — because that is somebody
-pasting the old style into the new setting, and joining it to the base would
-produce nonsense like `/home/u/d//home/u/d/admin_html`.
+#### Slashes: where they belong, and where they break things
+
+This is the easiest thing to get wrong, and getting it wrong sends a deployment
+somewhere plausible-looking rather than failing outright. The rules are short.
+
+| Setting | Must START with `/`? | May END with `/`? | May contain `/` in the middle? |
+| --- | --- | --- | --- |
+| `SFTP_ROOT_DIR` | **Yes — required** | Yes, optional (trimmed) | Yes, it is a full path |
+| `SFTP_ADMIN_DIR_*` | **No** | Yes, optional (trimmed) | **No — refused** |
+| `SFTP_PUBLIC_DIR_*` | **No** | Yes, optional (trimmed) | **No — refused** |
+| `SFTP_HOST` | **No** | **No** | **No** |
+| `SFTP_USER` | **No** | **No** | **No** |
+
+**In plain terms:**
+
+- **`SFTP_ROOT_DIR` is a full path and must start with `/`.** A trailing slash is
+  fine either way — the deployment trims it before joining.
+- **The six folder settings are a NAME, not a path.** Just `admin_html` or
+  `admin_html/`. No leading slash, and nothing with another folder inside it.
+- **`SFTP_HOST` is a bare machine name.** No `sftp://` in front, no slash after.
+
+**Right:**
+
+```text
+SFTP_ROOT_DIR         /home/dh_abcd1234/portal.millrdsdacambridge.uk/
+SFTP_ROOT_DIR         /home/dh_abcd1234/portal.millrdsdacambridge.uk      ← also fine
+SFTP_ADMIN_DIR_LIVE   admin_html/
+SFTP_ADMIN_DIR_LIVE   admin_html                                          ← also fine
+SFTP_HOST             iad1-shared-12-34.dreamhost.com
+```
+
+**Wrong, and what actually happens:**
+
+| What somebody types | What goes wrong |
+| --- | --- |
+| `SFTP_ROOT_DIR` = `home/dh_abcd1234/portal...` (no leading slash) | **Refused, with a message.** Without that check it would be treated as relative to wherever the SFTP session starts, and could create a whole `home/dh_abcd1234/...` tree *inside* your home folder — a second copy of everything, in the wrong place, that looks like it worked. |
+| `SFTP_ADMIN_DIR_LIVE` = `/home/dh_abcd1234/portal.../admin_html` (the old full-path style) | **Refused, with a message.** Joined to the base it would build `/home/dh_abcd1234/portal...//home/dh_abcd1234/portal.../admin_html`. |
+| `SFTP_ADMIN_DIR_LIVE` = `admin_html/public` | **Refused** — a folder name cannot contain another folder. |
+| `SFTP_ADMIN_DIR_LIVE` = `/admin_html/` | Accepted. Both slashes are trimmed, leaving `admin_html`. Untidy but unambiguous, so it is allowed rather than refused. |
+| `SFTP_HOST` = `sftp://iad1-shared-12-34.dreamhost.com/` | **Connection fails.** The host is put straight into `sftp://USER@HOST:PORT`, so this becomes `sftp://user@sftp://iad1-...com/:22`. |
+| `SFTP_ROOT_DIR` ends `//` | Harmless — trimmed to one. |
+
+**Why the deployment refuses rather than tidying up the first two.** Both are the
+signature of somebody pasting the old style into a new setting. Quietly correcting
+that would hide a half-finished changeover, which is the state in which the really
+expensive mistakes happen. A refusal costs a minute; a deployment into the wrong
+folder can publish the management portal.
 
 **Unchanged:** `SFTP_HOST`, `SFTP_USER`, `SFTP_PORT`, and `SFTP_KEY` or
 `SFTP_PASSWORD`.
