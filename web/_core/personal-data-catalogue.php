@@ -219,7 +219,7 @@ return [
     'tblEventRegistrations' => [
         'decision' => 'erase',
         'reason'   => 'Holds information about the person themselves',
-        'columns'  => ['fullName', 'dateOfBirth', 'gender', 'allergies', 'medicalNotes', 'parentName', 'parentPhone', 'parentEmail', 'emergencyContactName', 'emergencyContactPhone'], /* and 2 more */
+        'columns'  => ['fullName', 'dateOfBirth', 'gender', 'allergies', 'medicalNotes', 'parentName', 'parentPhone', 'parentEmail', 'emergencyContactName', 'emergencyContactPhone', 'submittedByUserID'],
     ],
     'tblExpenseClaimApprovals' => [
         'decision' => 'erase',

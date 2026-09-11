@@ -329,7 +329,7 @@ class GdprEraser
             'userID', 'memberID', 'donorID', 'submitterID', 'recipientUserID',
             'assignedToID', 'targetUserID', 'convertedUserID', 'uploadedByUserID',
             'leaderID', 'approverID', 'reviewedByID', 'startedByID',
-            'createdByID', 'updatedByID',
+            'submittedByUserID', 'createdByID', 'updatedByID',
         ];
 
         $entries = [];
@@ -373,11 +373,21 @@ class GdprEraser
             }
 
             if ($link === '') {
-                // No link to an account at all. Event registrations are the
-                // important example: a child's name, date of birth, allergies
-                // and medical notes, with nothing tying them to anybody's
-                // account. Those cannot be found by this route and are handled
-                // separately - see the erasure page and issue #479.
+                // No link to an account at all, so there is nothing to match a
+                // person against and this route cannot reach the table.
+                //
+                // Event registrations used to be the worst example - a child's
+                // name, date of birth, allergies and medical notes, with
+                // nothing tying them to anybody. They now record the account of
+                // whoever submitted them when that person was signed in, so
+                // they ARE reachable here (see migration 191).
+                //
+                // That only covers registrations made by somebody with an
+                // account, which is the minority. The rest are covered by a
+                // time limit instead: they are deleted a set number of days
+                // after the event whether anybody asks or not. The same
+                // thinking applies to every table still listed here - each
+                // needs either a link adding or a time limit. See issue #479.
                 continue;
             }
 

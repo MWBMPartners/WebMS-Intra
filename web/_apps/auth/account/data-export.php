@@ -29,6 +29,11 @@
  *   tblFormResponses      (your Forms Builder responses — internal channel
  *                          only, public/anonymous responses have no
  *                          submitterID to match — #153)
+ *   tblEventRegistrations (children you registered for an event while signed
+ *                          in — name, date of birth, allergies, medical
+ *                          notes, parent contact details. Registrations made
+ *                          without an account record nobody to match against,
+ *                          and are removed on a time limit instead — #479)
  *
  * Sensitive fields (password hashes, TOTP secret, tokenHash etc.) are
  * EXCLUDED — exporting them would be a security regression, not a feature.
@@ -171,6 +176,32 @@ $payload = [
         'formResponses' => $fetchUserRows(
             'SELECT responseID, formID, siteID, channel, answersJson, status, createdAt '
             . 'FROM tblFormResponses WHERE submitterID = ?'
+        ),
+        // 🧒 Event registrations (#479) — somebody signing a child up for
+        // an event. The most sensitive information the portal holds: a
+        // child's name, date of birth, allergies and medical notes, beside a
+        // parent's telephone number and email address.
+        //
+        // Only registrations submitted while signed in appear here, because
+        // only those record whose account made them. Anybody may register a
+        // child WITHOUT an account, and those carry nothing to match a person
+        // against - the same reasoning as the public form responses above.
+        // Those are covered by a time limit instead: they are deleted a set
+        // number of days after the event, whether anybody asks or not. See
+        // migration 191 and the clear-out on the Retention page.
+        //
+        // This is the matching half of the erasure entry: the portal must be
+        // able to both HAND OVER and REMOVE the same information, and until
+        // now it could do neither for this table.
+        'eventRegistrations' => $fetchUserRows(
+            'SELECT r.registrationID, r.eventID, e.eventName, e.startDateTime, '
+            . 'r.fullName, r.dateOfBirth, r.grade, r.gender, r.shirtSize, '
+            . 'r.allergies, r.medicalNotes, r.parentName, r.parentPhone, '
+            . 'r.parentEmail, r.photoConsent, r.emergencyContactName, '
+            . 'r.emergencyContactPhone, r.status, r.source, r.createdAt '
+            . 'FROM tblEventRegistrations AS r '
+            . 'INNER JOIN tblEvents AS e ON e.eventID = r.eventID '
+            . 'WHERE r.submittedByUserID = ?'
         ),
         // 👥 Small Groups (#150) — export↔erasure parity with the six
         // GdprEraser::catalogue() entries added alongside this block.

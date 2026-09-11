@@ -192,7 +192,7 @@ $linkColumns = [
     'userID', 'memberID', 'donorID', 'submitterID', 'recipientUserID',
     'assignedToID', 'targetUserID', 'convertedUserID', 'uploadedByUserID',
     'leaderID', 'approverID', 'reviewedByID', 'startedByID',
-    'createdByID', 'updatedByID',
+    'submittedByUserID', 'createdByID', 'updatedByID',
 ];
 $unreachable = [];
 foreach ($catalogue as $table => $meta) {

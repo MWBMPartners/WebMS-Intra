@@ -89,18 +89,45 @@ $dobArg       = (preg_match('/^\d{4}-\d{2}-\d{2}$/', $dob) === 1) ? $dob : null;
 $parentEmailArg = ($parentEmail !== '' && filter_var($parentEmail, FILTER_VALIDATE_EMAIL) !== false) ? $parentEmail : null;
 $eventIdInt   = (int) $event['eventID'];
 
+// 🔗 Who filled this in, IF the portal knows them.
+//
+//    This form is public and must stay public - a parent should not have to
+//    create an account to bring their child to a holiday club. But when the
+//    person IS signed in, recording their account matters a great deal.
+//
+//    Without it, this table could not be reached by a "delete everything you
+//    hold about me" request at all. Such a request works by looking for rows
+//    belonging to a person's account, and there was nothing here to match on.
+//    So the single most sensitive table in the portal - a child's name, date of
+//    birth, allergies and medical notes, with a parent's telephone number and
+//    email beside them - was the one table an erasure could never find.
+//
+//    Left empty for anybody not signed in, which is normal and expected. Those
+//    registrations are covered by the time limit instead: they are deleted a
+//    set number of days after the event, whether anybody asks or not. See
+//    migration 191 and the clear-out on the Retention page.
+$submittedByArg = null;
+if (isset($_SESSION['user_id']) === true && (int) $_SESSION['user_id'] > 0) {
+    $submittedByArg = (int) $_SESSION['user_id'];
+}
+
 $stmt = $mysqli->prepare(
     'INSERT INTO tblEventRegistrations '
     . '(eventID, fullName, dateOfBirth, grade, gender, shirtSize, allergies, medicalNotes, '
     . ' parentName, parentPhone, parentEmail, photoConsent, emergencyContactName, '
-    . ' emergencyContactPhone, status, source) '
-    . 'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "pending", "public-form")'
+    . ' emergencyContactPhone, submittedByUserID, status, source) '
+    . 'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "pending", "public-form")'
 );
+// ⚠️ The letters below must match the values after them, one for one and in
+//    order: i = a whole number, s = text. Adding a value without adding its
+//    letter is a fault this project has an automatic check for
+//    (check_bind_param_arity.py), because it fails at the moment somebody uses
+//    the form rather than when the code is written.
 $stmt->bind_param(
-    'issssssssssiss',
+    'issssssssssissi',
     $eventIdInt, $fullName, $dobArg, $grade, $genderArg, $shirtArg,
     $allergies, $medical, $parentName, $parentPhone, $parentEmailArg,
-    $photoConsent, $emergName, $emergPhone
+    $photoConsent, $emergName, $emergPhone, $submittedByArg
 );
 $stmt->execute();
 $newId = (int) $stmt->insert_id;

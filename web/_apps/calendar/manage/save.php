@@ -133,6 +133,69 @@ if ($eventName === '' || $startDateTime === '') {
     exit();
 }
 
+// 📆 The end cannot come before the start.
+//
+//    This was accepted until now, and it caused real harm rather than merely
+//    looking untidy. Several things work out how long ago an event finished by
+//    reading its end time - including the clear-out that deletes children's
+//    registration details a set number of days afterwards. An event moved into
+//    the future while its old end date was left behind therefore looked, to
+//    that clear-out, like an event that finished long ago, and its
+//    registrations were eligible for deletion before it had even happened.
+//
+//    The clear-out now also protects itself by taking whichever of the two
+//    times is later, so it is safe either way. This stops the bad data being
+//    created in the first place, which is the better place to stop it.
+//
+//    An equal end and start is allowed: a moment in a diary is a reasonable
+//    thing to record, and the comparison below is deliberately "before", not
+//    "before or equal".
+//    Compared as plain text, on purpose, and NOT by turning them into moments
+//    in time. That looks like the lazy way round and is in fact the correct
+//    one, for two separate reasons.
+//
+//    First, these are wall-clock times. The database column says so in as many
+//    words: the time written on the poster on the wall, not a point on a
+//    worldwide timeline. Comparing two wall-clock times needs no timezone, and
+//    bringing one in can only introduce error.
+//
+//    Second, converting them actively breaks this check once a year. On the
+//    morning the clocks go forward, one hour does not exist. Asked to read
+//    01:45 on that date, PHP helpfully shifts it to 02:45 - so an event
+//    starting 02:30 and "ending" 01:45 came out as ending LATER than it
+//    started, and sailed through. Verified on this machine: 2026-03-29 01:45 in
+//    Europe/London becomes 02:45.
+//
+//    Both values come from the same form, from date-and-time fields that always
+//    produce the same fixed layout - year, month, day, hour, minute, in that
+//    order, largest unit first. Text sorted that way sorts in time order too,
+//    which is the whole reason dates are written that way round.
+$normaliseWhen = static function (string $when): string {
+    // The browser sends the date and time joined by a "T". The database uses a
+    // space. Same value, so make them look the same before comparing.
+    return trim(str_replace('T', ' ', $when));
+};
+
+$startWhen = $normaliseWhen($startDateTime);
+$endWhen   = $normaliseWhen($endDateTime);
+
+// Anything not in that layout is left to the existing handling rather than
+// rejected here with a message about the wrong problem.
+$looksLikeDateTime = static function (string $when): bool {
+    return preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}(:\d{2})?$/', $when) === 1;
+};
+
+if (
+    $looksLikeDateTime($startWhen) === true
+    && $looksLikeDateTime($endWhen) === true
+    && $endWhen < $startWhen
+) {
+    $_SESSION['flash_msg']  = 'The event cannot end before it starts. Please check the dates.';
+    $_SESSION['flash_type'] = 'danger';
+    header('Location: /calendar/manage');
+    exit();
+}
+
 // 🔤 Generate slug
 $slug = strtolower(trim(preg_replace('/[^a-zA-Z0-9]+/', '-', $eventName), '-'));
 // 📅 Append date for uniqueness

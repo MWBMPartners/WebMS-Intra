@@ -824,6 +824,16 @@ CREATE TABLE IF NOT EXISTS `tblEvents` (
     `registrationOpensAt`   DATETIME     DEFAULT NULL,
     `registrationClosesAt`  DATETIME     DEFAULT NULL,
 
+    -- 🗓️ How long this event keeps its registrations (#479 — added by
+    -- migration 191). Empty means "use the portal-wide setting"
+    -- (events.registrationRetentionDays, 90 days). A number here wins over it,
+    -- because events genuinely differ: a residential trip may need longer for
+    -- insurance, a single afternoon far less. 0 means keep indefinitely, and
+    -- has to be set deliberately on the event — it is never the default,
+    -- because "we kept a child's medical notes for ever" should never be
+    -- something that happens by accident.
+    `registrationRetentionDays` INT DEFAULT NULL COMMENT 'Days after this event ends before its registrations are deleted. Empty uses the portal-wide setting. 0 means keep indefinitely and must be set deliberately.',
+
     -- 🔄 External calendar feed import (#327 — added by migration 129)
     `externalFeedID`     INT           DEFAULT NULL,
     `externalUid`        VARCHAR(255)  DEFAULT NULL,
@@ -5649,12 +5659,34 @@ CREATE TABLE IF NOT EXISTS `tblEventRegistrations` (
     `status`                 ENUM('pending','approved','rejected','waitlisted') NOT NULL DEFAULT 'pending',
     `notes`                  VARCHAR(500) DEFAULT NULL COMMENT 'Internal moderation notes',
     `source`                 VARCHAR(40)  NOT NULL DEFAULT 'public-form',
+
+    -- 🔗 The account of whoever submitted this, when they were signed in
+    -- (#479 — added by migration 191).
+    --
+    -- Before this existed, the table held no link to anybody's account at all.
+    -- That mattered because of how a "delete everything you hold about me"
+    -- request works: the portal looks for rows belonging to that person's
+    -- account. A table with no such link cannot be searched that way. So this —
+    -- by some distance the most sensitive table in the portal, holding a
+    -- child's name, date of birth, allergies and medical notes beside a
+    -- parent's telephone number and email — was the one table an erasure
+    -- request could never reach.
+    --
+    -- Deliberately allowed to be empty, and that is not an oversight. Anybody
+    -- may register a child without an account; a parent must not have to create
+    -- one to bring their child to a holiday club. Those registrations are
+    -- covered by the time limit instead — see registrationRetentionDays on
+    -- tblEvents, and the clear-out on the Retention page.
+    `submittedByUserID`      INT          DEFAULT NULL COMMENT 'The account of whoever submitted this, when they were signed in. Empty is normal and allowed: anybody may register a child without an account.',
     `createdAt`              DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     `reviewedByID`           INT          DEFAULT NULL,
     `reviewedAt`             DATETIME     DEFAULT NULL,
     PRIMARY KEY (`registrationID`),
     KEY `idx_reg_event_status` (`eventID`, `status`, `createdAt`),
     KEY `idx_reg_parent_email` (`parentEmail`),
+  -- So an erasure request can find one person's registrations quickly rather
+  -- than reading every row in the table (#479 — added by migration 191).
+  KEY `idx_registration_submitted_by` (`submittedByUserID`),
     CONSTRAINT `fk_reg_event`    FOREIGN KEY (`eventID`)     REFERENCES `tblEvents`(`eventID`) ON DELETE CASCADE,
     CONSTRAINT `fk_reg_reviewer` FOREIGN KEY (`reviewedByID`) REFERENCES `tblUsers`(`userID`)  ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
@@ -8583,4 +8615,28 @@ INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
 ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 
 INSERT INTO `tblMigrations` (`filename`) VALUES ('190_sitemap_and_dynamic_robots.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- ── from 191_event_registration_privacy.sql (#479) ───────────────────────────
+-- How long a child's registration details are kept after the event.
+--
+-- 90 days: long enough for a late question, an insurance query or a follow-up,
+-- short enough that a child's medical details are not sitting around for years.
+-- One event can override it (tblEvents.registrationRetentionDays above).
+--
+-- The clear-out is seeded ON. A time limit nobody runs is a document, not a
+-- protection — and this is the change that covers registrations made by people
+-- with no account, which is most of them. Those cannot be reached by a "delete
+-- everything you hold about me" request at all, because there is nothing to
+-- match a person against, so nobody should have to ask.
+--
+-- The two columns this works with are folded inline into tblEvents and
+-- tblEventRegistrations above, rather than being repeated here.
+
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'events.registrationRetentionDays', '90',   '90',   0),
+    (NULL, 'events.registrationRetentionRun',  'true', 'true', 0)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('191_event_registration_privacy.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;

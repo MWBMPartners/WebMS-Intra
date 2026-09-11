@@ -97,7 +97,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $result = run_retention_sweep();
         Logger::activity('AuditRetentionSweep', 'Admin sweep deleted ' . $result['totalDeleted'] . ' rows');
         $flashMsg  = 'Sweep complete. Deleted ' . $result['activityDeleted']
-                   . ' activity log row(s) and ' . $result['errorsDeleted'] . ' error row(s).';
+                   . ' activity log row(s), ' . $result['errorsDeleted'] . ' error row(s) and '
+                   . $result['registrationsDeleted'] . ' event registration(s).';
         $flashType = 'success';
     }
 }
@@ -146,13 +147,39 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             </div>
         </div>
     </div>
+    <!-- 🧒 Event registrations. Given the full width and a warning colour
+         deliberately: this is the only one of the three that holds information
+         about a named child - their date of birth, allergies and medical notes,
+         beside a parent's telephone number and email address. An administrator
+         should not be able to run this sweep without having seen it. -->
+    <div class="col-12">
+        <div class="card shadow-sm border-warning">
+            <div class="card-body">
+                <h2 class="h6"><i class="fa-solid fa-child-reaching me-1"></i>Event Registrations (<code>tblEventRegistrations</code>)</h2>
+                <p class="text-muted small mb-2">
+                    Kept for <strong><?php echo (int) (App::settings('events.registrationRetentionDays') ?? 90); ?> days</strong>
+                    after the event by default (setting: <code>events.registrationRetentionDays</code>).
+                    A single event can set its own number of days, which wins over this one.
+                    Each site uses its own setting.
+                </p>
+                <p class="mb-2">Registrations currently eligible for deletion: <strong><?php echo number_format($preview['registrations']); ?></strong></p>
+                <p class="small text-muted mb-0">
+                    These hold a child's name, date of birth, allergies and medical notes, with a
+                    parent's telephone number and email address. Most are submitted by people with no
+                    account, so they cannot be found by a &ldquo;delete everything you hold about
+                    me&rdquo; request &mdash; nobody should have to ask, which is why they are removed
+                    on a time limit instead.
+                </p>
+            </div>
+        </div>
+    </div>
 </div>
 
 <form method="post" action="/admin/maintenance/retention"
-      data-confirm="This will hard-delete <?php echo number_format($preview['activity'] + $preview['errors']); ?> rows. Continue?"
+      data-confirm="About <?php echo number_format($preview['activity'] + $preview['errors']); ?> log row(s) and <?php echo number_format($preview['registrations']); ?> event registration(s) are currently eligible, including any children's details they hold. The exact number may differ slightly, because more records become eligible as time passes. This cannot be undone. Continue?"
       data-confirm-destructive="true">
     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
-    <button type="submit" class="btn btn-warning" <?php echo ($preview['activity'] + $preview['errors']) === 0 ? 'disabled' : ''; ?>>
+    <button type="submit" class="btn btn-warning" <?php echo ($preview['activity'] + $preview['errors'] + $preview['registrations']) === 0 ? 'disabled' : ''; ?>>
         <i class="fa-solid fa-broom me-1"></i> Run Sweep Now
     </button>
     <a href="/settings" class="btn btn-outline-secondary">Adjust retention settings</a>
@@ -182,14 +209,111 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 // -----------------------------------------------------------------------------
 
 /**
+ * 📏 The rule that decides whether one registration is past its keep-by date.
+ *
+ * Two limits worth stating plainly rather than leaving to be discovered.
+ *
+ * The number shown on the page is a snapshot, not a promise. More records
+ * become eligible as time passes, and a setting can be changed in between, so
+ * the count an administrator sees and the number actually removed a moment
+ * later can differ slightly. The page says "currently eligible" for that
+ * reason. Guaranteeing an exact figure would mean fixing the list of candidates
+ * and checking each one again before deleting, which is not worth the
+ * complication for a clear-out that runs on a timescale of months.
+ *
+ * NOW() is the database server's idea of the time, while these event columns
+ * hold local wall-clock times. If the two disagree, the deadline moves by that
+ * difference - later if the database is behind, earlier if it is ahead. At 90
+ * days a few hours either way does not matter, but it is a real difference and
+ * not a guaranteed-safe one, so it is written down here rather than assumed.
+ *
+ * Written out once, on purpose, and used by BOTH the count shown to an
+ * administrator and the delete that actually runs. If the two were written
+ * separately they would eventually drift apart, and then the page would promise
+ * to remove one number of records and remove a different one. For a table
+ * holding children's medical notes that is not an acceptable risk.
+ *
+ * Three values are bound, in this order: the site, then the fallback number of
+ * days twice (once to test it is above zero, once to do the date arithmetic).
+ *
+ * Two details worth explaining, because both look redundant and neither is:
+ *
+ *   COALESCE(e.registrationRetentionDays, ?) - the event's own number of days
+ *   when it has one, the site's setting otherwise. That is exactly the rule
+ *   "the event's own setting wins". Testing it is above zero first is what
+ *   makes zero mean "keep indefinitely".
+ *
+ *   GREATEST(COALESCE(end, start), start) - the later of the event's end and
+ *   its start. An end time is optional, so it may be missing; but it can also
+ *   be WRONG. Nothing stops somebody saving an event whose end is before its
+ *   start, and nothing stops an event being moved into the future while its old
+ *   end date is left behind. Taking whichever is later means a stale end date
+ *   can never drag the deadline earlier than the event itself. Without it, an
+ *   event starting in December with a leftover end date in January of the year
+ *   just gone would have its registrations deleted today.
+ *
+ * @return string The WHERE clause, including the word WHERE.
+ */
+function registration_sweep_where(): string
+{
+    return 'WHERE e.siteID = ? '
+        . '  AND COALESCE(e.registrationRetentionDays, ?) > 0 '
+        . '  AND GREATEST(COALESCE(e.endDateTime, e.startDateTime), e.startDateTime) '
+        . '      < DATE_SUB(NOW(), INTERVAL COALESCE(e.registrationRetentionDays, ?) DAY)';
+}
+
+/**
+ * 🏢 Every site, with the number of days that site keeps registrations for.
+ *
+ * A site that has switched the clear-out off is left out of the list entirely,
+ * so nothing of its is touched. Sites that are no longer in use are still
+ * included: a site being closed down is not a reason to keep a child's medical
+ * notes for ever - if anything it is a reason not to.
+ *
+ * @return array<int, int> The site's identity number, mapped to its number of days.
+ */
+function registration_sweep_sites(): array
+{
+    $db  = App::db();
+    $out = [];
+
+    $result = $db->query('SELECT siteID FROM tblSites');
+    if ($result === false) {
+        return $out;
+    }
+
+    while ($row = $result->fetch_assoc()) {
+        $siteId = (int) $row['siteID'];
+
+        $run = (string) (App::settingForSite('events.registrationRetentionRun', $siteId) ?? 'true');
+        if ($run !== 'true') {
+            continue;
+        }
+
+        $days = (int) (App::settingForSite('events.registrationRetentionDays', $siteId) ?? '90');
+        if ($days < 0) {
+            // A negative number is meaningless here. Treated as the ordinary
+            // default rather than as "keep indefinitely", because somebody
+            // typing "-1" has made a mistake, not expressed an intention.
+            $days = 90;
+        }
+
+        $out[$siteId] = $days;
+    }
+    $result->free();
+
+    return $out;
+}
+
+/**
  * Count rows that WOULD be deleted at the current window.
  *
- * @return array{activity:int,errors:int}
+ * @return array{activity:int,errors:int,registrations:int}
  */
 function preview_retention_counts(int $activityDays, int $errorDays): array
 {
     $db = App::db();
-    $out = ['activity' => 0, 'errors' => 0];
+    $out = ['activity' => 0, 'errors' => 0, 'registrations' => 0];
 
     $stmt = $db->prepare(
         'SELECT COUNT(*) AS cnt FROM tblActivityLogs '
@@ -215,13 +339,33 @@ function preview_retention_counts(int $activityDays, int $errorDays): array
         $stmt->close();
     }
 
+    // 🧒 Registrations, counted site by site with each site's own setting -
+    //    the same rule, and the same WHERE clause, as the delete itself. An
+    //    administrator has to be shown the real number BEFORE confirming.
+    //    Being told "12 log rows" and then silently losing several thousand
+    //    children's registration records would be indefensible.
+    $stmt = $db->prepare(
+        'SELECT COUNT(*) AS cnt FROM tblEventRegistrations AS r '
+        . 'INNER JOIN tblEvents AS e ON e.eventID = r.eventID '
+        . registration_sweep_where()
+    );
+    if ($stmt !== false) {
+        foreach (registration_sweep_sites() as $siteId => $days) {
+            $stmt->bind_param('iii', $siteId, $days, $days);
+            $stmt->execute();
+            $row = $stmt->get_result()->fetch_assoc();
+            $out['registrations'] += (int) ($row['cnt'] ?? 0);
+        }
+        $stmt->close();
+    }
+
     return $out;
 }
 
 /**
  * Perform the actual delete. Returns counts per table.
  *
- * @return array{activityDeleted:int,errorsDeleted:int,totalDeleted:int}
+ * @return array{activityDeleted:int,errorsDeleted:int,registrationsDeleted:int,totalDeleted:int}
  */
 function run_retention_sweep(): array
 {
@@ -254,9 +398,72 @@ function run_retention_sweep(): array
         $stmt->close();
     }
 
+    // 🧹 Children's event registrations.
+    //
+    //    This is the most sensitive clear-out here, and the one that matters
+    //    most. Event registrations hold a child's name, date of birth,
+    //    allergies and medical notes, together with a parent's telephone number
+    //    and email address.
+    //
+    //    Most are submitted by people with no account - a parent should not
+    //    have to create one to bring their child to a holiday club - which
+    //    means a "delete everything you hold about me" request cannot reach
+    //    them: there is nothing to match a person against. So nobody should
+    //    have to ASK. After the event, and a reasonable gap, they simply go.
+    //
+    //    Two levels, because events genuinely differ. An event may set its own
+    //    number of days; otherwise the site's setting applies. A residential
+    //    trip may need longer for insurance; a single afternoon may want less.
+    //
+    //    Zero means keep indefinitely. It has to be set deliberately on an
+    //    event, and is never the default - "we kept a child's medical notes for
+    //    ever" should not be something that happens by accident.
+    //
+    //    Repeating events need no special handling, which is worth saying
+    //    because it looks as though they should. A registration always points
+    //    at one specific event record, and that record carries its own start
+    //    and end times. Repetition is described separately, against the SERIES,
+    //    and the only thing that reads it is the calendar feed export - which
+    //    gathers matching event records up into a single repeating entry purely
+    //    for the benefit of somebody's calendar application. Nothing generates
+    //    event records from it. So the dates used below always belong to the
+    //    very event the registration was made for.
+    $registrationsDeleted = 0;
+
+    // One site at a time, deliberately.
+    //
+    //    The two clear-outs above read one set of settings and then delete
+    //    across the whole portal. That is wrong here, and dangerously so. This
+    //    page is open to ANY administrator, not only a portal-wide one, and it
+    //    can also be run from a scheduled job that has no current site at all.
+    //
+    //    Read one site's settings and apply them everywhere, and an
+    //    administrator of site B who sets "keep for 1 day" would silently
+    //    destroy site A's registrations too - records site A believed it was
+    //    keeping for 90 days. The reverse is just as bad: site B switching the
+    //    clear-out off would leave every other site's children's medical notes
+    //    sitting there indefinitely.
+    //
+    //    So each site's own setting decides, and the delete below is limited to
+    //    that same site. A site is never able to reach another site's records.
+    $stmt = $db->prepare(
+        'DELETE r FROM tblEventRegistrations AS r '
+        . 'INNER JOIN tblEvents AS e ON e.eventID = r.eventID '
+        . registration_sweep_where()
+    );
+    if ($stmt !== false) {
+        foreach (registration_sweep_sites() as $siteId => $days) {
+            $stmt->bind_param('iii', $siteId, $days, $days);
+            $stmt->execute();
+            $registrationsDeleted += (int) $stmt->affected_rows;
+        }
+        $stmt->close();
+    }
+
     return [
-        'activityDeleted' => $activityDeleted,
-        'errorsDeleted'   => $errorsDeleted,
-        'totalDeleted'    => $activityDeleted + $errorsDeleted,
+        'activityDeleted'      => $activityDeleted,
+        'errorsDeleted'        => $errorsDeleted,
+        'registrationsDeleted' => $registrationsDeleted,
+        'totalDeleted'         => $activityDeleted + $errorsDeleted + $registrationsDeleted,
     ];
 }
