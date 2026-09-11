@@ -296,6 +296,19 @@ jobs:
             add_section "Web addresses ending in .php (broken, and they reveal what the site is built with)" "$PHPURL"
           fi
 
+          # 10d) Personal data with no decision recorded. Somebody has two
+          #      rights over their own information: a copy of it, and its
+          #      deletion. Both need an accurate list of where it lives. That
+          #      list used to be remembered rather than written down, and when
+          #      it was finally measured, 77 of the 126 tables holding personal
+          #      data were in neither the deletion list nor the download -
+          #      including a child's medical notes. This fails when a new table
+          #      appears that nobody has sorted.
+          PDATA=$(python3 tools/audit-checks/check_personal_data_coverage.py 2>&1 || true)
+          if echo "$PDATA" | grep -q '•'; then
+            add_section "Personal data with no decision recorded (erasure and download would both miss it)" "$PDATA"
+          fi
+
           # 11) Settings key consistency (catches the class #203/#208 were
           #     filed under; both turned out to be FP but this script
           #     walks the entire schema so it won't repeat the agent's miss)
