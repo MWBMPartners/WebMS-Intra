@@ -271,21 +271,36 @@ when the work is genuinely complex.
 
 ## When one system runs out: handing over, and handing back (STANDING RULE, all projects)
 
-**If the system doing a piece of work becomes unavailable — out of credit, rate
-limited, or simply down — hand the work to another one rather than stopping.**
-Then go back to the usual one as soon as it will take work again.
+**If whatever is doing a piece of work becomes unavailable — out of credit, rate
+limited, or simply down — hand the work to another suitable one rather than
+stopping.** Then go back to the usual one as soon as it will take work again.
+
+This covers **services and the agents inside them**. A particular model refusing,
+a sub-agent failing, or a whole tool being down are the same situation and get the
+same response.
 
 Deliberately written without naming particular tools. Today that means Claude Code
-and Codex, and within Claude Code it means falling back from one model to another.
-Tomorrow it may mean something else. The rule is about the situation, not the
-brand.
+and Codex, and within one tool it means falling back from one model or agent to
+another. Tomorrow it may mean something else. The rule is about the situation, not
+the brand.
+
+### Why this is reasonably safe — and what that safety depends on
+
+Every change here is already checked by a **different** system from the one that
+made it. That cross-checking is what catches the differences in habit and approach
+between one service or agent and another — which is exactly the risk a hand-over
+introduces.
+
+**So the safety argument depends entirely on that review actually happening.** If
+the review is skipped, or quietly done by the same system that did the building,
+the justification for handing over disappears with it. The two rules hold each
+other up.
 
 ### When to hand over
 
-- The service refuses the work: out of credit, a spend cap reached, rate limited,
-  a quota exhausted, or an outage.
-- Retrying has already failed once and the reason is not going to change by
-  itself.
+- The service or agent refuses the work: out of credit, a spend cap reached, rate
+  limited, a quota exhausted, or an outage.
+- Retrying has already failed once and the reason will not change by itself.
 
 Do **not** hand over merely because something is slow, or because another system
 might do it better. That is a different decision.
@@ -293,9 +308,9 @@ might do it better. That is a different decision.
 ### The one condition that has to be met first
 
 **The work must survive the move.** Hand over only when enough of the situation
-can go with it that the result will be as good. In practice that means the other
-system is given: what is being attempted, what has been established so far, which
-files matter, what has already been tried and rejected, and how the result will be
+can go with it that the result will be as good. In practice the replacement is
+given: what is being attempted, what has been established so far, which files
+matter, what has already been tried and rejected, and how the result will be
 checked.
 
 If that cannot be carried across, do not hand over. Say plainly that the work is
@@ -303,15 +318,29 @@ blocked and why. A confident answer produced without the context that made the
 question answerable is worse than no answer, because nobody can tell the
 difference by looking at it.
 
-### Go back to the usual system promptly
+### Go back to the usual one promptly
 
-A fallback is a detour, not a new route. Try the usual system again at the next
-natural break — the next task, the next planning run, the next review. Do not
-settle onto the fallback because it happens to be working.
+A fallback is a detour, not a new route. Return at the next natural break — the
+next task, the next planning run, the next review. Do not settle onto the fallback
+because it happens to be working.
 
-**Always retry the preferred system first on each new run, even if it failed the
-last time.** Limits reset, outages end, and credit gets topped up. Trying costs
-one failed call; assuming costs the whole benefit of the preferred system.
+**Always try the preferred system first on each new run, even if it failed the
+last time.** Limits reset, outages end, credit gets topped up. Trying costs one
+failed call; assuming costs the whole benefit of the preferred one.
+
+### When the usual one comes back: a FULL review of what it missed
+
+Picking the work back up is not enough. **Once the preferred system for a project
+is available again, run a full review of everything done while it was away** — not
+just the most recent change.
+
+- Review the accumulated work as one body, not change by change. Differences in
+  approach show up across a run of work far more clearly than inside any single
+  commit.
+- Do this **frequently**, not once at the end. The longer the stretch of
+  unreviewed work, the harder it is to unpick anything that turns out to be wrong.
+- This is a real review, not a glance: the same standard as any other, including
+  checking each point against the code rather than taking the reviewer's word.
 
 ### The one place a hand-over must NOT happen silently
 
@@ -326,16 +355,17 @@ So when the usual reviewer cannot run:
    imply an independent review happened.
 2. Get what independence is available — a different model, or a fresh agent with
    no memory of building the thing — and say which was used.
-3. Treat the change as **not yet fully reviewed**, and run the proper review when
-   the usual reviewer is available again.
+3. Treat the change as **not yet fully reviewed**, and include it in the catch-up
+   review above.
 
 ### Write down what happened
 
 Whenever a fallback is used, record it where the work is recorded — the commit
-message, the handoff note, the progress report. Two reasons. Somebody reading it
-later needs to know which parts had the usual level of checking. And a pattern of
-repeated fallbacks is worth noticing: it usually means a limit needs raising, not
-that the work needs re-planning.
+message, the handoff note, the progress report. Three reasons. Somebody reading it
+later needs to know which parts had the usual level of checking. The catch-up
+review needs to know what to look at. And a pattern of repeated fallbacks is worth
+noticing: it usually means a limit needs raising, not that the work needs
+re-planning.
 
 ## Never put ".php" in a web address (STANDING RULE, all projects)
 
