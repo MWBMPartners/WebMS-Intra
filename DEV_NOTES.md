@@ -400,6 +400,112 @@ gh secret set SFTP_PORT      --body '22'
 gh secret set SFTP_PASSWORD                       # prompts (avoids password in shell history)
 ```
 
+---
+
+### 3b. The two front doors — the settings this will need (#493, NOT YET LIVE)
+
+> ⚠️ **Do not set these yet.** The deployment does not read them until the work
+> on #493 lands. They are written down here now so the change can be planned,
+> and so nobody has to work them out again later.
+
+**What is changing.** The portal is becoming two websites that share one set of
+code:
+
+- **`web/admin_html/`** — the management portal. Everything behind a login. This
+  is today's `web/public_html/`, renamed.
+- **`web/public_html/`** — new, and genuinely public. No login, ever. This is what
+  a visitor to the noticeboard or the public calendar sees.
+
+**Why the existing three settings are retired rather than reused.** The folder
+called `public_html` **keeps its name but changes its meaning**. Today it holds
+the management portal; afterwards it holds the public website. If one of the old
+settings were quietly left pointing at the old place, the next deployment would
+copy **the entire management portal into the public web folder** — and it would
+look like it had worked.
+
+A setting that no longer exists makes the deployment **stop with a clear error**.
+A setting that still exists but now means something different fails silently, in
+the worst possible direction. So all three go, and six clearly-named ones replace
+them.
+
+**The settings, one per branch per front door.** They are named after the
+branches, because that is how you think about them when setting them up. (The old
+names used `LIVE` and `DEV` for `main` and `alpha`, which was one translation step
+with no benefit.)
+
+| Branch  | Front door         | Secret name              | Value (example)                                                        |
+| ------- | ------------------ | ------------------------ | ---------------------------------------------------------------------- |
+| `main`  | Management portal  | `SFTP_ADMIN_PATH_MAIN`   | `/home/dh_abcd1234/portal.millrdsdacambridge.uk/admin_html`             |
+| `main`  | Public website     | `SFTP_PUBLIC_PATH_MAIN`  | `/home/dh_abcd1234/portal.millrdsdacambridge.uk/public_html`            |
+| `beta`  | Management portal  | `SFTP_ADMIN_PATH_BETA`   | `/home/dh_abcd1234/portal.millrdsdacambridge.uk/admin_html_beta`        |
+| `beta`  | Public website     | `SFTP_PUBLIC_PATH_BETA`  | `/home/dh_abcd1234/portal.millrdsdacambridge.uk/public_html_beta`       |
+| `alpha` | Management portal  | `SFTP_ADMIN_PATH_ALPHA`  | `/home/dh_abcd1234/portal.millrdsdacambridge.uk/admin_html_dev`         |
+| `alpha` | Public website     | `SFTP_PUBLIC_PATH_ALPHA` | `/home/dh_abcd1234/portal.millrdsdacambridge.uk/public_html_dev`        |
+
+**Unchanged:** `SFTP_HOST`, `SFTP_USER`, `SFTP_PORT`, and `SFTP_KEY` or
+`SFTP_PASSWORD`.
+
+**Retired — delete these:** `SFTP_LIVE_PATH`, `SFTP_BETA_PATH`, `SFTP_DEV_PATH`.
+
+```bash
+BASE='/home/dh_abcd1234/portal.millrdsdacambridge.uk'
+
+gh secret set SFTP_ADMIN_PATH_MAIN   --body "$BASE/admin_html"
+gh secret set SFTP_PUBLIC_PATH_MAIN  --body "$BASE/public_html"
+gh secret set SFTP_ADMIN_PATH_BETA   --body "$BASE/admin_html_beta"
+gh secret set SFTP_PUBLIC_PATH_BETA  --body "$BASE/public_html_beta"
+gh secret set SFTP_ADMIN_PATH_ALPHA  --body "$BASE/admin_html_dev"
+gh secret set SFTP_PUBLIC_PATH_ALPHA --body "$BASE/public_html_dev"
+
+# Retire the old three, so a missed step stops the deployment
+# rather than publishing the management portal.
+gh secret delete SFTP_LIVE_PATH
+gh secret delete SFTP_BETA_PATH
+gh secret delete SFTP_DEV_PATH
+```
+
+#### Both folders must sit side by side
+
+This is a requirement, not a preference. The public front door finds the shared
+code by looking **one folder up** from itself. Put the public folder anywhere else
+and the shared code is not there, so every public page fails.
+
+```text
+/home/dh_abcd1234/portal.millrdsdacambridge.uk/      <- shared code lands here
+├── _core/  _apps/  _sql/  _lang/  _vendor/  _install/
+├── admin_html/          <- main  : the management portal
+├── admin_html_beta/     <- beta  : the management portal
+├── admin_html_dev/      <- alpha : the management portal
+├── public_html/         <- main  : the public website
+├── public_html_beta/    <- beta  : the public website
+└── public_html_dev/     <- alpha : the public website
+```
+
+The deployment checks that the two folders for a branch really do share a parent,
+and refuses rather than uploading something that cannot work. This account already
+runs three web roots from one parent, so the arrangement is already proven here.
+
+#### What to set in the DreamHost panel
+
+| Address                             | Web directory                                                    |
+| ----------------------------------- | ---------------------------------------------------------------- |
+| `portal.millrdsdacambridge.uk`      | `/home/dh_abcd1234/portal.millrdsdacambridge.uk/admin_html`       |
+| `public.millrdsdacambridge.uk`      | `/home/dh_abcd1234/portal.millrdsdacambridge.uk/public_html`      |
+
+> 🚨 **Never point a web address at the shared folder itself.** If any domain's
+> web directory is set to `/home/dh_abcd1234/portal.millrdsdacambridge.uk/`, the
+> web server will hand out database snapshots, uploaded files (pastoral
+> attachments, children's photos, expense receipts, Gift Aid addresses) and the
+> installer. The mistake would be in the hosting panel, so every check in the
+> deployment would pass while it was happening. The portal refuses to start if it
+> detects this, and a probe after deployment fetches those addresses and fails the
+> run if they answer — but the panel is the place to get it right.
+
+Serving the public pages at a path on a **separate main domain**
+(`example.org/noticeboard`) needs nothing deployed and no extra setting. That is a
+different mechanism — see `.claude/plans/public-door-3-build-plan.md`.
+```
+
 **Shared-base note.** The shared `_core/`, `_vendor/`, `_sql/` etc. upload to
 `dirname()` of whichever per-branch path applies. When all three paths share
 one parent (the default — recommended for the WebMS-Intra single-site setup),
