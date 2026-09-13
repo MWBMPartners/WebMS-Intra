@@ -53,6 +53,36 @@ then checked by an independent verifier agent.** The briefs, with full acceptanc
 plan was designed entirely on Opus while Fable was down. Brief:
 `.claude-work/briefs/plan-catchup-review.md`. Sequential agents, as the standing rule requires.
 
+**Running now (13 September):** build workflow run `wf_39955250-631`, and the Fable plan
+review run `wf_688222d8-d65`. Those run IDs can only be resumed from the SAME session. If the
+session is lost part way through, do not try to resume them — start again from the briefs.
+Each package brief in `.claude-work/briefs/` is self-contained: it lists its own files, what
+to fix, and its acceptance criteria. Before re-running a package, check `git diff` on that
+package's own files first — an interrupted builder may already have done part of the work, as
+happened with the 22 settings pages.
+
+**Ready to fire, so nothing waits on drafting:**
+
+- Codex review briefs for each package, and for the address fix:
+  `.claude-work/reviews/brief-{pkg1,pkg2,pkg3,forged}.txt` — checked: each names the real
+  repository path and its diff, with no mangled shell syntax. Each expects its diff at
+  `.claude-work/reviews/<name>.diff`. Build that diff with the file paths WRITTEN OUT, never from a
+  shell variable (on this machine zsh passes an unquoted variable as one argument, and `git diff`
+  then silently returns nothing). Count the files in the diff before sending it.
+- The address-fix review runs only AFTER Package 1 lands and `Logger.php` has been changed, because
+  it must check that the logger asking the rate limiter for an address cannot loop.
+
+**Issues tracking this round:** #493 (the public-door plan, Step 1), #494 (pages calling methods
+that do not exist, and the check being rebuilt), #495 (the 22 portal-wide settings pages), and
+**#496 (ten places that believed a visitor's claimed address — two real rate-limit bypasses)**.
+
+**The #479 data-download design brief is ready** at `.claude-work/briefs/design-479-data-download.md`.
+It waits for the plan review to finish, because only one analysis run may go at a time. It carries a
+real design question worth knowing now: a row matched because a person ACTED on it (created it,
+recorded it, approved it) usually holds SOMEBODY ELSE'S personal data — a visitor record a volunteer
+entered holds the visitor's name and phone number. Handing that whole row over in "your" download
+would disclose a third party's data, which a right-of-access request must not do.
+
 **Then, driven from the main session:** a Codex review of each package, fix, and review again
 until clean. Then the address-fix review (it waits for Package 1, because it depends on how the
 rate limiter finally decides which address to believe), and `Logger.php`'s direct header read.
