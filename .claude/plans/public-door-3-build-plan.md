@@ -1,3 +1,9 @@
+> ⚠️ **READ `public-door-4-fable-3-corrections.md` BEFORE BUILDING ANYTHING FROM THIS PLAN.**
+> A Fable review on 13 September 2026 found faults in it — including a safety self-test that
+> could never pass, a Step 2 change that would break every error page on the management
+> portal, and a Step 4 that queries tables Step 5 creates. Where the corrections and this plan
+> disagree, THE CORRECTIONS WIN.
+
 # BUILD PLAN — two front doors, and a public surface registry
 
 Verified against the working tree on `claude/alpha-wip`, 11 September 2026. Where I correct the design or the security review, I say so and give the evidence.

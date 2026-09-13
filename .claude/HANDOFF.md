@@ -11,6 +11,23 @@ proceeds, so the session can be picked up at any point).
 
 ## LATEST — 13 September 2026. RESUME FROM HERE.
 
+### ✅ Fable plan review — DONE (13 September)
+
+Ran on Fable itself (no fallback needed): critique, then a challenge that tried to refute every point,
+then corrections built only from points that survived. **23 corrections, plus decisions only the owner
+can make.** Saved, committed, in `.claude/plans/public-door-4-fable-{1-critique,2-challenge,3-corrections}.md`.
+`public-door-3-build-plan.md` now opens with a banner: read the corrections first; where they disagree,
+the corrections win. Headlines: the plan's own boundary self-test could never pass; Step 2 would break every
+error page on the management portal; a design safety layer (sign-in methods refusing on the public door) was
+silently dropped; Step 4 queries tables Step 5 creates; a folder name of `..` walks past every guard; the
+changeover order could serve the old management portal on the public hostname.
+
+### 🟡 #479 data-download design — RUNNING (run `wf_ff8a3d5d-dc0`)
+
+Four sequential Fable stages: survey, design, challenge, plan. Each stage writes its own output to
+`.claude-work/reviews/design-479-{1-survey,2-design,3-challenge,4-plan}.md` before returning, so the result
+does not depend on the task output under `/tmp` surviving.
+
 ### The owner's latest instructions (13 September) and the order they will be done in
 
 The owner re-issued the full standing instructions, adding three explicit asks: a sweep of EVERY issue
@@ -40,6 +57,25 @@ verifies it rather than rebuilding it.
   not be checked; state unchanged.
 - #493 to #496 describe the round in progress — never closed or reopened by the sweep.
 - Nothing is written to GitHub until every close and reopen has been double-checked by a second agent.
+
+**Checked with the GitHub API and the code on 13 September — so the sweep and docs pass start from facts:**
+
+- **362 issues** (319 closed, 43 open); numbers run to #496 because pull requests share the numbering.
+- **Project board** "WebMS Intra Development" (org project #2) holds only **32** of them — 31 Done, 1 Todo.
+  Default: every OPEN issue goes on it with a real status; closed old issues are not added.
+- **Milestones** are stale: "v1.0.0 — Phase 9" is still open while `main` is on 1.4.0, and milestones hold
+  only about 52 of 362 issues. The sweep RECOMMENDS; restructuring them is the owner's call.
+- **Labels** are inconsistent (`security` beside `type: security`; `app:noticeboard` without the space).
+- **The wiki has content** — the docs pass checks it.
+- **Swagger UI IS self-hosted** — `web/public_html/assets/vendor/swagger-ui/`, version 5.17.14, public copy
+  first with automatic fallback to the local files, plus `api.docs.local_assets_only`. (It is not in
+  `api-docs/`, which holds only `index.php` — that is why a first look suggested otherwise.)
+- **The API description may be well behind the code:** 63 handlers, 55 documented paths, 30 handlers not
+  obviously described (some may be covered by the `/api/v1/...` form). Two handlers answer 403 to everyone
+  because their `api.<app>.<action>.enabled` switch was never seeded: `/api/expenses/export` (looks like
+  another built-but-unreachable feature) and `/api/assets/_coerce` (looks like a helper file, not an endpoint).
+- The docs-pass brief is ready: `.claude-work/briefs/docs-pass.md`. The sweep brief now covers the board,
+  milestones, labels and those two handlers.
 
 **Why `dev-team-featurefind` is not being run as-is:** it fits the proposals task, but it writes its own
 `FEATURES.md`, which would overwrite this project's living feature inventory. Its competitor-comparison
