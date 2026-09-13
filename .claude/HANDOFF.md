@@ -9,7 +9,85 @@ proceeds, so the session can be picked up at any point).
 
 ## Read this first — where we are right now
 
-## LATEST — 11 September 2026, late. RESUME FROM HERE.
+## LATEST — 13 September 2026. RESUME FROM HERE.
+
+### The services are back
+
+Usage limits reset. On 13 September Fable, Codex and the build agents all answered a probe.
+
+### State as verified on 13 September, before anything new started
+
+- 34 changed PHP files in the working tree, **0 syntax errors**. All 15 checks and all 5
+  self-tests pass.
+- **The 22 portal-wide settings pages (#495):** the agent that "failed" had actually changed
+  **17 of them (920 lines)** before its weekly limit ran out. **None of it was verified.** The
+  5 it never reached: `admin/apps/index.php`, `admin/captcha/index.php`,
+  `admin/maintenance/offsite-backup.php`, `admin/settings/qr/index.php`,
+  `admin/settings/sabbath/index.php`.
+- **`check_static_calls.py`** is still the 1,486-line version that was verified by hand.
+  The tokenizer rebuild never started — that agent hit its limit before writing anything.
+- **LOST:** the `/private/tmp` scratchpad was cleared over the two days. The address-fix Codex
+  review never produced a surviving result, so it must run again. The Step 1 review file is
+  gone too, but its findings are written down further below in this file.
+
+### Lesson: nothing that must survive lives in /tmp any more
+
+Briefs, scan scripts and review transcripts now live in **`.claude-work/`** inside the repo. It
+is excluded through `.git/info/exclude` (local only; `.gitignore` is untouched), so it survives
+a clean-out of `/tmp` but is never committed. The design documents survived only because they
+had already been copied into `.claude/plans/`.
+
+### This round
+
+**Build workflow — three packages in parallel, each touching only its own files, each built and
+then checked by an independent verifier agent.** The briefs, with full acceptance criteria:
+
+- `.claude-work/briefs/pkg1-step1-fixes.md` — fix everything Codex found in Step 1.
+- `.claude-work/briefs/pkg2-settings22.md` — verify the 17 suspect pages, finish the other 5.
+- `.claude-work/briefs/pkg3-checker-rebuild.md` — rebuild check 16 on PHP's `token_get_all()`,
+  with all 17 known cases as committed regression fixtures.
+- Shared rules for every builder and verifier: `.claude-work/briefs/common-builder.md` and
+  `common-verifier.md`.
+
+**Analysis workflow, separate — a Fable catch-up review of the public-door plan**, because that
+plan was designed entirely on Opus while Fable was down. Brief:
+`.claude-work/briefs/plan-catchup-review.md`. Sequential agents, as the standing rule requires.
+
+**Then, driven from the main session:** a Codex review of each package, fix, and review again
+until clean. Then the address-fix review (it waits for Package 1, because it depends on how the
+rate limiter finally decides which address to believe), and `Logger.php`'s direct header read.
+
+### Decisions taken for Package 1 — recorded so they are not re-argued
+
+- `portal.trustedProxies` accepts single addresses AND ranges (IPv4 and IPv6). A `/0` range,
+  an out-of-range prefix, or anything malformed is ignored and never trusted.
+- X-Forwarded-For is walked from the **right**, skipping trusted hops.
+- A new `portal.trustedProxyHeader` (`x-forwarded-for` by default, or `cf-connecting-ip`) names
+  the ONE header the trusted proxies guarantee to overwrite. Nothing else is believed.
+- IPv4 written in IPv6 form (`::ffff:…`) is normalised before comparing.
+- A new `PORTAL_ENV_SOURCE` records whether the channel came from the environment, the folder
+  name, or the fallback. The alpha/beta gate engages only on the first two. How `PORTAL_ENV`
+  is decided, and error display, are deliberately left for Step 2's explicit channel file.
+- `/` is gated like `/dashboard`; the invitation page and `/offline` are let through.
+- The `public.` settings guard is case-insensitive (keys are NOT forced to lower case — many
+  are camelCase). A new key differing only in letter case from an existing one is refused.
+- Authorisation is repeated inside the UPDATE and DELETE themselves.
+- AppRegistry gets a loading guard, and keeps each definition file's result instead of
+  requiring it twice (not `require_once` — a returned array comes back as `true` the second time).
+
+### Decided against
+
+- **Running Codex inside workflow agents.** A Codex review routinely runs longer than the
+  10-minute limit on a single agent command. Reviews are driven from the main session instead,
+  in the background, with their output written to `.claude-work/reviews/`.
+- **Embedding the briefs inside the workflow script.** The briefs are full of backslashes
+  (`Portal\Core\Site`), and inside a JavaScript template string every one is silently eaten.
+  The briefs are files that the agents read.
+
+---
+
+
+## Earlier — 11 September 2026, late (superseded by the section above)
 
 ### Where things stand
 
@@ -20,6 +98,57 @@ proceeds, so the session can be picked up at any point).
 | Hardened `tools/audit-checks/check_static_calls.py` | 🟡 Untracked, 1,486 lines. **Verified working** with 7 fixtures (see below). **Not yet wired into `.github/workflows/pr-security.yml`.** |
 | 22 admin pages writing portal-wide settings | 🔴 **Live privilege problem**: any site administrator can change the payment keys (Stripe, PayPal), text-message and mail credentials used by EVERY organisation. Fix relaunched; issue opened. |
 | #493 Steps 2–9 | ⬜ Not started. |
+
+### Progress since that table was written (same evening)
+
+| Item | State |
+| --- | --- |
+| Check 16 wired into `.github/workflows/pr-security.yml` as step 20 | 🟡 Done, **uncommitted** — to be committed WITH `check_static_calls.py` once its review is back. Parses as YAML. `actionlint` shows two info-level shellcheck notes (SC2016) — **both were already there before this change**; nothing is an error. Proved silent on a clean tree. |
+| Forged-address fix — nine files | 🟡 Done, **uncommitted, not yet reviewed.** Every place that read the Cloudflare / X-Forwarded-For headers itself now calls `RateLimiter::clientIp()`. Two were real rate-limit bypasses: `AssetRegister::clientIp()` (public lost-and-found — proven to run `publicIpHash()` → `ipHash()` → `saltedHash(clientIp())`) and `LiveChat::clientIp()` (chat). Seven wrote a visitor-chosen address into stored records. Review brief staged at `scratchpad/forged-brief.txt`; **start it only after the Step 1 review finishes** so two Codex runs never overlap. |
+| `web/_core/Logger.php` | ⏸️ Still reads the headers directly. **Deliberately deferred**: it is part of Step 1, which is under review. Fix after Step 1 is committed. |
+
+### 🛑 Codex reviewed Step 1 — DO NOT COMMIT STEP 1 AS IT STANDS
+
+Two findings would lock people out. Fix both before Step 1 goes anywhere.
+
+- **P1 — the alpha/beta gate locks out EVERY administrator, root included.**
+  `web/_core/Gatekeeper.php:143` compares the admin flags with `=== '1'`, but a
+  prepared statement's `get_result()` returns TINYINT columns as native integers,
+  so `1 !== '1'` and nobody passes. The documented recovery ("an administrator can
+  switch it off") is broken by the same bug.
+- **P1 — a LIVE server can be gated.** `web/_core/bootstrap.php:103` falls back to
+  `PORTAL_ENV = 'dev'` when the web folder name is unrecognised, and the gate is on
+  by default, so ordinary members would be blocked on a live site. Fix: engage the
+  gate only on a POSITIVE channel match — never on the fallback — until Step 2's
+  explicit `.channel` file exists.
+- **P2 — `/` walks past the gate.** `Gatekeeper.php:85` exempts the empty path and
+  `Router.php:212` then turns it into the dashboard.
+- `/auth/invite` is missing from the gate's allowed list, so an invitee cannot
+  accept. `/offline` is missing too.
+- **Settings:** the `public.` guard is case-sensitive but the database lookup is
+  not (`utf8mb4_unicode_ci`), so `Public.x` slips past — normalise or reject
+  non-canonical keys. Also put the authorisation conditions INTO the UPDATE's
+  `WHERE` to close a read-then-write race.
+- **AppRegistry:** an app definition that calls `AppRegistry::all()` re-enters for
+  ever (no "loading" guard); `invalidate()` can then hit a class redeclaration.
+- Fine: Logger (`activity()`/`audit()` byte-identical to before), migration 193.
+- **`check_static_calls.py` is NOT reliable proof.** Six reproducible false
+  accusations (grouped `use {A, B}`, `use Vendor\Site`, bracketed namespace, trait
+  `insteadof`, backtick strings, nested heredoc) and four missed faults (aliased
+  `use X as S`, enums and interfaces never mapped, a call inside `{$a[Site::x()]}`,
+  `extends \Base` mis-mapped). My seven fixtures passed but did not cover these
+  shapes. **Being rebuilt on PHP's own tokenizer** with every case as a committed
+  regression fixture. Until then it is advisory only — never make it blocking.
+
+Item 1 of that review (the address handling, and the Cloudflare question below) is
+read next and decides what goes into the Step 1 fix.
+
+### ⚠️ Open question — probably needs fixing, not asking
+
+`portal.trustedProxies` is seeded **empty**, and `RateLimiter` has **no range (CIDR) support**. If the live site sits behind **Cloudflare**, every visitor will appear to come from one of Cloudflare's own edge addresses. Every rate limit then becomes shared between all visitors on that edge: one person could lock everybody out, or ordinary users could be blocked for someone else's behaviour. And without range support an operator cannot simply list Cloudflare's published ranges.
+
+This was introduced by Step 1 (the forged-address fix just makes more code rely on it). Asked Codex about it in both reviews. The likely right answer is to **add range support** — then it works both with and without Cloudflare, and the owner only has to fill in a setting rather than make a decision. Do not ship Step 1 to a Cloudflare-fronted server without settling this.
+
 
 ### What happened with the AI services — read this if something has failed
 
