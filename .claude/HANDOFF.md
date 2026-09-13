@@ -11,6 +11,40 @@ proceeds, so the session can be picked up at any point).
 
 ## LATEST — 13 September 2026. RESUME FROM HERE.
 
+### The owner's latest instructions (13 September) and the order they will be done in
+
+The owner re-issued the full standing instructions, adding three explicit asks: a sweep of EVERY issue
+(open and closed) checked against the real code; a ranked list of proposals for new work; and a thorough
+documentation update.
+
+**Already standing rules — nothing to add:** plain English; the fallback rule, including that it makes this
+handoff crucial; no PR stacking; the Codex review loop. All are in `.claude/CLAUDE.md`, the device-wide
+`~/.claude/CLAUDE.md` and memory. Self-hosted Swagger UI already exists (commit `8f21094`) — the docs pass
+verifies it rather than rebuilding it.
+
+**The order, and why:**
+
+1. The build round and the Fable plan review finish (running now).
+2. **#479 data-download design** — Fable, short. It goes before the sweep because it is high priority and
+   small, and once designed its BUILD can run alongside the long sweep (building is not an analysis run).
+3. **Issue sweep + proposals, as ONE analysis run.** Only one analysis run may go at a time, and the
+   proposals should build on what the sweep finds. Brief: `.claude-work/briefs/sweep-and-proposals.md`.
+4. **Documentation pass** once the code has settled, so it is done once, not twice.
+
+**Defaults for the sweep, so it does not stop to ask:**
+
+- Closed, but the core ask was never delivered → reopen, with evidence.
+- Closed, core delivered, a gap remains → stays closed; ONE linked follow-up issue.
+- Open but verifiably done → comment with evidence, then close.
+- Cannot be verified without a live server, database or outside account → comment saying exactly what could
+  not be checked; state unchanged.
+- #493 to #496 describe the round in progress — never closed or reopened by the sweep.
+- Nothing is written to GitHub until every close and reopen has been double-checked by a second agent.
+
+**Why `dev-team-featurefind` is not being run as-is:** it fits the proposals task, but it writes its own
+`FEATURES.md`, which would overwrite this project's living feature inventory. Its competitor-comparison
+idea is built into the proposals stage instead.
+
 ### The services are back
 
 Usage limits reset. On 13 September Fable, Codex and the build agents all answered a probe.
