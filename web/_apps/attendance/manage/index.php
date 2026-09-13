@@ -164,7 +164,15 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
     <?php foreach ($topLevel as $parent): ?>
         <!-- 📌 Top-level type -->
-        <div class="portal-data-row <?php echo $parent['isActive'] === '0' ? 'opacity-50' : ''; ?>">
+        <?php
+        // 🔢 The grey-out tests on this row and on each child row below used to be
+        //    `isActive === '0'`. The service types are read through a prepared
+        //    statement, which returns this flag as the whole number 0, never the
+        //    text '0', so inactive service types were never greyed out. They now
+        //    accept exactly 0 or '0' (a cast would also treat NULL, false and ''
+        //    as inactive).
+        ?>
+        <div class="portal-data-row <?php echo ($parent['isActive'] === 0 || $parent['isActive'] === '0') ? 'opacity-50' : ''; ?>">
             <div class="col-12 col-md-4">
                 <span class="d-md-none fw-semibold">Type: </span>
                 <strong><i class="fa-solid fa-folder me-1 text-primary"></i><?php echo htmlspecialchars($parent['typeName'], ENT_QUOTES, 'UTF-8'); ?></strong>
@@ -209,7 +217,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         });
         foreach ($children as $child):
         ?>
-            <div class="portal-data-row <?php echo $child['isActive'] === '0' ? 'opacity-50' : ''; ?>" style="padding-left:2rem;">
+            <div class="portal-data-row <?php echo ($child['isActive'] === 0 || $child['isActive'] === '0') ? 'opacity-50' : ''; ?>" style="padding-left:2rem;">
                 <div class="col-12 col-md-4">
                     <span class="d-md-none fw-semibold">Type: </span>
                     <i class="fa-solid fa-turn-up fa-rotate-90 me-1 text-muted"></i>

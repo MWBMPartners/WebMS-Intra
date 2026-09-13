@@ -342,7 +342,12 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <div class="col-12 col-md-4">
                 <span class="d-md-none fw-semibold">Event: </span>
                 <strong><?php echo htmlspecialchars($ev['eventName'], ENT_QUOTES, 'UTF-8'); ?></strong>
-                <?php if ($ev['isFeatured'] === '1'): ?>
+                <?php
+                // 🔢 Was `$ev['isFeatured'] === '1'`, always false because the list is
+                //    read through a prepared statement, which returns the number 1, not
+                //    the text '1', so the Featured star never showed. Accepts exactly
+                //    1 or '1' (a cast would also accept true, '01' and 1.5).
+                if ($ev['isFeatured'] === 1 || $ev['isFeatured'] === '1'): ?>
                     <i class="fa-solid fa-star text-warning ms-1" title="Featured"></i>
                 <?php endif; ?>
                 <?php if ($ev['isPublic'] === '0' || (int) $ev['isPublic'] === 0): ?>

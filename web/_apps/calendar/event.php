@@ -240,7 +240,18 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 // 🌐 Schema.org JSON-LD Event markup (#328) — SEO + rich-snippet eligibility.
 //     Conditional on isPublic + status to avoid leaking unpublished/draft events
 //     into search index. Only emitted on public events.
-if (($event['isPublic'] ?? '0') === '1' && in_array($event['status'] ?? '', ['published', 'cancelled', 'postponed'], true) === true):
+//     ⚠️ WHAT THIS CANNOT DO: it only holds back the search-engine markup.
+//     It does not hide the page. The only visitor check on this page is the
+//     isPublic test near the top, and it does not look at status. So a draft
+//     marked public is still shown in full to a visitor who is not signed in
+//     and knows its address. Whether that should change is an open decision,
+//     not something this block handles.
+// 🔢 The isPublic test used to be `($event['isPublic'] ?? '0') === '1'`. The event
+//    is read through a prepared statement, which hands this flag back as the whole
+//    number 1, never the text '1', so the markup was never output for any event.
+//    It now accepts exactly 1 or '1' (a cast would also accept true, '01' and 1.5).
+$eventPublicFlag = $event['isPublic'] ?? null;
+if (($eventPublicFlag === 1 || $eventPublicFlag === '1') && in_array($event['status'] ?? '', ['published', 'cancelled', 'postponed'], true) === true):
     $eventStatusSchema = [
         'published' => 'https://schema.org/EventScheduled',
         'cancelled' => 'https://schema.org/EventCancelled',
@@ -294,8 +305,25 @@ if (($event['isPublic'] ?? '0') === '1' && in_array($event['status'] ?? '', ['pu
     if ($heroAbsUrl !== null) {
         $jsonLd['image'] = [$heroAbsUrl];
     }
+    // 🛡️ The JSON_HEX_* flags are what stop an event's own text breaking out
+    //    of this <script> tag. A browser ends a script element at the first
+    //    "</script>" it sees, whatever the JSON around it says. Event name,
+    //    description, location, timezone and hero image are stored exactly as
+    //    an admin or an API key typed them, and this page is open to visitors
+    //    who are not signed in. JSON_UNESCAPED_SLASHES on its own (the
+    //    original flags) printed "</script><img onerror=...>" byte for byte.
+    //    With JSON_HEX_TAG, < and > come out as \u003C and \u003E (the JSON
+    //    escape for those two characters), so the text can never contain a
+    //    closing script tag. JSON_HEX_AMP, JSON_HEX_APOS and JSON_HEX_QUOT
+    //    do the same for & ' and " (\u0026, \u0027 and \u0022). A reader
+    //    of the JSON gets the original characters back. The result is still
+    //    valid JSON that search engines read normally. This only protects
+    //    THIS block: every other place on the page must keep using
+    //    htmlspecialchars().
+    //    This mattered from the moment the isPublic test above was fixed,
+    //    because until then this block never ran.
     echo "\n<script type=\"application/ld+json\">"
-        . json_encode($jsonLd, JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT)
+        . json_encode($jsonLd, JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT)
         . "</script>\n";
 endif;
 ?>
@@ -346,7 +374,11 @@ endif;
                 <?php elseif ($event['status'] === 'postponed'): ?>
                     <span class="badge bg-warning text-dark">Postponed</span>
                 <?php endif; ?>
-                <?php if ($event['isFeatured'] === '1'): ?>
+                <?php
+                // 🔢 Was `$event['isFeatured'] === '1'`, always false because the
+                //    prepared statement returns the number 1, not the text '1', so
+                //    the Featured badge never showed. Accepts exactly 1 or '1'.
+                if ($event['isFeatured'] === 1 || $event['isFeatured'] === '1'): ?>
                     <span class="badge bg-warning text-dark"><i class="fa-solid fa-star me-1"></i>Featured</span>
                 <?php endif; ?>
                 <?php if ($event['categoryName'] !== null): ?>
@@ -401,7 +433,12 @@ endif;
                                                 ENT_QUOTES, 'UTF-8'
                                             ); ?>
                                         </strong>
-                                        <?php if ($person['isPrimary'] === '1'): ?>
+                                        <?php
+                                        // 🔢 Was `$person['isPrimary'] === '1'`, always false because
+                                        //    the prepared statement returns the number 1, not the text
+                                        //    '1', so the Primary marker never showed. Accepts exactly
+                                        //    1 or '1'.
+                                        if ($person['isPrimary'] === 1 || $person['isPrimary'] === '1'): ?>
                                             <span class="badge bg-warning text-dark ms-1">Primary</span>
                                         <?php endif; ?>
                                     </div>

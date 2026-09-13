@@ -620,8 +620,40 @@ class Site
             return false;
         }
 
-        // 🛡️ Umbrella admins belong to all sites
-        if ($role['isRootAdmin'] === '1') {
+        // 🛡️ Umbrella admins belong to all sites.
+        //    This used to be `$role['isRootAdmin'] === '1'`, which was always
+        //    false. See flagIsOn() below for why. Fixing it changes what two
+        //    callers do for a global administrator with no membership row for
+        //    a site:
+        //    - /site/switch (site/switch.php) used to refuse to switch them
+        //      into that site; it now lets them in.
+        //    - Signing in (Auth::setSessionSiteId()) used to move them to the
+        //      first site they DO have a row for. It now keeps them on
+        //      whatever site Site::id() holds at that moment. What that is
+        //      depends on how the portal works out the site:
+        //        * Single-site mode: always site 1, so nothing changes.
+        //        * Multi-site, subdomain or path mode: the active site whose
+        //          address they signed in on, and they stay there. An
+        //          address that matches no active site counts as site 1.
+        //        * Multi-site, session mode: site 1, for EVERYBODY, both before
+        //          and after this change. The old code did store a different
+        //          site in the session for such an administrator. But in
+        //          session mode nothing ever reads that value back in time,
+        //          because the site is worked out before the session starts
+        //          (see the older fault described just below). So this change
+        //          makes no visible difference in session mode; the real
+        //          problem there is that older fault.
+        //      Checked on 13 September 2026 against MySQL 8.0.36 with
+        //      PHP 8.5.10, and by reading the start-up order in bootstrap.php
+        //      and public_html/index.php.
+        //    ⚠️ Separate, older fault, seen while checking this and NOT fixed
+        //    here (issue #502): bootstrap.php runs preDetect() before
+        //    public_html/index.php starts the session. detectFromSession()
+        //    can only read a session that has started, so in session mode
+        //    every request through index.php detects site 1, not only
+        //    sign-in.
+        //    Ordinary members are unaffected: no row still means no.
+        if (self::flagIsOn($role['isRootAdmin']) === true) {
             return true;
         }
 
@@ -643,7 +675,15 @@ class Site
         if ($role === false || $role['isSiteAdmin'] === null) {
             return false;
         }
-        return ($role['isSiteAdmin'] === '1' || $role['isSiteRootAdmin'] === '1');
+        // 🔢 Was `=== '1'` on both flags, which was always false, so this
+        //    method said "no" for every site administrator. See flagIsOn().
+        //    ⚠️ Nothing in the portal calls this method, or
+        //    userIsSiteRootAdmin() below (searched across web/ on
+        //    13 September 2026). So nobody ever saw the wrong answer, and
+        //    there is no symptom or caller to go looking for. Both are now
+        //    correct for whoever calls them first.
+        return (self::flagIsOn($role['isSiteAdmin']) === true
+            || self::flagIsOn($role['isSiteRootAdmin']) === true);
     }
 
     /**
@@ -660,7 +700,38 @@ class Site
         if ($role === false || $role['isSiteRootAdmin'] === null) {
             return false;
         }
-        return ($role['isSiteRootAdmin'] === '1');
+        // 🔢 Was `=== '1'`, which was always false. See flagIsOn().
+        return self::flagIsOn($role['isSiteRootAdmin']);
+    }
+
+    /**
+     * 🔢 Is a yes/no flag read from the database switched on?
+     *
+     * WHAT WAS WRONG BEFORE: userBelongsTo(), userIsSiteAdmin() and
+     * userIsSiteRootAdmin() compared isRootAdmin, isSiteAdmin and
+     * isSiteRootAdmin with the TEXT '1'. Those columns hold 0 or 1, and
+     * getUserSiteRole() reads them through a prepared statement. With mysqlnd
+     * (the database driver PHP ships with) a prepared statement hands
+     * whole-number columns back as PHP whole numbers: 1, not '1'. In PHP
+     * `1 === '1'` is false, because `===` compares the type as well as the
+     * value, so all three checks said "no" for everybody. Checked on
+     * 13 September 2026 against MySQL 8.0.36 with PHP 8.5.10.
+     *
+     * It accepts exactly two things as "on": the whole number 1 and the text
+     * '1'. So it is right whether the value came from a prepared statement
+     * (numbers) or from query() (text). A cast such as `(int) $value === 1`
+     * was not used, because it
+     * would also count true, '01' and 1.5 as "on"; the two-value test cannot
+     * widen by accident. NULL, which is what a missing membership row gives,
+     * counts as "off", as it did before.
+     *
+     * @param mixed $value The flag exactly as it came out of the database.
+     *
+     * @return bool True only when the flag holds 1 (as a number or as text).
+     */
+    private static function flagIsOn(mixed $value): bool
+    {
+        return ($value === 1 || $value === '1');
     }
 
     /**

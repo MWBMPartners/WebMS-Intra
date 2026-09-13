@@ -215,8 +215,18 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 <div class="row g-3 mb-3">
                     <div class="col-md-3">
                         <div class="form-check form-switch mt-4">
+                            <?php
+                            // 🔢 Was `($editing['isRecurring'] ?? '0') === '1'`. The task is read
+                            //    through a prepared statement, which hands this flag back as the
+                            //    whole number 1, never the text '1', so the test was always false.
+                            //    The box showed unticked on every recurring task, and saving the
+                            //    form then stored 0: editing a task quietly switched recurrence
+                            //    off. The test now accepts exactly 1 or '1' (a cast would also
+                            //    accept true, '01' and 1.5).
+                            $taskRecurringFlag = $editing['isRecurring'] ?? null;
+                            ?>
                             <input class="form-check-input" type="checkbox" id="isRecurring" name="isRecurring" value="1"
-                                   <?php echo (($editing['isRecurring'] ?? '0') === '1' ? 'checked' : ''); ?>>
+                                   <?php echo (($taskRecurringFlag === 1 || $taskRecurringFlag === '1') ? 'checked' : ''); ?>>
                             <label class="form-check-label" for="isRecurring">Recurring</label>
                         </div>
                     </div>

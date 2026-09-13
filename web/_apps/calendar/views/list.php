@@ -32,14 +32,22 @@ declare(strict_types=1);
             $isToday = $startDt->format('Y-m-d') === date('Y-m-d');
             $isPast  = $startDt < new DateTime();
             ?>
+            <?php
+            // 🔢 Both Featured checks on this card used to be `$event['isFeatured'] === '1'`.
+            //    calendar/index.php reads the events through a prepared statement, which
+            //    returns this flag as the whole number 1, never the text '1', so featured
+            //    events were never highlighted. Accepts exactly 1 or '1' (a cast would
+            //    also accept true, '01' and 1.5).
+            $eventIsFeatured = ($event['isFeatured'] === 1 || $event['isFeatured'] === '1');
+            ?>
             <div class="col-12 col-md-6 col-lg-4">
-                <div class="card h-100 <?php echo $event['isFeatured'] === '1' ? 'border-warning' : ''; ?> <?php echo $isPast === true ? 'opacity-75' : ''; ?>">
+                <div class="card h-100 <?php echo $eventIsFeatured === true ? 'border-warning' : ''; ?> <?php echo $isPast === true ? 'opacity-75' : ''; ?>">
                     <?php if ($event['heroImage'] !== null && $event['heroImage'] !== ''): ?>
                         <img src="/assets/uploads/calendar/<?php echo htmlspecialchars($event['heroImage'], ENT_QUOTES, 'UTF-8'); ?>"
                              class="card-img-top" alt="" style="height:180px;object-fit:cover;">
                     <?php endif; ?>
                     <div class="card-body">
-                        <?php if ($event['isFeatured'] === '1'): ?>
+                        <?php if ($eventIsFeatured === true): ?>
                             <span class="badge bg-warning text-dark mb-2"><i class="fa-solid fa-star me-1"></i>Featured</span>
                         <?php endif; ?>
 

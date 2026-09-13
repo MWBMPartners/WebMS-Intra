@@ -166,18 +166,29 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     </div>
                 </div>
 
+                <?php
+                // 🔢 The two boxes below used to test `($editing['isPinned'] ?? '0') === '1'`
+                //    and the same for isPublished. The announcement is read through a
+                //    prepared statement, which hands these flags back as the whole number 1,
+                //    never the text '1', so both boxes always showed unticked when editing,
+                //    and saving the form unpinned AND unpublished the announcement. The test
+                //    now accepts exactly 1 or '1' (a cast would also accept true, '01' and
+                //    1.5). A new announcement ($editing is null) still starts published.
+                $annPinnedFlag    = $editing['isPinned'] ?? null;
+                $annPublishedFlag = $editing['isPublished'] ?? null;
+                ?>
                 <div class="row g-3 mb-3">
                     <div class="col-md-4">
                         <div class="form-check form-switch mt-4">
                             <input class="form-check-input" type="checkbox" id="isPinned" name="isPinned" value="1"
-                                   <?php echo (($editing['isPinned'] ?? '0') === '1' ? 'checked' : ''); ?>>
+                                   <?php echo (($annPinnedFlag === 1 || $annPinnedFlag === '1') ? 'checked' : ''); ?>>
                             <label class="form-check-label" for="isPinned">Pin to top</label>
                         </div>
                     </div>
                     <div class="col-md-4">
                         <div class="form-check form-switch mt-4">
                             <input class="form-check-input" type="checkbox" id="isPublished" name="isPublished" value="1"
-                                   <?php echo (($editing['isPublished'] ?? '0') === '1' || $editing === null ? 'checked' : ''); ?>>
+                                   <?php echo (($annPublishedFlag === 1 || $annPublishedFlag === '1' || $editing === null) ? 'checked' : ''); ?>>
                             <label class="form-check-label" for="isPublished"><?php echo $workflowGate === true ? 'Publish (requires approval)' : 'Published'; ?></label>
                         </div>
                     </div>

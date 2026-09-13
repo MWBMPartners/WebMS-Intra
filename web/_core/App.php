@@ -273,7 +273,71 @@ class App
             return false;
         }
 
-        return ($user['isAdmin'] === '1' || $user['isRootAdmin'] === '1');
+        // 🔢 Was `$user['isAdmin'] === '1' || $user['isRootAdmin'] === '1'`.
+        //    Both flags arrive as the whole number 1, never the text '1', so
+        //    this was false for every administrator and debug mode could never
+        //    switch on. See flagIsOn() below for the full explanation.
+        return (self::flagIsOn($user, 'isAdmin') === true
+            || self::flagIsOn($user, 'isRootAdmin') === true);
+    }
+
+    /**
+     * 🔢 Is a yes/no flag on the current user's record switched on?
+     *
+     * -------------------------------------------------------------------------
+     * WHAT WAS WRONG BEFORE
+     * -------------------------------------------------------------------------
+     * The flags on the user record — isAdmin, isRootAdmin, and the two site
+     * flags isSiteAdmin and isSiteRootAdmin — are TINYINT columns holding 0 or
+     * 1. The checks in this class compared them with the TEXT '1', written
+     * `$user['isRootAdmin'] === '1'`.
+     *
+     * That only works if the database hands the value back as text. It does
+     * not. App::user() reads the row through a prepared statement, and with
+     * mysqlnd (the database driver PHP ships with) a prepared statement hands
+     * whole-number columns back as PHP whole numbers: 1, not '1'. In PHP,
+     * `1 === '1'` is false, because `===` compares the type as well as the
+     * value. Checked on 13 September 2026 against MySQL 8.0.36 with PHP 8.5.10
+     * and mysqlnd: the flags arrived as int(1).
+     *
+     * The effect was that App::isRootAdmin() said "no" for every real global
+     * administrator, App::hasRole() never gave a global administrator every
+     * role, App::isDebug() was never true, and App::isAdmin() said "no" to a
+     * global or legacy administrator who had no site-administrator flag — so
+     * they were refused at /settings. The settings pages reserve portal-wide
+     * changes for App::isRootAdmin(), so nobody could change one.
+     *
+     * The two SITE flags were not affected, because those checks happened to
+     * convert the value to text first: `(string) (...) === '1'`.
+     *
+     * -------------------------------------------------------------------------
+     * WHAT IT DOES NOW, AND WHY THIS EXACT FORM
+     * -------------------------------------------------------------------------
+     * It accepts exactly two things as "on": the whole number 1 and the text
+     * '1'. So it gives the right answer from a prepared statement (whole
+     * numbers) and from query() (text), and keeps working if the connection's
+     * MYSQLI_OPT_INT_AND_FLOAT_NATIVE option is ever changed, which is the
+     * setting that decides this for query().
+     *
+     * A cast such as `(int) $value === 1` was considered and not used. It
+     * would also count true, '01', ' 1' and 1.5 as "on". None of those can come
+     * out of a TINYINT column, but the brief for this change was to alter HOW
+     * the flag is recognised and not WHO counts as what, and the two-value test
+     * cannot widen by accident. A missing key or NULL is "off", as it was.
+     *
+     * WHAT THIS CANNOT DO: it only reads the row App::user() loaded, which is
+     * cached for the request. A flag changed in the database part way through
+     * a request is not seen until App::resetUser() is called.
+     *
+     * @param array<string, mixed> $user The row from App::user().
+     * @param string               $flag Column name, e.g. 'isRootAdmin'.
+     *
+     * @return bool True only when the flag holds 1 (as a number or as text).
+     */
+    private static function flagIsOn(array $user, string $flag): bool
+    {
+        $value = $user[$flag] ?? null;
+        return ($value === 1 || $value === '1');
     }
 
     /**
@@ -345,7 +409,11 @@ class App
         }
 
         // 🔑 Root admin has all roles implicitly
-        if ($user['isRootAdmin'] === '1') {
+        //    🔢 Was `$user['isRootAdmin'] === '1'`. The flag arrives as the
+        //    whole number 1, so this shortcut never fired and a global
+        //    administrator only had the roles written against their own name.
+        //    See flagIsOn() for the full explanation.
+        if (self::flagIsOn($user, 'isRootAdmin') === true) {
             return true;
         }
 
@@ -396,10 +464,16 @@ class App
         if ($user === null) {
             return false;
         }
-        return ($user['isAdmin'] === '1'
-            || $user['isRootAdmin'] === '1'
-            || (string) ($user['isSiteAdmin'] ?? '0') === '1'
-            || (string) ($user['isSiteRootAdmin'] ?? '0') === '1');
+        // 🔢 isAdmin and isRootAdmin were compared with `=== '1'`. They arrive
+        //    as the whole number 1, so a global or legacy administrator with no
+        //    site-administrator flag was refused (403 at /settings). The two
+        //    site flags used `(string) (...) === '1'`, which did work; they now
+        //    go through the same test so all four read the same way.
+        //    See flagIsOn() for the full explanation.
+        return (self::flagIsOn($user, 'isAdmin') === true
+            || self::flagIsOn($user, 'isRootAdmin') === true
+            || self::flagIsOn($user, 'isSiteAdmin') === true
+            || self::flagIsOn($user, 'isSiteRootAdmin') === true);
     }
 
     /**
@@ -413,7 +487,10 @@ class App
         if ($user === null) {
             return false;
         }
-        return ($user['isRootAdmin'] === '1');
+        // 🔢 Was `$user['isRootAdmin'] === '1'`, which was false for every
+        //    real global administrator because the flag arrives as the whole
+        //    number 1. See flagIsOn() for the full explanation.
+        return self::flagIsOn($user, 'isRootAdmin');
     }
 
     /**
@@ -440,12 +517,18 @@ class App
         }
 
         // 🛡️ Umbrella admins are implicitly site admins everywhere
-        if ($user['isRootAdmin'] === '1') {
+        //    🔢 Was `$user['isRootAdmin'] === '1'`, which never matched because
+        //    the flag arrives as the whole number 1: a global administrator
+        //    only counted here if they also held a site flag.
+        if (self::flagIsOn($user, 'isRootAdmin') === true) {
             return true;
         }
 
-        return ((string) ($user['isSiteAdmin'] ?? '0') === '1'
-            || (string) ($user['isSiteRootAdmin'] ?? '0') === '1');
+        // 🔢 Was `(string) (...) === '1'`. That one did work; it goes through
+        //    the same test now so every flag in this class reads the same way.
+        //    See flagIsOn() for the full explanation.
+        return (self::flagIsOn($user, 'isSiteAdmin') === true
+            || self::flagIsOn($user, 'isSiteRootAdmin') === true);
     }
 
     /**
@@ -461,11 +544,17 @@ class App
         }
 
         // 🛡️ Umbrella admins are implicitly site root admins everywhere
-        if ($user['isRootAdmin'] === '1') {
+        //    🔢 Was `$user['isRootAdmin'] === '1'`, which never matched because
+        //    the flag arrives as the whole number 1: a global administrator
+        //    only counted here if they also held the site root flag.
+        if (self::flagIsOn($user, 'isRootAdmin') === true) {
             return true;
         }
 
-        return ((string) ($user['isSiteRootAdmin'] ?? '0') === '1');
+        // 🔢 Was `(string) (...) === '1'`. That one did work; it goes through
+        //    the same test now so every flag in this class reads the same way.
+        //    See flagIsOn() for the full explanation.
+        return self::flagIsOn($user, 'isSiteRootAdmin');
     }
 
     // =========================================================================

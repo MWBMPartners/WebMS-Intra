@@ -145,8 +145,18 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     </div>
                     <div class="col-md-1">
                         <div class="form-check form-switch mt-4">
+                            <?php
+                            // 🔢 Was `($editing['isActive'] ?? '1') === '1'`. The workflow is read
+                            //    through a prepared statement, which hands this flag back as the
+                            //    whole number 1, never the text '1', so an existing active
+                            //    workflow showed the box unticked and saving the form deactivated
+                            //    it. The test now accepts exactly 1 or '1' (a cast would also
+                            //    accept true, '01' and 1.5). A brand-new workflow ($editing is
+                            //    null) still starts ticked, as before.
+                            $workflowActiveFlag = $editing['isActive'] ?? 1;
+                            ?>
                             <input class="form-check-input" type="checkbox" id="isActive" name="isActive" value="1"
-                                   <?php echo (($editing['isActive'] ?? '1') === '1' ? 'checked' : ''); ?>>
+                                   <?php echo (($workflowActiveFlag === 1 || $workflowActiveFlag === '1') ? 'checked' : ''); ?>>
                             <label class="form-check-label" for="isActive">Active</label>
                         </div>
                     </div>

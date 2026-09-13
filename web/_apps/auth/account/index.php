@@ -446,13 +446,26 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         </div>
                     </div>
                     <?php endif; ?>
-                    <?php if (($user['isAdmin'] ?? '0') === '1' || ($user['isRootAdmin'] ?? '0') === '1'): ?>
+                    <?php
+                    // 🔢 These three checks used to be `($user['isAdmin'] ?? '0') === '1'`
+                    //    and the same for isRootAdmin. App::user() reads the row through a
+                    //    prepared statement, which hands these flags back as the whole
+                    //    number 1, never the text '1'. `1 === '1'` is false in PHP, so the
+                    //    Privileges badge never showed for anybody. The test now accepts
+                    //    exactly 1 or '1'. A cast was not used because it would also
+                    //    accept true, '01' and 1.5.
+                    $accountRootFlag    = $user['isRootAdmin'] ?? null;
+                    $accountAdminFlag   = $user['isAdmin'] ?? null;
+                    $accountIsRootAdmin = ($accountRootFlag === 1 || $accountRootFlag === '1');
+                    $accountIsAdmin     = ($accountAdminFlag === 1 || $accountAdminFlag === '1');
+                    ?>
+                    <?php if ($accountIsAdmin === true || $accountIsRootAdmin === true): ?>
                     <div class="col-12">
                         <div class="small text-muted mb-1">Privileges</div>
                         <div>
-                            <?php if (($user['isRootAdmin'] ?? '0') === '1'): ?>
+                            <?php if ($accountIsRootAdmin === true): ?>
                                 <span class="badge bg-danger me-1">Root Admin</span>
-                            <?php elseif (($user['isAdmin'] ?? '0') === '1'): ?>
+                            <?php elseif ($accountIsAdmin === true): ?>
                                 <span class="badge bg-warning text-dark me-1">Admin</span>
                             <?php endif; ?>
                         </div>
