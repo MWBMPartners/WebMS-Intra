@@ -79,8 +79,27 @@ class Router
             return;
         }
 
-        // 🛡️ If the route is protected, enforce authentication
-        if ($route['isProtected'] === '1') {
+        // 🛡️ If the route is protected, send a signed-out visitor to sign in.
+        //
+        //    This used to test only `=== '1'`, the TEXT "1". But the route is
+        //    read through a prepared statement, and a prepared statement hands
+        //    back a yes/no column as the whole NUMBER 1, not as text. A number
+        //    is never identical to text, so the test was false for every route
+        //    and this line never sent anybody to sign in. Any page without a
+        //    sign-in check of its own was open to the whole internet — proved on
+        //    13 September 2026 for the expenses treasury queue (claimants'
+        //    names and amounts), expense submission and approval, the
+        //    dashboard, attendance and the support page (issue #497).
+        //
+        //    Both forms are accepted, so this keeps working if the route is ever
+        //    read by a plain query instead, which returns text.
+        //
+        //    Scheduled jobs must NOT be seeded as protected: they arrive with a
+        //    token and no session, so this line would quietly redirect them to
+        //    the sign-in page and the job would never run. Every scheduled job
+        //    therefore lives at a `cron/...` address seeded with isProtected = 0
+        //    and checks its own token (see web/_apps/cron/).
+        if ($route['isProtected'] === 1 || $route['isProtected'] === '1') {
             Auth::requireLogin();
         }
 
@@ -414,7 +433,9 @@ class Router
      * @param mysqli $db   Database connection
      * @param string $path The normalised request path (used as routeKey)
      *
-     * @return array{routeKey: string, targetFile: string, isProtected: string}|null
+     * @return array{routeKey: string, targetFile: string, isProtected: int|string}|null
+     *         isProtected arrives as the number 1 or 0 through this prepared
+     *         statement — see the comment in dispatch() for why that matters.
      */
     private static function findRoute(mysqli $db, string $path): ?array
     {

@@ -27,6 +27,11 @@
  *     /reset-password        — and to get back in if they have forgotten it
  *   • /admin/upgrade*        — the upgrader itself
  *   • /admin/maintenance*    — backup / restore UI
+ *   • /cron/health           — that exact address only, not anything that
+ *                              starts with it: the uptime monitor's
+ *                              read-only health report (owner's decision,
+ *                              14 September 2026). Every other cron/ job
+ *                              stays blocked. See EXACT_ALLOW_LIST.
  *   • /assets/css/* /js/* /images/* /fonts/* /vendor/* /noticeboard/*
  *                            — static subdirs only (CSS/JS for the
  *                              maintenance page itself). NOT a bare
@@ -118,6 +123,92 @@ class Maintenance
     ];
 
     /**
+     * Addresses that bypass the gate ONLY when the whole address matches,
+     * character for character. Compared with an exact in_array() check,
+     * never with `str_starts_with` like ALLOW_LIST above.
+     */
+    private const EXACT_ALLOW_LIST = [
+        // 🩺 THE UPTIME MONITOR'S HEALTH REPORT — AND NOTHING ELSE UNDER cron/.
+        //
+        //    Owner's decision, 14 September 2026. Until then a monitor called
+        //    /admin/maintenance/health?cron=1&token=…, which the
+        //    `admin/maintenance` entry above let through. So during an upgrade
+        //    the monitor still got its report, including the line saying that
+        //    maintenance mode is on. Issue #497 moved that report to its own
+        //    address, /cron/health, and nothing under cron/ was on this list,
+        //    so a monitor would have seen the portal as simply down for the
+        //    whole of every upgrade.
+        //
+        //    Only this one job is let through. The other scheduled jobs
+        //    (cron/retention-sweep, cron/backup-check, cron/event-reminders and
+        //    the rest) stay behind the holding page on purpose. They delete,
+        //    send or change things, and must not do that to a database that is
+        //    half way through an upgrade. The health checks are meant only to
+        //    read, and that is the whole reason this one is let through.
+        //
+        //    Three ways the page COULD still write were found on 14 September
+        //    2026, and all three are closed in web/_apps/cron/health.php. The
+        //    portal's error handler writes a tblErrors row for every PHP
+        //    warning, even one hidden with "@". A warning could come from:
+        //      - the session count (a session file deleted while being
+        //        counted);
+        //      - the token check itself, for anybody without the token
+        //        (sending ?token[]=x);
+        //      - header(), on a copy that shows errors on screen with output
+        //        not held back, once a visible warning from the checks had
+        //        been printed and so had sent the headers early. The page's
+        //        harmless handler had already been put back by then.
+        //    The page now accepts the token only as plain text, never prints a
+        //    PHP warning into its answer, and while maintenance mode is on
+        //    keeps a handler that does not touch the database in place from
+        //    just before the token check until the page stops. See the comment
+        //    there for what that cannot cover. In particular, code that runs
+        //    BEFORE any page, for every address including the holding page,
+        //    can still write an error row (?lang[]=x in bootstrap does); that
+        //    is not something this list or that page can change.
+        //
+        //    What was measured, against a test database: correct, wrong,
+        //    missing and list-shaped tokens and every warning condition above,
+        //    under both PHP's built-in server and php-cgi with output not held
+        //    back and errors shown on screen. Nothing was added to tblErrors.
+        //    That covers those calls, not every request anybody could invent.
+        //    If anybody ever makes the health checks write something, this
+        //    entry has to come out again.
+        //
+        //    WHY AN EXACT MATCH, NOT A PREFIX
+        //    Putting 'cron/health' in ALLOW_LIST would let through every
+        //    address that merely STARTS with those letters. A future
+        //    cron/health-report-mailer or cron/healthcheck-writer would then
+        //    walk past the holding page without anybody having decided that it
+        //    should. An exact match cannot grow by accident.
+        //
+        //    WHAT STRING THIS IS COMPARED WITH
+        //    The front controller hands isAllowed() the result of
+        //    Router::extractPath(), the same function the Router uses to pick
+        //    the page. By then the address has lost its query string, been put
+        //    into lower case, had slashes trimmed from both ends and repeated
+        //    slashes squeezed to one, and (when organisations are told apart by
+        //    the first part of the address) had the organisation's part removed.
+        //    So /cron/health?token=…, /cron/health/, /CRON/Health and
+        //    /<organisation>/cron/health all arrive here as exactly
+        //    'cron/health'. That is right, because the Router treats every one
+        //    of them as the same page. /cron/healthx, /cron/health-writer and
+        //    /cron/health/extra do not match, and get the holding page.
+        //
+        //    WHAT THIS CANNOT DO
+        //    - It does not check the token. It only lets the request reach
+        //      web/_apps/cron/health.php, which refuses a missing or wrong
+        //      token itself (403).
+        //    - It does not get the request past the pre-release gate. On an
+        //      alpha or beta copy, web/_core/Gatekeeper.php runs after this and
+        //      still sends a caller with no session to the sign-in page.
+        //    - It depends on being given Router::extractPath(). A string tidied
+        //      up some other way (a trailing slash left on, say) just fails to
+        //      match, which keeps the holding page up: the safe way round.
+        'cron/health',
+    ];
+
+    /**
      * Is maintenance currently active? Combines version-drift detection
      * with the explicit `portal.maintenance.active` flag.
      */
@@ -152,11 +243,19 @@ class Maintenance
 
     /**
      * Is the given request path allowed through even when maintenance
-     * is active? Pass the route key (without leading `/`).
+     * is active? Pass Router::extractPath() — see EXACT_ALLOW_LIST for why
+     * the exact matches depend on that.
      */
     public static function isAllowed(string $routeKey): bool
     {
         $routeKey = ltrim($routeKey, '/');
+
+        // 🎯 Whole-address matches first. Strict comparison, so only the
+        //    exact text listed counts — never an address that starts with it.
+        if (in_array($routeKey, self::EXACT_ALLOW_LIST, true) === true) {
+            return true;
+        }
+
         foreach (self::ALLOW_LIST as $prefix) {
             if (str_starts_with($routeKey, $prefix)) {
                 return true;

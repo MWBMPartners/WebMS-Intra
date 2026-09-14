@@ -138,9 +138,9 @@ endif;
             <div class="accordion-body">
                 <p>Activity logs and error logs grow unbounded. A retention sweeper deletes old rows nightly.</p>
                 <ol>
-                    <li>Generate a cron token at <a href="/admin/maintenance/retention">/admin/maintenance/retention</a>.</li>
-                    <li>Add this to DreamHost's cron scheduler (or your shared-hosting equivalent):
-                        <pre class="bg-body-tertiary p-2 rounded"><code>0 3 * * * curl -fsS "https://YOUR-PORTAL/admin/maintenance/retention?cron=1&amp;token=YOUR_TOKEN" &gt; /dev/null</code></pre>
+                    <li>Choose a long random token and save it as <code>maintenance.cronToken</code> in Settings. It is a portal-wide setting, so a global administrator has to do this. The <a href="/admin/maintenance/retention">retention page</a> shows what the sweep will remove.</li>
+                    <li>Add this to DreamHost's cron scheduler (or your shared-hosting equivalent), replacing YOUR-PORTAL with your portal's address:
+                        <pre class="bg-body-tertiary p-2 rounded"><code>0 3 * * * curl -fsS "https://YOUR-PORTAL/cron/retention-sweep?token=YOUR_TOKEN" &gt; /dev/null</code></pre>
                     </li>
                 </ol>
             </div>

@@ -3171,6 +3171,30 @@ INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
     ('admin/maintenance/retention', 'admin/maintenance/retention.php', 1)
 ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 
+-- ── from 196_scheduled_job_addresses.sql (#497) ───────────────────────────────
+-- Placed here, beside the staff pages these jobs came from, rather than at the
+-- end of the file with the other late migrations: the end of this file was
+-- being edited by separate, not-yet-committed work when this was added, and
+-- keeping apart makes the two changes easy to tell apart.
+--
+-- The retention sweep, the full health checks and the backup freshness alert
+-- used to be "?cron=1&token=…" modes of the protected staff pages
+-- admin/maintenance/retention, …/health and …/backup-check. Once the Router
+-- really enforced sign-in, a scheduler with a token and no session would have
+-- been redirected to the sign-in page and the jobs would have stopped
+-- silently. So they have their own cron/... addresses, NOT protected, each
+-- checking maintenance.cronToken itself — the convention every other scheduled
+-- job already follows. isProtected is reset on replay because a job address
+-- that ended up protected would fail in exactly that silent way.
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('cron/retention-sweep', 'cron/retention-sweep.php', 0),
+    ('cron/health',          'cron/health.php',          0),
+    ('cron/backup-check',    'cron/backup-check.php',    0)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`), `isProtected` = VALUES(`isProtected`);
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('196_scheduled_job_addresses.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
 -- Rate-limit by username threshold (matches migration 045 — issue #52)
 INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
     (NULL, 'auth.rateLimit.maxAttemptsByUsername', '10', '10', 0)
@@ -4890,9 +4914,15 @@ INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
     ('calendar/submit',           'calendar/submit.php',           0),
     ('calendar/submit-save',      'calendar/submit-save.php',      0),
     ('admin/calendar/moderation', 'admin/calendar/moderation.php', 1),
-    ('admin/calendar/moderate',   'admin/calendar/moderate.php',   1),
-    ('calendar/views/photo',      'calendar/views/photo.php',      1)
+    ('admin/calendar/moderate',   'admin/calendar/moderate.php',   1)
 ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+-- 'calendar/views/photo' used to be seeded in the statement above as an
+-- address of its own. The file was written as a piece of the calendar page,
+-- expecting the events to be fetched already, so opened directly it crashed
+-- with a server error. Migration 196 deletes the address from existing
+-- installations (#501). Nothing includes the file today: 'photo' is not in
+-- calendar/index.php's $validViews list. That is left to the calendar app's
+-- owner, who should either add 'photo' to the list or delete the file.
 
 INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
     (NULL, 'calendar.publicSubmit.enabled',         'true', 'true', 0),

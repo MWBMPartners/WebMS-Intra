@@ -5597,7 +5597,7 @@ Both of these were considered and chosen on purpose — please do not
 | --- | --- | --- |
 | `_install/index.php` (step 2, and the banner on later steps) | Anyone installing the portal | Only place that can block, and only on `'crit'` |
 | `/admin` dashboard | Signed-in admins | |
-| `/admin/maintenance/health` | Admins (also machine-readable, for uptime monitors) | Traffic light never moves for a `'warn'` |
+| `/admin/maintenance/health` | Admins. Uptime monitors use `/cron/health?token=…` instead, which returns the same checks as JSON (it was `?cron=1` on this page until #497). Like that old mode, it still answers while maintenance mode is on: it is the only `cron/` address `Maintenance.php` lets through, and only as an exact match | Traffic light never moves for a `'warn'` |
 | `/admin/system-info` | Any administrator | New — also shows PHP version/limits/extensions and connection facts (never the password — it is asked of the live connection, not read from the credentials file, so it is never loaded into the page) |
 | `/admin/system-info/phpinfo` | Umbrella administrators only | New — full PHP report, filtered as described above |
 

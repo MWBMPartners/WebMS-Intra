@@ -55,7 +55,8 @@ must-know shortcuts.</p>
             While maintenance mode is on, everybody else sees the holding page &mdash;
             but <strong>signing in still works</strong>, and so does resetting a
             forgotten password. If you use a code from your phone or a passkey, those
-            work too.
+            work too. The health report an uptime monitor reads, at /cron/health,
+            also keeps working, so the monitor can see an update is under way.
         </p>
         <p class="small mb-0">
             Worth knowing because maintenance mode also switches itself on by

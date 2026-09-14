@@ -51,9 +51,13 @@ Auth::ensureSession();
 //    If portal.maintenance.active = '1' OR the installed_version is
 //    behind PORTAL_VERSION (indicating new code was deployed but the
 //    DB hasn't been brought up yet), gate non-admin / non-allow-listed
-//    requests to a 503 maintenance page. Admins and routes on the
-//    allow list (auth/login, admin/upgrade, admin/maintenance, assets)
-//    pass through so admins can sign in and run the upgrade.
+//    requests to a 503 maintenance page. Admins, and the addresses on
+//    the two allow lists in web/_core/Maintenance.php, pass through: the
+//    sign-in pages, admin/upgrade, admin/maintenance, the static asset
+//    folders and offline, so admins can sign in and run the upgrade; and
+//    the one exact address cron/health, so an uptime monitor still gets
+//    its read-only health report. Those lists are the real ones; this
+//    summary is only a guide and has gone out of date before.
 if (Maintenance::isActive() === true
     && Maintenance::isAllowed(Router::extractPath()) === false
     && Maintenance::currentUserCanBypass() === false

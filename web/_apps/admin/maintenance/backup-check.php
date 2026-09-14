@@ -9,20 +9,21 @@
  * admin recipients if that age exceeds the `portal.backups.max_age_hours`
  * threshold.
  *
- * Two modes:
+ * This file is the staff page only: an administrator visits
+ * /admin/maintenance/backup-check and sees the current state inline. Viewing
+ * it never sends an email.
  *
- *   1. Web UI — admin visits /admin/maintenance/backup-check and sees the
- *      current state inline.
- *
- *   2. Cron-style endpoint — /admin/maintenance/backup-check?cron=1&token=…
- *      matched against `maintenance.cronToken`. Returns JSON. Designed for
- *      a daily wget/curl from DreamHost's cron scheduler.
+ * The daily scheduled check, which also sends the alert email, is at
+ * /cron/backup-check?token=… (web/_apps/cron/backup-check.php). Until
+ * 14 September 2026 it was a "?cron=1" mode of this page; the comment above
+ * the sign-in check below says why it moved.
  *
  * Settings:
  *
  *   portal.backups.max_age_hours       (default 36)
  *   portal.backups.alert_recipients    (default '' — comma-separated emails)
- *   maintenance.cronToken              (same token as retention.php)
+ *   maintenance.cronToken              (used by /cron/backup-check; the same
+ *                                       token as /cron/retention-sweep)
  *
  * @package   Portal\Admin
  * @author    MWBM Partners Ltd (t/a MWservices)
@@ -37,112 +38,34 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
-use Portal\Core\DbBackup;
-use Portal\Core\Mailer;
 
-$cronMode = isset($_GET['cron']) === true && $_GET['cron'] === '1';
-
-// 🔐 Auth
-if ($cronMode === true) {
-    $expected = (string) (App::settings()['maintenance']['cronToken'] ?? '');
-    $supplied = (string) ($_GET['token'] ?? '');
-    if ($expected === '' || hash_equals($expected, $supplied) === false) {
-        http_response_code(403);
-        header('Content-Type: application/json');
-        echo json_encode(['error' => 'invalid_token']);
-        exit();
-    }
-} else {
-    Auth::ensureSession();
-    Auth::requireLogin();
-    if (App::isAdmin() === false) {
-        http_response_code(403);
-        exit('Forbidden');
-    }
+// 🔐 Staff only. The Router already sends a signed-out visitor to sign in,
+//    because this address is seeded as protected; these checks stay as well so
+//    the page is still safe if it is ever reached some other way.
+//
+//    This page used to have a "?cron=1&token=" mode for the daily scheduled
+//    check, handled here before any sign-in, which also sent the alert email.
+//    It was removed on 14 September 2026 (issue #497): with the Router
+//    enforcing sign-in, a scheduler with a token and no session would only ever
+//    be redirected, and no alert would be sent. The job, and the alert email,
+//    are now at /cron/backup-check.
+Auth::ensureSession();
+Auth::requireLogin();
+if (App::isAdmin() === false) {
+    http_response_code(403);
+    exit('Forbidden');
 }
 
-// 📦 Probe snapshots
-$db        = App::db();
-$backup    = new DbBackup($db);
-$snapshots = $backup->listSnapshots();
-
-$thresholdHours = (int) (App::settings()['portal']['backups']['max_age_hours'] ?? 36);
-$recipientsRaw  = (string) (App::settings()['portal']['backups']['alert_recipients'] ?? '');
-$recipients     = array_filter(array_map('trim', explode(',', $recipientsRaw)));
-
-$mostRecent = $snapshots[0] ?? null;
-$ageHours   = null;
-$state      = 'ok';
-$message    = '';
-
-if ($mostRecent === null) {
-    $state   = 'critical';
-    $message = 'No snapshots found in web/_backups/.';
-} else {
-    $createdAt = strtotime((string) $mostRecent['created_at']);
-    if ($createdAt === false) {
-        $state   = 'critical';
-        $message = 'Most recent snapshot has unparseable created_at timestamp.';
-    } else {
-        $ageHours = (int) round((time() - $createdAt) / 3600);
-        if ($ageHours > $thresholdHours) {
-            $state   = 'stale';
-            $message = sprintf(
-                'Most recent backup is %d hours old (threshold: %d hours).',
-                $ageHours,
-                $thresholdHours
-            );
-        } else {
-            $state   = 'ok';
-            $message = sprintf(
-                'Most recent backup is %d hours old (within %d-hour threshold).',
-                $ageHours,
-                $thresholdHours
-            );
-        }
-    }
-}
-
-// 🚨 Alert dispatch (only if stale or critical AND we have recipients AND cron mode)
-//    Web-mode visits just show the status; alerts fire only from the
-//    scheduled cron call to avoid double-emailing the admin who's
-//    actively looking at the page.
-$alertsSent = 0;
-if ($cronMode === true && $state !== 'ok' && count($recipients) > 0) {
-    $portalName = (string) (App::settings()['site']['name'] ?? 'WebMS Intra');
-    $subject    = sprintf('[%s] Backup freshness alert: %s', $portalName, $state);
-    $body       = $message . "\n\n"
-                . sprintf("Snapshot count: %d\n", count($snapshots))
-                . sprintf("Threshold: %d hours\n", $thresholdHours)
-                . "\nReview: " . (string) (App::settings()['site']['url'] ?? '')
-                . "/admin/maintenance/backup-check\n";
-    foreach ($recipients as $to) {
-        try {
-            if (Mailer::send($to, $subject, $body) === true) {
-                $alertsSent++;
-            }
-        } catch (\Throwable $e) {
-            // 🛡️ Mail-send failure is non-fatal — we still return the
-            //    status JSON so the cron can decide what to do next.
-        }
-    }
-}
-
-// 🖼️ Render
-if ($cronMode === true) {
-    header('Content-Type: application/json');
-    echo json_encode([
-        'state'           => $state,
-        'message'         => $message,
-        'age_hours'       => $ageHours,
-        'threshold_hours' => $thresholdHours,
-        'snapshot_count'  => count($snapshots),
-        'recipients'      => count($recipients),
-        'alerts_sent'     => $alertsSent,
-        'checked_at'      => date('c'),
-    ]);
-    exit();
-}
+// 📦 The verdict is shared with /cron/backup-check, so this page and the alert
+//    always agree about whether the backups are fresh. Viewing this page never
+//    sends an email.
+require_once PORTAL_APPS . DIRECTORY_SEPARATOR . 'cron' . DIRECTORY_SEPARATOR . '_backup-freshness.php';
+$check          = backup_freshness_check();
+$snapshots      = $check['snapshots'];
+$thresholdHours = $check['thresholdHours'];
+$recipients     = $check['recipients'];
+$state          = $check['state'];
+$message        = $check['message'];
 
 $pageTitle   = 'Backup Freshness Check';
 $pageSection = 'admin';
@@ -194,7 +117,11 @@ $badgeClass = match ($state) {
     <div class="card-body">
         <h2 class="h5">Cron configuration</h2>
         <p>To enable automated alerting, add the following to your cron schedule:</p>
-        <pre class="bg-body-tertiary p-2 rounded"><code>0 9 * * * curl -fsS "https://<?php echo htmlspecialchars($_SERVER['HTTP_HOST'] ?? 'portal', ENT_QUOTES, 'UTF-8'); ?>/admin/maintenance/backup-check?cron=1&amp;token=YOUR_TOKEN" &gt; /dev/null</code></pre>
+        <pre class="bg-body-tertiary p-2 rounded"><code>0 9 * * * curl -fsS "https://<?php echo htmlspecialchars($_SERVER['HTTP_HOST'] ?? 'portal', ENT_QUOTES, 'UTF-8'); ?>/cron/backup-check?token=YOUR_TOKEN" &gt; /dev/null</code></pre>
+        <p class="small text-muted mb-2">
+            Use the token saved in <code>maintenance.cronToken</code>. The old address, this page with <code>?cron=1</code> added,
+            no longer works: this page now always asks for a sign-in, and no alert would be sent.
+        </p>
         <p class="small text-muted mb-0">
             Threshold: <strong><?php echo $thresholdHours; ?> hours</strong> (setting: <code>portal.backups.max_age_hours</code>)<br>
             Recipients: <strong><?php echo count($recipients); ?> address(es)</strong> (setting: <code>portal.backups.alert_recipients</code>)
