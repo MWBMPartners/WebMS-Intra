@@ -206,22 +206,26 @@ class LiveChat
     }
 
     /**
-     * 🌐 Client IP honouring CloudFlare → X-Forwarded-For → REMOTE_ADDR.
-     * Mirrors RateLimiter::getClientIp pattern for consistency.
+     * 🌐 The visitor's address, as decided by RateLimiter::clientIp() — the
+     * one place in the portal that decides which address to believe.
      */
     public static function clientIp(): string
     {
-        if (isset($_SERVER['HTTP_CF_CONNECTING_IP']) === true) {
-            $ip = (string) $_SERVER['HTTP_CF_CONNECTING_IP'];
-            return mb_substr($ip, 0, 45);
-        }
-        if (isset($_SERVER['HTTP_X_FORWARDED_FOR']) === true) {
-            $parts = explode(',', (string) $_SERVER['HTTP_X_FORWARDED_FOR']);
-            $ip    = trim($parts[0] ?? '');
-            return mb_substr($ip, 0, 45);
-        }
-        $ip = (string) ($_SERVER['REMOTE_ADDR'] ?? '0.0.0.0');
-        return mb_substr($ip, 0, 45);
+        // 🛑 This used to read the Cloudflare and X-Forwarded-For headers
+        //    directly and believe them. Anybody can send those headers, so
+        //    anybody could claim any address they liked. RateLimiter::clientIp()
+        //    is now the ONE place in the portal that decides which address to
+        //    believe: it trusts those headers only when the request really
+        //    arrived through a proxy listed in the portal.trustedProxies
+        //    setting, and otherwise uses the address the connection actually
+        //    came from. Delegating means a fix to that rule reaches this code
+        //    too, instead of this copy quietly drifting out of step - which is
+        //    exactly how it went wrong. It matters here because the chat's rate
+        //    limit in livechat/api/send.php is keyed on this address. Kept as a
+        //    method because other code calls LiveChat::clientIp(). The
+        //    45-character clamp is kept: 45 is the longest an IPv6 address can
+        //    be written, and it matches the column this is stored in.
+        return mb_substr(RateLimiter::clientIp(), 0, 45);
     }
 
     /**

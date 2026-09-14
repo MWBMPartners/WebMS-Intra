@@ -133,14 +133,18 @@ $expiryMinutes = (int) (App::settings('auth.passwordReset.tokenExpiry') ?? '60')
 $expiresAt     = date('Y-m-d H:i:s', time() + ($expiryMinutes * 60));
 
 // 🌐 Capture the requester's IP for audit trail
-$createdIP = $_SERVER['HTTP_CF_CONNECTING_IP']
-    ?? $_SERVER['HTTP_X_FORWARDED_FOR']
-    ?? $_SERVER['REMOTE_ADDR']
-    ?? '';
-// Take only the first IP if X-Forwarded-For has a chain
-if (str_contains($createdIP, ',') === true) {
-    $createdIP = trim(explode(',', $createdIP)[0]);
-}
+// 🛑 This used to read the Cloudflare and X-Forwarded-For headers directly and
+//    believe them. Anybody can send those headers, so anybody could claim any
+//    address they liked. RateLimiter::clientIp() is now the ONE place in the
+//    portal that decides which address to believe: it trusts those headers only
+//    when the request really arrived through a proxy listed in the
+//    portal.trustedProxies setting, and otherwise uses the address the
+//    connection actually came from. Delegating means a fix to that rule reaches
+//    this code too, instead of this copy quietly drifting out of step - which is
+//    exactly how it went wrong. Here the address is written into the
+//    password-reset request's audit record, a record that is only worth keeping
+//    if it is true.
+$createdIP = RateLimiter::clientIp();
 
 $insertStmt = $mysqli->prepare(
     'INSERT INTO tblPasswordResets (userID, tokenHash, expiresAt, createdIP) '

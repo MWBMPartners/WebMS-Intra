@@ -156,16 +156,20 @@ if (count($result['errors']) > 0) {
 }
 
 // -----------------------------------------------------------------------------
-// 🌐 9. IP capture — CF-Connecting-IP → X-Forwarded-For first hop →
-// REMOTE_ADDR, comma-split, capped to 45 chars (anonymous-save.php idiom).
+// 🌐 9. IP capture — the SAME address the rate limit above uses, capped to 45
+// characters (the longest an IPv6 address can be written).
 // -----------------------------------------------------------------------------
-$ip = $_SERVER['HTTP_CF_CONNECTING_IP']
-    ?? $_SERVER['HTTP_X_FORWARDED_FOR']
-    ?? $_SERVER['REMOTE_ADDR']
-    ?? '';
-if (str_contains((string) $ip, ',') === true) {
-    $ip = trim(explode(',', (string) $ip)[0]);
-}
+// 🛑 This used to read the Cloudflare and X-Forwarded-For headers directly
+//    and believe them. Anybody can send those headers, so the address could
+//    be anything a visitor chose. RateLimiter::clientIp() is the ONE place in
+//    the portal that decides which address to believe: it trusts those
+//    headers only when the request really arrived through a proxy listed in
+//    portal.trustedProxies, and otherwise uses the address the connection
+//    actually came from. Worse, this page was inconsistent with itself: its
+//    rate limit a few lines up already used RateLimiter::clientIp(), then
+//    this re-read the raw header to decide what to STORE - so the limit used
+//    the trustworthy address while the saved response kept the forgeable one.
+$ip = RateLimiter::clientIp();
 $ip = mb_substr((string) $ip, 0, 45);
 
 RateLimiter::recordHit($rateBucket, 900);

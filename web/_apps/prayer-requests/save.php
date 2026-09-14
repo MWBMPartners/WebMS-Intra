@@ -26,6 +26,7 @@ use Portal\Core\Auth;
 use Portal\Core\Logger;
 use Portal\Core\PrayerChain;
 use Portal\Core\Site;
+use Portal\Core\RateLimiter;
 
 // 🛡️ Only POST
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
@@ -86,13 +87,17 @@ $siteId = Site::id();
 $user   = App::user();
 $userId = (int) ($user['userID'] ?? 0);
 
-$ip = $_SERVER['HTTP_CF_CONNECTING_IP']
-    ?? $_SERVER['HTTP_X_FORWARDED_FOR']
-    ?? $_SERVER['REMOTE_ADDR']
-    ?? '';
-if (str_contains((string) $ip, ',') === true) {
-    $ip = trim(explode(',', (string) $ip)[0]);
-}
+// 🛑 This used to read the Cloudflare and X-Forwarded-For headers directly and
+//    believe them. Anybody can send those headers, so anybody could claim any
+//    address they liked. RateLimiter::clientIp() is now the ONE place in the
+//    portal that decides which address to believe: it trusts those headers only
+//    when the request really arrived through a proxy listed in the
+//    portal.trustedProxies setting, and otherwise uses the address the
+//    connection actually came from. Delegating means a fix to that rule reaches
+//    this code too, instead of this copy quietly drifting out of step - which is
+//    exactly how it went wrong. Here the address is written into the prayer
+//    request, a record that is only worth keeping if it is true.
+$ip = RateLimiter::clientIp();
 $ip = mb_substr((string) $ip, 0, 45);
 
 // 💾 Insert

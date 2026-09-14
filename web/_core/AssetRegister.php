@@ -1104,20 +1104,25 @@ class AssetRegister
     }
 
     /**
-     * Client IP resolution — mirrors Logger::clientIp() (private on that
-     * class, so re-implemented here rather than reached into). Honours
-     * Cloudflare / standard proxy headers.
+     * Client IP resolution. Delegates to RateLimiter::clientIp(), the one
+     * place in the portal that decides which address to believe.
      */
     private static function clientIp(): string
     {
-        if (isset($_SERVER['HTTP_CF_CONNECTING_IP']) === true) {
-            return (string) $_SERVER['HTTP_CF_CONNECTING_IP'];
-        }
-        if (isset($_SERVER['HTTP_X_FORWARDED_FOR']) === true) {
-            $parts = explode(',', (string) $_SERVER['HTTP_X_FORWARDED_FOR']);
-            return trim($parts[0]);
-        }
-        return (string) ($_SERVER['REMOTE_ADDR'] ?? '0.0.0.0');
+        // 🛑 This used to read the Cloudflare and X-Forwarded-For headers
+        //    directly and believe them. Anybody can send those headers, so
+        //    anybody could claim any address they liked. RateLimiter::clientIp()
+        //    is now the ONE place in the portal that decides which address to
+        //    believe: it trusts those headers only when the request really
+        //    arrived through a proxy listed in the portal.trustedProxies
+        //    setting, and otherwise uses the address the connection actually
+        //    came from. Delegating means a fix to that rule reaches this code
+        //    too, instead of this copy quietly drifting out of step - which is
+        //    exactly how it went wrong. It matters here because the public
+        //    lost-and-found form buckets its five-reports-per-fifteen-minutes
+        //    limit on a hash of this address, so varying one header per request
+        //    switched the limit off entirely.
+        return RateLimiter::clientIp();
     }
 
     /**

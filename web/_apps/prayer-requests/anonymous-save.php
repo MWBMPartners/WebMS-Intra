@@ -96,13 +96,16 @@ $body    = mb_substr($body, 0, 4000);
 
 // 🌐 Capture context
 $siteId = Site::id();
-$ip = $_SERVER['HTTP_CF_CONNECTING_IP']
-    ?? $_SERVER['HTTP_X_FORWARDED_FOR']
-    ?? $_SERVER['REMOTE_ADDR']
-    ?? '';
-if (str_contains((string) $ip, ',') === true) {
-    $ip = trim(explode(',', (string) $ip)[0]);
-}
+// 🛑 This used to read the Cloudflare and X-Forwarded-For headers directly
+//    and believe them. Anybody can send those headers, so the address could
+//    be anything a visitor chose. RateLimiter::clientIp() is the ONE place in
+//    the portal that decides which address to believe: it trusts those
+//    headers only when the request really arrived through a proxy listed in
+//    portal.trustedProxies, and otherwise uses the address the connection
+//    actually came from. Here the address is stored on an anonymous prayer
+//    request, which is only worth keeping if it is true - it is what
+//    moderators rely on to spot one person flooding the form.
+$ip = RateLimiter::clientIp();
 $ip = mb_substr((string) $ip, 0, 45);
 
 // 💾 Insert — always pending, leadership-only, anonymous
