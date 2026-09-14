@@ -36,11 +36,27 @@
  * deviation from the (non-ON-DUPLICATE) write-idiom requirement, which is
  * unaffected by whether the stored bytes are encrypted.
  *
+ * WHO MAY CHANGE WHAT
+ * -----------------------------------------------------------------------------
+ * The seven "save" keys belong to the current organisation, so any
+ * administrator of it may change them, exactly as before. The reminders cron
+ * token is the one portal-wide value here: a single token runs the reminders
+ * job for EVERY organisation on the installation.
+ *
+ * Until 11 September 2026 any administrator, including an administrator of a
+ * single organisation, could regenerate it. Doing so instantly broke the
+ * scheduled reminders job for every organisation, and showed that person the
+ * new token, which is the key to the job. The owner decided that settings
+ * affecting every organisation are for a global administrator only, so
+ * regenerating is now refused to anybody else. They see the reason on the
+ * page in place of the button, and are told again if they send the form
+ * anyway.
+ *
  * @package   Portal\Venues
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2026-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.0.0
+ * @version   1.1.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/429
  * -----------------------------------------------------------------------------
  */
@@ -127,12 +143,21 @@ function venues_settings_regenerate_cron_token(\mysqli $db): string
 Auth::ensureSession();
 Auth::requireLogin();
 
-// 🛡️ Admin-only — settings affects every site, not just the ones a
-// venue_manager happens to manage.
+// 🛡️ Administrators only, not Venue Managers. This comment used to say the
+//    settings here affect every site. That is only true of the cron token:
+//    the seven "save" keys are written against the current organisation
+//    (siteID = Site::id()), so an administrator of that organisation is the
+//    right person to change them. The cron token is the portal-wide
+//    exception, handled below.
 if (App::isAdmin() !== true) {
     Router::renderError(403);
     return;
 }
+
+// 🛡️ Only a global administrator may regenerate the portal-wide cron token
+//    (see "WHO MAY CHANGE WHAT" in the file header). Worked out once and used
+//    by both the handler and the page below, so the two can never disagree.
+$mayChangePortalWideSettings = App::isRootAdmin();
 
 $siteId = Site::id();
 $userId = (int) ($_SESSION['user_id'] ?? 0);
@@ -152,6 +177,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = (string) ($_POST['action'] ?? 'save');
 
     if ($action === 'regenerate_token') {
+        // 🚧 Refused, with the reason, for anybody but a global administrator.
+        //    The refusal is worded rather than a bare "forbidden": an
+        //    administrator who is told nothing assumes the portal is broken
+        //    and tries again. It sits after the form-token check above, so a
+        //    forged request from another website cannot fill the activity log.
+        if ($mayChangePortalWideSettings === false) {
+            Logger::activity(
+                'SettingsGroupSaveRefused',
+                'Refused: portal-wide setting "venues.cron_token" may only be changed by a global administrator',
+                $userId > 0 ? $userId : null
+            );
+            $_SESSION['flash_msg']  = 'That setting is portal-wide: the reminders cron token '
+                . 'is shared by every organisation on this installation, not only yours. '
+                . 'Only a global administrator can change it. Your own organisation\'s '
+                . 'venue settings on this page are unaffected.';
+            $_SESSION['flash_type'] = 'danger';
+            header('Location: /venues/settings');
+            exit();
+        }
+
         $newToken = venues_settings_regenerate_cron_token($db);
         Logger::activity('VenueSettingsSaved', 'Regenerated the venue reminders cron token', $userId > 0 ? $userId : null);
 
@@ -331,11 +376,25 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             Status:
             <span class="badge <?php echo $tokenSet === true ? 'bg-success' : 'bg-secondary'; ?>"><?php echo $tokenSet === true ? 'Set' : 'Not set'; ?></span>
         </p>
-        <form method="post" action="/venues/settings" data-confirm="Regenerate the reminders cron token? Any existing scheduled job using the OLD token will stop working until it is updated.">
-            <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
-            <input type="hidden" name="action" value="regenerate_token">
-            <button type="submit" class="btn btn-outline-warning btn-sm"><i class="fa-solid fa-key me-1"></i>Regenerate token</button>
-        </form>
+        <?php if ($mayChangePortalWideSettings === true): ?>
+            <form method="post" action="/venues/settings" data-confirm="Regenerate the reminders cron token? Any existing scheduled job using the OLD token will stop working until it is updated.">
+                <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
+                <input type="hidden" name="action" value="regenerate_token">
+                <button type="submit" class="btn btn-outline-warning btn-sm"><i class="fa-solid fa-key me-1"></i>Regenerate token</button>
+            </form>
+        <?php else: ?>
+            <!-- 👀 Shown in place of the button, so nobody fills in a form only
+                 to be refused afterwards. Hiding the button is a courtesy, not
+                 the control: the refusal in the handler above is what actually
+                 enforces the rule. -->
+            <div class="alert alert-info small mb-0">
+                <i class="fa-solid fa-circle-info me-2"></i>
+                This token is shared by <strong>every organisation</strong> on this
+                installation, not only yours, so only a global administrator can
+                regenerate it. Your own organisation's venue settings above are
+                unaffected.
+            </div>
+        <?php endif; ?>
     </div>
 </div>
 
