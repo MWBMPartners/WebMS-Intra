@@ -27,6 +27,10 @@
  * RRULE even if that event belongs to a recurring series — the caller asked
  * for one occurrence, not a subscription to the whole series.
  *
+ * #503 — a single `id=` download now follows the event page's own rule: a
+ * draft only for people who can manage events (anybody else gets the same
+ * "not found" as a missing event), and sign-in for an event not marked public.
+ *
  * @see       https://datatracker.ietf.org/doc/html/rfc5545
  * @package   Portal\Calendar
  * @author    MWBM Partners Ltd (t/a MWservices)
@@ -40,6 +44,7 @@
 declare(strict_types=1);
 
 use Portal\Core\App;
+use Portal\Core\Auth;
 use Portal\Core\Ical;
 use Portal\Core\Router;
 use Portal\Core\Site;
@@ -66,6 +71,7 @@ $events = [];
 
 if ($eventId > 0) {
     // 📅 Single event
+    $row  = null;
     $stmt = $db->prepare(
         'SELECT * FROM tblEvents WHERE eventID = ? AND isDeleted = 0 AND siteID = ? LIMIT 1'
     );
@@ -73,10 +79,39 @@ if ($eventId > 0) {
         $stmt->bind_param('ii', $eventId, $siteId);
         $stmt->execute();
         $row = $stmt->get_result()->fetch_assoc();
-        if ($row !== null) {
-            $events[] = $row;
-        }
         $stmt->close();
+    }
+
+    // 🛡️ Who may download ONE event (#503). The same rule as the event's own
+    //    page (calendar/event.php), whose "Add to Calendar" button links here.
+    //
+    //    What was wrong before: this lookup had no condition on status or on
+    //    isPublic and asked nobody to sign in. Anybody could download any
+    //    draft or internal event, with its description and location, by trying
+    //    id=1, id=2 and so on. Event numbers count upward, so that needs no
+    //    guessing at all.
+    //
+    //    1. A draft goes only to people who can manage events: App::isAdmin(),
+    //       exactly the check every page under calendar/manage/ makes. For
+    //       anybody else the row is dropped, so the request falls through to
+    //       the same "not found" as a number that matches no event, and the
+    //       answer does not reveal that the draft exists. This runs before the
+    //       sign-in request below for the same reason as on the event page.
+    //    2. An event not marked public needs sign-in, as on the event page.
+    //
+    //    The series and "all upcoming" downloads below already leave drafts out
+    //    with their own status test, so they are not changed here.
+    if ($row !== null
+        && in_array((string) ($row['status'] ?? ''), ['published', 'cancelled', 'postponed'], true) === false
+        && App::isAdmin() === false
+    ) {
+        $row = null;
+    }
+    if ($row !== null && (int) $row['isPublic'] === 0 && Auth::check() === false) {
+        Auth::requireLogin();
+    }
+    if ($row !== null) {
+        $events[] = $row;
     }
 } elseif ($seriesId > 0) {
     // 🔄 All events in a series
@@ -116,7 +151,24 @@ if (count($events) === 0) {
 
 // 📤 Calendar name / filename basis (unchanged from the hand-built version)
 $siteName = App::settings('site.name') ?? 'Portal';
-$siteUrl  = 'https://' . ($_SERVER['HTTP_HOST'] ?? 'portal.millrdsdacambridge.uk');
+
+// 🔗 The start of this portal's web address (for example https://portal.example.org),
+//    used below to give each event in the download a link back to its page.
+//    It comes from the address the visitor used (HTTP_HOST), because
+//    WebMS-Intra is installed by many customers at many addresses and none
+//    may be built in.
+//    What was wrong before: with no HTTP_HOST this fell back to one
+//    customer's live address, so a download from any other customer's portal
+//    would have linked to that customer's site. Now the link is simply left
+//    out of the file (Ical::emit() skips an empty address). HTTP_HOST is
+//    rarely missing: very old clients that do not say which site they want,
+//    some test requests, and unusual server set-ups can all leave it out.
+//    (An earlier version of this comment said "only" very old clients; the
+//    Codex review of 14 September 2026 pointed out that was too strong.)
+//    ⚠️ It still always says https://, exactly as before. A portal served
+//    only over plain http gets a link that does not open. Not changed here.
+$requestHost = (string) ($_SERVER['HTTP_HOST'] ?? '');
+$siteUrl     = $requestHost !== '' ? 'https://' . $requestHost : '';
 
 $calName = $siteName . ' Calendar';
 if ($eventId > 0) {
@@ -315,7 +367,18 @@ foreach ($events as $ev) {
         'endsAt'      => (string) ($ev['endDateTime'] ?? ''),
         'allDay'      => $isAllDay,
         'timezone'    => (string) ($ev['timezone'] ?? 'Europe/London'),
-        'url'         => $siteUrl . '/calendar/event?slug=' . urlencode((string) $ev['eventSlug']),
+        // 🔗 Link back to the event's own page. Site::url() adds the
+        //    organisation's part of the address when the portal tells
+        //    organisations apart by address ("path mode", for example
+        //    /cambridge/calendar/event); otherwise it gives /calendar/event,
+        //    exactly as before. What was wrong before: a bare
+        //    '/calendar/event' in path mode opened the FIRST organisation's
+        //    event with the same slug (slugs are only unique within one
+        //    organisation), or "not found". Empty when there is no host (see
+        //    $siteUrl above), which leaves the link out of the file.
+        'url'         => $siteUrl !== ''
+            ? $siteUrl . Site::url('calendar/event') . '?slug=' . urlencode((string) $ev['eventSlug'])
+            : '',
         'status'      => $status,
     ];
 

@@ -714,8 +714,18 @@ class Site
      * (the database driver PHP ships with) a prepared statement hands
      * whole-number columns back as PHP whole numbers: 1, not '1'. In PHP
      * `1 === '1'` is false, because `===` compares the type as well as the
-     * value, so all three checks said "no" for everybody. Checked on
+     * value, so every one of those flag tests said "no". Checked on
      * 13 September 2026 against MySQL 8.0.36 with PHP 8.5.10.
+     *
+     * What that meant for each method (an earlier version of this comment
+     * said all three said "no" for everybody, which overstated it; corrected
+     * after the Codex catch-up review on 14 September 2026):
+     *  - userIsSiteAdmin() and userIsSiteRootAdmin() rest entirely on the
+     *    flags, so they did say "no" for everybody.
+     *  - userBelongsTo() only used the flag to let a global administrator
+     *    belong everywhere. Its last line still accepts anybody with a
+     *    membership row, so ordinary members were never refused; only a
+     *    global administrator WITHOUT a membership row was.
      *
      * It accepts exactly two things as "on": the whole number 1 and the text
      * '1'. So it is right whether the value came from a prepared statement
