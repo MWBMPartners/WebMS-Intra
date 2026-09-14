@@ -69,7 +69,12 @@ if ($action === 'grant') {
     }
 
     // 🔍 Resolve user by email.
-    $stmt = $mysqli->prepare('SELECT userID FROM tblUsers WHERE email = ? LIMIT 1');
+    // The column on tblUsers is called emailAddress, not email — "email" was
+    // never a real column (see full_schema.sql), so this prepare() used to
+    // throw straight away (MYSQLI_REPORT_STRICT turns MySQL's "unknown
+    // column" into a thrown mysqli_sql_exception), and granting a
+    // coordinator crashed with a 500 on every attempt (#501).
+    $stmt = $mysqli->prepare('SELECT userID FROM tblUsers WHERE emailAddress = ? LIMIT 1');
     $stmt->bind_param('s', $email);
     $stmt->execute();
     $row = $stmt->get_result()->fetch_assoc();

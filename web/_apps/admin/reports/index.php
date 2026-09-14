@@ -73,8 +73,28 @@ if ($s3 !== false) {
 }
 
 // 📊 Total attendance sessions
+// The headcount isn't a column of tblAttendanceSessions itself — a session
+// can have several counted groups (Adults, Children, Visitors, ...), each
+// its own row in tblAttendanceCounts, linked back by sessionID. Reading
+// "headcount" straight off tblAttendanceSessions has never worked; MySQL
+// refused the query outright (unknown column), and because this app's
+// database connection is set to throw on that kind of error
+// (MYSQLI_REPORT_STRICT in bootstrap.php), the whole Reports page crashed
+// with a 500 on every single visit (#501). The correct shape — LEFT JOIN
+// to tblAttendanceCounts and SUM its headcount column — already exists
+// elsewhere in the Attendance app (see web/_apps/attendance/index.php's
+// "Quick stats" query).
+// 🛡️ The first fix (round 1) copied that shape but left out its
+// "s.isDeleted = 0" filter. Deleting a session in the Attendance app only
+// marks it deleted; the row and its headcount rows stay in the database.
+// Without this filter, a session someone deleted keeps inflating this card
+// forever. Round 2 (review gap, #501) adds the filter so this really does
+// mirror the Quick stats query, not just resemble it.
 $s4 = $mysqli->prepare(
-    'SELECT COUNT(*) AS cnt, COALESCE(SUM(headcount), 0) AS heads FROM tblAttendanceSessions WHERE siteID = ?'
+    'SELECT COUNT(DISTINCT s.sessionID) AS cnt, COALESCE(SUM(c.headcount), 0) AS heads '
+    . 'FROM tblAttendanceSessions s '
+    . 'LEFT JOIN tblAttendanceCounts c ON c.sessionID = s.sessionID '
+    . 'WHERE s.siteID = ? AND s.isDeleted = 0'
 );
 if ($s4 !== false) {
     $s4->bind_param('i', $siteId);
@@ -87,10 +107,26 @@ if ($s4 !== false) {
 
 // 📊 Monthly activity (last 12 months)
 $monthlyActivity = [];
+// tblActivityLogs has no "createdAt" column — the audit-trail timestamp is
+// called `timestamp` (see full_schema.sql). Backticked here because
+// "timestamp" is also a MySQL keyword (a non-reserved one, so the backticks
+// are not strictly required, but they make it unmistakably a column name;
+// an earlier version of this comment wrongly called it reserved). Same crash as the attendance
+// query above: the prepare() itself throws under MYSQLI_REPORT_STRICT, so
+// this took the whole Reports page down with a 500 on every visit (#501).
+// 🏢 Only this organisation's rows. This used to add "OR siteID IS NULL".
+// A blank siteID is never written: Logger::activity() always stores
+// Site::id(), which is never empty, and migration 015 filled in the old rows.
+// A row only becomes blank when its organisation is deleted, because the
+// column's link to tblSites is ON DELETE SET NULL. Such rows belong to no
+// current organisation, but they were counted in every organisation's
+// charts. The on-screen activity viewer (admin/activity/index.php) already
+// leaves them out for organisation administrators. Nothing in the portal
+// deletes an organisation today, so on current data this changes nothing.
 $ma = $mysqli->prepare(
-    'SELECT DATE_FORMAT(createdAt, \'%Y-%m\') AS month, COUNT(*) AS cnt '
-    . 'FROM tblActivityLogs WHERE (siteID = ? OR siteID IS NULL) '
-    . 'AND createdAt >= DATE_SUB(NOW(), INTERVAL 12 MONTH) '
+    'SELECT DATE_FORMAT(`timestamp`, \'%Y-%m\') AS month, COUNT(*) AS cnt '
+    . 'FROM tblActivityLogs WHERE siteID = ? '
+    . 'AND `timestamp` >= DATE_SUB(NOW(), INTERVAL 12 MONTH) '
     . 'GROUP BY month ORDER BY month'
 );
 if ($ma !== false) {
@@ -120,9 +156,12 @@ if ($es !== false) {
 
 // 📊 Top activity types (last 30 days)
 $topActivities = [];
+// Same fix as the monthly-activity query above — tblActivityLogs's
+// timestamp column is called `timestamp`, not createdAt (#501). Also only
+// this organisation's rows, for the reason given above that query.
 $ta = $mysqli->prepare(
     'SELECT activityType, COUNT(*) AS cnt FROM tblActivityLogs '
-    . 'WHERE (siteID = ? OR siteID IS NULL) AND createdAt >= DATE_SUB(NOW(), INTERVAL 30 DAY) '
+    . 'WHERE siteID = ? AND `timestamp` >= DATE_SUB(NOW(), INTERVAL 30 DAY) '
     . 'GROUP BY activityType ORDER BY cnt DESC LIMIT 10'
 );
 if ($ta !== false) {
