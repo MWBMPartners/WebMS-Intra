@@ -1711,7 +1711,16 @@
           "Tasks",
           "Legacy Alias"
         ],
-        "summary": "List tasks (own by default; admins can filter via userID)",
+        "summary": "List tasks (own for sessions; organisation-wide for API keys)",
+        "description": "Requires an authenticated session or an API key with scope `tasks:read`. A session returns tasks assigned to the caller; an administrator may choose another assignee with `userID`. An API key returns tasks in the key's organisation, optionally filtered by `userID`. Deleted tasks are excluded. Results are paginated, and `status` defaults to `open`. **Canonical route:** `GET /api/v1/tasks`.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
         "parameters": [
           {
             "name": "status",
@@ -1732,7 +1741,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Admin-only filter"
+            "description": "Assignee filter for session administrators and API keys. Ignored for ordinary session members. Results always stay within the current organisation."
           },
           {
             "name": "page",
@@ -6291,15 +6300,14 @@
         "tags": [
           "Tasks"
         ],
-        "summary": "List tasks (v1; own by default, admins can filter via userID)",
-        "description": "Requires scope `tasks:read` (bearer) or an authenticated session. **Legacy alias:** `GET /api/tasks/list`.",
+        "summary": "List tasks (v1; own for sessions, organisation-wide for API keys)",
+        "description": "Requires an authenticated session or an API key with scope `tasks:read`. A session returns tasks assigned to the caller; an administrator may choose another assignee with `userID`. An API key returns tasks in the key's organisation, optionally filtered by `userID`. Deleted tasks are excluded. Results are paginated, and `status` defaults to `open`. **Legacy alias:** `GET /api/tasks/list`.",
         "security": [
           {
             "bearerAuth": []
           },
           {
-            "sessionCookie": [],
-            "csrfToken": []
+            "sessionCookie": []
           }
         ],
         "parameters": [
@@ -6322,7 +6330,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Admin-only filter"
+            "description": "Assignee filter for session administrators and API keys. Ignored for ordinary session members. Results always stay within the current organisation."
           },
           {
             "name": "page",

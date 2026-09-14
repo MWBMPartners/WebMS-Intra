@@ -1,5 +1,5 @@
 <?php
-// Path: public_html/dashboard/index.php
+// Path: _apps/dashboard/index.php
 /**
  * -----------------------------------------------------------------------------
  * Portal Home Dashboard 🏠
@@ -167,10 +167,25 @@ if ($isAdmin === true) {
 }
 
 // 📋 Recent activity count (last 24h, admin only)
+//
+// WHAT WAS WRONG: this counted rows with `createdAt >= ...`, but
+// tblActivityLogs has no `createdAt` column — every row's time is stored in
+// a column called `timestamp` (see its CREATE TABLE in full_schema.sql).
+// mysqli's strict report mode (set in bootstrap.php) turns that into a
+// thrown mysqli_sql_exception the moment prepare() runs, and the portal's
+// global exception handler turns any uncaught exception into a 500 — so
+// EVERY administrator (global or site) got the portal's generic server-error
+// page (web/_core/templates/error-500.php) instead of their dashboard the
+// instant they opened it — or, with debug mode switched on, a raw stack
+// trace instead of that page (see bootstrap.php's exception handler).
+// Members never hit this, because the `if ($isAdmin === true)` guard below
+// skips the whole widget for them — that is why the fault was
+// administrator-only, reproduced and confirmed against a real MySQL 8.0.36
+// database on 13 September 2026.
 if ($isAdmin === true) {
     $actStmt = $mysqli->prepare(
         'SELECT COUNT(*) AS cnt FROM tblActivityLogs '
-        . 'WHERE createdAt >= DATE_SUB(NOW(), INTERVAL 24 HOUR) AND (siteID = ? OR siteID IS NULL)'
+        . 'WHERE `timestamp` >= DATE_SUB(NOW(), INTERVAL 24 HOUR) AND (siteID = ? OR siteID IS NULL)'
     );
     if ($actStmt !== false) {
         $actStmt->bind_param('i', $siteId);
