@@ -18,7 +18,7 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   0.3.0
+ * @version   0.4.0
  * -----------------------------------------------------------------------------
  */
 
@@ -41,6 +41,15 @@ if (App::isAdmin() === false) {
     return;
 }
 
+// 🛡️ Global administrator? App::isRootAdmin() is the one place that decides.
+//    For a short while this line ALSO read the flag straight off App::user()
+//    and converted it to a whole number. That was a stop-gap: App::isRootAdmin()
+//    used to compare with the text '1' while the database hands back the whole
+//    number 1, so it was false for every real global administrator, and nobody
+//    could delete a setting here or see a sensitive setting's stored text.
+//    App.php now accepts both forms (App::flagIsOn()), so the extra check was
+//    removed. Please do not put it back; the full note is beside the same line
+//    in web/_apps/settings/save.php.
 $isRoot = App::isRootAdmin();
 
 // -----------------------------------------------------------------------------
@@ -53,23 +62,167 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'delet
         header('Location: /settings');
         exit();
     }
+    // -------------------------------------------------------------------------
+    // 🚧 THE REFUSALS THAT MATCH THE SAVE HANDLER
+    // -------------------------------------------------------------------------
+    // Deleting a setting has always been reserved for a global administrator
+    // on this page, so the rules below are already satisfied by that gate
+    // alone: portal-wide rows, "public" and "public." names, and stored names
+    // outside the safe characters. They are still written out, for two
+    // reasons.
+    //
+    // First, the message. "Only root admins can delete settings" tells an
+    // administrator nothing about WHY this particular row is different from
+    // the rows they are allowed to change on the same screen. Saying that the
+    // row is portal-wide, or that it controls the public website, is the
+    // difference between an administrator who understands the rule and one
+    // who thinks the portal is broken.
+    //
+    // Second, and more important: if anybody ever widens the gate below from
+    // "global administrator" to "any administrator", these two checks are
+    // what keeps the rule true. Deleting a portal-wide row is not a smaller
+    // act than editing one — it removes the value every other organisation on
+    // the installation was reading.
+    //
+    // Deliberately NOT done here: telling somebody a row exists that they
+    // could not otherwise see. The lookup is scoped exactly like the delete,
+    // so a row belonging to another organisation reads as "not found".
+    $deleteId     = (int) ($_POST['settingID'] ?? 0);
+    $deleteSiteId = Site::id();
+
+    if ($deleteId > 0 && $isRoot === false) {
+        $target = null;
+        $lookup = $mysqli->prepare(
+            'SELECT settingKey, siteID FROM tblSettings '
+            . 'WHERE settingID = ? AND (siteID = ? OR siteID IS NULL) LIMIT 1'
+        );
+        if ($lookup !== false) {
+            $lookup->bind_param('ii', $deleteId, $deleteSiteId);
+            $lookup->execute();
+            $target = $lookup->get_result()->fetch_assoc();
+            $lookup->close();
+        }
+
+        if ($target !== null) {
+            $targetKey = (string) $target['settingKey'];
+
+            if ($target['siteID'] === null) {
+                $_SESSION['flash_msg']  = 'That setting is portal-wide: it is '
+                    . 'the value every organisation on this installation uses '
+                    . 'unless it has set its own. Only a global administrator '
+                    . 'can delete it.';
+                $_SESSION['flash_type'] = 'danger';
+                header('Location: /settings');
+                exit();
+            }
+
+            // 🔡 "public" on its own, or a name beginning "public.", in ANY
+            //    letter case. The database compares setting names without
+            //    regard to capital and small letters, so to it
+            //    "PUBLIC.example" is the same name as "public.example". The
+            //    first version of this test was case-sensitive and missed it.
+            //    The second missed the bare name "public", which replaces
+            //    every "public." setting when the portal loads its settings
+            //    (the full note is in web/_apps/settings/save.php).
+            if (strcasecmp($targetKey, 'public') === 0 || strncasecmp($targetKey, 'public.', 7) === 0) {
+                $_SESSION['flash_msg']  = 'The setting called "public", and every '
+                    . 'setting whose name begins "public.", control the public '
+                    . 'website, which anybody on the internet can read without '
+                    . 'signing in. Only a global administrator can delete those.';
+                $_SESSION['flash_type'] = 'danger';
+                header('Location: /settings');
+                exit();
+            }
+
+            // 🔤 A stored name using anything other than A to Z, digits, full
+            //    stops, hyphens and underscores is reserved too. The database
+            //    can treat such a name as EQUAL to a protected one: an accent
+            //    typed as a separate mark, full-width letters, or an invisible
+            //    character all compare equal to "public.example" on MySQL
+            //    8.0.36, while failing a character-by-character test. The same
+            //    rule, and the reasons for it, are in web/_apps/settings/save.php.
+            if (preg_match('/^[A-Za-z0-9._-]+\z/', $targetKey) !== 1) {
+                $_SESSION['flash_msg']  = 'This setting\'s name contains characters '
+                    . 'other than the letters A to Z, numbers, full stops (.), '
+                    . 'hyphens (-) and underscores (_). The database can treat a '
+                    . 'name like that as the same name as a protected setting, so '
+                    . 'only a global administrator can delete it.';
+                $_SESSION['flash_type'] = 'danger';
+                header('Location: /settings');
+                exit();
+            }
+        }
+    }
+
     if ($isRoot === true) {
-        $deleteId = (int) ($_POST['settingID'] ?? 0);
-        $deleteSiteId = Site::id();
         if ($deleteId > 0) {
-            // 🌐 Multi-site: only delete settings belonging to this site or global (NULL)
-            $stmt = $mysqli->prepare('DELETE FROM tblSettings WHERE settingID = ? AND (siteID = ? OR siteID IS NULL)');
+            // 🔒 THE RULES ARE WRITTEN INTO THE STATEMENT, NOT ONLY CHECKED ABOVE
+            //
+            //    WHAT WAS WRONG: the refusals above were decided in PHP from a
+            //    row read a moment earlier, and the DELETE then ran with only
+            //    the organisation scope in it. If the row changed in between,
+            //    the delete went ahead on the strength of a check made against
+            //    what the row used to be. Nothing was checked afterwards
+            //    either: "Setting deleted." was shown even when nothing was.
+            //
+            //    NOW the statement carries the same rules as the UPDATE in
+            //    web/_apps/settings/save.php, using $globalFlag (1 for a global
+            //    administrator, 0 for anybody else — worked out from $isRoot,
+            //    not written in as 1):
+            //      - this organisation's own row is allowed; a portal-wide row
+            //        only when $globalFlag is 1;
+            //      - when $globalFlag is 0, the name must be made only of A to
+            //        Z, digits, full stops, hyphens and underscores, must not
+            //        be empty, and must not be "public" or begin "public.", in
+            //        any letter case. This is the same text as $nameRuleSql in
+            //        web/_apps/settings/save.php, which explains each part and
+            //        what was checked on MySQL 8.0.36; if one changes, change
+            //        both. WHAT WAS WRONG: this used to test only
+            //        LOWER(settingKey) NOT LIKE 'public.%', which misses the
+            //        bare name "public" and names the database treats as equal
+            //        to a "public." name while LIKE does not (an accent typed as
+            //        a separate mark, an invisible character).
+            //    Today only a global administrator reaches this line, so both
+            //    extra conditions pass. They are in the statement anyway, so
+            //    that if the gate around this block is ever widened, the
+            //    database still refuses what the refusals above refuse instead
+            //    of quietly deleting it.
+            //
+            //    Then the number of rows actually removed is checked, and zero
+            //    is reported as "nothing was deleted", never as success.
+            $globalFlag  = (int) $isRoot;
+            $rowsDeleted = 0;
+            $stmt = $mysqli->prepare(
+                'DELETE FROM tblSettings '
+                . 'WHERE settingID = ? '
+                . 'AND (siteID = ? OR (siteID IS NULL AND ? = 1)) '
+                . "AND (? = 1 OR (CHAR_LENGTH(settingKey) = LENGTH(settingKey) "
+                . "AND settingKey COLLATE utf8mb4_bin NOT REGEXP '[^A-Za-z0-9._-]' "
+                . "AND settingKey <> '' "
+                . "AND LOWER(settingKey) <> 'public' "
+                . "AND LOWER(settingKey) NOT LIKE 'public.%'))"
+            );
             if ($stmt !== false) {
-                $stmt->bind_param('ii', $deleteId, $deleteSiteId);
+                $stmt->bind_param('iiii', $deleteId, $deleteSiteId, $globalFlag, $globalFlag);
                 $stmt->execute();
+                $rowsDeleted = $stmt->affected_rows;
                 $stmt->close();
             }
-            Logger::activity('SettingsDelete', 'Deleted setting ID ' . $deleteId, $_SESSION['user_id'] ?? null);
-            $_SESSION['flash_msg']  = 'Setting deleted.';
-            $_SESSION['flash_type'] = 'success';
+            if ($rowsDeleted > 0) {
+                Logger::activity('SettingsDelete', 'Deleted setting ID ' . $deleteId, $_SESSION['user_id'] ?? null);
+                $_SESSION['flash_msg']  = 'Setting deleted.';
+                $_SESSION['flash_type'] = 'success';
+            } else {
+                $_SESSION['flash_msg']  = 'Nothing was deleted. That setting could not '
+                    . 'be found (somebody may have removed it a moment ago), or it does '
+                    . 'not belong to the organisation you are working in.';
+                $_SESSION['flash_type'] = 'warning';
+            }
         }
     } else {
-        $_SESSION['flash_msg']  = 'Only root admins can delete settings.';
+        $_SESSION['flash_msg']  = 'Only a global administrator can delete a '
+            . 'setting. An administrator of one organisation can change that '
+            . 'organisation\'s own settings, but not remove them.';
         $_SESSION['flash_type'] = 'danger';
     }
     header('Location: /settings');

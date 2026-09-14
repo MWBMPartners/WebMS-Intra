@@ -12,11 +12,32 @@
  * help text, and (for select) options. Renders proper inputs instead of the
  * generic dot-notation editor, with inline explanations and validation.
  *
+ * WHO MAY SAVE HERE, AND WHY IT IS NARROWER THAN WHO MAY LOOK
+ * -----------------------------------------------------------------------------
+ * EVERY row this page writes is portal-wide — the INSERT below puts NULL in
+ * the siteID column, on purpose, because these are installation-level choices
+ * (security headers, maintenance mode, backup alerting, upgrade policy) and
+ * not per-organisation ones.
+ *
+ * That means one click here changes what every organisation on the
+ * installation gets. Until now the page was gated on App::isAdmin(), which is
+ * true for an administrator of a SINGLE organisation as well as for a global
+ * administrator — so an administrator of one tenant could put the whole
+ * installation into maintenance mode, or switch off a security header for
+ * everybody.
+ *
+ * Saving is now reserved for a global administrator. Looking is not: an
+ * administrator of one organisation can still read these values, which is
+ * useful when they are trying to understand behaviour they cannot change, and
+ * reveals nothing sensitive. The form is shown read-only to them, with the
+ * reason written on the page, rather than letting them fill it in and be
+ * refused afterwards.
+ *
  * @package   Portal\Admin
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.0.0
+ * @version   1.1.0
  * @link      https://github.com/MWBMPartners/webMS-Intra/issues/252
  * -----------------------------------------------------------------------------
  */
@@ -25,6 +46,7 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\Logger;
 use Portal\Core\Router;
 
 Auth::ensureSession();
@@ -33,6 +55,20 @@ if (App::isAdmin() === false) {
     http_response_code(403);
     exit('Forbidden');
 }
+
+// 🛡️ Looking is allowed for any administrator; saving is not. See the note in
+//    the file header for why. Worked out once and used by both the save
+//    handler and the form below, so the two can never disagree.
+//
+//    App::isRootAdmin() is the one place that decides. For a short while this
+//    line ALSO read the flag straight off App::user() and converted it to a
+//    whole number. That was a stop-gap: App::isRootAdmin() used to compare with
+//    the text '1' while the database hands back the whole number 1, which made
+//    every form on this page read-only for everybody. App.php now accepts both
+//    forms (App::flagIsOn()), so the extra check was removed. Please do not put
+//    it back; the full note is beside the same line in
+//    web/_apps/settings/save.php.
+$mayChangePortalWideSettings = App::isRootAdmin();
 
 // -----------------------------------------------------------------------------
 // 🗂️ Group definitions. Each field: key (full dot-notation setting key),
@@ -108,7 +144,64 @@ $group = $groups[$groupKey];
 // -----------------------------------------------------------------------------
 $flash = '';
 $flashType = 'info';
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && Auth::verifyCsrf($_POST['csrf_token'] ?? '') === true) {
+
+// 🎫 Check the form token ONCE, and use the answer in both branches below.
+//
+//    WHAT WAS WRONG: each branch called Auth::verifyCsrf() for itself. That
+//    method replaces the session's token the moment a check succeeds, so that
+//    a captured form cannot be sent a second time. For a global administrator
+//    the first call — in the refusal branch — succeeded and used the token up;
+//    that branch was then skipped, correctly, because they ARE allowed to save;
+//    and the second call, guarding the save itself, compared the form with the
+//    brand-new token and failed. So nothing was saved and no message was shown.
+//    Everybody else was unaffected: they are refused in the first branch, which
+//    is exactly what should happen to them.
+//    Checked 13 September 2026 by running this page against MySQL 8.0.36 as a
+//    global administrator: before this change the row was left untouched with
+//    no message; after it, the row was saved.
+$isValidPost = $_SERVER['REQUEST_METHOD'] === 'POST'
+    && Auth::verifyCsrf($_POST['csrf_token'] ?? '') === true;
+
+if ($isValidPost === true && $mayChangePortalWideSettings === false) {
+    // 🚧 Refusal 1 — portal-wide rows are for a global administrator only.
+    //    Every key on this page is one, so this single check covers the whole
+    //    form. It is also the reason there is no separate test here for keys
+    //    beginning "public." (the other rule that arrived with this change):
+    //    such a key could only ever be added to the $groups list above, and
+    //    getting past this point already requires being a global
+    //    administrator. If this page is ever given a field that is saved
+    //    PER ORGANISATION rather than portal-wide, that field will need the
+    //    same name rules web/_apps/settings/save.php applies, because this
+    //    check will no longer stand in for them. In short:
+    //      - "public" on its own is reserved exactly like "public." names, in
+    //        any letter case. A row called just "public" wipes out every
+    //        "public." setting when the portal loads its settings;
+    //      - a stored name using anything other than A-Z, digits, full stops,
+    //        hyphens and underscores is reserved too, because the database can
+    //        treat such a name as equal to a reserved one (an accent written as
+    //        a separate mark, full-width letters, invisible characters);
+    //      - a name must never be both a value and a group: "portal" beside
+    //        "portal.headers.coop" makes one silently replace the other.
+    //    The keys on this page are fixed in the $groups list above and none of
+    //    them breaks these rules, which is why nothing extra is checked here.
+    //
+    //    The refusal is worded, not silent. An administrator who presses Save
+    //    and sees nothing happen assumes the portal is broken and presses it
+    //    again; one who is told the rule stops.
+    $flash = 'These settings are portal-wide: they apply to every '
+        . 'organisation on this installation, not only yours. Only a global '
+        . 'administrator can change them. Your own organisation\'s settings '
+        . 'are on the main Settings page and are unaffected.';
+    $flashType = 'danger';
+    Logger::activity(
+        'SettingsGroupSaveRefused',
+        'Refused: portal-wide settings group "' . $groupKey . '" may only be changed by a global administrator',
+        $_SESSION['user_id'] ?? null
+    );
+} elseif ($isValidPost === true) {
+    // 💾 Reached only by a global administrator with a valid form token. The
+    //    token was checked once, above; checking it again here is what used to
+    //    make this branch unreachable (see the note above $isValidPost).
     $db = App::db();
     try {
         foreach ($group['fields'] as $key => $def) {
@@ -165,6 +258,13 @@ $pageSection = 'admin';
 $breadcrumbs = ['Dashboard' => '/', 'Admin' => '/admin', 'Settings' => '/admin/settings', $group['title'] => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 $csrf = Auth::csrfToken();
+
+// 🔒 Attribute added to every control when the person looking may not save.
+//    This is a COURTESY, not the control: a disabled field is only a hint to
+//    the browser and anybody can send the form anyway. The refusal in the save
+//    handler above is what actually enforces the rule. Both are needed — one
+//    to be honest with the person, one to be safe.
+$readOnlyAttr = $mayChangePortalWideSettings === false ? ' disabled' : '';
 ?>
 
 <h1 class="mb-1"><i class="<?php echo htmlspecialchars((string) $group['icon'], ENT_QUOTES, 'UTF-8'); ?> me-2"></i><?php echo htmlspecialchars((string) $group['title'], ENT_QUOTES, 'UTF-8'); ?></h1>
@@ -172,6 +272,19 @@ $csrf = Auth::csrfToken();
 
 <?php if ($flash !== ''): ?>
     <div class="alert alert-<?php echo htmlspecialchars($flashType, ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars($flash, ENT_QUOTES, 'UTF-8'); ?></div>
+<?php endif; ?>
+
+<?php if ($mayChangePortalWideSettings === false): ?>
+    <!-- 👀 Read-only notice. Shown instead of letting somebody fill the form in
+         and only find out it was refused after they pressed Save. -->
+    <div class="alert alert-info">
+        <i class="fa-solid fa-circle-info me-2"></i>
+        These settings apply to <strong>every organisation</strong> on this
+        installation, not only yours, so only a global administrator can change
+        them. You can see the current values here. Your own organisation's
+        settings are on the <a href="/admin/settings">main Settings page</a> and
+        are unaffected.
+    </div>
 <?php endif; ?>
 
 <form method="post">
@@ -186,7 +299,7 @@ $csrf = Auth::csrfToken();
                     <?php if ($def['type'] === 'toggle'): ?>
                         <div class="form-check form-switch">
                             <input class="form-check-input" type="checkbox" id="<?php echo htmlspecialchars($formName, ENT_QUOTES, 'UTF-8'); ?>"
-                                   name="<?php echo htmlspecialchars($formName, ENT_QUOTES, 'UTF-8'); ?>" <?php echo ($val === '1' || $val === 'true') ? 'checked' : ''; ?>>
+                                   name="<?php echo htmlspecialchars($formName, ENT_QUOTES, 'UTF-8'); ?>" <?php echo ($val === '1' || $val === 'true') ? 'checked' : ''; ?><?php echo $readOnlyAttr; ?>>
                             <label class="form-check-label" for="<?php echo htmlspecialchars($formName, ENT_QUOTES, 'UTF-8'); ?>">
                                 <strong><?php echo htmlspecialchars((string) $def['label'], ENT_QUOTES, 'UTF-8'); ?></strong>
                             </label>
@@ -197,10 +310,10 @@ $csrf = Auth::csrfToken();
                         </label>
                         <?php if ($def['type'] === 'textarea'): ?>
                             <textarea class="form-control form-control-sm" id="<?php echo htmlspecialchars($formName, ENT_QUOTES, 'UTF-8'); ?>"
-                                      name="<?php echo htmlspecialchars($formName, ENT_QUOTES, 'UTF-8'); ?>" rows="2"><?php echo htmlspecialchars($val, ENT_QUOTES, 'UTF-8'); ?></textarea>
+                                      name="<?php echo htmlspecialchars($formName, ENT_QUOTES, 'UTF-8'); ?>" rows="2"<?php echo $readOnlyAttr; ?>><?php echo htmlspecialchars($val, ENT_QUOTES, 'UTF-8'); ?></textarea>
                         <?php elseif ($def['type'] === 'select'): ?>
                             <select class="form-select form-select-sm" id="<?php echo htmlspecialchars($formName, ENT_QUOTES, 'UTF-8'); ?>"
-                                    name="<?php echo htmlspecialchars($formName, ENT_QUOTES, 'UTF-8'); ?>">
+                                    name="<?php echo htmlspecialchars($formName, ENT_QUOTES, 'UTF-8'); ?>"<?php echo $readOnlyAttr; ?>>
                                 <?php foreach ((array) $def['options'] as $optVal => $optLabel): ?>
                                     <option value="<?php echo htmlspecialchars((string) $optVal, ENT_QUOTES, 'UTF-8'); ?>" <?php echo $val === (string) $optVal ? 'selected' : ''; ?>>
                                         <?php echo htmlspecialchars((string) $optLabel, ENT_QUOTES, 'UTF-8'); ?>
@@ -212,7 +325,7 @@ $csrf = Auth::csrfToken();
                                    <?php echo isset($def['min']) ? 'min="' . (int) $def['min'] . '"' : ''; ?>
                                    class="form-control form-control-sm" id="<?php echo htmlspecialchars($formName, ENT_QUOTES, 'UTF-8'); ?>"
                                    name="<?php echo htmlspecialchars($formName, ENT_QUOTES, 'UTF-8'); ?>"
-                                   value="<?php echo htmlspecialchars($val, ENT_QUOTES, 'UTF-8'); ?>">
+                                   value="<?php echo htmlspecialchars($val, ENT_QUOTES, 'UTF-8'); ?>"<?php echo $readOnlyAttr; ?>>
                         <?php endif; ?>
                     <?php endif; ?>
                     <?php if (($def['help'] ?? '') !== ''): ?>
@@ -222,7 +335,9 @@ $csrf = Auth::csrfToken();
                 </div>
             <?php endforeach; ?>
 
-            <button type="submit" class="btn btn-primary">Save</button>
+            <?php if ($mayChangePortalWideSettings === true): ?>
+                <button type="submit" class="btn btn-primary">Save</button>
+            <?php endif; ?>
             <a href="/admin/settings" class="btn btn-outline-secondary">All settings</a>
         </div>
     </div>

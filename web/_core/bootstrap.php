@@ -90,9 +90,11 @@ unset($PORTAL_BRAND_DEFAULTS);
 // inside the beta/dev directory names and misclassify them as prod.
 // See: https://www.php.net/manual/en/function.getenv.php
 $env = getenv('PORTAL_ENV');
+$envSource = 'environment';
 if ($env === false || $env === '') {
     // 🔍 Auto-detect from the front-controller directory name
     $docRoot = $_SERVER['DOCUMENT_ROOT'] ?? '';
+    $envSource = 'folder';
     if (str_contains($docRoot, 'public_html_dev') === true || str_contains($docRoot, 'alpha_html') === true) {
         $env = 'dev';
     } elseif (str_contains($docRoot, 'public_html_beta') === true || str_contains($docRoot, 'beta_html') === true) {
@@ -101,9 +103,36 @@ if ($env === false || $env === '') {
         $env = 'prod';
     } else {
         $env = 'dev'; // Default to dev for safety
+        $envSource = 'fallback';
     }
 }
 define('PORTAL_ENV', $env);
+
+// 🧭 PORTAL_ENV_SOURCE — HOW the channel above was decided, not WHAT it is.
+//    Exactly one of:
+//      'environment'  the PORTAL_ENV environment variable was set;
+//      'folder'       a recognised web folder name was found in DOCUMENT_ROOT;
+//      'fallback'     neither — the 'dev' above is a last-resort guess.
+//
+//    It exists for the pre-release gate (Gatekeeper::shouldEnforce()). That
+//    gate asks for a staff sign-in on the 'dev', 'beta' and 'alpha' channels
+//    ('alpha' only ever comes from the environment variable). On a LIVE
+//    server whose web folder simply has a name this code does not recognise,
+//    the guess above says 'dev', and gating on that guess would stop every
+//    ordinary member using the live site. So the gate only engages when the
+//    channel came from 'environment' or 'folder', never from 'fallback'.
+//
+//    ⚠️ DELIBERATELY NOT CHANGED HERE — please do not "tidy" these:
+//    how PORTAL_ENV itself is decided (including falling back to 'dev'), and
+//    the error-display rules just below, which still show PHP errors on
+//    screen whenever PORTAL_ENV is not 'prod' — including after a fallback
+//    guess. Both are known and both are left exactly as they were on purpose:
+//    Step 2 of the build plan (.claude/plans/public-door-3-build-plan.md)
+//    replaces this folder-name guessing with an explicit channel file and
+//    deals with both then. A partial change here would only be contradicted
+//    by that step.
+define('PORTAL_ENV_SOURCE', $envSource);
+unset($envSource);
 
 // 🛡️ PHP error display hardening
 // -----------------------------------------------------------------------------

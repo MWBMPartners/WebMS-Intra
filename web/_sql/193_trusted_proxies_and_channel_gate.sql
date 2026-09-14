@@ -1,0 +1,180 @@
+-- =============================================================================
+-- Migration 193: who may tell us a visitor's address, and who may see a
+--                pre-release copy of the portal
+-- =============================================================================
+-- Three settings. No tables, no columns, no indexes. Nothing changes shape.
+--
+-- All three are the database half of a code change that landed at the same
+-- time. None of them publishes anything, and none alters what any existing
+-- page does for anybody who is allowed to use it today.
+--
+-- All three are read from the PORTAL-WIDE row only: the row with no
+-- organisation against it. A row of the same name saved for one organisation
+-- is ignored, on purpose. Otherwise an administrator of a single organisation
+-- could add a row of their own and undo the protection for everybody who
+-- reaches the portal through that organisation's address. Changing the
+-- portal-wide row needs a global administrator.
+--
+-- -----------------------------------------------------------------------------
+-- 1. portal.trustedProxies — SEEDED EMPTY, AND EMPTY IS CORRECT FOR MOST SITES
+-- -----------------------------------------------------------------------------
+-- Every "too many attempts" limit in the portal counts against the address a
+-- request came from: the sign-in lockout, the two-step-code throttle, the
+-- limits on the public prayer-request and lost-property forms.
+--
+-- Until now the portal worked that address out by reading two request headers,
+-- CF-Connecting-IP and X-Forwarded-For, and believing whichever it found. A
+-- request header is only text the caller types, so anybody could send a
+-- different value on every request and look like a brand new person each time.
+-- Every one of those limits could be walked straight past.
+--
+-- Now a forwarded header is believed only when the machine that actually
+-- opened the connection is listed in this setting. EMPTY means "believe
+-- nobody, and use the address the web server itself saw". That is the right
+-- setting for ordinary hosting, where visitors connect straight to the server
+-- with nothing in between, and it is why this change makes no difference at
+-- all to such a site.
+--
+-- It needs a value only when something genuinely sits in front of the portal
+-- and passes requests along, such as Cloudflare or a load balancer. It then
+-- lists that thing's machines:
+--   - as single addresses, for example 192.0.2.10 or 2001:db8::10
+--   - or as ranges written with a slash, for example 173.245.48.0/20 or
+--     2400:cb00::/32. The number after the slash is how many leading bits of
+--     the address are fixed, so 173.245.48.0/20 covers 4,096 IPv4 addresses.
+--   - separated by commas. A new line or a space between entries works too,
+--     so a published list can be pasted in exactly as it comes.
+--   - with nothing at all between the address, the slash and the number.
+--     If a space, a tab, a new line or a comma touches the slash, as in
+--     "192.0.2.1 /24" or "192.0.2.1/ 24", the whole thing is ignored, and the
+--     address in front of the slash is NOT trusted on its own either. A
+--     mistyped range must do nothing at all, never something different from
+--     what was written.
+-- IPv4 and IPv6 are both understood, and an IPv4 address written the IPv6 way
+-- (::ffff:192.0.2.10) counts as the same machine as 192.0.2.10.
+--
+-- An entry is IGNORED, and never trusted, when it is not a valid address or
+-- range, when the number after the slash is too big (over 32 for IPv4, over
+-- 128 for IPv6), or when that number is 0. A range of /0 (0.0.0.0/0 or ::/0)
+-- means "every address on the internet", and trusting the whole internet
+-- would bring back exactly the trick this setting exists to stop. Because a
+-- mistyped entry quietly does nothing, check after changing this that failed
+-- sign-ins in the activity log show visitors' own addresses, not the proxy's.
+--
+-- -----------------------------------------------------------------------------
+-- 2. portal.trustedProxyHeader — SEEDED 'x-forwarded-for'
+-- -----------------------------------------------------------------------------
+-- Which ONE header the machines listed above are relied on to fill in. Only
+-- that header is ever read. Two values are understood:
+--
+--   x-forwarded-for   The default. A standard list that every proxy ADDS to,
+--                     putting the address it received the request from on the
+--                     right-hand end. The portal reads it from the right,
+--                     stepping left past each listed machine, and takes the
+--                     first address that is NOT listed as the visitor.
+--                     Anything further left was written by the visitor and is
+--                     never believed.
+--
+--   cf-connecting-ip  Cloudflare's own header. Cloudflare replaces it with the
+--                     visitor's address on every request, whatever the visitor
+--                     sent. An ordinary proxy or load balancer passes it along
+--                     untouched, so behind one of those a visitor could set it
+--                     to anything they liked.
+--
+-- Anything else behaves exactly like x-forwarded-for. Capital letters do not
+-- matter, so CF-Connecting-IP is fine. Only the operator knows which header
+-- their own proxy guarantees to overwrite, which is why this is a setting and
+-- the portal does not guess.
+--
+-- WHAT AN OPERATOR BEHIND CLOUDFLARE SHOULD ENTER
+--   portal.trustedProxies      every range Cloudflare publishes, from BOTH
+--                              https://www.cloudflare.com/ips-v4 and
+--                              https://www.cloudflare.com/ips-v6
+--   portal.trustedProxyHeader  cf-connecting-ip
+--
+--   Why every range, and both lists: Cloudflare reaches the server from many
+--   machines, over IPv4 or IPv6. A Cloudflare machine missing from the list is
+--   not trusted, so every visitor arriving through it would appear to be that
+--   one Cloudflare address and would share one limit. One person getting a
+--   password wrong a few times would then lock out everybody arriving that
+--   way. Cloudflare changes these lists rarely, but it does change them, so
+--   compare them with the setting now and then.
+--
+--   Why cf-connecting-ip: Cloudflare overwrites it on every request with a
+--   single address, so there is no list to walk and nothing for a visitor to
+--   add to.
+--
+--   What this cannot protect against: once a machine is trusted, it is
+--   trusted. Listing a range is a decision that everything inside it passes
+--   visitors' addresses on honestly.
+--
+-- -----------------------------------------------------------------------------
+-- 3. portal.gatekeeper.enabled — SEEDED ON, AND IT IS A WAY OUT, NOT A FEATURE
+-- -----------------------------------------------------------------------------
+-- The portal ships a class whose only job is to keep strangers out of the
+-- alpha and beta copies, the ones running unfinished work. Nothing had ever
+-- called it, so those pre-release copies were open to anybody who knew the
+-- address. It is now called on the dev and beta channels only, never on the
+-- live one.
+--
+-- It is also never applied when the portal only GUESSED its channel. The
+-- channel comes from the PORTAL_ENV environment variable, or else from the
+-- name of the web folder, and when neither is recognised the portal settles on
+-- "development". Gating on that guess could ask every ordinary member of a
+-- live site whose web folder has an unexpected name to sign in as staff, so
+-- the gate declines and writes a line to the PHP error log instead. That is
+-- why seeding this ON is safe.
+--
+-- The setting exists so there is still a way back if the gate ever shuts out
+-- the wrong people: setting it to false switches the gate off. An
+-- administrator is never shut out by the gate itself, because the sign-in
+-- pages are on its open list and anybody with the Admin or Root Admin flag on
+-- their user record passes it.
+--
+-- -----------------------------------------------------------------------------
+-- WHAT REPLAY DOES
+-- -----------------------------------------------------------------------------
+-- Nothing, on a database that already has these rows. The installer runs
+-- full_schema.sql and then replays every numbered migration regardless of
+-- which have already run, so the insert below carries ON DUPLICATE KEY UPDATE
+-- and touches only the recorded default. A value an administrator has since
+-- typed in is never overwritten. A portal-wide row is recognised as a
+-- duplicate because of the uq_setting_key_scope key added by migration 187.
+--
+-- -----------------------------------------------------------------------------
+-- A NOTE FOR WHOEVER WRITES THE NEXT MIGRATION
+-- -----------------------------------------------------------------------------
+-- The public-website plan (.claude/plans/public-door-3-build-plan.md) once
+-- described a migration 193 of its own. That number is taken by this file.
+-- The public-website work needs the next free number, and it must NOT seed
+-- portal.trustedProxies or portal.trustedProxyHeader a second time.
+--
+-- @package   Portal\Core
+-- @author    MWBM Partners Ltd (t/a MWservices)
+-- @copyright 2026-present MWBM Partners Ltd (t/a MWservices)
+-- @license   All Rights Reserved
+-- =============================================================================
+
+-- #############################################################################
+-- ⚙️  A. The three settings
+-- #############################################################################
+-- All portal-wide (siteID empty). Which machines may report a visitor's
+-- address, which header they fill in, and whether this copy of the portal is
+-- gated are all facts about the installation, not about any one organisation.
+-- This statement is repeated word for word in full_schema.sql.
+
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'portal.trustedProxies',     '',                '',                0),
+    (NULL, 'portal.trustedProxyHeader', 'x-forwarded-for', 'x-forwarded-for', 0),
+    (NULL, 'portal.gatekeeper.enabled', 'true',            'true',            0)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
+
+-- #############################################################################
+-- 📋 B. Self-record (the installer replays every numbered migration after
+--        full_schema.sql and ignores tblMigrations, so this INSERT has to be
+--        safe to run a second time)
+-- #############################################################################
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('193_trusted_proxies_and_channel_gate.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;

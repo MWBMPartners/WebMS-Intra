@@ -8656,3 +8656,41 @@ ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
 INSERT INTO `tblMigrations` (`filename`) VALUES ('192_removable_creator_links.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- ── from 193_trusted_proxies_and_channel_gate.sql ─────────────────────────
+-- Three settings, all portal-wide, no change to the shape of anything. The
+-- migration file itself carries the full explanation, including exactly what
+-- an operator behind Cloudflare should enter. All three are read from the
+-- portal-wide row only, so a row saved for one organisation cannot override
+-- them.
+--
+-- portal.trustedProxies — which machines, or ranges of machines, are allowed
+-- to tell us a visitor's real address. Single addresses or slash ranges
+-- (173.245.48.0/20, 2400:cb00::/32), IPv4 or IPv6, separated by commas. A
+-- malformed entry, a too-large size after the slash, or a /0 range is ignored
+-- and never trusted. Seeded EMPTY, which is correct for ordinary hosting,
+-- where a visitor connects straight to the server: believe nobody, and use the
+-- address the web server itself saw. It matters because every "too many
+-- attempts" limit in the portal counts against that address, and a request
+-- header is only text the caller types.
+--
+-- portal.trustedProxyHeader — the ONE header those machines are relied on to
+-- fill in. 'x-forwarded-for' (the default, read from the right-hand end,
+-- stepping left past trusted machines) or 'cf-connecting-ip' (Cloudflare,
+-- which overwrites it on every request). Anything else behaves as the default.
+--
+-- portal.gatekeeper.enabled — whether the dev and beta copies of the portal
+-- ask for a staff sign-in before showing anything. Seeded ON. Never applies to
+-- the live channel, and never when the channel was only a fallback guess
+-- rather than set by the PORTAL_ENV environment variable or a recognised web
+-- folder name. The setting is a way back if the gate ever shuts out the wrong
+-- people.
+
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'portal.trustedProxies',     '',                '',                0),
+    (NULL, 'portal.trustedProxyHeader', 'x-forwarded-for', 'x-forwarded-for', 0),
+    (NULL, 'portal.gatekeeper.enabled', 'true',            'true',            0)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('193_trusted_proxies_and_channel_gate.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;

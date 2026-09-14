@@ -28,6 +28,7 @@ if (is_readable($authCredsPath) === false) {
 require_once dirname(__DIR__) . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEPARATOR . 'bootstrap.php';
 
 use Portal\Core\Auth;
+use Portal\Core\Gatekeeper;
 use Portal\Core\Maintenance;
 use Portal\Core\Router;
 
@@ -58,6 +59,88 @@ if (Maintenance::isActive() === true
     && Maintenance::currentUserCanBypass() === false
 ) {
     Maintenance::renderAndExit();
+}
+
+// 🚧 Pre-release channel gate (alpha / beta).
+// -----------------------------------------------------------------------------
+// WHAT WAS WRONG
+// -----------------------------------------------------------------------------
+// web/_core/Gatekeeper.php exists to keep strangers out of the alpha and beta
+// copies of the portal — the ones running unfinished work. Searching the whole
+// of web/ for the word "Gatekeeper" found the class itself and one line of
+// translated text, and nothing else. Nothing had ever called it. So the
+// pre-release portals were open to anybody who knew the address, and had been
+// since the class was written.
+//
+// This is the project's "shipped but unreachable" pattern pointing the
+// dangerous way round: not a feature nobody can use, but a protection nobody
+// was getting.
+//
+// -----------------------------------------------------------------------------
+// WHY IT IS PLACED HERE, AFTER THE MAINTENANCE GATE
+// -----------------------------------------------------------------------------
+// It has to come after Auth::ensureSession() above, because it needs to know
+// who is signed in. It comes after the maintenance gate so that an upgrade in
+// progress still shows the "back shortly" page rather than a sign-in redirect.
+// It comes before Router::dispatch() because from that point on the request
+// belongs to a page.
+//
+// It cannot lock anybody out of the installer. When the portal has not been
+// installed yet, the top of this file hands the request to the installation
+// wizard and stops, long before this line is reached.
+//
+// -----------------------------------------------------------------------------
+// WHEN IT RUNS — decided in ONE place, Gatekeeper::shouldEnforce()
+// -----------------------------------------------------------------------------
+// Only on the 'dev', 'beta' and 'alpha' channels, never on the live one. Those
+// three are named explicitly, in Gatekeeper::VALID_CHANNELS, which enforce()
+// uses too. So a future new value, or an unexpected value from the PORTAL_ENV
+// environment variable, cannot switch the gate on by accident.
+// ('alpha' was missing from the first version, although the in-app help says
+// alpha sites are gated. bootstrap.php only produces 'alpha' from the
+// environment variable, so it is always a deliberate choice.)
+//
+// And only when bootstrap.php worked the channel out from something deliberate
+// — PORTAL_ENV_SOURCE is 'environment' or 'folder' — never from its
+// last-resort guess, 'fallback'.
+//
+// WHAT WAS WRONG: the first version gated on 'dev' however that had been
+// decided. bootstrap.php settles on 'dev' when it recognises neither an
+// environment variable nor a web folder name, so a LIVE server whose web folder
+// simply has an unexpected name would have asked every ordinary member to sign
+// in as staff. When the gate now declines for that reason it writes one line to
+// PHP's error log, so a genuine pre-release copy left open by it is noticed.
+//
+// The defined() check covers a half-finished deploy, in which this file has
+// arrived but an older bootstrap.php that does not set PORTAL_ENV_SOURCE is
+// still in place. The channel is then treated as a guess: the direction that
+// cannot lock members out.
+//
+// -----------------------------------------------------------------------------
+// THE WAY OUT, IF THIS EVER SHUTS THE WRONG PEOPLE OUT
+// -----------------------------------------------------------------------------
+// portal.gatekeeper.enabled, seeded 'true'. Setting it to 'false' switches the
+// gate off. An administrator is never locked out by the gate itself — the
+// sign-in pages are on its open list, and anybody with the Admin or Root Admin
+// flag on their user record passes it — so there is always a way back in to
+// change it. Only the PORTAL-WIDE row of that setting is read (a row added for
+// one organisation is ignored — see Gatekeeper::shouldEnforce()), and changing
+// the portal-wide row needs a global administrator.
+//
+// -----------------------------------------------------------------------------
+// KNOWN CONSEQUENCE, WRITTEN DOWN RATHER THAN DISCOVERED
+// -----------------------------------------------------------------------------
+// On the alpha and beta channels this now also refuses the addresses that
+// machines rather than people use: the scheduled-job addresses under /cron/,
+// the payment and Zoom notification addresses, and the newsletter open/click
+// trackers. Each of those already carries its own secret or signature, so they
+// were never the open door this gate is about. If a scheduled job or a payment
+// notification is genuinely wanted on a pre-release channel, add 'cron' to
+// Gatekeeper::OPEN_PREFIXES (and the individual addresses to OPEN_PATHS)
+// rather than switching the whole gate off.
+$portalChannelSource = defined('PORTAL_ENV_SOURCE') === true ? (string) PORTAL_ENV_SOURCE : 'fallback';
+if (Gatekeeper::shouldEnforce(PORTAL_ENV, $portalChannelSource) === true) {
+    Gatekeeper::enforce(PORTAL_ENV);
 }
 
 Router::dispatch($mysqli);
