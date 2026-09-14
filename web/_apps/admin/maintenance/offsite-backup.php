@@ -3,14 +3,59 @@
 /**
  * Admin — Off-site backup status + manual trigger.
  *
+ * WHO MAY SAVE THE SETTINGS, AND WHY IT IS NARROWER THAN WHO MAY LOOK
+ * -----------------------------------------------------------------------------
+ * The settings form on this page saves portal-wide rows (nothing in the siteID
+ * column). There is one off-site copy for the whole installation — every
+ * organisation's records live in the same database, so they are in the same
+ * snapshot — which makes where that copy goes, how long it is kept and who is
+ * told when it fails decisions for the installation, not for one organisation.
+ *
+ * Until 13 September 2026 the only check was App::isAdmin(), which is true for
+ * an administrator of a SINGLE organisation as well as for a global
+ * administrator (see web/_core/App.php). So an administrator of one
+ * organisation could switch the off-site copy off for everybody, point it at
+ * a storage destination of their own choosing, or send the failure alerts to
+ * themselves. The owner decided that settings affecting every organisation are
+ * for a global administrator only.
+ *
+ * An administrator of one organisation can still open the page and see the
+ * backup status. The settings form is shown to them read-only, with the
+ * reason written above it, and the save is refused on the server whatever the
+ * page shows, because a form can be sent without ever opening the page.
+ *
+ * "RUN NOW" IS A SEPARATE ACTION, GATED THE SAME WAY
+ * -----------------------------------------------------------------------------
+ * The "Run now" button does not save a setting — it posts to a different
+ * handler (web/_apps/admin/maintenance/offsite-backup-run.php) that executes
+ * the off-site sync script immediately. But that script archives and uploads
+ * the SAME shared snapshot every organisation's data lives in, and its own
+ * pruning step can delete older remote copies too, so it carries exactly the
+ * same installation-wide blast radius as the settings above it. Until
+ * 13 September 2026 this page showed the button (and the text inviting its
+ * use) to any administrator, without checking who they were, whenever the
+ * sync script and encryption key existed on disk — so an administrator of one
+ * organisation could trigger, and indirectly prune, the off-site copy every
+ * other organisation depends on. The button and its explanatory text are now
+ * shown only when `App::isRootAdmin()` is true; a site administrator instead
+ * sees a short explanation and no button. The handler itself
+ * (offsite-backup-run.php) is being brought into line with this in the same
+ * round of fixes, by a change to that file specifically.
+ *
  * @package   Portal\Admin
+ * @author    MWBM Partners Ltd (t/a MWservices)
+ * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
+ * @license   All Rights Reserved
+ * @version   1.2.0
  * @link      https://github.com/MWBMPartners/webMS-Intra/issues/249
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/495
  */
 
 declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\Logger;
 use Portal\Core\Router;
 
 Auth::ensureSession();
@@ -20,6 +65,23 @@ if (App::isAdmin() === false) {
     return;
 }
 
+// 🛡️ Looking is allowed for any administrator; saving the settings is not. See
+//    the note in the file header for why. Worked out once and used by both the
+//    handler and the form below, so the two can never disagree.
+$mayChangePortalWideSettings = App::isRootAdmin();
+
+// 🛡️ "Run now" is a different action from saving the settings above (it
+//    executes the sync script immediately rather than writing a row), but it
+//    carries the same installation-wide reach, so it needs the same
+//    permission. Kept as its own named variable rather than reusing
+//    $mayChangePortalWideSettings, even though both currently read
+//    App::isRootAdmin(): the two questions ("may this visitor change the
+//    settings" and "may this visitor run the script now") are conceptually
+//    different, and giving each its own name means a future change to one
+//    can't silently change the other's behaviour too. See "RUN NOW IS A
+//    SEPARATE ACTION" in the file header for the history of why this exists.
+$mayRunOffsiteBackup = App::isRootAdmin();
+
 $db = App::db();
 
 // POST handler — must run before any output so the redirect is clean.
@@ -27,6 +89,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (string) ($_POST['action'] ?? '') =
     if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
         http_response_code(400);
         exit('Bad request');
+    }
+
+    // 🚧 Refused BEFORE anything is written: every key this form saves is
+    //    portal-wide. The refusal is worded rather than a bare "forbidden",
+    //    because an administrator who presses Save and is told nothing assumes
+    //    the portal is broken and tries again. It sits after the form-token
+    //    check, so a forged request from another website cannot fill the
+    //    activity log with refusals.
+    if ($mayChangePortalWideSettings === false) {
+        Logger::activity(
+            'SettingsGroupSaveRefused',
+            'Refused: portal-wide settings group "backup.offsite" may only be changed by a global administrator',
+            $_SESSION['user_id'] ?? null
+        );
+        $_SESSION['flash_msg']  = 'Off-site backup settings are portal-wide: there is one '
+            . 'off-site copy for every organisation on this installation, not only yours. '
+            . 'Only a global administrator can change them. Nothing has been changed.';
+        $_SESSION['flash_type'] = 'danger';
+        header('Location: /admin/maintenance/offsite-backup');
+        exit();
     }
     $upsert = static function (mysqli $db, string $key, string $value): void {
         $stmt = $db->prepare('SELECT settingID FROM tblSettings WHERE settingKey = ? AND siteID IS NULL LIMIT 1');
@@ -172,12 +254,29 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <div class="card mb-3">
     <div class="card-header"><strong>Settings</strong></div>
     <div class="card-body">
+        <?php
+        // 🔒 Added to every control when the person looking may not save. This
+        //    is a COURTESY, not the control: a disabled field is only a hint to
+        //    the browser and anybody can send the form anyway. The refusal in
+        //    the POST handler at the top of this file is what enforces the rule.
+        $readOnlyAttr = $mayChangePortalWideSettings === false ? ' disabled' : '';
+        ?>
+        <?php if ($mayChangePortalWideSettings === false): ?>
+            <!-- 👀 Read-only notice. Shown instead of letting somebody fill the
+                 form in and only find out it was refused after they pressed Save. -->
+            <div class="alert alert-info">
+                <i class="fa-solid fa-circle-info me-2"></i>
+                There is one off-site copy for <strong>every organisation</strong> on
+                this installation, not only yours, so only a global administrator can
+                change these settings. You can see the current values here.
+            </div>
+        <?php endif; ?>
         <form method="post" action="/admin/maintenance/offsite-backup" class="row g-3">
             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
             <input type="hidden" name="action" value="save">
             <div class="col-md-3">
                 <label class="form-label">Destination</label>
-                <select class="form-select" name="destination">
+                <select class="form-select" name="destination"<?php echo $readOnlyAttr; ?>>
                     <?php foreach (['rclone','s3','sftp'] as $d): ?>
                         <option value="<?php echo $d; ?>" <?php echo $dest === $d ? 'selected' : ''; ?>><?php echo $d; ?></option>
                     <?php endforeach; ?>
@@ -185,32 +284,34 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             </div>
             <div class="col-md-3">
                 <label class="form-label">rclone remote (e.g. b2:portal-backups)</label>
-                <input type="text" class="form-control" name="rcloneRemote" value="<?php echo htmlspecialchars($remote, ENT_QUOTES, 'UTF-8'); ?>">
+                <input type="text" class="form-control" name="rcloneRemote" value="<?php echo htmlspecialchars($remote, ENT_QUOTES, 'UTF-8'); ?>"<?php echo $readOnlyAttr; ?>>
             </div>
             <div class="col-md-1">
                 <label class="form-label">Weekly</label>
-                <input type="number" min="1" max="52" class="form-control" name="keepWeekly" value="<?php echo $keepW; ?>">
+                <input type="number" min="1" max="52" class="form-control" name="keepWeekly" value="<?php echo $keepW; ?>"<?php echo $readOnlyAttr; ?>>
             </div>
             <div class="col-md-1">
                 <label class="form-label">Monthly</label>
-                <input type="number" min="1" max="60" class="form-control" name="keepMonthly" value="<?php echo $keepM; ?>">
+                <input type="number" min="1" max="60" class="form-control" name="keepMonthly" value="<?php echo $keepM; ?>"<?php echo $readOnlyAttr; ?>>
             </div>
             <div class="col-md-2">
                 <label class="form-label">Alert email</label>
-                <input type="email" class="form-control" name="alertEmail" value="<?php echo htmlspecialchars($alertTo, ENT_QUOTES, 'UTF-8'); ?>">
+                <input type="email" class="form-control" name="alertEmail" value="<?php echo htmlspecialchars($alertTo, ENT_QUOTES, 'UTF-8'); ?>"<?php echo $readOnlyAttr; ?>>
             </div>
             <div class="col-md-2 d-flex align-items-end">
                 <div class="form-check me-3">
-                    <input type="checkbox" class="form-check-input" id="osEnabled" name="enabled" value="1" <?php echo $enabled === true ? 'checked' : ''; ?>>
+                    <input type="checkbox" class="form-check-input" id="osEnabled" name="enabled" value="1" <?php echo $enabled === true ? 'checked' : ''; ?><?php echo $readOnlyAttr; ?>>
                     <label class="form-check-label" for="osEnabled">Enabled</label>
                 </div>
-                <button class="btn btn-primary btn-sm" type="submit">Save</button>
+                <?php if ($mayChangePortalWideSettings === true): ?>
+                    <button class="btn btn-primary btn-sm" type="submit">Save</button>
+                <?php endif; ?>
             </div>
         </form>
     </div>
 </div>
 
-<?php if ($scriptExists === true && $keyExists === true): ?>
+<?php if ($scriptExists === true && $keyExists === true && $mayRunOffsiteBackup === true): ?>
     <form method="post" action="/admin/maintenance/offsite-backup/run" class="mb-3">
         <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
         <button class="btn btn-warning" type="submit" data-confirm="Run the off-site sync now? This can take several minutes.">
@@ -218,6 +319,19 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         </button>
         <span class="small text-muted ms-2">Runs the same script the cron uses, synchronously.</span>
     </form>
+<?php elseif ($scriptExists === true && $keyExists === true): ?>
+    <!-- 👀 Read-only equivalent of the button above, same pattern as the
+         settings notice further up this page. No button and no text inviting
+         its use - the script archives and uploads every organisation's shared
+         snapshot, and can prune older remote copies, so running it is a
+         global-administrator action, not a site-administrator one. -->
+    <p class="small text-muted mb-3">
+        <i class="fa-solid fa-lock me-1"></i>
+        Running the off-site sync immediately is limited to a global
+        administrator, because it acts on the shared snapshot for every
+        organisation on this installation. It will still run automatically on
+        its schedule.
+    </p>
 <?php endif; ?>
 
 <div class="card">

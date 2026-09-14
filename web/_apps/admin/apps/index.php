@@ -7,12 +7,42 @@
  * Browse, enable, and disable installable apps. Apps are registered via
  * `web/_core/apps/{slug}.php` (see Portal\Core\AppRegistry).
  *
+ * WHO MAY SWITCH APPS ON OR OFF, AND WHY IT IS NARROWER THAN WHO MAY LOOK
+ * -----------------------------------------------------------------------------
+ * The switch this page saves is portal-wide: the INSERT below puts NULL in the
+ * siteID column. So switching an app off here switches it off for EVERY
+ * organisation on the installation, not only the one the administrator is
+ * working in.
+ *
+ * Until 13 September 2026 the only check was App::isAdmin(), which is true for
+ * an administrator of a SINGLE organisation as well as for a global
+ * administrator (see web/_core/App.php). So an administrator of one
+ * organisation could switch off, for example, Giving or Prayer Requests for
+ * every other organisation too. The owner decided that settings affecting
+ * every organisation are for a global administrator only.
+ *
+ * Looking is still allowed. An administrator of one organisation sees the
+ * list, with the reason written on the page and no Enable or Disable buttons.
+ * Hiding the buttons is only a courtesy: the refusal in the handler below is
+ * what actually stops the change, because a form can be sent without ever
+ * opening this page.
+ *
+ * Probably the wrong way round, and deliberately left alone. The project notes
+ * describe the app list as something each organisation switches for itself,
+ * and the settings loader (web/_core/bootstrap.php) already lets an
+ * organisation's own row override the portal-wide one. But this page has
+ * always saved portal-wide, and saving per organisation instead would change
+ * what every existing installation does, so it needs its own decision.
+ * Reserving the portal-wide switch for a global administrator is safe either
+ * way.
+ *
  * @package   Portal\Admin
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.0.0
+ * @version   1.1.0
  * @link      https://github.com/MWBMPartners/webMS-Intra/issues/255
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/495
  * -----------------------------------------------------------------------------
  */
 
@@ -21,6 +51,7 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\AppRegistry;
 use Portal\Core\Auth;
+use Portal\Core\Logger;
 
 Auth::ensureSession();
 Auth::requireLogin();
@@ -29,47 +60,98 @@ if (App::isAdmin() === false) {
     exit('Forbidden');
 }
 
+// 🛡️ Looking is allowed for any administrator; switching apps is not. See the
+//    note in the file header for why. Worked out once and used by both the
+//    handler and the page below, so the two can never disagree.
+$mayChangePortalWideSettings = App::isRootAdmin();
+
 $flash = '';
 $flashType = 'info';
 
-// 🛠️ Action handler — enable / disable
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && Auth::verifyCsrf($_POST['csrf_token'] ?? '') === true) {
-    $action = (string) ($_POST['action'] ?? '');
-    $slug   = (string) ($_POST['slug'] ?? '');
-    $registry = AppRegistry::all();
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    // 🔑 The form token is checked exactly ONCE per request, and only then is
+    //    the person's permission looked at.
+    //
+    //    WHAT WAS WRONG: the first version of this handler asked
+    //    Auth::verifyCsrf() in the refusal branch AND again in the save branch.
+    //    A successful check replaces the token with a new one (see
+    //    Auth::verifyCsrf() in web/_core/Auth.php — it does that so a captured
+    //    form cannot be replayed). So for a global administrator the first
+    //    check passed and used the token up, and the second check then compared
+    //    the form against a token that no longer existed and failed. The save
+    //    branch never ran, nothing was written and no message appeared: the
+    //    button looked as if it worked and did nothing.
+    //
+    //    Asking once and keeping the answer in a variable cannot go wrong that
+    //    way, however the branches below are rearranged later.
+    $tokenIsValid = Auth::verifyCsrf($_POST['csrf_token'] ?? '');
 
-    if ($slug === '' || isset($registry[$slug]) === false) {
-        $flash = 'Unknown app.';
+    if ($tokenIsValid === false) {
+        // 🚫 Missing, wrong or expired token (for example the page was left
+        //    open for a long time, or the request came from another website).
+        //    This used to be ignored in silence, which reads as "the button is
+        //    broken". Nothing is written and nothing is logged, so a forged
+        //    request from another website cannot fill the activity log.
+        $flash = 'This form had expired or was not sent from this page, so nothing '
+            . 'has been changed. Please try again.';
         $flashType = 'danger';
-    } elseif (($registry[$slug]['isCore'] ?? false) === true) {
-        $flash = 'Core apps cannot be disabled.';
+    } elseif ($mayChangePortalWideSettings === false) {
+        // 🚧 Refused BEFORE anything is written: the switch is portal-wide, so
+        //    it is for a global administrator only. The refusal is worded
+        //    rather than a bare "forbidden", because an administrator who
+        //    presses a button and is told nothing assumes the portal is broken
+        //    and presses it again. It sits after the form-token check, so a
+        //    forged request from another website cannot fill the activity log
+        //    with refusals.
+        $flash = 'Apps are switched on and off for the whole installation: a change '
+            . 'here applies to every organisation, not only yours. Only a global '
+            . 'administrator can change it. Nothing has been changed.';
         $flashType = 'danger';
+        Logger::activity(
+            'SettingsGroupSaveRefused',
+            'Refused: portal-wide app on/off switch may only be changed by a global administrator',
+            $_SESSION['user_id'] ?? null
+        );
     } else {
-        $settingKey = (string) $registry[$slug]['settingKey'];
-        $value = $action === 'enable' ? '1' : '0';
-        try {
-            $db = App::db();
-            $stmt = $db->prepare(
-                "INSERT INTO `tblSettings` "
-                . "(`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) "
-                . "VALUES (NULL, ?, ?, '0', 0) "
-                . "ON DUPLICATE KEY UPDATE `settingValue` = VALUES(`settingValue`)"
-            );
-            if ($stmt !== false) {
-                $stmt->bind_param('ss', $settingKey, $value);
-                $stmt->execute();
-                $stmt->close();
-            }
-            AppRegistry::invalidate();
-            $flash = sprintf(
-                '%s %s.',
-                htmlspecialchars((string) $registry[$slug]['name'], ENT_QUOTES, 'UTF-8'),
-                $action === 'enable' ? 'enabled' : 'disabled'
-            );
-            $flashType = 'success';
-        } catch (\Throwable $e) {
-            $flash = 'Failed: ' . $e->getMessage();
+        // 🛠️ Action handler — enable / disable. Only a global administrator
+        //    with a valid token reaches this point.
+        $action = (string) ($_POST['action'] ?? '');
+        $slug   = (string) ($_POST['slug'] ?? '');
+        $registry = AppRegistry::all();
+
+        if ($slug === '' || isset($registry[$slug]) === false) {
+            $flash = 'Unknown app.';
             $flashType = 'danger';
+        } elseif (($registry[$slug]['isCore'] ?? false) === true) {
+            $flash = 'Core apps cannot be disabled.';
+            $flashType = 'danger';
+        } else {
+            $settingKey = (string) $registry[$slug]['settingKey'];
+            $value = $action === 'enable' ? '1' : '0';
+            try {
+                $db = App::db();
+                $stmt = $db->prepare(
+                    "INSERT INTO `tblSettings` "
+                    . "(`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) "
+                    . "VALUES (NULL, ?, ?, '0', 0) "
+                    . "ON DUPLICATE KEY UPDATE `settingValue` = VALUES(`settingValue`)"
+                );
+                if ($stmt !== false) {
+                    $stmt->bind_param('ss', $settingKey, $value);
+                    $stmt->execute();
+                    $stmt->close();
+                }
+                AppRegistry::invalidate();
+                $flash = sprintf(
+                    '%s %s.',
+                    htmlspecialchars((string) $registry[$slug]['name'], ENT_QUOTES, 'UTF-8'),
+                    $action === 'enable' ? 'enabled' : 'disabled'
+                );
+                $flashType = 'success';
+            } catch (\Throwable $e) {
+                $flash = 'Failed: ' . $e->getMessage();
+                $flashType = 'danger';
+            }
         }
     }
 }
@@ -115,6 +197,17 @@ $csrf = Auth::csrfToken();
     <div class="alert alert-<?php echo htmlspecialchars($flashType, ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars($flash, ENT_QUOTES, 'UTF-8'); ?></div>
 <?php endif; ?>
 
+<?php if ($mayChangePortalWideSettings === false): ?>
+    <!-- 👀 Read-only notice. Shown instead of the Enable / Disable buttons, so
+         nobody presses one and only then finds out it was refused. -->
+    <div class="alert alert-info">
+        <i class="fa-solid fa-circle-info me-2"></i>
+        Switching an app on or off here applies to <strong>every
+        organisation</strong> on this installation, not only yours, so only a
+        global administrator can do it. You can see which apps are switched on.
+    </div>
+<?php endif; ?>
+
 <div class="card mb-4">
     <div class="card-body">
         <h2 class="h6 mb-2">Organisation profile</h2>
@@ -158,7 +251,11 @@ $csrf = Auth::csrfToken();
                                 <?php endforeach; ?>
                             </p>
                         <?php endif; ?>
-                        <?php if ($isCore === false): ?>
+                        <?php
+                        // 🔒 No Enable / Disable buttons for somebody who may not
+                        //    use them. A courtesy only: the refusal at the top of
+                        //    this file is what actually stops the change.
+                        if ($isCore === false && $mayChangePortalWideSettings === true): ?>
                             <form method="post" class="d-inline">
                                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                                 <input type="hidden" name="slug" value="<?php echo htmlspecialchars($slug, ENT_QUOTES, 'UTF-8'); ?>">

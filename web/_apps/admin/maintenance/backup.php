@@ -17,12 +17,52 @@
  *   POST action=restore_full   name=NAME               — restore all tables
  *   POST action=delete         name=NAME               — recursive delete
  *
+ * WHO MAY USE THIS PAGE, AND WHY IT IS A GLOBAL ADMINISTRATOR ONLY
+ * -----------------------------------------------------------------------------
+ * A snapshot is a copy of the WHOLE database: every organisation on the
+ * installation, their members, their giving records, password hashes, and the
+ * portal-wide settings including payment and other service credentials. So
+ * every action here works on all organisations at once, not only the one the
+ * administrator belongs to:
+ *
+ *   restore_table / restore_full  replace live data for every organisation with
+ *                                 older copies. Restoring tblSettings alone puts
+ *                                 back old portal-wide settings and credentials.
+ *   delete                        removes a recovery point every organisation
+ *                                 depends on, including the automatic copy taken
+ *                                 before each upgrade.
+ *   snapshot_now                  reads every organisation's data and writes a
+ *                                 full copy onto the shared server disk.
+ *   list / inspect                show row counts for the whole installation,
+ *                                 table by table, and offer the restore buttons.
+ *
+ * Until 13 September 2026 the only check was App::isAdmin(), which is true for
+ * an administrator of a SINGLE organisation as well as for a global
+ * administrator (see web/_core/App.php). So an administrator of one
+ * organisation could restore tblSettings from an old snapshot and quietly put
+ * back old payment credentials and other settings that the rest of the portal
+ * now reserves for a global administrator (issue #495) — a way round those
+ * pages' refusals. They could also replace every other organisation's data
+ * with an old copy, or delete the backups.
+ *
+ * This matches the upgrade page (web/_install/upgrade.php), which already
+ * refuses anybody but the global administrator for the same reason: it acts on
+ * the database underneath every organisation. On an ordinary
+ * single-organisation installation the owner IS the global administrator, so
+ * nothing is taken away in practice.
+ *
+ * The whole page is refused, not just the buttons, because nothing on it is
+ * about one organisation. An administrator of one organisation is told why, in
+ * words, and where to see how recent the last backup is (the Health page, which
+ * shows that without any of the above).
+ *
  * @package   Portal\Admin
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.0.1
+ * @version   1.1.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/227
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/495
  * -----------------------------------------------------------------------------
  */
 
@@ -31,6 +71,7 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\DbBackup;
+use Portal\Core\Logger;
 use Portal\Core\Maintenance;
 
 Auth::ensureSession();
@@ -38,6 +79,49 @@ Auth::requireLogin();
 if (App::isAdmin() === false) {
     http_response_code(403);
     exit('Forbidden');
+}
+
+// 🚧 Global administrators only — see "WHO MAY USE THIS PAGE" above. This sits
+//    BEFORE the action handler and before any snapshot is listed, so nothing
+//    below runs for anybody else: no snapshot, no restore, no delete, and no
+//    list of the whole installation's row counts.
+if (App::isRootAdmin() === false) {
+    // 📝 A refused ACTION is recorded, so a global administrator can see that
+    //    somebody tried to restore or delete. Only when the form token is
+    //    valid, though: otherwise a forged request from another website could
+    //    fill the activity log with refusals. Simply opening the page is not
+    //    recorded. The token is checked here once and the request ends below,
+    //    so it is never checked a second time.
+    if ($_SERVER['REQUEST_METHOD'] === 'POST'
+        && Auth::verifyCsrf($_POST['csrf_token'] ?? '') === true
+    ) {
+        Logger::activity(
+            'BackupActionRefused',
+            sprintf(
+                'Refused: backup action "%s" may only be used by a global administrator',
+                substr(preg_replace('/[^a-z_]/', '', (string) ($_POST['action'] ?? '')) ?? '', 0, 30)
+            ),
+            $_SESSION['user_id'] ?? null
+        );
+    }
+
+    http_response_code(403);
+    $pageTitle   = 'Backup Management';
+    $pageSection = 'admin';
+    $breadcrumbs = ['Dashboard' => '/', 'Admin' => '/admin', 'Maintenance' => '/admin/maintenance', 'Backups' => ''];
+    require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
+    ?>
+    <h1 class="mb-3"><i class="fa-solid fa-database me-2"></i>Backup Management</h1>
+    <div class="alert alert-danger">
+        A backup is a copy of the whole installation: every organisation on it,
+        not only yours. Taking, restoring or deleting one affects all of them,
+        so only a global administrator can use this page. Nothing has been
+        changed. To see how recent the latest backup is, open the
+        <a href="/admin/maintenance/health">Health page</a>.
+    </div>
+    <?php
+    require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'footer.php';
+    return;
 }
 
 $db     = App::db();

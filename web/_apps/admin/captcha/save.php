@@ -11,11 +11,27 @@
  * All captcha settings are stored at siteID = NULL (global / shared across
  * all sites in this installation).
  *
+ * WHO MAY SAVE HERE
+ * -----------------------------------------------------------------------------
+ * Every setting this handler saves is portal-wide: it is written with nothing
+ * in the siteID column, so it is the value EVERY organisation on this
+ * installation uses. These are the keys for the "are you a person?" check
+ * (captcha) that protects sign-in and the public forms, and the order the
+ * providers are tried in.
+ *
+ * Until 11 September 2026 the only check was App::isAdmin(), which is true for
+ * an administrator of a SINGLE organisation as well as for a global
+ * administrator (see web/_core/App.php). So an administrator of any one
+ * organisation could remove that protection for every organisation, or swap in
+ * keys of their own. The owner decided that settings affecting every
+ * organisation are for a global administrator only. Anybody else is now
+ * refused, is told why on screen, and nothing is saved.
+ *
  * @package   Portal\Admin
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   0.10.0
+ * @version   0.11.0
  * -----------------------------------------------------------------------------
  */
 
@@ -42,6 +58,32 @@ if (App::isAdmin() === false) {
 // 🔐 CSRF
 if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
     $_SESSION['flash_msg']  = 'Invalid or expired form token. Please try again.';
+    $_SESSION['flash_type'] = 'danger';
+    header('Location: /admin/captcha', true, 302);
+    exit();
+}
+
+// 🚧 Portal-wide settings are for a global administrator only — see "WHO MAY
+//    SAVE HERE" in the file header. The refusal gives the reason rather than a
+//    bare "forbidden": an administrator who presses Save and is told nothing
+//    assumes the portal is broken and tries again. It comes after the
+//    form-token check, so a forged request from another website cannot fill
+//    the activity log with refusals.
+//
+//    What this cannot do on its own: the captcha page
+//    (web/_apps/admin/captcha/index.php) now shows this form read-only to such
+//    an administrator, with the reason. But a form can be sent without ever
+//    opening the page, so this refusal is what actually enforces the rule.
+if (App::isRootAdmin() === false) {
+    Logger::activity(
+        'SettingsGroupSaveRefused',
+        'Refused: portal-wide settings group "captcha" may only be changed by a global administrator',
+        $_SESSION['user_id'] ?? null
+    );
+    $_SESSION['flash_msg']  = 'These settings are portal-wide: they apply to every '
+        . 'organisation on this installation, not only yours. Only a global '
+        . 'administrator can change them. Your own organisation\'s settings '
+        . 'are on the main Settings page and are unaffected.';
     $_SESSION['flash_type'] = 'danger';
     header('Location: /admin/captcha', true, 302);
     exit();

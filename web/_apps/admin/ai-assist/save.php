@@ -3,7 +3,27 @@
 /**
  * Admin — AI Assist settings save.
  *
+ * WHO MAY SAVE HERE
+ * -----------------------------------------------------------------------------
+ * Every setting this handler saves is portal-wide: it is written with nothing
+ * in the siteID column, so it is the value EVERY organisation on this
+ * installation uses. That includes which AI provider drafts text, its account
+ * keys, the address of a self-hosted AI server, and the monthly spending limit.
+ *
+ * Until 11 September 2026 the only check was App::isAdmin(), which is true for
+ * an administrator of a SINGLE organisation as well as for a global
+ * administrator (see web/_core/App.php). So an administrator of any one
+ * organisation could send every organisation's drafts to an AI account or
+ * server of their choosing, or lift the monthly spending limit. The owner
+ * decided that settings affecting every organisation are for a global
+ * administrator only. Anybody else is now refused, is told why on screen, and
+ * nothing is saved.
+ *
  * @package   Portal\Admin
+ * @author    MWBM Partners Ltd (t/a MWservices)
+ * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
+ * @license   All Rights Reserved
+ * @version   1.4.0
  * @link      https://github.com/MWBMPartners/webMS-Intra/issues/277
  */
 
@@ -11,6 +31,7 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\Logger;
 use Portal\Core\Router;
 
 Auth::ensureSession();
@@ -22,6 +43,32 @@ if (App::isAdmin() === false) {
 if ($_SERVER['REQUEST_METHOD'] !== 'POST' || Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
     http_response_code(400);
     exit('Bad request');
+}
+
+// 🚧 Portal-wide settings are for a global administrator only — see "WHO MAY
+//    SAVE HERE" in the file header. The refusal gives the reason rather than a
+//    bare "forbidden": an administrator who presses Save and is told nothing
+//    assumes the portal is broken and tries again. It comes after the
+//    form-token check, so a forged request from another website cannot fill
+//    the activity log with refusals.
+//
+//    What this cannot do: the page that shows the form
+//    (web/_apps/admin/ai-assist/index.php) was not changed, so an
+//    administrator of one organisation still sees a Save button there. This
+//    refusal is what actually enforces the rule.
+if (App::isRootAdmin() === false) {
+    Logger::activity(
+        'SettingsGroupSaveRefused',
+        'Refused: portal-wide settings group "ai-assist" may only be changed by a global administrator',
+        $_SESSION['user_id'] ?? null
+    );
+    $_SESSION['flash_msg']  = 'These settings are portal-wide: they apply to every '
+        . 'organisation on this installation, not only yours. Only a global '
+        . 'administrator can change them. Your own organisation\'s settings '
+        . 'are on the main Settings page and are unaffected.';
+    $_SESSION['flash_type'] = 'danger';
+    header('Location: /admin/ai-assist');
+    exit();
 }
 
 $db = App::db();

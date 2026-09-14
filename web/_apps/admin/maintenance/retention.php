@@ -18,6 +18,31 @@
  *      `maintenance.cronToken` setting (matching token in the query string)
  *      instead of session auth, so a wget/curl from cron works.
  *
+ * WHO MAY USE THE WEB UI, AND WHY IT IS A GLOBAL ADMINISTRATOR ONLY
+ * -----------------------------------------------------------------------------
+ * Both the sweep and the preview counts above it act on the WHOLE
+ * installation, not the one organisation the visiting administrator belongs
+ * to: the activity-log and error deletes have no organisation column to limit
+ * them to, and the event-registration clean-up loops over every organisation
+ * on the server in turn (see registration_sweep_sites()).
+ *
+ * Until 13 September 2026 the only check was App::isAdmin(), which is true for
+ * an administrator of a SINGLE organisation as well as for a global
+ * administrator (see web/_core/App.php). So an administrator of one
+ * organisation could press "Run Sweep Now" and hard-delete activity logs,
+ * error rows and children's event-registration records — including
+ * safeguarding details such as allergies and medical notes — belonging to
+ * every OTHER organisation on the installation, without their knowledge or
+ * consent. This matches the fix already made to backup.php for the same
+ * reason (issue #495): an action with no organisation boundary needs a
+ * permission with no organisation boundary.
+ *
+ * The scheduled-job (cron) path above is untouched by this: it was never
+ * gated by App::isAdmin() in the first place, it authenticates with a shared
+ * secret token instead of a session, and per-organisation retention is a
+ * separate, not-yet-decided question tracked in issue #491 — this change is
+ * only about WHO may press the web button, not what the sweep deletes.
+ *
  * Settings:
  *
  *   audit.retentionDays        (default 365) — activity logs
@@ -31,7 +56,9 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.0.0
+ * @version   1.1.0
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/491
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/495
  * -----------------------------------------------------------------------------
  */
 
@@ -75,6 +102,47 @@ $breadcrumbs = ['Dashboard' => '/', 'Admin' => '/admin', 'Maintenance' => '', 'R
 Auth::ensureSession();
 if (App::isAdmin() === false) {
     Router::renderError(403);
+    return;
+}
+
+// 🚧 Global administrators only — see "WHO MAY USE THE WEB UI" in the file
+//    header above. This sits BEFORE the POST handler and BEFORE the preview
+//    counts are computed, so nothing below runs for anybody else: no sweep,
+//    and the installation-wide row counts (which already covered every
+//    organisation, not just the visitor's own) are not shown either.
+//
+//    Matches how backup.php refuses (issue #495 fix, 13 September 2026): the
+//    same wording style, the same 403 status, and a refusal recorded in the
+//    activity log — but ONLY for a POST with a genuine form token, otherwise
+//    a forged request from another website could fill the log with
+//    refusals just by loading images from it. Simply opening the page is not
+//    recorded.
+if (App::isRootAdmin() === false) {
+    if ($_SERVER['REQUEST_METHOD'] === 'POST'
+        && Auth::verifyCsrf($_POST['csrf_token'] ?? '') === true
+    ) {
+        Logger::activity(
+            'RetentionSweepRefused',
+            'Refused: the audit-log retention sweep may only be run by a global administrator',
+            $_SESSION['user_id'] ?? null
+        );
+    }
+
+    http_response_code(403);
+    // $pageTitle / $pageSection / $breadcrumbs are already set above, before
+    // Auth::ensureSession() runs — reused here rather than repeated.
+    require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
+    ?>
+    <h1 class="mb-3"><i class="fa-solid fa-broom me-2"></i>Audit Retention Sweeper</h1>
+    <div class="alert alert-danger">
+        This sweep deletes activity-log and error rows, and event
+        registrations — including children's names, dates of birth, allergies
+        and medical notes — across every organisation on this installation,
+        not only yours. So only a global administrator can use this page.
+        Nothing has been changed.
+    </div>
+    <?php
+    require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'footer.php';
     return;
 }
 

@@ -9,11 +9,20 @@
  *   hymnal_save, hymnal_toggle, entry_save, entry_delete, csv_import,
  *   remote_save, remote_test, public_share_toggle.
  *
+ * WHO MAY USE WHICH ACTION
+ * -----------------------------------------------------------------------------
+ * Most actions work on hymnals, which belong to one organisation, so any
+ * administrator of that organisation may use them. remote_save and
+ * public_share_toggle are different: they write portal-wide settings (nothing
+ * in the siteID column), which apply to EVERY organisation on the
+ * installation. Since 11 September 2026 those two are refused to anybody but
+ * a global administrator. The note above the switch statement explains why.
+ *
  * @package   Portal\Admin
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2026 MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.0.0
+ * @version   1.1.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/128
  * -----------------------------------------------------------------------------
  */
@@ -96,6 +105,58 @@ $upsertSetting = static function (string $key, string $value, bool $isSensitive)
         }
     }
 };
+
+// -----------------------------------------------------------------------------
+// 🚧 Two actions change portal-wide settings: a global administrator only
+// -----------------------------------------------------------------------------
+// Most of this handler works on hymnals, and a hymnal belongs to one
+// organisation: each row carries its siteID, and $ownsHymnal re-checks it
+// before every change. Any administrator of that organisation may use those
+// actions, and still can. remote_test only tries the saved settings and
+// changes nothing, so it stays open too.
+//
+// Two actions are different. They save through $upsertSetting, which puts
+// nothing in the siteID column, so what they save applies to EVERY
+// organisation on the installation:
+//   remote_save         — the outside hymn-lookup service: the web address
+//                         the server contacts, and the key it sends.
+//   public_share_toggle — whether service plans may be shared publicly.
+// Until 11 September 2026 the only check was App::isAdmin(), which is true for
+// an administrator of ONE organisation too (see web/_core/App.php). So an
+// administrator of one organisation could point every organisation's hymn
+// look-ups at a service of their choosing, or switch public sharing on for
+// everybody. The owner decided that settings affecting every organisation are
+// for a global administrator only.
+//
+// public_share_toggle is labelled below as a "site-level switch", and the
+// project notes describe it the same way, but it has always been saved
+// portal-wide. It probably ought to be per organisation. Changing that is a
+// separate decision, so for now it is simply reserved for a global
+// administrator, which is safe either way.
+//
+// The refusal gives the reason rather than a bare "forbidden", because an
+// administrator who is told nothing assumes the portal is broken and tries
+// again. It comes after the form-token check, so a forged request from
+// another website cannot fill the activity log with refusals.
+//
+// What this cannot do: the hymns page (web/_apps/admin/hymns.php) was not
+// changed, so an administrator of one organisation still sees these two
+// forms there. This refusal is what actually enforces the rule.
+if (in_array($action, ['remote_save', 'public_share_toggle'], true) === true
+    && App::isRootAdmin() === false
+) {
+    Logger::activity(
+        'SettingsGroupSaveRefused',
+        'Refused: portal-wide settings group "hymns ' . $action . '" may only be changed by a global administrator',
+        $_SESSION['user_id'] ?? null
+    );
+    $_SESSION['flash_msg']  = 'These settings are portal-wide: they apply to every '
+        . 'organisation on this installation, not only yours. Only a global '
+        . 'administrator can change them. Your own organisation\'s settings '
+        . 'are on the main Settings page and are unaffected.';
+    $_SESSION['flash_type'] = 'danger';
+    $redirect();
+}
 
 switch ($action) {
     // -----------------------------------------------------------------------
@@ -266,7 +327,8 @@ switch ($action) {
     }
 
     // -----------------------------------------------------------------------
-    // 🔗 Public Order-of-Service site-level switch
+    // 🔗 Public Order-of-Service switch. Called "site-level", but it is saved
+    //    portal-wide — see the note above the switch statement.
     // -----------------------------------------------------------------------
     case 'public_share_toggle': {
         $enabled = isset($_POST['enabled']) === true ? 'true' : 'false';

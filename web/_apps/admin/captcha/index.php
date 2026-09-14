@@ -11,15 +11,37 @@
  *   • Live "configured / not configured" status badges
  *   • Highlight of which provider is currently active given the priority + keys
  *
- * Umbrella (root) admins can do everything; site admins are also allowed —
- * the captcha settings are global, so the underlying setting writes are
- * site-agnostic (siteID = NULL).
+ * WHO MAY CHANGE THESE, AND WHY IT IS NARROWER THAN WHO MAY LOOK
+ * -----------------------------------------------------------------------------
+ * Every setting on this page is saved portal-wide (nothing in the siteID
+ * column), so it is the value EVERY organisation on the installation uses.
+ *
+ * This comment used to say that site administrators were "also allowed",
+ * because the settings are shared. That was exactly the problem:
+ * App::isAdmin() is true for an administrator of a SINGLE organisation, so any
+ * one of them could remove the "are you a person?" check from every
+ * organisation's sign-in page, or swap in keys of their own. The owner decided
+ * on 13 September 2026 that settings affecting every organisation are for a
+ * global administrator only.
+ *
+ * An administrator of one organisation can still open this page and see which
+ * providers are set up, which helps when they are trying to understand
+ * behaviour they cannot change. They see it read-only: the reason on the page,
+ * every field disabled, no Save buttons, no drag-to-reorder, and the SECRET
+ * keys left out of the page entirely (a disabled field still carries its value
+ * in the page source). The public site keys are still shown, because they are
+ * published in every page that shows a captcha anyway.
+ *
+ * Hiding the controls is a courtesy, not the control. The save handler,
+ * web/_apps/admin/captcha/save.php, refuses the change on the server whatever
+ * this page shows, because a form can be sent without ever opening the page.
  *
  * @package   Portal\Admin
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   0.10.0
+ * @version   0.11.0
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/495
  * -----------------------------------------------------------------------------
  */
 
@@ -40,6 +62,15 @@ if (App::isAdmin() === false) {
     Router::renderError(403);
     return;
 }
+
+// 🛡️ Looking is allowed for any administrator; changing is not (see the file
+//    header). Worked out once and used by every control below, so no part of
+//    the page can disagree with another about whether this person may save.
+$mayChangePortalWideSettings = App::isRootAdmin();
+
+// 🔒 Added to every field when the person looking may not save. A disabled
+//    field is only a hint to the browser; save.php is what enforces the rule.
+$readOnlyAttr = $mayChangePortalWideSettings === false ? ' disabled' : '';
 
 // 💬 Flash message from save handler
 $flashMsg  = $_SESSION['flash_msg']  ?? '';
@@ -95,7 +126,14 @@ $providerIcon = static function (string $key): string {
     <div>
         <h1 class="mb-1"><i class="fa-solid fa-robot me-2"></i>Captcha Providers</h1>
         <p class="text-secondary mb-0">
-            Configure provider keys and drag to set the fallback priority.
+            <?php
+            // Same reason as the "Drag to re-order" sentence below: only
+            // somebody who may save is told to configure keys and drag rows.
+            if ($mayChangePortalWideSettings === true): ?>
+                Configure provider keys and drag to set the fallback priority.
+            <?php else: ?>
+                Which providers are set up, and the order they are tried in.
+            <?php endif; ?>
         </p>
     </div>
     <a href="/admin" class="btn btn-outline-secondary">
@@ -110,11 +148,32 @@ $providerIcon = static function (string $key): string {
     </div>
 <?php endif; ?>
 
+<?php if ($mayChangePortalWideSettings === false): ?>
+    <!-- 👀 Read-only notice. Shown instead of letting somebody fill the form in
+         and only find out it was refused after they pressed Save. -->
+    <div class="alert alert-info">
+        <i class="fa-solid fa-circle-info me-2"></i>
+        These settings apply to <strong>every organisation</strong> on this
+        installation, not only yours, so only a global administrator can change
+        them. You can see which providers are set up here. Secret keys are not
+        shown.
+    </div>
+<?php endif; ?>
+
 <div class="alert alert-info">
     <i class="fa-solid fa-circle-info me-1"></i>
     <strong>How it works:</strong>
     The active provider is the first item below that has both a site key and a secret key.
-    Drag to re-order. If nothing is configured, forms that use captcha will simply skip it.
+    <?php
+    // 🔒 "Drag to re-order" is only true for somebody who may save the order.
+    //    It used to be shown to everybody. An administrator of one organisation
+    //    sees this page read-only: the drag script is not loaded for them and
+    //    there is no Save Priority button, so the sentence told them to do
+    //    something the page would not let them do.
+    if ($mayChangePortalWideSettings === true): ?>
+        Drag to re-order.
+    <?php endif; ?>
+    If nothing is configured, forms that use captcha will simply skip it.
     <?php if ($activeProvider !== ''): ?>
         Current active provider:
         <strong><?php echo htmlspecialchars(ucfirst($activeProvider), ENT_QUOTES, 'UTF-8'); ?></strong>.
@@ -141,7 +200,7 @@ $providerIcon = static function (string $key): string {
                 <?php foreach ($providers as $p): ?>
                     <li class="list-group-item d-flex align-items-center justify-content-between"
                         data-key="<?php echo htmlspecialchars($p['key'], ENT_QUOTES, 'UTF-8'); ?>"
-                        style="cursor: grab;">
+                        <?php echo $mayChangePortalWideSettings === true ? 'style="cursor: grab;"' : ''; ?>>
                         <div>
                             <i class="fa-solid fa-grip-vertical text-muted me-3" aria-hidden="true"></i>
                             <?php echo $providerIcon($p['key']); ?>
@@ -155,12 +214,16 @@ $providerIcon = static function (string $key): string {
                 <?php endforeach; ?>
             </ul>
 
-            <button type="submit" class="btn btn-primary">
-                <i class="fa-solid fa-save me-1"></i> Save Priority
-            </button>
-            <span class="small text-muted ms-2">
-                Tip: drag rows to reorder. Active provider is decided top-to-bottom.
-            </span>
+            <?php if ($mayChangePortalWideSettings === true): ?>
+                <!-- 🔒 Save Priority and the drag tip are only for somebody who may
+                     save. save.php refuses everybody else whatever the page shows. -->
+                <button type="submit" class="btn btn-primary">
+                    <i class="fa-solid fa-save me-1"></i> Save Priority
+                </button>
+                <span class="small text-muted ms-2">
+                    Tip: drag rows to reorder. Active provider is decided top-to-bottom.
+                </span>
+            <?php endif; ?>
         </form>
     </div>
 </div>
@@ -186,13 +249,16 @@ $providerIcon = static function (string $key): string {
                     <label for="turnstile_site" class="form-label">Site Key</label>
                     <input type="text" class="form-control" id="turnstile_site" name="turnstile_site"
                            value="<?php echo htmlspecialchars($turnstileSite, ENT_QUOTES, 'UTF-8'); ?>"
-                           autocomplete="off">
+                           autocomplete="off"<?php echo $readOnlyAttr; ?>>
                 </div>
                 <div class="col-md-6">
                     <label for="turnstile_secret" class="form-label">Secret Key</label>
+                    <!-- 🔑 The secret is only written into the page for somebody who
+                         may change it. A disabled field still carries its value in
+                         the page source, so disabling alone would not hide it. -->
                     <input type="password" class="form-control" id="turnstile_secret" name="turnstile_secret"
-                           value="<?php echo htmlspecialchars($turnstileSecret, ENT_QUOTES, 'UTF-8'); ?>"
-                           autocomplete="off">
+                           value="<?php echo htmlspecialchars($mayChangePortalWideSettings === true ? $turnstileSecret : '', ENT_QUOTES, 'UTF-8'); ?>"
+                           autocomplete="off"<?php echo $readOnlyAttr; ?>>
                 </div>
             </div>
             <p class="form-text mb-0">
@@ -218,17 +284,17 @@ $providerIcon = static function (string $key): string {
                     <label for="recaptcha_site" class="form-label">Site Key</label>
                     <input type="text" class="form-control" id="recaptcha_site" name="recaptcha_site"
                            value="<?php echo htmlspecialchars($recaptchaSite, ENT_QUOTES, 'UTF-8'); ?>"
-                           autocomplete="off">
+                           autocomplete="off"<?php echo $readOnlyAttr; ?>>
                 </div>
                 <div class="col-md-6">
                     <label for="recaptcha_secret" class="form-label">Secret Key</label>
                     <input type="password" class="form-control" id="recaptcha_secret" name="recaptcha_secret"
-                           value="<?php echo htmlspecialchars($recaptchaSecret, ENT_QUOTES, 'UTF-8'); ?>"
-                           autocomplete="off">
+                           value="<?php echo htmlspecialchars($mayChangePortalWideSettings === true ? $recaptchaSecret : '', ENT_QUOTES, 'UTF-8'); ?>"
+                           autocomplete="off"<?php echo $readOnlyAttr; ?>>
                 </div>
                 <div class="col-md-4">
                     <label for="recaptcha_version" class="form-label">Version</label>
-                    <select class="form-select" id="recaptcha_version" name="recaptcha_version">
+                    <select class="form-select" id="recaptcha_version" name="recaptcha_version"<?php echo $readOnlyAttr; ?>>
                         <option value="v2" <?php echo $recaptchaVer === 'v2' ? 'selected' : ''; ?>>
                             v2 (visible checkbox)
                         </option>
@@ -241,7 +307,7 @@ $providerIcon = static function (string $key): string {
                     <label for="recaptcha_v3_action" class="form-label">v3 Action Name</label>
                     <input type="text" class="form-control" id="recaptcha_v3_action" name="recaptcha_v3_action"
                            value="<?php echo htmlspecialchars($recaptchaV3Act, ENT_QUOTES, 'UTF-8'); ?>"
-                           autocomplete="off">
+                           autocomplete="off"<?php echo $readOnlyAttr; ?>>
                     <div class="form-text">Default: <code>submit</code>. v3 only.</div>
                 </div>
                 <div class="col-md-4">
@@ -249,7 +315,7 @@ $providerIcon = static function (string $key): string {
                     <input type="number" class="form-control" id="recaptcha_v3_threshold" name="recaptcha_v3_threshold"
                            min="0" max="1" step="0.05"
                            value="<?php echo htmlspecialchars($recaptchaV3Thr, ENT_QUOTES, 'UTF-8'); ?>"
-                           autocomplete="off">
+                           autocomplete="off"<?php echo $readOnlyAttr; ?>>
                     <div class="form-text">0.0 (allow all) to 1.0 (strict). v3 only.</div>
                 </div>
             </div>
@@ -276,13 +342,13 @@ $providerIcon = static function (string $key): string {
                     <label for="hcaptcha_site" class="form-label">Site Key</label>
                     <input type="text" class="form-control" id="hcaptcha_site" name="hcaptcha_site"
                            value="<?php echo htmlspecialchars($hcaptchaSite, ENT_QUOTES, 'UTF-8'); ?>"
-                           autocomplete="off">
+                           autocomplete="off"<?php echo $readOnlyAttr; ?>>
                 </div>
                 <div class="col-md-6">
                     <label for="hcaptcha_secret" class="form-label">Secret Key</label>
                     <input type="password" class="form-control" id="hcaptcha_secret" name="hcaptcha_secret"
-                           value="<?php echo htmlspecialchars($hcaptchaSecret, ENT_QUOTES, 'UTF-8'); ?>"
-                           autocomplete="off">
+                           value="<?php echo htmlspecialchars($mayChangePortalWideSettings === true ? $hcaptchaSecret : '', ENT_QUOTES, 'UTF-8'); ?>"
+                           autocomplete="off"<?php echo $readOnlyAttr; ?>>
                 </div>
             </div>
             <p class="form-text mb-0">
@@ -294,14 +360,19 @@ $providerIcon = static function (string $key): string {
         </div>
     </div>
 
-    <button type="submit" class="btn btn-success">
-        <i class="fa-solid fa-save me-1"></i> Save Provider Keys
-    </button>
-    <a href="/admin/captcha" class="btn btn-outline-secondary">Cancel</a>
+    <?php if ($mayChangePortalWideSettings === true): ?>
+        <button type="submit" class="btn btn-success">
+            <i class="fa-solid fa-save me-1"></i> Save Provider Keys
+        </button>
+        <a href="/admin/captcha" class="btn btn-outline-secondary">Cancel</a>
+    <?php endif; ?>
 </form>
 
+<?php if ($mayChangePortalWideSettings === true): ?>
 <!-- ============================================================================ -->
 <!-- 🪜 Drag-and-drop init (SortableJS via Asset helper — SRI when configured) -->
+<!--    Only loaded for somebody who may save the order: for anybody else the   -->
+<!--    list is for reading, and letting them drag rows would suggest otherwise. -->
 <!-- ============================================================================ -->
 <?php echo \Portal\Core\Asset::sortableJs(); ?>
 <script>
@@ -325,5 +396,6 @@ $providerIcon = static function (string $key): string {
     });
 })();
 </script>
+<?php endif; ?>
 
 <?php require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'footer.php'; ?>
