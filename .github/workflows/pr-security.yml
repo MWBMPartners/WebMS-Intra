@@ -58,6 +58,14 @@
 # ValueError PHP 8 throws uncaught (it isn't a mysqli_sql_exception, so
 # the repo-wide mysqli_report STRICT setting doesn't catch it), fatally
 # 500ing the calendar occurrence-override save and task creation.
+# Check 16 (#494) was added after four pages called methods that do not
+# exist - Site::name(), Captcha::renderWidget(), Captcha::verifyFromPost() -
+# or used a core class without an import (Auth:: on the Activity Log). Each
+# is a fatal error the moment that line runs. Several sat AFTER the page's
+# not-found handling, so a wrong address behaved correctly while a VALID one
+# returned an error page; every event address in the sitemap was one. No
+# earlier check reads a method name at all, and there is no autoloader to
+# catch it, so it had shipped unnoticed.
 # The scripts live in tools/audit-checks/ and are runnable locally.
 # =============================================================================
 
@@ -378,6 +386,21 @@ jobs:
           NATIVE_CONFIRM=$(python3 tools/audit-checks/check_no_native_confirm.py 2>&1 | tail -n +3 || true)
           if echo "$NATIVE_CONFIRM" | grep -q '•'; then
             add_section "Native confirm() used instead of the portal's data-confirm modal" "$NATIVE_CONFIRM"
+          fi
+
+          # 20) A call to a method that does not exist, a call with no arguments
+          #     to a method that needs some, or a core class used without an
+          #     import. Each is a fatal error when that line runs, and nothing
+          #     else here reads a method name (#494). Only the finding lines and
+          #     their headings go into the comment - the script's coverage
+          #     figures and its long explanation of what it cannot check would
+          #     bury the one line that matters.
+          STATIC_CALLS=$(python3 tools/audit-checks/check_static_calls.py 2>&1 || true)
+          # grep -a: treat the check's output as text even if a line holds a byte that is not valid UTF-8.
+          # Without it, GNU grep prints 'binary file matches' instead of the finding line, and the finding
+          # never reaches the report (found 13 September 2026 while fixing the wrapper's output handling).
+          if echo "$STATIC_CALLS" | grep -a -q '•'; then
+            add_section "Calls to methods that do not exist, or core classes used with no import (a fatal error the moment that line runs)" "$(echo "$STATIC_CALLS" | grep -a -E '^[[:space:]]*•|^###')"
           fi
 
           echo "hits=$HITS" >> "$GITHUB_OUTPUT"
