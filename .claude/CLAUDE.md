@@ -420,6 +420,25 @@ registered. The mistake was in what the pages pointed AT.
 `tools/audit-checks/check_no_php_in_urls.py` now checks this on every pull
 request.
 
+## No web address is ever built in — WebMS-Intra is a product (STANDING RULE)
+
+**WebMS-Intra is used by many customers. No web address or domain name may be hard-coded** in code, GitHub
+workflows, settings seeds, templates, emails or the API specification. The owner set this on 13 September 2026:
+"Any domains should be configurable during the installation process (for real customers)."
+
+- **Our own addresses are only examples of one customer's set-up.** That covers `portal.millrdsdacambridge.uk` in
+  this file, in DEV_NOTES and in the plans. Where a document shows one, label it as an example.
+- **Addresses come from the installer, a setting, or a GitHub secret or variable.** A missing address gives a clear
+  message or a skipped step with a warning, never a quiet fallback to ours.
+- **Hosting is configurable too.** We deploy every channel over SFTP to one DreamHost user. Other customers may use
+  other hosts, or separate accounts per channel. Nothing may assume the channels share a user, a server or a host.
+- **Customers will install from a downloadable zip package** (#499), so installing and upgrading must work for
+  someone with only a hosting panel.
+
+Before committing, check: `grep -rn millrdsdacambridge web .github tools` should find nothing except clearly
+labelled examples. Known offender to remove: the live health-check address in `.github/workflows/deploy.yml`.
+Tracked in #500.
+
 ## Comment everything, in every language (STANDING RULE, all projects)
 
 Detailed comments in HTML, PHP, CSS, JavaScript, XML, JSON and SQL. Specifically:

@@ -321,3 +321,77 @@ Every `tblEvents` row is one occurrence (`full_schema.sql`, tblEvents header; `c
 **Not decided by the owner but reversed by this review, stated so it is not missed:** Correction 10 replaces the design's static-file media publishing with PHP-served media using byte ranges. The reason is a defect, not a preference — static copying cannot know which channel's folder to write into and cannot stay in step with one shared database — so it is written as a correction. If the owner wants static publishing kept regardless, the missing pieces are a channel-to-folder convention in PHP and a sweep that creates as well as deletes, and Correction 10's deletions are reversed.
 
 **What I did not check:** no live server, Apache, lftp or DreamHost panel was touched. The Apache `.htaccess` merge order (Correction 15), lftp's exit status on a missing directory and its `mkdir -p` (Correction 5c), and Safari's byte-range requirement (Correction 10) are from documentation and experience, not observed here; each is marked at the point it matters.
+---
+
+# Owner decisions — answered 13 September 2026
+
+These settle the decisions above. A builder follows these; they are not re-opened.
+
+1. **Recurring events (decision 1):** ticked ONCE for the series; any single date can opt out. The series
+   tick applies to dates from the moment of saving onward, never retrospectively.
+2. **Delegated administrators (decision 2):** may prepare a surface before it is switched on. Only whether
+   visitors can see it is gated. (The owner's recommended default; not objected to.)
+3. **Embed allow-list (decision 3):** NO list. The feed only ever holds content that is already public.
+4. **`public.assetBase` (decision 4):** dropped until a customer asks for the one-line include. (Default; not
+   objected to.)
+5. **How much of a published event the public sees (decision 5):** the FULL description on the event's own
+   page, and an excerpt in lists. The help page states plainly that a published event's description is public
+   in full.
+6. **Publishing separate per channel (decision 6): SETTLED BY A LARGER DECISION, 13 September 2026.**
+   While measuring this, it was found that the code gives the channels no separation of its own.
+   `bootstrap.php:302` loads `_auth_keys/auth_creds.php` from the folder above `_core/`, and nothing selects a
+   database per channel. `deploy.yml:190-192` uploads the shared code to `dirname()` of each channel's web
+   folder. This repo documented a layout with all the web folders side by side under one parent, which means
+   one copy of the code and one database for all three channels. Strictly, those paths come from GitHub
+   secrets, so the code alone cannot prove how any server is arranged. That ours were side by side comes from
+   the owner's own settings, recorded in DEV_NOTES 3b on 11 September, not from anything the code can show.
+   The owner chose to **separate the channels completely, the way iHymns does**. The repo stays the same for
+   every channel, which differ only by branch. The deploy step puts each branch into its own folder on the
+   server, and each folder has its own `_auth_keys/`.
+   **A separate folder does not, by itself, mean a separate database.**
+   - Each channel needs its own database created in DreamHost, and its own run of the installer. The
+     installer writes that channel's `auth_creds.php` and `enc.key`.
+   - Never copy `_auth_keys/` from one channel to another. Copying `auth_creds.php` points both channels at the
+     same database. Settings encrypted with one channel's `enc.key` cannot be read with another's.
+   - The owner reports that nothing is live yet. That cannot be verified from the code. On that basis no
+     uploads or data need moving now. If that ever changes, moving them is a separate, planned job.
+   Once each channel has its own database, publishing is separate per channel **with no extra publishing
+   code**. The channel-detection and deploy work below is still needed.
+   Deploy settings, owner's choice (option C): `SFTP_PATH_ROOT_DIR` = the hosting home folder only, plus
+   `SFTP_PATH_LIVE_DIR`, `SFTP_PATH_BETA_DIR`, `SFTP_PATH_ALPHA_DIR`. Door folders are fixed as `admin_html/` and
+   `public_html/` inside each. The six `SFTP_PATH_<CHANNEL>_<DOOR>_DIR` settings are retired.
+   **This overturns parts of the corrections above,** and a plan amendment run must re-walk them. Known so far:
+   - Correction 1's "one database, three channels" premise is gone.
+   - Correction 5's deploy redesign now uploads shared code to each CHANNEL's folder.
+   - Step 2's `.channel` file becomes REQUIRED, and **it must be working before any web folder is renamed on
+     a server.**
+
+     How `bootstrap.php:92-108` decides the channel today:
+     - A non-empty `PORTAL_ENV` environment variable wins outright.
+     - Otherwise it searches the WHOLE web-folder path, in this order: `public_html_dev` or `alpha_html` means
+       'dev'; `public_html_beta` or `beta_html` means 'beta'; any other path containing `public_html` means
+       'prod'.
+     - Anything else falls back to 'dev', recorded as a guess.
+
+     With no environment variable set, AND provided no folder higher up the path already matches one of the
+     earlier names (a parent folder called `alpha_html`, for instance, would still give 'dev' recorded as a
+     folder match, not a guess), the new layout's folder names would therefore:
+     - make every channel's public side count as 'prod', even alpha's. There would be no pre-release gate, and
+       errors would be hidden.
+     - make every staff side (`admin_html`) fall back to 'dev'. `bootstrap.php:147-155` shows PHP errors on
+       screen for every value except exactly 'prod', so errors would show **including on live's staff side**.
+       And because the channel was only guessed, `Gatekeeper::shouldEnforce()` declines, so the pre-release
+       gate would not apply there either.
+
+     So the rename and the channel file must ship in the same deploy, with the file read first. Two further
+     requirements on the channel file's reader:
+     - It must produce exactly `prod` for live. Any other word, `live` included, turns error display on.
+     - It must report a source the gate accepts. Today `Gatekeeper.php` accepts only 'environment' or 'folder'.
+       Otherwise the gate must be changed in the same step to accept the new source.
+   Until that amendment exists, **where this section and a correction above disagree about channels,
+   this section wins.**
+7. **Correction 10 stands for now** — posters and video are served by the public door's own code, not copied as
+   static files. Its stated reason was that static copies cannot know which channel's folder to write into.
+   **That reason no longer holds** once each channel has its own folder. Correction 10 may still be right for
+   other reasons: range requests, and checking at the moment of serving that an item is still published.
+   The amendment run must re-examine it rather than assume it.

@@ -1,0 +1,149 @@
+# .dev-team/config.yml — repo-wide settings for the dev-team plugin, for WebMS-Intra.
+#
+# Committed on purpose: it applies to every session and every collaborator.
+# Anything passed when a dev-team skill is started still wins over this file
+# for that one run.
+#
+# The meaning of every setting below comes from the plugin's own reference:
+#   dev-team-plugin/skills/dev-team-orchestrator/references/config-and-toggles.md
+#   dev-team-plugin/skills/dev-team-orchestrator/references/model-routing.md
+# The reasons come from this project's own rules: .claude/CLAUDE.md, the project
+# memory, and .claude/HANDOFF.md. Check both still say what they say before
+# changing a value here.
+#
+# WHERE THE PLUGIN'S OWN FILES GO
+#   The plugin keeps its working files in this folder (.dev-team/), the same as
+#   the SIGNula.id repo does. Its feature-gap list is .dev-team/FEATURES.md, and
+#   the plugin writes it there by itself (dev-team-featurefind's SKILL.md, and
+#   gap-scoring-rubric.md, "FEATURES.md structure"). There is no setting for
+#   that path.
+#
+#   This matters because this repo ALREADY has a FEATURES.md at the top level:
+#   the living list of what the portal does, which people read and edit by
+#   hand. The two files are different things. Any instruction telling a plugin
+#   run to write the top-level FEATURES.md is a mistake.
+version: 1
+
+defaults:
+  # Balanced routes work like this (model-routing.md, "Cost posture"):
+  #   building and scouting   Opus
+  #   hard reasoning          Fable
+  #   every checking role     Opus
+  #   documentation           Sonnet
+  #   mechanical edits        Haiku
+  #
+  # That is MORE expensive than this project's rule for building, which is
+  # Sonnet or Haiku, with Opus only for complex work. It is kept as the default
+  # because the plugin is used here mainly for research (dev-team-featurefind),
+  # where Fable's reasoning and Opus's scouting matter.
+  #
+  # For a plain building run, pass models=economy. Building then moves to
+  # Sonnet, but be aware that hard reasoning also drops from Fable to Opus.
+  # Checking stays on Opus either way.
+  models: balanced
+
+  # Hybrid: acts on its own only for small, contained, reversible work. It
+  # stops and asks before anything destructive, irreversible or outside the
+  # repo, and also when requirements contradict each other or something keeps
+  # failing. That matches the owner's instruction to proceed without halting,
+  # except for explicit decisions.
+  gates: hybrid
+
+  # OFF, deliberately, even though issues ARE updated after every task here.
+  # This project updates each issue by hand, one at a time, against the actual
+  # code. Its issue sweeps change GitHub only after a separate, independent
+  # double-check. dev-team-featurefind does check each gap it records (it wants
+  # evidence for every claimed competitor feature), but that is the plugin's
+  # own check, not the independent review this project requires before any
+  # GitHub change. Letting the plugin create or edit issues on its own schedule
+  # would skip that review.
+  issues: off
+
+  cycles: 5
+  cap: 30
+
+git:
+  # Runs branch from and target alpha, never main. Without default-branch the
+  # plugin would use the repo's default branch, which is main, and a run would
+  # skip the promotion chain: alpha, then beta, then release-candidate, then
+  # main.
+  #
+  # stack-prs: false and single-pr: true stop a run stacking one pull request
+  # on another, and make it reuse its OWN branch's open pull request rather than
+  # open a duplicate. They do NOT, by themselves, keep all work on one branch.
+  # This project's rule of one working branch (claude/alpha-wip) and one pull
+  # request into alpha later still has to be followed, and a run must be told
+  # it. See "Branch discipline" in the project memory.
+  stack-prs: false
+  single-pr: true
+  default-branch: alpha
+
+features:
+  # One setting controlling two safety nets. See config-and-toggles.md (the
+  # guard notes); the code is hooks/guard-dev-team.sh and hooks/guard-ledgers.sh.
+  #
+  #   1. A check on shell commands, which blocks a few unrecoverable actions
+  #      such as pushing to main. At "on" it checks every command in every
+  #      session. At "auto" it works only when .dev-team/autopilot.json exists
+  #      (which normally means a plugin run is going, but a file left behind
+  #      after a run keeps it on), or when the DEV_TEAM_GUARD environment
+  #      setting is set (hooks/guard-dev-team.sh, the "Scope" block).
+  #
+  #   2. A check on file writes and edits made through Claude Code's own file
+  #      tools. It has two rules:
+  #      - Rule 1 (active even at "auto"). Refuses a Write (not an Edit) whose
+  #        FIRST THREE LINES carry the plugin's marker, aimed at a file named
+  #        like one of its ledgers anywhere outside .dev-team/: PROJECT.md,
+  #        FEATURES.md, SECURITY.md, VERIFICATION.md, MIGRATION.md, HANDOFF.md,
+  #        verdict.json or README.md, in any folder.
+  #      - Rule 2 (always active at "on"; at "auto", only while
+  #        .dev-team/loop.lock/ exists, which is only during one autopilot
+  #        cycle, or when DEV_TEAM_GUARD is set).
+  #        Refuses a write or edit to one of these files:
+  #          top-level FEATURES.md, PROJECT.md, SECURITY.md, VERIFICATION.md,
+  #          MIGRATION.md, HANDOFF.md or verdict.json;
+  #          .github/SECURITY.md or docs/SECURITY.md;
+  #        whenever the new text contains either of these:
+  #          the plugin's marker; or
+  #          anything shaped like one of its record ids: FG, F, B, G, V, I or M,
+  #          then a hyphen, then exactly three digits, such as "F-001".
+  #
+  # A KNOWN, ACCEPTED LIMITATION of "on": an edit to OUR OWN top-level FEATURES.md
+  # made through Claude Code is refused if the new text happens to contain
+  # something like "B-123", even when the plugin has nothing to do with it.
+  #   - Workaround: rephrase that text, or make the edit in an ordinary editor.
+  #     The hook only sees Claude Code's own file tools.
+  #   - .claude/HANDOFF.md is not covered by rule 2, which only protects the
+  #     top-level locations listed above. It IS covered by rule 1: a full
+  #     rewrite of it whose first three lines carry the plugin's marker would be
+  #     refused. Our handoff never carries that marker, so in practice this does
+  #     not arise.
+  #
+  # Kept "on" anyway, because the shell check refusing a push to main from ANY
+  # session is worth more than the occasional rephrasing. Both are safety nets
+  # only; the real protection for main is GitHub's own branch protection.
+  guard: on
+
+  # OFF. When on, the plugin rewrites .dev-team/HANDOFF.md after every task.
+  # This project's handoff document is .claude/HANDOFF.md. It is written by hand
+  # as the work happens, because handing work between systems depends on it
+  # (see the fallback rule in .claude/CLAUDE.md). A second, automatically
+  # rewritten handoff file would drift away from it, and a system picking up
+  # cold could read the wrong one.
+  auto-handoff: off
+
+  # OFF. When on, the plugin makes a local commit (never a push) as soon as a
+  # task is finished and has passed the plugin's own checks. Those checks are
+  # not the Codex review that this project's standing rule requires before
+  # anything is committed.
+  #
+  # Turning this off does not promise the plugin will never commit in some
+  # other way. Any run here must still be told: commit nothing until Codex has
+  # reviewed it, and stage files by name only.
+  auto-commit: off
+
+  update-notifier: on
+  branch-notifier: on
+  notifications: on
+  telemetry: on
+  dry-run: off

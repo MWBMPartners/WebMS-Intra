@@ -22,6 +22,755 @@ error page on the management portal; a design safety layer (sign-in methods refu
 silently dropped; Step 4 queries tables Step 5 creates; a folder name of `..` walks past every guard; the
 changeover order could serve the old management portal on the public hostname.
 
+**Owner decisions on the plan review — answered 13 September.** Recorded at the end of
+`.claude/plans/public-door-4-fable-3-corrections.md`. Series-level public tick with per-date opt-out; full
+description on an event's own page and an excerpt in lists; no embed allow-list; delegates may prepare a
+surface before switch-on; `public.assetBase` dropped. **Still open: per-channel publishing** — the owner
+prefers it now and asked for a real estimate before choosing. Being measured two ways (a per-channel switch on
+the public hostname record, versus a channel column on the whole settings table).
+
+### BUILD ROUND FINISHED, 13 September (workflow w882qn0nu, run wf_39955250-631) — state and what is next
+
+Per-agent results: `~/.claude/projects/<this project>/<session>/subagents/workflows/wf_39955250-631/journal.jsonl`
+(result order: pkg2 build, pkg2 verify, pkg1 build, pkg3 build, pkg1 verify, pkg3 verify, pkg1 fix, pkg3 fix).
+
+| Package | Build | Independent verify | Fix | Re-verified? |
+|---|---|---|---|---|
+| pkg2 — 22 portal-wide settings pages (#495) | done | **PASS** | not needed | n/a |
+| pkg1 — Step 1 review fixes (#493) | done | **FAIL**, criterion 10 (blocker below) | stop-gap applied | **no** |
+| pkg3 — method-call checker on PHP's tokenizer (#494) | done | **FAIL**, criterion 2: case-6 fixture was not a real nested heredoc; plus 5 minor | all six fixed | **no** |
+
+Main session re-ran the checks on the whole working tree afterwards. `php -l` on 64 changed or new PHP files:
+clean. All 15 `tools/audit-checks/check_*.py`: exit 0. All 6 `tools/*selftest*.php`: exit 0.
+
+**BLOCKER FOUND — pre-existing and serious, not caused by this round.** `web/_core/App.php` compares user-record
+flags with the text `'1'` (`=== '1'`, around lines 276, 348, 399-400, 416, 443 and 464). But `App::user()` loads
+the row through a prepared statement, which hands back whole numbers. Proven on MySQL 8.0.36 with PHP 8.5 and
+mysqlnd: `App::isRootAdmin()` is FALSE for a real global administrator. A root or legacy administrator with no
+site-administrator flag gets 403 on /settings. pkg1 and pkg2 reserve portal-wide changes for
+`App::isRootAdmin()`, so as built NOBODY could change a portal-wide setting. The pkg1 fix agent put a stop-gap
+in three pages only (settings/save.php, settings/index.php, admin/settings/group.php). pkg2's 22 pages have no
+stop-gap. bootstrap.php's settings loader has the same shape (`isSensitive === '1'` decides decryption), with
+its real type not yet proven.
+
+**Being fixed now as pkg4** (Opus builder, background). Brief: `.claude-work/briefs/pkg4-admin-flags.md`. It covers:
+- App.php made type-safe;
+- the bootstrap comparison proven and made type-safe;
+- the stop-gap removed;
+- **Logger.php's own address reader moved onto RateLimiter::clientIp()** — the deferred #496 item, with no recursion and no need for the database;
+- a scan listing every other text-versus-number comparison, which becomes a new GitHub issue. Nothing outside its list is fixed.
+
+**Codex reviews launched, round 1:** pkg2 (`brief-pkg2b.txt`, which is `brief-pkg2.txt` plus a note that the App.php
+fix is separate) writing to `.claude-work/reviews/codex-pkg2-r1.txt`; pkg3 (`brief-pkg3.txt`) writing to `codex-pkg3-r1.txt`.
+The diffs are in `.claude-work/reviews/pkg2.diff` (22 files) and `pkg3.diff` (26 files, including pr-security.yml step 20).
+**pkg1 and forged-address (#496) reviews wait for pkg4**, because pkg4 edits their files.
+
+**Commit order once each review comes back clean:**
+1. pkg1 and pkg4 as ONE commit, since they share the three settings pages;
+2. pkg2;
+3. pkg3;
+4. forged-address, including Logger.php.
+
+Stage named paths only.
+
+**Follow-ups for one new issue (found by the agents, NOT fixed):**
+- The pages behind 17 of the pkg2 handlers still show a working Save button to site administrators. The server refuses the save and explains why, but only afterwards.
+- The dashboard shows the set-up checklist's Dismiss button to every administrator.
+- The read-only captcha page still says "Drag to re-order".
+- The QR settings page says "leave empty to keep", but saving writes the empty value over the stored API key. It also stores that key unencrypted while marking it sensitive.
+- The apps page escapes the app name twice in its success message.
+- The header comment in venues/settings.php is out of date: migration 187 stops the duplicate rows it describes.
+- The admin help page never mentions `portal.devAccessRoles`.
+- A mistyped `portal.trustedProxies` entry is ignored silently.
+- Header-comment dates are inconsistent (11 v 13 September).
+
+### 14 September ~03:05 — docs Codex round 4: CLEAN; docs, config and plans committed and pushed
+
+- `codex-docs-channels-r4.txt` passes the full completeness check (last `codex` after last `exec`, `tokens used`,
+  no capacity or ERROR lines) and says **CLEAN**. It covers `.dev-team/config.yml` and the corrections doc's owner
+  decisions.
+- **Committed and pushed in one docs commit:**
+  - `.dev-team/config.yml` and `.dev-team/.gitignore`;
+  - `.claude/plans/public-door-4-fable-3-corrections.md`;
+  - `.claude/plans/public-door-5-channels-amendment.md`, with the owner's 10 answers;
+  - `.claude/plans/data-download-479-{1-survey,2-design,3-challenge,4-plan}.md`, with the owner's 10 answers;
+  - `.claude/plans/secret-settings-497-design.md`, with the owner's 2 answers;
+  - `.claude/CLAUDE.md`, with the new standing rule "No web address is ever built in";
+  - this handoff.
+
+  The commit message states which of these Codex reviewed.
+- The Codex code-review queue is still running: pkg1-r3, pkg2-r3, 498-r1, pkg6-catchup, 501-r2.
+
+### 14 September ~02:55 — Codex queue mostly FAILED ("model at capacity"); re-queued with a proper completeness check
+
+- **The 02:33 queue "finished" in 9 minutes, but only `codex-501-r1.txt` is a real review.**
+  `codex-pkg1-r3`, `codex-pkg2-r3`, `codex-498-r1` and `codex-pkg6-catchup` each died with "ERROR: Selected model is at
+  capacity" and exit 0. The old check (`^codex$` present) passed them. That is WRONG: the marker appears before every
+  progress message, and inside re-read old reviews. `codex-pkg2-r3.txt` "looked" like a review only because Codex had
+  cat'ed the r2b file. **Do not act on any of those four files.**
+- **#501 Codex round 1: no code defect; NOT CLEAN only because of the API description.** Fixed in
+  `web/_core/api-spec.json` exactly as Codex suggested, still valid JSON:
+  - summaries and descriptions for `GET /api/tasks/list` and `GET /api/v1/tasks`;
+  - both `userID` descriptions;
+  - csrfToken removed from the v1 GET session alternative;
+  - a security override added on the legacy GET. Confirmed first that `ApiAuth::requireRead()` does not check CSRF.
+  - Other GET operations still listing csrfToken are listed in `.claude-work/spec-get-csrf-list.txt`, for the docs
+    pass.
+- **New Codex queue (background).** It waits for the docs r4 run to end, then:
+  - re-runs docs r4 if that was incomplete;
+  - then pkg1-r3, pkg2-r3, 498-r1, pkg6-catchup, and 501-r2 (with a regenerated `501.diff` that includes the spec).
+  - It is ONE AT A TIME. A review counts only if `complete()` passes: no limit text, no capacity or ERROR in the last
+    lines, the last `codex` line after the last `exec` line, and `tokens used` present.
+  - "At capacity" means wait 5 minutes and retry, up to 5 attempts; attempts 4 and 5 use `-m gpt-5.6-sol`, and the
+    model used is logged.
+  - A usage limit stops the queue.
+  - Failed attempts are kept as `*.attemptN.txt`.
+- Memory `codex-limit-looks-like-success.md` updated with the capacity lesson and the completeness rule.
+- **Reusable script saved:** `.claude-work/codex-queue.sh` (syntax checked). Run it as
+  `bash .claude-work/codex-queue.sh NAME1 BRIEF1 NAME2 BRIEF2 ...` from the repo root. It has the same `complete()` check,
+  the retry, the fallback model and stop-on-limit. Use it for every future Codex review instead of hand-written loops.
+
+### 14 September ~02:40 — docs Codex round 3: NOT CLEAN (3 wording points), fixed; round 4 queued
+
+`codex-docs-channels-r3b.txt` found three points, each verified against the plugin's hook scripts (updated since our
+first read) and bootstrap.php:
+1. The shell guard's `auto` mode is active when `.dev-team/autopilot.json` EXISTS, or `DEV_TEAM_GUARD` is set, not
+   only "while a run is going".
+2. Rule 1 looks at the first THREE lines of a Write, and its names now include `readme.md`. `.claude/HANDOFF.md` is
+   outside rule 2 but INSIDE rule 1.
+3. The folder warning needed "provided no parent folder already matches an earlier name".
+
+All three are fixed in `.dev-team/config.yml` and the corrections doc. **Round 4 is queued**
+(`codex-docs-channels-r4.txt`); it starts after the main Codex queue reports "queue ended".
+
+### LATEST — 14 September ~02:25: CLAUDE LIMIT HIT AGAIN (reset 02:20); state re-established; Codex back at 02:31
+
+**Committed and pushed before the limit:** `eb077e1`, the #497 comparisons (App.php plus the 9 files).
+- App.php was Codex-reviewed.
+- The 9 files were interim-reviewed by Fable.
+- A Codex catch-up review is queued.
+
+**What the limit killed, and what was done about it (fallback rule):**
+- **`review-fixes-round3`:**
+  - pkg1-r3 (settings/proxy): DONE, verify PASS;
+  - pkg2-r3 (retention and off-site gates): DONE, verify PASS;
+  - forged-r2 (Logger safety) and pkg3-r3 (checker): builds DIED.
+
+  **Resumed** with `resumeFromRunId wf_46cf3fe6-d72` (the finished ones replay from cache).
+  - pkg1-r3 changes, now uncommitted: bare `public` is reserved; NOBODY can create a value/group name clash (e.g.
+    `portal`); a proxy entry with whitespace or a comma touching the slash is refused; a site administrator cannot
+    update or delete a stored name with characters outside `A-Za-z0-9._-`.
+  - Follow-ups (minor): the clash check is not atomic; older stored clashes need a loader change.
+  - pkg2-r3: `retention.php` page and sweep are global-admin only (the cron path is unchanged); `offsite-backup.php`
+    shows "Run now" to global admins only. Minor follow-up: a stale comment in `run_retention_sweep()` (~line 505).
+- **Interim review of #501 (`wf_e65fa51c-c04`):** rounds 1-2 done, round 3 died.
+  - **Its fixer went beyond the brief:** `tasks/api/list.php` now gives an API-KEY caller every open task in the
+    key's organisation (or ?userID), mirroring `expenses/api/list.php`. Codex has been asked specifically whether
+    that is right.
+  - Follow-ups: `api-spec.json` now misdescribes tasks list; list rows carry no assignee or status; there is no
+    isDeleted filter; `check_sql_columns.py` cannot see WHERE columns.
+  - **NOT resumed; Codex takes over.**
+- **Interim review of #498 (`wf_768fc165-a5e`):** died before round 1. **NOT resumed; Codex takes over.**
+- **Plan revision r2 (`wf_9867eb01-c8f`):** survey saved (`plan-amend2-1-survey.md`, 45 KB); design, challenge and
+  revision died. **Resumed** (survey cached, Fable retried first).
+- **Codex docs review waiter:** still alive and due at 02:32 (`codex-docs-channels-r3b.txt`).
+
+**Codex queue launched** (background; waits until 02:33; ONE AT A TIME; stops at a limit or a missing answer block).
+Briefs are `.claude-work/reviews/brief-*.txt`; the diffs were regenerated.
+1. `codex-pkg1-r3.txt`: `pkg1.diff`, now WITHOUT App.php;
+2. `codex-pkg2-r3.txt`: `pkg2.diff`, now WITH retention.php;
+3. `codex-498-r1.txt`: `498.diff`, demo data plus the off-site run handler;
+4. `codex-501-r1.txt`: `501.diff`;
+5. `codex-pkg6-catchup.txt`: `git show eb077e1` catch-up.
+
+**Stand-in reviews STOP now that Codex is back.** Return to the usual reviewer promptly.
+
+**Filed #503:** a draft event marked public (the default) is visible in full by direct link, because
+`calendar/event.php` never checks the status. Commented on #497 with commit `eb077e1`.
+
+**Order from here:**
+1. Read each Codex review, fix, re-review until clean, then commit and push per package (pkg1, pkg2, #498 with the
+   off-site handler, #501) and update issues.
+2. pkg6b (Router + cron + photo route) launches after pkg2 is COMMITTED, because it edits retention.php.
+3. pkg5 (secret settings build) after pkg1, #498 and pkg6b are committed.
+4. forged-r2 and pkg3-r3 go to Codex when their builds finish.
+5. Plan r2, then the sweep (sequential Fable), then the docs pass.
+
+**Concurrency note:** Claude has hit its limit TWICE with 5 or 6 agents running. Keep at most about 3 Claude agent
+chains going at once.
+
+### 13 September ~23:45 — interim review of the #497 comparisons done; next is the commit
+
+- **Workflow `interim-review-pkg6` (run `wf_5c438808-9d9`)** ran 4 rounds on Fable. Nothing is wrong in the code of
+  the 9 files. Remaining items:
+  - A Site.php comment overstated what the old code did in session mode. **Reworded by the main session.**
+  - **The commit must include `web/_core/App.php`,** or the My Account badge would say "Root Admin" while the
+    committed App.php still refuses that person. App.php's checks were already reviewed by CODEX in pkg1 r2b ("App.php
+    permissions: correct", 200 checks), so it is safe to commit with these files.
+  - **A pre-existing fault the review found, verified by the main session and filed as a new issue:** session-mode
+    multi-organisation never works. `bootstrap.php:358` detects the site before `index.php:48` starts the session,
+    and `detectFromSession()` needs an active session, so every request is organisation 1 and `/site/switch` does
+    nothing. `site/switch.php:66` also ignores `Site::set()` returning false.
+  - Also noted, pre-existing and NOT filed yet: a DRAFT event marked public is shown in full to anyone with its link
+    (`calendar/event.php:74` checks only isPublic). **Verify it, then file it.**
+- **NEXT:** mechanical checks, then **commit and push** `web/_core/App.php` plus the 9 files: Site.php,
+  auth/account/index.php, tasks/index.php, admin/workflows/index.php, announcements/manage.php, calendar/event.php,
+  calendar/manage/index.php, calendar/views/list.php, attendance/manage/index.php. **Router.php is NOT included.**
+  - The message must say: App.php Codex-reviewed; the 9 files INTERIM-reviewed by Fable, 4 rounds, because Codex is
+    out; a Codex catch-up is owed.
+  - Then comment on #497.
+- **Interim review of #498 plus the off-site trigger launched** (run `wf_768fc165-a5e`, reusable `interim-review` script).
+- **COMMIT MECHANICS WARNING:** in `web/_sql/full_schema.sql`, the uncommitted migration 193 settings block (pkg1)
+  and the 194 `tblDemoDataRegister` block (#498) sit in ONE diff hunk at line ~8659. To commit them separately, write
+  a patch with only one block and `git apply --cached` it. Check with `git diff --cached` before committing.
+
+### 13 September ~23:30 — off-site trigger and #498 demo data: BOTH VERIFIED
+
+Workflow `maintenance-498` (run `wf_f9900c13-181`) finished; 6 agents.
+
+- **Off-site "Run now" (`offsite-backup-run.php`).** Built (Sonnet), then verify FAIL on one major point: the message
+  wrongly said "nothing has been logged". Fixed (Opus), then re-verify **PASS**.
+  - Now: a non-administrator gets an immediate 403 as before. A site administrator or legacy administrator gets a
+    403 page drawn by the handler itself, in backup.php's style; the script is not run and there is no sync-log row.
+    A valid-token refusal is logged as `OffsiteBackupRunRefused`.
+- **#498 demo data:** built (Opus), then verify **PASS**.
+  - The page is for global administrators only, and the switch is read from the portal-wide row only.
+  - Load uses database-assigned numbers, and records every created row in a new register table
+    `tblDemoDataRegister (tableName, rowID, checkValue, createdAt)`, all in one transaction. It refuses when demo
+    data is already loaded.
+  - Wipe deletes only registered rows whose value still matches, and refuses (listing them) if a real row links to
+    demo data through a declared foreign key. All or nothing.
+  - `demo_data.sql` was DELETED and replaced by a PHP-driven load into the CURRENT organisation. Demo people are
+    inactive and cannot sign in.
+  - Migration 194 plus a full_schema hunk; the catalogue entry is `not-personal`.
+  - Old demo rows (9000-9004) are never touched automatically, and the page explains how to recognise them. The old
+    load could never have run on this schema anyway; the old WIPE was the real danger.
+- **Follow-ups (not fixed; put into a small follow-up package or the sweep):**
+  1. `Migrator.php:228` still shows a user-visible message naming the deleted `demo_data.sql`, plus comments at
+     `Migrator.php:142-147` and `:221`, `check_migration_idempotency.py:117`, `check_mariadb_only_ddl.py:18` and
+     `tools/e2e-migrations/run.sh:166`.
+  2. **While demo data is loaded, a real newsletter's "latest announcements" (`Newsletter.php:348`) can include the
+     [DEMO] announcements**, and real members see them in the portal. This is the one effect on real people. Default
+     plan: exclude registered demo rows from newsletters.
+  3. `offsite-backup-run.php` uses `escapeshellcmd()` on a path, which breaks when the hosting path contains spaces.
+     Use `escapeshellarg()`.
+  4. The "← Maintenance" link on demo-data, health and offsite-backup-run goes to `/admin/maintenance`, which is not
+     a registered address.
+  5. The stale header comment in `offsite-backup.php` says the run handler is unchanged.
+  6. A non-administrator gets a bare 'Forbidden' on demo-data (matching backup.php).
+- **Next:** one interim review (Fable) of the off-site file plus all the #498 files, then commit and push as the #498
+  commit and comment on #498. **`maintenance-498` finishing unblocks pkg6b ONLY once `review-fixes-round3` also
+  finishes.**
+
+### 13 September ~23:15 — #497 secret-settings DESIGN FINISHED; plan revision r2 LAUNCHED
+
+- **Design run `design-497-secret-settings` (run `wf_ec141e58-e3b`) finished: all three stages on Fable.**
+  - Outputs: `.claude-work/reviews/pkg5-{1-investigation,2-challenge,3-design}.md` and
+    `.claude/plans/secret-settings-497-design.md` (58 KB, identical).
+  - Key PROVEN facts:
+    - the loader has never decrypted (a prepared statement returns int 1);
+    - fixing the comparison alone makes EVERY page fatal: the `auth.ms365.tenantOnly`='true' seed throws
+      SodiumException, which nothing catches;
+    - `tenantOnly` is read by NOTHING, so it can be deleted with no security effect;
+    - all 13 dedicated admin pages encrypt, so their integrations get ciphertext today. That includes CAPTCHA,
+      which would lock out 13 forms;
+    - the generic `/settings` editor silently stores secrets as plain text AND turns the flag off. That is why
+      Microsoft and Google sign-in, Graph mail and most cron tokens work at all today;
+    - nothing double-decrypts once fixed.
+  - The build plan has 10 steps: a new `SecretSettings` class; bootstrap helpers become wrappers; migration **195**
+    plus full_schema; Captcha fails closed with a notice; captcha pages stop pre-filling secrets; the generic editor
+    keeps secrets encrypted; `upgrade.php` repairs stored rows once; admin dashboard and health notices; a selftest
+    plus a new `check_sensitive_seeds.py`; docs.
+  - **2 OWNER DECISIONS ANSWERED 13 September** (recorded at the end of the design file):
+    - (1) **Option B, NOT the recommendation:** with unreadable CAPTCHA keys, refuse the PUBLIC forms but ALLOW
+      sign-in and password reset. So `Captcha::verify()` gets a which-form parameter at all 13 call sites, and the
+      admin notice says sign-in is running without anti-spam.
+    - (2) **Option A:** encrypt readable secrets automatically on the next Upgrade, and document backing up
+      `enc.key` together with the database.
+  - **The pkg5 BUILD must wait for:** `review-fixes-round3` (edits settings/save.php and index.php),
+    `maintenance-498` (full_schema.sql), and pkg6b (edits health.php). Its steps touch all of those.
+- **Plan revision r2 launched** (Workflow `plan-amend-channels-r2`, run `wf_9867eb01-c8f`, sequential Fable). It
+  covers configurable addresses (#500), hybrid hosting and the zip package (#499). Outputs:
+  `.claude-work/reviews/plan-amend2-{1-survey,2-design,3-challenge,4-revision}.md` and
+  `.claude/plans/public-door-6-configurable-domains-and-package.md`. It is the only analysis run active; **the sweep
+  waits for it.**
+
+### 13 September ~23:00 — #501 items 1 and 2 FIXED and verified; interim review launched
+
+- **Workflow `small-faults-dashboard-tasks` (run `wf_85ca6902-d96`): builder done, independent verify PASS.**
+  - `dashboard/index.php`: `createdAt` → `` `timestamp` `` in the Activity (24h) widget.
+  - `tasks/api/list.php`: `assignedUserID` → `assignedToID`.
+  - Proven on MySQL 8.0.36: 500 errors before, 200 after, zero new error rows, and the counts match the database.
+  - The other three tasks api handlers were already correct.
+- **Confirmed checker gap for the sweep:** `check_sql_columns.py` never reads WHERE clauses in SELECT or UPDATE
+  (only in one simple DELETE shape). Both faults were WHERE-clause columns.
+- **Side note from the builder:** local testing with `PORTAL_ENV=dev` sends non-admins to the pre-release gate, so
+  test role-based pages with the channel detected as prod (or give the test users a gate role).
+- **A reusable Workflow `interim-review` was created and launched for these 2 files** (Fable reviewer, Sonnet fixer).
+  Script (exact): `~/.claude/projects/-Users-lance-manasse-Projects-Coding---Development-MWBM-Partners-Ltd-GitHub-WebMS-Intra/19f94bec-c3e9-4f58-b234-28317b147f87/workflows/scripts/interim-review-wf_e65fa51c-c04.js` (run `wf_e65fa51c-c04`). Relaunch it for any package with args
+  `{name, files, purpose, questions, fixerType}`.
+- When clean: commit and push those 2 files as a #501 commit, noting the INTERIM Fable review and that a Codex
+  catch-up is owed; comment on #501.
+
+### 13 September ~22:40 — #501 filed; small fix running; the stray login file is gone
+
+- **#501 filed** for three pre-existing faults, each confirmed in the code:
+  1. `/dashboard` fails for every administrator: `dashboard/index.php:171-174` uses `createdAt` on `tblActivityLogs`,
+     whose column is `timestamp`;
+  2. `/api/tasks/list` gives a 500 error when signed in. The columns it selects all exist, so the cause is not yet
+     traced;
+  3. `calendar/views/photo` is a fragment registered as a route.
+
+  **Checker gap:** `check_sql_columns.py` apparently does not read WHERE clauses. That goes to the sweep.
+- **Workflow `small-faults-dashboard-tasks` launched** (run `wf_85ca6902-d96`; Sonnet build, Opus verify) for #501
+  items 1 and 2.
+- **#501 item 3 (the photo route) was added to the pkg6b brief,** in the same migration 196 as the cron moves.
+- **The stray `web/_auth_keys/auth_creds.php` is gone**; `web/_auth_keys/` does not exist in the real tree.
+  `.claude-work/briefs/common-builder.md` gained a rule: never create anything under `web/_auth_keys`, `_uploads` or
+  `_backups` in the real tree; use a scratch copy.
+- **Running now:**
+  - `maintenance-498`;
+  - `review-fixes-round3`;
+  - `design-497-secret-settings` (Fable, the only analysis run);
+  - `interim-review-pkg6`;
+  - `small-faults-dashboard-tasks`;
+  - the Codex docs review waiter, due at 02:32.
+- **Waiting to launch:** pkg6b (after `review-fixes-round3` AND `maintenance-498`); the plan revision r2 (after the
+  #497 design run); interim reviews and commits as packages finish; the Codex catch-up from 02:32.
+
+### 13 September ~22:30 — #497 comparisons: 12 of 13 FIXED; the Router fix held back for a good reason
+
+Workflow `pkg6-number-flags` (run `wf_6e5ac591-46d`) finished: build, verify (FAIL), fix, re-verify (FAIL). **Both
+failures are ONLY the held-back Router item.**
+- **Fixed and proven on MySQL 8.0.36 (uncommitted):** Site.php (userBelongsTo and userIsSiteAdmin/RootAdmin, with a
+  private `flagIsOn`); the My Account badge; editing tasks, workflows and announcements no longer turns
+  recurrence, active, pinned or published off; calendar featured badges, primary marker and search-engine markup;
+  attendance greying.
+- **`Router.php:83` NOT changed.** Three routes seeded protected are called by scheduled jobs with a token and no
+  session: `admin/maintenance/retention`, `health` and `backup-check` (`?cron=1&token=`). The Router fix would
+  silently stop them.
+  **Decided (technical, not an owner question):** move those job modes to `cron/*` addresses, `isProtected=0`, as
+  every other job already is, then fix the Router. Brief: `.claude-work/briefs/pkg6b-router-and-cron.md`; migration
+  **196**. **Launch only after `review-fixes-round3` (edits retention.php) and `maintenance-498` (may edit
+  full_schema.sql) have both finished.**
+- **Confirmed OPEN to signed-out visitors today:** `expenses/treasury` (names, titles, amounts), `expenses/submit`,
+  `expenses/approve`, `dashboard`, `attendance`, `help/support`.
+- **Pre-existing faults found, not caused by this work, to be filed as one issue:**
+  - `/dashboard` gives a 500 error for an administrator (a wrong column name);
+  - `/api/tasks/list` gives a 500 error when signed in;
+  - `calendar/views/photo` is a page fragment registered as a route (500 error).
+- **Stray file:** an agent created `web/_auth_keys/auth_creds.php` in the REAL tree, pointing at its throwaway database
+  container. It is gitignored, so it cannot be committed, but it changes what the real tree does. **Delete it once no
+  build agent is running,** and add to `common-builder.md`: never create files under `web/_auth_keys/` in the real
+  tree; use a scratch copy.
+- **Interim review launched:** Workflow `interim-review-pkg6`. A Fable reviewer (Opus if Fable is refused) reviews
+  the 9 changed files, with Opus fixing and Fable re-reviewing until clean. **Labelled INTERIM: Codex is out until
+  02:31.** When clean: commit and push those 9 files as a #497 part commit, saying which model reviewed, and add them
+  to the Codex catch-up queue.
+
+### 13 September ~22:05 — Codex queue results; CODEX LIMITED AGAIN until 02:31 on 14 September
+
+**Codex round 2 results** (each read in full, from the last `codex` line onwards):
+- **pkg1 round 2b (`codex-pkg1-r2b.txt`): NOT CLEAN, 3 medium findings.**
+  1. A site administrator can create the bare key `public`, which replaces the whole `public.*` group for their
+     organisation through the loader's nesting.
+  2. `192.0.2.1 /0` in `portal.trustedProxies` splits into a trusted `192.0.2.1`.
+  3. An existing key with a combining accent (`públic.`) can slip past the UPDATE's LIKE test.
+
+  Everything else passed: proxy chains (71 checks), Gatekeeper, App.php permissions (200 checks), group.php single
+  CSRF check, AppRegistry, and migration 193 matching.
+- **pkg2 round 2b (`codex-pkg2-r2b.txt`): the round 2 fixes PASS.** Three maintenance gaps remain:
+  - [P1] `retention.php` sweep open to any administrator;
+  - [P1] demo-data, already #498. Codex adds: `demo_data.sql:15-28` loads into ORGANISATION 1 whatever the caller's
+    organisation. **Check this is handled when reviewing #498.**
+  - [P2] `offsite-backup.php:288` shows "Run now" to site administrators.
+
+  Codex's per-file view of which settings belong to each organisation is kept for the sweep; not acted on.
+- **Forged-address round 1b (`codex-forged-r1b.txt`): all ten replacements CORRECT.** Two faults were already in
+  Logger before this change:
+  - `writeErrorRow()` can throw when the database is missing or failing (a TypeError at Logger.php:41);
+  - alert mail failures can recurse (Logger.php:459 → Mailer → Logger).
+
+  Side notes: an empty `REMOTE_ADDR` now gives '0.0.0.0' rather than ''; AssetRegister hash buckets restart for
+  visitors whose recorded address text changes (harmless).
+- **pkg3 round 2b (`codex-pkg3-r2b.txt`): NOT CLEAN, 3 medium findings.**
+  1. `Holder::Site::ok()` and `$obj->Site::ok()` are read as a class `Site`.
+  2. `...` inside a parameter's attribute marks the parameter optional.
+  3. A crash message without a trailing newline glues the wrapper's '•' line onto it, so step 20's second grep
+     drops it; also, exit 1 with a mid-line '•' skips the fallback.
+- **Docs round 3: CODEX USAGE LIMIT, not reviewed.** Codex says try again at **02:31 on 14 September**.
+
+**Launched: Workflow `review-fixes-round3`** (sequential, one package at a time). Briefs:
+- `.claude-work/briefs/fix-pkg1-r3.md` (Opus): also covers the general "a single-word key hides a whole group"
+  shape, e.g. `portal`;
+- `fix-pkg2-r3.md` (Sonnet): retention page and sweep global-admin-only, cron path unchanged; the off-site page's
+  "Run now" button global-admin-only;
+- `fix-forged-r2.md` (Opus): Logger never throws, loops or needs the database; alerting re-entrancy guard;
+- `fix-pkg3-r3.md` (Opus).
+
+Each package is verified by Opus on a real database.
+
+**THE PLAN WHILE CODEX IS LIMITED (fallback rule):**
+- Keep building and fixing.
+- When a package passes its independent verification, give it an **INTERIM review by a different Claude model
+  (Fable), with no memory of building it, clearly labelled "interim — not the Codex review"**.
+- Then commit and push, with the commit message saying Codex was unavailable, which model reviewed instead, and that
+  a Codex catch-up is owed.
+- From **02:32 on 14 September**, run a **Codex catch-up review of everything committed while it was away**, one
+  package at a time, starting with docs r3.
+- Codex findings are then fixed and re-reviewed as usual.
+
+**Still running:**
+- `pkg6-number-flags` (#497 comparisons);
+- `maintenance-498` (off-site trigger, then #498);
+- `design-497-secret-settings` (Fable design; the only analysis run active);
+- `review-fixes-round3`.
+
+### 13 September ~22:00 — the owner answered the re-plan's 10 decisions; the plan needs a revision
+
+The answers are recorded at the end of `.claude/plans/public-door-5-channels-amendment.md` ("OWNER ANSWERS"). In short:
+- **Recommended answers for 1, 5, 6, 7, 8, 9 and 10:** fail closed; no scheduled jobs on test copies; media through
+  the portal; a fresh beta; `health` on the allow list; delete the old folders by hand; wipe an empty live.
+- **2 and 3 OVERRULED: NO HARD-CODED WEB ADDRESSES ANYWHERE.** WebMS-Intra is a product for many customers, and every
+  domain is configurable at installation. Ours is just one configuration.
+- **NEW: a GitHub Action that builds a downloadable ZIP installation package** for future customers.
+- **4: HYBRID.** Ours is one DreamHost user for all channels; other customers may have separate hosting accounts, or
+  other hosts, per channel. The deploy must support both.
+- **Revision run queued** (brief `.claude-work/briefs/plan-amend-channels-r2.md`, sequential Fable). It launches after
+  the secret-settings design run finishes, and before the sweep.
+- New issues are being opened for the zip package and for configurable addresses; the answers are commented on #493.
+- **Do NOT build any #493 step 2+ until that revision exists.**
+
+### 13 September ~21:45 — channel re-plan FINISHED; secret-settings design STARTED
+
+- **Re-plan done** (run `wf_a32bd4e5-673`; all three stages ran on Fable, and stage 3 succeeded on the retry).
+  - The amendment is saved in BOTH `.claude-work/reviews/plan-amend-3-amendment.md` and
+    `.claude/plans/public-door-5-channels-amendment.md` (identical, 85 KB).
+  - Section 0 says exactly what it replaces in the corrections, the build plan and DEV_NOTES.
+  - Section 3 gives the deploy workflow exactly: per-folder uploads, never `web/` as a whole; guards; health checks
+    on every channel.
+  - Section 4 is the hard ordering; section 6 is the changeover for someone using only the panel and SFTP.
+  - It ends with **10 OWNER DECISIONS**, asked on 13 September (answers to be recorded in the amendment and here).
+  - It adds `health` to `Maintenance::ALLOW_LIST` as a new Step 2 item.
+- **Secret-settings design run launched** (Workflow `design-497-secret-settings`, run `wf_ec141e58-e3b`,
+  sequential Fable). Outputs:
+  - `.claude-work/reviews/pkg5-{1-investigation,2-challenge,3-design}.md`
+  - `.claude/plans/secret-settings-497-design.md`
+
+  It is the only analysis run active. **The sweep waits for it.**
+- Still running: the Codex queue (pkg1 r2b first); `pkg6-number-flags`; `maintenance-498` (off-site trigger, then
+  #498).
+
+### LATEST — 13 September 21:40: the owner's new instructions, what is running, and the order of work
+
+**The owner's instructions (13 September, after the limits reset):**
+- Pick up everything that was interrupted.
+- Do #497 (all of it: the comparisons AND secret-settings decryption), #498 (demo data), and tighten the off-site
+  backup "Run now" trigger.
+- Then Codex review, fix, and re-review until clean.
+- The full standing block was re-issued: plain English; keep the handoff current; Fable for deep analysis (Opus
+  fallback), Sonnet/Haiku for building (Opus if complex); dev-team plugin; cross-review; after each task commit AND
+  PUSH to the working branch and update each issue individually; memory and context; a thorough documentation pass;
+  autonomy; progress tables; no stacked PRs; the LLM fallback rule.
+- The three standing rules (plain English, handoff, LLM fallback) were ALREADY in `.claude/CLAUDE.md` and
+  `~/.claude/CLAUDE.md`; this was checked, not added twice.
+
+**Checked alive at 21:37 (nothing was lost this time):**
+- The Codex queue: `codex-pkg1-r2b.txt` being written by a live `codex exec` process. Next in the queue: pkg2 r2b,
+  forged r1b, pkg3 r2b, docs r3.
+- Workflow `pkg6-number-flags` (run `wf_6e5ac591-46d`): the builder agent is active. It has edited Site.php and 8 page
+  files; **Router.php is not yet changed** (by design, it lists the open pages and public routes at risk first).
+- Workflow `plan-amend-channels` (run `wf_a32bd4e5-673`): the stage-3 amendment agent is active (Fable retry).
+
+**Launched now:** Workflow `maintenance-498` runs sequentially, to limit concurrent usage:
+1. The off-site trigger. Brief `.claude-work/briefs/offsite-trigger.md`; Sonnet builder, then Opus verifier, then a
+   fix and re-verify if needed.
+2. #498 demo data. Brief `.claude-work/briefs/demo-data-498.md`; Opus builder, then the same.
+
+**Migration numbers RESERVED (to stop clashes):**
+- **194 = #498** demo-data register (only if it needs one);
+- **195 = #497** secret settings (pkg5);
+- the #479 and #493 plans take the next free numbers when they are built, and must renumber from their plan text.
+
+**Commit mechanics to remember:** `web/_sql/full_schema.sql` will hold hunks from pkg1 (migration 193) and from #498
+(and later pkg5). Commit each package's hunks separately: build a filtered patch with `git diff` and apply it with
+`git apply --cached`. Never commit the whole file for one package.
+
+**Order of work from here:**
+1. When the re-plan finishes: launch the pkg5 secret-settings design run (brief `.claude-work/briefs/pkg5-secret-settings.md`,
+   sequential Fable), then build it.
+2. As each package's build and verify finishes: queue its Codex review; fix and re-review until clean; then commit and
+   push that package alone; update its issue; update memory and handoff.
+3. Commit order once clean:
+   - pkg1+pkg4 (Step 1 + App.php);
+   - forged-address (#496);
+   - pkg2 (#495, incl. backup.php);
+   - pkg3 (#494);
+   - docs, config and plans;
+   - pkg6 (#497 comparisons);
+   - the off-site trigger;
+   - #498;
+   - pkg5 (#497 secrets).
+4. Then: the issue sweep and ranked proposals (sequential Fable, featurefind writing `.dev-team/FEATURES.md`); the
+   thorough documentation pass; the #479 build; the #493 build under the amendment.
+
+### ⚠️ CLAUDE USAGE LIMIT HIT, 13 September evening — what died and how it was resumed
+
+The Claude session limit (it reset at 21:20 London time) killed four pieces of work at once. Codex was NOT affected,
+because it has its own limit. Recorded under the fallback rule:
+- **pkg6, the number-versus-text comparisons: agent died mid-build.** It may have left partial edits. Relaunched as
+  Workflow `pkg6-number-flags`: build, independent verify on a real database, fix, re-verify. The builder is told
+  to inspect `git diff` on its files for partial edits first.
+- **pkg5, the secret-settings investigation: died at its first step, nothing written.** Queued, not relaunched.
+  It is design work, so it runs as a sequential Fable analysis run AFTER the channel re-plan finishes (never two
+  analysis runs at once). Its brief is the pkg5 prompt recorded in this session; it produces
+  `.claude-work/reviews/pkg5-secret-settings-investigation.md`.
+- **Channel re-plan: stages 1 (re-walk) and 2 (challenge) completed on Fable. Stage 3 (amendment) failed on BOTH
+  Fable and Opus.** Resumed with `resumeFromRunId wf_a32bd4e5-673`, so the cached stages replay and Fable is tried
+  first again. Stage 1 found, among other things:
+  - `Maintenance::ALLOW_LIST` lacks `health`, so the post-deploy health check always hits the 503 holding page
+    during an upgrade;
+  - under option C, live's channel folder IS the old shared base, so live keeps its existing `_auth_keys/`.
+- **The owner's answers to D2, D4-D8 and D10 were recorded after the reset.** All ten #479 decisions are answered,
+  all as recommended; see the plan file's "OWNER ANSWERS" section.
+
+### Maintenance pages checked against the code, 13 September (while Codex was limited)
+
+The pkg2 fix agent flagged pages outside its list that only check `App::isAdmin()`. Read directly:
+- **`admin/maintenance/demo-data.php`: DATA-LOSS HAZARD, filed as #498** (body in `.claude-work/issue-demo-data.md`).
+  `demo_data.sql` uses ON DUPLICATE KEY UPDATE, so LOADING also overwrites real accounts numbered 9000-9004.
+  - Any administrator can use it (line 30).
+  - Its wipe runs `DELETE FROM tblUsers WHERE userID >= 9000`, plus four other tables, with no organisation filter
+    (lines 79-83).
+  - `userID` is plain auto-increment, so real accounts reach 9000, and from then on Wipe deletes real people.
+  - The switch `portal.demo_mode.enabled` is seeded '0' portal-wide (full_schema.sql:2948).
+  - `demo_data.sql` uses fixed account numbers 9000-9004.
+- **`admin/maintenance/offsite-backup-run.php:24`:** any administrator can run the off-site sync of the whole
+  installation's backups. It should be made global-administrator-only to match backup.php. **Fold into pkg2 round 3**
+  (Codex pkg2 r2b was asked to look for exactly these pages, so wait for its answer first).
+- **`admin/maintenance/retention.php`:** any administrator; deletes activity logs and errors for every organisation.
+  **Already covered by #491.** Note for #491's decision: the owner's settled GDPR decision "logs kept forever, with
+  the user link decoupled" sits uneasily with an activity-log sweeper that deletes logs at all. Raise it when #491
+  is decided.
+- **`health.php`, `backup-check.php`:** display only, isAdmin-only. Not examined further.
+- **pkg5 (secret settings) design brief saved** to `.claude-work/briefs/pkg5-secret-settings.md`, as three sequential
+  Fable stages. Launch after the re-plan finishes, BEFORE the sweep.
+
+### ⚠️ CODEX ALSO HIT ITS USAGE LIMIT — the four reviews launched around the Claude limit never ran
+
+`codex-pkg1-r2.txt`, `codex-forged-r1.txt`, `codex-pkg2-r2.txt` and `codex-pkg3-r2.txt` each contain only the brief
+plus "ERROR: You've hit your usage limit ... try again at 9:30 PM". **None of those reviews happened.** Under the
+fallback rule, nothing was quietly reviewed by Claude instead. The changes stay NOT REVIEWED and uncommitted.
+
+A background queue waits until 21:31, then runs the reviews ONE AT A TIME, so a second limit loses at most one. It
+stops at the first "usage limit" answer. Order and output files:
+1. `codex-pkg1-r2b.txt`
+2. `codex-pkg2-r2b.txt`
+3. `codex-forged-r1b.txt`
+4. `codex-pkg3-r2b.txt`
+5. `codex-docs-channels-r3.txt`
+
+The same briefs as before are used; the docs review uses the new round 3 brief. If the queue stops, re-run the rest
+by hand with the same command shape.
+
+**Docs round 2 points: all verified and fixed.**
+1. The guard rule 2 promise was wrong. Checked in the plugin's own `hooks/guard-ledgers.sh`: `id_pattern`
+   `\b(FG|F|B|G|V|I|M)-[0-9]{3}\b` matches with no marker, and with `guard: on`, `run_active=1` always. The
+   config.yml comment now states the limitation and the workaround, and says why `on` is kept.
+2. Corrections item 6: "ours was not" and "nothing is live" are now attributed to the owner, not the code.
+3. The folder warning was rewritten: the `PORTAL_ENV` variable wins; the match order; an unrecognised staff path
+   also skips the gate; the reader must produce exactly `prod`, and a source the gate accepts.
+
+### Results that came back around the limit
+
+- **pkg3 fix (checker): DONE, all 8 Codex findings reproduced and fixed.**
+  - Also found and fixed: `use Auth;` was being resolved as `Portal\Core\Auth`.
+  - The real run is identical before and after: 788 files, 6,486 calls, 0 findings. Self-test 100 of 100.
+  - Step 20's greps now use `grep -a`, so an invalid byte cannot swallow a finding line.
+  - **Codex round 2 launched,** writing to `codex-pkg3-r2.txt`.
+- **pkg2 fix (settings pages): DONE.** All 4 findings reproduced and fixed. `backup.php` is now global-administrator
+  only for every action. It flagged pages outside its list that still only check `isAdmin()`:
+  offsite-backup-run, retention, backup-check, health, **demo-data (loads or wipes live tables)**, plus help pages
+  pointing site administrators at backups. These go in the follow-ups issue, or into pkg2 round 3 if Codex r2
+  raises them.
+- **pkg4 (App.php flags and Logger): DONE,** apart from the bootstrap step, which was deliberately NOT done: fixing it
+  alone crashes every page because of the `auth.ms365.tenantOnly` seed. That became pkg5.
+  - It also found and fixed group.php's double CSRF check.
+  - Its scan found 14 broken comparisons. **CRITICAL: `Router.php:83` means the Router never forces sign-in.**
+- **New GitHub issue #497** for the number-versus-text comparisons (critical, security). A **#479 comment** was posted: design finished, all ten decisions answered.
+- **Codex reviews launched before the limit, all three finished:** pkg1 round 2 (`codex-pkg1-r2.txt`),
+  forged-address round 1 (`codex-forged-r1.txt`), pkg2 round 2 (`codex-pkg2-r2.txt`). Being read now.
+- **Docs and config Codex round 2 (`codex-docs-channels-r2.txt`): NOT CLEAN, 3 points.**
+  1. The guard comment wrongly promises it never blocks a person's own edit. Rule 2 also matches record IDs
+     such as `FG-001` with no marker; being verified in `guard-ledgers.sh`.
+  2. Corrections item 6's "ours was not" and "nothing is live" are the owner's information, not provable from
+     code, and must say so.
+  3. The folder warning needs qualifying: the `PORTAL_ENV` variable wins; `public_html_dev` and the like are
+     matched first; an unrecognised staff path ALSO bypasses the pre-release gate; and the production value must
+     be exactly `prod`.
+
+  Round 3 follows once those are fixed.
+
+### #479 DESIGN FINISHED, pkg2 review back, re-plan RUNNING — 13 September (later)
+
+- **#479 design run finished** (`w46hpsp1l`, run `wf_ff8a3d5d-dc0`; all four stages ran on Fable).
+  - Copied to `.claude/plans/data-download-479-{1-survey,2-design,3-challenge,4-plan}.md` so they get committed.
+  - The final plan (`4-plan.md`) has Parts 0 to 6, a build plan in 8 steps (migration 194 is in its Step 4),
+    **10 OWNER DECISIONS D1 to D10**, and a "What was not checked" list.
+  - No Codex review of the plan yet; the standing rule applies to each build step.
+  - Survey facts worth keeping:
+    - the catalogue really has 55 erase, 70 unlink, 3 retain and 3 not-personal; its heading comments are stale;
+    - the download covers 20 of 131 tables;
+    - `calendarToken` leaks in today's download;
+    - 5 catalogue entries name columns that do not exist;
+    - 11 tables with a link to a user sit outside the catalogue under column names the coverage check misses.
+  - **Owner decisions asked 13 September:** D1 (an administrator queues a download for a written request),
+    D9 (how Microsoft/Google-only members prove it is them), D3 (a child's Kids profile in a parent's download),
+    and whether to accept the recommended answers for D2, D4-D8 and D10.
+  - **#479 migration-number clash to resolve:** BOTH this plan and the #493 plan want migration 194. Whichever
+    builds first takes 194; the other renumbers.
+- **pkg2 Codex review (`codex-pkg2-r1.txt`): NOT CLEAN.**
+  - [P1] apps, qr and sabbath call `Auth::verifyCsrf()` twice. The first call replaces the token
+    (Auth.php:297-301), so a global administrator's save silently does nothing.
+  - [P1, pre-existing] `admin/maintenance/backup.php:38` only checks `isAdmin()`, so a site administrator can
+    restore `tblSettings` (portal-wide rows included) from a snapshot.
+  - [P2, pre-existing] the QR API key: a blank submission overwrites the stored key, which is also stored
+    unencrypted and copied into `defaultValue`.
+  - No ungated portal-wide write was found in the 22 files, and no text-versus-number comparisons.
+  - Codex also gave a per-file view of which settings arguably belong to each ORGANISATION rather than the
+    installation: payments, Sabbath quiet hours, organisation address, QR, apps, and the MS365 mailbox. **Not
+    acted on.** It is a design question for the sweep, or for the owner.
+  - **Fix agent launched** (Opus). Files: apps/index.php, qr/index.php, sabbath/index.php,
+    maintenance/backup.php (plus its handler if any), captcha/index.php ("Drag to re-order" text).
+- **Channel re-plan run LAUNCHED** (Workflow `plan-amend-channels`: sequential Fable with Opus fallback).
+  Outputs go to `.claude-work/reviews/plan-amend-{1-rewalk,2-challenge,3-amendment}.md` and
+  `.claude/plans/public-door-5-channels-amendment.md`. The brief's facts were corrected first: separate folder
+  is not the same as separate database, and the `public_html`/`admin_html` detection hazard.
+- **Docs and config Codex review round 2 launched**, writing to `codex-docs-channels-r2.txt`.
+- **Running now:** pkg4 (administrator flags and Logger), the pkg3 fix (checker), the pkg2 fix (settings pages),
+  the re-plan, and docs review round 2. **The sweep and proposals run waits for the re-plan to finish.**
+
+### Codex round 1 results, 13 September
+
+- **Docs and config review (`codex-docs-channels-r1.txt`): NOT CLEAN. Every point was checked against the plugin reference and bootstrap.php, and all were right. Fixed:**
+  - The `.dev-team/config.yml` comments were rewritten. Featurefind ALREADY writes `.dev-team/FEATURES.md` by itself. `guard` covers two hooks (shell commands, and file writes and edits). auto-handoff writes `.dev-team/HANDOFF.md`. "balanced" builds on OPUS, not Sonnet (model-routing.md:69-75); kept, with the comment now saying so. The branch settings do not enforce one working branch.
+  - Corrections doc item 6: the "one database" claim is qualified (paths come from secrets). "Separate folder ≠ separate database": each channel needs its own database and installer run, and `_auth_keys/` must never be copied between channels.
+  - **New hazard recorded:** `bootstrap.php:98-107` treats any path containing `public_html` as live and anything else as 'dev', which shows errors. So a folder rename before the channel file lands would show PHP errors on live's staff side and make alpha's public side look live. The rename and the channel file must ship together.
+  - The re-plan brief gained items 10 (hard ordering) and 11 (databases and keys per channel).
+  - **Round 2 of this review still to run.**
+- **pkg3 method-call checker (`codex-pkg3-r1.txt`): NOT CLEAN.**
+  - The ten original cases pass, and the real run is clean (788 files, 6,485 calls, 0.67s); self-test 41/41.
+  - 8 medium findings: imports leak between namespaces; comma-separated imports lost, and grouped function/const imports treated as classes; core map keyed by short name; conditional declarations overwrite each other; methods returning by reference are missed; four trait `insteadof`/`as`/abstract argument-count errors; the Python wrapper has no timeout; the wrapper's decode or launch errors fail invisibly in pr-security step 20.
+  - **Fix agent launched** (Opus). It must reproduce each finding first. Where the checker cannot be sure, it must neither accuse nor count the call as verified. Brief is inline in the agent prompt, and the findings are in `codex-pkg3-r1.txt` from line 3623.
+- pkg2 review: still running.
+
+### Also done, 13 September (after the build round), and what is waiting
+
+- **#493 comment posted** recording the channel decision, the option C settings, and what changes in the plan:
+  https://github.com/MWBMPartners/WebMS-Intra/issues/493#issuecomment-5654890165
+- **Memory saved:** `webms-channels-fully-separate.md`, `db-flags-come-back-as-numbers.md` (MEMORY.md index updated).
+- **`.dev-team/config.yml` + `.dev-team/.gitignore` created** (uncommitted). Settings:
+  - `default-branch: alpha`, `stack-prs: false`, `single-pr: true`;
+  - `issues: off`, because issues are updated by hand and individually;
+  - `guard: on`;
+  - `auto-handoff: off`, because `.claude/HANDOFF.md` is the handoff;
+  - `auto-commit: off`, because Codex reviews before commit and only named files are staged.
+
+  The comment in the file records that a featurefind run must be TOLD to write `.dev-team/FEATURES.md`. The plugin has no setting for that path, and the top-level FEATURES.md is our own.
+- **Brief for the channel re-plan written:** `.claude-work/briefs/plan-amend-channels.md`. It is a sequential Fable run with an Opus fallback. **Launch only after the #479 design run finishes.** Its outputs go to `.claude-work/reviews/plan-amend-{1-rewalk,2-challenge,3-amendment}.md` and `.claude/plans/public-door-5-channels-amendment.md`.
+- **Codex review of the docs and config launched:** `brief-docs-channels.txt`, writing to `codex-docs-channels-r1.txt`. Once it is clean, commit `.dev-team/config.yml`, `.dev-team/.gitignore`, `.claude/plans/public-door-4-fable-3-corrections.md` and `.claude/HANDOFF.md`.
+- **Nothing reads any `SFTP_PATH_*` secret yet.** `deploy.yml` still reads `SFTP_LIVE_PATH`, `SFTP_BETA_PATH` and `SFTP_DEV_PATH`, so the owner can change the secrets now without breaking anything.
+
+**Waiting on (all in the background):**
+- pkg4, the administrator-flags fix (Opus agent);
+- Codex reviews: pkg2 (`codex-pkg2-r1.txt`), pkg3 (`codex-pkg3-r1.txt`) and docs (`codex-docs-channels-r1.txt`);
+- the #479 design run (`w46hpsp1l`, run `wf_ff8a3d5d-dc0`). Stage 1 is saved as `design-479-1-survey.md`.
+
+**Then:**
+1. Codex reviews pkg1 (plus pkg4) and forged-address.
+2. Commits, in the order above.
+3. Update #493, #494, #495 and #496, and create the issue for the text-versus-number comparisons from pkg4's scan and the follow-ups issue.
+4. Channel re-plan run.
+5. Sweep and proposals (with featurefind writing to `.dev-team/FEATURES.md`).
+6. #479 build.
+7. Docs pass.
+
+### ⚠️ FOUND 13 September — the three channels are not separate on the server at all
+
+Found while measuring what "publish separately per channel" would cost. PROVEN from the code, not a document:
+
+- `web/_core/bootstrap.php:301` loads the database login from `_auth_keys/auth_creds.php` under the ONE shared
+  root. Nothing chooses a different database per channel.
+- `.github/workflows/deploy.yml` sends `_core/`, `_apps/`, `_sql/` and the rest to `dirname()` of each channel's
+  web root — the SAME parent folder for all three. DEV_NOTES already says it: "last push wins for shared code".
+  The planned `SFTP_PATH_ROOT_DIR` scheme keeps exactly this shape.
+
+So **alpha, beta and live share one database AND one copy of the framework and app code**; only the web roots
+differ. An alpha deploy changes the code live runs, and testing on alpha reads and writes real members' data —
+including safeguarding records. Nothing is deployed yet, so it is cheap to change now.
+
+Measured cost of the per-channel options:
+- A channel column on every setting (the review's costing): **517 settings reads in 199 files**, plus the two
+  uniqueness rules on `tblSettings` (`uq_setting_key_site`, `uq_setting_key_scope`), on a table that has already
+  produced duplicate rows once. Three to five days, high regression risk.
+- A per-channel switch on the public hostname record the plan already needs (`tblPublicHosts`): a few hours,
+  but alpha still changes live's code and data.
+- **Fully separate channels** — own code folder and own database each: removes the question entirely, since each
+  channel then has its own settings. Roughly half a day to a day for deploy and docs, plus about an hour of the
+  owner's time. Changes the SFTP settings again.
+
+**OWNER DECIDED, 13 September: FULLY SEPARATE CHANNELS, the iHymns way.** In the owner's words: "each channel's code
+stays as is, and is separated at repo level only by branch. Code is then separated into separate folders on the
+server, purely by GitHub Action deployment based on source branch (similar to iHymns)".
+
+What that means, checked against iHymns' own files (not its docs alone):
+- iHymns gives each channel its own DreamHost folder — `/home/user/ihymns.app/`, `/home/user/beta.ihymns.app/`,
+  `/home/user/dev.ihymns.app/` (iHymns `DEV_NOTES.md:109-111`). Its deploy puts shared pieces in `dirname()` of
+  that channel's path, which is therefore DIFFERENT per channel (iHymns `deploy.yml:1014`, `:1073`).
+- Its database login sits beside the web folder (`dirname(__DIR__, 2)/.auth/db_credentials.php`,
+  `includes/db_mysql.php:56`), so a separate folder means a separate database with NO code choosing one.
+- The deploy writes the channel into a file (`.env-channel`, iHymns `deploy.yml:521`) and the PHP reads it
+  (`includes/environment.php:34`).
+
+For WebMS the same falls out almost for free: `bootstrap.php:302` already reads `_auth_keys/auth_creds.php`
+beside the code, so each channel folder gets its own `_auth_keys/`, its own `enc.key`, its own `_uploads/`
+and its own database. The repo does not change per channel.
+
+**Consequences to carry into the #493 plan (not yet applied to the plan files):**
+1. Correction 1's premise ("one database, three channels") is gone. Each channel's database holds only its own
+   public hostname rows. Re-check whether `tblPublicHosts.siteID` still needs to allow NULL.
+2. Correction 5 (deploy redesign) changes shape: shared code goes to the CHANNEL's root, not one shared root.
+   "Last push wins for shared code" (deploy.yml:21-22) stops being true, and that comment must go.
+3. **The channel can no longer come from the folder name.** `bootstrap.php:98-105` spots `public_html_dev` /
+   `public_html_beta` in the web folder's path. In the new layout every channel's folders are named
+   `admin_html/` and `public_html/`, so all three would fall back to 'dev'. The `.channel` marker file the plan
+   already has in Step 2 becomes REQUIRED, not optional. Migration 193's gate declines on a guessed channel,
+   so this fails safe (no lock-out) but also means the alpha/beta gate would do nothing until Step 2 lands.
+4. Per-channel publishing needs no code at all: each channel has its own settings table.
+5. **The deploy settings change again — OWNER DECIDED OPTION C, 13 September.** Four settings:
+   `SFTP_PATH_ROOT_DIR` = the hosting HOME folder only (`/home/USER/`), plus `SFTP_PATH_LIVE_DIR`,
+   `SFTP_PATH_BETA_DIR`, `SFTP_PATH_ALPHA_DIR`, each naming one channel's folder inside it (e.g.
+   `portal.millrdsdacambridge.uk/`, `beta.portal.millrdsdacambridge.uk/`, `alpha.portal.millrdsdacambridge.uk/`).
+   Inside every channel folder the doors are FIXED as `admin_html/` and `public_html/`, matching the repo.
+   RETIRED: the six `SFTP_PATH_<CHANNEL>_<DOOR>_DIR` settings the owner set up earlier the same day.
+   `SFTP_PATH_ROOT_DIR` KEEPS its name but its VALUE changes (drop the `portal.millrdsdacambridge.uk/` part).
+   Rejected: A (three full paths) and B (nine). The owner was shown that the SERVER layout is identical under
+   all three; only how GitHub describes it differs. Known limit of C, accepted: every channel must sit under
+   one hosting home folder. That already holds, because there is one SFTP_USER / SFTP_PASSWORD.
+   Worth knowing, not acted on: with one hosting user, alpha's code could in principle read live's
+   `_auth_keys/`. Nothing does so by accident (every path is relative to its own folder); a separate DreamHost
+   user for alpha would be the stronger setup, and would need per-channel login settings and a secrets change.
+6. DEV_NOTES 3b and 3c (the settings table, slash rules, changeover steps) must be rewritten.
+7. The plan amendment is planning work, so it runs as a sequential Fable run AFTER the #479 design run finishes
+   (never two analysis runs at once).
+
+**`.dev-team/` — the owner's suggestion, confirmed.** SIGNula.id keeps its dev-team state in `.dev-team/`
+(`FEATURES.md`, `PROJECT.md`, `autopilot.json`, `specs/`; its `.gitignore` excludes only `loop.lock/`).
+Using the same folder lets `dev-team-featurefind` write its ledger to `.dev-team/FEATURES.md` without touching
+this project's own `FEATURES.md` — and `.dev-team/` is outside `web/`, so it is never deployed. Featurefind
+runs its market researchers side by side by default; they will be run one at a time, because the owner's
+sequential-analysis rule wins over a skill's default.
+
 ### 🟡 #479 data-download design — RUNNING (run `wf_ff8a3d5d-dc0`)
 
 Four sequential Fable stages: survey, design, challenge, plan. Each stage writes its own output to
