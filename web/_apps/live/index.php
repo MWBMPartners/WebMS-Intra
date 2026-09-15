@@ -144,11 +144,29 @@ if ($livePushPublicKey !== ''):
 //    if the eventID is missing or invalid.
 $widgetEventId = (int) ($_GET['eventID'] ?? 0);
 if ($widgetEventId > 0) {
-    $stmt = $mysqli->prepare('SELECT 1 FROM tblEvents WHERE eventID = ? AND siteID = ? AND isDeleted = 0 LIMIT 1');
+    // 🛡️ Drafts (#503). The same rule as the event's own page
+    //    (calendar/event.php): only an event whose status is published,
+    //    cancelled or postponed counts for people in general, and a DRAFT only
+    //    for somebody who can manage events (App::isAdmin(), exactly the check
+    //    every page under calendar/manage/ makes). For everybody else a draft
+    //    is treated exactly like a number that matches no event: no chat
+    //    widget, and nothing else on the page changes.
+    //
+    //    What was wrong before: the check asked only that the event existed and
+    //    was not deleted, so whether the chat widget appeared told any signed-in
+    //    member which event numbers belonged to drafts.
+    //
+    //    Deleted events were already excluded (isDeleted = 0). Sign-in is
+    //    already required at the top of this page, which covers the event
+    //    page's rule for events not marked public.
+    $stmt = $mysqli->prepare('SELECT status FROM tblEvents WHERE eventID = ? AND siteID = ? AND isDeleted = 0 LIMIT 1');
     $stmt->bind_param('ii', $widgetEventId, $siteId);
     $stmt->execute();
-    $eventOk = (bool) $stmt->get_result()->fetch_assoc();
+    $widgetEvent = $stmt->get_result()->fetch_assoc();
     $stmt->close();
+    $eventOk = $widgetEvent !== null
+        && (in_array((string) ($widgetEvent['status'] ?? ''), ['published', 'cancelled', 'postponed'], true) === true
+            || App::isAdmin() === true);
     if ($eventOk === true): ?>
     <div class="mt-3" data-livechat-widget data-event-id="<?php echo (int) $widgetEventId; ?>"></div>
     <script src="/assets/js/livechat-widget.js" defer></script>

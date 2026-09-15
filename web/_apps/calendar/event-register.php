@@ -29,7 +29,7 @@ if ($slug === '' || preg_match('/^[a-z0-9][a-z0-9\-]{0,79}$/i', $slug) !== 1) {
 $siteId = Site::id();
 $stmt = $mysqli->prepare(
     'SELECT eventID, eventName, eventSlug, startDateTime, registrationEnabled, '
-    . '       registrationOpensAt, registrationClosesAt '
+    . '       registrationOpensAt, registrationClosesAt, isPublic '
     . 'FROM tblEvents WHERE eventSlug = ? AND siteID = ? AND isDeleted = 0 AND status = "published" LIMIT 1'
 );
 $stmt->bind_param('si', $slug, $siteId);
@@ -37,7 +37,32 @@ $stmt->execute();
 $event = $stmt->get_result()->fetch_assoc() ?: null;
 $stmt->close();
 
+// 🛡️ Drafts and deleted events (#503) were already handled by the query: it
+//    asks for status = "published" and isDeleted = 0, so both get the same
+//    "Event not found." as a slug that matches nothing.
 if ($event === null) { http_response_code(404); exit('Event not found.'); }
+
+// 🛡️ Events not marked public need sign-in (#503). The same rule as the
+//    event's own page (calendar/event.php): members only.
+//
+//    What was wrong before: this form asked nobody to sign in, whatever the
+//    event, so anybody with the address of an INTERNAL event could open its
+//    registration form, and the save handler accepted the registration, even
+//    though the event's own page would have asked them to sign in first.
+//
+//    Why this is not a deliberate feature being taken away: the form is meant
+//    to be public so that a parent can register a child for a public event
+//    without an account (this file's header, #348, and the comment in
+//    event-register-save.php). Nothing in the help pages, the issues (#347,
+//    #348), the changelog or the settings says the same should apply to an
+//    event that is not public. A public event is unchanged: no sign-in.
+//
+//    Checked in the same place as on the event page: after "not found", before
+//    anything about registration itself, so a signed-out visitor learns no more
+//    here than the event page would tell them.
+if ((int) $event['isPublic'] === 0 && Auth::check() === false) {
+    Auth::requireLogin();
+}
 if ((int) $event['registrationEnabled'] !== 1) {
     http_response_code(404); exit('Registration is not open for this event.');
 }

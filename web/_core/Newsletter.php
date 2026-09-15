@@ -23,6 +23,8 @@ declare(strict_types=1);
 
 namespace Portal\Core;
 
+use mysqli;
+
 class Newsletter
 {
     /**
@@ -305,6 +307,37 @@ class Newsletter
     }
 
     /**
+     * True when tblDemoDataRegister exists in the current database (#498).
+     *
+     * WHY THIS CHECK EXISTS AT ALL: the register table was added by
+     * migration 194, well after this class was written. Code deployed after
+     * that migration file exists can still run against a database that has
+     * not been upgraded yet — files reach the server before an administrator
+     * presses "Run migrations" — so this cannot assume the table is there.
+     *
+     * WHY SHOW TABLES LIKE, AND NOT A try/catch: `SHOW TABLES LIKE` answers
+     * "does a table by this name exist" without ever failing because the
+     * table is missing — it simply returns no rows in that case. That is
+     * what lets this stay safe on an un-upgraded database while a genuinely
+     * broken connection (or any other real database fault) still throws
+     * an ordinary exception straight out of this method, exactly as any
+     * other query in this file would. A blanket try/catch here would have
+     * hidden that real fault behind the same "no demo data" answer as the
+     * harmless, expected case — which is precisely the kind of silent
+     * failure this codebase's standing rules say to avoid.
+     */
+    private static function demoRegisterExists(mysqli $db): bool
+    {
+        $result = $db->query("SHOW TABLES LIKE 'tblDemoDataRegister'");
+        if ($result === false) {
+            return false;
+        }
+        $exists = $result->num_rows > 0;
+        $result->free();
+        return $exists;
+    }
+
+    /**
      * Render a single content block to HTML. Dynamic blocks pull live
      * data from the relevant table at render time.
      */
@@ -345,9 +378,66 @@ class Newsletter
             case 'announcements':
                 $count = max(1, min(10, (int) ($cfg['count'] ?? 3)));
                 $items = [];
-                $stmt = $db->prepare('SELECT title, body FROM tblAnnouncements WHERE siteID = ? AND isPublished = 1 ORDER BY createdAt DESC LIMIT ?');
+
+                // 🛡️ Never let a demo announcement reach a real newsletter (#498).
+                //
+                //    Admin -> Maintenance -> Demo data creates a few made-up,
+                //    clearly-titled "[DEMO]" announcements for training, and
+                //    records the row number of each one in the new
+                //    tblDemoDataRegister table. Before this check, a newsletter
+                //    sent while demo data was loaded would have picked one of
+                //    those up exactly like a real announcement — this query had
+                //    no way to tell the difference.
+                //
+                //    The register table is new (migration 194), so code that
+                //    reads it can run against a portal whose files have been
+                //    uploaded but whose database has not been upgraded yet —
+                //    that is an ordinary, expected state, not a fault, and must
+                //    not show an error on this page. self::demoRegisterExists()
+                //    answers "does the table exist" with SHOW TABLES LIKE, which
+                //    never fails just because the named table is missing (it
+                //    only returns zero rows) — so a genuinely broken database
+                //    (for example a dropped connection) still surfaces as a real
+                //    exception below instead of being read as "no demo data".
+                //
+                //    The register row must also belong to THIS organisation.
+                //    Matching on the row number alone would also leave out a
+                //    real announcement in another organisation that happens to
+                //    reuse a number once used by demo data (a restore or an
+                //    import can do that).
+                //
+                //    What this cannot do: a demo announcement that somebody has
+                //    since edited into a real notice stays on the register -
+                //    Wipe deliberately leaves changed rows in place and says so
+                //    - and so stays out of newsletters until an administrator
+                //    removes its register entry. Leaving a real notice out is
+                //    the safe direction to be wrong in; sending a [DEMO] one to
+                //    every member is not.
+                $demoFilterSql = '';
+                if (self::demoRegisterExists($db) === true) {
+                    $demoFilterSql = ' AND announcementID NOT IN '
+                        . '(SELECT rowID FROM tblDemoDataRegister WHERE tableName = ? AND siteID = ?)';
+                }
+
+                $stmt = $db->prepare(
+                    'SELECT title, body FROM tblAnnouncements '
+                    . 'WHERE siteID = ? AND isPublished = 1'
+                    . $demoFilterSql
+                    . ' ORDER BY createdAt DESC LIMIT ?'
+                );
                 if ($stmt !== false) {
-                    $stmt->bind_param('ii', $siteId, $count);
+                    if ($demoFilterSql !== '') {
+                        // Same table name every time — the register is shared
+                        // by several tables (users, announcements, memberships),
+                        // and this block only ever wants the announcement rows.
+                        $demoTableName = 'tblAnnouncements';
+                        // Order follows the placeholders: the announcement's
+                        // organisation, then the register's table name and
+                        // organisation, then the count.
+                        $stmt->bind_param('isii', $siteId, $demoTableName, $siteId, $count);
+                    } else {
+                        $stmt->bind_param('ii', $siteId, $count);
+                    }
                     $stmt->execute();
                     $rs = $stmt->get_result();
                     while ($r = $rs->fetch_assoc()) {

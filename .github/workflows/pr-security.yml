@@ -269,7 +269,15 @@ jobs:
           # surface in the report; PHP lint remains the only hard gate).
 
           # 9) SQL column-name mismatches (catches #198, #201, #213 classes)
-          SQL_COLS=$(python3 tools/audit-checks/check_sql_columns.py 2>&1 | tail -n +5 || true)
+          #    The whole output goes into the comment, on purpose. This step
+          #    used to keep it from line 5 onward (`tail -n +5`), to drop the
+          #    two summary lines. Line 4 was the first finding's heading
+          #    ("### SELECT-WHERE column-name mismatches (1)"), so every
+          #    comment with findings lost it. A fixed line count breaks
+          #    silently whenever the script's layout changes; passing
+          #    everything cannot drop anything. The summary lines and the
+          #    coverage figures after the findings are worth reading anyway.
+          SQL_COLS=$(python3 tools/audit-checks/check_sql_columns.py 2>&1 || true)
           if echo "$SQL_COLS" | grep -q '•'; then
             add_section "SQL column-name mismatches (runtime INSERT/SELECT references column not in schema)" "$SQL_COLS"
           fi

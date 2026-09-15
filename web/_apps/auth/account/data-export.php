@@ -34,6 +34,9 @@
  *                          notes, parent contact details. Registrations made
  *                          without an account record nobody to match against,
  *                          and are removed on a time limit instead — #479)
+ *   tblDemoDataRegister   (Demo Data list entries pointing at your account or
+ *                          your memberships — only possible if a made-up demo
+ *                          person was edited into your real account — #498)
  *
  * Sensitive fields (password hashes, TOTP secret, tokenHash etc.) are
  * EXCLUDED — exporting them would be a security regression, not a feature.
@@ -234,6 +237,45 @@ $payload = [
         'smallGroupMembersAdded' => $fetchUserRows(
             'SELECT membershipID, groupID, memberRole, status, createdAt FROM tblSmallGroupMembers WHERE addedByID = ?'
         ),
+        // 🧪 Demo Data list (#498) — entries on the Demo Data page's list of
+        // rows it created (tblDemoDataRegister) that point at this person's
+        // own account or at one of their memberships. Normally there are none.
+        // It happens only when a made-up demo person was later edited into a
+        // real account and kept. An entry holds a table name, a row number, an
+        // organisation number, the names of the columns it fingerprinted and a
+        // one-way fingerprint of the row as it was loaded: no name or text. It
+        // still points at this person, so it is handed over. The matching
+        // erasure step is GdprEraser::eraseDemoDataRegisterEntries().
+        //
+        // Entries for announcements are left out: an announcement is the
+        // organisation's content, not information about its author.
+        //
+        // Matched through tblUsers so the one person number the helper binds
+        // can be used twice (a row number only means "this person" together
+        // with its table name, so rowID alone is never matched).
+        //
+        // Error 1146 means the table does not exist, because the database has
+        // not been upgraded to include it (migration 194). Then nothing is
+        // held, so the answer is an empty list. Web/_core/Maintenance.php only
+        // compares version numbers and does not stop the portal while an
+        // upgrade is waiting, so without this the whole export would fail on
+        // such a database. Any other database error is not hidden.
+        'demoDataRegister' => (static function () use ($fetchUserRows): array {
+            try {
+                return $fetchUserRows(
+                    'SELECT r.registerID, r.tableName, r.rowID, r.siteID, r.fingerprintColumns, r.fingerprint, r.createdAt '
+                    . 'FROM tblUsers AS u '
+                    . "INNER JOIN tblDemoDataRegister AS r ON (r.tableName = 'tblUsers' AND r.rowID = u.userID) "
+                    . "OR (r.tableName = 'tblUserSites' AND r.rowID IN (SELECT us.userSiteID FROM tblUserSites AS us WHERE us.userID = u.userID)) "
+                    . 'WHERE u.userID = ?'
+                );
+            } catch (\mysqli_sql_exception $problem) {
+                if ($problem->getCode() === 1146) {
+                    return [];
+                }
+                throw $problem;
+            }
+        })(),
         // 🙏 Salvation decision cards (tblSalvationCards) are DELIBERATELY
         // NOT exported here: the public decision-card form has no userID
         // FK at all (fullName/email/phone/address are free-text fields

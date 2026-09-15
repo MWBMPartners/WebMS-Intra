@@ -24,7 +24,7 @@
  *   Auth::unlinkAccount(...)       → bool   – remove a provider link (safety-checked)
  *   Auth::getLinkedAccounts(...)   → array  – list linked providers for a user
  *   Auth::countLoginMethods(...)   → int    – count available login methods
- *   Auth::logout()                 → void   – destroy session
+ *   Auth::logout()                 → void   – destroy session, clear offline copies (#507)
  *   Auth::csrfToken()              → string – get / create CSRF token
  *   Auth::verifyCsrf($tok)         → bool   – compare token constant-time
  *   Auth::curlPost($url, $data)    → ?string – HTTP POST via cURL
@@ -55,6 +55,381 @@ use SimpleJWT\JWT as SimpleJWT;
 class Auth
 {
     /* ====================================================================== */
+    /* Offline copies (#507)                                                  */
+    /* ====================================================================== */
+
+    /**
+     * The response header that tells the portal's service worker
+     * (web/public_html/sw.js) it may keep a copy of this page for offline use.
+     * The worker keeps a page ONLY when this header says "allow". The same
+     * name is written in sw.js (OFFLINE_COPY_HEADER) and in the sign-out page
+     * script in logout(); change all three together.
+     */
+    private const OFFLINE_COPY_HEADER = 'X-Offline-Copy';
+
+    /**
+     * Session entries that say nothing about who the visitor is. A page is
+     * marked as safe to keep offline only when the session holds NOTHING
+     * except these.
+     *
+     * Why a list of harmless entries, and not a list of "signed in" ones:
+     * being identified is not only `user_id`. A half-finished two-step
+     * sign-in holds `2fa_user_id`, and the Asset Tracker kiosk holds
+     * `kiosk_user_id` without any `user_id` at all. A list of "signed in"
+     * entries would silently miss the next feature to add its own. With this
+     * list, an entry nobody has thought about makes pages NOT kept offline —
+     * a small loss of convenience instead of a leak.
+     *
+     * Checked against every `$_SESSION[...]` name in web/ on 14 September 2026:
+     *   csrf_token      the form token every visitor gets
+     *   login_redirect  where to go back to after signing in
+     *   oauth_state     a random value for a Microsoft or Google sign-in in progress
+     *   portal_locale   the language a visitor chose
+     *   active_site_id  which organisation's pages are being shown
+     * Flash messages are deliberately NOT here, because they can repeat back
+     * what a visitor typed. But what that achieves is narrower than it sounds:
+     * the decision is made when the headers are sent, so a flash that is STILL
+     * in the session at that moment stops the page being kept. Most pages read
+     * and remove their flash before they send any output (for example
+     * projects/view.php and assets/kiosk.php), and a page like that IS kept.
+     * No harm was found on 14 September 2026, because the public flash texts
+     * found are fixed wording with nothing the visitor typed, but do not rely
+     * on this list to keep a flash out of the offline store. (An earlier
+     * version of this comment said a page carrying a flash "is not kept"; an
+     * independent check showed that was not true.)
+     *
+     * @var list<string>
+     */
+    private const SESSION_KEYS_SAFE_TO_KEEP_OFFLINE = [
+        'csrf_token',
+        'login_redirect',
+        'oauth_state',
+        'portal_locale',
+        'active_site_id',
+    ];
+
+    /** True once the header decision below has been registered for this request. */
+    private static bool $offlineCopyDecisionRegistered = false;
+
+    /**
+     * Arrange for every response to say whether the service worker may keep it.
+     *
+     * WHY IT IS DONE HERE, AND AT THE LAST MOMENT
+     * web/public_html/index.php calls ensureSession() for every request that
+     * reaches the front controller, before any page runs — and pages that call
+     * requireLogin() come through ensureSession() as well. So this is the one
+     * place that covers every signed-in page, including pages that do not use
+     * the shared header template (downloads, sign-in steps, JSON answers).
+     *
+     * The decision itself is made just before the headers leave, using PHP's
+     * header_register_callback(), not now. A request can change who is signed
+     * in part way through (signing in, signing out, a kiosk PIN), and deciding
+     * at the start would label such a response by the wrong state.
+     *
+     * TRIED AND REJECTED
+     *   - web/_core/templates/header.php: only pages that use the template run
+     *     it, so a signed-in page that does not would go unmarked.
+     *   - web/public_html/index.php: runs for every page, but before the page,
+     *     so it would label by the state at the start of the request.
+     *   - Relying on the Cache-Control no-store that PHP already sends: PHP
+     *     sends it on public pages too, so it cannot tell the two apart.
+     *
+     * WHAT IT CANNOT DO
+     *   - PHP keeps only ONE such callback per request; registering another
+     *     anywhere replaces this one without warning. If that happens, TWO
+     *     things stop being sent. The first is the "allow" marker, so the
+     *     worker then keeps no pages at all and offline public pages stop
+     *     working. The second is `Vary: *` (added in round 2, see
+     *     oldServiceWorkerWouldStore()), so a browser still running a worker
+     *     from before #507 could again store a signed-in page that finishes
+     *     downloading after sign-out — the very race this class exists to
+     *     close. A scratch test on 15 September 2026 confirmed neither header
+     *     is sent once a second callback replaces this one. (None of web/
+     *     registered one when this was written.)
+     *   - Responses that never start a session (for example /api-docs/, which
+     *     the web server serves directly) get no marker, so they are not kept.
+     *
+     * @return void
+     */
+    private static function registerOfflineCopyDecision(): void
+    {
+        if (self::$offlineCopyDecisionRegistered === true || headers_sent() === true) {
+            return;
+        }
+        self::$offlineCopyDecisionRegistered = header_register_callback(static function (): void {
+            self::sendOfflineCopyHeaders();
+        });
+    }
+
+    /**
+     * Runs as the headers are about to be sent. Marks a page built for an
+     * unidentified visitor as keepable, and makes sure a response for an
+     * identified one carries "private" — plus `Vary: *` where a service worker
+     * from before #507 would otherwise store it (see
+     * oldServiceWorkerWouldStore()).
+     *
+     * @return void
+     */
+    private static function sendOfflineCopyHeaders(): void
+    {
+        // 🧹 Whatever happened earlier in the request, only this decision counts.
+        header_remove(self::OFFLINE_COPY_HEADER);
+
+        // 🔍 No session loaded means we cannot know who this was for: say nothing.
+        $sessionKeys = (isset($_SESSION) === true && is_array($_SESSION) === true) ? array_keys($_SESSION) : null;
+
+        if ($sessionKeys !== null
+            && array_diff($sessionKeys, self::SESSION_KEYS_SAFE_TO_KEEP_OFFLINE) === []
+        ) {
+            header(self::OFFLINE_COPY_HEADER . ': allow');
+            return;
+        }
+
+        if ($sessionKeys === null) {
+            return;
+        }
+
+        // 🚫 An identified visitor: make sure no service worker at all can store
+        //    this response, however late it finishes downloading (see
+        //    oldServiceWorkerWouldStore() for why, and why not on everything).
+        //    The one exception is the portal's fixed offline page (see
+        //    offlinePageAnswered()): refusing it emptied the worker's whole
+        //    install list on servers that send /offline/ through PHP.
+        if (self::oldServiceWorkerWouldStore() === true && self::offlinePageAnswered() === false) {
+            header('Vary: *', false);
+        }
+
+        // 🔒 An identified visitor. PHP's session start normally already sent
+        //    "no-store", but a page may have replaced it with its own value
+        //    ("no-cache, must-revalidate" on a download, "public, max-age" on
+        //    media). Add "private" beside such a value — as a second header
+        //    line, so the page's own directives are kept — which tells shared
+        //    caches and the service worker alike not to keep it.
+        foreach (headers_list() as $line) {
+            if (stripos($line, 'Cache-Control:') === 0
+                && (stripos($line, 'private') !== false || stripos($line, 'no-store') !== false)
+            ) {
+                return;
+            }
+        }
+        header('Cache-Control: private', false);
+    }
+
+    /**
+     * Would a service worker from BEFORE #507 store this response? Asked only
+     * for a response to an identified visitor; a yes adds `Vary: *`.
+     *
+     * WHAT WAS WRONG (found by the Codex review of #507): the sign-out page
+     * deletes stored signed-in pages, but a worker from before #507 stores a
+     * page without waiting for it, and the copy only lands once the whole page
+     * has downloaded. So a signed-in page still downloading in another tab
+     * could land AFTER the sign-out page had finished deleting, and that old
+     * worker then showed it offline. Reproduced on 14 September 2026 in Edge
+     * 153 and in Playwright's Firefox 155 and WebKit 26.6 builds, with a second
+     * tab whose page finished downloading seven seconds after sign-out.
+     *
+     * WHY `Vary: *` CLOSES IT: the Cache Storage standard makes the browser
+     * refuse to store any response whose Vary header contains "*" — put(),
+     * add() and addAll() all fail with an error, whichever worker calls them
+     * (add() was seen refused this way in Edge 153, Firefox 155 and WebKit
+     * 26.6 on 15 September 2026). The refusal
+     * happens inside the browser, when the copy would be written, so it does
+     * not matter which worker version is running, when the download finishes,
+     * or whether the current sw.js can be fetched. The sign-out page then only
+     * has to delete what was stored before the portal started sending this.
+     *
+     * WHY IT MUST STAY EVEN ONCE NO OLD WORKER IS LEFT: a worker from after
+     * #507 refuses these responses in its FETCH handler (mayKeepCopy() in
+     * sw.js wants the "allow" marker on a page and turns away anything
+     * "private"). But its INSTALL step stores each file on its list with
+     * cache.add(), and cache.add() does not look at Cache-Control at all. So
+     * for the install list, `Vary: *` is the only thing that stops a
+     * signed-in page being stored. On a server that sends /offline/ through
+     * PHP, that page is the dashboard of an organisation whose site key is
+     * "offline".
+     * WHAT THIS COMMENT USED TO SAY, AND WHY IT WAS WRONG: that the "private"
+     * added below already protected a current worker, so this header was
+     * only for older ones. Tested 15 September 2026: with only the `Vary: *`
+     * line switched off and "private" still sent, Edge 153 stored that
+     * signed-in dashboard at install time, kept it after sign-out and showed
+     * it offline with the person's name. A scratch probe the same day stored
+     * a "no-store, private" page through cache.add() in Edge 153, Firefox 155
+     * and WebKit 26.6, and refused the same page carrying `Vary: *` in all
+     * three. Removing this header, even once old workers are gone, reopens
+     * that leak.
+     *
+     * WHICH RESPONSES: every response an old worker would store, plus some it
+     * would not. It ignores the request method (the old worker only handles
+     * GET), the old worker's /api/ exclusion, and the response status (the old
+     * worker stores only successful answers). It also finds text/html anywhere
+     * in the Content-Type, ignoring case. The old worker's own test also looks
+     * anywhere in the value (indexOf('text/html') !== -1), but it is
+     * case-sensitive. Matching
+     * extra responses is harmless: they lose only ordinary browser-cache
+     * reuse, and they are already "no-store" or "private". Do not narrow this
+     * to fit the old worker exactly — a response it misses can still be
+     * stored and shown after sign-out.
+     *
+     * History: an earlier version of the Content-Type check looked only at
+     * the START of the value, which missed a Content-Type such as
+     * "application/octet-stream; note=text/html" (found with a scratch
+     * php-cgi probe on 15 September 2026). No page in web/ actually sends a
+     * value shaped like that, so this was a comment-accuracy point, not a
+     * live fault — but the check should not depend on staying lucky.
+     *
+     * It keeps every web page (text/html) through the old worker's
+     * network-first path, and ANY response through its cache-first path when
+     * the address starts with /assets/ or ends in a static file ending —
+     * copied from the old worker's OWN rules, which are frozen (that worker's
+     * code never changes again), so repeating them here is safe. The Asset
+     * Tracker's signed-in downloads (/assets/labels-pdf,
+     * /assets/resource-download) are the non-page responses this catches.
+     * (Its label images are answered at /api/assets/qr, and an old worker
+     * never stores anything under /api/.) A missing Content-Type counts as a
+     * page, because text/html is what PHP sends when a page sets none.
+     *
+     * TRIED AND REJECTED
+     *   - `Vary: *` on EVERY response for an identified visitor. Simpler to
+     *     state, but Vary: * also stops the browser's ordinary cache reusing a
+     *     response, and some signed-in responses rely on that: photos
+     *     (Photos.php, "private, max-age=3600"), QR codes and the calendar feed.
+     *     An old worker never stores those (they are not pages and not under
+     *     /assets/), so they would lose their caching for no gain.
+     *   - Replacing the old worker during sign-out instead (see logout()).
+     *
+     * WHAT IT CANNOT DO
+     *   - It relies on the Vary header reaching the browser unchanged. Apache
+     *     adding its own value (for example "Accept-Encoding" from compression)
+     *     is fine, because the "*" stays in the list. A proxy or content delivery
+     *     network in front of the portal that removed the header would reopen
+     *     the gap; none was tested.
+     *   - It cannot remove copies stored before the portal started sending it;
+     *     the sign-out page and sw.js's activate handler do that.
+     *
+     * @see https://w3c.github.io/ServiceWorker/#cache-put (a Vary value of "*"
+     *      makes put() reject with a TypeError)
+     * @return bool
+     */
+    private static function oldServiceWorkerWouldStore(): bool
+    {
+        $contentType = null;
+        foreach (headers_list() as $line) {
+            if (stripos($line, 'Content-Type:') === 0) {
+                $contentType = strtolower(trim(substr($line, strlen('Content-Type:'))));
+            }
+        }
+        if ($contentType === null || str_contains($contentType, 'text/html') === true) {
+            return true;
+        }
+
+        // 📋 The same file endings as isStaticAsset() in the pre-#507 sw.js.
+        $path = parse_url((string) ($_SERVER['REQUEST_URI'] ?? ''), PHP_URL_PATH);
+        if (is_string($path) === false) {
+            return false;
+        }
+        return str_starts_with($path, '/assets/') === true
+            || preg_match('/\.(css|js|png|jpg|jpeg|gif|svg|ico|woff2?|ttf|eot|webp)$/i', $path) === 1;
+    }
+
+    /**
+     * Has PHP included the portal's own fixed offline page
+     * (web/public_html/offline/index.php) at any point while building this
+     * response? Today that means this response IS the offline page, because
+     * only Router.php includes that file, and only to answer the 'offline'
+     * route. Asked only right before adding `Vary: *` to a response for an
+     * identified visitor — see sendOfflineCopyHeaders().
+     *
+     * WHAT WAS WRONG: on a server that sends /offline/ through the front
+     * controller (for example nginx with try_files, which sw.js says it
+     * supports), a signed-in visitor's copy of the offline page got
+     * `Vary: *` like any other page. The worker's install step then fetched
+     * its whole list with ONE cache.addAll() call, and addAll() is all-or-
+     * nothing: that single refused response emptied the whole list, so
+     * nothing was stored offline at all — not the offline page, not
+     * portal.css or portal.js, not the manifest. The .catch on the install
+     * step hid the failure, so nothing anywhere showed it had happened.
+     * (sw.js now stores each file on its own, with cache.add(). Without this
+     * exemption only the offline page itself would now be lost, but that is
+     * still the page the worker exists to show.)
+     * Reproduced 15 September 2026 in Edge 153 and in Playwright's Firefox
+     * 155 and WebKit 26.6 builds.
+     *
+     * WHY EXEMPTING IT IS SAFE: web/public_html/offline/index.php is fixed
+     * text. It reads no session and no database — the same reason sw.js
+     * already stores it at install time with no check at all.
+     *
+     * WHY IT CHECKS THE FILE THAT RAN, NOT THE ADDRESS: with path-prefix
+     * multi-site, an organisation whose site key is "offline" gets its OWN
+     * signed-in dashboard at /offline/ — Router::extractPath() strips the
+     * site key from the front of the address before routing, so that
+     * address no longer means "the portal's shared offline page" for that
+     * organisation. An address-only rule would exempt that dashboard from
+     * `Vary: *` too, and that dashboard DOES say who is signed in.
+     * Reproduced in Edge, Firefox and WebKit on 15 September 2026: with an
+     * address-only exemption, that signed-in dashboard was stored at install
+     * time and went on being shown offline — with the visitor's name on it —
+     * even after sign-out.
+     *
+     * TRIED AND REJECTED
+     *   - Comparing the request address to '/offline' / '/offline/': the leak
+     *     above.
+     *   - Comparing BOTH the address and the file: the file check alone is
+     *     what makes this safe. A second, separate copy of the address here
+     *     would only be able to go stale, and staleness in this direction
+     *     (the address check passing when the file check would have failed)
+     *     is exactly the leak above.
+     *   - Asking Router.php what route this request resolved to: that would
+     *     mean calling another class from inside the last-moment header
+     *     callback, where any exception thrown partway through breaks the
+     *     headers for every kind of response, not only this one. It would
+     *     also answer the wrong question — which ROUTE matched — where the
+     *     point here is which FILE actually ran.
+     *   - Building the path from the PORTAL_ROOT constant instead of
+     *     dirname(__DIR__): PORTAL_ROOT resolves to the same folder (see
+     *     bootstrap.php), but this method runs while headers are already
+     *     being sent, where a missing or undefined constant would throw an
+     *     Error partway through sending them. dirname(__DIR__) needs nothing
+     *     beyond what loading this class itself already guarantees, and
+     *     web/_install/ loads this class too without ever defining
+     *     PORTAL_ROOT.
+     *
+     * WHAT IT CANNOT DO
+     *   - It trusts web/public_html/offline/index.php to go on reading
+     *     nothing about the visitor. If that page is ever changed to show
+     *     who is signed in, remove this exemption.
+     *   - It only sees files PHP has already included by the time the
+     *     headers are sent. Any output printed before the offline page is
+     *     included makes this return false, so the exemption simply does not
+     *     apply — the safe direction: the page is then not stored on a
+     *     front-controller server, exactly as before this method existed.
+     *   - It checks for the exact file Router.php includes for the 'offline'
+     *     route today. If that changes, update this method to match;
+     *     otherwise the exemption silently stops applying — again the safe
+     *     direction, a loss of offline support rather than a leak.
+     *   - It cannot tell whether offline/index.php produced THIS response or
+     *     was only included along the way: it asks whether PHP included that
+     *     file at any point in the request. A scratch php-cgi probe on 15
+     *     September 2026 included it (output thrown away) inside a response
+     *     that was really a signed-in dashboard, and that dashboard went out
+     *     with no `Vary: *`. So any other code that included offline/index.php
+     *     would silently exempt its own response, and a worker from before
+     *     #507 could then store that response and show it after sign-out.
+     *     Include that file only from the 'offline' route in Router.php. (A
+     *     search of web/ on 15 September 2026 found nothing else including
+     *     it.)
+     *
+     * @return bool True when PHP has included the portal's own
+     *              offline/index.php at any point in this request (today,
+     *              only when Router.php answers the 'offline' route with it).
+     */
+    private static function offlinePageAnswered(): bool
+    {
+        $offlinePage = realpath(dirname(__DIR__) . DIRECTORY_SEPARATOR . 'public_html'
+            . DIRECTORY_SEPARATOR . 'offline' . DIRECTORY_SEPARATOR . 'index.php');
+        return is_string($offlinePage) === true && in_array($offlinePage, get_included_files(), true) === true;
+    }
+
+    /* ====================================================================== */
     /* Session helpers                                                        */
     /* ====================================================================== */
 
@@ -64,12 +439,19 @@ class Auth
      * Sets HttpOnly, Secure, SameSite=Lax flags on the session cookie to
      * prevent XSS theft and CSRF attacks.
      *
+     * Also arranges the offline-copy marker for this response (#507) — see
+     * registerOfflineCopyDecision(). That happens even when some other code
+     * already started the session, which is why it comes before the early
+     * return.
+     *
      * @see https://owasp.org/www-community/controls/Session_Management_Cheat_Sheet
      *
      * @return void
      */
     public static function ensureSession(): void
     {
+        self::registerOfflineCopyDecision();
+
         if (session_status() === PHP_SESSION_ACTIVE) {
             return;
         }
@@ -1413,9 +1795,93 @@ class Auth
     /* ====================================================================== */
 
     /**
-     * Destroy the current session and redirect to the home page.
+     * Destroy the current session, clear what the browser kept, then send the
+     * visitor to the home page.
      *
-     * @return void (terminates with redirect)
+     * WHAT WAS WRONG (#507): this used to end the session and redirect, and do
+     * nothing else. The portal's service worker (web/public_html/sw.js) had
+     * kept copies of the signed-in pages, and those stayed readable offline for
+     * the next person to use the browser.
+     *
+     * WHAT IT DOES NOW
+     *   1. Ends the session exactly as before.
+     *   2. Sends `Clear-Site-Data: "cache"`. That ASKS the browser to empty its
+     *      ordinary download cache for this site — which matters for signed-in
+     *      files the portal allows the browser to reuse for a while, such as
+     *      photos ("private, max-age=3600") and asset labels. Browsers do not
+     *      all honour it: MDN's compatibility data (checked 14 September 2026)
+     *      lists Chrome's support for "cache" as partial, Firefox as supporting
+     *      it from version 138 (and earlier from 63 to 94), and Safari from 17.
+     *      Treat it as a help, not a guarantee.
+     *   3. Answers with a tiny page, instead of a redirect, whose script deletes
+     *      every stored page from the service worker's storage (Cache Storage),
+     *      keeping only static files, the offline page and manifest (except in
+     *      a store written by a worker from before #507 — see the comment
+     *      above the echo below), and pages the portal marked as built for a
+     *      signed-out visitor. Then it goes to '/'.
+     *
+     * WHY BOTH 2 AND 3: tested on 14 September 2026 in Edge 153 and in
+     * Playwright's Firefox 155 and WebKit 26.6 builds, `Clear-Site-Data:
+     * "cache"` does NOT touch the service worker's Cache Storage in any of
+     * them. The script is what reaches the stored pages. It works whichever
+     * version of the worker is running, so it also clears copies kept by the
+     * old worker in a browser that has not yet picked up the new sw.js.
+     *
+     * WHY STEP 3 IS ENOUGH WHILE ANOTHER TAB IS STILL DOWNLOADING: on its own
+     * it was not (found by the Codex review; reproduced in all three browsers
+     * above). A worker from before #507 could write a signed-in page that
+     * finished downloading after step 3 had run. What closes that is not on
+     * this page: sendOfflineCopyHeaders() gives signed-in pages `Vary: *`,
+     * which browsers refuse to put into Cache Storage at all. So no signed-in
+     * page can land after step 3, apart from the fixed offline page. That page
+     * is exempt because it holds nothing about the visitor (see
+     * offlinePageAnswered()). Step 3 only removes what was stored before.
+     * Details in oldServiceWorkerWouldStore().
+     *
+     * TRIED AND REJECTED
+     *   - `Clear-Site-Data: "storage"` does empty Cache Storage (same test), but
+     *     it also unregisters the service worker — which cancels the browser's
+     *     push notification subscription (#322) — and wipes localStorage (theme
+     *     and readability choices) and IndexedDB (the offline form queue, #233).
+     *     Too much to take away from somebody signing out of their own phone.
+     *   - Asking the worker to clear itself by message: a worker from before
+     *     this fix does not understand the message, and those are exactly the
+     *     browsers holding signed-in copies.
+     *   - Closing the race from this page by replacing the old worker: fetch
+     *     the current sw.js, wait for it to install, ask it to delete the old
+     *     stores whole, and remove the worker registration if no current worker
+     *     answered. Built and tested on 14 September 2026 in the same three
+     *     browsers; it did NOT close the race. The tab still downloading runs
+     *     the page footer's worker registration when it finishes loading, and
+     *     that brought the old worker straight back — in Edge even when sw.js
+     *     could not be fetched — so the late copy was shown offline again. Edge
+     *     also held the new worker back while the old one was busy and it did
+     *     not answer in time, so sign-out removed the registration, and with it
+     *     the push subscription (#322), for no reason. In Firefox and WebKit,
+     *     putting the new worker in charge cut off the other tab's download.
+     *   - Deleting again after a fixed wait. A page cannot see another tab's
+     *     downloads, so any wait is a guess, and it slows every sign-out.
+     *
+     * WHAT IT CANNOT DO
+     *   - It cannot reach a browser that never loads this page: a session that
+     *     simply expires, or one ended by offboarding, removes nothing from the
+     *     browser. The protection there is that sw.js no longer keeps signed-in
+     *     pages at all.
+     *   - With JavaScript switched off the script cannot run, so nothing is
+     *     removed; the page moves on by itself and the session still ends. A
+     *     browser that ran a worker from before #507 on earlier visits and then
+     *     had JavaScript switched off keeps what that worker stored. If
+     *     JavaScript is switched back on, that old worker can show those copies
+     *     offline again, until the browser fetches the current sw.js (whose
+     *     activate handler deletes the old store).
+     *   - It keeps '/offline/' in the current worker's store by address. If
+     *     the current sw.js installed while an older Auth.php was still live,
+     *     then for an organisation whose site key is "offline", on a server
+     *     that sends that address through PHP, that entry is the signed-in
+     *     dashboard, and it is kept. Details in the comment above the echo
+     *     below.
+     *
+     * @return void (terminates after sending the sign-out page)
      */
     public static function logout(): void
     {
@@ -1445,7 +1911,169 @@ class Auth
 
         session_destroy();
 
-        header('Location: /', true, 302);
+        // 🧹 Ask the browser to empty its ordinary cache for this site. Not
+        //    every browser honours this fully (see "WHAT IT DOES NOW" above).
+        header('Clear-Site-Data: "cache"');
+
+        // 🔒 The sign-out page itself must never be kept offline: "private"
+        //    makes sw.js refuse it even though the now-empty session would
+        //    otherwise earn it the "allow" marker.
+        header('Cache-Control: no-store, private');
+
+        // 🛡️ Only this page's own script may run, nothing else may load.
+        $nonce = App::cspNonce();
+        header("Content-Security-Policy: default-src 'none'; script-src 'nonce-" . $nonce . "'; "
+            . "base-uri 'none'; form-action 'none'; frame-ancestors 'none'");
+        header('Content-Type: text/html; charset=UTF-8');
+
+        $nonceAttr = htmlspecialchars($nonce, ENT_QUOTES, 'UTF-8');
+
+        // 📄 The script below decides what to delete from Cache Storage.
+        //    KEPT: the addresses in ALWAYS_KEEP, which are the non-personal
+        //    entries of the worker's install list — the offline page under its
+        //    current name '/offline/' and its pre-fix name '/offline' (still
+        //    used by an older worker), and '/manifest.json'. They are checked
+        //    BEFORE the "private" rule on purpose: the install list is fetched
+        //    with the sign-in cookie, so the portal labels the manifest
+        //    "private" too, and an earlier version of this script therefore
+        //    deleted it — leaving the offline page's manifest link broken
+        //    until the worker next installed. Neither page reads anything
+        //    about the visitor, which is what makes keeping them safe; if
+        //    either ever does, take it out of this list and out of
+        //    PRECACHE_ASSETS in sw.js.
+        //    THE ADDRESS ALONE IS NOT PROOF OF WHICH FILE ANSWERED IT. On a
+        //    server that sends these addresses through PHP, an organisation
+        //    whose site key is "offline" (path-prefix multi-site) has its OWN
+        //    signed-in dashboard at /offline and /offline/ — Router strips the
+        //    site key from the front of the address before routing, so those
+        //    addresses reach that organisation's dashboard, not the portal's
+        //    shared offline page. A worker from before #507 stored whatever
+        //    answered at install time with no check at all, so for that
+        //    organisation it stored the DASHBOARD under /offline. Keeping
+        //    ALWAYS_KEEP purely by address kept that dashboard after sign-out
+        //    too, and the old worker went on showing it offline — with the
+        //    visitor's name on it. Reproduced in Edge 153 and in Playwright's
+        //    Firefox 155 and WebKit 26.6 builds on 15 September 2026.
+        //    THE FIX: ALWAYS_KEEP now applies only OUTSIDE the stores a
+        //    pre-#507 worker wrote — 'portal-v1' and 'portal-v2' (see
+        //    PRE_507_STORES below). Those two names are frozen: that old
+        //    worker's code never changes again, so it can only ever have
+        //    written a store under one of those two names. Inside such a
+        //    store, these addresses fall through to the ordinary rules below
+        //    instead, which is what deletes a wrongly-stored dashboard.
+        //    WHY THE CURRENT WORKER'S OWN STORE IS NORMALLY SAFE WITHOUT THIS
+        //    CHECK: once this Auth.php is live, the browser refuses to let the
+        //    current worker's install step store any copy carrying `Vary: *`.
+        //    The dashboard of an organisation keyed "offline" gets that
+        //    header; the real offline page is exempt (see
+        //    Auth::offlinePageAnswered()). The worker's fetch handler stores a
+        //    page only when the response carries the "allow" marker.
+        //    WHAT THIS CANNOT PROTECT: the install step checks nothing itself.
+        //    If the current sw.js installs while an OLDER Auth.php is still
+        //    live, that older file sends no `Vary: *`. So for an organisation
+        //    whose site key is "offline", on a server that sends /offline/
+        //    through PHP, the signed-in dashboard IS stored as '/offline/' in
+        //    the current store. This script then keeps it at every sign-out,
+        //    and the worker shows it offline with the person's name, until
+        //    CACHE_VERSION next changes. The window is the deploy that FIRST
+        //    brings this file and the matching sw.js to a server whose
+        //    Auth.php sends no `Vary: *` (any version from before #507).
+        //    Later deploys find this Auth.php already live, and it already
+        //    sends that header, so they do not reopen the window, unless a
+        //    later change stops the header being sent or the server is rolled
+        //    back to an older Auth.php. When this was written, deploy.yml
+        //    uploaded web/public_html/ (sw.js) before web/_core/ (this file),
+        //    so that first deploy opens the window while web/_core/ uploads.
+        //    It stays open if that deploy stops half way, and a customer
+        //    uploading files by hand can open it the same way.
+        //    Reproduced 15 September 2026 in Edge 153, Firefox 155 and
+        //    WebKit 26.6. The cause is a site key taking over a fixed portal
+        //    address. That belongs where site keys are saved
+        //    (web/_apps/admin/sites/save.php, which does not yet refuse such
+        //    keys), not here. A cookie-free install fetch was tried and
+        //    rejected; see the install step in sw.js.
+        //    WHAT THIS COSTS: during the changeover, a browser still running
+        //    a worker from before #507 on such a server shows the bare "you
+        //    appear to be offline" message after sign-out, instead of the
+        //    portal's offline page — because that wrongly-stored dashboard
+        //    copy is now correctly deleted, and nothing else was ever stored
+        //    under that address for the old worker to fall back to. On the
+        //    project's own Apache hosting, the old worker's copy at
+        //    '/offline' was in any case a redirect to '/offline/', and
+        //    browsers already refuse to show a stored redirected response for
+        //    a page load (see OFFLINE_PAGE in sw.js), so nothing changes
+        //    there.
+        //    TRIED AND REJECTED:
+        //      - Dropping only '/offline' from ALWAYS_KEEP, keeping
+        //        '/offline/' unconditionally: the old worker stores
+        //        '/offline/' under this same fault when THAT is the
+        //        organisation's home address instead.
+        //      - Keeping ALWAYS_KEEP unconditionally, but only inside a store
+        //        literally named 'portal-v3': the very next CACHE_VERSION
+        //        change (portal-v4, and so on) would then silently stop
+        //        keeping the offline page at sign-out for every visitor, not
+        //        only the ones affected by this fault.
+        //    Also KEPT: pages stored with the marker and without
+        //    "private" (built for a signed-out visitor, the same test sw.js
+        //    uses); static files — an address with a file ending from the same
+        //    list as isStaticAsset() in sw.js, whose stored answer is not a
+        //    page and not "no-store"/"private".
+        //    DELETED: everything else, in every store, whatever its name — so
+        //    copies from an older worker version go too.
+        //    Deliberately NOT keeping everything under /assets/: the Asset
+        //    Tracker's signed-in pages live there (/assets/my, /assets/item).
+        //    It waits for the deletions to finish before leaving the page,
+        //    because leaving could stop them part way.
+        echo '<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Signed out</title>
+<noscript><meta http-equiv="refresh" content="0;url=/"></noscript>
+<script nonce="' . $nonceAttr . '">
+(function () {
+    "use strict";
+    var ALWAYS_KEEP = ["/offline/", "/offline", "/manifest.json"];
+    // 📋 Stores a worker from before #507 could have written. Frozen: the
+    //    code of that old worker never changes again, so it can only ever be
+    //    one of these two names. See the comment above the echo() in
+    //    Auth::logout() for why ALWAYS_KEEP must not apply inside them.
+    var PRE_507_STORES = ["portal-v1", "portal-v2"];
+    var MARKER = "' . self::OFFLINE_COPY_HEADER . '";
+    var STATIC_FILE = /\.(css|js|png|jpg|jpeg|gif|svg|ico|woff2?|ttf|eot|webp)$/i;
+    function goHome() { window.location.replace("/"); }
+    function keep(storeName, request, response) {
+        if (!response) { return false; }
+        var path = new URL(request.url).pathname;
+        var cc = (response.headers.get("Cache-Control") || "").toLowerCase();
+        var isPage = (response.headers.get("Content-Type") || "").toLowerCase().indexOf("text/html") !== -1;
+        if (ALWAYS_KEEP.indexOf(path) !== -1 && PRE_507_STORES.indexOf(storeName) === -1) { return true; }
+        if (cc.indexOf("private") !== -1) { return false; }
+        if (isPage) { return response.headers.get(MARKER) === "allow"; }
+        return STATIC_FILE.test(path) && cc.indexOf("no-store") === -1;
+    }
+    if (typeof window.caches === "undefined") { goHome(); return; }
+    caches.keys().then(function (names) {
+        return Promise.all(names.map(function (name) {
+            return caches.open(name).then(function (cache) {
+                return cache.keys().then(function (requests) {
+                    return Promise.all(requests.map(function (request) {
+                        return cache.match(request).then(function (response) {
+                            return keep(name, request, response) ? null : cache.delete(request);
+                        });
+                    }));
+                });
+            });
+        }));
+    }).catch(function () { /* nothing more can be done here; still move on */ }).then(goHome);
+}());
+</script>
+</head>
+<body>
+<p>You have been signed out. <a href="/">Continue</a></p>
+</body>
+</html>';
         exit();
     }
 

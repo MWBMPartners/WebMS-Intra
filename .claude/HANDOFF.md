@@ -84,6 +84,917 @@ Stage named paths only.
 - A mistyped `portal.trustedProxies` entry is ignored silently.
 - Header-comment dates are inconsistent (11 v 13 September).
 
+### 14 September ~12:15 — NEW SESSION (68f7195e): the 09:04 stop recovered; what is being relaunched
+
+**What happened.** At 08:53 the old session (19f94bec) asked the owner a question and waited for the answer. At 09:04
+the session ended. Every background task it owned was killed: **waiter 3 (the 12:37 Codex queue)** and three test web
+servers. Three workflows were cut off part-way. Nothing on disk was lost.
+
+**Checked at 12:03, before touching anything:**
+- No Codex queue or waiter process is alive, so the 12:37 queue will NOT start by itself.
+- All eight Codex review diffs still match the working tree. The one apparent exception is `498.diff`: its
+  `full_schema.sql` now differs only by lines pkg6b added later, and all 25 of its own changed lines are still present.
+- All nine Codex briefs exist and are not empty.
+- `codex-pkg6-catchup.txt` and `codex-forged-r3.txt` hold only the 07:49 usage-limit error. They are NOT reviews.
+
+**Interrupted work.** The finished reports are saved in `.claude-work/resume/`, because the old session's folders
+are not durable.
+- **pkg6b** (`wf_0c7a1efd-c6c`): the build is done, and verify round 1 FAILED on 4 gaps. Fix round 1 is done (it corrected false
+  comments about `calendar/views/photo.php`, and the job headers now describe maintenance mode accurately). **Verify
+  round 2 never returned.** What happens to each gap:
+  - Gap 2 needs an **owner decision**. During maintenance mode the three new `cron/...` addresses get the 503
+    maintenance page, whereas the old `?cron=1` addresses answered with JSON. Allowing only `cron/health` would need
+    `web/_core/Maintenance.php`.
+  - Gap 3 is a real fault that pkg6b did not cause: `bootstrap.php:397` never decrypts secret settings. It goes with
+    pkg5, migration 195.
+  - Gap 4: four background requests now redirect a signed-out visitor to the sign-in page instead of answering. It
+    needs a follow-up issue.
+- **small-faults-sql-columns-2** (`wf_7543f710-779`): the builder found and fixed FOUR faults, not two:
+  - `coordinators-save.php` used `email` instead of `emailAddress`;
+  - `reports/index.php` summed a `headcount` column that does not exist, and used `createdAt` twice instead of
+    `timestamp`.
+
+  **Verify round 1 never returned.** The builder also found the same headcount fault in
+  `web/_apps/admin/reports/data.php:87`, and did not fix it.
+- **Issue sweep** (`wf_e4c43146-809`): gather and batches 1-3 are done (`sweep/batch-01..03.json`). **Batch 4 of 9
+  never returned.**
+
+**`web/_apps/venues/settings.php` was left out of commit `e414cf1` by mistake, as far as anyone can tell.** It is in
+`pkg2.files` and in the reviewed `pkg2.diff` (Codex pkg2-r3: CLEAN), and its working-tree changes are line-for-line
+identical to what was reviewed. The commit has 23 of the 24 files, and no reason for leaving it out is recorded. It
+is to be committed as pkg2's last file once `php -l` and the checks pass.
+
+**Being relaunched now:**
+1. The workflow `resume-builds`, with two chains whose files do not overlap:
+   - pkg6b verify round 2, then fix rounds if needed;
+   - small faults: fix `reports/data.php` too, then verify all three files.
+2. The workflow `issue-sweep-resume`: batches 4-9, then the double-check, project state, research and proposals.
+   Fable is tried first. It is the only analysis run.
+3. **Codex queue 4, started by hand** as a background command that waits until 12:37. Its log is
+   `.claude-work/codex-queue-4.log`. The order is the same as waiter 3: pkg6-catchup, 501-r2, forged-r3, pkg3-r4,
+   followups-498-r1, 503-r1, 498-r2, sqlcols-r2, 503b-r1.
+
+**LAUNCHED at about 12:20 (update as they finish):**
+- **`3e56f25` COMMITTED AND PUSHED:** `venues/settings.php`, pkg2's last file. Local HEAD equals `origin/claude/alpha-wip`.
+- **`resume-builds`:** run `wf_cf95bc03-171`, task `wfrbv8t09`.
+  Script: `~/.claude/projects/<project>/68f7195e-91e3-4a62-997b-e5e9acb09538/workflows/scripts/resume-builds-wf_cf95bc03-171.js`.
+  - Chain A: pkg6b, container `pkg6b-r2-mysql`, ports 8970-8979.
+  - Chain B: small faults, container `sf2-mysql`, ports 8980-8989.
+  - **When each chain comes back verified, write its Codex brief and diff.** Neither has one yet:
+    - `brief-pkg6b-r1.txt` covers Router, the cron files, 196, the three maintenance pages, the help page, one
+      DEV_NOTES row, and full_schema's route block;
+    - `brief-smallfaults-r1.txt` covers coordinators-save, reports/index and reports/data.
+- **`issue-sweep-resume`:** run `wf_c3380904-b9b`, task `wwwb8rgdz`, in the same scripts folder. It covers batches 4-9, then
+  the double-check, project state, research and proposals.
+- **Codex queue 4:** background task `bq9u3ce8e`, log `.claude-work/codex-queue-4.log`. The two limit-only files were
+  moved aside as `codex-pkg6-catchup.FAILED-0749.txt` and `codex-forged-r3.FAILED-0750.txt`.
+  **If this session dies before the queue ends,** read the log to see which reviews finished, then run the rest by
+  hand, from the repository root:
+  `bash .claude-work/codex-queue.sh codex-pkg6-catchup brief-pkg6-catchup.txt codex-501-r2 brief-501-r2.txt codex-forged-r3 brief-forged-r3.txt codex-pkg3-r4 brief-pkg3-r4.txt codex-followups-498-r1 brief-followups-498-r1.txt codex-503-r1 brief-503-r1.txt codex-498-r2 brief-498-r2.txt codex-sqlcols-r2 brief-sqlcols-r2.txt codex-503b-r1 brief-503b-r1.txt`
+
+**OWNER DECISIONS, answered at about 12:25 on 14 September:**
+1. **RSVP-by-link invitations work for INTERNAL events too.** This keeps what the shipped code already does. The
+   invitation goes deliberately to one named address, from someone trusted to run the event, and the page shows only
+   the event's name, date and location. So the code needs no change. The comment in `rsvp-by-link.php` and the
+   503b Codex brief must say this is deliberate, so it is not reported as a fault.
+2. **Let ONLY `cron/health` through maintenance mode.** The retention clear-out and the backup check stay blocked, so
+   they never run against a half-upgraded database. This needs `web/_core/Maintenance.php`, and new header wording in
+   the three cron job files. **Build it as a pkg6b follow-up round AFTER chain A's verify returns**, never underneath
+   a running verify, and include `Maintenance.php` in the pkg6b Codex brief.
+   - Watch out: `Maintenance::isAllowed()` matches with `str_starts_with`, so a bare `cron/health` entry would also let
+     through any future address starting with those letters. Match that one exactly.
+
+**22:46 — CODEX IS OUT UNTIL 20 SEPTEMBER 2026, 16:30 (a weekly-scale limit). FABLE IS ALSO OUT OF CREDITS.
+DECISION ASKED OF THE OWNER.**
+- **Queue 9 started on time at 22:41:**
+  - **codex-498-r4 COMPLETE: NOT CLEAN**, with two MEDIUM findings:
+    1. `demo-data.php:696` turns numbers into text using PHP's precision of 14, so two DOUBLE values that differ
+       slightly can give the SAME fingerprint. Current DECIMAL columns are not affected. It needs a lossless number
+       representation, and conservative handling of fingerprints already recorded.
+    2. The audit calls at `GdprEraser.php:1163` and `:1200` sit OUTSIDE the failure handling that resets the request.
+       If an audit write throws, the request stays at `processing`, and the portal refuses a retry. It must be covered
+       by the same reset, reporting accurately if the register entries were already deleted. This is separate from
+       #510.
+  - **codex-offline-cache-r2:** it hit the limit at 22:44 and did NOT review. Its output was moved aside as
+    `codex-offline-cache-r2.FAILED-2244.txt`.
+  - **codex-sqlcols-r5:** never started.
+  - The message now says "try again at Sep 20th, 2026 4:30 PM".
+- **Nothing is running** (no workflow and no waiter).
+- **Unreviewed by Codex and verified only by Claude:** offline-cache-r2 (its diff and brief are ready) and sqlcols-r5
+  (its diff and brief are ready).
+- **Under the fallback rule** the reviewer must not be replaced silently. The owner has been asked to choose between
+  waiting, adding Codex credit, or a recorded stand-in review.
+- **OWNER ANSWER (after midnight into 15 September): HOLD ALL COMMITS UNTIL CODEX HAS REVIEWED.** Nothing from 498,
+  offline-cache, sqlcols or 503b is committed on a stand-in review.
+- **OWNER ANSWER, 15 September: "Stand-in review now".** A fresh agent that built none of the work reviews
+  offline-cache-r2 and sqlcols-r5 using their Codex briefs. It tries Fable first, with Opus as fallback. Its result is
+  recorded as a STAND-IN, NOT a full review.
+- **The combined fix run then goes ahead, as ONE sequential workflow `run-c`.**
+  - **Package order:**
+    1. offline-cache-r3, only if the stand-in finds something;
+    2. 498-r5, covering Codex 498-r4's two MEDIUM findings;
+    3. 503b-r4, the four handlers;
+    4. sqlcols-r6, covering the stand-in's findings plus the line-3163 comment and the `SmallGroups.php:101-112`
+       comment.
+  - **Each package:** a Fable plan (Opus per step if needed), a Sonnet build, an independent check, and up to 3
+    re-plan and fix rounds.
+  - **Every step writes its report to `.claude-work/resume/runC--*.md`.**
+- **Commits stay ON HOLD.** Codex does a catch-up review of every package on or after 20 September 16:30, using
+  briefs written after run-c.
+- **LAUNCHED:** workflow `run-c`, run `wf_2cb105b3-281`, task `wht6qoh7x`. It uses container `runc-mysql` and ports
+  9030-9039.
+  - Stand-in reviews are written to `.claude-work/reviews/standin-offline-cache-r2.md` and `standin-sqlcols-r5.md`.
+  - Every package step writes `.claude-work/resume/runC--<package>-<step>.md`.
+  - **If the session dies:** the run cannot be resumed from a new session. Read the runC files to see how far it got,
+    then run a fresh continuation script for the remaining packages, using the same method.
+- The owner asked to be told when each build and check completes. A journal watcher does that and must be restarted
+  after each step.
+
+**15 September, 08:20-11:55 — run-c progress (every planning, review and check step so far on OPUS; Fable refused
+each one for lack of credits):**
+- **Stand-in review offline-cache-r2: NOT CLEAN**, with two points (`reviews/standin-offline-cache-r2.md`):
+  - **P2:** on a front-controller server, `Vary: *` on a signed-in visitor's /offline/ made the all-or-nothing
+    `cache.addAll()` store nothing;
+  - **P3:** comments overstated which responses are covered.
+- **Stand-in review sqlcols-r5: NOT CLEAN**, with two P3 points (`reviews/standin-sqlcols-r5.md`):
+  - the `live_matches()` equivalence depends on the first word not overlapping itself, which is not stated;
+  - pr-security.yml step 9 makes a crash look like a clean run.
+- **offline-cache-r3 finished NOT VERIFIED after 3 check rounds.**
+  - **The CODE is proven** in Edge, Firefox and WebKit on a front-controller server and on Apache:
+    `Auth::offlinePageAnswered()` exempts the real offline/index.php from `Vary: *`, sw.js installs file by file,
+    the Content-Type test is `str_contains`, and sign-out no longer keeps /offline/ inside portal-v1/v2 stores.
+  - **The last remaining gap is P4 wording.** `Auth.php:238-239` and `306-307` claim the sign-out page and activate
+    handler remove every earlier copy. They do not remove one narrow case: an organisation whose site key is
+    "offline", on a front-controller server, where the current sw.js installed while a pre-#507 Auth.php was live, so
+    its dashboard sits as /offline/ in portal-v3.
+  - **Carry this into the Codex catch-up brief** as a known point: either correct the wording, or decide in code
+    whether sign-out should stop always keeping /offline/.
+  - Reports are in `.claude-work/resume/runC--offline-cache-r3-*.md`.
+- **Now running:** 498-r5 (planning).
+
+**21:55 — `sqlcols-r5b` VERIFIED (verify r1 on Opus: PASS). THE COLUMN CHECKER IS READY FOR THE 22:41 CODEX QUEUE.**
+- Sonnet reworded the two passages (blind spot 15's SmallGroups sentence, and the `live_matches()` docstring's "committed
+  version"). No code changed (AST-confirmed); `--strict` exits 0 and all audit checks exit 0.
+- `sqlcols.diff` has been rebuilt (check_sql_columns.py plus pr-security.yml), and `brief-sqlcols-r5.txt` written; the
+  queue 9 list already names it.
+- **Follow-ups outside this round, for combined run C:**
+  - the line 3163 comment "(the committed script ...)" should say "the older version, commit 9c77216";
+  - the comment at `web/_core/SmallGroups.php` lines 101-112 falsely says the primary FROM table has no short name.
+- **Model record for all of sqlcols-r5 and r5b:** Fable was refused ("out of usage credits") on EVERY planning and
+  checking step (9 steps), so Opus did each one. Sonnet did every build. Record this in the eventual commit message.
+
+**21:42 — `sqlcols-r5` FINISHED. Verify r3 (Opus) FAILED on 2 wording slips ONLY; the verifier confirms the code is correct and
+everything else holds.** It used file checksum c9b47584…, and the result is saved as `sqlcols-r5--verify_r3.md`.
+**The slips:**
+1. Blind spot 15 falsely says no code writes a GROUP-named table with a short name. `SmallGroups.php:120` does, and it is
+   only unreached by SELECT_RE.
+2. The `live_matches()` docstring still says "the committed version", which should be "the older version (commit
+   9c77216)".
+
+**Fable failed ("out of usage credits") on all 7 planning and checking steps of `sqlcols-r5`; Opus did every one.**
+Workflow `sqlcols-r5b` has been launched: a Fable re-plan (Opus fallback), a Sonnet wording edit, then an independent
+check, with up to 2 check rounds. **If it verifies before 22:41,** rebuild `sqlcols.diff` and write
+`brief-sqlcols-r5.txt`, which the queue 9 list already names.
+
+**21:26 — `sqlcols-r5` round 2:** the re-plan r1 (Opus) and fix r1 (Sonnet: seven wording edits, no code change) are
+done. **Verify r2 (Opus) FAILED, again on wording only.** The verifier states the code is correct and all six
+original gaps are closed. The points:
+1. Blind spot 3's example says `reports/index.php:91` still uses `createdAt`, which is stale since 3effa5a;
+2. the summary paragraph's list of wrong-report routes omits 12, which now describes one;
+3. line 685 is 98 characters long (cosmetic).
+
+Re-plan r2 is running now; after it come fix r2 (Sonnet) and verify r3, the LAST round of this run. The saved result
+is in `.claude-work/resume/sqlcols-r5--verify_r2.md`.
+
+**21:08 — `sqlcols-r5`: Sonnet build DONE (report in `.claude-work/resume/sqlcols-r5--build.md`). Verify r1 (on OPUS;
+Fable unavailable) FAILED, on 3 minor documentation-accuracy points only, with 0 findings on the tree:**
+1. Blind spot 19, bullet 2 wrongly says the WHERE run-on cannot happen between double-quoted strings.
+   `read_where_after_set()` can follow `" . "` into ordinary text (a contrived shape).
+2. Blind spot 15 says "on the same line", but SELECT_RE's `\s+` before FROM can cross line breaks.
+3. The `where_comes_later()` docstring has a stale "78", which should be 79.
+
+Re-plan r1 is running (Opus again). Fable has now failed on every step of this run so far. Next come the Sonnet fix,
+then verify r2. The verify r1 result is saved in `.claude-work/resume/sqlcols-r5--verify_r1.md`.
+
+**20:47 — `sqlcols-r5` progress: BOTH planning steps ran on OPUS, because Fable was unavailable for each (tried first
+each time; the quota is probably used up).** This fallback is to be recorded in the commit message and the Codex brief.
+The draft plan (`sqlcols-r5-plan-draft.md`, written 20:12) and the settled plan (`sqlcols-r5-plan.md`, 20:34) are
+saved. The Sonnet build has been running since about 20:35 and is still active. The check comes next, trying Fable
+first again. The queue 9 waiter is alive for 22:41.
+
+**19:58 — OWNER: "fix the column checker failures now, then queue the post-fix recheck with the other Codex reviews at
+22:41". This SUPERSEDES the sqlcols decision in the 19:50 entry.**
+- **Workflow `sqlcols-r5` launched**, following the owner's method:
+  1. a Fable draft plan, written to `.claude-work/resume/sqlcols-r5-plan-draft.md`;
+  2. a Fable challenge that settles it, written to `.claude-work/resume/sqlcols-r5-plan.md`;
+  3. a Sonnet build;
+  4. an independent check (Fable, with Opus per step only if Fable is unavailable);
+  5. then a Fable re-plan and a Sonnet fix, for up to 3 rounds.
+
+  Its aim is to converge: remove the two regressions against the committed checker (help-text false reports, and the
+  lost `" . "WHERE` coverage) and the quadratic slowdown, and make the blind-spot list exact.
+- **The queue 9 list** is now `codex-498-r4`, `codex-offline-cache-r2`, `codex-sqlcols-r5 brief-sqlcols-r5.txt`.
+  `brief-sqlcols-r4.txt` was set aside as `brief-sqlcols-r4.SUPERSEDED.txt` so r4 is not reviewed.
+- **When `sqlcols-r5` VERIFIES:** rebuild `sqlcols.diff` (check_sql_columns.py plus pr-security.yml) and write
+  `brief-sqlcols-r5.txt` BEFORE 22:41. If it is not ready by then, the queue refuses the missing brief and skips it; run
+  it by hand afterwards with `bash .claude-work/codex-queue.sh codex-sqlcols-r5 brief-sqlcols-r5.txt`.
+
+**19:50 — UPDATE TO THE ENTRY BELOW: `sqlcols-r4` has FINISHED. Only the queue 9 waiter is still running.**
+- **sqlcols-r4 verify r3 FAILED, with 6 MINOR gaps** (saved in `.claude-work/resume/sqlcols-r4--verify_r3.md`):
+  1. `live_matches()` has undocumented quadratic time;
+  2. the blind-spot 17 `_CARRY_RE` description is wrong (dot-to-dot stretches with commas carry on);
+  3. blind spot 15/18: the SELECT column-list route to wrong reports is not listed;
+  4. example SQL inside ordinary PHP strings (help text) is now wrongly reported, which is new against the committed
+     version;
+  5. `" . "WHERE` names are no longer checked by anything, and this is not recorded as a loss;
+  6. the blind spot 18 "379 outside" figure is swapped.
+- **Decision** (following the owner's "let the reviews finish, then apply all fixes at once"): sqlcols-r4 is ALSO sent
+  to Codex, LAST in queue 9, with those 6 listed as known. Its gaps plus any Codex findings go into combined run C.
+  `sqlcols.diff` has been rebuilt (it includes pr-security.yml step 9), and `brief-sqlcols-r4.txt` is written.
+- **The queue 9 list is now final:** 498-r4, offline-cache-r2, sqlcols-r4. So in step B below, there is no need to
+  re-verify sqlcols first; just run the queue.
+
+**19:45 — THE OWNER MAY INTERRUPT THIS SESSION. IF YOU ARE A NEW SESSION, START HERE.**
+
+**What was running at 19:45 (both die if the session ends):**
+1. Workflow `sqlcols-r4` (run `wf_6749828a-a47`) was on its LAST agent, "verify r3". Verify r1 and r2 FAILED, and
+   fix 2 and fix 3 are done. Its finished reports are saved in `.claude-work/resume/sqlcols-r4--*.md`.
+2. Background waiter "queue 9", sleeping until 22:41.
+
+**How to pick up in a new session:**
+- **A. Codex reviews (after 22:39).** First check Codex with `codex exec --skip-git-repo-check "Reply with exactly one word: READY" < /dev/null`.
+  Then, from the repository root, run
+  `bash -c 'set -f; bash .claude-work/codex-queue.sh $(cat .claude-work/codex-queue-9.list)'`
+  The list holds `codex-498-r4 brief-498-r4.txt` and `codex-offline-cache-r2 brief-offline-cache-r2.txt`. Both
+  diffs and briefs are written, and both packages are VERIFIED.
+- **B. The column checker.** A new session cannot resume `sqlcols-r4`. Run a fresh INDEPENDENT check of the current
+  `tools/audit-checks/check_sql_columns.py` (and any change to the check_sql_columns step in
+  `.github/workflows/pr-security.yml`) against `.claude-work/reviews/codex-sqlcols-r3.txt` and the saved reports,
+  following the owner's method: Fable, falling back to Opus per step. If it passes, write `sqlcols.diff` and
+  `brief-sqlcols-r4.txt`, then queue it for Codex after A. If it fails, its gaps go into the combined fix run in C.
+- **C. After ALL Codex reviews:** ONE sequential run. For each package in turn: a Fable plan (Opus per step if
+  needed, retrying Fable every step), a Sonnet build, and an independent check (Fable, falling back to Opus). It covers
+  the four 503b handlers (see the 18:22 entry), and every NOT CLEAN finding from 498-r4, offline-cache-r2 and
+  sqlcols. Then Codex reviews each, one at a time, and whatever is CLEAN is committed (498 together with
+  followups-498).
+- **Nothing is uncommitted that has not been saved.** The uncommitted packages are 498 with followups-498,
+  offline-cache, 503b and sqlcols. The stopped Opus 503b-r4 edits are in `.claude-work/resume/503b-r4-opus-partial/`,
+  NOT in the tree.
+
+**About 19:40 — `codex-fixes-r4` FINISHED: offline-cache-r2 VERIFIED (verify r1 PASS). Added to the queue 9 list.**
+- **Design change from the brief (evidence in `.claude-work/resume/r4--offline-cache-r2_build.md`).** The builder
+  first built and tested the brief's "put the new worker in charge before cleaning up" idea, and it failed in all three
+  engines. Instead, `Auth::sendOfflineCopyHeaders()` adds `Vary: *` (through the new `oldServiceWorkerWouldStore()`)
+  to every signed-in page and every signed-in `/assets/` or static-ending response. Under the Cache Storage standard,
+  `cache.put()` then refuses to store it, whichever worker asks.
+- **Tested:** real Edge 153, Firefox 155 and WebKit 26.6 behind real Apache with php-fpm. Before the fix, a late page
+  landed in portal-v2 with the person's name in all three engines. After it, 12 runs showed none.
+- `offline-cache.diff` has been rebuilt and `brief-offline-cache-r2.txt` written.
+- **The queue 9 list now holds 498-r4 and offline-cache-r2. Add sqlcols-r4 when it verifies.**
+- **The owner's standing rule, restated on 14 September:** Fable plans and analyses using SEQUENTIAL agents. If Fable
+  is unavailable, Opus stands in for THAT step only, and every later step retries Fable. Sonnet builds.
+
+**18:55 — CODEX USAGE LIMIT AGAIN at 18:50; the reset is at 22:39.** The 498-r4 review did NOT run. Its output was
+moved aside as `codex-498-r4.FAILED-1850.txt`, so it is not a review.
+- **Queue 9 waiter** (background, this session only): at 22:41 it runs the NAME BRIEF pairs in
+  `.claude-work/codex-queue-9.list`, which currently holds only `codex-498-r4 brief-498-r4.txt`. **Add
+  `codex-offline-cache-r2 brief-offline-cache-r2.txt` and `codex-sqlcols-r4 brief-sqlcols-r4.txt` when those packages
+  verify** and their diffs and briefs are written. The log is `.claude-work/codex-queue-9.log`.
+- **If this session ends before 22:41,** run this by hand after the reset:
+  `bash -c 'set -f; bash .claude-work/codex-queue.sh $(cat .claude-work/codex-queue-9.list)'`
+
+**18:52 — "Pick up where we left off": the same session is still running. No Codex review was ever stopped (only the
+Opus BUILD `503b-r4`). The owner's point: let all the Codex reviews finish, then apply every fix in ONE run. That
+matches the order below.**
+- **498-r4 VERIFIED** (verify r1 PASS; reports in `.claude-work/resume/r4--498-r4_*.md`). Invisible columns are read
+  from information_schema and named explicitly; the eraser stops before the catalogue on any error other than 1146,
+  sets the request back to pending_review and throws; migration 194 has guarded upgrade steps from draft 1, draft 2
+  and round 3, marks old entries so they can never be wiped, and drops checkValue. Tested on MySQL 8.0.36 and MariaDB
+  11.4 and 12.3.
+- `498.diff` has been rebuilt (the full_schema.sql hunk is now only the 194 block, since 196 is committed).
+  `brief-498-r4.txt` is written, and the **Codex review is running as queue 8** (`.claude-work/codex-queue-8.log`),
+  started early because review only reads files.
+- **Still running:** offline-cache-r2 (verify r1), and sqlcols-r4 (verify r1 FAILED, fix 2 running).
+- Then, as planned: the Codex reviews of offline-cache-r2 and sqlcols-r4, one at a time after queue 8 ends. Then ONE
+  sequential Fable-plan / Sonnet-build run for the four 503b handlers plus every Codex finding from 498-r4,
+  offline-cache-r2 and sqlcols-r4.
+
+**18:30 — OWNER INSTRUCTION: QUEUE IN ORDER, AND USE THE PROPER MODELS. `503b-r4` (Opus) STOPPED.**
+
+The owner said:
+> "Once the currently queued tasks are complete, (including the fixes for 507, 498 and the column checker, also queue
+> the fix for: the events API's single-event lookup; the two event-hub lists (resources and videos); the RSVP page.
+> and any fixes found from the codex checks for 507, 498 and the column checker. Remember, plan and analyse using
+> Fable sequential agents (or Opus if fable isnt available) then implement using Sonnet"
+
+**Correction recorded:** the fix rounds today (`codex-fixes-r3`, `codex-fixes-r4`, `sqlcols-r4`, the maintenance
+rounds and `503b-r3`) all used **Opus builders and Opus verifiers**, not a Fable plan and a Sonnet build. The ones
+still running (`codex-fixes-r4`, `sqlcols-r4`) are allowed to finish, as the owner asked. The memory file
+`webms-working-method.md` has been updated.
+
+**The order from here (do not start a step before the previous one has finished):**
+1. **Let these finish:** `codex-fixes-r4` (offline-cache-r2 and 498-r4) and `sqlcols-r4`.
+2. **Codex reviews, ONE AT A TIME,** each only if its package verified: offline-cache-r2, then 498-r4, then
+   sqlcols-r4. Check Codex with a one-word prompt first. Write each brief and diff from the verified state.
+   Commit any that come back CLEAN (498 goes with followups-498).
+3. **ONE sequential fix run** containing:
+   - 503b-r4, the four handlers from Codex 503b-r3: `events/api/detail.php:109`, `calendar/api/hub-resources.php:84`,
+     `hub-videos.php:91` and `rsvp.php:99` must decide rights before the lookup so the query log is identical for a
+     missing, draft or deleted event, for every caller kind, including API keys;
+   - a fix for every NOT CLEAN finding from step 2.
+
+   **For each package, one after another:** a **Fable plan** (Opus fallback built into the script), then a **Sonnet
+   build**, then an independent check (Fable, falling back to Opus), then a Fable re-plan of any gaps, then Sonnet
+   again, for up to 3 rounds.
+4. **Codex reviews of step 3's packages, one at a time;** commit what comes back CLEAN.
+
+**Stopped run `503b-r4`** (run `wf_71abc5ff-839`, stopped about 3 minutes in): it HAD already edited the nine part-2
+files (most in detail.php, rsvp.php and both hub files). Its unverified edits are saved in
+`.claude-work/resume/503b-r4-opus-partial/`, as `working-tree-at-stop.diff` plus copies of the files. The nine files
+were restored to HEAD + `503b.diff`, confirmed identical to what Codex reviewed in round 3. The container
+`lane2-mysql` and `/private/tmp/503b-r4-work` were removed. The Fable planner in step 3 MAY read the saved partial
+diff as a starting idea, but must not assume it is correct.
+
+**18:22 — Codex 503b-r3 NOT CLEAN; fix round `503b-r4` launched (then stopped at 18:30, see above).**
+- Codex confirmed the invitation page is now fine. Its round-2 findings are fixed: the refusal paths run identical
+  statements, the rights match `App::isAdmin()`, and the links use `Site::url()`.
+- **New P2, the same timing shape in four other part-2 handlers:** `events/api/detail.php:109`,
+  `calendar/api/hub-resources.php:84` and `hub-videos.php:91` call `App::isAdmin()` only when an event was found,
+  and `rsvp.php:99` only for a draft. That triggers `App::user()`'s account query, so a draft and a missing event
+  differ by one query for a signed-in non-administrator.
+- `503b-r4` (lane2-mysql, ports 9010-9019) must decide the viewer's rights before the lookup on every request, with
+  query-log parity for every caller kind, including API keys.
+
+**18:20 — `503b-r3` VERIFIED (verify r1 PASS, no gaps); CODEX IS AVAILABLE AGAIN (a READY test at 18:19); its review is
+running as queue 7.**
+- rsvp-by-link.php: the draft rule sits in the lookup's WHERE clause (it joins tblUsers U and tblUserSites US for the
+  event's own organisation). `App::user()` is read on every request and `App::isAdmin()` is no longer called. The
+  query log is identical for every refusal case, and the timing difference is within ±0.18 ms. The details link uses
+  `Site::url()`. A deliberate change: an administrator with a deactivated account is refused their own organisation's
+  draft too.
+- `503b.diff` has been regenerated (9 files) and `brief-503b-r3.txt` written. The queue 7 log is
+  `.claude-work/codex-queue-7.log`.
+- **Queue one package at a time:** start the next queue only after queue 7 ends, to keep Codex runs from overlapping
+  and to limit usage.
+- Reports are saved in `.claude-work/resume/503b3--*.md`.
+
+**About 18:15 — `3effa5a` (smallfaults, #501) COMMITTED AND PUSHED; #501 commented on.** It covers the three files.
+The two P3 comments Codex raised were corrected before committing (comment only), and those are the only differences
+from the reviewed diff. It was proven on HEAD plus the three files alone.
+**Commits today so far:** 3e56f25, 6c8712b, 3a1e437, dc193b1, 90ff001, 6c84a48, 3effa5a.
+**Still uncommitted and in fix rounds:** 503b (`503b-r3`), offline-cache (`codex-fixes-r4`), 498 with followups-498
+(`codex-fixes-r4`; followups-498 is already CLEAN and is committed with 498), and sqlcols (`sqlcols-r4`).
+
+**17:56 — CODEX QUEUE 6 ENDED (all 7 are real answers, with no limit hit).**
+- **smallfaults-r2 NOT CLEAN, on two P3 COMMENT points only.** It found no functional defect, and every one of the 14
+  queries matches the schema. The two points:
+  - `reports/index.php:112` calls `timestamp` a reserved word; it is a NONRESERVED keyword.
+  - `data.php:167` says MySQL builds an index on the derived table; it CAN, depending on the plan.
+
+  **Plan:** the main session fixes both comments, then commits the three files, following the 503 export.php
+  precedent, and records that in the commit message.
+- **sqlcols-r3 NOT CLEAN**, with three P2 and two P3 findings:
+  - SQL inside a quoted value is scanned as a second statement;
+  - `''` and `\'` escapes in SET values give a regression (a miss) and a false report;
+  - aliases after `$var` and bare table names are reported as unknown tables;
+  - blind spot 16 wrongly includes qualified SET names;
+  - the PR workflow's `tail -n +5` drops the SELECT coverage heading on a clean run.
+
+  **Workflow `sqlcols-r4` launched** (it may also touch that one step in pr-security.yml).
+- **Nothing is queued for Codex yet.** The next queue needs: 503b-r3, offline-cache-r2, 498-r4, sqlcols-r4. Check
+  Codex availability first with a one-word prompt.
+
+**About 18:05 — Codex queue 6 results 4 and 5 are both NOT CLEAN; workflow `codex-fixes-r4` launched.**
+- **offline-cache-r1 NOT CLEAN:**
+  - **P1:** the sign-out script sweeps Cache Storage once, but the OLD portal-v2 worker stores responses asynchronously,
+    so another tab's signed-in response that finishes after the sweep lands in portal-v2 and stays readable offline.
+  - **P3:** the comment claiming JavaScript-off browsers have nothing stored is not true.
+  - **Wording:** "empties" needs qualifying (Chrome is partial, Firefox 138+, Safari 17+).
+- **498-r3 NOT CLEAN**, with three MEDIUM findings:
+  1. `SELECT *` leaves out INVISIBLE columns, so data in an invisible column added after Load is wiped;
+  2. GdprEraser's register step swallows its errors and then carries on into the catalogue, which deletes memberships,
+     so a retry cannot find the remaining entries;
+  3. migration 194 does not upgrade a table built from an earlier draft; it needs guarded ALTERs that keep entries,
+     and Wipe must never delete an entry without a full fingerprint.
+- **`codex-fixes-r4`** runs two parallel chains:
+  - offline-cache-r2 (lane1-mysql, ports 9000-9009, Playwright browsers);
+  - 498-r4 (lane3-mysql, ports 9020-9029).
+- **Still running separately:** `503b-r3` (ports 9010-9019), and the Codex queue with smallfaults-r2, then sqlcols-r3.
+
+**About 18:00 — `6c84a48` (503 part 1 + Site.php comment) COMMITTED AND PUSHED; #503 commented on.** Proven on
+HEAD + those 3 files alone. The only difference from the reviewed diff is the softened export.php comment. 503 part 2
+stays uncommitted until `503b-r3` is verified and Codex has reviewed it.
+
+**About 17:55 — `90ff001` (pkg6b, #497 and #501) COMMITTED AND PUSHED.**
+- It was proven on a worktree holding HEAD plus pkg6b only: every check and self-test passed, including parity
+  `--strict`.
+- The 17 files were staged, and full_schema.sql was staged using `git apply --cached` on a patch holding only pkg6b's
+  two hunks. The #498 `tblDemoDataRegister` hunk is still uncommitted in the working tree.
+- #497 has been commented on. 503-r2 is next: the export.php comment has been softened as Codex asked (comment only),
+  then commit event.php, export.php and Site.php.
+- **Now possible:** fix the Router.php comment "logout() calls exit() after redirect" once offline-cache is committed.
+
+**17:47 — QUEUE 6 STARTED ON TIME (17:39:00). First three results:**
+- **pkg6b-r1: CLEAN.** Ready to commit. `full_schema.sql` also holds the #498 hunk, so stage ONLY pkg6b's two hunks
+  (use hash-object/update-index, or commit #498 first). Files are listed in `pkg6b.diff`.
+- **503-r2: CLEAN.** Ready to commit (event.php, export.php, Site.php). One minor wording point: the export.php:163-165
+  comment says a missing Host header happens "only" for very old clients; soften that at commit time.
+- **503b-r2: NOT CLEAN**, with two P2 findings, both in `rsvp-by-link.php`:
+  1. A signed-in visitor holding another organisation's draft token triggers the extra rights query (lines 159-168),
+     but an unknown token does not, so timing can tell the two apart. Fold the rights check into the lookup, or give
+     every path the same queries.
+  2. The "View event details" links (lines 234 and 285) use a bare `/calendar/event?slug=`, which loses the path
+     prefix. Use `Site::url()`.
+
+  Fix round **`503b-r3`** was launched at 17:47.
+- offline-cache-r1 is reviewing now; 498-r3, smallfaults-r2 and sqlcols-r3 follow.
+
+**About 15:15 — `codex-fixes-r3` FINISHED (18 agents). All six packages are ready for Codex; the 17:39 list is final.**
+- **offline-cache (#507):** verify r1 failed, then a fix, then **verify r2 PASS**.
+  - The r1 failures were that Apache redirects `/offline` to `/offline/` (browsers refuse a stored redirected answer
+    for a page load) and that sign-out deleted `/manifest.json`. Both are fixed.
+  - The main session then corrected the flash-message comment in `Auth.php` (comment only, NOT re-verified).
+  - Design: `Auth::ensureSession()` sends `X-Offline-Copy: allow` only when the session holds harmless keys; `sw.js`
+    keeps only pages carrying that marker, with CACHE_VERSION `portal-v3`; sign-out is now a small page that sends
+    `Clear-Site-Data: "cache"` and a script that clears Cache Storage.
+  - Tested in real Edge 153, Firefox 155 and WebKit 26.6 (Playwright), and on real Apache.
+- **sqlcols-r3:** verify failed three times. The last failure was only the header's blind spot 15 missing one
+  wrong-report route: the SET reading runs on when the SQL string ends in `=`, `,` or `(`. The main session added that
+  to blind spot 15, the paragraph listing wrong-report routes, and the UPDATE_RE comment (documentation only, NOT
+  re-verified). The code was accepted by the verifier.
+- **Diffs:** `offline-cache.diff` (Auth.php, sw.js) and `sqlcols.diff`. **Briefs:** `brief-offline-cache-r1.txt` and
+  `brief-sqlcols-r3.txt`.
+- **`codex-queue-6.list` final order:** pkg6b-r1, 503b-r2, 503-r2, offline-cache-r1, 498-r3, smallfaults-r2,
+  sqlcols-r3. Queue 6 runs them at 17:39; if the limit hits part-way, the rest need running by hand after the next
+  reset.
+- **Follow-ups to do after BOTH pkg6b and offline-cache are committed:** the Router.php comment "logout() calls exit()
+  after redirect" should read "logout() sends the sign-out page and calls exit()". DEV_NOTES text for the service
+  worker is suggested in `.claude-work/resume/fx--offline-cache_build.md` (notDone).
+- **Nothing is left running except the queue 6 waiter.**
+
+**About 15:05 — four more packages VERIFIED; their Codex briefs are queued; issues #510-#512 opened.**
+- **Verified in `codex-fixes-r3` (reports: `.claude-work/resume/fx--*.md`):**
+  - **503-r2:** event.php and export.php build every portal link with `Site::url()`, and export.php's built-in
+    live-domain fallback is removed; Site.php's comment is verified.
+  - **503b-r2:** in rsvp-by-link.php, draft rights are checked against the EVENT'S organisation. The lookup is still
+    open to every organisation, because emailed links carry no prefix. The "View event details" link only appears for
+    the same organisation.
+  - **498-r3:** every column is fingerprinted (not `tblAnnouncements.updatedAt`), plus a new `fingerprintColumns`
+    column in 194 and full_schema. The catalogue marks it erase; there is a new
+    `GdprEraser::eraseDemoDataRegisterEntries()` that runs first, a `data-export.php` block, and selftest check 10.
+    The LOW point was declined again.
+  - **smallfaults-r2:** `monthly_logins` counts only completed sign-ins, using session links for LoginLocal, and
+    `OR siteID IS NULL` is removed. The overstated session-link comment in data.php was corrected by the main session
+    afterwards (comment only).
+- **Diffs regenerated:**
+  - `503.diff` (event, export, Site);
+  - `503b.diff` (9 files);
+  - `498.diff` (9 files, including only the 194 hunk of full_schema and the deleted demo_data.sql);
+  - `smallfaults.diff` — to be regenerated after the comment edit.
+- **Briefs written:** `brief-503-r2`, `brief-503b-r2`, `brief-498-r3`, `brief-smallfaults-r2` (a FULL review, because
+  r1 was cut off by the limit).
+- **`codex-queue-6.list` order:** pkg6b-r1, 503b-r2, 503-r2, 498-r3, smallfaults-r2. Add sqlcols-r3 and offline-cache
+  (#507) when their lanes are verified.
+- **New issues:**
+  - **#510 (critical):** GdprEraser stops part-way. The catalogue erases `tblErasureRequest`, the audit rows cascade,
+    FK error 1452 follows, 65 of 124 steps never run, and no audit is left.
+  - **#511 (high):** being signed in counts as membership of any organisation (an account in A read an internal event
+    in B). The coordinator grant looks users up across organisations, and the legacy isAdmin flag covers every
+    organisation.
+  - **#512:** path-mode links without a prefix (rsvp.php redirect, event-assign returnTo, invites-send; uploads may not
+    be served at all).
+- **Still running:** sqlcols-r3 (in fix rounds) and offline-cache (fix round 1 done, verify r2 running).
+
+**About 15:00 — ISSUE SWEEP FINISHED, BUT PARTLY ON THE FALLBACK: FABLE RAN OUT OF USAGE CREDITS at about 13:30.**
+- **Workflow `issue-sweep-resume` (run `wf_c3380904-b9b`):**
+  - batches 4-7 ran on **Fable**;
+  - batch 8, batch 9, the double-check, project state, research and proposals each failed on Fable with "You're out of
+    usage credits". **Each one then ran on OPUS**, which is the script's built-in fallback.
+  - Every output exists: `.claude-work/sweep/batch-01..09.json`, `doublecheck.json`, `project-state.md`,
+    `proposals.md` (also at `.claude/plans/alpha-proposals.md`), and `.dev-team/FEATURES.md`.
+  - The double-check tested 60 recommendations (14 reopen, 1 close, 45 follow-up), and 58 held up.
+- **Fallback record:** those six stages did NOT get Fable's deep analysis. **When Fable is available again, run a
+  catch-up review on Fable** of `doublecheck.json`, `project-state.md` and `proposals.md` as ONE body of work. Treat
+  its conclusions as not fully reviewed until then. NOTHING from the sweep has been written to GitHub yet.
+- The build lanes (`codex-fixes-r3`) use Opus and Sonnet, so the Fable limit did not affect them.
+
+**About 14:50 — pkg6b is VERIFIED IN FULL; its Codex brief is queued for 17:39; issues #508 and #509 opened.**
+- `pkg6b-maintenance-health-r3` (run `wf_4d7265a4-0df`): fix round 3, then **verify round 4 PASS**. Reports:
+  `.claude-work/resume/maint3--*.md`.
+  - `cron/health.php` switches `display_errors` off for the whole page. During maintenance its harmless handler goes in
+    before the token check and is never removed, and exceptions give a 500 JSON answer with no database row.
+  - The duplicate heading is gone. The staff-page note and a comment in `public_html/index.php` were updated, and a
+    sentence was added to the disaster-recovery help page.
+- **`pkg6b.diff`** has 17 file sections. For `full_schema.sql` it keeps only the two pkg6b hunks: the tblRoutes block for
+  196, and the removal of the photo row. The #498 hunk was filtered out by content. `brief-pkg6b-r1.txt` is written,
+  and `codex-pkg6b-r1 brief-pkg6b-r1.txt` has been added to `codex-queue-6.list`.
+- **When committing pkg6b:** `full_schema.sql` holds both pkg6b and #498 changes. Stage only pkg6b's hunks, using the
+  `git hash-object -w` / `git update-index --cacheinfo` method used for 4eba0ee, or commit #498 first.
+- **#508:** `/admin/upgrade` and `/admin/users/import` crash on the breadcrumb shape (the fix is one line each).
+  **#509:** during maintenance, a malformed session cookie or `?lang[]=` writes error rows on any address, and a
+  signed-in global administrator skips maintenance, so a cron address opened by hand runs its job.
+- pkg6b's Codex brief lists these as known; there is no need to report them again.
+
+**About 14:45 — `pkg6b-maintenance-health` FINISHED NOT VERIFIED after 3 verify rounds. Round 3 launched as
+`pkg6b-maintenance-health-r3`.** Reports are in `.claude-work/resume/maint--*.md`.
+- **Built:** `Maintenance.php` has `EXACT_ALLOW_LIST = ['cron/health']`, matched against `Router::extractPath()`
+  output, which is lower case, has no query string, has its slashes trimmed and its organisation prefix removed. 25
+  look-alikes were proven blocked.
+- **Measured:** a normal call writes nothing; 210 table checksums, a file hash and the MySQL query log (SELECT and SET
+  NAMES only) all agree.
+- **Faults each verify round found, in turn:**
+  - Round 1: a warning inside the probes, even one hidden with `@`, is written to `tblErrors` by the portal handler.
+    Fixed with a harmless handler used only while maintenance is on.
+  - Round 2: `?token[]=x` triggered "Array to string" before that handler was installed. Fixed: the token must be
+    text, and the handler is now installed earlier.
+  - Round 3: the `finally` block restores the portal handler BEFORE `header()`. With display_errors on and output
+    unbuffered (php-cgi), "headers already sent" reaches the portal handler and writes a row. It needs the right
+    token. **Being fixed now.**
+- Also open: a duplicate heading in `cron/health.php`, and the staff-page note (on pre-release copies the gate sends a
+  monitor to sign-in). Stale wording: `public_html/index.php:55` and `help/disaster-recovery.php:55`.
+- **Already there before this work, for an issue:**
+  1. `/admin/upgrade`, signed in during maintenance, writes about 10 `tblErrors` rows (`htmlspecialchars` is given an
+     array at `templates/header.php:298`). The round-3 fixer is asked for the cause.
+  2. A signed-in global administrator skips maintenance mode entirely, so opening `/cron/retention-sweep?token=` in a
+     signed-in browser runs the clear-out during an upgrade.
+- The pkg6b Codex brief still waits for this round, and must include `Maintenance.php`, `cron/health.php` and whatever
+  this round changes.
+
+**About 13:20 — `3a1e437` (pkg3, #494) and `dc193b1` (forged, #496) COMMITTED AND PUSHED. CODEX LIMITED UNTIL 17:37.**
+- Both were proven first on a throwaway worktree: HEAD, then HEAD + pkg3, then HEAD + pkg3 + forged. Every audit
+  check and self-test exited 0, and `php -l` was clean. The re-check of each file against its reviewed diff passed
+  before staging. #494 and #496 have been commented on. (`Logger::criticalAlert` exists only in a comment in `Sms.php`,
+  and `RateLimiter::DEFAULT` is a constant; neither is a fault.)
+- **Queue 5 hit Codex's usage limit at 13:00** during `smallfaults-r1`; the reset is at 17:37. The file
+  `codex-smallfaults-r1.txt` is INCOMPLETE and is not a review. Before stopping, it found one real point: with
+  two-step verification, `LoginLocal` is logged BEFORE the second step, and SSO logs `...Pending2fa` then
+  `TotpVerified`. So `monthly_logins` misses some completed sign-ins and counts unfinished ones.
+- **Queue 6 waiter:** background task `beosopa1j`, log `.claude-work/codex-queue-6.log`. At 17:39 it runs the NAME
+  BRIEF pairs listed in `.claude-work/codex-queue-6.list`, one pair per line (for example
+  `codex-smallfaults-r2 brief-smallfaults-r2.txt`). **Add each line as its brief is written.** If the session dies,
+  run `bash -c 'set -f; bash .claude-work/codex-queue.sh $(cat .claude-work/codex-queue-6.list)'` by hand after
+  17:37.
+- **New issue #507:** the service worker keeps signed-in pages readable offline after sign-out (Codex 503-r1 P1). It
+  affects EVERY signed-in page, not just drafts, and is pre-existing.
+- **Workflow `codex-fixes-r3` launched** (run `wf_8cfaf941-503`, task `wgiwgeg6q`; containers `lane1-mysql`,
+  `lane2-mysql`, `lane3-mysql`; ports 9000-9029). It runs three lanes, each running two packages one after the other:
+  - lane 1: 503-r2 (the event.php URL prefix from the catch-up review, plus the Site.php comment), then the
+    offline-cache fix;
+  - lane 2: 503b-r2 (the invitation link's organisation check), then smallfaults-r2 (counting sign-ins that use
+    two-step verification);
+  - lane 3: 498-r3 (fingerprint columns, and the catalogue's handling of register rows), then sqlcols-r3 (three false
+    positives).
+
+  No lane may touch pkg6b's files. `pkg6b-maintenance-health` is still running.
+
+**13:00 — CODEX QUEUE 4 FINISHED: all 9 reviews are real answers. Queue 5 started at 12:59 (smallfaults-r1 first).**
+
+| Review | Verdict | What next |
+| --- | --- | --- |
+| pkg6-catchup | NOT CLEAN | event.php search-engine URL loses the organisation prefix, and a Site.php comment (already fixed). Fold both into the 503 round 2 package. |
+| 501-r2 | CLEAN | Committed `6c8712b`. |
+| forged-r3 | CLEAN | Commit after proving it on HEAD alone (Auth.php is in it, so commit BEFORE any fix touches Auth.php). |
+| pkg3-r4 | CLEAN | Commit after proving it on HEAD alone (tools and pr-security.yml only). |
+| followups-498-r1 | CLEAN | **HOLD until 498 is clean.** It removes references to `demo_data.sql`, and only the 498 package deletes that file. |
+| 503-r1 | NOT CLEAN | P1: the service worker caches the draft event page a manager saw, so after sign-out it can still be opened offline in the same browser. Check whether every signed-in page has this problem. |
+| 498-r2 | NOT CLEAN | HIGH: the fingerprint leaves out displayAddress, displayBio, displayPhone, photos and coordinates, so Wipe could delete real details added to a demo person. MEDIUM: the catalogue says tblDemoDataRegister holds no personal data, but tableName+rowID identifies a user, so it needs conditional export and erasure. LOW: the GitHub issue link. **Decline again with the reason** (a code-repository link is not a customer address). |
+| sqlcols-r2 | NOT CLEAN | Three P2 false positives: SQL comments (`--` and `#`), a JOIN alias named like `tblX` treated as a table, and a number like `1e3` read as a column. |
+| 503b-r1 | NOT CLEAN | P1: the rsvp-by-link lookup has no organisation check, and its draft test uses `App::isAdmin()` for the CURRENT organisation, so an admin of A holding B's token can open B's draft. Take care: guests have no session, and Site::id() for a signed-out visitor may detect site 1 (#502). Checking admin rights for the EVENT'S organisation may be safer than filtering by Site::id(). |
+
+**About 13:15 — `6c8712b` (#501: dashboard and task list) COMMITTED AND PUSHED; small faults queued for Codex; catch-up plan**
+- Codex 501-r2 was CLEAN (a real answer; short because round 2 only covered the API description). The three files
+  matched `501.diff` exactly, and #501 has been commented on.
+- **The `data.php:40-42` comment is corrected** (comment only). `smallfaults.diff` (3 files) and
+  `brief-smallfaults-r1.txt` are written.
+- **Codex catch-up for `eb077e1`, which came back NOT CLEAN; both points were checked against the code and both are real:**
+  1. `calendar/event.php:320-322` builds the search-engine markup's event address from `HTTP_HOST` +
+     `/calendar/event?slug=`, so in path mode an organisation's prefix is lost. The fix is `Site::url('calendar/event')`
+     (the hero image address is a static file in the web root, so it needs no prefix). **Wait for Codex `503-r1` and
+     commit #503 part 1 first, because `event.php` is in that review.**
+  2. The `Site.php` flagIsOn docblock overstated the fault. **Already corrected** (comment only, uncommitted): only the
+     two admin-flag methods said "no" for everybody, while userBelongsTo only refused a global admin without a
+     membership row.
+
+  Together these become the **catch-up-fixes** package. Write `brief-catchup-fixes-r1.txt` and `catchup-fixes.diff`
+  (Site.php plus event.php's URL lines) once (1) is done.
+- **Waiter 5** (background task `bwn8anpmh`; log `.claude-work/codex-queue-5.log`) polls
+  until queue 4 prints "queue ended", then runs `codex-smallfaults-r1`, `codex-pkg6b-r1` and
+  `codex-catchup-fixes-r1`. A brief that does not exist yet is REFUSED and skipped. If so, run it by hand:
+  `bash .claude-work/codex-queue.sh codex-pkg6b-r1 brief-pkg6b-r1.txt` (and likewise for the others).
+- **Workflow `pkg6b-maintenance-health`:** run `wf_784bf1f6-53c`, task `wevwkqvw1`.
+
+**About 13:00 — `resume-builds` FINISHED. Both chains are verified. Reports: `.claude-work/resume/rb--*.md`.**
+- **pkg6b: verify round 2 PASS**, with no new gaps. The follow-up for maintenance mode (owner decision 2) is launched
+  as workflow `pkg6b-maintenance-health` (Opus build and verify; container `maint-mysql`, ports 8990-8999). It edits
+  `Maintenance.php`, the three cron job headers, the note on the staff health page, and the DEV_NOTES row. **The
+  pkg6b Codex brief waits until that is verified,** and it must include `Maintenance.php`. One stale doc was found:
+  HANDOFF line ~702 still describes `?cron=1`, and needs refreshing.
+- **Small faults: verify round 1 FAILED, then a fix, then verify round 2 PASSED.** Changes over and above the four
+  column fixes:
+  - `reports/data.php` `attendance_monthly` now joins the headcount table as well;
+  - both attendance queries now leave out deleted sessions (`s.isDeleted = 0`), which the attendance page already
+    did;
+  - `monthly_logins` now counts `LoginLocal`, `LoginMS365`, `LoginGoogle` and `LoginWebAuthn`. It used to look for
+    `Login`, which nothing ever writes.
+
+  Still to do before its Codex brief: fix the old comment at `data.php:40-42` (it claims `prepare()` fails silently;
+  under strict reporting that is a 500), which is comment-only. Not faults, but follow-ups:
+  - nothing in the portal calls `/admin/reports/data`;
+  - the Top Activity list has no tie-break.
+- **Codex queue 4:** `pkg6-catchup` completed at 12:40 and is **NOT CLEAN**:
+  - **P2:** `calendar/event.php:266-268` builds the search-engine markup's event address as
+    `/calendar/event?...`, without the organisation's address prefix (path mode). Codex suggests `Site::url()`.
+  - A comment: `Site.php:717` overstates the fault.
+
+  Being checked against the code now. `event.php` is also in the 503 package, which is 6th in the Codex queue, so do
+  not edit it underneath that review.
+
+**Done at about 12:30:**
+- Both decisions are posted on #503 and #497.
+- The decision is recorded in the comment in `rsvp-by-link.php`, which was a comment-only edit; `php -l` is clean.
+- `503b.diff` is regenerated (still 9 files, and the only difference is that comment).
+- The "known, do not report" note in `brief-503b-r1.txt` now states the decision.
+
+**Lesson:** a background waiter lives only as long as the session that started it. After any stop, run `ps` for
+`codex-queue` before assuming a scheduled queue will run.
+
+### 14 September ~09:30 — sqlcols and #503 part 2 VERIFIED; Codex briefs written; one owner question asked
+
+- **Workflow `sqlcols-r2-and-503b` (run `wf_fb54cc29-20f`) finished.**
+  - **check_sql_columns.py:** verify FAIL, fix, FAIL, fix, **PASS on round 3.** It now scans single-table bare-column
+    WHERE comparisons in SELECT, UPDATE and DELETE; skips sub-queries; reads only the WHERE clause itself; ignores PHP
+    `$variables`; prints honest coverage; and lists eight blind spots. The one remaining false-accusation shape is a
+    sub-query kept in its own PHP variable.
+    - **It found 2 REAL faults:** `admin/calendar/coordinators-save.php:72` uses `tblUsers.email` (should be
+      `emailAddress`), and `admin/reports/index.php:121` uses `tblActivityLogs.createdAt` (should be `timestamp`);
+      `reports/index.php:91` may be the same but is invisible to the check.
+    - Added to #501; **workflow `small-faults-sql-columns-2` is fixing them** (Sonnet build, Opus verify).
+  - **#503 part 2: verify PASS on round 1.** 9 files:
+    web/_apps/calendar/api/hub-resources.php, web/_apps/calendar/api/hub-videos.php, web/_apps/calendar/event-register-save.php, web/_apps/calendar/event-register.php, web/_apps/calendar/feed.php, web/_apps/calendar/rsvp-by-link.php, web/_apps/calendar/rsvp.php, web/_apps/events/api/detail.php, web/_apps/live/index.php.
+    - API keys see drafts only with `events:write`; for a key request the session is ignored.
+    - Internal events now need sign-in to register (public-event registration is deliberate and unchanged).
+    - The feed excludes drafts for everyone, including managers.
+- `503b.diff` and `sqlcols.diff` were written; `brief-503b-r1.txt` and `brief-sqlcols-r2.txt` are written, so waiter 3
+  picks them up at 12:37. (The first attempt at the 503b file list failed to parse and was rebuilt from git status.)
+- **OWNER QUESTION asked:** may an RSVP-by-link invitation (sent to a named email by an administrator or coordinator)
+  let a guest answer for an INTERNAL event without an account? Proposal #335 said public events only; the shipped code
+  never enforced it; the builder left it as it is.
+- **Follow-ups (not fixed; for an issue or the sweep):**
+  1. The draft-visibility rule is now copied in about 11 files; a shared helper, for example on `Portal\Core\Events`,
+     is recommended.
+  2. `calendar/anon-checkin.php` (`/attend?eventID=N`) shows an INTERNAL published event's name signed out.
+  3. The `web/_core/Ical.php:90,99` comment is stale (the feed now sends STATUS).
+  4. The feed now refuses a user with no active membership, so a global administrator with no membership row gets 403.
+     Check this against the `Site::userBelongsTo` rule (global admins belong everywhere).
+  5. Hub APIs show drafts only to App::isAdmin or an `events:write` key, not to coordinators.
+  6. Nothing in the portal ever turns `registrationEnabled` on, so the registration form is reachable only after a
+     direct database edit.
+  7. Test note: `event-register-save.php:147` gives a 500 after saving when no mail sender is configured (pre-existing).
+
+### 14 September ~08:55 — Newsletter follow-up DONE by the main session; #498 wording tidied; diffs regenerated
+
+- `web/_core/Newsletter.php`: the demo exclusion is now
+  `NOT IN (SELECT rowID FROM tblDemoDataRegister WHERE tableName = ? AND siteID = ?)`, bound
+  `'isii', $siteId, $demoTableName, $siteId, $count`. The comment says a changed demo announcement stays out of
+  newsletters until its register entry is removed (the safe direction).
+- `demo-data.php`: the header's fingerprint column list names the phone number, and the Wipe messages read correctly
+  for a count of one. These were the verifier's two minor points.
+- `php -l` is clean on both; all audit checks and self-tests exit 0. `498.diff` and `followups-498.diff` were
+  regenerated, and both briefs note these edits, for the 12:37 Codex queue.
+
+### 14 September ~08:40 — `fix-498-r2` finished; pkg6b launched; a Newsletter follow-up is needed
+
+- **#498 round 2 (run `wf_1a0127b5-0bb`): built and verified.**
+  - `tblDemoDataRegister.checkValue` is replaced by `siteID` plus `fingerprint CHAR(64)`: SHA-256 over the table,
+    the row id, and length-prefixed values of the columns Load set, including the creation time.
+  - Wipe deletes only rows still in the recorded organisation with a matching fingerprint, and lists changed rows
+    "left in place". Demo rows linked to a kept row stay with it. Both Codex failure shapes were reproduced before and
+    shown fixed after.
+  - Migration 194 and its full_schema block were updated in place and are identical; they replay twice on MySQL
+    8.0.36 and run twice on MariaDB 11.4.
+  - `498.diff` was regenerated and `brief-498-r2.txt` written, so waiter 3 will pick it up at 12:37.
+  - Known limits:
+    - there is no page control to take a kept row off the register, so Load stays blocked until it is removed by hand
+      (the page says so);
+    - an undeclared link is documented, not detected.
+- **NEW FOLLOW-UP:** `web/_core/Newsletter.php` (followups-498 package, uncommitted, awaiting Codex) excludes register
+  rows by number only. It must also match `siteID`. A kept, now-real announcement still being left out of newsletters
+  until its register entry is removed is acceptable and should be documented. Fix it before the followups-498 Codex
+  review at 12:37, then regenerate `followups-498.diff` and add a note to its brief.
+- **Workflow `pkg6b-router-and-cron` launched** (Opus build, Opus verify, up to 3 rounds): cron addresses for
+  retention, health and backup-check; the `Router.php:83` fix; removal of the stray calendar photo route; migration
+  196. `full_schema.sql` route seeds only; the 194 block is left alone.
+- **Running now:** the sweep (Fable), `sqlcols-r2-and-503b` (2 Opus chains), `pkg6b` (Opus). The Codex queue is at
+  12:37.
+
+### LATEST — 14 September ~08:05: two packages COMMITTED; #498 in a fix round; Codex limited again until 12:35
+
+**Codex queue 1 (07:35):**
+- pkg1-r3 **CLEAN**, pkg2-r3 **CLEAN**, 498-r1 **NOT CLEAN**;
+- pkg6-catchup hit the Codex usage limit at 07:49 (Codex says "try again at 12:35 PM");
+- another Codex session on this machine (`codex exec -m gpt-5.6-sol ... codex-review-4b.log`) appears to be drawing on
+  the same allowance.
+
+Queue 2 (waiter 2) ran after it and stopped at its first review on the same limit; see its log.
+
+**COMMITTED AND PUSHED:**
+- **`e414cf1`: pkg2 (#495),** 23 files. All 22 portal-wide settings pages are global-admin only; backup.php,
+  retention.php page and sweep, and offsite-backup.php's "Run now" are all global-admin only; apps, QR and Sabbath
+  check the token once; the QR key is kept and encrypted. Commented on #495.
+- **`4eba0ee`: pkg1 (#493 Step 1 and #496's foundation):**
+  - RateLimiter trusted proxies, Gatekeeper, `PORTAL_ENV_SOURCE`, the index.php gate call;
+  - settings save, index and group protections, and AppRegistry;
+  - migration 193 plus ONLY its full_schema block.
+
+  The `full_schema.sql` split was done by staging an intermediate copy with `git hash-object -w` and
+  `git update-index --cacheinfo`. **The 21-line 194 `tblDemoDataRegister` block is still UNCOMMITTED** in the working
+  tree, and belongs to #498. Commented on #493 and #496.
+  - Checked before committing: no pkg1 file uses Logger's uncommitted `errorPlatformForSite`. That method stays with
+    the forged package.
+
+**#498 Codex round 1 finding (HIGH):** Wipe trusts one check value (email, number or slug). An announcement edited
+through the API with its slug kept, or a reused number with the same slug in another organisation, would be deleted.
+- **Workflow `fix-498-r2` running:** it records organisation and a content fingerprint at Load, and Wipe deletes only
+  rows still exactly as loaded, listing changed ones as "left in place". It edits `demo-data.php`, migration 194, the
+  full_schema 194 block and the catalogue entry.
+- **Declined Codex point, with the reason:** GitHub issue links in code comments are not "built-in addresses" under
+  the #500 rule. That rule is about the customer's portal and our deployment domains; `@link` references to the code
+  repository are fine.
+
+**Waiter 3 (background)** starts at 12:37 and queues every brief that exists by then, in order: pkg6-catchup, 501-r2,
+forged-r3, pkg3-r4, followups-498-r1, 503-r1, 498-r2, sqlcols-r2, 503b-r1.
+**Write `brief-498-r2.txt`, `brief-sqlcols-r2.txt` and `brief-503b-r1.txt` when those workflows finish verified.**
+
+**Waiting (file clashes):**
+- pkg6b (Router, cron moves, photo route) launches AFTER `fix-498-r2` finishes, because both edit full_schema.sql;
+- pkg5 (secret settings build) after #498 and pkg6b are committed.
+
+**Running now:** the issue sweep (Fable), `sqlcols-r2-and-503b` (two Opus chains in parallel), `fix-498-r2` (Opus).
+
+### LATEST — 14 September ~04:00: plan-6 answered; #503 verified; the sweep RUNNING; sqlcols round 2 and #503 part 2 RUNNING
+
+- **Owner answers to plan-6** (recorded at the end of `.claude/plans/public-door-6-configurable-domains-and-package.md`):
+  1. **KEEP** the placeholder folders (NOT the recommendation): our address in `public_html_redir/index.html` becomes
+     `https://portal.example.org/` with a placeholder comment; the package drops the folders; no allow-list entry.
+  2. **YES** to CDN-fallback copies in the zip.
+  3. **YES**, edit migration 062, recording the exception in its header; migration 197 fixes existing installs.
+- **`build-503-and-sqlcols` (run `wf_e49ab8aa-2d3`) finished.**
+  - **#503 part 1: verify PASS.** `calendar/event.php` returns the same "not found" for a draft unless the viewer passes
+    `App::isAdmin()` (the calendar manage-page check), with a draft notice for managers. The `export.php` single-event
+    branch gets the same rule plus sign-in for non-public events; before, ANY draft or internal event was downloadable
+    signed out by counting ids.
+  - `503.diff` and `brief-503-r1.txt` are written, so waiter 2 will queue it.
+  - **sqlcols: verify FAIL, then fix, then re-verify FAIL.** Open: a sub-query inside UPDATE or DELETE is mis-scanned by
+    the SELECT loop (a medium false-accusation risk), and the header omits a blind spot (a quoted value before FROM).
+    **No Codex brief yet.**
+- **Workflow `sqlcols-r2-and-503b` launched** (the two run in parallel; files do not overlap):
+  - sqlcols round 2: Opus fix and verify, up to 3 rounds;
+  - #503 part 2: drafts and deleted events via `events/api/detail.php`, `calendar/rsvp.php`, `calendar/feed.php` (also
+    deleted events), `rsvp-by-link.php`, event registration (internal events without sign-in; check first whether it is
+    deliberate), `calendar/api/hub-resources.php` and `hub-videos.php`, and `live/index.php`. Opus build and verify, up
+    to 3 rounds.
+  - **Deliberately left out:** `export.php`'s series branch, which does not check isPublic. Its file is in the part-1
+    Codex review; do it after that commit.
+- **Workflow `issue-sweep-and-proposals` launched** (run `wf_e4c43146-809`):
+  - gather (Sonnet); then sequential Fable batches of 45 issues; an adversarial double-check; project state; featurefind
+    research writing `.dev-team/FEATURES.md`; ranked proposals written to `.claude-work/sweep/proposals.md` and
+    `.claude/plans/alpha-proposals.md`.
+  - It writes NOTHING to GitHub: apply the double-checked changes afterwards.
+  - It is the only analysis run active.
+- **Claude chains now:** the sweep, sqlcols-r2 and 503b (3). Codex queue 1 starts at 07:35, and waiter 2 runs after it
+  (currently with briefs forged-r3, pkg3-r4, followups-498-r1 and 503-r1).
+
+### 14 September ~03:45 — plan revision r2 FINISHED; 3 owner decisions asked; the sweep is next
+
+- **`plan-amend-channels-r2` (run `wf_9867eb01-c8f`) finished; all four stages on Fable.** Outputs:
+  `.claude-work/reviews/plan-amend2-{1-survey,2-design,3-challenge,4-revision}.md` and
+  `.claude/plans/public-door-6-configurable-domains-and-package.md` (119 KB, identical copies).
+  - Sections: what it replaces; every built-in address and what it becomes; the portal's own address; the channel
+    for a package install; hybrid hosting in the deploy; the installation package; replacement text for the amendment;
+    docs; build placement; design choices; what was not checked.
+  - Migration **197** fixes the support-email seed on existing installs.
+  - **3 OWNER DECISIONS asked 14 September:**
+    1. delete the placeholder folders `public_html_redir`, `public_html_landing` and `private_html`;
+    2. ship CDN-fallback copies in the zip;
+    3. edit old migration 062 to remove our support address.
+- **The sweep brief was updated** with the in-progress issues (#479 and #491-#503), the facts found this week, the
+  featurefind method writing `.dev-team/FEATURES.md` (sequential slices, never the top-level FEATURES.md), and outputs
+  in `.claude-work/sweep/`.
+- **NEXT:** launch the sweep workflow (sequential Fable batches, a double-check, project state, feature research,
+  then proposals). It is the only analysis run active; `build-503-and-sqlcols` is a build and may overlap.
+
+### 14 September ~03:40 — `review-fixes-round3` FINISHED: all four packages verified
+
+- **Built and verify PASS (no fix rounds needed):**
+  - pkg1-r3: settings and proxy;
+  - pkg2-r3: retention and off-site page gates;
+  - forged-r2: Logger never throws, loops or needs the database;
+  - pkg3-r3: the method-call checker's three Codex round 2 findings.
+- `pkg3.diff` was regenerated and `brief-pkg3-r4.txt` written. Waiter 2 now has briefs for forged-r3, pkg3-r4 and
+  followups-498-r1; 503 and sqlcols come when their workflow finishes.
+- Claude chains running now: `plan-amend-channels-r2` (Fable) and `build-503-and-sqlcols`. Codex queue 1 is at 07:35,
+  queue 2 after it.
+
+### 14 September ~03:30 — `followups-498` finished; its Codex brief is written for queue 2
+
+- **Build and verify PASS.** Changed: `Migrator.php` (the user-visible message and comments no longer name the deleted
+  `demo_data.sql`), dead exclusions removed from `check_migration_idempotency.py` and `check_mariadb_only_ddl.py`, and
+  a reference in `tools/e2e-migrations/run.sh`. Both checks give identical findings, and the e2e harness passes all 4
+  phases.
+- **`Newsletter.php`** leaves out announcements in `tblDemoDataRegister`, checks for the table with `SHOW TABLES LIKE`,
+  and treats a missing table as none; genuine database faults still surface. Proven with the table present, empty and
+  dropped.
+- `followups-498.diff` and `brief-followups-498-r1.txt` are written, so waiter 2 will queue it. The brief asks Codex
+  about LIKE wildcards in `SHOW TABLES LIKE 'tblDemoDataRegister'` (no `_` or `%` in the name, but check).
+- **New follow-up found (not fixed):** `web/_apps/announcements/api/list.php` (`/api/announcements` and
+  `/api/v1/announcements`, API-key reachable) also returns [DEMO] announcements while demo data is loaded.
+
+### LATEST — 14 September ~03:10: Claude credits back; Codex still limited until 07:33
+
+- **Codex was checked with a one-word test prompt at 03:05:** still limited, "try again at 7:33 AM". Waiter 1
+  (python, PID 97544) starts queue 1 at about 07:35: pkg1-r3, pkg2-r3, 498-r1, pkg6-catchup, 501-r2.
+- **Waiter 2 (background)** waits for queue 1's "queue ended" line, then runs `codex-queue.sh` for every brief that
+  exists by then, in this order:
+  1. `brief-forged-r3.txt` (WRITTEN: Logger round 2 done, verify PASS; `forged.diff` regenerated);
+  2. `brief-pkg3-r4.txt`;
+  3. `brief-followups-498-r1.txt`;
+  4. `brief-503-r1.txt`;
+  5. `brief-sqlcols-r1.txt`.
+
+  **Write each of those briefs when its build and verify finish.** A brief missing at that moment is skipped, and
+  must then be run by hand.
+- **State of the Claude runs at 03:04:**
+  - `review-fixes-round3`: pkg1-r3 PASS, pkg2-r3 PASS, forged-r2 PASS (Logger), pkg3-r3 built with its verify
+    running;
+  - `plan-amend-channels-r2`: survey and design saved, challenge being written, revision next;
+  - `followups-498`: built, verify running.
+- **New workflow `build-503-and-sqlcols`,** sequential. Both files are outside every review set:
+  1. #503: draft events visible only to those allowed to manage events, using the same permission as the calendar
+     manage pages. Opus build, Opus verify. File: `calendar/event.php` (plus `export.php` only if it serves a single
+     draft).
+  2. `check_sql_columns.py` reads SELECT and UPDATE WHERE clauses: zero false positives, coverage printed, and both
+     historical faults caught if possible. Sonnet build, Opus verify.
+- **Frozen until reviewed and committed** (do not edit):
+  - the pkg1, pkg2, 498, 501 and forged file sets;
+  - the pkg3 tools and pr-security.yml;
+  - the followups-498 files (Migrator, Newsletter, two check scripts, e2e run.sh).
+
+  Also, `eb077e1`'s files are being catch-up reviewed from the COMMITTED diff. Editing `calendar/event.php` for #503
+  does not change what Codex reviews, because the brief uses `pkg6-commit.diff`.
+
+### 14 September ~03:25 — CODEX USAGE LIMIT again at 02:51; the five code reviews are scheduled for its reset
+
+- The v2 queue started correctly (the real brief reached Codex) but hit **"You've hit your usage limit"** on the first
+  review at 02:51. It stopped, as designed. **Still NO Codex review exists** for pkg1-r3, pkg2-r3, 498-r1, pkg6-catchup
+  or 501-r2.
+- The stale broken files were moved aside as `codex-*.FAILED-HHMM.txt`, so none can be mistaken for a review.
+- **Codex said "try again at 7:33 AM", so the waiter will start the queue at about 07:35 on 14 September.** Its
+  log stays empty until then, because Python holds its messages back while it waits; that is expected. If nothing
+  has happened by 07:45, run the script by hand.
+- **A background waiter reads the reset time from Codex's own message, waits until 2 minutes after it, then runs
+  `bash .claude-work/codex-queue.sh`** for the same five, in the same order. If it cannot read the time, it says so
+  and schedules nothing: then run the script by hand after the reset.
+- Under the fallback rule nothing is committed on a stand-in review this time. The stand-in reviews cost about 1.2M
+  Claude tokens per package and helped trigger the Claude limit. Codex is the reviewer; the wait is recorded here.
+- Claude work continues meanwhile, capped at about 3 chains: `review-fixes-round3` (forged-r2, pkg3-r3),
+  `plan-amend-channels-r2`, `followups-498`.
+
+### 14 September ~03:15 — the 02:44 Codex queue sent EMPTY prompts; script v2; code reviews re-queued
+
+- **The zsh trap struck again, inside the background queue:** `set -- $pair` does not split in zsh. All five "reviews"
+  were `codex exec` with an EMPTY prompt, written to files named like `codex-pkg1-r3 brief-pkg1-r3.txt.txt`, and the
+  v1 completeness check called them COMPLETE. **Those five files were deleted. No review of pkg1-r3, pkg2-r3, 498-r1,
+  pkg6-catchup or 501-r2 exists yet.** `501.diff` had not been regenerated either; it now has been, and includes the
+  spec.
+- **`.claude-work/codex-queue.sh` is now VERSION 2:**
+  - it refuses a missing or empty brief;
+  - it adds a footer asking for a final CLEAN / NOT CLEAN line;
+  - a review counts only if its final answer is at least 300 characters and contains CLEAN, plus all the v1 checks
+    (limit, capacity, last `codex` after last `exec`, `tokens used`);
+  - retry and fallback model as before.
+
+  **ALWAYS run it as `bash .claude-work/codex-queue.sh NAME BRIEF ...` with separate arguments.**
+- **Re-queued now, via the script:** pkg1-r3, pkg2-r3, 498-r1, pkg6-catchup, 501-r2.
+- Memory updated: `zsh-does-not-split-variables.md` and `codex-limit-looks-like-success.md`.
+
+### 14 September ~03:10 — docs commit `89ad68d` confirmed on GitHub; #498 follow-ups started
+
+- **`89ad68d` pushed and verified:** local HEAD equals `origin/claude/alpha-wip`. Commented on #493, #479, #497 and #500.
+- **Workflow `followups-498` launched** (Sonnet build, Opus verify). It deliberately touches ONLY files that are not
+  under review: `web/_core/Migrator.php`, the two check scripts, `tools/e2e-migrations/run.sh`, and
+  `web/_core/Newsletter.php`.
+  1. It removes stale references to the deleted `demo_data.sql`, including the user-visible Migrator message.
+  2. Newsletters never include announcements recorded in `tblDemoDataRegister`, and this must not break when that
+     table does not exist yet (code uploaded before the upgrade).
+- **Held back, because their files are under Codex review right now:**
+  - `escapeshellcmd` on the off-site run handler;
+  - the broken "← Maintenance" link;
+  - the stale comment in `retention.php`;
+  - #503 (calendar/event.php, part of the catch-up review);
+  - #502 (bootstrap.php, part of pkg1).
+- **Claude agent chains running now (about 3, per the concurrency note):** `review-fixes-round3` (forged-r2, pkg3-r3),
+  `plan-amend-channels-r2`, `followups-498`. The Codex queue is separate.
+
 ### 14 September ~03:05 — docs Codex round 4: CLEAN; docs, config and plans committed and pushed
 
 - `codex-docs-channels-r4.txt` passes the full completeness check (last `codex` after last `exec`, `tokens used`,

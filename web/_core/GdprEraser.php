@@ -620,8 +620,20 @@ class GdprEraser
             $erasedEmail = (string) ($row['emailAddress'] ?? '');
         }
 
+        // 🧪 #498 — the Demo Data page's list entries for this person. Runs
+        //    BEFORE the catalogue, because it finds membership entries through
+        //    the person's tblUserSites rows and the catalogue deletes those.
+        //    If it fails for any reason other than the table not existing yet
+        //    (including failing to record its own step in the audit trail —
+        //    round 5, #498), it puts the request back to pending_review and
+        //    THROWS, so nothing below runs and a retry starts from the same
+        //    position. The thrown message says plainly whether the request
+        //    really was put back or has to be reset by hand. See
+        //    eraseDemoDataRegisterEntries() for why it is not a catalogue
+        //    entry, and why a failure has to stop everything.
+        $any = self::eraseDemoDataRegisterEntries($requestId, $userId) > 0;
+
         $catalogue = self::catalogue();
-        $any = false;
         foreach ($catalogue as $entry) {
             $any = self::processEntry($db, $requestId, $userId, $entry) || $any;
         }
@@ -1028,6 +1040,348 @@ class GdprEraser
         }
 
         return $affected > 0 ? (int) $affected : 0;
+    }
+
+    /**
+     * 🧪 Delete the Demo Data page's list entries that point at this person
+     *    (#498).
+     *
+     * tblDemoDataRegister is the Demo Data page's list of the rows it created
+     * (web/_apps/admin/maintenance/demo-data.php). An entry is a table name and
+     * a row number, with no name or text. But an entry naming this person's
+     * own account (tblUsers) or one of their memberships (tblUserSites) still
+     * points straight at them: a made-up demo person can be edited into a
+     * real one and kept. A number that identifies somebody is personal data
+     * even with nothing beside it, so those entries are deleted.
+     *
+     * WHY THIS IS NOT A catalogue() ENTRY. The generic instructions match ONE
+     * column against the person's number. Here the number is in rowID, and it
+     * only means "this person" together with tableName. Matching rowID alone
+     * would also delete the entry for, say, announcement number 7 whenever
+     * person number 7 is erased. That would delete nothing real, but it would
+     * quietly take a demo announcement off the list, so Wipe would never
+     * remove it and nothing would show it was still there.
+     *
+     * WHY IT RUNS BEFORE THE CATALOGUE. Membership entries are found through
+     * the person's rows in tblUserSites, and the catalogue deletes those rows.
+     *
+     * Deleting an entry is always the safe direction for the Demo Data page:
+     * Wipe never deletes a row that is not on the list. The account row itself
+     * is kept and emptied by the catalogue's last step, as for anybody.
+     *
+     * What it does NOT touch: entries for announcements. An announcement is
+     * the organisation's content, not information about its author (the
+     * catalogue unlinks the author and keeps the announcement).
+     *
+     * The matching export is the 'demoDataRegister' block in
+     * web/_apps/auth/account/data-export.php.
+     *
+     * WHY A FAILURE STOPS THE WHOLE ERASURE. The first version of this step
+     * wrote a failure to the audit trail and let the erasure carry on. Codex
+     * found (14 September 2026) that this turned a passing problem, such as a
+     * lock held for a moment, into a permanent one. The membership entries are
+     * found through the person's tblUserSites rows, and the catalogue deletes
+     * those rows a moment later. After a failed attempt the entries were still
+     * on the list, but nothing linked the person to them any more, so running
+     * the erasure again could never find them.
+     * Now any failure is written to the audit trail, the request is put back
+     * from 'processing' to 'pending_review' (the only state the erasure page,
+     * web/_apps/admin/erasure/process.php, will run a request from), and an
+     * exception is thrown. This is the first thing execute() erases, so
+     * nothing has been erased at that point, and running the request again
+     * starts from exactly the same position and finds every entry.
+     *
+     * ROUND 5 (15 September 2026, Codex). That first fix still had a gap: the
+     * DELETE and the audit line that recorded it were two separate statements,
+     * neither inside a transaction with the other. If the audit write itself
+     * failed - for example a lock wait timeout on tblErasureAudit, which this
+     * table's own chained-hash design means every request writes to in order -
+     * the DELETE had already happened, but nothing said so, and the request
+     * still had to be put back to pending_review for the reset to help at all.
+     * A retry then found the entries already gone and deleted nothing, so the
+     * audit trail permanently lacked a deletion that genuinely occurred - not
+     * a false negative that self-heals on retry, but a hole that stays.
+     * The fix: the DELETE and its 'delete' audit line are now ONE transaction.
+     * Either both happen (committed together) or neither does (rolled back
+     * together), so the audit trail can never end up missing a deletion that
+     * really happened, and a retry after any failure finds every entry again,
+     * exactly as before this row of work.
+     *
+     * WHAT WAS TRIED AND REJECTED FOR ROUND 5:
+     *   - The brief's literal wording ("report that those entries were already
+     *     removed" after a successful delete whose audit write then failed).
+     *     Rejected because, with the delete and its audit line as one
+     *     transaction, a failed audit write UNDOES the delete - so "nothing was
+     *     erased" is what actually happened, and is the honest thing to report.
+     *     The only genuinely unknown case is a failure during COMMIT itself,
+     *     which is reported as unconfirmed rather than either "erased" or
+     *     "not erased" (see "What this cannot do" below).
+     *   - Swallowing an audit-write failure and carrying on regardless.
+     *     Rejected because the catalogue's own processEntry() calls to
+     *     logAudit() are not guarded either, so the very next one would meet
+     *     the same lock and fail the same way, leaving the request stuck with
+     *     only part of the person erased and no way to tell how much.
+     *   - Catching the exception in web/_apps/admin/erasure/process.php
+     *     instead. Rejected: that is outside this change, and would not make
+     *     the delete and its audit line succeed or fail together, which is the
+     *     actual fault being fixed.
+     *   - Retrying the audit write in a loop before giving up. Rejected: each
+     *     attempt can wait the database's full lock-wait limit (50 seconds by
+     *     default), which only makes the request sit at 'processing' for
+     *     longer before the reset that is meant to free it.
+     *   - Writing a 'failed' audit line and THEN putting the request back, even
+     *     when the audit trail itself is what failed. Measured (round 5
+     *     testing, lock-wait limit set to 3 seconds for the test): this order
+     *     took roughly 6 seconds before the reset, because it waited out one
+     *     lock-wait timeout on the real audit line and then a second one on
+     *     the 'failed' line, which fails the same way for the same reason.
+     *     Skipping the second attempt and going straight to the reset measured
+     *     about 3 seconds, with the same safe result (nothing erased, request
+     *     back at pending_review). Every extra second spent at 'processing' is
+     *     a second in which a web server or hosting time limit can kill this
+     *     PHP process before the reset runs at all, which is the exact fault
+     *     being fixed - so a 'failed' line is written for every OTHER kind of
+     *     failure (starting the transaction, the DELETE itself, saving), but
+     *     not when the audit trail is what failed.
+     *
+     * The one failure that does NOT stop it is MySQL error 1146, "table does
+     * not exist", and ONLY when it comes from the DELETE itself. A database
+     * not yet upgraded to migration 194 has no list, so the list holds nothing
+     * about anybody; that is recorded as 'skip' with 'table-missing', the same
+     * words processEntry() uses, and the erasure carries on. If the SKIP line
+     * itself cannot be written (the audit table has the same problem it always
+     * might), that stops the step like any other audit-write failure above -
+     * error 1146 from a query that is not the DELETE is not "the list does not
+     * exist", it is "the audit trail does not exist", which is a different and
+     * much more serious problem and must not be waved through as harmless.
+     *
+     * HOW THIS INTERACTS WITH ISSUE #510 (a separate, older fault, not fixed
+     * here). The catalogue's own entry for tblErasureRequest deletes the
+     * request being processed. The database deletes its audit lines with it,
+     * and the next audit line then fails, which stops execute() part way.
+     * That happens inside the catalogue, AFTER this step. Stopping here
+     * happens BEFORE the catalogue, while the request and its audit lines
+     * still exist, so the failure line survives and the request can be run
+     * again. A later run that gets past this step still meets #510, exactly
+     * as it did before this change.
+     *
+     * What this cannot do:
+     *   - If putting the request back fails too (for example the connection
+     *     has gone), the request stays at 'processing' and has to be set back
+     *     by hand. The exception's message now says plainly which of the two
+     *     happened, rather than always claiming the reset worked; the earlier
+     *     version of this code said the request was back at pending review
+     *     even on the runs where the reset itself had failed.
+     *   - A failure during COMMIT leaves it genuinely unknown whether the
+     *     DELETE was saved or not. The thrown message says so, and says that
+     *     running the request again will delete whatever, if anything,
+     *     remains - which is safe either way, because a second DELETE against
+     *     rows that are already gone simply affects nothing.
+     *   - begin_transaction() silently commits any transaction a caller
+     *     already had open on this connection. The only caller of this method,
+     *     execute(), calls it first, before opening any transaction of its
+     *     own, so this never discards work belonging to something else.
+     *   - While the audit write is waiting on a lock, the tblDemoDataRegister
+     *     rows being deleted, and the person's tblUserSites rows the DELETE's
+     *     subquery reads, stay locked for up to the database's lock-wait
+     *     limit (50 seconds by default) before this method gives up.
+     *   - After a failure while writing to the audit trail specifically
+     *     (rather than to the request row), no 'failed' audit line is written
+     *     at all, for the timing reason explained above. The reason for the
+     *     stop is still in the PHP error log, and in the thrown exception's
+     *     message, which the portal records in tblErrors.
+     *
+     * @param int $requestId The erasure request, for the audit trail.
+     * @param int $userId    The person being erased.
+     *
+     * @return int List entries deleted. 0 when there were none, or when the
+     *   table does not exist yet (written to the audit trail as a skip).
+     *
+     * @throws \RuntimeException On any other failure, after recording it where
+     *   the audit trail itself still works, and attempting to put the request
+     *   back to 'pending_review' - the exception message says whether that
+     *   attempt succeeded.
+     */
+    private static function eraseDemoDataRegisterEntries(int $requestId, int $userId): int
+    {
+        $db = App::db();
+
+        // Which part was running when something failed. It decides three
+        // things below: whether MySQL error 1146 means "the list does not
+        // exist yet" (only when it comes from the DELETE itself - the same
+        // error from the audit write means "the AUDIT TRAIL does not exist",
+        // a much more serious problem, and must not be waved through as
+        // harmless); what the thrown message says was lost; and whether a
+        // 'failed' audit line is even attempted (see "WHAT WAS TRIED AND
+        // REJECTED FOR ROUND 5" in this method's docblock for why not, when
+        // the audit trail itself is what failed).
+        $stage        = 'start';
+        $deleted      = 0;
+        $tableMissing = false;
+        // A SEPARATE flag from "$problem is empty", not "$problem === ''",
+        // because an exception with an empty message (unlikely, but not
+        // impossible) would otherwise look exactly like success below.
+        $failed  = false;
+        $problem = '';
+
+        try {
+            if ($db->begin_transaction() === false) {
+                // Only reached if the driver is not set to throw (it is, see
+                // bootstrap.php's mysqli_report(MYSQLI_REPORT_STRICT), but
+                // this method already guards every other non-throwing case,
+                // so it stays consistent rather than assuming that config).
+                throw new \RuntimeException('a transaction could not be started: ' . $db->error);
+            }
+            try {
+                $stage = 'delete';
+                $stmt  = $db->prepare(
+                    "DELETE FROM tblDemoDataRegister WHERE (tableName = 'tblUsers' AND rowID = ?) "
+                    . "OR (tableName = 'tblUserSites' AND rowID IN (SELECT userSiteID FROM tblUserSites WHERE userID = ?))"
+                );
+                if ($stmt === false) {
+                    throw new \mysqli_sql_exception((string) $db->error, (int) $db->errno);
+                }
+                $stmt->bind_param('ii', $userId, $userId);
+                if ($stmt->execute() === false) {
+                    $failure = new \mysqli_sql_exception((string) $stmt->error, (int) $stmt->errno);
+                    $stmt->close();
+                    throw $failure;
+                }
+                $deleted = (int) $stmt->affected_rows;
+                $stmt->close();
+
+                // The DELETE and its audit line are now ONE transaction (round
+                // 5 of #498) - see this method's docblock for why. Only write
+                // the line when something was actually deleted; an empty
+                // delete needs no audit entry, same as before this change.
+                if ($deleted > 0) {
+                    $stage = 'audit';
+                    self::logAudit(
+                        $db,
+                        $requestId,
+                        'delete',
+                        'tblDemoDataRegister',
+                        (string) $deleted . ' rows',
+                        'Demo Data list entries pointing at this person\'s account or memberships deleted; entries for announcements kept'
+                    );
+                }
+
+                $stage = 'commit';
+                if ($db->commit() === false) {
+                    throw new \RuntimeException('the deletion could not be saved: ' . $db->error);
+                }
+                $stage = 'done';
+            } catch (\Throwable $inner) {
+                // Undo FIRST, before anything below (the 'failed' audit line,
+                // the reset) runs - those must survive outside this
+                // transaction, or they would be thrown away by the rollback
+                // along with everything else.
+                try {
+                    $db->rollback();
+                } catch (\Throwable $rollbackProblem) {
+                    error_log('[WebMS-Intra] GdprEraser: rollback failed for erasure #' . $requestId . ': ' . $rollbackProblem->getMessage());
+                }
+                throw $inner;
+            }
+        } catch (\mysqli_sql_exception $e) {
+            if ($stage === 'delete' && (int) $e->getCode() === 1146) {
+                $tableMissing = true;
+            } else {
+                $failed  = true;
+                $problem = 'Error ' . (int) $e->getCode() . ': ' . $e->getMessage();
+            }
+        } catch (\Throwable $e) {
+            $failed  = true;
+            $problem = get_class($e) . ': ' . $e->getMessage();
+        }
+
+        if ($tableMissing === true) {
+            // A database not yet upgraded to migration 194 has no list at
+            // all, so there is nothing about anybody to delete. Recorded the
+            // same way processEntry() records a genuinely missing table.
+            try {
+                self::logAudit($db, $requestId, 'skip', 'tblDemoDataRegister', null, 'table-missing');
+                return 0;
+            } catch (\Throwable $e) {
+                // Writing even the SKIP line failed - the audit trail itself
+                // has a problem, which is not "table-missing" any more, so
+                // fall through to the same stopped-and-reset handling as any
+                // other failure below.
+                $stage   = 'skip-audit';
+                $failed  = true;
+                $problem = ($e instanceof \mysqli_sql_exception ? 'Error ' . (int) $e->getCode() . ': ' : get_class($e) . ': ') . $e->getMessage();
+            }
+        }
+
+        if ($failed === false) {
+            return $deleted;
+        }
+
+        $where = [
+            'start'      => 'before the Demo Data list entries could be deleted',
+            'delete'     => 'while deleting the Demo Data list entries',
+            'audit'      => 'while recording the deletion of the Demo Data list entries in the audit trail',
+            'commit'     => 'while saving the deletion of the Demo Data list entries',
+            'skip-audit' => 'while recording in the audit trail that the Demo Data list does not exist yet',
+        ][$stage] ?? 'at an unexpected point';
+        $outcome = $stage === 'commit'
+            // Only COMMIT leaves it genuinely unconfirmed: everything up to
+            // and including the audit write succeeded, but whether the
+            // database actually saved it is unknown. Every other stage
+            // rolled back cleanly, so "nothing was erased" is simply true.
+            ? 'it could not be confirmed whether the Demo Data list entries were deleted; running the request again deletes any that remain'
+            : 'nothing was erased';
+
+        // Record the stop, UNLESS the audit trail itself is what failed: a
+        // second write to the same table would very likely fail the same
+        // way, and waiting for it (up to the database's lock-wait limit, 50
+        // seconds by default) only delays the reset below, which is the part
+        // that actually has to happen. Measured in round 5 testing: writing
+        // the 'failed' line first, then resetting, took about 6 seconds with
+        // a 3-second lock-wait limit (two timeouts back to back); skipping
+        // straight to the reset took about 3 seconds for the same safe
+        // result. See "WHAT WAS TRIED AND REJECTED FOR ROUND 5" above.
+        if ($stage === 'audit' || $stage === 'skip-audit') {
+            error_log('[WebMS-Intra] GdprEraser: erasure #' . $requestId . ' stopped ' . $where . ' (' . $problem . '); no failure line was written, because the audit trail is what failed');
+        } else {
+            try {
+                self::logAudit(
+                    $db,
+                    $requestId,
+                    'failed',
+                    'tblDemoDataRegister',
+                    null,
+                    mb_substr('Erasure stopped ' . $where . ': ' . $outcome . '; putting the request back to pending_review. ' . $problem, 0, 250)
+                );
+            } catch (\Throwable $auditProblem) {
+                error_log('[WebMS-Intra] GdprEraser: could not record the stopped erasure #' . $requestId . ': ' . $auditProblem->getMessage());
+            }
+        }
+
+        // Put the request back so it can be run again - and say HONESTLY in
+        // the thrown message whether that actually worked, rather than
+        // always claiming it did (the fault this exact line fixes: the
+        // earlier version of this code reported "back at pending review"
+        // even on the runs where this UPDATE itself had failed).
+        $putBack = false;
+        try {
+            $reset = $db->prepare("UPDATE tblErasureRequest SET status = 'pending_review' WHERE requestID = ? AND status = 'processing'");
+            if ($reset !== false) {
+                $reset->bind_param('i', $requestId);
+                $reset->execute();
+                $putBack = ((int) $reset->affected_rows === 1);
+                $reset->close();
+            }
+        } catch (\Throwable $resetProblem) {
+            error_log('[WebMS-Intra] GdprEraser: could not put erasure #' . $requestId . ' back to pending_review: ' . $resetProblem->getMessage());
+        }
+
+        throw new \RuntimeException(
+            'Erasure request #' . $requestId . ' stopped ' . $where . ', so ' . $outcome . ' (' . $problem . '). '
+            . ($putBack === true
+                ? 'The request is back at pending review, so it can be run again.'
+                : 'The request could NOT be put back to pending review, so it has to be set back by hand before it can be run again.')
+        );
     }
 
     private static function logAudit(\mysqli $db, int $requestId, string $action, string $table, ?string $recordKey, string $details): void

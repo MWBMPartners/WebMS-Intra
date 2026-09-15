@@ -35,6 +35,7 @@
 declare(strict_types=1);
 
 use Portal\Core\ApiAuth;
+use Portal\Core\ApiKey;
 use Portal\Core\ApiResponse;
 use Portal\Core\App;
 use Portal\Core\Site;
@@ -55,7 +56,7 @@ if ($eventId <= 0) {
 //    timing/shape difference — both "no such event" and "event, wrong site"
 //    return the identical 404.
 $eventStmt = $db->prepare(
-    'SELECT eventID FROM tblEvents WHERE eventID = ? AND siteID = ? AND isDeleted = 0 LIMIT 1'
+    'SELECT eventID, status FROM tblEvents WHERE eventID = ? AND siteID = ? AND isDeleted = 0 LIMIT 1'
 );
 if ($eventStmt === false) {
     ApiResponse::error('Database error', 500);
@@ -64,6 +65,32 @@ $eventStmt->bind_param('ii', $eventId, $siteId);
 $eventStmt->execute();
 $eventRow = $eventStmt->get_result()->fetch_assoc();
 $eventStmt->close();
+
+// 🛡️ Drafts (#503). The same rule as the event's own page (calendar/event.php)
+//    and the events detail API (events/api/detail.php, which explains the
+//    choices in full). Only an event whose status is published, cancelled or
+//    postponed is answered for people in general. A DRAFT only for somebody
+//    who can manage events: App::isAdmin() for a signed-in session, or an API
+//    key holding events:write (a key with only eventhub:read cannot manage
+//    events, so it is treated like a member). Everybody else gets EXACTLY the
+//    same "Event not found" as a number that matches no event.
+//
+//    What was wrong before: the lookup had no condition on status, so any
+//    signed-in member could learn that a draft existed, and read its Team Hub
+//    resources, by trying eventID=1, 2, 3 and so on.
+//
+//    ⚠️ The same few lines are repeated in events/api/detail.php and
+//       hub-videos.php. If who may manage events ever changes, change all three.
+if ($eventRow !== null) {
+    $isVisibleStatus = in_array((string) ($eventRow['status'] ?? ''), ['published', 'cancelled', 'postponed'], true) === true;
+    $apiKeyRow       = ApiAuth::bearerKeyRow();
+    $canManageEvents = $apiKeyRow !== null
+        ? ApiKey::hasScope($apiKeyRow, 'events:write')
+        : App::isAdmin();
+    if ($isVisibleStatus === false && $canManageEvents === false) {
+        $eventRow = null;
+    }
+}
 
 if ($eventRow === null) {
     ApiResponse::error('Event not found', 404);

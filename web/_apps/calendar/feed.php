@@ -32,8 +32,37 @@ $db = App::db();
 
 // 🪞 Resolve the user's site for scoping. Multi-site users are not
 //    currently supported in the feed — picks their primary.
-$siteId = 1;
-$stmt = $db->prepare('SELECT siteID FROM tblUserSites WHERE userID = ? AND isActive = 1 ORDER BY siteID LIMIT 1');
+//
+// 🛡️ Members only (#503). This feed includes events that are not marked
+//    public, and the event page's rule for those is "members only": somebody
+//    who is signed in. A feed address works without signing in, so the next
+//    best thing is to check that the person the address belongs to could
+//    still sign in and still belongs to an organisation (site):
+//      - their account is switched on (tblUsers.isActive = 1, the same test
+//        Auth::loginLocal makes before letting anybody sign in);
+//      - they have a membership that is switched on (tblUserSites.isActive = 1);
+//      - that organisation is switched on (tblSites.isActive = 1, as
+//        Site::resolveDefaultSiteForUser requires).
+//    If any of those fails, the reply is the same "Invalid token." as an
+//    address that belongs to nobody.
+//
+//    What was wrong before: the lookup read tblUserSites alone, and when it
+//    found nothing it fell back to site 1. Offboarding switches off the account
+//    and every membership but does not clear the feed address, so somebody who
+//    had left kept receiving site 1's calendar, internal events included, for
+//    as long as their calendar app kept asking.
+//
+//    ⚠️ Cannot do: it does not stop the address working for somebody who is
+//    still a member. Only regenerating or revoking it on the Calendar feed page
+//    (calendar/account-feed.php) does that.
+$siteId = 0;
+$stmt = $db->prepare(
+    'SELECT US.siteID FROM tblUserSites US '
+    . 'JOIN tblUsers U ON U.userID = US.userID '
+    . 'JOIN tblSites S ON S.siteID = US.siteID '
+    . 'WHERE US.userID = ? AND US.isActive = 1 AND U.isActive = 1 AND S.isActive = 1 '
+    . 'ORDER BY US.siteID LIMIT 1'
+);
 if ($stmt !== false) {
     $stmt->bind_param('i', $userId);
     $stmt->execute();
@@ -43,6 +72,11 @@ if ($stmt !== false) {
         $siteId = (int) $row['siteID'];
     }
 }
+if ($siteId <= 0) {
+    http_response_code(403);
+    header('Content-Type: text/plain');
+    exit('Invalid token.');
+}
 
 $daysFwd = max(7, min(365, (int) ($_GET['days'] ?? 365)));
 $fromDate = date('Y-m-d', strtotime('-30 days'));
@@ -51,11 +85,31 @@ $toDate   = date('Y-m-d', strtotime('+' . $daysFwd . ' days'));
 $events = [];
 
 // 📅 Standard calendar events.
+//
+// 🛡️ Which events (#503). The event page's rule is: only an event whose status
+//    is published, cancelled or postponed is shown to people in general, and a
+//    draft only to somebody who can manage events. This feed leaves drafts out
+//    for EVERYBODY, event managers included, for two reasons. The feed is
+//    identified by its address, not by anybody signing in, so "can manage
+//    events" (App::isAdmin(), which reads the signed-in session) has nothing
+//    to go on here. And the Calendar feed page promises subscribers
+//    "published portal events", while the feed ends up copied into Google,
+//    Apple or Outlook calendars, where a draft does not belong.
+//    Cancelled and postponed events stay in, marked as such (see STATUS below),
+//    so a subscriber's calendar shows the change instead of the event quietly
+//    vanishing or looking as if it is still on.
+//    Deleted events (isDeleted = 1) are never included.
+//
+//    What was wrong before: the query had no condition on status and none on
+//    isDeleted, so every subscriber's calendar received drafts, and even
+//    events that had been deleted, with their descriptions and locations.
 $stmt = $db->prepare(
     'SELECT eventID, eventName, description, startDateTime, endDateTime, isAllDay, '
-    . '       timezone, locationName, locationAddress, eventSlug, updatedAt '
+    . '       timezone, locationName, locationAddress, eventSlug, updatedAt, status '
     . 'FROM tblEvents '
-    . 'WHERE siteID = ? AND startDateTime >= ? AND startDateTime <= ? '
+    . 'WHERE siteID = ? AND isDeleted = 0 '
+    . "  AND status IN ('published', 'cancelled', 'postponed') "
+    . '  AND startDateTime >= ? AND startDateTime <= ? '
     . 'ORDER BY startDateTime'
 );
 if ($stmt !== false) {
@@ -65,6 +119,15 @@ if ($stmt !== false) {
     while ($r = $rs->fetch_assoc()) {
         $location = trim((string) ($r['locationName'] ?? '') . ' ' . (string) ($r['locationAddress'] ?? ''));
         $events[] = [
+            // 🚦 The same status words the single-event download sends
+            //    (calendar/export.php): CANCELLED, TENTATIVE for postponed,
+            //    otherwise CONFIRMED. Calendar apps show a cancelled event
+            //    struck through or remove it, which is the point.
+            'status'       => match ((string) $r['status']) {
+                'cancelled' => 'CANCELLED',
+                'postponed' => 'TENTATIVE',
+                default     => 'CONFIRMED',
+            },
             'uid'          => 'event-' . $r['eventID'] . '@portal.webms-intra',
             'summary'      => (string) $r['eventName'],
             'description'  => (string) ($r['description'] ?? ''),

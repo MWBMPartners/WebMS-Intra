@@ -42,13 +42,25 @@ if ($slug === '' || preg_match('/^[a-z0-9][a-z0-9\-]{0,79}$/i', $slug) !== 1) {
 
 $siteId = Site::id();
 $stmt = $mysqli->prepare(
-    'SELECT eventID, eventName, registrationEnabled, registrationOpensAt, registrationClosesAt '
+    'SELECT eventID, eventName, registrationEnabled, registrationOpensAt, registrationClosesAt, isPublic '
     . 'FROM tblEvents WHERE eventSlug = ? AND siteID = ? AND isDeleted = 0 AND status = "published" LIMIT 1'
 );
 $stmt->bind_param('si', $slug, $siteId);
 $stmt->execute();
 $event = $stmt->get_result()->fetch_assoc() ?: null;
 $stmt->close();
+
+// 🛡️ Events not marked public need sign-in (#503), exactly as the form page
+//    (calendar/event-register.php) and the event's own page require. Checked
+//    here too because somebody can post to this address without ever opening
+//    the form. Drafts and deleted events never get this far: the query above
+//    asks for status = "published" and isDeleted = 0.
+//
+//    What was wrong before: this handler asked nobody to sign in, so a
+//    registration for an INTERNAL event was accepted from anybody at all.
+if ($event !== null && (int) $event['isPublic'] === 0 && Auth::check() === false) {
+    Auth::requireLogin();
+}
 
 if ($event === null || (int) $event['registrationEnabled'] !== 1) {
     http_response_code(404); exit('Registration not available.');
@@ -91,8 +103,9 @@ $eventIdInt   = (int) $event['eventID'];
 
 // 🔗 Who filled this in, IF the portal knows them.
 //
-//    This form is public and must stay public - a parent should not have to
-//    create an account to bring their child to a holiday club. But when the
+//    This form is public and must stay public for an event marked public - a
+//    parent should not have to create an account to bring their child to a
+//    holiday club. (An event not marked public needs sign-in; see above.) But when the
 //    person IS signed in, recording their account matters a great deal.
 //
 //    Without it, this table could not be reached by a "delete everything you

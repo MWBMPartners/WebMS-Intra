@@ -163,7 +163,15 @@ dump_indexes() {
 apply_migration() {
     local file="$1"
     local name; name="$(basename "${file}")"
-    if [[ "${name}" == "demo_data.sql" || "${name}" == "full_schema.sql" ]]; then
+    # NOTE: this guard against full_schema.sql is already unreachable in
+    # practice — the only caller, run_all_migrations(), loops over
+    # "${SQL_DIR}"/[0-9]*.sql, and full_schema.sql has no leading digit — but
+    # it is left in place as a second line of defence. A matching guard for
+    # demo_data.sql used to sit here too; that file is gone (#498 moved demo
+    # data creation into PHP, recorded in tblDemoDataRegister instead of a
+    # SQL file the installer or Migrator would ever see), so there is
+    # nothing left for that half of the check to protect against.
+    if [[ "${name}" == "full_schema.sql" ]]; then
         return 0
     fi
     if mysql_file "${file}"; then

@@ -8724,3 +8724,35 @@ ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
 
 INSERT INTO `tblMigrations` (`filename`) VALUES ('193_trusted_proxies_and_channel_gate.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- ── from 194_demo_data_register.sql (#498) ───────────────────────────────────
+-- The list of every row the Demo Data page (Admin → Maintenance → Demo Data)
+-- created. Wipe only considers the rows named here, and deletes one only while
+-- it still belongs to the recorded organisation (siteID) and still has the
+-- recorded fingerprint (a SHA-256 hash of every column of the row, except one
+-- the database changes by itself, taken when it was created; the columns are
+-- named in fingerprintColumns). A row that has changed is left in place. It
+-- used to delete every account numbered 9000 or above, which reaches real
+-- people once an installation grows. No foreign keys on purpose: rowID points
+-- into several tables, and a cascade would silently drop list entries. The
+-- migration file carries the full explanation, including the designs that
+-- were rejected. It also carries guarded steps that upgrade a table left by
+-- an earlier development draft of that file. They are not repeated here: this
+-- script only ever creates the table new, in the current shape, and the
+-- installer runs every numbered migration afterwards, where those steps find
+-- nothing to do.
+CREATE TABLE IF NOT EXISTS `tblDemoDataRegister` (
+    `registerID`  INT         NOT NULL AUTO_INCREMENT,
+    `tableName`   VARCHAR(64) NOT NULL COMMENT 'Which table the demo row was created in (only tables the Demo Data page writes to)',
+    `rowID`       INT         NOT NULL COMMENT 'The identity number the database gave the demo row',
+    `siteID`      INT         DEFAULT NULL COMMENT 'Organisation the demo row belonged to when created; NULL where the table has no organisation column',
+    `fingerprintColumns` TEXT CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT 'The columns the fingerprint covers, in order, separated by commas: every column the row had when created except ones the database changes by itself',
+    `fingerprint` CHAR(64)    CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT 'SHA-256 (hex) of the table name, row number and every column named in fingerprintColumns when created; Wipe leaves the row in place if it no longer matches',
+    `createdAt`   DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'When the demo data was loaded',
+    PRIMARY KEY (`registerID`),
+    UNIQUE KEY `uq_demo_register_row` (`tableName`, `rowID`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+COMMENT='Every row the Demo Data page created, so Wipe removes exactly those (#498)';
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('194_demo_data_register.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;

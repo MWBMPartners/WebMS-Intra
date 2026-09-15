@@ -27,6 +27,7 @@
 
 declare(strict_types=1);
 
+use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Events;
 use Portal\Core\Logger;
@@ -66,7 +67,7 @@ if ($eventId <= 0 || in_array($response, $validResponses, true) === false) {
 
 // 🔍 Verify event exists and belongs to site
 $evStmt = $mysqli->prepare(
-    'SELECT eventID, eventName, capacity FROM tblEvents WHERE eventID = ? AND siteID = ? AND isDeleted = 0 LIMIT 1'
+    'SELECT eventID, eventName, capacity, status FROM tblEvents WHERE eventID = ? AND siteID = ? AND isDeleted = 0 LIMIT 1'
 );
 if ($evStmt === false) {
     $_SESSION['flash_msg']  = t('error.database');
@@ -78,6 +79,29 @@ $evStmt->bind_param('ii', $eventId, $siteId);
 $evStmt->execute();
 $event = $evStmt->get_result()->fetch_assoc();
 $evStmt->close();
+
+// 🛡️ Drafts (#503). The same rule as the event's own page (calendar/event.php).
+//    Only an event whose status is published, cancelled or postponed can be
+//    answered by people in general. A DRAFT only by somebody who can manage
+//    events: App::isAdmin(), exactly the check every page under
+//    calendar/manage/ makes. For everybody else the row is dropped, so the
+//    request gets EXACTLY the same "Event not found." as a number that matches
+//    no event, and trying numbers one by one does not reveal which drafts exist.
+//
+//    What was wrong before: this only checked that the event existed. A member
+//    could RSVP to a draft, and so learn that it existed, by posting eventID=1,
+//    2, 3 and so on. Event numbers simply count upward.
+//
+//    Deleted events were already refused by the query (isDeleted = 0). Sign-in
+//    is already required at the top (Auth::requireLogin), which covers the
+//    event page's rule for events not marked public: members may answer those.
+//    Answering a cancelled or postponed event is unchanged by this.
+if ($event !== null
+    && in_array((string) ($event['status'] ?? ''), ['published', 'cancelled', 'postponed'], true) === false
+    && App::isAdmin() === false
+) {
+    $event = null;
+}
 
 if ($event === null) {
     $_SESSION['flash_msg']  = 'Event not found.';

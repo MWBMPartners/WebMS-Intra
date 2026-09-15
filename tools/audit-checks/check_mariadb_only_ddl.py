@@ -14,8 +14,11 @@ The portable fix is the information_schema + PREPARE/EXECUTE guard idiom
 already shipped in this codebase (web/_sql/037, 112, 138) — see DEV_NOTES.md
 → "Portable DDL convention (MySQL 8.0 ∩ MariaDB)".
 
-This script scans every web/_sql/*.sql file (numbered migrations,
-full_schema.sql, demo_data.sql) for the MariaDB-only forms and flags them.
+This script scans every web/_sql/*.sql file (numbered migrations and
+full_schema.sql) for the MariaDB-only forms and flags them. (Before #498
+that list also included demo_data.sql; that file is gone — Admin ->
+Maintenance -> Demo data now creates its sample rows through PHP instead
+of a SQL file, so there is nothing there left to scan.)
 
 Exit:
   0 — clean.

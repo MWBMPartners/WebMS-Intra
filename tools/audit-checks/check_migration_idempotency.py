@@ -112,10 +112,16 @@ INSERT_OK_RE = re.compile(
 # table and only runs once.
 EXEMPT_FILES = {"000_create_migrations_table.sql"}
 
-# Files allowed to have non-idempotent INSERTs (one-shot seeds).
-EXEMPT_INSERT_FILES = {
-    "demo_data.sql",
-}
+# Files allowed to have non-idempotent INSERTs (one-shot seeds). Empty for
+# now. The one entry this ever held, demo_data.sql, is gone: since #498
+# Admin -> Maintenance -> Demo data creates its sample rows through PHP
+# instead of loading a SQL file, so there is no seed file left needing this
+# exemption. In practice it was already unreachable before the file was
+# deleted too — main() only scans "[0-9]*.sql", and demo_data.sql never
+# matched that pattern. The set is kept, empty, rather than removed
+# outright, so a future one-shot seed file has somewhere to be added
+# without re-inventing this mechanism.
+EXEMPT_INSERT_FILES: set[str] = set()
 
 
 def strip_comments_preserving_lines(sql: str) -> str:

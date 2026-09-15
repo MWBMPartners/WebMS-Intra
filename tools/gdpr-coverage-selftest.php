@@ -220,13 +220,24 @@ $deliberateDeletes = [
     // birth, allergies and medical notes - deleting it is the entire point.
     'tblEventRegistrations' => 'A child\'s medical details; deletion is the purpose',
 ];
+
+// Tables with no single column that can be matched against a person, which a
+// dedicated step in GdprEraser erases instead (with a matching block in the
+// data export). Each maps to the name of that step. Check 10 below proves each
+// step exists and runs, so these are left out of the "no link" report rather
+// than listed there as if nothing handled them.
+$dedicatedSteps = [
+    // #498: a list entry only means "this person" together with its tableName.
+    'tblDemoDataRegister' => 'eraseDemoDataRegisterEntries',
+];
+
 $unreachable = [];
 foreach ($catalogue as $table => $meta) {
     if ((string) ($meta['decision'] ?? '') !== 'erase') {
         continue;
     }
     $columns = (array) ($meta['columns'] ?? []);
-    if (array_intersect($linkColumns, $columns) === []) {
+    if (array_intersect($linkColumns, $columns) === [] && isset($dedicatedSteps[(string) $table]) === false) {
         $unreachable[] = (string) $table;
     }
 }
@@ -362,6 +373,50 @@ check(
     implode(', ', array_slice($notListed, 0, 8))
     . ' -- a table handled by the code but absent from the list is invisible to '
     . 'every count, every review and every report'
+);
+
+// -----------------------------------------------------------------------------
+// 10. Tables erased by a DEDICATED step, because no single column can be
+//     matched against a person (see $dedicatedSteps above). The generic
+//     handling skips such a table on purpose, so if the dedicated step were
+//     removed, or never called, nothing would erase it and nothing would say
+//     so. Each one must: be marked "erase" in the written list; have its step
+//     defined in GdprEraser; have that step called from execute() BEFORE the
+//     catalogue is walked (the #498 step finds a person's membership entries
+//     through rows the catalogue deletes); and be handed over by the data
+//     export page.
+// -----------------------------------------------------------------------------
+$exportFile  = __DIR__ . '/../web/_apps/auth/account/data-export.php';
+$export      = is_readable($exportFile) === true ? (string) file_get_contents($exportFile) : '';
+$executeFrom = strpos($eraser, 'public static function execute(');
+$executeTo   = strpos($eraser, 'public static function inventory(');
+$executePart = ($executeFrom !== false && $executeTo !== false && $executeTo > $executeFrom)
+    ? substr($eraser, $executeFrom, $executeTo - $executeFrom)
+    : '';
+
+$dedicatedFaults = [];
+foreach ($dedicatedSteps as $table => $method) {
+    if ((string) ($catalogue[$table]['decision'] ?? '') !== 'erase') {
+        $dedicatedFaults[] = $table . ' is not marked "erase" in the written list';
+    }
+    if (strpos($eraser, 'private static function ' . $method . '(') === false) {
+        $dedicatedFaults[] = 'GdprEraser has no ' . $method . '()';
+    }
+    $callAt      = strpos($executePart, 'self::' . $method . '(');
+    $catalogueAt = strpos($executePart, 'self::catalogue()');
+    if ($callAt === false) {
+        $dedicatedFaults[] = 'execute() never calls ' . $method . '()';
+    } elseif ($catalogueAt !== false && $callAt > $catalogueAt) {
+        $dedicatedFaults[] = 'execute() calls ' . $method . '() after the catalogue is walked';
+    }
+    if (preg_match('/\b(FROM|JOIN)\s+' . preg_quote($table, '/') . '\b/', $export) !== 1) {
+        $dedicatedFaults[] = 'the data export never reads ' . $table;
+    }
+}
+check(
+    'every table erased by a dedicated step is erased, in time, and exported',
+    $dedicatedFaults === [],
+    implode('; ', $dedicatedFaults)
 );
 
 echo "\n" . str_repeat('-', 78) . "\n";

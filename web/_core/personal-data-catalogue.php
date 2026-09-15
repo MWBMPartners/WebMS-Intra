@@ -89,7 +89,8 @@ return [
     // ERASE - information about the person themselves
     // =========================================================================
     // Deleted outright when somebody asks to be forgotten.
-    // 85 tables.
+    // 91 entries in this section (counted 14 September 2026; it said 85, which
+    // was already out of date, and several entries here are really 'unlink').
 
     'tblAiUsage' => [
         'decision' => 'erase',
@@ -170,6 +171,39 @@ return [
         'decision' => 'unlink',
         'reason'   => 'Who wrote the entry down, not who it is about. Deleting it would destroy somebody else\'s record because the person holding the pen asked to be forgotten.',
         'columns'  => ['notes', 'recordedByID'],
+    ],
+    // 🧪 The Demo Data page's list of the rows it created (#498).
+    //
+    //    This said "not personal" until 14 September 2026, on the grounds that
+    //    an entry holds only a table name, a row number, an organisation
+    //    number and a one-way fingerprint. Codex pointed out that this was too
+    //    broad. An entry naming tblUsers and a number points straight at an
+    //    account, and a made-up demo person can be edited into a real one and
+    //    kept. A number that identifies somebody is personal data even with no
+    //    name beside it.
+    //
+    //    So an entry pointing at a person's own account (tableName 'tblUsers')
+    //    or at one of their memberships ('tblUserSites') is deleted when that
+    //    person is erased, and included in their data export. Entries for
+    //    announcements are not about a person, and are left alone.
+    //
+    //    The generic handling that reads this list CANNOT do that. It matches
+    //    one column against the person's number, and here rowID only means
+    //    "this person" together with tableName. Matching rowID alone would
+    //    also remove, say, the entry for announcement number 7 when person
+    //    number 7 is erased. Neither column below is a name GdprEraser treats
+    //    as a link, so the generic handling skips this table rather than
+    //    guessing. The work is done by a dedicated step instead,
+    //    GdprEraser::eraseDemoDataRegisterEntries(), and by the
+    //    'demoDataRegister' block in web/_apps/auth/account/data-export.php.
+    //    tools/gdpr-coverage-selftest.php fails if either is missing.
+    'tblDemoDataRegister' => [
+        'decision' => 'erase',
+        'reason'   => 'The Demo Data page\'s list of rows it created. An entry naming'
+                    . ' this person\'s account or one of their memberships points at'
+                    . ' them, so it is deleted and included in their data export.'
+                    . ' Entries for announcements are not about a person and are kept.',
+        'columns'  => ['tableName', 'rowID'],
     ],
     'tblErasureRequest' => [
         'decision' => 'erase',
