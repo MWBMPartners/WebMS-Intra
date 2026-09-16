@@ -9,7 +9,107 @@ proceeds, so the session can be picked up at any point).
 
 ## Read this first — where we are right now
 
-## LATEST — 13 September 2026. RESUME FROM HERE.
+## LATEST — 16 September 2026, about 22:15. RESUME FROM HERE.
+
+**The owner's new instructions (16 Sept, evening), now standing:**
+- They are recorded as "Working with the owner" in `.claude/CLAUDE.md` and in memory
+  `owner-working-instructions-sept16.md`.
+- Plain English in all feedback; the handoff kept current; Fable plans sequentially, with Opus per step and Fable
+  retried; Sonnet or Haiku build; dev-team plugins allowed; cross-system review repeated until clean.
+- **After each task:** commit and push to this branch, update the issues, update `.claude/`, update `.OpenAI/` (to be
+  created), update the handoff.
+- Autonomy, with decisions raised UP FRONT; progress shown as a table.
+- The rule for switching AI systems (tool-agnostic) was already in the project CLAUDE.md, `~/.claude/CLAUDE.md` and
+  `~/.codex/AGENTS.md`.
+
+**New issue #514** (created 16 Sept): import outside calendars (`webcal://`), with visibility choices: public,
+members, or selected volunteer or staff groups. It builds on #327, which the code check found only partly done:
+- webcal addresses are refused (`feeds-save.php:31`);
+- every imported event is public (`import-feeds.php:117`);
+- there is no repeat or cancellation handling, events deleted from the feed are kept, and time zones are dropped;
+- there is no internal-address guard;
+- `/admin/calendar/feeds` is `App::isAdmin()`.
+
+The body is in `.claude-work/resume/calendar-import-issue-body.md`. **It is queued LAST, as the owner asked.**
+
+**OWNER DECISIONS, answered 16 Sept about 22:20:**
+- **A: COMMIT AND PUSH NOW.** Commit and push each piece as soon as its independent Claude check passes, with the
+  commit message stating plainly that Codex has NOT reviewed it yet. From 20 Sept Codex reviews everything committed
+  this way, and fixes follow as new commits. **This replaces the 14 Sept "hold commits" decision.**
+- **B, for #514: EVERY supported kind of group is selectable:** roles, small groups, leadership roles, user groups,
+  and any other supported group, including custom or bespoke groups. This was recorded as a comment on #514.
+
+**THE QUEUE, in order:**
+
+| # | Task | Status |
+| --- | --- | --- |
+| 1 | run-d: 498-r5 check | DONE, PASS (Fable) |
+| 2 | run-d: 503b-r4 (four handlers) | build done; check running |
+| 3 | run-d: sqlcols-r6 | queued |
+| 4 | run-d: offline-cache-r4 (wording) | queued |
+| 5 | After-task steps for finished packages: commit and push (per decision A), issues, `.claude/`, `.OpenAI/`, handoff | waiting on decision A |
+| 6 | Create `.OpenAI/` context and memory for Codex (Sonnet/Haiku) | queued |
+| 7 | Codex catch-up review of `110e47d` plus the run-d changes; fix and re-review until clean | from 20 Sept 16:30 |
+| 8 | Thorough documentation update: every .md, in-app help, OpenAPI spec (#482: 29 undocumented endpoints), Swagger UI check (already self-hosted with fallback), `.claude/` and `.OpenAI/` | queued |
+| 9 | #514 outside calendars: Fable plan, Sonnet build, check, Codex review | queued last |
+
+## Earlier on 16 September 2026, about 20:00 (older entries follow).
+
+**What happened since 15 September 12:45:**
+- **`run-c` ended part-way:** the Claude WEEKLY limit was hit ("resets Sep 20 at 4pm"). The 498-r5 BUILD failed to
+  start, so NO code change was made for it. Its settled plan is saved in `.claude-work/resume/runC--498-r5-plan.md`.
+  The 503b-r4 and sqlcols-r6 planning never ran. offline-cache-r3 had finished (code proven, 1 P4 wording gap left;
+  see the 15 September entries).
+- **COMMIT `110e47d` (15 Sept 13:15, author Salem874, pushed to origin/claude/alpha-wip) was NOT made by Claude.** Its
+  message reads like an editor-generated one ("Refactor demo data handling and improve service worker caching
+  strategy"). It committed ALL the held work plus the handoff, plans and `.dev-team/FEATURES.md`: 31 files covering
+  498, followups-498, offline-cache (r3 state), sqlcols (r5b state) and 503b (r3 state). **This goes against the
+  owner's 14 September "hold commits until Codex" decision, so the owner has been asked to confirm it was
+  intentional. Do NOT revert it without the owner.** Codex still has to catch-up review all of it, now as a committed
+  diff: `git diff 3effa5a 110e47d`.
+- **OWNER CONFIRMED (16 September): `110e47d` was intentional,** a precautionary backup to GitHub in case of a local
+  system problem while waiting for Codex. **Its contents STILL need the full review as originally planned:** Codex
+  catch-up review from 20 September 16:30, package by package (498 with followups-498, offline-cache, sqlcols, 503b),
+  using the existing briefs updated for anything changed since. Treat `110e47d` as committed but NOT yet reviewed.
+- **16 September: the owner reports Claude capacity is back**, and asked for:
+  1. **a GitHub issue for WinterCMS support**, paired with the WordPress issue #127;
+  2. to pick up where we left off;
+  3. the method: plan and analyse with SEQUENTIAL Fable agents (Opus per step only if Fable is unavailable, retrying
+     Fable every step), and implement with Sonnet.
+
+**About 20:40 — WinterCMS issue DONE: #513 created,** labelled type: feature, priority: medium, scope: core, for
+consideration. Its sources are `.claude-work/resume/wintercms-{research,issue-draft,issue-final,issue-body}.md`, and
+all 3 planning steps ran on FABLE (so Fable has credits again). A sibling comment was posted on #127; it notes that
+issue #127's phase 3 shortcodes should use the #493 public door, not the bearer-key `/api/v1/events`, which does not filter
+`isPublic` (and `isPublic` defaults ON). **`run-d` launched** (run `wf_bf06569f-293`, task `wt2c6mgvu`; container `rund-mysql`, ports 9040-9049; every step writes `.claude-work/resume/runD--<package>-<step>.md`): the continuation of run-c, with the same order
+and method as below.
+
+**20:46 — run-d, 498-r5: the Sonnet build found BOTH fixes ALREADY IN `110e47d`** (`demo-data.php` @version 2.4.0:
+`pack('E')` float fingerprints and approximate-number columns read as `col * 1e0`; `GdprEraser` DELETE plus audit in
+one transaction, with a checked reset). It changed nothing. **Correction to the 16 Sept note above:** the 15 Sept
+498-r5 build DID run and edit those files before the weekly limit killed it, and the owner's backup commit captured
+those edits. **So `110e47d` contains 498-r5 work that was UNVERIFIED when committed.** run-d's check r1 is verifying it
+now. (503b-r4 and sqlcols-r6 never started on 15 Sept, so they have no such edits.)
+**21:04 — 498-r5 check r1 PASS, on FABLE.** Both Codex round-4 findings are fixed as `110e47d` holds them: the round-4
+code reproduces both faults, every attempt to break the fixes failed, and all checks exit 0. The report is
+`.claude-work/resume/runD--498-r5-verify-r1.md`. For the Codex catch-up, write `brief-498-r5.txt` from the r5 plan
+and this check. **503b-r4 planning is now running.**
+
+**The order now (only ONE analysis run at a time):**
+1. Workflow `wintercms-issue`: research, then draft, then challenge. Outputs go to
+   `.claude-work/resume/wintercms-{research,issue-draft,issue-final}.md`. Then Claude creates the issue from the final
+   text.
+2. THEN a continuation of run-c, as new uncommitted changes on top of `110e47d`:
+   - **498-r5:** start at the Sonnet BUILD from the saved settled plan, then the check and fix rounds;
+   - **503b-r4:** the four handlers;
+   - **sqlcols-r6:** the stand-in findings plus the two comment follow-ups;
+   - optionally **offline-cache-r4**, for the P4 wording.
+
+   Each package: a Fable plan (Opus per step), a Sonnet build, and an independent check.
+3. Codex catch-up review from 20 September 16:30 of `110e47d` plus the new changes. Ask the owner whether commits stay
+   on hold.
+
+## Previous — 13 September 2026.
 
 ### ✅ Fable plan review — DONE (13 September)
 

@@ -1174,6 +1174,47 @@ and the safety of every multi-step database change in the portal.
 - **PR #137** (in flight) — Calendar seven view modes (closes #136)
 - **PR #138** (in flight) — Calendar per-month strap-lines + category display-style toggle
 
+## Working with the owner (STANDING RULES, set 16 September 2026)
+
+These restate how the owner wants work run. Several already appear above; this section
+is the one place that lists them together.
+
+- **Plain English in every explanation and piece of feedback,** not only in documents.
+  Technical terms confuse even technically skilled readers; if one is unavoidable, say
+  what it means straight away. (Also in the "Plain English" rule above.)
+- **Keep `.claude/HANDOFF.md` current as the work happens**, so the work can be picked up
+  at any moment if a session stops. Update it before anything long starts, after each
+  step, and the moment something important is learned.
+- **Deep analysis and deep planning:** sequential agents, never parallel, one analysis
+  run at a time. Try Fable first on every step; if Fable is unavailable, Opus stands in
+  for that step only, and the next step tries Fable again.
+- **Building:** Sonnet or Haiku, whichever fits; Opus only when the build is genuinely
+  complex. Use tokens efficiently without ever trading away correctness (GIRFT: Get It
+  Right First Time).
+- **Plugins:** the dev-team plugins may be used for any of this, including suggesting
+  fixes and features and routing reviews to a different AI system.
+- **Cross-system review until clean:** every change is reviewed by a different AI system
+  from the one that built it (today: built by Claude Code, reviewed by Codex, and the
+  reverse). Findings are fixed and the change is reviewed again, round after round,
+  until the review comes back clean.
+- **After each piece of work:**
+  1. commit and push to the single working branch that will later be merged into
+     `alpha` (no extra pull requests; no stacking);
+  2. update the related GitHub issue(s), one by one;
+  3. update the Claude memory and the context in `.claude/`;
+  4. update the OpenAI/Codex memory and context in `.OpenAI/`;
+  5. update the handoff document.
+- **Autonomy:** work through the whole queue without stopping. Stop only for a decision
+  or approval that genuinely needs the owner, say simply what is needed and why, and
+  raise such questions at the START, not one by one as they come up. Carry on with
+  everything else while waiting.
+- **Progress updates:** report often, showing the task queue as a table with each
+  task's status.
+- **Switching AI systems when one runs out:** see "When one system runs out" above. It
+  applies to any AI service or agent, not a named one, and relies on the handoff being
+  current and on cross-system review; switch back to the main system promptly and run a
+  full review of what it missed.
+
 ## GitHub Labels
 
 - `type:` -- feature, enhancement, bug, security, docs, infrastructure, refactor
