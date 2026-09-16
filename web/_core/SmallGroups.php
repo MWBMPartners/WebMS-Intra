@@ -98,17 +98,17 @@ final class SmallGroups
      */
     public static function listGroups(int $siteId, bool $activeOnly = true): array
     {
-        // 🧩 Note on the two correlated subqueries below: neither aliases
-        // `tblSmallGroupMembers` as the table immediately after its own
-        // FROM — every `tblSmallGroup*` table name contains the bare
-        // substring "Group", which trips a backtracking false-positive in
-        // check_sql_columns.py's SELECT-column regex whenever a short
-        // alias sits directly after `FROM tblSmallGroup*` (it backtracks
-        // the table-name match down to "tblSmall" + "Group…", matching
-        // "Group" as a false GROUP-BY terminator). Un-aliasing the primary
-        // FROM table (or introducing it via JOIN instead, which the
-        // checker's FROM-anchored regex never inspects) sidesteps it
-        // without changing behaviour — verified against the real script.
+        // 🧩 Neither sub-query below gives tblSmallGroupMembers a short name
+        // straight after its FROM (the second brings it in with a JOIN), so
+        // that tools/audit-checks/check_sql_columns.py gives no wrong report:
+        // in "FROM tblSmallGroupMembers m WHERE" it takes the "Group" inside
+        // the name as a GROUP BY and WRONGLY REPORTS "tblSmallGroup" as an
+        // unknown table (blind spot 15 there; the older version, commit
+        // 9c77216, said "tblSmall"). The outer FROM keeps its short name, g,
+        // and is not reported only because that check cannot read a column
+        // list across a line break and the double-quoted pieces above the
+        // FROM are not joined onto its line (it joins single-quoted strings
+        // only): make every piece single-quoted and it WOULD be reported.
         $db = self::db();
         $sql = 'SELECT g.*, '
             . "(SELECT COUNT(*) FROM tblSmallGroupMembers WHERE groupID = g.groupID AND status = 'active') AS memberCount, "

@@ -1973,16 +1973,29 @@ def live_matches(
     round 4, fix round 2 (14 September 2026). The older version (commit
     9c77216), round 3 and the first two fixes of round 4 all missed it.
 
-    How it searches: it finds each place the pattern's first word appears,
-    passes over any place whose first character never runs as SQL WITHOUT
-    trying the pattern there, and tries the whole pattern only at the places
-    left. After a match that is read, it carries on from the end of that
-    match, exactly as finditer() does, so nothing that was read before is
-    read twice or differently. A pattern that starts with a fixed word can
-    only match where that word is, and none of the six patterns starts with
-    \\b, a look-behind or ^, so whether it matches at a place does not depend
-    on where the search began. The results are therefore the same as a
-    search that restarts after every skipped match.
+    How it searches: it looks for the pattern's first word from where the
+    last reading ended. At a place whose first character never runs as SQL
+    it does NOT try the pattern, and looks for the word again from one
+    character on. Where the word does run as SQL it tries the whole pattern
+    there: if that fails it again moves on by one character; if it matches,
+    the match is given out and the search carries on from the end of that
+    match, exactly as finditer() does, so nothing that was read is read
+    twice or differently. Moving on by ONE character, and not to the end of
+    the word, matters only when the first word can overlap itself: with
+    `ABAB\\s` on "ABABAB ", the copy of ABAB that starts at the third
+    character is found only that way. (Round 5 took the places from
+    finditer() on the word, which returns only copies that do not overlap,
+    so that match was never tried, and this docstring's promise rested on a
+    condition nobody had written down. None of the six patterns' first
+    words, INSERT, UPDATE, SELECT and DELETE, can overlap itself, so nothing
+    the check read changed; found by the stand-in review of round 5, fixed
+    in round 6.) A pattern that starts with a fixed word can only match
+    where that word is, and none of the six patterns starts with \\b, a
+    look-behind or ^, so whether it matches at a place does not depend on
+    where the search began. The results are therefore the same as a search
+    that restarts one character after every skipped match, for any pattern
+    that starts with one fixed word and has no top-level `|`. The guard
+    below checks only the first of those two (see "What it cannot do").
 
     Rejected, in order:
       * finditer() plus a skip: it hid real statements, as described above.
@@ -1994,6 +2007,17 @@ def live_matches(
         3,000 commented-out SELECTs (the older version, commit 9c77216: under
         0.01 s), and about 3.1 seconds for 3,000 SELECTs inside one quoted
         value. Found by the independent check of round 4.
+      * taking the places from finditer() on the first word alone (round 5):
+        it returns only copies that do not overlap, so a first word that can
+        overlap itself (ABAB, EXECUTE) could miss a statement. Two other ways
+        out were tried in round 6. Refusing such a word in the guard keeps a
+        limit that costs nothing to remove. A look-ahead that consumes
+        nothing, `(?=WORD)`, finds overlapping copies too, but the regex
+        engine cannot use its fast scan for a literal first character on it:
+        the whole tree took about 15% longer (1.06 s against 0.92 s on 16
+        September 2026, fastest of 5), and a 2 MB file with no statement
+        word at all about 40% longer. Restarting the literal search from
+        one character on, as now, took the same time as round 5.
 
     What it cannot do:
       * it only saves the time spent on places that never run as SQL. A place
@@ -2016,6 +2040,10 @@ def live_matches(
         silently lost. None of the six patterns has one; any new pattern
         given to this function must start with one fixed word and have no
         top-level `|`.
+        The search always moves at least one character on after a match, so
+        even a pattern that can match nothing, such as `SELECT\\s|`, cannot
+        make it loop for ever (the first draft of round 6 could); the
+        matches it gives for such a pattern are still meaningless.
     """
     first = _LEADING_WORD_RE.match(pattern.pattern)
     if first is None or pattern.pattern[first.end():first.end() + 1] != "\\":
@@ -2028,15 +2056,29 @@ def live_matches(
     # where the pattern's first word can match, in any letter case.
     word_re = re.compile(first.group(), pattern.flags)
     pos = 0
-    for word in word_re.finditer(text):
+    while True:
+        word = word_re.search(text, pos)
+        if word is None:
+            return
         start = word.start()
-        if start < pos or starts_in_unread_text(regions, start):
+        if starts_in_unread_text(regions, start):
+            # Not tried, and the next search starts ONE character on, not
+            # after the word, so a copy of the word that starts inside this
+            # one is still found (see "How it searches" above).
+            pos = start + 1
             continue
         m = pattern.match(text, start)
         if m is None:
+            pos = start + 1
             continue
         yield m
-        pos = m.end()
+        # For a pattern the guard accepts the match covers at least the first
+        # word, so m.end() is already past `start`. The max() is for a
+        # pattern that can match nothing (a top-level `|` with an empty side,
+        # such as `SELECT\s|`, which the guard does not catch): without it
+        # the search would find the same word at the same spot for ever. The
+        # first draft of round 6 had no max() and hung on exactly that.
+        pos = max(m.end(), start + 1)
 
 
 _COMMENT_RUN_RE = re.compile(rb"\x04+")
@@ -3155,14 +3197,19 @@ def check() -> int:
     # thing a reader meets. The pull-request check
     # (.github/workflows/pr-security.yml) puts this script's WHOLE output into
     # its comment when there is at least one finding, and adds nothing when
-    # there is none.
+    # there is none. Since 16 September 2026 it also puts the whole output
+    # under a "did not finish" heading when this script exits with an error
+    # (a crash, the coverage assert in print_where_coverage(), or the
+    # ValueError from live_matches()); before that a crash looked exactly
+    # like a clean run there.
     # Until round 4 that step kept the output only from line 5 onward
     # (`tail -n +5`), and a comment here claimed printing coverage last made
     # that layout safe. It did not: with findings, line 4 is the heading of
     # the first group ("### SELECT-WHERE column-name mismatches (3)"), which
-    # was dropped (the committed script lost it the same way), and with no
-    # findings line 4 is the SELECT coverage heading. Nothing in this script's
-    # layout is now relied on by the workflow.
+    # was dropped (the older version, commit 9c77216, lost it the same way:
+    # its line 4 was that heading too), and with no findings line 4 is the
+    # SELECT coverage heading. Nothing in this script's layout is now relied
+    # on by the workflow.
     print_where_coverage(coverage)
 
     strict = "--strict" in sys.argv

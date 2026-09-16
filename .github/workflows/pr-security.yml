@@ -277,8 +277,21 @@ jobs:
           #    silently whenever the script's layout changes; passing
           #    everything cannot drop anything. The summary lines and the
           #    coverage figures after the findings are worth reading anyway.
-          SQL_COLS=$(python3 tools/audit-checks/check_sql_columns.py 2>&1 || true)
-          if echo "$SQL_COLS" | grep -q '•'; then
+          #    The exit code is kept too. Without --strict (not passed here)
+          #    the script exits 0 with or without findings, so a non-zero exit
+          #    means it did not finish: a crash, or one of its own refusals
+          #    (coverage figures that do not add up, or a search pattern it
+          #    cannot use). Until 16 September 2026 the exit code was thrown
+          #    away (`|| true`) and only a `•` in the output earned a section,
+          #    so a crash printed a traceback with no `•` and looked exactly
+          #    like a clean run. Now a non-zero exit always earns a section,
+          #    output or not. `set +e` above means the failing command does
+          #    not stop this step, and nothing here blocks the merge.
+          SQL_COLS=$(python3 tools/audit-checks/check_sql_columns.py 2>&1)
+          SQL_RC=$?
+          if [[ "$SQL_RC" -ne 0 ]]; then
+            add_section "check_sql_columns.py did not finish (exit code $SQL_RC): its findings, if any, are unknown" "${SQL_COLS:-(the script printed nothing at all)}"
+          elif echo "$SQL_COLS" | grep -q '•'; then
             add_section "SQL column-name mismatches (runtime INSERT/SELECT references column not in schema)" "$SQL_COLS"
           fi
 
