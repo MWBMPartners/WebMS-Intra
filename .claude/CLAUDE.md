@@ -207,7 +207,14 @@ precision stay exactly as rigorous. Only the way it is explained changes.
 what was not checked, and what went wrong. Say "I could not test this because
 there is no database on this machine" rather than implying it was verified.
 
-## Codex review (STANDING RULE — every change, before it is committed)
+## Codex review (STANDING RULE — every change gets a second system's review)
+
+*(Heading and "When to run it" reworded 16 September 2026. They used to say
+"before it is committed" throughout. The requirement for a different
+system's review has not changed; what changed is the owner's decision that
+work is committed and pushed after an independent Claude check while Codex
+is unavailable, rather than waiting for Codex — see "When to run it" below
+and `.claude/HANDOFF.md`, decision A, 16 September.)*
 
 **Every piece of work done here must also be reviewed by a different system —
 Codex — before it counts as finished.** The customer asked for this on
@@ -233,7 +240,16 @@ codex exec --skip-git-repo-check "<what you want reviewed>"
 
 **When to run it.** After the work is written and the mechanical checks pass
 (`php -l`, the thirteen scripts in `tools/audit-checks/`, and the end-to-end
-migration harness where the database is involved), but **before committing**.
+migration harness where the database is involved). When Codex is available,
+review before committing remains the normal order. When Codex is not
+available, the owner's decision of 16 September 2026 applies instead:
+commit and push once a different Claude agent — one that did not write the
+code — has independently checked the work, with the commit message stating
+plainly that Codex has not reviewed it yet; Codex reviews the commit as
+soon as it is available again, and any fix it finds lands as a new,
+separate commit. Either way, review by a different system is still
+required for every change before it counts as reviewed — only the timing
+relative to the commit has changed.
 
 **How to treat the result.** As a second opinion, not a verdict. Check each
 point against the code before acting on it. Codex will sometimes be wrong;
@@ -1233,7 +1249,12 @@ When making changes:
 3. Update CHANGELOG.md, **FEATURES.md**, DEV_NOTES.md, README.md as appropriate
 4. Update `.claude/` memory and context
 5. Update GitHub Wiki/Project/Milestones alongside Issues
-6. COMMIT changes (DO NOT PUSH unless the user explicitly asks for a PR)
+6. Commit and push to the single working branch after each task; do not
+   open extra pull requests *(updated 16 September 2026 to match the
+   owner's decision to commit and push finished work right away — see
+   "Codex review" above and `.claude/HANDOFF.md`, decision A. This step
+   used to read "COMMIT changes (DO NOT PUSH unless the user explicitly
+   asks for a PR)".)*
 7. Close GitHub Issue with commit / PR reference
 
 ### STANDING: monitor & fix GitHub PR Security checks (always applicable)
