@@ -150,6 +150,19 @@ wolf on things that are actually fine gets switched off by frustrated
 developers, and then it protects nothing at all — prefer a check that
 sometimes misses a real fault over one that produces false alarms.
 
+Two more lessons from the same checker (16 September 2026, commit `bda3d84`,
+issue #501). **First, a check that crashes must never look like a check that
+found nothing.** The pull-request workflow ran the column checker in a way
+that printed the same clean-looking report whether the checker finished or
+fell over part way. A crash now shows plainly, while real findings stay
+advisory. **Second, a "faster" way of searching that promises the same results
+as the slow way has to be proven the same, not assumed.** The faster search
+jumped from one match to the next without overlaps, so a real query starting
+inside an earlier match could be stepped over. It now tries every position
+in turn, and always moves forward by at least one character. Without that,
+a pattern able to match nothing would loop forever, which the builder
+confirmed by reproducing it.
+
 **A real file or folder in the public web root silently wins over any
 address the application itself has registered with the same name.** This
 is a general web-server behaviour (`RewriteCond %{REQUEST_FILENAME} !-d`

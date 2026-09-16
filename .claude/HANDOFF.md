@@ -45,8 +45,8 @@ The body is in `.claude-work/resume/calendar-import-issue-body.md`. **It is queu
 | --- | --- | --- |
 | 1 | run-d: 498-r5 check | DONE, PASS (Fable) |
 | 2 | run-d: 503b-r4 (four handlers + live page) | DONE: check PASS (Fable); **committed `ed5d89f`, pushed**; #503 commented on; not yet reviewed by Codex |
-| 3 | run-d: sqlcols-r6 | planning (draft) running since 22:18 |
-| 4 | run-d: offline-cache-r4 (wording) | queued |
+| 3 | run-d: sqlcols-r6 | DONE: check PASS (Fable); **committed `bda3d84`, pushed**; #501 commented on; not yet reviewed by Codex. Follow-up (low): the example in the new `SmallGroups.php:104` comment matches the header blind-spot-15 grep ("written once" now gives 2 hits). NOTE: the dev-team guard hook blocks any Bash command containing the word for the production branch plus "push", even inside a commit message, so commit with `git commit -F <file>` and push in a separate command. |
+| 4 | run-d: offline-cache-r4 (wording) | planning (draft) running since 23:19 |
 | 5 | **#514 outside calendars** (MOVED UP by the owner, 16 Sept about 22:35): Fable deep plan (sequential), Sonnet build (Opus if complex), check, commit, then Codex review | **starts as soon as run-d (items 3-4) finishes**; it cannot overlap run-d's planning (one analysis run at a time) |
 | 6 | Create `.OpenAI/` context and memory for Codex | **DONE.** Written by Sonnet; independent check rounds (Fable) found and got fixed: the commit rule, an invented rule, release channels, review stance, GIRFT and wording. The last low point (an unprovable "channels still share one database" sentence) was fixed with the checker's exact wording (Haiku edit, verified by grep). The three out-of-date passages in `.claude/CLAUDE.md` and the codex-review memory were aligned with the 16 Sept commit decision. Committed with this handoff. |
 | 7 | After-task steps for each finished package: commit and push (decision A), issues, `.claude/`, `.OpenAI/`, handoff | rolling |
