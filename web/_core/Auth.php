@@ -237,6 +237,9 @@ class Auth
      * not matter which worker version is running, when the download finishes,
      * or whether the current sw.js can be fetched. The sign-out page then only
      * has to delete what was stored before the portal started sending this.
+     * Of the pages built for a signed-in visitor among those older copies, it
+     * deletes all but one, which it cannot tell apart from the offline page:
+     * see the last bullet under "WHAT IT CANNOT DO" below.
      *
      * WHY IT MUST STAY EVEN ONCE NO OLD WORKER IS LEFT: a worker from after
      * #507 refuses these responses in its FETCH handler (mayKeepCopy() in
@@ -303,8 +306,39 @@ class Auth
      *     is fine, because the "*" stays in the list. A proxy or content delivery
      *     network in front of the portal that removed the header would reopen
      *     the gap; none was tested.
-     *   - It cannot remove copies stored before the portal started sending it;
-     *     the sign-out page and sw.js's activate handler do that.
+     *   - It cannot remove copies stored before the portal started sending it.
+     *     The sign-out page and sw.js's activate handler remove those, with
+     *     ONE exception that neither removes: a copy stored at '/offline/' by
+     *     the CURRENT worker's install step while an older Auth.php (from
+     *     before #507, so sending no `Vary: *`) was still live. For an
+     *     organisation whose site key is "offline", on a server that sends
+     *     /offline/ through PHP, that copy is the signed-in dashboard, with
+     *     the person's name on it. The sign-out page keeps it on purpose,
+     *     because it cannot tell it from the offline page: both sit under
+     *     the same address, and the three headers the sign-out page reads
+     *     (Content-Type, Cache-Control and the marker) are the same on both:
+     *     text/html, the session's no-store, no marker. Neither carries
+     *     `Vary: *`, which is why the browser stored them. Other headers do
+     *     differ today (the shared page template gives the dashboard a
+     *     Content-Security-Policy and removes X-Powered-By; the offline page
+     *     uses no template, so it has neither change; seen 17 September 2026
+     *     with curl, and in the copies Edge, Firefox and WebKit stored), but
+     *     a rule built on them would not be safe: a web server can add a
+     *     policy header to every response, the branding.hidePoweredBy
+     *     setting removes X-Powered-By everywhere, and on such a server
+     *     bootstrap.php already sends Strict-Transport-Security to both over
+     *     HTTPS. Such a rule would one day delete the real offline page at
+     *     every sign-out, with nothing logged. Only the body tells them
+     *     apart, and the sign-out page reads no bodies; a body check was
+     *     rejected too, because it would need fixed wording inside the
+     *     offline page, and a later edit to that page would then delete it
+     *     at every sign-out in the same silent way.
+     *     The activate handler leaves it because it deletes only the stores
+     *     of OTHER worker versions, and this copy sits in the current one. It
+     *     is only certain to go when CACHE_VERSION next changes, because the
+     *     new worker's activate handler then deletes the whole old store.
+     *     What it costs, and the proper fix (refusing such site keys where
+     *     they are saved), are in the comment above the echo in logout().
      *
      * @see https://w3c.github.io/ServiceWorker/#cache-put (a Vary value of "*"
      *      makes put() reject with a TypeError)
