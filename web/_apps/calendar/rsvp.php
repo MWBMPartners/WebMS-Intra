@@ -65,9 +65,62 @@ if ($eventId <= 0 || in_array($response, $validResponses, true) === false) {
     exit();
 }
 
-// 🔍 Verify event exists and belongs to site
+// 🔍 Verify the event exists, belongs to this site, and may be answered.
+//
+// 🛡️ Drafts (#503). The same rule as the event's own page (calendar/event.php).
+//    Only an event whose status is published, cancelled or postponed can be
+//    answered by people in general. A DRAFT only by somebody who can manage
+//    events: App::isAdmin(), exactly the check every page under
+//    calendar/manage/ makes. For everybody else the lookup finds no row, so the
+//    request gets EXACTLY the same "Event not found." as a number that matches
+//    no event, and trying numbers one by one does not reveal which drafts exist.
+//
+//    What was wrong before #503: this only checked that the event existed. A
+//    member could RSVP to a draft, and so learn that it existed, by posting
+//    eventID=1, 2, 3 and so on. Event numbers simply count upward.
+//
+// ⏱️ The same database work for every "not found" (Codex review, third round,
+//    14 September 2026, brief-503b-r3.txt / codex-503b-r3.txt). App::isAdmin()
+//    is asked HERE, before the lookup, for every request that gets this far,
+//    and the draft rule is part of the lookup's WHERE clause as the bound
+//    yes/no value $canManageFlag. So a refused draft, a deleted event and a
+//    number that matches nothing all send the same statements, get the same
+//    empty result, and take the same PHP lines to the same redirect and
+//    message.
+//
+//    What was wrong in the first fix: App::isAdmin() was asked after the
+//    lookup and only for a draft. Its first use in a request runs the account
+//    query (App::user(), web/_core/App.php), and nothing earlier in this
+//    handler asks for the account (Auth::requireLogin only looks at the
+//    session). So a refused draft cost one more database round trip than a
+//    missing number — measured (round 4, 16 September 2026): 17 logged
+//    commands for a missing number against 20 for a refused draft (now 20 for
+//    both). The same redirect and message either way, but measurably slower.
+//
+//    ⚠️ What this CANNOT promise: inside MySQL a number that matches a draft
+//       row still costs reading that row before it is rejected, which a number
+//       matching nothing does not. That is microseconds, not zero. Every
+//       request that reaches the lookup now pays for the account query,
+//       whatever the number; that depends only on who is asking.
+//
+//    Tried and rejected: asking App::isAdmin() up front but keeping the status
+//    test in PHP after the lookup. The database work would match, but a
+//    refused draft would still run PHP lines a missing number skips. Putting
+//    the rule in the query makes both an empty result, the same approach as
+//    the events detail API (events/api/detail.php) and the invitation page
+//    (calendar/rsvp-by-link.php). A fixed or random delay was also rejected: it
+//    slows everybody, and random noise can be averaged away.
+//
+//    Deleted events are refused by the query too (isDeleted = 0). Sign-in is
+//    already required at the top (Auth::requireLogin), which covers the event
+//    page's rule for events not marked public: members may answer those.
+//    Answering a cancelled or postponed event is unchanged by this.
+$canManageFlag = App::isAdmin() === true ? 1 : 0;
+
 $evStmt = $mysqli->prepare(
-    'SELECT eventID, eventName, capacity, status FROM tblEvents WHERE eventID = ? AND siteID = ? AND isDeleted = 0 LIMIT 1'
+    'SELECT eventID, eventName, capacity FROM tblEvents '
+    . 'WHERE eventID = ? AND siteID = ? AND isDeleted = 0 '
+    . "AND (status IN ('published', 'cancelled', 'postponed') OR ? = 1) LIMIT 1"
 );
 if ($evStmt === false) {
     $_SESSION['flash_msg']  = t('error.database');
@@ -75,33 +128,10 @@ if ($evStmt === false) {
     header('Location: ' . $redirect);
     exit();
 }
-$evStmt->bind_param('ii', $eventId, $siteId);
+$evStmt->bind_param('iii', $eventId, $siteId, $canManageFlag);
 $evStmt->execute();
 $event = $evStmt->get_result()->fetch_assoc();
 $evStmt->close();
-
-// 🛡️ Drafts (#503). The same rule as the event's own page (calendar/event.php).
-//    Only an event whose status is published, cancelled or postponed can be
-//    answered by people in general. A DRAFT only by somebody who can manage
-//    events: App::isAdmin(), exactly the check every page under
-//    calendar/manage/ makes. For everybody else the row is dropped, so the
-//    request gets EXACTLY the same "Event not found." as a number that matches
-//    no event, and trying numbers one by one does not reveal which drafts exist.
-//
-//    What was wrong before: this only checked that the event existed. A member
-//    could RSVP to a draft, and so learn that it existed, by posting eventID=1,
-//    2, 3 and so on. Event numbers simply count upward.
-//
-//    Deleted events were already refused by the query (isDeleted = 0). Sign-in
-//    is already required at the top (Auth::requireLogin), which covers the
-//    event page's rule for events not marked public: members may answer those.
-//    Answering a cancelled or postponed event is unchanged by this.
-if ($event !== null
-    && in_array((string) ($event['status'] ?? ''), ['published', 'cancelled', 'postponed'], true) === false
-    && App::isAdmin() === false
-) {
-    $event = null;
-}
 
 if ($event === null) {
     $_SESSION['flash_msg']  = 'Event not found.';

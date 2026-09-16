@@ -60,44 +60,63 @@ if ($eventId <= 0) {
 // 🏢 Tenant guard — confirm the event belongs to the resolved site BEFORE
 //    touching tblEventHubVideos (a child table with no own siteID column,
 //    see migration 155). Never leak another tenant's event via a 404 vs 200
-//    timing/shape difference — both "no such event" and "event, wrong site"
-//    return the identical 404.
+//    timing/shape difference — both "no such event", "event, wrong site" and
+//    "a draft this caller may not see" return the identical 404.
+//
+// 🛡️ Drafts (#503). The same rule as the event's own page (calendar/event.php)
+//    and the events detail API (events/api/detail.php, which explains the
+//    choices, the timing reasoning and the rejected alternatives in full).
+//    Only an event whose status is published, cancelled or postponed is
+//    answered for people in general. A DRAFT only for somebody who can manage
+//    events: App::isAdmin() for a signed-in session, or an API key holding
+//    events:write (a key with only eventhub:read cannot manage events, so it is
+//    treated like a member; for a key request the session is ignored).
+//    Everybody else gets EXACTLY the same "Event not found" as a number that
+//    matches no event.
+//
+//    The rights are decided BEFORE the lookup, for every request that gets
+//    this far, and the draft rule is inside the lookup's WHERE clause as the
+//    bound yes/no value $canManageFlag. So a refused draft, a deleted event and
+//    a number that matches nothing all run the same statements and come back
+//    as the same empty result.
+//
+//    What was wrong before #503: the lookup had no condition on status, so any
+//    signed-in member could learn that a draft existed, and list its Team Hub
+//    videos, by trying eventID=1, 2, 3 and so on.
+//    What was wrong in the first fix (Codex review, third round, 14 September
+//    2026, brief-503b-r3.txt / codex-503b-r3.txt): the rights were read only
+//    when the lookup had found an event, so for a signed-in member
+//    App::isAdmin() ran its account query for a draft but not for a missing
+//    number. Same reply, one more database round trip — measured (round 4,
+//    16 September 2026): 14 logged commands for a missing number against 17
+//    for a refused draft (now 17 for both).
+//
+//    ⚠️ Cannot promise: inside MySQL a number matching a draft row still costs
+//       reading that row before it is rejected (microseconds). A signed-in
+//       session always pays for the account query now, whatever the number. An
+//       API key's rights come from the key row ApiRouter already read, so they
+//       cost no query at all.
+//
+//    ⚠️ The same few lines are repeated in events/api/detail.php and
+//       hub-resources.php (which also carries the full tried-and-rejected
+//       list). If who may manage events ever changes, change all three.
+$apiKeyRow       = ApiAuth::bearerKeyRow();
+$canManageEvents = $apiKeyRow !== null
+    ? ApiKey::hasScope($apiKeyRow, 'events:write')
+    : App::isAdmin();
+$canManageFlag   = $canManageEvents === true ? 1 : 0;
+
 $eventStmt = $db->prepare(
-    'SELECT eventID, status FROM tblEvents WHERE eventID = ? AND siteID = ? AND isDeleted = 0 LIMIT 1'
+    'SELECT eventID FROM tblEvents WHERE eventID = ? AND siteID = ? AND isDeleted = 0 '
+    . "AND (status IN ('published', 'cancelled', 'postponed') OR ? = 1) LIMIT 1"
 );
 if ($eventStmt === false) {
     ApiResponse::error('Database error', 500);
 }
-$eventStmt->bind_param('ii', $eventId, $siteId);
+$eventStmt->bind_param('iii', $eventId, $siteId, $canManageFlag);
 $eventStmt->execute();
 $eventRow = $eventStmt->get_result()->fetch_assoc();
 $eventStmt->close();
-
-// 🛡️ Drafts (#503). The same rule as the event's own page (calendar/event.php)
-//    and the events detail API (events/api/detail.php, which explains the
-//    choices in full). Only an event whose status is published, cancelled or
-//    postponed is answered for people in general. A DRAFT only for somebody
-//    who can manage events: App::isAdmin() for a signed-in session, or an API
-//    key holding events:write (a key with only eventhub:read cannot manage
-//    events, so it is treated like a member). Everybody else gets EXACTLY the
-//    same "Event not found" as a number that matches no event.
-//
-//    What was wrong before: the lookup had no condition on status, so any
-//    signed-in member could learn that a draft existed, and list its Team Hub
-//    videos, by trying eventID=1, 2, 3 and so on.
-//
-//    ⚠️ The same few lines are repeated in events/api/detail.php and
-//       hub-resources.php. If who may manage events ever changes, change all three.
-if ($eventRow !== null) {
-    $isVisibleStatus = in_array((string) ($eventRow['status'] ?? ''), ['published', 'cancelled', 'postponed'], true) === true;
-    $apiKeyRow       = ApiAuth::bearerKeyRow();
-    $canManageEvents = $apiKeyRow !== null
-        ? ApiKey::hasScope($apiKeyRow, 'events:write')
-        : App::isAdmin();
-    if ($isVisibleStatus === false && $canManageEvents === false) {
-        $eventRow = null;
-    }
-}
 
 if ($eventRow === null) {
     ApiResponse::error('Event not found', 404);

@@ -152,21 +152,46 @@ if ($widgetEventId > 0) {
     //    is treated exactly like a number that matches no event: no chat
     //    widget, and nothing else on the page changes.
     //
-    //    What was wrong before: the check asked only that the event existed and
-    //    was not deleted, so whether the chat widget appeared told any signed-in
-    //    member which event numbers belonged to drafts.
+    //    The rights are decided BEFORE the lookup, for every request that gets
+    //    this far, and the draft rule is inside the lookup's WHERE clause as
+    //    the bound yes/no value $canManageFlag. So a refused draft, a deleted
+    //    event and a number that matches nothing are all the same empty
+    //    result and take the same PHP path (no widget).
     //
-    //    Deleted events were already excluded (isDeleted = 0). Sign-in is
-    //    already required at the top of this page, which covers the event
+    //    What was wrong before #503: the check asked only that the event
+    //    existed and was not deleted, so whether the chat widget appeared told
+    //    any signed-in member which event numbers belonged to drafts.
+    //
+    //    ⏱️ Round 4 (16 September 2026): unlike the four other files this
+    //       package touched, this page showed NO measured round-trip
+    //       difference before this change (member: 23 database commands for
+    //       every one of missing/draft/deleted/published), because
+    //       header.php includes nav.php, and nav.php already calls
+    //       App::user() to draw the navigation bar for every signed-in
+    //       request, BEFORE this block runs. So App::isAdmin() here has
+    //       always been free — the account query was already paid for.
+    //       This change is made anyway so the widget decision no longer
+    //       depends on an include order in a DIFFERENT file happening to
+    //       run first: if nav.php's own query is ever moved, made
+    //       conditional, or this block is reused somewhere nav.php is not
+    //       loaded, the shape would silently reopen otherwise. This is a
+    //       consistency fix, not a fix for a measured leak here.
+    //
+    //    Deleted events are refused by the query too (isDeleted = 0). Sign-in
+    //    is already required at the top of this page, which covers the event
     //    page's rule for events not marked public.
-    $stmt = $mysqli->prepare('SELECT status FROM tblEvents WHERE eventID = ? AND siteID = ? AND isDeleted = 0 LIMIT 1');
-    $stmt->bind_param('ii', $widgetEventId, $siteId);
+    //
+    //    See events/api/detail.php for the fuller write-up (rejected
+    //    alternatives, what "cannot promise" means) — the same design.
+    $canManageFlag = App::isAdmin() === true ? 1 : 0;
+    $stmt = $mysqli->prepare(
+        'SELECT 1 FROM tblEvents WHERE eventID = ? AND siteID = ? AND isDeleted = 0 '
+        . "AND (status IN ('published', 'cancelled', 'postponed') OR ? = 1) LIMIT 1"
+    );
+    $stmt->bind_param('iii', $widgetEventId, $siteId, $canManageFlag);
     $stmt->execute();
-    $widgetEvent = $stmt->get_result()->fetch_assoc();
+    $eventOk = $stmt->get_result()->fetch_assoc() !== null;
     $stmt->close();
-    $eventOk = $widgetEvent !== null
-        && (in_array((string) ($widgetEvent['status'] ?? ''), ['published', 'cancelled', 'postponed'], true) === true
-            || App::isAdmin() === true);
     if ($eventOk === true): ?>
     <div class="mt-3" data-livechat-widget data-event-id="<?php echo (int) $widgetEventId; ?>"></div>
     <script src="/assets/js/livechat-widget.js" defer></script>
