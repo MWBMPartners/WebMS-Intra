@@ -284,7 +284,11 @@ foreach ([1, '1'] as $onValue) {
         'global_admin'
     );
 }
-foreach ([0, '0', null] as $offValue) {
+// The values true, '01', and '1x' are added to detect a loosened test
+// that uses (int) $value === 1 instead of the strict check. Issue #497
+// explains why only the exact integer 1 and the exact string '1' count
+// as set; any other value must not.
+foreach ([0, '0', null, true, '01', '1x'] as $offValue) {
     $facts = ['isAdmin' => 0, 'isRootAdmin' => $offValue, 'thisOrgActive' => 1, 'otherOrgRows' => 0];
     assertDecision(
         'isRootAdmin=' . var_export($offValue, true) . ' counts as OFF',
@@ -303,7 +307,11 @@ foreach ([1, '1'] as $onValue) {
         'portal_admin'
     );
 }
-foreach ([0, '0', null] as $offValue) {
+// The values true, '01', and '1x' are added to detect a loosened test
+// that uses (int) $value === 1 instead of the strict check. Issue #497
+// explains why only the exact integer 1 and the exact string '1' count
+// as set; any other value must not.
+foreach ([0, '0', null, true, '01', '1x'] as $offValue) {
     $facts = ['isAdmin' => $offValue, 'isRootAdmin' => 0, 'thisOrgActive' => 1, 'otherOrgRows' => 0];
     assertDecision(
         'isAdmin=' . var_export($offValue, true) . ' counts as OFF',
@@ -323,11 +331,14 @@ foreach ([1, '1'] as $onValue) {
         ''
     );
 }
-foreach (['0', 2] as $notOnValue) {
+foreach (['0', 2, true, '01', '1x'] as $notOnValue) {
     // A value of 0 (int) is covered separately by the "ended" tests above
     // (belongs only for REACH_REHIRE); here we cover the TEXT '0' and any
     // other non-1 value some future caller might hand in, both of which
-    // must NOT count as an active membership.
+    // must NOT count as an active membership. The values true, '01', and
+    // '1x' are added to detect a loosened test that uses (int) $value === 1
+    // instead of the strict check; issue #497 is why only exact integer 1
+    // and exact string '1' count as set.
     $facts = ['isAdmin' => 0, 'isRootAdmin' => 0, 'thisOrgActive' => $notOnValue, 'otherOrgRows' => 0];
     assertDecision(
         'thisOrgActive=' . var_export($notOnValue, true) . ' does not count as active (NOT_FOUND)',

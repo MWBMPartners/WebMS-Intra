@@ -424,6 +424,19 @@ jobs:
             add_section "Calls to methods that do not exist, or core classes used with no import (a fatal error the moment that line runs)" "$(echo "$STATIC_CALLS" | grep -a -E '^[[:space:]]*•|^###')"
           fi
 
+          # 21) A change to an account or to the access it carries (a password,
+          #     the on/off switch, a membership, the portal-wide administrator
+          #     flag, an offboarding, a safeguarding record) written without
+          #     asking AccountGuard first. That is the shape of #518, where an
+          #     administrator of one organisation could change any account in
+          #     the whole installation. The check has its own short allow list,
+          #     with a reason for each entry, and also reports an allow-list
+          #     entry that no longer matches anything.
+          ACCOUNT_GUARD=$(python3 tools/audit-checks/check_account_writes_guarded.py 2>&1 | tail -n +4 || true)
+          if echo "$ACCOUNT_GUARD" | grep -q '•'; then
+            add_section "Account or access changes written without asking AccountGuard (the #518 shape)" "$ACCOUNT_GUARD"
+          fi
+
           echo "hits=$HITS" >> "$GITHUB_OUTPUT"
           echo "Total finding sections: $HITS"
 
