@@ -117,6 +117,32 @@ hand if the session that scheduled it is gone.
 
 ## Real bugs and traps already found in this codebase
 
+**An administrator gate that asks who you are, but never what you may touch.**
+Every page in this portal that changed an account asked one question: is the
+person signed in an administrator of the organisation currently open? None asked
+whether the ACCOUNT being changed was one they were entitled to change. So an
+administrator of one organisation could change any account in the whole
+installation: set a new password on a global administrator's account and sign in
+as them, change an email address (which redirects a password reset), switch an
+account off, or hand out the older portal-wide administrator flag, which grants
+administration of every organisation. It was reproduced on a real database on
+17 September 2026 (issue #518) and found in eight places at once: the members
+page, the user import, the users API, offboarding and rehire, invitations with
+the "admin" role, and safeguarding records. The fix put the second question in
+one place (`web/_core/AccountGuard.php`) and made every one of those places ask
+it first; an account outside the administrator's organisation now answers
+exactly as a missing one does, so a refusal gives nothing away.
+
+**The lesson is general, not specific to this codebase.** Wherever a system has
+tenants, organisations or teams, check the permission against the TARGET of the
+change, not only against the person making it. When reviewing such code, look
+for an identifier taken from the request and used in a WHERE clause without a
+tenant condition beside it. A second habit worth copying: a new automatic check
+(`tools/audit-checks/check_account_writes_guarded.py`) now fails the pull request
+if a future change writes to an account table without asking the guard, with a
+short allow list that carries a reason for every entry.
+
+
 **A prepared-statement query hands back whole numbers, not text — so
 comparing a database flag against the text `'1'` is always false.** With
 the MySQLi driver used here, a row loaded through a prepared statement
