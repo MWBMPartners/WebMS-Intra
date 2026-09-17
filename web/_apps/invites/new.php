@@ -47,8 +47,14 @@ $csrf = Auth::csrfToken();
                     <label class="form-label">Role on acceptance</label>
                     <select name="role" class="form-select">
                         <?php foreach (['user', 'volunteer', 'staff', 'admin'] as $role): ?>
+                            <?php // 🛡️ #518: the label makes clear "admin" only reaches this
+                                  // organisation — see invites/accept.php, which now enforces
+                                  // that (it used to grant portal-wide rights). The submitted
+                                  // value is unchanged. ?>
                             <option value="<?php echo htmlspecialchars($role, ENT_QUOTES, 'UTF-8'); ?>" <?php echo $role === $defaultRole ? 'selected' : ''; ?>>
-                                <?php echo htmlspecialchars($role, ENT_QUOTES, 'UTF-8'); ?>
+                                <?php echo $role === 'admin'
+                                    ? 'admin (of this organisation)'
+                                    : htmlspecialchars($role, ENT_QUOTES, 'UTF-8'); ?>
                             </option>
                         <?php endforeach; ?>
                     </select>

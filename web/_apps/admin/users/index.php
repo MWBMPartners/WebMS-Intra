@@ -8,19 +8,30 @@
  * Displays user list with roles, local account status, and admin flags.
  * Uses Bootstrap modals for add/edit forms.
  *
+ * -----------------------------------------------------------------------------
+ * #518 FIX (17 September 2026): the list used to show EVERY account on the
+ * installation to any administrator, and drew Admin/Root-Admin checkboxes
+ * that a non-global administrator could submit by hand to grant themselves
+ * portal-wide rights. The list is now scoped to this organisation's own
+ * members (Portal\Core\AccountGuard::memberScopeSql()), and the Edit
+ * button is replaced with a plain badge for any account a non-global
+ * administrator is not allowed to change.
+ *
  * @package   Portal\Admin
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   0.3.0
+ * @version   0.4.0
  * -----------------------------------------------------------------------------
  */
 
 declare(strict_types=1);
 
+use Portal\Core\AccountGuard;
 use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Router;
+use Portal\Core\Site;
 
 // 📌 Page metadata
 $pageTitle   = 'User Management';
@@ -60,6 +71,22 @@ if ($filterStatus === 'active') {
     $whereClauses[] = 'u.isActive = 1';
 } elseif ($filterStatus === 'inactive') {
     $whereClauses[] = 'u.isActive = 0';
+}
+
+// 🛡️ #518: for a non-global administrator on a multi-organisation
+//    installation, limit the list to accounts that are active members of
+//    THIS organisation. A global administrator, or any administrator on a
+//    single-organisation installation, gets an empty scope (everyone).
+[$scopeSql, $scopeTypes, $scopeValues] = AccountGuard::memberScopeSql('u.userID');
+if ($scopeSql !== '') {
+    $whereClauses[] = $scopeSql;
+    $bindTypes     .= $scopeTypes;
+    // The scope SQL binds one value (the open organisation's siteID). It
+    // is kept in its own named variable, not read straight out of the
+    // array, so the by-reference bind_param() pattern this file already
+    // uses for every other bound value keeps working unchanged.
+    $scopeSiteId  = (int) $scopeValues[0];
+    $bindValues[] = &$scopeSiteId;
 }
 
 $whereSQL = count($whereClauses) > 0 ? 'WHERE ' . implode(' AND ', $whereClauses) : '';
@@ -113,6 +140,14 @@ if ($stmt !== false) {
     }
     $stmt->close();
 }
+
+// 🛡️ #518: work out, for every row actually being shown, whether THIS
+//    administrator is allowed to change it — used below to decide
+//    between the Edit button and the "changed by a global administrator"
+//    badge. One query for the whole page, not one per row.
+$actorGlobal = AccountGuard::actorIsGlobal();
+$singleOrg   = AccountGuard::isSingleOrganisation();
+$rowFacts    = AccountGuard::facts(array_map(static fn (array $u): int => (int) $u['userID'], $users), Site::id());
 
 // 📋 Fetch all roles for the role assignment checkboxes
 $allRoles = [];
@@ -232,6 +267,20 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         $isAdmin  = $user['isAdmin'] === '1' || (int) $user['isAdmin'] === 1;
         $isRoot   = $user['isRootAdmin'] === '1' || (int) $user['isRootAdmin'] === 1;
         $roles    = $userRoles[$uid] ?? [];
+        // 🛡️ #518: the same rule the save handler enforces, worked out
+        //    here purely to decide what to DRAW — this class's own
+        //    docblock is explicit that it never decides who may open a
+        //    page, only how far a change may reach once someone is
+        //    already on it. AccountGuard::REACH_ACCOUNT is used here
+        //    because it is the widest everyday change (name/email/
+        //    phone/password/active) — a row that shows an Edit button
+        //    here can always at least change SOMETHING on that account.
+        $rowVerdict = AccountGuard::decide(
+            $actorGlobal,
+            $rowFacts[$uid] ?? null,
+            AccountGuard::REACH_ACCOUNT,
+            $singleOrg
+        )['verdict'];
         ?>
         <div class="portal-data-row <?php echo $isActive === false ? 'opacity-50' : ''; ?>">
             <div class="col-12 col-md-3">
@@ -273,17 +322,27 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 <?php endif; ?>
             </div>
             <div class="col-12 col-md-2 text-md-end mt-2 mt-md-0">
-                <button class="btn btn-sm btn-outline-primary portal-edit-user-btn"
-                        data-bs-toggle="modal" data-bs-target="#editUserModal"
-                        data-uid="<?php echo $uid; ?>"
-                        data-fullname="<?php echo htmlspecialchars($user['fullName'] ?? '', ENT_QUOTES, 'UTF-8'); ?>"
-                        data-email="<?php echo htmlspecialchars($user['emailAddress'], ENT_QUOTES, 'UTF-8'); ?>"
-                        data-phone="<?php echo htmlspecialchars($user['phoneNumber'] ?? '', ENT_QUOTES, 'UTF-8'); ?>"
-                        data-active="<?php echo $isActive ? '1' : '0'; ?>"
-                        data-admin="<?php echo $isAdmin ? '1' : '0'; ?>"
-                        data-rootadmin="<?php echo $isRoot ? '1' : '0'; ?>">
-                    <i class="fa-solid fa-pen me-1"></i>Edit
-                </button>
+                <?php if ($rowVerdict === AccountGuard::ALLOW): ?>
+                    <button class="btn btn-sm btn-outline-primary portal-edit-user-btn"
+                            data-bs-toggle="modal" data-bs-target="#editUserModal"
+                            data-uid="<?php echo $uid; ?>"
+                            data-fullname="<?php echo htmlspecialchars($user['fullName'] ?? '', ENT_QUOTES, 'UTF-8'); ?>"
+                            data-email="<?php echo htmlspecialchars($user['emailAddress'], ENT_QUOTES, 'UTF-8'); ?>"
+                            data-phone="<?php echo htmlspecialchars($user['phoneNumber'] ?? '', ENT_QUOTES, 'UTF-8'); ?>"
+                            data-active="<?php echo $isActive ? '1' : '0'; ?>"
+                            data-admin="<?php echo $isAdmin ? '1' : '0'; ?>"
+                            data-rootadmin="<?php echo $isRoot ? '1' : '0'; ?>">
+                        <i class="fa-solid fa-pen me-1"></i>Edit
+                    </button>
+                <?php elseif ($rowVerdict === AccountGuard::GLOBAL_ONLY): ?>
+                    <!-- 🛡️ #518: this row is real (it belongs to this organisation, or this
+                         is a global administrator's own view), but only a global
+                         administrator may change it — see AccountGuard::message(). -->
+                    <span class="badge text-bg-light border" title="Only a global administrator can change this account">Changed by a global administrator</span>
+                <?php endif; ?>
+                <?php // A NOT_FOUND verdict here means the account changed between the
+                      // list query and this render (e.g. it was offboarded a moment
+                      // ago); drawing neither control is the safe, honest answer. ?>
             </div>
         </div>
     <?php endforeach; ?>
@@ -396,10 +455,16 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                 <input class="form-check-input" type="checkbox" name="isActive" value="1" id="add-active" checked>
                                 <label class="form-check-label" for="add-active">Active</label>
                             </div>
+                            <?php // 🛡️ #518: the portal-wide Admin box only reaches every
+                                  // organisation this account is ever added to, so only a
+                                  // global administrator is shown it — save.php refuses the
+                                  // change server-side too, even from a hand-made request. ?>
+                            <?php if (AccountGuard::actorIsGlobal() === true): ?>
                             <div class="form-check form-check-inline">
                                 <input class="form-check-input" type="checkbox" name="isAdmin" value="1" id="add-admin">
                                 <label class="form-check-label" for="add-admin">Admin</label>
                             </div>
+                            <?php endif; ?>
                             <?php if (App::isRootAdmin() === true): ?>
                             <div class="form-check form-check-inline">
                                 <input class="form-check-input" type="checkbox" name="isRootAdmin" value="1" id="add-root">
@@ -466,10 +531,13 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                 <input class="form-check-input" type="checkbox" name="isActive" value="1" id="edit-active">
                                 <label class="form-check-label" for="edit-active">Active</label>
                             </div>
+                            <?php // 🛡️ #518: see the matching comment above the Add dialog's Admin box. ?>
+                            <?php if (AccountGuard::actorIsGlobal() === true): ?>
                             <div class="form-check form-check-inline">
                                 <input class="form-check-input" type="checkbox" name="isAdmin" value="1" id="edit-admin">
                                 <label class="form-check-label" for="edit-admin">Admin</label>
                             </div>
+                            <?php endif; ?>
                             <?php if (App::isRootAdmin() === true): ?>
                             <div class="form-check form-check-inline">
                                 <input class="form-check-input" type="checkbox" name="isRootAdmin" value="1" id="edit-root">
@@ -498,7 +566,15 @@ editUserModal.addEventListener('show.bs.modal', function (event) {
     document.getElementById('edit-emailAddress').value  = btn.getAttribute('data-email');
     document.getElementById('edit-phoneNumber').value   = btn.getAttribute('data-phone');
     document.getElementById('edit-active').checked      = btn.getAttribute('data-active') === '1';
-    document.getElementById('edit-admin').checked       = btn.getAttribute('data-admin') === '1';
+    // 🛡️ #518: the Admin box (like the Root Admin box below it) is only
+    // drawn for a global administrator now. Without this null check, the
+    // WHOLE Edit dialog would throw and stop populating the moment a
+    // non-global administrator opened it, because the element simply
+    // does not exist on the page for them.
+    var adminEl = document.getElementById('edit-admin');
+    if (adminEl !== null) {
+        adminEl.checked = btn.getAttribute('data-admin') === '1';
+    }
     var rootEl = document.getElementById('edit-root');
     if (rootEl !== null) {
         rootEl.checked = btn.getAttribute('data-rootadmin') === '1';

@@ -13,16 +13,23 @@
  * sign-in attempt fails cleanly instead of crashing — see the matching
  * inactive-account guard in Auth::callbackMS365()/callbackGoogle() (#B7b).
  *
+ * #518 FIX (17 September 2026): App::isAdmin() plus the own-account check
+ * below let an administrator of ANY organisation offboard ANY account —
+ * deactivate it, wipe its passkeys, clear its password — with no check
+ * that the account belonged to their own organisation at all. Now goes
+ * through Portal\Core\AccountGuard first.
+ *
  * @package   Portal\Offboarding
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   0.2.0
+ * @version   0.3.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/240
  */
 
 declare(strict_types=1);
 
+use Portal\Core\AccountGuard;
 use Portal\Core\App;
 use Portal\Core\Auth;
 
@@ -55,6 +62,20 @@ if ($userId === $adminId) {
     $_SESSION['flash_msg']  = "You can't offboard your own account.";
     $_SESSION['flash_type'] = 'danger';
     header('Location: /admin/users');
+    exit();
+}
+
+// 🛡️ #518: for a non-global administrator, this has already confirmed the
+//    account has no membership row — active or ended — in any OTHER
+//    organisation, and is not a global or portal-wide administrator's
+//    account. Before this fix, a missing account number reached the
+//    database directly below and, depending on the row shape, could
+//    surface a raw database error instead of a clean message.
+$verdict = AccountGuard::check($userId, AccountGuard::REACH_ACCOUNT, 'offboard account #' . $userId);
+if ($verdict !== AccountGuard::ALLOW) {
+    $_SESSION['flash_msg']  = AccountGuard::message($verdict, AccountGuard::REACH_ACCOUNT);
+    $_SESSION['flash_type'] = 'danger';
+    header('Location: /offboarding');
     exit();
 }
 

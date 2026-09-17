@@ -3,12 +3,21 @@
 /**
  * Offboarding — list of recent offboarding actions (audit view).
  *
+ * #518 FIX (17 September 2026): App::isAdmin() alone let an administrator
+ * of ANY organisation see EVERY offboarding record on the whole
+ * installation, including who offboarded whom and why, for accounts that
+ * had nothing to do with their own organisation. The list is now scoped
+ * to accounts that belong (or used to belong — an OFFBOARDED person's
+ * membership is, by definition, usually ended) to the organisation that
+ * is open, via Portal\Core\AccountGuard::memberScopeSql().
+ *
  * @package   Portal\Offboarding
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/240
  */
 
 declare(strict_types=1);
 
+use Portal\Core\AccountGuard;
 use Portal\Core\App;
 use Portal\Core\Auth;
 
@@ -21,23 +30,38 @@ if (App::isAdmin() === false) {
 
 $db = App::db();
 
+// 🛡️ #518: `true` (includeEnded) is required here — an offboarded
+//    person's membership row is, in the ordinary case, exactly the ENDED
+//    row that offboarding itself just created. Scoping this list to only
+//    ACTIVE members would hide almost every record from the very
+//    organisation that made it.
+[$scopeSql, $scopeTypes, $scopeValues] = AccountGuard::memberScopeSql('o.userID', true);
+
 $rows = [];
-$rs = $db->query(
-    'SELECT o.offboardingID, o.userID, o.effectiveDate, o.reason, o.dataDisposition, '
+$listSql = 'SELECT o.offboardingID, o.userID, o.effectiveDate, o.reason, o.dataDisposition, '
     . '       o.offboardedAt, o.rehiredAt, '
     . '       u.fullName, u.emailAddress, '
     . '       b.fullName AS byName '
     . 'FROM tblOffboarding o '
     . 'JOIN tblUsers u ON u.userID = o.userID '
     . 'LEFT JOIN tblUsers b ON b.userID = o.offboardedByID '
-    . 'ORDER BY o.offboardedAt DESC LIMIT 100'
-);
-if ($rs !== false) {
+    . ($scopeSql !== '' ? 'WHERE ' . $scopeSql . ' ' : '')
+    . 'ORDER BY o.offboardedAt DESC LIMIT 100';
+$stmt = $db->prepare($listSql);
+if ($stmt !== false) {
+    if ($scopeSql !== '') {
+        $stmt->bind_param($scopeTypes, ...$scopeValues);
+    }
+    $stmt->execute();
+    $rs = $stmt->get_result();
     while ($r = $rs->fetch_assoc()) {
         $rows[] = $r;
     }
-    $rs->free();
+    $stmt->close();
 }
+// 🛡️ #518: if prepare() itself fails, $rows stays empty — the same
+//    "nothing to show" outcome the old $db->query() === false path gave,
+//    never a page error.
 
 $undoWindowDays = (int) (App::settings()['offboarding']['undo_window_days'] ?? 7);
 

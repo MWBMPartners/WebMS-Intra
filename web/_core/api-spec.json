@@ -947,7 +947,7 @@
           "isAdmin": {
             "type": "boolean",
             "default": false,
-            "description": "Portal-wide admin flag. Session mode only — silently ignored for bearer callers."
+            "description": "Administrator rights across the whole portal (every organisation). Honoured only for a signed-in (session) request from a global administrator; a session request from anyone else that would change it is refused with 403. Ignored for API-key requests."
           },
           "isSiteAdmin": {
             "type": "boolean",
@@ -957,7 +957,7 @@
       },
       "UserUpdate": {
         "type": "object",
-        "description": "Editable: fullName, isActive, isAdmin (session mode only), isSiteAdmin. Email address and password are excluded from v1 (silently ignored if present). A session caller can never deactivate their OWN account via this endpoint. Directory location fields are likewise excluded — see the `UserCreate` schema note (#456 Chunk B).",
+        "description": "Editable: fullName, isActive, isAdmin (session mode only), isSiteAdmin. Email address and password are excluded from v1 (silently ignored if present). A session caller can never deactivate their OWN account via this endpoint. Directory location fields are likewise excluded — see the `UserCreate` schema note (#456 Chunk B). Changing fullName or isActive on an account that belongs to a global administrator, has administrator rights across the whole portal, or also belongs (or used to belong) to another organisation is refused with 403 unless the caller is a global administrator using a signed-in session. Changing isSiteAdmin on a global administrator or a portal-wide administrator is refused the same way. An API key never counts as a global administrator.",
         "properties": {
           "fullName": {
             "type": "string",
@@ -968,7 +968,7 @@
           },
           "isAdmin": {
             "type": "boolean",
-            "description": "Portal-wide admin flag. Session mode only — silently ignored for bearer callers."
+            "description": "Administrator rights across the whole portal (every organisation). Honoured only for a signed-in (session) request from a global administrator; from anyone else a request asking for it is refused with 403. Ignored for API-key requests."
           },
           "isSiteAdmin": {
             "type": "boolean"

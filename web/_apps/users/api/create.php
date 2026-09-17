@@ -29,17 +29,26 @@
  * scope rather than under-validated): `isRootAdmin` / `isSiteRootAdmin`
  * (root-tier privilege escalation) and any password field.
  *
+ * -----------------------------------------------------------------------------
+ * #518 FIX (17 September 2026): `isAdmin` here reads exactly the same way
+ * `sessionNeedsAdmin` does — "any administrator of the organisation that
+ * is open", not "a global administrator" — so a session-mode SITE
+ * administrator could already mint a brand-new portal-wide administrator
+ * account from inside one organisation. Refused now unless the caller is
+ * a global administrator (Portal\Core\AccountGuard::actorIsGlobal()).
+ *
  * @package   Portal\API\Users
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   0.1.0
+ * @version   0.2.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/323
  * -----------------------------------------------------------------------------
  */
 
 declare(strict_types=1);
 
+use Portal\Core\AccountGuard;
 use Portal\Core\ApiAuth;
 use Portal\Core\ApiResponse;
 use Portal\Core\App;
@@ -48,6 +57,27 @@ use Portal\Core\Site;
 
 ApiAuth::requireMethod('POST');
 $body = ApiAuth::requireWrite('users:write', sessionNeedsAdmin: true);
+
+// 🛡️ #518: refused BEFORE any field validation, so the answer never
+//    depends on whether the rest of the request would otherwise have
+//    succeeded. Only a session request from a GLOBAL administrator may
+//    ask for the portal-wide isAdmin flag — a bearer key never reaches
+//    here at all (the condition below is always false for one, since
+//    ApiAuth::source() is only ever 'apikey' or 'session'), which matches
+//    isAdmin being silently ignored for bearer requests further down.
+if (ApiAuth::source() === 'session'
+    && array_key_exists('isAdmin', $body) === true
+    && (bool) $body['isAdmin'] === true
+    && AccountGuard::actorIsGlobal() === false
+) {
+    AccountGuard::logRefusal(
+        'API: create a new account with portal-wide administrator rights',
+        AccountGuard::GLOBAL_ONLY,
+        'portal_grant',
+        null
+    );
+    ApiResponse::error(AccountGuard::message(AccountGuard::GLOBAL_ONLY, AccountGuard::REACH_PORTAL), 403);
+}
 
 $db     = App::db();
 $siteId = Site::id();
@@ -86,9 +116,15 @@ $isActive    = array_key_exists('isActive', $body) === false || (bool) $body['is
 // 🛡️ tblUsers.isAdmin is the PORTAL-WIDE ("Legacy Admin") flag — App::isAdmin()
 //    returns true from it regardless of site. Granting it from an otherwise
 //    tenant-pinned, site-scoped endpoint would let a site-scoped bearer key mint
-//    a portal admin (#323 Phase 2 review). So honour isAdmin ONLY in session mode
-//    (the caller is already a global admin via sessionNeedsAdmin), never for a
-//    bearer key — which gets the SITE-scoped isSiteAdmin only.
+//    a portal admin (#323 Phase 2 review). So honoured ONLY in session mode,
+//    never for a bearer key — which gets the SITE-scoped isSiteAdmin only.
+//    `sessionNeedsAdmin` does NOT mean the caller is a global administrator —
+//    it means any administrator of the organisation that is open (#518). The
+//    block above this comment is what actually restricts this to a GLOBAL
+//    administrator; by the time execution reaches this line, either the body
+//    genuinely has no isAdmin=true request from a session caller, or that
+//    caller already passed the AccountGuard check — so this line just carries
+//    the already-authorised value forward.
 $isAdmin     = ApiAuth::source() === 'session'
     && array_key_exists('isAdmin', $body) === true && (bool) $body['isAdmin'] === true ? 1 : 0;
 $isSiteAdmin = array_key_exists('isSiteAdmin', $body) === true && (bool) $body['isSiteAdmin'] === true ? 1 : 0;

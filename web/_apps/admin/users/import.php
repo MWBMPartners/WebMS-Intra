@@ -9,17 +9,27 @@
  *
  * CSV columns: fullName, emailAddress, isAdmin (0/1, optional)
  *
+ * -----------------------------------------------------------------------------
+ * #518 FIX (17 September 2026): a CSV `isAdmin` column let any
+ * administrator import an account with the portal-wide isAdmin flag
+ * switched on — no different from setting it by hand on the Add User
+ * form, which #518 also closes. Only a global administrator (checked at
+ * BOTH preview time and import time, because the preview sits in the
+ * session and the person's rights could have changed since) may bring in
+ * a row asking for it.
+ *
  * @package   Portal\Admin
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   0.8.2
+ * @version   0.9.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/87
  * -----------------------------------------------------------------------------
  */
 
 declare(strict_types=1);
 
+use Portal\Core\AccountGuard;
 use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Logger;
@@ -109,9 +119,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                 continue;
                             }
 
-                            $name    = trim($row[$nameCol] ?? '');
-                            $email   = strtolower(trim($row[$emailCol] ?? ''));
-                            $isAdmin = ($adminCol !== false) ? (int) ($row[$adminCol] ?? 0) : 0;
+                            $name  = trim($row[$nameCol] ?? '');
+                            $email = strtolower(trim($row[$emailCol] ?? ''));
+                            // 🛡️ #518: exact-string '1' only, not a plain (int) cast — a cast
+                            //    would turn a value like "2" into 2, which would then be
+                            //    stored straight into a column that only ever means yes/no.
+                            $isAdmin = ($adminCol !== false && trim((string) ($row[$adminCol] ?? '')) === '1') ? 1 : 0;
 
                             $rowErrors = [];
                             if ($name === '') {
@@ -122,6 +135,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             }
                             if ($email !== '' && isset($existingEmails[$email]) === true) {
                                 $rowErrors[] = 'Email already exists';
+                            }
+                            // 🛡️ #518: the portal-wide isAdmin flag reaches every
+                            //    organisation this account is ever added to, so an import
+                            //    asking for it must come from a global administrator.
+                            if ($isAdmin === 1 && AccountGuard::actorIsGlobal() === false) {
+                                $rowErrors[] = 'Only a global administrator can create accounts with administrator rights across the whole portal. Remove the isAdmin value from this row, or ask a global administrator to import it.';
                             }
 
                             $preview[] = [
@@ -151,6 +170,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } else {
             $created = 0;
             $skipped = 0;
+            // 🛡️ #518: this is the BACKSTOP, not the main defence — the
+            //    preview step above already marks an isAdmin=1 row invalid
+            //    for anyone who is not a global administrator. This second
+            //    check exists because a preview sits in the SESSION between
+            //    the two steps, so the person's rights could have changed
+            //    in between, and a preview built on a copy of this page
+            //    from before this fix shipped would never have been
+            //    checked at all.
+            $actorGlobal   = AccountGuard::actorIsGlobal();
+            $refusedPortal = 0;
 
             // Note: tblUsers has NO siteID column — multi-site assignment is
             // via tblUserSites (inserted below). An earlier version of this
@@ -173,6 +202,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         continue;
                     }
 
+                    // 🛡️ #518 backstop (see the comment above the loop) —
+                    //    re-checked here, at IMPORT time, not just preview
+                    //    time.
+                    if ((int) $row['isAdmin'] === 1 && $actorGlobal === false) {
+                        $row['result'] = 'Skipped: only a global administrator can create accounts with administrator rights across the whole portal';
+                        $skipped++;
+                        $refusedPortal++;
+                        continue;
+                    }
+
                     $insertStmt->bind_param('ssi', $row['name'], $row['email'], $row['isAdmin']);
 
                     try {
@@ -190,6 +229,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 unset($row);
                 $insertStmt->close();
                 $siteStmt->close();
+            }
+
+            // 🛡️ #518: one security record for the whole import, not one per
+            //    refused row — the account numbers do not exist yet, so
+            //    there is nothing to name, and a bulk import commonly
+            //    produces the same refusal many times over.
+            if ($refusedPortal > 0) {
+                AccountGuard::logRefusal(
+                    'import ' . $refusedPortal . ' account(s) with portal-wide administrator rights',
+                    AccountGuard::GLOBAL_ONLY,
+                    'portal_grant',
+                    null
+                );
             }
 
             $results = $preview;

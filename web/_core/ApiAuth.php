@@ -178,7 +178,7 @@ final class ApiAuth
      * Terminates 401/403/429 on failure.
      *
      * @param string $scope             The resource:read scope the key must hold.
-     * @param bool   $sessionNeedsAdmin Session-mode reads that are admin-only.
+     * @param bool   $sessionNeedsAdmin Session-mode reads that are admin-only. This means any administrator of the organisation that is open (`App::isAdmin()`), and a site administrator counts. It is NOT a check for a global administrator; use `App::isRootAdmin()` or `AccountGuard::actorIsGlobal()` for that (#518).
      *
      * @return void
      */
@@ -206,7 +206,7 @@ final class ApiAuth
      * Terminates 401/403/429 on failure.
      *
      * @param string $scope             The resource:write scope the key must hold.
-     * @param bool   $sessionNeedsAdmin Session-mode writes that require admin (default true).
+     * @param bool   $sessionNeedsAdmin Session-mode writes that require admin (default true). This means any administrator of the organisation that is open (`App::isAdmin()`), and a site administrator counts. It is NOT a check for a global administrator; use `App::isRootAdmin()` or `AccountGuard::actorIsGlobal()` for that (#518).
      *
      * @return array<string,mixed> The decoded JSON request body ([] when absent/invalid).
      */

@@ -16,11 +16,17 @@
  * in the invite's site rather than session key `site_id` that Site::id()
  * never reads.
  *
+ * #518 FIX (17 September 2026): an "admin" invitation used to set the
+ * new account's PORTAL-WIDE isAdmin flag — a full takeover of every
+ * organisation on the installation, from a single accepted invitation.
+ * It now sets isSiteAdmin on the membership row for the invitation's own
+ * organisation only.
+ *
  * @package   Portal\Invites
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   0.2.1
+ * @version   0.3.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/239
  * -----------------------------------------------------------------------------
  */
@@ -107,27 +113,39 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             try {
                 $db->begin_transaction();
 
-                // Create user
+                // 🛡️ #518: role "admin" used to give the new account the
+                //    PORTAL-WIDE isAdmin flag — administrator of EVERY
+                //    organisation on the installation, not only the one
+                //    that sent the invitation (proven on a real database
+                //    while investigating #518). It now makes the person an
+                //    administrator of THIS organisation only, via the
+                //    site-scoped isSiteAdmin flag on their membership row.
+                //    This also covers an invitation that was SENT before
+                //    this fix shipped and is only now being accepted —
+                //    deliberate, since intendedRole is read fresh here, at
+                //    acceptance time, not frozen at send time.
                 $intendedRole = (string) ($invite['intendedRole'] ?? 'user');
-                $isAdmin = ($intendedRole === 'admin' ? 1 : 0);
                 $stmt = $db->prepare(
                     'INSERT INTO tblUsers (fullName, emailAddress, isActive, isAdmin) '
-                    . 'VALUES (?, ?, 1, ?)'
+                    . 'VALUES (?, ?, 1, 0)'
                 );
                 if ($stmt === false) {
                     throw new \RuntimeException('User prepare failed');
                 }
-                $stmt->bind_param('ssi', $name, $invite['email'], $isAdmin);
+                $stmt->bind_param('ss', $name, $invite['email']);
                 $stmt->execute();
                 $newUserId = (int) $stmt->insert_id;
                 $stmt->close();
 
-                // Site membership (tblUserSites)
+                // Site membership (tblUserSites) — isSiteAdmin=1 only for
+                // an "admin" invitation, and only for THIS site.
+                $isSiteAdmin = ($intendedRole === 'admin') ? 1 : 0;
+                $inviteSiteId = (int) $invite['siteID'];
                 $stmt = $db->prepare(
-                    'INSERT INTO tblUserSites (userID, siteID, isActive) VALUES (?, ?, 1)'
+                    'INSERT INTO tblUserSites (userID, siteID, isSiteAdmin, isActive) VALUES (?, ?, ?, 1)'
                 );
                 if ($stmt !== false) {
-                    $stmt->bind_param('ii', $newUserId, $invite['siteID']);
+                    $stmt->bind_param('iii', $newUserId, $inviteSiteId, $isSiteAdmin);
                     $stmt->execute();
                     $stmt->close();
                 }

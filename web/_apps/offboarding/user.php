@@ -3,12 +3,20 @@
 /**
  * Offboarding — confirmation page for a single user (admin-only).
  *
+ * #518 FIX (17 September 2026): App::isAdmin() alone let an administrator
+ * of any organisation reach the offboard confirmation for ANY account.
+ * The page now asks Portal\Core\AccountGuard both whether this account
+ * may be SEEN here at all, and (separately) whether it may actually be
+ * offboarded — a global administrator's account can be seen, but only a
+ * global administrator can offboard it.
+ *
  * @package   Portal\Offboarding
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/240
  */
 
 declare(strict_types=1);
 
+use Portal\Core\AccountGuard;
 use Portal\Core\App;
 use Portal\Core\Auth;
 
@@ -26,6 +34,14 @@ if ($userId <= 0) {
     exit();
 }
 
+// 🛡️ #518: a missing account and one that belongs to another
+//    organisation must look identical here — a plain 404, exactly as an
+//    unknown id already did before this fix.
+if (AccountGuard::check($userId, AccountGuard::REACH_VIEW, 'open the offboarding page for account #' . $userId) !== AccountGuard::ALLOW) {
+    http_response_code(404);
+    exit('User not found');
+}
+
 $u = null;
 $stmt = $db->prepare('SELECT userID, fullName, emailAddress, isActive FROM tblUsers WHERE userID = ? LIMIT 1');
 if ($stmt !== false) {
@@ -39,6 +55,12 @@ if ($u === null) {
     exit('User not found');
 }
 
+// 🛡️ #518: this is the SEPARATE, narrower question — not "can this
+//    administrator see this account" (already answered above) but "may
+//    they actually offboard it". A global administrator's own account,
+//    for instance, can be seen here but not offboarded by anyone else.
+$canOffboard = (AccountGuard::verdict($userId, AccountGuard::REACH_ACCOUNT) === AccountGuard::ALLOW);
+
 $pageTitle   = 'Offboard ' . $u['fullName'];
 $pageSection = 'offboarding';
 $breadcrumbs = ['Dashboard' => '/', 'Admin' => '/admin', 'Users' => '/admin/users', 'Offboard' => ''];
@@ -48,6 +70,7 @@ $csrf = Auth::csrfToken();
 
 <h1 class="mb-3"><i class="fa-solid fa-door-open me-2 text-danger"></i>Offboard <?php echo htmlspecialchars((string) $u['fullName'], ENT_QUOTES, 'UTF-8'); ?></h1>
 
+<?php if ($canOffboard === true): ?>
 <div class="alert alert-warning">
     <strong>Offboarding will:</strong>
     <ul class="mb-0">
@@ -93,5 +116,14 @@ $csrf = Auth::csrfToken();
         </div>
     </div>
 </form>
+<?php else: ?>
+<!-- 🛡️ #518: this account can be SEEN by this administrator, but not
+     offboarded by them — e.g. it belongs to a global administrator, or
+     to another organisation too. No form is drawn at all. -->
+<div class="alert alert-info">
+    <?php echo htmlspecialchars(AccountGuard::message(AccountGuard::GLOBAL_ONLY, AccountGuard::REACH_ACCOUNT), ENT_QUOTES, 'UTF-8'); ?>
+    <a href="/offboarding">Back to offboarding</a>
+</div>
+<?php endif; ?>
 
 <?php require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'footer.php'; ?>

@@ -4,6 +4,12 @@
  * Invite Onboarding — POST handler. Issues one invitation per email address,
  * stores SHA-256 hash, sends invite email when Mailer is configured.
  *
+ * #518 FIX (17 September 2026): the `role` field this page accepted was
+ * never checked against the four roles the New Invitation form actually
+ * offers — see invites/accept.php's matching fix for why that mattered:
+ * any text stored here decided whether the accepted invitation carried
+ * administrator rights.
+ *
  * @package   Portal\Invites
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/239
  */
@@ -31,6 +37,14 @@ $userId = (int) ($_SESSION['user_id'] ?? 0);
 
 $emailsRaw = (string) ($_POST['emails'] ?? '');
 $role      = (string) ($_POST['role'] ?? 'user');
+// 🛡️ #518: any text used to be stored here, and that value decides
+//    whether an accepted invitation carries administrator rights
+//    (invites/accept.php). Restricted to exactly the four roles the New
+//    Invitation form itself offers — a hand-made request asking for
+//    anything else quietly becomes an ordinary "user" invite instead.
+if (in_array($role, ['user', 'volunteer', 'staff', 'admin'], true) === false) {
+    $role = 'user';
+}
 $days      = max(1, min(90, (int) ($_POST['expiryDays'] ?? 7)));
 $message   = trim((string) ($_POST['welcomeMessage'] ?? ''));
 

@@ -8,12 +8,20 @@
  * trail of all DBS checks per user). The DBS list reads the latest row via
  * a window query.
  *
+ * #518 FIX (17 September 2026): App::isAdmin() plus "does the account
+ * exist and is it active" let an administrator of ANY organisation record
+ * a DBS safeguarding check — a confidential record — against ANY
+ * account. tblDbsChecks has no organisation column of its own; it is now
+ * guarded by Portal\Core\AccountGuard reading the account's OWN
+ * organisation membership instead.
+ *
  * @link https://github.com/MWBMPartners/webMS-Intra/issues/310
  * -----------------------------------------------------------------------------
  */
 
 declare(strict_types=1);
 
+use Portal\Core\AccountGuard;
 use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Logger;
@@ -44,7 +52,20 @@ if ($userId <= 0
     header('Location: /admin/safeguarding/dbs', true, 302); exit();
 }
 
-// 🛡️ Confirm target user exists.
+// 🛡️ #518: tblDbsChecks has no organisation column of its own — a DBS
+//    check is only ever "for this organisation" through the account it
+//    names, so AccountGuard reads that account's own membership.
+$verdict = AccountGuard::check($userId, AccountGuard::REACH_ACCOUNT, 'record a DBS check for account #' . $userId);
+if ($verdict === AccountGuard::NOT_FOUND) {
+    http_response_code(404); exit('User not found');
+}
+if ($verdict !== AccountGuard::ALLOW) {
+    $_SESSION['flash_msg']  = AccountGuard::message($verdict, AccountGuard::REACH_ACCOUNT);
+    $_SESSION['flash_type'] = 'danger';
+    header('Location: /admin/safeguarding/dbs', true, 302); exit();
+}
+
+// 🛡️ Confirm target user exists and is active.
 $stmt = $mysqli->prepare('SELECT userID FROM tblUsers WHERE userID = ? AND isActive = 1');
 $stmt->bind_param('i', $userId);
 $stmt->execute();

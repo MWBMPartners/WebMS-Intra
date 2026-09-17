@@ -13,17 +13,24 @@
  * Admin can record a new DBS check (or supersede an old row) from a
  * compact inline form.
  *
+ * #518 FIX (17 September 2026): the list used to show every active
+ * account on the whole installation, with its confidential safeguarding
+ * status, to any administrator. It is now scoped to accounts that belong
+ * to the organisation that is open, via
+ * Portal\Core\AccountGuard::memberScopeSql().
+ *
  * @package   Portal\Admin
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.0.0
+ * @version   1.1.0
  * @link      https://github.com/MWBMPartners/webMS-Intra/issues/310
  * -----------------------------------------------------------------------------
  */
 
 declare(strict_types=1);
 
+use Portal\Core\AccountGuard;
 use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Logger;
@@ -38,6 +45,13 @@ Logger::activity('SafeguardingDbsList', 'Admin viewed DBS list');
 $warningDays = (int) Settings::get('safeguarding.dbs_renewal_warning_days', '90');
 $requireForCoords = (string) Settings::get('safeguarding.dbs_required_for_coordinators', '0');
 
+// 🛡️ #518: limit the list, for a non-global administrator on a
+//    multi-organisation installation, to accounts that are active
+//    members of THIS organisation. tblDbsChecks has no organisation
+//    column of its own, so this is enforced through tblUsers/
+//    tblUserSites, the same as the save handler above.
+[$scopeSql, $scopeTypes, $scopeValues] = AccountGuard::memberScopeSql('u.userID');
+
 // 📋 Per-user latest DBS status. LEFT JOIN ensures users with no DBS row
 //     still appear (as Missing).
 $users = [];
@@ -51,9 +65,18 @@ $sql = 'SELECT u.userID, u.fullName, u.emailAddress AS email, '
      . '    ) d2 ON d1.dbsCheckID = d2.latest '
      . ') d ON d.userID = u.userID '
      . 'WHERE u.isActive = 1 '
+     . ($scopeSql !== '' ? 'AND ' . $scopeSql . ' ' : '')
      . 'ORDER BY u.fullName ASC';
-$result = $mysqli->query($sql);
-while ($r = $result->fetch_assoc()) { $users[] = $r; }
+$stmt = $mysqli->prepare($sql);
+if ($stmt !== false) {
+    if ($scopeSql !== '') {
+        $stmt->bind_param($scopeTypes, ...$scopeValues);
+    }
+    $stmt->execute();
+    $result = $stmt->get_result();
+    while ($r = $result->fetch_assoc()) { $users[] = $r; }
+    $stmt->close();
+}
 
 $pageTitle = 'DBS Safeguarding';
 $csrf = htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8');
