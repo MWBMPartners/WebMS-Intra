@@ -2,6 +2,49 @@
 
 
 ## [Unreleased] (alpha)
+- fix(calendar,security): the public "no login" check-in page showed the
+  name and date of every published INTERNAL event to anyone who was signed
+  out, and let them add a check-in against it — event numbers count up from
+  1, so anyone could simply walk through them (#519). `/attend` and
+  `/attend/save` (`web/_apps/calendar/anon-checkin.php` and
+  `anon-checkin-save.php`) used to look an event up with only "belongs to
+  this organisation, not deleted, published" and never asked whether it was
+  PUBLIC. Now a public event stays open to everyone as before; an internal
+  event needs a real, active member of that event's own organisation, a
+  global root administrator, or — on a single-organisation installation
+  only — an account with no switched-off membership row. Everybody else,
+  a signed-in member of a DIFFERENT organisation included, gets exactly
+  the same "Event not found." as a made-up event number, the same
+  timing-safe shape #503 already gave four other calendar handlers. The
+  save handler also gained a rate limit that did not exist before: 300
+  check-ins per 5 minutes per internet connection per event (generous on
+  purpose — a whole congregation on one venue's wifi is one connection),
+  a new setting (`attend.rateLimit.max`/`windowSeconds`, migration 197),
+  0 switches it off. Also fixed in the same pass, found by the sweep this
+  fix required (#520 asked for it): `Events::promoteFromWaitlist()`
+  (`web/_core/Events.php`) selected a column called `email` from
+  `tblUsers`, which has never existed — the real name is `emailAddress` —
+  so every single call threw, was silently caught, rolled back and logged
+  one line nobody reads, meaning **nobody has ever been moved up a
+  waiting list** since the feature shipped. Two more, found by the same
+  sweep and fixed alongside it because leaving a known crash next door
+  was the wrong call: the Live Chat moderation queue
+  (`web/_apps/admin/live/chat.php`) selected `flaggedReason`, which is
+  really `flagReason`, so the whole queue 500'd every time it was opened;
+  and the Leadership API (`web/_apps/leadership/api/list.php`) selected
+  `assignedAt`, a column `tblLeadershipAssignments` has never had —
+  fixed to `startDate` (when the person actually started; `createdAt`
+  would have read as a start date and been wrong), the endpoint had
+  never worked at all. `tools/audit-checks/check_sql_columns.py` can now
+  also read a JOINed SELECT's `alias.column` names (never a bare name —
+  still too ambiguous), which is precisely what found the `u.email` and
+  `assignedAt` faults automatically; measured on the real tree with zero
+  false alarms, and it does NOT catch `flaggedReason` (that statement's
+  column list holds a quoted value before FROM, an existing, documented
+  blind spot). Neither this fix nor #519 makes the anonymous check-in
+  counts appear anywhere — they are still recorded and read by nothing,
+  which is unchanged, deliberate, and raised separately for whoever picks
+  up #525.
 - fix(routing): four faults fixed, none of them the fault its issue title
   said — all four were found by checking the code itself, not by trusting
   the report. Two of them share one cause: `web/public_html/.htaccess`

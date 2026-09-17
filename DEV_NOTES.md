@@ -1826,6 +1826,55 @@ the column under its own unqualified name either way. See
 table whose name embeds `GROUP`/`ORDER`/`LIMIT`/`WHERE` as a bare substring
 right after `tbl` — check new table names against this before aliasing them.
 
+### `check_sql_columns.py` can now read a JOINed SELECT's `alias.column` names (#519/#520)
+
+Before 17 September 2026 this checker gave up completely on any SELECT with a
+JOIN or a short table alias — a **bare** column name in a joined statement
+could belong to either table, and guessing would make the checker cry wolf
+and get switched off, so it skipped the whole statement (counted under
+"skipped — join or table alias present").
+
+That was too cautious for one common case: a name written as
+`shortname.column` says exactly which table it belongs to. Nothing has to be
+guessed. `Events::promoteFromWaitlist()` selected `u.email` from a
+`JOIN tblUsers u`; `tblUsers` has never had a column called that — the real
+name is `emailAddress`. The query threw on every call, was silently caught,
+rolled back and logged one line nobody reads, so **the waiting-list feature
+has been completely dead since it shipped, and nothing on screen ever said
+so** (#520). The checker's own bare-name scan could never have caught this —
+`u.email` sits in a two-table JOIN — which is exactly the gap this closes.
+
+**What it does now:** of the statements it still skips as "join or alias",
+those that name at least one `alias.column` get a SECOND, narrower reading —
+only qualified names, never bare ones. Measured on the real tree: 2,739
+`alias.column` names checked, 0 false alarms, and it found both `u.email`
+(#520) and a second real fault it turned up along the way, the Leadership
+API's `a.assignedAt` (`tblLeadershipAssignments` has no such column — see the
+CHANGELOG entry for both fixes).
+
+**What it still cannot do** — read the full account in the script's own
+header ("THE SELECT-ALIAS READING") before touching this again:
+- A statement whose column list holds a quoted value before `FROM` (e.g.
+  `COALESCE(e.eventName, "— no event —")`) is not recognised **at all**, so
+  this reading never even sees it. This is why it did **not** catch
+  `admin/live/chat.php`'s real, live `m.flaggedReason` fault — that one was
+  found by hand during the same sweep and fixed in the same commit, but the
+  checker still cannot see that shape.
+- A bare column name in a joined statement is still not read — unchanged.
+- Column names are compared **without regard to case**, because MySQL
+  compares them that way (proved: `SELECT d.FILENAME FROM tblDocuments d`
+  runs fine even though the schema spells it `fileName`). Comparing
+  case-sensitively was tried first and immediately cried wolf on that real,
+  correct query — do not "tidy" this back to a case-sensitive compare.
+- An unresolvable short name (one the statement itself never declared) is
+  skipped and counted, never reported — reporting it would risk accusing a
+  correct column of a table this reading could not identify.
+
+There is no self-test file dedicated to `check_sql_columns.py` — see the
+script's header for why (it follows its own established practice of a small
+throwaway fixture file per new rule, run once and deleted, rather than a
+permanent fixture suite).
+
 ---
 
 ## File Structure Quick Reference

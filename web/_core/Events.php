@@ -134,8 +134,21 @@ class Events
             // into an array up front so promoting one row's status mid-loop
             // can't disturb the cursor for the rest.
             $candidates = [];
+            // ⚠️ WHAT WAS WRONG HERE, AND WHY IT MATTERED (#520)
+            // `tblUsers` has never had a column called `email` — the real
+            // name is `emailAddress`. This SELECT threw ERROR 1054 "Unknown
+            // column 'u.email'" on every single call, because the portal
+            // runs mysqli in strict mode (bootstrap.php). The whole method
+            // is wrapped in a try/catch that rolls back and logs one line to
+            // the PHP error log (see the catch below) and returns 0 — so
+            // waitlist promotion has been COMPLETELY DEAD since it shipped:
+            // nobody was ever moved up, nobody was ever emailed, and nothing
+            // on screen ever said so; the caller (rsvp.php) just shows its
+            // ordinary "RSVP cancelled" flash regardless. `AS email` is kept
+            // on purpose so `$c['email']` further down (the confirmation
+            // email step) needs no change at all.
             $stmt = $db->prepare(
-                'SELECT r.rsvpID, r.userID, r.guestCount, u.email, u.fullName '
+                'SELECT r.rsvpID, r.userID, r.guestCount, u.emailAddress AS email, u.fullName '
                 . 'FROM tblEventRSVPs r '
                 . 'JOIN tblUsers u ON u.userID = r.userID '
                 . 'WHERE r.eventID = ? AND r.siteID = ? AND r.response = "going" AND r.status = "waitlist" '

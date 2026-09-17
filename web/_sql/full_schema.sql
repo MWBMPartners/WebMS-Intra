@@ -8756,3 +8756,23 @@ COMMENT='Every row the Demo Data page created, so Wipe removes exactly those (#4
 
 INSERT INTO `tblMigrations` (`filename`) VALUES ('194_demo_data_register.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- ── from 197_attend_rate_limit.sql (#519) ────────────────────────────────────
+-- A rate limit on the public "no login" check-in page (/attend/save). Two
+-- settings only, no tables, no columns. Default 300 check-ins per 300
+-- seconds PER INTERNET CONNECTION PER EVENT — generous on purpose, because a
+-- whole congregation on a venue's own wifi is ONE connection and therefore
+-- one bucket; a tighter number would refuse a genuine latecomer at a busy
+-- door. Setting attend.rateLimit.max to '0' switches the limit off. It
+-- cannot stop somebody spread across many events or many addresses, and
+-- cannot tell one person at a venue from another when they share the
+-- venue's connection — it only makes a bulk flood slow, not impossible. The
+-- migration file carries the fuller explanation, including why the default
+-- was raised from an earlier, tighter draft.
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'attend.rateLimit.max',           '500', '500', 0),
+    (NULL, 'attend.rateLimit.windowSeconds', '300', '300', 0)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('197_attend_rate_limit.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;

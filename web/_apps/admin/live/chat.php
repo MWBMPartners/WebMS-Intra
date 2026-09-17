@@ -37,9 +37,17 @@ $siteId = Site::id();
 //    for the active site, newest first. Include event name + moderator if
 //    set (history shown after action).
 $queue = [];
+// ⚠️ WHAT WAS WRONG HERE (found by the #519/#520 sweep of every `alias.
+// column` reference against the real schema): `tblLiveChatMessages` has no
+// column called `flaggedReason` — it is `flagReason`. Every call to this
+// page threw ERROR 1054 "Unknown column 'm.flaggedReason'" and answered
+// HTTP 500, so the moderation queue has never rendered since it shipped.
+// `AS flaggedReason` is kept on purpose so the PHP further down
+// ($m['flaggedReason'], used to show the flag reason on a flagged message)
+// needs no change at all.
 $stmt = $mysqli->prepare(
     'SELECT m.messageID, m.eventID, m.displayName, m.body, m.status, '
-    . '       m.flaggedReason, m.senderIP, m.createdAt, '
+    . '       m.flagReason AS flaggedReason, m.senderIP, m.createdAt, '
     . '       COALESCE(e.eventName, "— no event —") AS eventName '
     . 'FROM tblLiveChatMessages m '
     . 'LEFT JOIN tblEvents e ON e.eventID = m.eventID '

@@ -14,10 +14,16 @@ WHERE clauses (added after two more real misses — see the "WHERE-clause
 columns" section below for the full story): this check now also reads the
 columns a SELECT, UPDATE or DELETE statement tests IN ITS WHERE clause, not
 just the columns it writes (INSERT/UPDATE) or reads back (SELECT's own
-column list). It can only do this for the plain, single-table shape — one
-table, no JOIN, no alias, no sub-query — because with more than one table
-in play a bare column name could belong to either side, and guessing would
-turn this into the kind of check that cries wolf and gets switched off.
+column list). For a BARE column name (`WHERE status = ?`) it can only do
+this for the plain, single-table shape — one table, no JOIN, no alias, no
+sub-query — because with more than one table in play a bare column name
+could belong to either side, and guessing would turn this into the kind of
+check that cries wolf and gets switched off. A name written as
+`alias.column` is different — it says exactly which table it means, so a
+JOIN or a short alias no longer has to rule it out. Since 17 September 2026
+(#519/#520) a joined SELECT's `alias.column` names ARE read this way — see
+"THE SELECT-ALIAS READING" in the blind-spot list below for exactly what
+that does and does not cover.
 
 Every place it is blind, in one list. Each was reproduced with a small
 test file, and the first two were checked against the two real faults
@@ -682,6 +688,96 @@ and web/_apps/tasks/api/list.php, read via `git show`):
      On 14 September 2026 every statement those two scans read on the real
      tree started its PHP string, followed "(" or followed UNION, so the test
      skipped none of them.
+
+THE SELECT-ALIAS READING (added 17 September 2026, for #519/#520): a SECOND,
+narrower reading of exactly the SELECT statements blind spot 4 above gives up
+on — the ones with a JOIN, a list of tables, or a short table alias, where a
+BARE column name is genuinely ambiguous and stays unread. A name written as
+`shortname.column`, though, says exactly which table it means; nothing has
+to be guessed. This reading checks only THOSE names, using the very
+`by_alias` map `parse_from_tables()` already built for the DELETE check
+higher up in this same script (the SELECT WHERE scan was already calling
+that function for its own unknown-table check — see the surrounding code —
+this reading is one small addition on top, not a second parser).
+
+  * How it got here: while planning #519 and #520, the question was asked
+    plainly — can this check be taught to read a joined SELECT's qualified
+    names at all, safely, without turning it into the kind of check that
+    cries wolf and gets switched off? A throwaway prototype answered yes,
+    reusing every one of this script's own functions (build_schema_map(),
+    reconstruct_php_strings(), sql_regions(), strip_php_comments(),
+    live_matches(), SELECT_TAIL_RE, reread_without_comments(),
+    follows_non_sql_text(), parse_from_tables() and QUALIFIED_COL_RE), run
+    over web/_apps, web/_core and web/public_html on the committed code: of
+    1,191 recognised SELECT statements, 411 had at least one resolvable
+    short name, 3,738 alias.column names were found in them, 313 could not
+    be resolved to a declared short name and were skipped, 3,425 were
+    actually checked, and exactly 2 were reported — both real, live faults
+    (Events.php's `u.email`, #520, and the leadership API's
+    `a.assignedAt`) — with ZERO false alarms. That is the design kept here.
+  * Rule 1 — only `alias.column` is read. A bare column name in the same
+    statement is STILL not read, for the reason blind spot 4 gives; this
+    reading adds coverage, it does not remove the caution the bare-name scan
+    already applies.
+  * Rule 2 — a statement is skipped ENTIRELY (this reading never runs at
+    all) when any name in its FROM/JOIN part is not a real table. That is
+    the existing `unknown_tables` guard a few lines above this reading in
+    scan_php_inserts(), which already runs and `continue`s before this
+    reading is ever reached — no separate check was needed for it.
+  * Rule 3 — column names are compared WITHOUT REGARD TO CASE. Proved on
+    MySQL 8.0.36: `SELECT d.FILENAME FROM tblDocuments d` runs perfectly
+    even though the schema spells the column `fileName` — MySQL column
+    names are case-insensitive. The FIRST version of this prototype
+    compared case-sensitively and reported that correct query
+    (`web/_apps/documents/api/list.php`) as a fault. Comparing without
+    regard to case removed it, with the 2 genuine findings above unchanged.
+    Any future edit that starts comparing case-sensitively again WILL cry
+    wolf on that same file, which is exactly the failure the rest of this
+    script goes to such lengths everywhere else to avoid.
+  * Rule 4 — an unresolvable short name (one the statement's own FROM/JOIN
+    part never declared) is SKIPPED AND COUNTED, never reported. Reporting
+    it would risk accusing a perfectly correct column belonging to a table
+    this reading simply could not identify — for instance, a qualifier that
+    is the statement's own FULL table name rather than a declared alias
+    (`SELECT title FROM tblTasks WHERE tblTasks.title = ?`) is never added
+    to `by_alias` by parse_from_tables() (see blind spot 16), so it is
+    skipped here too, exactly as the rest of this script already treats
+    that shape.
+  * What it reads: the WHOLE recognised statement text (`full`, from
+    SELECT to the point SELECT_TAIL_RE stops), not only the WHERE clause —
+    so a qualified name in an ORDER BY, a JOIN ... ON, or the SELECT
+    column list itself is checked too, not just one in the WHERE. This is
+    deliberately broader than the bare-name WHERE scans elsewhere in this
+    script, and it is safe here because `alias.column` names its table
+    directly rather than leaving it to be inferred from position.
+  * What it STILL cannot do, each proved by trying it and NOT closing it
+    (the same discipline as every numbered blind spot above):
+      - a statement whose column list holds a quoted value before FROM is
+        not recognised BY SELECT_TAIL_RE AT ALL, so this reading never
+        even sees it — this is blind spot 3, unchanged, and it is why
+        admin/live/chat.php's real `m.flaggedReason` fault (found by hand,
+        not by this reading, during the #519/#520 sweep) is not reported
+        by this check: that statement's column list holds
+        `COALESCE(e.eventName, "— no event —")`, and the double quote ends
+        SELECT_TAIL_RE's reading before it ever reaches FROM.
+      - a bare column name in a joined statement is unchanged — still not
+        read (blind spot 4).
+      - a quoted VALUE elsewhere in the recognised text that happens to
+        contain a dot between two word characters (an email address in a
+        default value, for instance) could in principle be matched by
+        QUALIFIED_COL_RE and, if its left-hand side happened to coincide
+        with a declared short name, be checked against the wrong table.
+        This was not observed anywhere on the real tree when this reading
+        was written (0 false alarms across 3,425 checks) and is noted here
+        because it was reasoned about, not because it was seen — the same
+        standard blind spot 17's own notes hold to.
+  * Coverage: printed by print_where_coverage() in ITS OWN block, separate
+    from the select_where_*/update_where_* arithmetic that must sum exactly
+    to "found" — a statement can legitimately be counted BOTH as "skipped —
+    join or alias" there AND under this reading, because this is a second
+    pass over exactly those skipped statements, not a different population.
+    Folding the two together would make a single statement count twice
+    toward one total and break the sum the assert in that function checks.
 
 Blind spots 4 (a short name after something the pattern cannot read), 6,
 9, 12 (a "where" in ordinary text joined after an UPDATE's SET part, the
@@ -2705,6 +2801,27 @@ def scan_php_inserts(
         "update_where_skipped_subquery": 0,
         "update_where_skipped_unknown_table": 0,
         "update_where_not_reached": 0,
+        # ── SELECT-ALIAS (added for #519/#520 — see the header's "SELECT-ALIAS
+        # reading" section for the full account). These four are DELIBERATELY
+        # NOT part of the select_where_* add-up above: a statement can be
+        # counted BOTH as "skipped — join or alias" there AND here, because
+        # this is a second, narrower pass over exactly those skipped
+        # statements, not a different population of them.
+        "select_qualified_statements": 0,  # of the join/alias-skipped statements, how many named at least one alias.column
+        "select_qualified_found": 0,       # every alias.column name found in those statements
+        "select_qualified_checked": 0,     # of those, how many resolved to a known table and were actually checked
+        "select_qualified_unresolved": 0,  # of those, how many named a short name this statement never declared (skipped, not reported)
+    }
+    # Column names compared WITHOUT REGARD TO CASE in the SELECT-ALIAS reading
+    # below, because MySQL itself compares them that way — proved on MySQL
+    # 8.0.36: `SELECT d.FILENAME FROM tblDocuments d` runs perfectly even
+    # though the schema spells the column `fileName`. Comparing case-
+    # sensitively would have reported that CORRECT query as a fault, which is
+    # exactly the "cries wolf" failure this whole script exists to avoid (see
+    # the header). Built once here, not once per statement, since the schema
+    # itself never changes during a single run of this script.
+    schema_lower: dict[str, set[str]] = {
+        t: {c.lower() for c in cols} for t, cols in schema.items()
     }
     for root in PHP_ROOTS:
         if not root.exists():
@@ -2956,7 +3073,7 @@ def scan_php_inserts(
                     coverage["select_where_skipped_subquery"] += 1
                     continue
 
-                tables, _by_alias, unknown_tables = parse_from_tables(names_part, schema)
+                tables, by_alias, unknown_tables = parse_from_tables(names_part, schema)
                 for u in unknown_tables:
                     findings.append((php, line_no, u, "(unknown table)", "SELECT-WHERE"))
                 if unknown_tables:
@@ -2966,6 +3083,60 @@ def scan_php_inserts(
                 # is not enough on its own.
                 if len(tables) != 1 or not names_one_plain_table(names_part):
                     coverage["select_where_skipped_join_or_alias"] += 1
+                    # ── SELECT-ALIAS reading (#519/#520) ─────────────────────
+                    # A bare column name here really could belong to either
+                    # table, which is why the scan above gives up on this
+                    # statement. But a name written as `shortname.column`
+                    # says EXACTLY which table it belongs to — nothing has
+                    # to be guessed — so it can still be read, using the
+                    # very `by_alias` map parse_from_tables() just built two
+                    # lines above (the same map the DELETE check already
+                    # trusts for its own qualified-name reading). See the
+                    # header's "SELECT-ALIAS reading" section for the full
+                    # account of what this does and does not catch — in
+                    # short: it found #520's `u.email` and the leadership
+                    # API's `a.assignedAt`, both real, live faults; it does
+                    # NOT find admin/live/chat.php's `m.flaggedReason`
+                    # fault, because that statement's column list holds a
+                    # double-quoted value before FROM
+                    # (`COALESCE(e.eventName, "— no event —")`), which stops
+                    # SELECT_TAIL_RE recognising the statement AT ALL — the
+                    # header's own long-documented blind spot 3. That is a
+                    # gap in what this script can see, not a gap in this
+                    # particular reading, and closing it is a separate
+                    # piece of work.
+                    if by_alias:
+                        coverage["select_qualified_statements"] += 1
+                        seen_q: set[tuple[str, str]] = set()
+                        for qm in QUALIFIED_COL_RE.finditer(full):
+                            alias = qm.group(1).lower()
+                            col = qm.group(2)
+                            coverage["select_qualified_found"] += 1
+                            tbl_q = by_alias.get(alias)
+                            if tbl_q is None:
+                                # Not a short name THIS statement declared —
+                                # could genuinely belong to another table
+                                # this script does not know the shape of
+                                # (e.g. the statement's own full table name
+                                # used as its own qualifier with no alias,
+                                # which parse_from_tables() never adds to
+                                # by_alias — see blind spot 16 in the header
+                                # for why that shape is never read). Skipped
+                                # and counted, never reported: reporting
+                                # here would risk accusing a perfectly
+                                # correct column belonging to a table this
+                                # reading simply could not identify.
+                                coverage["select_qualified_unresolved"] += 1
+                                continue
+                            coverage["select_qualified_checked"] += 1
+                            if (
+                                col.lower() not in schema_lower[tbl_q]
+                                and (tbl_q, col) not in seen_q
+                            ):
+                                seen_q.add((tbl_q, col))
+                                findings.append(
+                                    (php, line_no, tbl_q, col, "SELECT-ALIAS")
+                                )
                     continue
 
                 coverage["select_where_examined"] += 1
@@ -3124,6 +3295,50 @@ def print_where_coverage(coverage: dict[str, int]) -> None:
             "stopped the reading, so not checked: "
             f"{coverage[f'{kind}_where_not_reached']}"
         )
+
+    # ── SELECT-ALIAS coverage (added for #519/#520) ──────────────────────────
+    # Deliberately its OWN block, kept OUT of the examined+skipped=total
+    # arithmetic asserted above. That arithmetic answers "of every SELECT
+    # WHERE clause this script reached, what happened to it" — a single-
+    # statement, single-bucket question. This reading is a SECOND, narrower
+    # pass over the statements already counted as "skipped — join or table
+    # alias present", so a statement legitimately appears in BOTH that count
+    # and this one; folding these into the same sum would make that total
+    # count some statements twice and the arithmetic would stop meaning what
+    # it says it means.
+    #
+    # Per the "a check only covers what it reads" rule (zero findings proves
+    # nothing on its own): a real, non-zero "names checked" figure here is
+    # what tells a reader this reading actually ran over real code, as
+    # opposed to a change that silently never fires. See DEV_NOTES.md for
+    # the numbers measured on the real tree when this was written.
+    print(
+        "SELECT-ALIAS reading (of the statements skipped above as 'join or "
+        "table alias present', a second pass reads any name written as "
+        "alias.column — see the header's 'SELECT-ALIAS reading' section):"
+    )
+    print(
+        "  of those skipped statements, how many named at least one "
+        f"alias.column: {coverage['select_qualified_statements']}"
+    )
+    print(f"  alias.column names found in them: {coverage['select_qualified_found']}")
+    print(
+        "  of those, resolved to a table this statement declared, and "
+        f"checked: {coverage['select_qualified_checked']}"
+    )
+    print(
+        "  of those, the short name was not one this statement declared "
+        f"(skipped, never reported): {coverage['select_qualified_unresolved']}"
+    )
+    print(
+        "  A statement whose column list holds a quoted value before FROM "
+        "is not recognised at all (blind spot 3 in the header) and so is in "
+        "NONE of these figures either — this is why m.flaggedReason in "
+        "admin/live/chat.php is not found by this reading, even though it "
+        "is a real, live fault."
+    )
+    print()
+
     print(
         "  Notes on these figures:\n"
         "  - They count only statements this script RECOGNISED and whose WHERE "
@@ -3163,7 +3378,7 @@ def check() -> int:
     findings, coverage = scan_php_inserts(schema)
     print(
         "Column-name mismatches "
-        "(INSERT + UPDATE + SELECT + DELETE + SELECT-WHERE + UPDATE-WHERE): "
+        "(INSERT + UPDATE + SELECT + DELETE + SELECT-WHERE + UPDATE-WHERE + SELECT-ALIAS): "
         f"{len(findings)}"
     )
     print()
@@ -3184,7 +3399,7 @@ def check() -> int:
         for finding in deduped:
             by_kind.setdefault(finding[4], []).append(finding)
 
-        for kind in ("INSERT", "UPDATE", "SELECT", "DELETE", "SELECT-WHERE", "UPDATE-WHERE"):
+        for kind in ("INSERT", "UPDATE", "SELECT", "DELETE", "SELECT-WHERE", "UPDATE-WHERE", "SELECT-ALIAS"):
             rows = by_kind.get(kind, [])
             if not rows:
                 continue
