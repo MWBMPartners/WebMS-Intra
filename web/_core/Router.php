@@ -499,6 +499,31 @@ class Router
     }
 
     /**
+     * The one answer for an event the viewer may not see, whatever the
+     * reason: missing, deleted, a draft, or internal and the viewer may not
+     * see it. All the same page, on purpose, so the answer cannot be used to
+     * learn which events exist (#532). 404 underneath, so a search engine
+     * drops a dead address — this replaces an earlier answer (a 302 sign-in
+     * redirect) that told a search engine nothing and asked somebody
+     * following a DEAD link to sign in for something that no longer exists,
+     * an answer the owner changed on 20 September 2026. Also carries a
+     * sign-in link for anybody who has an account, since a genuinely
+     * refused event usually means "you are not signed in" or "you are
+     * signed in as the wrong account".
+     *
+     * A GET page calls this then `return`s; a POST handler calls it then
+     * `exit()`s (mirrors Auth::requireLogin()'s own calling convention).
+     *
+     * WHAT THIS CANNOT DO: tell the visitor which of the reasons applies —
+     * that is the entire point of giving every reason the same page.
+     */
+    public static function renderEventUnavailable(): void
+    {
+        http_response_code(404);
+        require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'event-unavailable.php';
+    }
+
+    /**
      * @return void
      */
     public static function renderError(int $code): void

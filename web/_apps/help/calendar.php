@@ -228,10 +228,12 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <!-- Wording matched to the rest of the package by the #525 round-1 independent check: this used
          to say the technical detail "is deleted", which the retention screen and the sweep that
          actually does the clearing both deliberately avoid saying, because the CHECK-IN ROW itself is
-         never deleted — only the browser description and the scrambled sender address on it are
-         cleared. Saying "deleted" here risked reading as "the whole check-in disappears", which is not
-         what happens; see admin/maintenance/retention.php ("Nothing is deleted here. The rows stay...")
-         and cron/_retention-sweep.php for the same care taken elsewhere. -->
+         never deleted — only the scrambled sender address on it is cleared. Saying "deleted" here
+         risked reading as "the whole check-in disappears", which is not what happens; see
+         admin/maintenance/retention.php ("Nothing is deleted here. The rows stay...") and
+         cron/_retention-sweep.php for the same care taken elsewhere. #530: this used to also mention a
+         browser description — migration 201 removed that column entirely, since nothing ever read it,
+         so there is now only the one piece of detail to describe. -->
     <p>
         One more thing worth knowing. After a while &mdash; 90 days by default &mdash; the technical
         detail behind the figure is cleared from the row (the row itself stays; nothing about the

@@ -8,8 +8,11 @@
  * Three settings on one small page:
  *
  *   attend.anonCounts.visibleTo   who may see the door figures
- *   attend.detailRetentionDays    how long the browser description and the
- *                                 scrambled sender address are kept
+ *   attend.detailRetentionDays    how long the scrambled sender address is
+ *                                 kept (#530: a browser-description column
+ *                                 used to be kept on the same timer; it was
+ *                                 dropped by migration 201, since nothing
+ *                                 ever read it)
  *   attend.reports.visibleTo      who may open the attendance reports page
  *                                 at all (#529) — a SEPARATE question from
  *                                 the door figures above: a member can be
@@ -285,11 +288,10 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                        id="retentionDays" name="retentionDays"
                        value="<?php echo (int) $effectiveRetention; ?>">
                 <div class="form-text">
-                    The technical detail is the browser description and a scrambled version of the
-                    sender's internet address. Neither is ever shown anywhere. After this many days
-                    both are emptied out, while the counts, the headcounts, how each check-in arrived
-                    and when it happened all stay exactly as they are. Enter <strong>0</strong> to keep
-                    the detail for ever.
+                    The technical detail is a scrambled version of the sender's internet address. It
+                    is never shown anywhere. After this many days it is emptied out, while the counts,
+                    the headcounts, how each check-in arrived and when it happened all stay exactly as
+                    they are. Enter <strong>0</strong> to keep the detail for ever.
                 </div>
             </div>
 

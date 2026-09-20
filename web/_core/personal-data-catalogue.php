@@ -131,22 +131,29 @@ return [
         // links it to an account, so a "delete everything you hold about me"
         // request can never reach one: there is nothing to match the person
         // against, and the erasure routine therefore skips this table entirely.
-        // That is not a gap being ignored — since #525 the browser description
-        // and the scrambled sender address are emptied out on a timer instead
-        // (the setting attend.detailRetentionDays, 90 days by default, 0 to
-        // keep for ever, set per organisation at /admin/settings/attendance).
+        // That is not a gap being ignored — since #525 the scrambled sender
+        // address is emptied out on a timer instead (the setting
+        // attend.detailRetentionDays, 90 days by default, 0 to keep for
+        // ever, set per organisation at /admin/settings/attendance).
         // Nobody should have to ask for something that cannot be found by
         // asking. See issue #479.
+        //
+        // #530 / migration 201: a "browser description" column (what kind
+        // of device the check-in came from) used to sit on this row too.
+        // Nothing anywhere ever read it, before #525 or after, so it has
+        // been dropped rather than left as an unused column with no stated
+        // purpose. The scrambled sender address (ipHash) is the only
+        // personal detail left on this table.
         'reason'   => 'Somebody checking in at the door without signing in. Nothing on the row links it to an account, '
-                    . 'so an erasure request cannot reach it — there is nothing to match the person against. The browser '
-                    . 'description and the scrambled sender address are cleared on a timer instead '
-                    . '(attend.detailRetentionDays, 90 days by default, 0 means keep for ever). See #479 and #525.',
+                    . 'so an erasure request cannot reach it — there is nothing to match the person against. The '
+                    . 'scrambled sender address is cleared on a timer instead '
+                    . '(attend.detailRetentionDays, 90 days by default, 0 means keep for ever). See #479, #525 and #530.',
         // Required whenever decision is 'retain' (tools/gdpr-coverage-selftest.php
         // checks every 'retain' entry has one). Not a legal minimum — this row
         // is cleared by a technical timer the organisation controls, not by law
         // — but the self-test's rule is the same either way: say for how long.
         'period'   => '90 days by default, per the organisation\'s attend.detailRetentionDays setting (0 = keep for ever)',
-        'columns'  => ['userAgent'],
+        'columns'  => ['ipHash'],
     ],
     'tblAnonymousCheckinDays' => [
         'decision' => 'not-personal',

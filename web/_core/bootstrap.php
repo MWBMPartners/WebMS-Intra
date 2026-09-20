@@ -625,8 +625,13 @@ if (defined('PORTAL_LANG') === false) {
 
 \Portal\Core\I18n::init();
 
-// 📋 Handle ?lang= query parameter for language switching
-if (isset($_GET['lang']) === true && $_GET['lang'] !== '') {
+// 📋 Handle ?lang= query parameter for language switching.
+// #509 point 2: I18n::switchLocale() takes a `string`, so a REQUEST sent as
+// a list — ?lang[]=x — used to arrive here as an array, and PHP's typed
+// parameter refused it with a TypeError: a 500 and one error row, on every
+// address, open or closed, because this runs before the maintenance gate.
+// Anything that is not text is now simply ignored rather than crashing.
+if (isset($_GET['lang']) === true && is_string($_GET['lang']) === true && $_GET['lang'] !== '') {
     \Portal\Core\I18n::switchLocale($_GET['lang']);
     // 🔀 Redirect to same page without the lang parameter to avoid sticky URL
     $currentUri = $_SERVER['REQUEST_URI'] ?? '/';

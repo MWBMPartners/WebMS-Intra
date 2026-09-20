@@ -65,6 +65,7 @@ declare(strict_types=1);
 
 use Portal\Core\Auth;
 use Portal\Core\RateLimiter;
+use Portal\Core\Router;
 use Portal\Core\Site;
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') { header('Location: /', true, 302); exit(); }
@@ -173,7 +174,14 @@ $stmt->bind_param('iiiii', $eventId, $siteId, $viewerId, $viewerId, $siteId);
 $stmt->execute();
 $ok = (bool) $stmt->get_result()->fetch_assoc();
 $stmt->close();
-if ($ok === false) { http_response_code(404); exit('Event not found'); }
+if ($ok === false) {
+    // Same page as anon-checkin.php's own refusal (changed 20 September 2026
+    // from bare-text "Event not found" — see that file's header). The
+    // rate-limit refusal above stays a plain 429: it is about the sender
+    // making too many attempts, not about whether this event exists.
+    Router::renderEventUnavailable();
+    exit();
+}
 
 // 🗒️ ipHash below is left reading $_SERVER['REMOTE_ADDR'] DIRECTLY, exactly
 // as it did before this fix — it is deliberately NOT switched to
@@ -183,18 +191,18 @@ if ($ok === false) { http_response_code(404); exit('Event not found'); }
 // needs it changed. So the rate-limit bucket above and this stored hash now
 // come from two different places on purpose; a follow-up issue, not a
 // change here, is the right way to unify them.
-$ua     = mb_substr((string) ($_SERVER['HTTP_USER_AGENT'] ?? ''), 0, 255);
 $ip     = (string) ($_SERVER['REMOTE_ADDR'] ?? '');
 $ipHash = $ip !== '' ? hash('sha256', $ip . '|' . $eventId) : null;
 
-// 📭 NOTE FOR WHOEVER NEXT TOUCHES THIS FILE: this row is written here and
-// read NOWHERE — no attendance report, no admin screen, no export reads
-// tblAnonymousCheckins today. That was true before this fix and is
-// unchanged by it; closing #519's leak does not make the count appear
-// anywhere. If a screen is ever built to show it, that is a separate,
-// non-security piece of work (raised for the owner as #519's plan §11).
-$stmt = $mysqli->prepare('INSERT INTO tblAnonymousCheckins (eventID, headcount, source, userAgent, ipHash) VALUES (?, ?, ?, ?, ?)');
-$stmt->bind_param('iisss', $eventId, $headcount, $source, $ua, $ipHash);
+// 📭 This row is read by the attendance page's "anonymous check-ins at the
+// door" panel (AnonymousCheckins::summaryForEvent(), #525) — headcount,
+// source and ipHash all feed a figure shown there. #530: the browser
+// description (userAgent) this INSERT used to also write is REMOVED as of
+// migration 201 — nothing anywhere ever read it, before #525 or after, and
+// it is not one of the columns that panel uses. See AnonymousCheckins.php
+// for the fuller account of what changed and why.
+$stmt = $mysqli->prepare('INSERT INTO tblAnonymousCheckins (eventID, headcount, source, ipHash) VALUES (?, ?, ?, ?)');
+$stmt->bind_param('iiss', $eventId, $headcount, $source, $ipHash);
 $stmt->execute();
 $stmt->close();
 

@@ -198,10 +198,14 @@ try {
 // Page metadata
 $pageTitle   = 'Upgrade Portal';
 $pageSection = 'admin';
-$breadcrumbs = [
-    ['label' => 'Admin', 'url' => '/admin'],
-    ['label' => 'Upgrade', 'url' => ''],
-];
+// #508: a breadcrumb trail is [label => address, …] — a flat map, not a
+// list of small arrays. This page used to pass the wrong shape
+// ([['label' => …, 'url' => …], …]), so header.php's loop handed an ARRAY
+// to htmlspecialchars() and the page died half drawn, ten error rows for
+// one mistake. header.php now guards against the wrong shape too (see its
+// own comment), but the fix belongs here: the trail should be right in
+// the first place.
+$breadcrumbs = ['Admin' => '/admin', 'Upgrade' => ''];
 
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>

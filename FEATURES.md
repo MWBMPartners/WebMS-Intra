@@ -411,7 +411,11 @@ Service-type-aware headcount tracker.
   default), administrators plus that event's coordinators, or whoever
   the page itself already lets in — is a setting for the whole
   installation, changeable per organisation at
-  `/admin/settings/attendance`.
+  `/admin/settings/attendance`. What is recorded about a check-in is the
+  count, the source (own phone / kiosk / QR code), the time, and a
+  scrambled sender address cleared after the organisation's retention
+  period; a "browser description" column that nothing ever read was
+  dropped by migration 201 (#530).
 
 **Tables:** `tblAttendanceSessions`, `tblAttendanceCounts`, `tblAttendanceServiceTypes`, `tblAnonymousCheckins`, `tblAnonymousCheckinDays`
 **Settings:** `attend.anonCounts.visibleTo`, `attend.detailRetentionDays`

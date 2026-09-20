@@ -21,7 +21,10 @@ use Portal\Core\Logger;
 use Portal\Core\Mailer;
 use Portal\Core\Site;
 
-if ($_SERVER['REQUEST_METHOD'] !== 'POST') { header('Location: /calendar', true, 302); exit(); }
+// #512 — every Site::url() call in this file adds the organisation's own
+// address prefix in path mode (and is the plain address everywhere else),
+// where a bare string used to always answer for organisation 1.
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') { header('Location: ' . Site::url('calendar'), true, 302); exit(); }
 
 Auth::ensureSession();
 Auth::requireLogin();
@@ -36,7 +39,7 @@ $siteId   = Site::id();
 if ($eventId <= 0 || (App::isAdmin() === false && Auth::isCoordinatorOf($eventId) === false)) {
     http_response_code(403); exit('Forbidden');
 }
-$redirect = '/calendar/event/invites?eventID=' . $eventId;
+$redirect = Site::url('calendar/event/invites') . '?eventID=' . $eventId;
 
 if ($email === '' || filter_var($email, FILTER_VALIDATE_EMAIL) === false) {
     $_SESSION['flash_msg']  = 'Invalid email address.';
@@ -67,9 +70,17 @@ $stmt->execute();
 $stmt->close();
 
 // 📧 Build the email.
+// Scheme and host still come from the CONNECTION ($_SERVER), not
+// Site::url() — WebMS-Intra is installed at many different addresses by
+// many different customers (#500), and there is no setting anywhere that
+// records "this portal's own web address" for a background job to read
+// (a cron-triggered send would have no $_SERVER['HTTP_HOST'] at all). That
+// gap is real but belongs to #500, not to this fix — noted here so nobody
+// mistakes the omission for an oversight of THIS issue. The PATH still
+// goes through Site::url(), which is the part #512 is actually about.
 $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
 $host   = (string) ($_SERVER['HTTP_HOST'] ?? 'localhost');
-$rsvpUrl = $scheme . '://' . $host . '/calendar/rsvp-by-link?t=' . $token;
+$rsvpUrl = $scheme . '://' . $host . Site::url('calendar/rsvp-by-link') . '?t=' . $token;
 $when    = date('l j M Y, H:i', strtotime((string) $event['startDateTime']));
 
 $subject = 'You\'re invited: ' . (string) $event['eventName'];
@@ -80,9 +91,25 @@ $bodyHtml = '<p>Hi' . ($display !== '' ? ' ' . htmlspecialchars($display, ENT_QU
     . '" style="background:#5e6ad2; color:white; padding:12px 24px; text-decoration:none; border-radius:6px;">RSVP — single click</a></p>'
     . '<p style="font-size:12px; color:#666;">Or paste this link into your browser: ' . htmlspecialchars($rsvpUrl, ENT_QUOTES, 'UTF-8') . '</p>';
 
+// #512 — Mailer::send() CAN throw: sendViaGraph() raises
+// RuntimeException('From address missing') when MS365 Graph is the active
+// provider but no sender address has been configured. Before this fix,
+// that meant a portal with the mailer half set up gave a bare 500 AFTER
+// the invite row above had already been written — the token existed and
+// worked, but the page that was meant to say so never rendered, and
+// nothing told the sender what had happened. Caught the same way the
+// "mailer reported a failure" flash below already covers a false return
+// value; this covers a thrown exception the same way, so both failure
+// shapes land on the same ordinary flash message rather than one of them
+// crashing the request.
 $sent = false;
 if (class_exists(Mailer::class) === true && method_exists(Mailer::class, 'send') === true) {
-    $sent = (bool) Mailer::send($email, $subject, $bodyHtml);
+    try {
+        $sent = (bool) Mailer::send($email, $subject, $bodyHtml);
+    } catch (\Throwable $e) {
+        $sent = false;
+        Logger::errorPlatform('Email', 'Error', 'INVITE_SEND', 'Invitation email could not be sent', $e->getMessage());
+    }
 }
 
 Logger::activity('EventInviteSent', 'Event #' . $eventId . ' → ' . $email . ($sent === true ? ' [delivered]' : ' [mailer failed]'));

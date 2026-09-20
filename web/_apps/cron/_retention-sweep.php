@@ -148,9 +148,13 @@ function registration_sweep_sites(): array
 /**
  * 🏢 Every site, with the number of days it keeps anonymous check-in detail for.
  *
- * "Detail" here means the browser description and the scrambled version of the
- * sender's internet address that are stored on each anonymous check-in. Nothing
- * reads either of them, and nothing here or anywhere else ever shows them.
+ * "Detail" here means the scrambled version of the sender's internet address
+ * that is stored on each anonymous check-in. Nothing anywhere ever shows it
+ * on a screen — the attendance page's door-figures panel (#525) reads it
+ * only to work out a count, never to display the address itself. (#530: a
+ * browser-description column used to be stored here too, and unlike the
+ * scrambled address, nothing ever read it for any purpose at all; migration
+ * 201 removed it.)
  *
  * A site that keeps them for ever is left out of the list entirely, so nothing
  * of its is touched.
@@ -199,9 +203,11 @@ function anon_checkin_sweep_sites(): array
  * Count rows that WOULD be deleted at the current window.
  *
  * `checkinDetail` is the odd one out and is named differently on purpose:
- * nothing is deleted there. It counts anonymous check-in ROWS that still hold a
- * browser description or a scrambled address and would have both emptied out.
- * The rows themselves, and every count on them, stay.
+ * nothing is deleted there. It counts anonymous check-in ROWS that still hold
+ * a scrambled address and would have it emptied out. The rows themselves,
+ * and every count on them, stay. (#530: this used to also count a row that
+ * held only a browser description; migration 201 removed that column, so
+ * the scrambled address is the only detail left to count.)
  *
  * @return array{activity:int,errors:int,registrations:int,checkinDetail:int}
  */
@@ -373,9 +379,12 @@ function run_retention_sweep(): array
     //
     //    Not a delete. The rows stay exactly where they are, with their counts,
     //    their headcounts, how each check-in arrived and when it happened all
-    //    untouched. What is emptied is the browser description and the
-    //    scrambled version of the sender's internet address — two pieces of
-    //    personal information that nothing in the portal has ever read.
+    //    untouched. What is emptied is the scrambled version of the sender's
+    //    internet address — never shown on a screen, read only by
+    //    AnonymousCheckins::summaryForEvent() to work out a count (#525).
+    //    (#530: a browser-description column used to be emptied here too;
+    //    nothing anywhere ever read it, for any purpose, so migration 201
+    //    dropped it rather than leaving it to be cleared on a timer forever.)
     //
     //    They cannot simply be left. An anonymous check-in has no link to any
     //    person at all, so a "delete everything you hold about me" request can

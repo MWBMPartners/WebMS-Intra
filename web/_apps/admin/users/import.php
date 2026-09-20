@@ -39,11 +39,16 @@ use Portal\Core\Site;
 // 📌 Page metadata
 $pageTitle   = 'Import Users';
 $pageSection = 'admin';
-$breadcrumbs = [
-    ['label' => 'Admin', 'url' => '/admin'],
-    ['label' => 'Users', 'url' => '/admin/users'],
-    ['label' => 'Import', 'url' => ''],
-];
+// #508: a breadcrumb trail is [label => address, …] — a flat map, not a
+// list of small arrays. This page used to pass the wrong shape
+// ([['label' => …, 'url' => …], …]), so header.php's loop handed an ARRAY
+// to htmlspecialchars() and the page died half drawn before any of this
+// page's own messages — including the #518 refusal wording — could ever
+// be seen. header.php now guards against the wrong shape too (see its own
+// comment), but the fix belongs here: the trail should be right in the
+// first place. Bare '/admin', not prefixed for path mode — that is #512
+// item 4's separate, portal-wide problem, matching every other admin page.
+$breadcrumbs = ['Admin' => '/admin', 'Users' => '/admin/users', 'Import' => ''];
 
 // 🛡️ Admin access check
 if (App::isAdmin() === false) {

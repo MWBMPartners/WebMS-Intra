@@ -177,6 +177,18 @@ return [
     'calendar.preaching_plan'       => 'Preaching Plan',
     'calendar.subscribe'            => 'Subscribe',
 
+    // -------------------------------------------------------------------------
+    // Event unavailable (added 20 September 2026) — the ONE page shown for an
+    // event that is missing, deleted, a draft, or internal and the viewer may
+    // not see it. Deliberately worded not to say WHICH of those applies
+    // (see Router::renderEventUnavailable()). 'auth.sign_in' above is reused
+    // for the button text rather than duplicated here.
+    // -------------------------------------------------------------------------
+    'event.unavailable_title'       => 'This event is not available',
+    'event.unavailable_signed_out'  => 'It may have been removed, or it may be one that only members can see. If you have an account, sign in and try the link again.',
+    'event.unavailable_signed_in'   => 'It may have been removed, or it may be one your account cannot see.',
+    'event.unavailable_calendar'    => 'Go to the calendar',
+
     // =========================================================================
     // 📊 Attendance
     // =========================================================================

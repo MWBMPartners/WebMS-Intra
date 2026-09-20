@@ -30,8 +30,13 @@
  *   • /cron/health           — that exact address only, not anything that
  *                              starts with it: the uptime monitor's
  *                              read-only health report (owner's decision,
- *                              14 September 2026). Every other cron/ job
- *                              stays blocked. See EXACT_ALLOW_LIST.
+ *                              14 September 2026). Every OTHER cron/
+ *                              address is blocked for EVERYBODY while
+ *                              maintenance is on, administrators included —
+ *                              enforced by blocks(), not by this allow
+ *                              list, because an administrator would
+ *                              otherwise bypass it like any other gated
+ *                              page (#509 point 3). See EXACT_ALLOW_LIST.
  *   • /assets/css/* /js/* /images/* /fonts/* /vendor/* /noticeboard/*
  *                            — static subdirs only (CSS/JS for the
  *                              maintenance page itself). NOT a bare
@@ -268,6 +273,17 @@ class Maintenance
      * Is the current session an admin user? Admins can pass through
      * the gate to access /admin/* routes (covered by ALLOW_LIST) and
      * to fix the problem.
+     *
+     * STATED PLAINLY, so nobody has to go and check: "admin" here is
+     * `App::isAdmin()`, which is true for a SITE administrator of any one
+     * organisation and for an account carrying the older, portal-wide
+     * `isAdmin` flag, not only a GLOBAL (root) administrator. Every one of
+     * them skips maintenance mode completely today, cron addresses
+     * included until `blocks()` below was added (#509 point 3) — the
+     * issue's own wording undersold this, because it only mentions "a
+     * global administrator". Narrowing this to global administrators only
+     * is a real, separate policy question (raised for the owner, #509's
+     * plan Q1), not built here.
      */
     public static function currentUserCanBypass(): bool
     {
@@ -275,6 +291,49 @@ class Maintenance
         //    exists so future logic (e.g. "only root admins") can be
         //    centralised without touching the front controller.
         return App::isAdmin();
+    }
+
+    /**
+     * Does maintenance mode stop THIS request? The ONE place that answer is
+     * decided, so the front controller does not have to repeat the
+     * ordering rules itself.
+     *
+     * Closed AND not on either allow list AND (a cron address, which
+     * NOBODY bypasses, OR a visitor who may not bypass).
+     *
+     * #509 point 3: before this method existed, ANY administrator —
+     * including a legacy `isAdmin`-flag account with no real membership
+     * anywhere — could open a scheduled-job address by hand while the
+     * portal was closed and have it run for real. `/cron/retention-sweep`
+     * did exactly that: a signed-in administrator opening it mid-upgrade
+     * ran the clear-out against what could be a half-upgraded database.
+     * `/cron/health` is deliberately unaffected by this rule — it is on
+     * EXACT_ALLOW_LIST, so `isAllowed()` already lets it through before
+     * this method is even reached; every OTHER cron/ address is now
+     * blocked for everybody, administrators included, whatever
+     * `currentUserCanBypass()` says.
+     *
+     * Order matters for cost, not just correctness: `isActive()` only
+     * reads settings already in memory; `currentUserCanBypass()` may query
+     * the account (App::isAdmin() → App::user()), so it is asked LAST,
+     * once every cheaper answer has already failed to settle the
+     * question.
+     *
+     * @param string $routeKey The address the visitor asked for — pass
+     *                         Router::extractPath(), matching isAllowed().
+     */
+    public static function blocks(string $routeKey): bool
+    {
+        if (self::isActive() === false) {
+            return false;
+        }
+        if (self::isAllowed($routeKey) === true) {
+            return false;
+        }
+        if (str_starts_with(ltrim($routeKey, '/'), 'cron/') === true) {
+            return true;
+        }
+        return self::currentUserCanBypass() === false;
     }
 
     /**
@@ -327,6 +386,29 @@ class Maintenance
      */
     public static function renderAndExit(): void
     {
+        // #509 point 1/2's other half. While the portal is closed, the
+        // database may be half upgraded — a table this page's own queries
+        // touch could be mid-ALTER. A warning raised while DRAWING THIS
+        // PAGE used to go through the portal's normal handler, which
+        // writes to tblErrors — the very table that might not be in a
+        // fit state to accept the write. Same shape as cron/health.php's
+        // own guard (see that file for the fuller reasoning): send it to
+        // PHP's own error log instead, for the rest of this request. Never
+        // paired with restore_error_handler() — this method always ends by
+        // exiting, so there is no "rest of the request" to hand the normal
+        // handler back to.
+        //
+        // WHAT THIS CANNOT COVER: anything that runs BEFORE this method is
+        // even called — bootstrap, session start, the gate decision
+        // itself. Auth::ensureSession()'s own guard (#509 point 1) and
+        // bootstrap.php's ?lang= type check (#509 point 2) cover the two
+        // known cases there; a genuine server fault before the gate is
+        // still recorded normally, on purpose — that is a real fault
+        // worth knowing about, not an artefact of the portal being closed.
+        set_error_handler(static function (): bool {
+            return false; // let PHP's own handling deal with it
+        });
+
         http_response_code(503);
         header('Retry-After: 60');
         // 🤖 Belt-and-braces — bootstrap should already have set this,

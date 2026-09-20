@@ -514,6 +514,37 @@ class Auth
             'samesite'  => 'Lax',       // 🛡️ Prevents CSRF via cross-origin requests
         ]);
 
+        // #509 point 1. A session cookie PHP itself would refuse — not
+        // 1 to 256 characters of letters, digits, comma or hyphen, which is
+        // PHP's own session-id rule — is dropped BEFORE session_start(),
+        // because otherwise session_start() raises two warnings, the
+        // portal's own error handler writes each one to tblErrors, and the
+        // session never actually starts. That meant every LATER call to
+        // this method in the same request repeated the same two warnings
+        // (this is why the holding page wrote more error rows than
+        // /cron/health for the same malformed cookie — it calls
+        // ensureSession() more than once), AND the visitor was left with NO
+        // session at all for the whole request, open or closed, signed in
+        // or not. Anybody can send such a cookie without signing in, on any
+        // address.
+        //
+        // PHP reads the session id from $_COOKIE, so removing it there
+        // before session_start() runs is enough — session_start() then
+        // simply hands the visitor a fresh, valid id, exactly as it would
+        // for a first-time visitor with no cookie at all.
+        //
+        // WHAT THIS CANNOT DO: validate the session's CONTENTS (that is a
+        // different question, answered elsewhere), and it does not touch a
+        // well-formed id that happens to name no real session — PHP already
+        // handles that case correctly by starting a new, empty one.
+        $cookieName = session_name();
+        if (isset($_COOKIE[$cookieName]) === true
+            && (is_string($_COOKIE[$cookieName]) === false
+                || preg_match('/^[a-zA-Z0-9,-]{1,256}$/', $_COOKIE[$cookieName]) !== 1)
+        ) {
+            unset($_COOKIE[$cookieName]);
+        }
+
         session_start();
     }
 

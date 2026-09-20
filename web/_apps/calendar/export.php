@@ -67,6 +67,16 @@ $exportAll = ($_GET['all'] ?? '') === '1';
 // 🌐 Multi-site scope
 $siteId = Site::id();
 
+// 🛡️ Asked BEFORE the lookup, and on every request, whatever it turns out
+//    to find — the same discipline calendar/event.php already follows.
+//    What was wrong before: App::isAdmin() below only ran for a row that
+//    turned out to be a draft, so a signed-in visitor asking for a draft
+//    number cost one more database query than one asking for a missing
+//    number — a small but real timing difference between "exists but
+//    refused" and "does not exist" (#503/#532 discipline applied here too).
+$canManage = App::isAdmin();
+$signedIn  = Auth::check();
+
 $events = [];
 
 if ($eventId > 0) {
@@ -103,38 +113,36 @@ if ($eventId > 0) {
     //    with their own status test, so they are not changed here.
     if ($row !== null
         && in_array((string) ($row['status'] ?? ''), ['published', 'cancelled', 'postponed'], true) === false
-        && App::isAdmin() === false
+        && $canManage === false
     ) {
         $row = null;
     }
 
-    // 🛡️ #532 (20 September 2026) — WHAT WAS WRONG. This used to read
-    //    `if ($row !== null && (int) $row['isPublic'] === 0 && Auth::check()
-    //    === false)`, so a signed-out visitor got a 302 to sign in for a
-    //    real internal event but a plain 404 (from the `count($events) ===
-    //    0` check below) for an event number that matched nothing. Event
-    //    numbers count upward from 1, so a stranger could simply walk
-    //    through them and learn which internal events exist without ever
-    //    being able to open one — the issue's own words describe exactly
-    //    this page ("event numbers count upward… walk through them"). THE
-    //    FIX: a signed-out visitor is sent to sign in whenever the row is
-    //    missing OR not public, so a real internal number and a made-up one
-    //    look identical until AFTER signing in. This has to run AFTER the
-    //    draft rule above, not before it: that rule already nulls $row for
-    //    a non-administrator asking for a draft, so a signed-out visitor
-    //    requesting a draft number reaches this line with $row === null and
-    //    is sent to sign in exactly like everyone else refused here — one
-    //    test now covers every refused case for a signed-out visitor. A
-    //    SIGNED-IN visitor who may not see the event is untouched by this
-    //    line and falls through to the ordinary `count($events) === 0 →
-    //    Router::renderError(404)` below, same as before.
-    if (Auth::check() === false && ($row === null || (int) $row['isPublic'] === 0)) {
-        Auth::requireLogin();
+    // 🛡️ ONE page for a refused download and a missing one — changed again,
+    //    20 September 2026, matching calendar/event.php. WHAT WAS WRONG
+    //    BEFORE #532's FIX: a signed-out visitor got a 302 to sign in for a
+    //    real internal event but a plain 404 for an event number that
+    //    matched nothing — event numbers count upward from 1, so a stranger
+    //    could walk through them and learn which internal events exist.
+    //    #532 closed that by sending a signed-out visitor to sign in for
+    //    BOTH cases, but that meant somebody following a DEAD link (an old
+    //    shared download link for an event since deleted) was asked to
+    //    sign in for something that no longer exists. The owner's answer:
+    //    treat "exists but not public, and you are signed out" exactly as
+    //    "missing", then answer both the SAME way —
+    //    Router::renderEventUnavailable() — which is a 404 with a sign-in
+    //    link, not a sign-in redirect. This still runs AFTER the draft rule
+    //    above, so a signed-out visitor asking for a draft number reaches
+    //    here with $row already null.
+    if ($row !== null && (int) $row['isPublic'] === 0 && $signedIn === false) {
+        $row = null; // an internal event is not for a signed-out visitor: treat exactly as missing
+    }
+    if ($row === null) {
+        Router::renderEventUnavailable();
+        return;
     }
 
-    if ($row !== null) {
-        $events[] = $row;
-    }
+    $events[] = $row;
 } elseif ($seriesId > 0) {
     // 🔄 All events in a series
     $stmt = $db->prepare(

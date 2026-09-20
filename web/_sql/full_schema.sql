@@ -5783,13 +5783,18 @@ CREATE TABLE IF NOT EXISTS `tblExternalFeeds` (
     CONSTRAINT `fk_feed_creator` FOREIGN KEY (`createdByID`) REFERENCES `tblUsers`(`userID`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
--- ── from 130_anonymous_attendance.sql ──────────────────────────────────────────
+-- ── from 130_anonymous_attendance.sql, `userAgent` removed by
+--    201_drop_checkin_browser_description.sql (#530) — it was written on
+--    every check-in and read by nothing, ever; see that migration's own
+--    header for the full reasoning. A fresh install never creates the
+--    column at all, so there is nothing for migration 201 to drop on a
+--    brand-new database — its guard finds the column already absent and
+--    runs a harmless no-op, exactly as intended. ──────────────────────────
 CREATE TABLE IF NOT EXISTS `tblAnonymousCheckins` (
     `checkinID`     INT NOT NULL AUTO_INCREMENT,
     `eventID`       INT NOT NULL,
     `headcount`     INT NOT NULL DEFAULT 1 COMMENT 'How many people checking in together',
     `source`        ENUM('self','kiosk','qr') NOT NULL DEFAULT 'self',
-    `userAgent`     VARCHAR(255) DEFAULT NULL,
     `ipHash`        CHAR(64) DEFAULT NULL COMMENT 'SHA-256 of IP for soft-dedup, NOT raw IP',
     `checkedInAt`   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (`checkinID`),
@@ -8872,4 +8877,18 @@ INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue
 ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
 
 INSERT INTO `tblMigrations` (`filename`) VALUES ('200_attendance_report_visibility.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- ── from 201_drop_checkin_browser_description.sql (#530) ──────────────────────
+-- Every anonymous check-in used to record the visitor's browser description
+-- (userAgent) alongside the scrambled sender address, and nothing anywhere
+-- ever read it — not the attendance report, not the #525 check-ins panel.
+-- The CREATE TABLE above (from 130_anonymous_attendance.sql) already drops
+-- the column outright rather than merely leaving it unwritten, since a fresh
+-- install has no reason to create a column that has never had a purpose.
+-- This row only records that the migration has run, for an installation
+-- upgrading from an earlier version where the column still exists — see
+-- 201_drop_checkin_browser_description.sql for the guarded ALTER itself and
+-- the fuller reasoning.
+INSERT INTO `tblMigrations` (`filename`) VALUES ('201_drop_checkin_browser_description.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;

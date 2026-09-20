@@ -26,6 +26,9 @@ use Portal\Core\App;
 use Portal\Core\Asset;
 use Portal\Core\Auth;
 use Portal\Core\I18n;
+use Portal\Core\Logger;
+use Portal\Core\Maintenance;
+use Portal\Core\Router;
 use Portal\Core\Site;
 
 // 🛡️ Ensure session is started (needed for CSRF meta tag and nav user info)
@@ -35,6 +38,38 @@ Auth::ensureSession();
 $pageTitle   = $pageTitle   ?? 'Portal';
 $pageSection = $pageSection ?? '';
 $breadcrumbs = $breadcrumbs ?? [];
+
+// 🛡️ #508 — a breadcrumb trail is [label => address, …]. Two pages once
+// passed a list of small arrays instead
+// ([['label' => …, 'url' => …], …]): the loop further down this file then
+// handed an ARRAY to htmlspecialchars(), which only accepts a string, so
+// the page died half drawn and ten error rows were written for the one
+// mistake. Now a wrong-shaped trail is simply dropped — the page draws
+// without a trail instead of crashing — and exactly ONE clear row names
+// the address, so the mistake is easy to find instead of buried under
+// nine repeats of it.
+//
+// Checked by VALUE TYPE, not array_is_list(): a label that happens to be
+// all digits (for example the year '2026') becomes an integer array key in
+// PHP, which is still a perfectly valid trail — array_is_list() would
+// wrongly reject it, because a map with an accidental sequential-integer
+// key layout looks like a list to that function.
+//
+// WHAT THIS CANNOT DO: fix the trail. The page that built it still has to
+// be corrected — this guard only stops the crash and points at the cause.
+foreach ($breadcrumbs as $crumbUrl) {
+    if (is_string($crumbUrl) === false) {
+        Logger::errorPlatform(
+            'PHP',
+            'Error',
+            'BREADCRUMB_SHAPE',
+            'Breadcrumb trail is the wrong shape',
+            'Address: /' . Router::extractPath() . ' — expected [label => address, …]; a value was not text'
+        );
+        $breadcrumbs = [];
+        break;
+    }
+}
 
 // 🌐 Site branding — use Site::branding() for multi-site, fallback to settings.
 // $siteColor is injected as --portal-primary on the <html> element below so
@@ -273,6 +308,24 @@ require __DIR__ . DIRECTORY_SEPARATOR . 'nav.php';
 
 <main class="portal-main" id="main-content" role="main">
 <div class="container">
+
+<?php
+// 🚧 #509 point 3 — the maintenance-bypass banner. Today ANY administrator
+// (site, global or the legacy `isAdmin` flag — see
+// Maintenance::currentUserCanBypass()'s own doc comment) can carry on
+// using the portal untouched while maintenance mode holds everybody else
+// back, with nothing anywhere telling them that is what is happening.
+// Drawn only for exactly that visitor, so it costs nothing for anyone
+// else and nothing at all when maintenance is off. Plain text, not a
+// t() key on purpose — this is a one-off operational notice for an
+// administrator mid-upgrade, not user-facing product copy that needs
+// translating.
+if (Maintenance::isActive() === true && Maintenance::currentUserCanBypass() === true): ?>
+    <div class="alert alert-warning small mb-3" role="status">
+        <i class="fa-solid fa-triangle-exclamation me-1"></i>
+        Maintenance mode is on. Everyone who is not an administrator sees a holding page until it is finished.
+    </div>
+<?php endif; ?>
 
 <?php
 // 🍞 Render breadcrumbs if provided

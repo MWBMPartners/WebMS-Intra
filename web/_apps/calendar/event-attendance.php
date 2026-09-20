@@ -37,7 +37,7 @@ $siteId = Site::id();
 
 // 📋 Load event.
 $event = null;
-$stmt = $mysqli->prepare('SELECT eventID, eventName, startDateTime, endDateTime FROM tblEvents WHERE eventID = ? AND siteID = ? AND isDeleted = 0');
+$stmt = $mysqli->prepare('SELECT eventID, eventName, startDateTime, endDateTime, timezone FROM tblEvents WHERE eventID = ? AND siteID = ? AND isDeleted = 0');
 if ($stmt !== false) {
     $stmt->bind_param('ii', $eventId, $siteId);
     $stmt->execute();
@@ -46,16 +46,53 @@ if ($stmt !== false) {
 }
 if ($event === null) { http_response_code(404); exit('Event not found'); }
 
-// 📅 Build the day list (one column per day from start to end).
-$startTs = strtotime((string) $event['startDateTime']);
-$endTs   = !empty($event['endDateTime']) ? strtotime((string) $event['endDateTime']) : $startTs;
-if ($endTs < $startTs) { $endTs = $startTs; }
-$days = [];
-for ($t = $startTs; $t <= $endTs + 1; $t += 86400) {
-    $days[] = date('Y-m-d', $t);
-    if (count($days) >= 14) { break; } // cap at 14 days for sanity
+// 📅 Build the day list (one column per CALENDAR day from start to end).
+//
+// #528 — WHAT WAS WRONG. This used to add 86,400 seconds (one day, in
+// TIMESTAMP terms) at a time. A timestamp does not know about clock
+// changes: on the day British Summer Time ends, "one day later" by the
+// clock is 25 real hours, so adding 86,400 seconds lands 1 hour short of
+// midnight and the SAME calendar day is shown twice; on the day it
+// starts, a day is only 23 real hours, so adding 86,400 seconds
+// overshoots past midnight and a whole day is skipped. Proved on a
+// 24-26 October event and a 28-30 March one (see the settled plan's proof
+// 15 for the exact wrong output).
+//
+// It was ALSO wrong with no clock change involved at all: an event
+// starting late one evening and ending just after midnight the next day
+// (23:00 -> 01:00) produced only ONE column, because the old loop compared
+// TIMESTAMPS 24 hours apart, not calendar days — two timestamps 2 hours
+// apart never satisfy "add a day and you have passed the end".
+//
+// THE FIX steps CALENDAR days from midnight, in the EVENT's OWN time zone
+// (tblEvents.timezone, written by manage/save.php — the same field
+// event.php's own comment already treats as the source of truth for
+// reading this event's wall-clock times). DateTimeImmutable::modify('+1
+// day') is calendar arithmetic, not a fixed number of seconds, so it
+// steps correctly over a 23- or 25-hour day. The 14-day cap is unchanged.
+$zone = new DateTimeZone(date_default_timezone_get());
+try {
+    $zone = new DateTimeZone((string) ($event['timezone'] ?? ''));
+} catch (\Exception $e) {
+    // An old row, or one that somehow never got a usable zone name: fall
+    // back to the server's own zone rather than fail the page. Not logged
+    // — the resulting day LIST is identical whatever zone is used here; the
+    // zone only decides how the wall-clock text in the database is read,
+    // and a blank/unusable name is not itself a fault worth an error row.
 }
-if (count($days) === 0) { $days[] = date('Y-m-d', $startTs); }
+$startDay = (new DateTimeImmutable((string) $event['startDateTime'], $zone))->setTime(0, 0);
+$endDay   = !empty($event['endDateTime'])
+    ? (new DateTimeImmutable((string) $event['endDateTime'], $zone))->setTime(0, 0)
+    : $startDay;
+if ($endDay < $startDay) { $endDay = $startDay; }
+$days = [];
+for ($day = $startDay; $day <= $endDay && count($days) < 14; $day = $day->modify('+1 day')) {
+    $days[] = $day->format('Y-m-d');
+}
+// count($days) === 0 is no longer reachable: the loop above always runs at
+// least once, because $startDay <= $endDay is guaranteed by the check two
+// lines up. The old fallback for an empty list is therefore removed rather
+// than kept as dead code nothing can ever execute.
 
 // 👥 Participants: confirmed RSVPs (with userID).
 $participants = [];
@@ -157,8 +194,13 @@ $anonSessions   = [];
 // method already existed and doing the real thing is more useful than
 // describing accurately why it does not happen.
 $anonStoredNow  = [];
-$eventFirstDay  = date('Y-m-d', $startTs);
-$eventLastDay   = date('Y-m-d', $endTs);
+// The event's REAL first/last day — not capped at 14, unlike $days above,
+// because these two feed the "is this day outside the event's own dates"
+// badge on the anonymous check-ins panel further down, which must judge
+// against the true end of the event even when the day-by-day grid itself
+// stops showing columns after 14.
+$eventFirstDay  = $days[0];
+$eventLastDay   = $endDay->format('Y-m-d');
 
 if ($mayViewAnon === true) {
     $anon = AnonymousCheckins::summaryForEvent($mysqli, $eventId, $siteId);
@@ -231,9 +273,15 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
     <?php if ($mayViewAnon === true && $anon !== null): ?>
         <!-- 🚪 Anonymous check-ins (#525). Built with portal-data-list, not a
-             <table> — the house rule for data display. The raw table further
-             down this page is older and is deliberately left alone here; it is
-             recorded separately as part of #528. -->
+             raw HTML table element — the house rule for data display. The
+             raw table further down this page used to be older and left
+             alone on purpose while #528 was still open; #528 has now
+             replaced that markup with portal-data-list too (see the
+             attendance grid further down), so this whole page follows the
+             same rule. Deliberately not spelling out the HTML tag name
+             here in angle brackets: a plain-text search for that shape
+             would still find it sitting in a comment, even though
+             nothing on the page draws one any more. -->
         <div class="card mb-4 border-info">
             <div class="card-header bg-body-tertiary">
                 <h2 class="h6 mb-0">
@@ -470,52 +518,71 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <?php if (count($participants) === 0): ?>
         <div class="alert alert-info">No confirmed RSVPs yet — add a walk-in to get started.</div>
     <?php else: ?>
-        <div class="table-responsive">
-            <table class="table table-bordered table-sm align-middle">
-                <thead class="table-light">
-                    <tr>
-                        <th>Name</th>
-                        <?php foreach ($days as $d): ?>
-                            <th class="text-center" style="min-width: 90px;">
-                                <?php echo htmlspecialchars(date('D j M', strtotime($d)), ENT_QUOTES, 'UTF-8'); ?>
-                            </th>
-                        <?php endforeach; ?>
-                    </tr>
-                </thead>
-                <tbody>
-                    <?php foreach ($participants as $p): ?>
-                        <tr>
-                            <td>
-                                <?php echo htmlspecialchars($p['name'], ENT_QUOTES, 'UTF-8'); ?>
-                                <?php if ($p['isWalkin']): ?>
-                                    <span class="badge bg-warning text-dark ms-1" title="Walk-in">WI</span>
-                                <?php endif; ?>
-                            </td>
-                            <?php foreach ($days as $d):
-                                $key = $p['userID'] !== null ? 'u:' . $p['userID'] . ':' . $d : 'w:' . $p['walkinName'] . ':' . $d;
-                                $isAttended = isset($attended[$key]);
-                            ?>
-                                <td class="text-center">
-                                    <form method="post" action="/calendar/event/attendance/mark" class="m-0">
-                                        <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
-                                        <input type="hidden" name="eventID" value="<?php echo $eventId; ?>">
-                                        <?php if ($p['userID'] !== null): ?>
-                                            <input type="hidden" name="userID" value="<?php echo (int) $p['userID']; ?>">
-                                        <?php else: ?>
-                                            <input type="hidden" name="walkinName" value="<?php echo htmlspecialchars((string) $p['walkinName'], ENT_QUOTES, 'UTF-8'); ?>">
-                                        <?php endif; ?>
-                                        <input type="hidden" name="dayDate" value="<?php echo htmlspecialchars($d, ENT_QUOTES, 'UTF-8'); ?>">
-                                        <input type="hidden" name="toggle" value="<?php echo $isAttended ? '0' : '1'; ?>">
-                                        <button type="submit" class="btn btn-sm <?php echo $isAttended ? 'btn-success' : 'btn-outline-secondary'; ?>" style="width: 50px;">
-                                            <?php echo $isAttended ? '<i class="fa-solid fa-check"></i>' : ''; ?>
-                                        </button>
-                                    </form>
-                                </td>
-                            <?php endforeach; ?>
-                        </tr>
+        <!-- #528 — this used to be a raw HTML table element, against the
+             project's own "no table tags for data display" rule
+             (portal-data-list instead). Replaced rather than left, now
+             that the day-column fault above is fixed and this section is
+             being touched anyway.
+             The style block below only sizes the two column kinds — the
+             component itself already stacks on a phone and scrolls
+             sideways on a wider screen, the same as .table-responsive did
+             for the old table. -->
+        <style>
+        /* Attendance grid: one row per participant, one fixed-width cell per
+           day. Below 768px (Bootstrap's md breakpoint) portal-data-list's own
+           CSS stacks every cell and shows its data-label, so no rule here is
+           needed for a phone. From 768px up, the row is only as wide as its
+           columns need and the wrapper below scrolls sideways if there are
+           more days than fit — the same behaviour .table-responsive gave the
+           table it replaces. Widths are in rem, never px, per the mobile
+           check (check_mobile_readiness.py flags hard-coded px widths). */
+        @media (min-width: 768px) {
+            .attendance-grid .portal-data-row { width: max-content; min-width: 100%; }
+            .attendance-grid .attendance-name { flex: 1 1 12rem; min-width: 12rem; }
+            .attendance-grid .attendance-day  { flex: 0 0 5rem; width: 5rem; text-align: center; }
+        }
+        </style>
+        <div class="overflow-auto">
+            <div class="portal-data-list attendance-grid">
+                <div class="portal-data-row portal-data-header d-none d-md-flex">
+                    <div class="attendance-name">Name</div>
+                    <?php foreach ($days as $d): ?>
+                        <div class="attendance-day"><?php echo htmlspecialchars(date('D j M', strtotime($d)), ENT_QUOTES, 'UTF-8'); ?></div>
                     <?php endforeach; ?>
-                </tbody>
-            </table>
+                </div>
+                <?php foreach ($participants as $p): ?>
+                    <div class="portal-data-row">
+                        <div class="portal-data-cell attendance-name" data-label="Name">
+                            <?php echo htmlspecialchars($p['name'], ENT_QUOTES, 'UTF-8'); ?>
+                            <?php if ($p['isWalkin']): ?>
+                                <span class="badge bg-warning text-dark ms-1" title="Walk-in">WI</span>
+                            <?php endif; ?>
+                        </div>
+                        <?php foreach ($days as $d):
+                            $key = $p['userID'] !== null ? 'u:' . $p['userID'] . ':' . $d : 'w:' . $p['walkinName'] . ':' . $d;
+                            $isAttended = isset($attended[$key]);
+                            $dayLabel = htmlspecialchars(date('D j M', strtotime($d)), ENT_QUOTES, 'UTF-8');
+                        ?>
+                            <div class="portal-data-cell attendance-day" data-label="<?php echo $dayLabel; ?>">
+                                <form method="post" action="/calendar/event/attendance/mark" class="m-0">
+                                    <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
+                                    <input type="hidden" name="eventID" value="<?php echo $eventId; ?>">
+                                    <?php if ($p['userID'] !== null): ?>
+                                        <input type="hidden" name="userID" value="<?php echo (int) $p['userID']; ?>">
+                                    <?php else: ?>
+                                        <input type="hidden" name="walkinName" value="<?php echo htmlspecialchars((string) $p['walkinName'], ENT_QUOTES, 'UTF-8'); ?>">
+                                    <?php endif; ?>
+                                    <input type="hidden" name="dayDate" value="<?php echo htmlspecialchars($d, ENT_QUOTES, 'UTF-8'); ?>">
+                                    <input type="hidden" name="toggle" value="<?php echo $isAttended ? '0' : '1'; ?>">
+                                    <button type="submit" class="btn btn-sm <?php echo $isAttended ? 'btn-success' : 'btn-outline-secondary'; ?>" style="width: 50px;">
+                                        <?php echo $isAttended ? '<i class="fa-solid fa-check"></i>' : ''; ?>
+                                    </button>
+                                </form>
+                            </div>
+                        <?php endforeach; ?>
+                    </div>
+                <?php endforeach; ?>
+            </div>
         </div>
     <?php endif; ?>
 

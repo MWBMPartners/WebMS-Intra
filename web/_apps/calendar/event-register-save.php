@@ -18,6 +18,7 @@ use Portal\Core\Auth;
 use Portal\Core\Captcha;
 use Portal\Core\Logger;
 use Portal\Core\Mailer;
+use Portal\Core\Router;
 use Portal\Core\Site;
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') { header('Location: /calendar', true, 302); exit(); }
@@ -40,14 +41,18 @@ if ($slug === '' || preg_match('/^[a-z0-9][a-z0-9\-]{0,79}$/i', $slug) !== 1) {
     http_response_code(400); exit('Invalid event.');
 }
 
-// 🛡️ #532 (20 September 2026): the SAME visibility rule as
-//    calendar/event-register.php, word for word — see that file's header
-//    for the full account of what was wrong (a real internal event's
-//    registration was silently ACCEPTED from anybody at all, whatever this
-//    page's sign-in check said, because this handler can be posted to
-//    directly without ever opening the form) and why the rule is shaped
-//    the way it is. The viewer test sits INSIDE the WHERE clause so a
-//    refused row and a missing one cost the database the same work.
+// 🛡️ The SAME visibility rule as calendar/event-register.php, word for
+//    word — see that file's header for the full account of what was wrong
+//    (a real internal event's registration was silently ACCEPTED from
+//    anybody at all, whatever this page's sign-in check said, because this
+//    handler can be posted to directly without ever opening the form) and
+//    why the rule is shaped the way it is. The viewer test sits INSIDE the
+//    WHERE clause so a refused row and a missing one cost the database the
+//    same work. Changed 20 September 2026: a refused submission and a
+//    missing event now answer with the SAME page
+//    (Router::renderEventUnavailable()) rather than a sign-in redirect, so
+//    a dead link is not met with "please sign in" for something that no
+//    longer exists — see event-register.php's header for the full reason.
 $viewerId = (int) ($_SESSION['user_id'] ?? 0);
 $siteId   = Site::id();
 $stmt = $mysqli->prepare(
@@ -70,10 +75,8 @@ $event = $stmt->get_result()->fetch_assoc() ?: null;
 $stmt->close();
 
 if ($event === null) {
-    if (Auth::check() === false) {
-        Auth::requireLogin(); // sends to /login?redirect=… and exits; never returns
-    }
-    http_response_code(404); exit('Registration not available.');
+    Router::renderEventUnavailable();
+    exit();
 }
 
 if ((int) $event['registrationEnabled'] !== 1) {

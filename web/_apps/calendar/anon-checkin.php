@@ -22,10 +22,14 @@
 //
 // An INTERNAL event: only a member of THAT event's own organisation, or a
 // global root administrator. Everybody else, including a signed-in member
-// of a DIFFERENT organisation, gets exactly the same "Event not found." as
-// a made-up event number. That is deliberate: it stops a refused event and
-// a missing one being told apart by anything at all, the same discipline
-// #503 already applied to four other calendar handlers.
+// of a DIFFERENT organisation, gets exactly the same not-available page as
+// a made-up event number (changed 20 September 2026 from a bare-text
+// "Event not found." to Router::renderEventUnavailable() — one themed page,
+// with a sign-in link for anybody who has an account, shared with the
+// event page, the registration pages and the single-event download). That
+// is deliberate: it stops a refused event and a missing one being told
+// apart by anything at all, the same discipline #503 already applied to
+// four other calendar handlers.
 //
 // ---------------------------------------------------------------------------
 // #533 (20 September 2026): THE SINGLE-ORGANISATION COMPATIBILITY BRANCH IS
@@ -63,6 +67,7 @@
 declare(strict_types=1);
 
 use Portal\Core\Auth;
+use Portal\Core\Router;
 use Portal\Core\Site;
 
 $eventId = (int) ($_GET['eventID'] ?? 0);
@@ -107,7 +112,10 @@ $stmt->bind_param('iiiii', $eventId, $siteId, $viewerId, $viewerId, $siteId);
 $stmt->execute();
 $event = $stmt->get_result()->fetch_assoc() ?: null;
 $stmt->close();
-if ($event === null) { http_response_code(404); exit('Event not found.'); }
+if ($event === null) {
+    Router::renderEventUnavailable();
+    return;
+}
 
 $pageTitle = 'Check in — ' . (string) $event['eventName'];
 $csrf = htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8');

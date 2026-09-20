@@ -17,8 +17,11 @@
  * This class is the one place that reads the table, so that:
  *   - the rule about who may see the figures is written once, not five times;
  *   - the organisation check is in the SQL, not in PHP afterwards;
- *   - nothing can accidentally put a browser description or a scrambled
- *     address on a screen, because no method here ever returns either.
+ *   - nothing can accidentally put the scrambled sender address on a screen,
+ *     because no method here ever returns it. (Until migration 201 (#530)
+ *     this also covered a "browser description" column — what kind of
+ *     device the check-in came from. Nothing anywhere ever read it, before
+ *     #525 or after, so it is now dropped rather than merely left unused.)
  *
  * WHAT THIS CLASS DELIBERATELY DOES NOT DO
  * ----------------------------------------
@@ -84,7 +87,12 @@ class AnonymousCheckins
      */
     public const VISIBILITY_KEY = 'attend.anonCounts.visibleTo';
 
-    /** How long the browser description and scrambled address are kept. */
+    /**
+     * How long the scrambled sender address is kept. Until migration 201
+     * (#530) this also governed a browser-description column; that column
+     * is now dropped, not merely left empty, so there is nothing left for
+     * this timer to clear except the address.
+     */
     public const RETENTION_KEY = 'attend.detailRetentionDays';
 
     /** The narrowest choice, and the one anything unrecognised falls back to. */
@@ -325,11 +333,15 @@ class AnonymousCheckins
      *
      * `rowsCounted` on the stored row is what lets a reader tell a row whose
      * detail was CLEARED from a row that arrived afterwards. It counts every row
-     * whose detail was cleared at that moment — including rows that had only a
-     * browser description and never had a scramble at all, which is why the
-     * stored figure already counts each of those as its own sender. Rows of that
-     * day with an empty scramble BEYOND that number therefore have to be rows
+     * that still held a scramble (`ipHash`) at that moment. Rows of that day
+     * with an empty scramble BEYOND that number therefore have to be rows
      * that arrived later, and each counts as its own sender on top.
+     *
+     * Until migration 201 (#530) removed the browser-description column,
+     * "still held detail" also covered a row that had a description but no
+     * scramble — such a row does not exist as a separate case any more,
+     * because the only thing left that can hold detail is the scramble
+     * itself.
      *
      * AN EARLIER VERSION COUNTED ONLY THE ROWS THAT HAD A SCRAMBLE, and it was
      * wrong in a way that was easy to miss. A row that never had a scramble was
@@ -965,7 +977,7 @@ class AnonymousCheckins
      * @param int    $siteId The organisation.
      * @param int    $days   Days of detail to keep. 0 or less means keep for ever.
      *
-     * @return int Rows that still hold a browser description or a scramble.
+     * @return int Rows that still hold a scrambled sender address.
      */
     public static function countDetailToClear(mysqli $db, int $siteId, int $days): int
     {
@@ -983,7 +995,11 @@ class AnonymousCheckins
             . 'FROM tblAnonymousCheckins '
             . 'INNER JOIN tblEvents e ON e.eventID = tblAnonymousCheckins.eventID AND e.siteID = ? '
             . 'WHERE DATE(tblAnonymousCheckins.checkedInAt) < ? '
-            . 'AND (tblAnonymousCheckins.userAgent IS NOT NULL OR tblAnonymousCheckins.ipHash IS NOT NULL)'
+            // #530 / migration 201: this predicate used to test the old
+            // browser-description column too. That column no longer exists,
+            // so ipHash is the only detail left that can still be there to
+            // clear.
+            . 'AND tblAnonymousCheckins.ipHash IS NOT NULL'
         );
         if ($stmt === false) {
             return 0;
@@ -1024,8 +1040,11 @@ class AnonymousCheckins
      * is worse than neither, so both happen or neither does.
      *
      * WHAT IS NEVER TOUCHED: the counts, the headcounts, how the check-in
-     * arrived, and when. Only the browser description and the scrambled address
-     * are emptied, and the rows themselves stay.
+     * arrived, and when. Only the scrambled address is emptied, and the rows
+     * themselves stay. (Until migration 201 (#530) a browser-description
+     * column was emptied here too; that column is now dropped entirely,
+     * so there is nothing left for this method to touch besides the
+     * address.)
      *
      * @param mysqli $db     An open connection.
      * @param int    $siteId The organisation.
@@ -1062,8 +1081,9 @@ class AnonymousCheckins
             . 'FROM tblAnonymousCheckins '
             . 'INNER JOIN tblEvents e ON e.eventID = tblAnonymousCheckins.eventID AND e.siteID = ? '
             . 'WHERE DATE(tblAnonymousCheckins.checkedInAt) < ? '
-            . 'AND (tblAnonymousCheckins.userAgent IS NOT NULL '
-            . 'OR tblAnonymousCheckins.ipHash IS NOT NULL) '
+            // Single-column predicate since migration 201 (#530) dropped the
+            // browser-description column — ipHash is the only detail left.
+            . 'AND tblAnonymousCheckins.ipHash IS NOT NULL '
             . 'GROUP BY tblAnonymousCheckins.eventID, DATE(tblAnonymousCheckins.checkedInAt)'
             . ') AS pairs'
         );
@@ -1082,14 +1102,14 @@ class AnonymousCheckins
             // 📝 Write the figure down before the detail behind it goes.
             //
             //    THE ROWS COVERED HERE ARE EXACTLY THE ROWS THE CLEAR-OUT BELOW
-            //    WILL TOUCH — the same "still has some detail" condition, word
+            //    WILL TOUCH — the same "still has a scramble" condition, word
             //    for word. That is not a tidiness point, it is what makes the
             //    whole thing work. Cover fewer rows here than the clear-out
-            //    empties and a row that had only a browser description drops out
-            //    of `rowsCounted`, then looks like a late arrival for ever
-            //    afterwards. Cover MORE rows here than the clear-out empties and
-            //    the next sweep finds the same rows again, adds them a second
-            //    time, and marks a perfectly ordinary day as approximate.
+            //    empties and a row drops out of `rowsCounted`, then looks like
+            //    a late arrival for ever afterwards. Cover MORE rows here than
+            //    the clear-out empties and the next sweep finds the same rows
+            //    again, adds them a second time, and marks a perfectly ordinary
+            //    day as approximate.
             //
             //    The senders figure is the full one: different scrambles, plus
             //    one for each row that has no scramble at all. Those rows count
@@ -1114,8 +1134,8 @@ class AnonymousCheckins
                 . 'FROM tblAnonymousCheckins '
                 . 'INNER JOIN tblEvents e ON e.eventID = tblAnonymousCheckins.eventID AND e.siteID = ? '
                 . 'WHERE DATE(tblAnonymousCheckins.checkedInAt) < ? '
-                . 'AND (tblAnonymousCheckins.userAgent IS NOT NULL '
-                . 'OR tblAnonymousCheckins.ipHash IS NOT NULL) '
+                // Single-column predicate since migration 201 (#530).
+                . 'AND tblAnonymousCheckins.ipHash IS NOT NULL '
                 . 'GROUP BY tblAnonymousCheckins.eventID, DATE(tblAnonymousCheckins.checkedInAt) '
                 . 'ON DUPLICATE KEY UPDATE '
                 . 'uniqueSenders   = uniqueSenders + VALUES(uniqueSenders), '
@@ -1144,13 +1164,18 @@ class AnonymousCheckins
             // 🧽 Empty the detail for exactly the same days.
             //    `affected_rows` IS the right answer here: this is a plain
             //    UPDATE, so it is one per row changed.
+            //
+            //    Only `ipHash` is cleared here now. Until migration 201
+            //    (#530) this also cleared a browser-description column;
+            //    that column is dropped, not merely emptied, so there is
+            //    nothing left besides the scramble for this statement to
+            //    touch.
             $stmt = $db->prepare(
                 'UPDATE tblAnonymousCheckins '
                 . 'INNER JOIN tblEvents e ON e.eventID = tblAnonymousCheckins.eventID AND e.siteID = ? '
-                . 'SET tblAnonymousCheckins.userAgent = NULL, tblAnonymousCheckins.ipHash = NULL '
+                . 'SET tblAnonymousCheckins.ipHash = NULL '
                 . 'WHERE DATE(tblAnonymousCheckins.checkedInAt) < ? '
-                . 'AND (tblAnonymousCheckins.userAgent IS NOT NULL '
-                . 'OR tblAnonymousCheckins.ipHash IS NOT NULL)'
+                . 'AND tblAnonymousCheckins.ipHash IS NOT NULL'
             );
             if ($stmt === false) {
                 throw new \RuntimeException('Could not prepare the clear-out statement');

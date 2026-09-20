@@ -49,11 +49,13 @@
  *
  *   audit.retentionDays        (default 365) — activity logs
  *   errors.retentionDays       (default 365) — error logs
- *   attend.detailRetentionDays (default 90) — how long the browser description
- *                               and the scrambled sender address are kept on an
- *                               anonymous check-in. Each organisation has its
- *                               own; 0 means keep for ever. Changed at
- *                               /admin/settings/attendance.
+ *   attend.detailRetentionDays (default 90) — how long the scrambled sender
+ *                               address is kept on an anonymous check-in
+ *                               (#530: a browser-description column used to
+ *                               sit on the same timer; migration 201 dropped
+ *                               it, since nothing ever read it). Each
+ *                               organisation has its own; 0 means keep for
+ *                               ever. Changed at /admin/settings/attendance.
  *   maintenance.cronToken      ('' by default — used by /cron/retention-sweep;
  *                               an empty value switches the job off)
  *
@@ -142,10 +144,9 @@ if (App::isRootAdmin() === false) {
         This sweep deletes activity-log and error rows, and event
         registrations — including children's names, dates of birth, allergies
         and medical notes — across every organisation on this installation,
-        not only yours. It also empties the browser description and the
-        scrambled sender address out of old anonymous check-ins, again across
-        every organisation. So only a global administrator can use this page.
-        Nothing has been changed.
+        not only yours. It also empties the scrambled sender address out of
+        old anonymous check-ins, again across every organisation. So only a
+        global administrator can use this page. Nothing has been changed.
     </div>
     <?php
     require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'footer.php';
@@ -178,8 +179,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                    //    and the difference matters: the check-in rows and every
                    //    count on them are still there.
                    . 'Also stored the sender figure for ' . $result['checkinDaysStored']
-                   . ' event-day(s) of anonymous check-ins and then emptied the browser description '
-                   . 'and scrambled address out of ' . $result['checkinDetailCleared']
+                   . ' event-day(s) of anonymous check-ins and then emptied the scrambled address '
+                   . 'out of ' . $result['checkinDetailCleared']
                    . ' check-in row(s). Those rows and their counts were not deleted.';
         $flashType = 'success';
     }
@@ -284,7 +285,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 </div>
 
 <form method="post" action="/admin/maintenance/retention"
-      data-confirm="About <?php echo number_format($preview['activity'] + $preview['errors']); ?> log row(s) and <?php echo number_format($preview['registrations']); ?> event registration(s) are currently eligible, including any children's details they hold, and <?php echo number_format($preview['checkinDetail']); ?> anonymous check-in row(s) would have their browser description and scrambled address emptied out (those rows and their counts are kept). The exact numbers may differ slightly, because more records become eligible as time passes. This cannot be undone. Continue?"
+      data-confirm="About <?php echo number_format($preview['activity'] + $preview['errors']); ?> log row(s) and <?php echo number_format($preview['registrations']); ?> event registration(s) are currently eligible, including any children's details they hold, and <?php echo number_format($preview['checkinDetail']); ?> anonymous check-in row(s) would have their scrambled sender address emptied out (those rows and their counts are kept). The exact numbers may differ slightly, because more records become eligible as time passes. This cannot be undone. Continue?"
       data-confirm-destructive="true">
     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
     <button type="submit" class="btn btn-warning" <?php echo ($preview['activity'] + $preview['errors'] + $preview['registrations'] + $preview['checkinDetail']) === 0 ? 'disabled' : ''; ?>>

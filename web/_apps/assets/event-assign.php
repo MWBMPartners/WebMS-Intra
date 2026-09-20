@@ -54,16 +54,23 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\AssetRegister;
 use Portal\Core\Auth;
+use Portal\Core\Site;
 
 Auth::ensureSession();
 Auth::requireLogin();
 
 // 🔐 CSRF FIRST — before any side-effect, per house convention (mirrors
 // owners-save.php/loan-action.php).
+//
+// #512 — Site::url() below gives the plain address outside path mode, so
+// nothing changes for a portal that does not use it; in path mode it adds
+// the organisation's own prefix, which a bare '/assets' here used to
+// drop, sending a path-mode visitor to organisation 1's Asset Tracker
+// instead of their own.
 if ($_SERVER['REQUEST_METHOD'] !== 'POST' || Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
     $_SESSION['flash_msg']  = 'Invalid or expired form token. Please try again.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /assets');
+    header('Location: ' . Site::url('assets'));
     exit();
 }
 
@@ -78,7 +85,7 @@ $asset = $assetId > 0 ? AssetRegister::get($assetId) : null;
 if ($asset === null) {
     $_SESSION['flash_msg']  = 'Asset not found.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /assets');
+    header('Location: ' . Site::url('assets'));
     exit();
 }
 
@@ -139,19 +146,40 @@ switch ($action) {
 // 🔙 Return to wherever the form was rendered from — item.php's Assigned-
 // events panel (default) or the calendar event page's own section, via a
 // posted `returnTo` value. NEVER trusted as a raw redirect target: only a
-// value that starts with exactly ONE leading slash followed by `assets`
-// or `calendar` (no scheme, no host, no protocol-relative `//` prefix, no
-// embedded `://`) is honoured — everything else falls back to the safe
-// default. This is what keeps `returnTo` from ever becoming an open
+// value that is EXACTLY one of this portal's own known bases, or that base
+// followed by `/` or `?`, is honoured — everything else falls back to the
+// safe default. This is what keeps `returnTo` from ever becoming an open
 // redirect, per the file header's DOUBLE IDOR + safe-redirect note.
+//
+// #512 — WHAT WAS WRONG. The bases used to be hard-coded ('/assets',
+// '/calendar'), which meant two separate faults at once. First, in path
+// mode, event.php's own "Assigned assets" section posts back
+// `Site::url('calendar/event') . '?slug=…'`, which in path mode is
+// PREFIXED with the organisation's address — so that legitimate value
+// never matched the bare hard-coded base and silently fell through to the
+// safe default instead of the calendar page it was meant to return to.
+// Second, `str_starts_with($returnTo, '/assets')` also matches
+// `/assetsfoo` — a base compared as a plain string prefix, not as a whole
+// path segment, is not actually checking what it looks like it is
+// checking. Using Site::url() for the bases fixes the first fault (the
+// base itself now carries the same prefix a legitimate posted value
+// would); checking for the base ALONE, or the base immediately followed
+// by `/` or `?`, fixes the second.
 $returnTo = (string) ($_POST['returnTo'] ?? 'item');
-$redirect = '/assets/item?id=' . $assetId; // 🛟 safe default
+$redirect = Site::url('assets/item') . '?id=' . $assetId; // 🛟 safe default, prefixed in path mode
 if ($returnTo !== '' && $returnTo !== 'item'
     && str_starts_with($returnTo, '//') === false
     && str_contains($returnTo, '://') === false
-    && (str_starts_with($returnTo, '/assets') === true || str_starts_with($returnTo, '/calendar') === true)
 ) {
-    $redirect = $returnTo;
+    foreach ([Site::url('assets'), Site::url('calendar')] as $base) {
+        if ($returnTo === $base
+            || str_starts_with($returnTo, $base . '/') === true
+            || str_starts_with($returnTo, $base . '?') === true
+        ) {
+            $redirect = $returnTo;
+            break;
+        }
+    }
 }
 
 header('Location: ' . $redirect);

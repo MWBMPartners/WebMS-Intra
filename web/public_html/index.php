@@ -58,10 +58,18 @@ Auth::ensureSession();
 //    the one exact address cron/health, so an uptime monitor still gets
 //    its read-only health report. Those lists are the real ones; this
 //    summary is only a guide and has gone out of date before.
-if (Maintenance::isActive() === true
-    && Maintenance::isAllowed(Router::extractPath()) === false
-    && Maintenance::currentUserCanBypass() === false
-) {
+//
+//    #509 point 3 — CHANGED: the three-part condition this line used to
+//    spell out here has moved into Maintenance::blocks(), which adds one
+//    more rule this file used to be missing: every cron/ address OTHER
+//    than cron/health is now blocked for EVERYBODY while the portal is
+//    closed, administrators included — a signed-in administrator opening
+//    a scheduled-job address by hand during an upgrade used to run it for
+//    real, against what might be a half-upgraded database. See
+//    Maintenance::blocks()'s own doc comment for the full ordering and
+//    reasoning; this file no longer needs to know the rule's shape, only
+//    that it exists.
+if (Maintenance::blocks(Router::extractPath()) === true) {
     Maintenance::renderAndExit();
 }
 

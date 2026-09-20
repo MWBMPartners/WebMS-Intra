@@ -329,21 +329,26 @@ check(
 );
 
 // -----------------------------------------------------------------------------
-// 6. Nothing here may ever return a browser description or a scrambled address
+// 6. Nothing here may ever return the scrambled address, and the old
+//    browser-description column is not spoken of by name any more
 // -----------------------------------------------------------------------------
-echo "\n6. The two pieces of personal detail never leave the class\n";
+echo "\n6. The remaining piece of personal detail never leaves the class\n";
 
 $source = (string) file_get_contents(__DIR__ . '/../web/_core/AnonymousCheckins.php');
 
-// `userAgent` may appear ONLY in the clear-out's SET and its IS NOT NULL test,
-// never as something selected. `ipHash` may appear only inside COUNT(DISTINCT …)
-// and IS NULL / IS NOT NULL tests. A plain "SELECT … userAgent" or a bare
-// "ipHash AS" would mean a value could reach a screen.
+// Migration 201 (#530) dropped the browser-description column entirely — it
+// is not merely unused, it does not exist. This used to be two separate
+// assertions (one checking no method SELECTs it as a value, one checking the
+// SET/IS NOT NULL shape it was allowed to appear in) because the column was
+// still there to be careful about. Now there is nothing to be careful about:
+// the class should never mention that column's name at all, by any route —
+// a plain substring check catches every one of the old assertions' cases at
+// once, and catches a re-introduction that neither of them would have (for
+// example, a comment or a variable name reusing it).
 check(
-    'no method selects the browser description as a value',
-    preg_match('/SELECT[^\']*userAgent\s+AS/i', $source) !== 1
-    && strpos($source, 'userAgent AS') === false,
-    'Found something that reads like "SELECT … userAgent AS …".'
+    'the class never mentions the browser-description column, which migration 201 removed (#530)',
+    strpos($source, 'userAgent') === false,
+    'Found "userAgent" in AnonymousCheckins.php — that column no longer exists (#530).'
 );
 check(
     'no method selects the scrambled address as a value',

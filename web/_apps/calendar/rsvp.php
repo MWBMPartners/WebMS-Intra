@@ -33,9 +33,13 @@ use Portal\Core\Events;
 use Portal\Core\Logger;
 use Portal\Core\Site;
 
-// 🛡️ POST only
+// 🛡️ POST only. #512 — Site::url() gives the plain address outside path
+// mode, so nothing changes for a portal that does not use it; in path
+// mode it adds the organisation's own prefix, which a bare '/calendar'
+// here used to drop, sending a path-mode visitor to organisation 1's
+// calendar instead of their own.
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    header('Location: /calendar');
+    header('Location: ' . Site::url('calendar'));
     exit();
 }
 
@@ -44,7 +48,7 @@ Auth::requireLogin();
 if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
     $_SESSION['flash_msg']  = 'Invalid or expired form token. Please try again.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /calendar');
+    header('Location: ' . Site::url('calendar'));
     exit();
 }
 
@@ -54,7 +58,10 @@ $slug     = trim($_POST['slug'] ?? '');
 $userId   = (int) ($_SESSION['user_id'] ?? 0);
 $siteId   = Site::id();
 
-$redirect = '/calendar' . ($slug !== '' ? '/event?slug=' . urlencode($slug) : '');
+// #512 — same reason as the two redirects above: Site::url() carries the
+// organisation's own address prefix in path mode, which the old bare
+// '/calendar' string here dropped.
+$redirect = Site::url('calendar') . ($slug !== '' ? '/event?slug=' . urlencode($slug) : '');
 
 // 🔍 Validate
 $validResponses = ['going', 'maybe', 'not_going', 'cancel'];

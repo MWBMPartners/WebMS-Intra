@@ -19,6 +19,7 @@ declare(strict_types=1);
 
 use Portal\Core\Auth;
 use Portal\Core\Captcha;
+use Portal\Core\Router;
 use Portal\Core\Site;
 
 $slug = trim((string) ($_GET['slug'] ?? ''));
@@ -58,25 +59,24 @@ if ($slug === '' || preg_match('/^[a-z0-9][a-z0-9\-]{0,79}$/i', $slug) !== 1) {
 //    it proves nothing about which organisation somebody actually belongs
 //    to (#511, #514 finding 3).
 //
-//    WHY SIGN-IN, NOT 404, FOR A SIGNED-OUT VISITOR. The check-in page
-//    (anon-checkin.php) chose 404 for everyone refused, because it is
-//    designed to be used AT THE DOOR, signed out, with no expectation of
-//    ever signing in. This page is different: a member gets sent a
-//    registration LINK by email and is expected to sign in to use it, so a
-//    signed-out visitor is sent to sign in for anything that is not a
-//    public published event — a real internal event, a draft, a deleted
-//    event and a made-up slug ALL alike — and only finds out afterwards,
-//    once signed in, whether the event was real. A SIGNED-IN visitor who
-//    may not see the event gets the plain 404 straight away, the same as a
-//    made-up slug.
+//    ONE PAGE FOR BOTH CASES — changed again, 20 September 2026. This used
+//    to send a signed-out visitor to sign in (302) for anything that was
+//    not a public published event, so a real internal slug and a made-up
+//    one looked the same until AFTER signing in. The owner's answer: that
+//    still asked somebody with a DEAD registration link (the event since
+//    deleted, or the link simply mistyped) to sign in for something that
+//    no longer exists. Both cases now answer with the SAME page —
+//    `Router::renderEventUnavailable()`, 404 underneath, with a sign-in
+//    link for anybody who does have an account — and cost the same
+//    database work either way, because the viewer test is inside the WHERE
+//    clause below, not decided afterwards in PHP. A SIGNED-IN visitor who
+//    may not see the event gets the same page too, just without the
+//    sign-in link (they are already signed in).
 //
 //    WHAT THIS CANNOT DO. Inside MySQL, a slug that matches a real internal
 //    row still costs reading that row before the WHERE clause rejects it —
 //    microseconds, the same limit `rsvp.php`'s own comment already accepts
-//    for the same reason. It also cannot stop a signed-out visitor with a
-//    WRONG slug being sent to sign in rather than told "not found"
-//    straight away — accepted, deliberately: see the settled plan's
-//    "Rejected" list for why 404-for-everyone-signed-out was not chosen.
+//    for the same reason.
 $viewerId = (int) ($_SESSION['user_id'] ?? 0); // 0 when signed out — both EXISTS branches below are then false
 $siteId   = Site::id();
 $stmt = $mysqli->prepare(
@@ -100,10 +100,8 @@ $event = $stmt->get_result()->fetch_assoc() ?: null;
 $stmt->close();
 
 if ($event === null) {
-    if (Auth::check() === false) {
-        Auth::requireLogin(); // sends to /login?redirect=… and exits; never returns
-    }
-    http_response_code(404); exit('Event not found.');
+    Router::renderEventUnavailable();
+    return;
 }
 
 if ((int) $event['registrationEnabled'] !== 1) {

@@ -2,6 +2,21 @@
 
 
 ## [Unreleased] (alpha)
+- fix(calendar,privacy): dropped the anonymous check-in "browser
+  description" column (#530). Every anonymous check-in has recorded the
+  visitor's browser description alongside a scrambled sender address since
+  the table was created, and nothing anywhere — not the attendance report,
+  not the #525 door-figures panel built specifically to read this table —
+  has ever read it. What is recorded about an anonymous check-in now is the
+  count, the source (own phone / kiosk / QR code), the time, and a scrambled
+  sender address that is cleared after the organisation's retention period
+  (`attend.detailRetentionDays`, 90 days by default). Migration 201 drops
+  the column outright rather than merely leaving it unwritten, so an
+  automatic check can catch any future reference to it. Nothing that counts
+  or displays a check-in ever used the dropped column, so figures before and
+  after this change are unaffected; see the migration's own header for one
+  narrow internal exception in how a rare edge-case row is counted while its
+  detail is being cleared, which does not change any total a person sees.
 - feat(attendance): the anonymous check-in counts the portal has recorded
   since September 2025 can finally be seen (#525). Somebody who checks in
   without signing in — a QR code scan, or a kiosk button at the door —

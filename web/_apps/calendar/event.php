@@ -104,27 +104,30 @@ if ($stmt !== false) {
 //
 // THE FIX: one combined visibility test, `$visible`, covering "does an
 // event even exist here" and "is its status one the public may see (or
-// can this viewer manage events)" together — then ONE decision for a
-// signed-out visitor (sign in whenever NOT visible, OR visible but not
-// public) and a SEPARATE, simpler one for a signed-in visitor (404 when
-// not visible; a signed-in member may always read a published non-public
-// event, only drafts and missing events are held back from them, exactly
-// as before). `$visible === false` is checked FIRST inside the
-// signed-out branch specifically so `(int) $event['isPublic']` is never
-// evaluated when `$event` is null — PHP's `||` short-circuits, so this
-// never reads a property of a missing event.
+// can this viewer manage events)" together.
 //
-// THE COST, STATED PLAINLY (accepted, per the settled plan's Q3): a
-// signed-out visitor with a WRONG address on this public, search-indexed
-// page is now sent to sign in rather than shown "not found" straight
-// away, and only learns the truth after signing in. That is the same
-// trade-off already made on the registration pages for the same reason:
-// closing the "does this exist" leak has to apply consistently, or a
-// stranger simply asks whichever page still leaks it.
+// WHY SIGN-IN, NOT 404 — CHANGED AGAIN, 20 September 2026. Between #532 and
+// now, a refused event sent a signed-out visitor to sign in (302) and a
+// missing one answered 404 — closing the "does this exist" leak, but at the
+// cost of asking somebody who followed a DEAD link (an old shared link, a
+// search result, a bookmark for an event since deleted) to sign in for
+// something that no longer exists at all. The owner chose a third answer:
+// ONE page for both cases (`Router::renderEventUnavailable()`), which says
+// the event is not available, offers a sign-in link for anybody who does
+// have an account, and answers 404 underneath so a search engine drops a
+// dead address instead of a portal treating it as a live sign-in gate. The
+// two cases still cost the same database work — `$canManage` and
+// `$signedIn` are read at the top of this file, before the lookup, on
+// every request, whatever it turns out to find — and now produce the same
+// page too. `$visible === false` is checked FIRST in `$refused` below so
+// `(int) $event['isPublic']` is never evaluated when `$event` is null —
+// PHP's `||` short-circuits, so this never reads a property of a missing
+// event.
 //
-// ⚠️ This protects THIS page only. calendar/export.php applies the
-//    matching rule to its own single-event download; other pages that
-//    show an event make their own checks.
+// ⚠️ This protects THIS page only. calendar/export.php, the registration
+//    pages and the check-in pages apply the matching rule to their own
+//    single-event addresses; other pages that show an event make their
+//    own checks.
 $publicEventStatuses = ['published', 'cancelled', 'postponed'];
 // $isVisibleStatus is kept as ITS OWN variable, separate from the combined
 // $visible test below, because two places further down this file
@@ -137,12 +140,12 @@ $isVisibleStatus = $event !== null
     && in_array((string) ($event['status'] ?? ''), $publicEventStatuses, true) === true;
 $visible = $event !== null && ($isVisibleStatus === true || $canManage === true);
 
-if ($signedIn === false) {
-    if ($visible === false || (int) $event['isPublic'] === 0) {
-        Auth::requireLogin(); // sends to /login?redirect=… and exits; never returns
-    }
-} elseif ($visible === false) {
-    Router::renderError(404);
+// One decision, one page. `$visible === false` is tested FIRST so
+// `$event['isPublic']` is never read when `$event` is null (PHP's ||
+// short-circuits).
+$refused = $visible === false || ($signedIn === false && (int) $event['isPublic'] === 0);
+if ($refused === true) {
+    Router::renderEventUnavailable();
     return;
 }
 
