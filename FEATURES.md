@@ -25,9 +25,9 @@
 >
 > **For what is actually true today, check the code.** The counts and the
 > commands to re-derive them are in `.claude/CLAUDE.md` under "Counts, and when
-> they were last checked". As of 10 September 2026: 54 app folders, 47 of them
-> switchable on and off per site, 77 framework classes, 186 database changes
-> numbered 000-187, 209 tables, 19 in-app help guides.
+> they were last checked". As of 20 September 2026: 54 app folders, 47 of them
+> switchable on and off per site, 81 framework classes, 196 database changes
+> numbered 000-198, 213 tables, 19 in-app help guides.
 >
 > **Original snapshot line, kept for reference:** 2026-06-21 · Version on
 > `main`: 1.2.1
@@ -399,8 +399,22 @@ Service-type-aware headcount tracker.
 - Counts split by service type (hierarchical: e.g. Worship → Sabbath School → Adult).
 - Filters by service type, date range; CSV export; trend reports.
 - Bulk session templates (#74).
+- Anonymous check-in counts (#525) — every check-in submitted at
+  `/attend`, the no-sign-in page used for kiosks and QR codes, is now
+  actually visible instead of sitting unread: a per-day breakdown on the
+  event's own attendance page and the event hub, organisation totals and
+  a per-month line on the attendance reports page, an
+  administrators-only spreadsheet download, and a door figure on the
+  livestream dashboard. An administrator can also push an event's
+  anonymous headcount into a real attendance session by hand (never
+  automatic). Who may see the figures — administrators only (the
+  default), administrators plus that event's coordinators, or whoever
+  the page itself already lets in — is a setting for the whole
+  installation, changeable per organisation at
+  `/admin/settings/attendance`.
 
-**Tables:** `tblAttendanceSessions`, `tblAttendanceCounts`, `tblAttendanceServiceTypes`
+**Tables:** `tblAttendanceSessions`, `tblAttendanceCounts`, `tblAttendanceServiceTypes`, `tblAnonymousCheckins`, `tblAnonymousCheckinDays`
+**Settings:** `attend.anonCounts.visibleTo`, `attend.detailRetentionDays`
 
 ---
 

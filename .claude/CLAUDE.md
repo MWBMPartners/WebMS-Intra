@@ -39,23 +39,25 @@ Internal portal platform (PHP 8.5, backward-compatible with 8.4, Bootstrap 5.3.3
 ## Counts, and when they were last checked
 
 These numbers go stale quickly and have been wrong before. Verified against the
-code on **10 September 2026**:
+code on **20 September 2026**:
 
 | What | Count | How to re-check |
 | --- | --- | --- |
 | App folders | 54 | `ls -d web/_apps/*/ | wc -l` |
 | Installable apps (the on/off list) | 47 | `ls web/_core/apps/*.php | wc -l` |
-| Framework classes | 78 | `ls web/_core/*.php | wc -l` |
-| Numbered database migrations | 188, numbered 000-189 | `ls web/_sql/[0-9][0-9][0-9]_*.sql | wc -l` |
-| Database tables | 209 | `grep -c 'CREATE TABLE IF NOT EXISTS' web/_sql/full_schema.sql` |
-| PHP files | 788 | `find web -name '*.php' | wc -l` |
+| Framework classes | 81 | `ls web/_core/*.php | wc -l` |
+| Numbered database migrations | 196 files, numbered 000-198 | `ls web/_sql/[0-9][0-9][0-9]_*.sql | wc -l` |
+| Database tables | 213 | `grep -c 'CREATE TABLE IF NOT EXISTS' web/_sql/full_schema.sql` |
+| PHP files | 803 | `find web -name '*.php' | wc -l` |
 | In-app help guides | 19 | `ls web/_apps/help/*.php | wc -l` |
-| Live addresses the portal answers on | 544 | `python3 tools/audit-checks/check_route_targets.py` |
-| Settings seeded | 566 | `python3 tools/audit-checks/check_settings_keys.py` |
+| Live addresses the portal answers on | 552 | `python3 tools/audit-checks/check_route_targets.py` |
+| Settings seeded | 575 | `python3 tools/audit-checks/check_settings_keys.py` |
+| Automatic checks in `tools/audit-checks/` | 16 | `ls tools/audit-checks/check_*.py | wc -l` |
+| Self-tests in `tools/` | 8 | `ls tools/*selftest*.php | wc -l` |
 
-**If a number here disagrees with the code, the code is right.** Numbers 168 and
-169 are missing from the migration sequence: they were never used, and nothing
-depends on the numbering being unbroken.
+**If a number here disagrees with the code, the code is right.** Numbers 168,
+169 and 195 are missing from the migration sequence: they were never used, and
+nothing depends on the numbering being unbroken.
 
 ## Directory Layout
 
@@ -67,8 +69,8 @@ web/                <- ALL deployable files (synced to server via SFTP)
                        app's PHP handlers live here; Router resolves
                        tblRoutes.targetFile against PORTAL_APPS = _apps/.
   _vendor/simplejwt/<- Vendored RS256 JWT verifier
-  _sql/             <- Numbered SQL migrations (000-187 + full_schema.sql).
-                     186 files, not 188: 168 and 169 were never used.
+  _sql/             <- Numbered SQL migrations (000-198 + full_schema.sql).
+                     196 files, not 199: 168, 169 and 195 were never used.
   _lang/            <- I18n translation files (en.php, cy.php, …)
   _install/         <- Standalone 6-step installation wizard (bootstrap-free)
   public_html/      <- Web root: ONLY the front controller + static assets +
@@ -238,8 +240,28 @@ codex exec --skip-git-repo-check "<what you want reviewed>"
   specific things: is it correct, is it safe, would anything here fail on
   MySQL 8.0, would anything here break on shared hosting with no command line.
 
+**TEMPORARY ARRANGEMENT, set by the owner on 20 September 2026 — read this
+before scheduling any review.** Reviews are NOT being run package by package at
+the moment. One comprehensive Codex review of the whole branch happens **after
+the #514 build**. It covers both the work Codex never saw while it was out of
+usage from 13 to 20 September (some of which the owner committed to GitHub so it
+could not be lost) and everything built since. **No pull request is raised until
+that review is done** and every finding is either fixed and re-reviewed clean, or
+written up as its own issue the owner has seen and agreed to leave for later.
+Once that pull request is raised, the normal arrangement below returns: each
+finished piece goes to Codex as it lands.
+
+Why: Codex ran out of usage part way through the catch-up on 20 September, after
+four of five areas. Spending what is left on small per-package reviews would
+leave nothing for the review that judges the whole body of work as one piece.
+
+Two things did NOT change. Every package still gets a Claude-side independent
+check by a fresh agent that did not build it, before it is committed. And every
+commit message still says plainly that Codex has not reviewed it yet, so silence
+never implies a review happened.
+
 **When to run it.** After the work is written and the mechanical checks pass
-(`php -l`, the thirteen scripts in `tools/audit-checks/`, and the end-to-end
+(`php -l`, the sixteen scripts in `tools/audit-checks/`, and the end-to-end
 migration harness where the database is involved). When Codex is available,
 review before committing remains the normal order. When Codex is not
 available, the owner's decision of 16 September 2026 applies instead:

@@ -2,6 +2,45 @@
 
 
 ## [Unreleased] (alpha)
+- feat(attendance): the anonymous check-in counts the portal has recorded
+  since September 2025 can finally be seen (#525). Somebody who checks in
+  without signing in — a QR code scan, or a kiosk button at the door —
+  has always been written to `tblAnonymousCheckins`, but no page, report,
+  export or download ever read a single row of it. A new class,
+  `Portal\Core\AnonymousCheckins` (`web/_core/AnonymousCheckins.php`), is
+  now the only code that reads that table; the organisation check lives
+  inside its own SQL, and none of its methods ever return the browser
+  description or the scrambled sender address, so nothing built on top of
+  it can leak either by accident. The counts now show in five places: the
+  event's own attendance page (a per-day breakdown), the event hub (so a
+  host can watch people arrive live), the attendance reports page
+  (organisation totals and a per-month line, never an event name), a new
+  administrators-only spreadsheet download, and the livestream dashboard
+  (a door figure next to the viewer count). An administrator can also
+  push an event's anonymous headcount into a real attendance session by
+  hand — never automatic, and pressing the button twice replaces that one
+  row instead of adding a second. Who may see the figures is a new
+  three-way setting, `attend.anonCounts.visibleTo` — administrators only
+  (the default), administrators and that event's coordinators, or
+  whoever the page's own sign-in rule already lets in — set for the
+  whole installation and changeable per organisation from a new page at
+  `/admin/settings/attendance`; administrators can always see the
+  figures regardless, and the spreadsheet download stays
+  administrators-only no matter what the setting says, because a
+  downloaded file keeps existing after a setting is tightened. The
+  browser description and scrambled sender address behind each check-in
+  are cleared out after `attend.detailRetentionDays` (90 days by
+  default, 0 keeps them forever); each day's "probably different
+  senders" figure is worked out and stored before that detail goes, so
+  an old event's number does not drift afterwards, and a day that later
+  gets late check-ins after its figure was stored is marked "includes
+  late arrivals, so less exact". Migration 198 adds the new
+  `tblAnonymousCheckinDays` table, the two settings and the four routes.
+  Fixed in the same piece of work: the livestream dashboard's "top
+  events" list had no organisation check at all, so an administrator of
+  one organisation could see another organisation's livestreamed event
+  names and viewer counts — the two figures shown above it were already
+  scoped correctly, this list was not (#527).
 - fix(calendar,security): the public "no login" check-in page showed the
   name and date of every published INTERNAL event to anyone who was signed
   out, and let them add a check-in against it — event numbers count up from
@@ -16,11 +55,12 @@
   a signed-in member of a DIFFERENT organisation included, gets exactly
   the same "Event not found." as a made-up event number, the same
   timing-safe shape #503 already gave four other calendar handlers. The
-  save handler also gained a rate limit that did not exist before: 300
+  save handler also gained a rate limit that did not exist before: 500
   check-ins per 5 minutes per internet connection per event (generous on
-  purpose — a whole congregation on one venue's wifi is one connection),
-  a new setting (`attend.rateLimit.max`/`windowSeconds`, migration 197),
-  0 switches it off. Also fixed in the same pass, found by the sweep this
+  purpose — a whole congregation on one venue's wifi is one connection;
+  the planning step proposed 300, the owner chose 500), a new setting
+  (`attend.rateLimit.max`/`windowSeconds`, migration 197), 0 switches it
+  off. Also fixed in the same pass, found by the sweep this
   fix required (#520 asked for it): `Events::promoteFromWaitlist()`
   (`web/_core/Events.php`) selected a column called `email` from
   `tblUsers`, which has never existed — the real name is `emailAddress` —
@@ -28,23 +68,104 @@
   one line nobody reads, meaning **nobody has ever been moved up a
   waiting list** since the feature shipped. Two more, found by the same
   sweep and fixed alongside it because leaving a known crash next door
-  was the wrong call: the Live Chat moderation queue
-  (`web/_apps/admin/live/chat.php`) selected `flaggedReason`, which is
+  was the wrong call: the Live Chat moderation queue (#523,
+  `web/_apps/admin/live/chat.php`) selected `flaggedReason`, which is
   really `flagReason`, so the whole queue 500'd every time it was opened;
-  and the Leadership API (`web/_apps/leadership/api/list.php`) selected
-  `assignedAt`, a column `tblLeadershipAssignments` has never had —
-  fixed to `startDate` (when the person actually started; `createdAt`
-  would have read as a start date and been wrong), the endpoint had
-  never worked at all. `tools/audit-checks/check_sql_columns.py` can now
-  also read a JOINed SELECT's `alias.column` names (never a bare name —
-  still too ambiguous), which is precisely what found the `u.email` and
-  `assignedAt` faults automatically; measured on the real tree with zero
-  false alarms, and it does NOT catch `flaggedReason` (that statement's
-  column list holds a quoted value before FROM, an existing, documented
-  blind spot). Neither this fix nor #519 makes the anonymous check-in
-  counts appear anywhere — they are still recorded and read by nothing,
-  which is unchanged, deliberate, and raised separately for whoever picks
-  up #525.
+  and the Leadership API (#524, `web/_apps/leadership/api/list.php`)
+  selected `assignedAt`, a column `tblLeadershipAssignments` has never
+  had — fixed to `startDate` (when the person actually started;
+  `createdAt` would have read as a start date and been wrong), the
+  endpoint had never worked at all. `tools/audit-checks/check_sql_columns.py`
+  can now also read a JOINed SELECT's `alias.column` names (never a bare
+  name — still too ambiguous), which is precisely what found the
+  `u.email` and `assignedAt` faults automatically (#501); measured on
+  the real tree with zero false alarms, and it does NOT catch
+  `flaggedReason` (that statement's column list holds a quoted value
+  before FROM, an existing, documented blind spot). Neither this fix
+  nor #519 made the anonymous check-in counts appear anywhere — that
+  was raised separately as #525, and is now done too (see the entry
+  above).
+- fix(accounts,security): **critical** — an administrator of one
+  organisation could change any account in any organisation in the whole
+  installation, including setting a new password on a global
+  administrator's account, changing that account's email address,
+  switching off a member of another organisation, or granting the
+  portal-wide administrator flag to any account, including their own
+  (#518). Every page that changes an account asked only "is the signed-in
+  person an administrator of the organisation that's currently open",
+  never "may they change THIS account". Reproduced on a real two-organisation
+  database before fixing it. One new class, `Portal\Core\AccountGuard`
+  (`web/_core/AccountGuard.php`), is now asked first by every page and
+  handler that changes or lists accounts for changing: an account number
+  that does not exist is "not found"; an account outside the
+  administrator's own organisation is ALSO "not found", so a refusal
+  gives nothing away; only a global administrator may set the
+  portal-wide administrator flag, change a global administrator's
+  account, or change an account that belongs to more than one
+  organisation. An "admin" invitation now only ever makes someone an
+  administrator of the organisation that sent it — including invitations
+  already sent and not yet accepted. Every refusal is logged twice, once
+  against the organisation involved and once, without the target's name,
+  email or attempted password, on a security line only global
+  administrators see. Sixteen files were fixed across users, the users
+  API, offboarding, invitations and safeguarding records; no database
+  change was needed. Two new tools ship with it: a no-database self-test
+  (`tools/account-guard-selftest.php`) and a new automatic check
+  (`tools/audit-checks/check_account_writes_guarded.py`, wired into the
+  pull-request checks as step 21) that fails if a future change writes to
+  an account table without asking the guard first. Because this fix
+  cannot take back rights already handed out before it shipped, a
+  read-only checklist for a global administrator to run straight after
+  deploying ships alongside it: `docs/post-deploy-check-518.md`.
+- docs(offline): corrected the notes on
+  `Auth::oldServiceWorkerWouldStore()` about which stored offline copy a
+  sign-out cannot remove, and why (#507). The notes used to say sign-out
+  and `sw.js` remove every offline copy stored before the portal started
+  sending `Vary: *`; there is one they do not. It only exists for an
+  organisation whose site key is literally "offline", on a server that
+  answers `/offline/` through PHP, saved while an older version of
+  `Auth.php` was still running — in that one case, the person's
+  signed-in dashboard is stored under the address `/offline/`. The notes
+  now say plainly which copy that is, that it carries the person's name,
+  why sign-out keeps it (the three headers it checks are the same as on
+  the real offline page), why fixing this with a different header rule
+  was rejected (it would eventually delete the real offline page at
+  every sign-out, with nothing logged), that it only goes once
+  `CACHE_VERSION` next changes, and that the proper fix belongs where
+  site keys are saved (tracked separately as #515). Comments only — no
+  code changed.
+- fix(checks): two low-severity faults in the automatic column check,
+  `tools/audit-checks/check_sql_columns.py`, found by a stand-in review
+  (a fresh Claude agent, while Codex was out of usage) (#501). First, its
+  faster search found each query's first word with Python's
+  `finditer()`, which only returns matches that do not overlap — a real
+  query starting inside an earlier match could be stepped over and
+  missed, even though the check's own notes promised results identical
+  to its slower search; it now searches forward from each position in
+  turn instead. Second, the pull-request checks
+  (`.github/workflows/pr-security.yml`) ran the check in a way that made
+  a crash — a Python error, or the check's own refusal when its figures
+  do not add up — look exactly like a clean run in the pull-request
+  report; a crash is now shown plainly, while genuine findings stay
+  advisory, as before. (The check's newer ability to understand short
+  table names such as `u.` is recorded in the #519/#520/#523/#524 entry
+  above, where it found two of the four faults.)
+- fix: a draft or deleted event now takes exactly the same amount of
+  database work to refuse as an event that does not exist (#503).
+  Codex's review found that four pages — the events API's single-event
+  lookup, the event hub's resources and videos lists, and the RSVP page
+  — asked the database about the signed-in member's own account only
+  when an event was actually found, or only when it was a draft. That
+  one extra database round trip made a refused draft answer
+  fractionally slower than an event that truly does not exist, which
+  could in principle hint that the draft is there. All four pages, plus
+  the live page which had the same pattern, now decide "may this caller
+  manage events" before looking the event up at all, on every request,
+  and the draft rule now sits inside the lookup itself as one extra
+  bound condition rather than a separate check afterwards. A refused
+  draft, a deleted event, another organisation's event and a made-up
+  event number now run the same query, get the same empty result and
+  give the same reply.
 - fix(routing): four faults fixed, none of them the fault its issue title
   said — all four were found by checking the code itself, not by trusting
   the report. Two of them share one cause: `web/public_html/.htaccess`
