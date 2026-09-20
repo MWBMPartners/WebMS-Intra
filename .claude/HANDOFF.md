@@ -9,6 +9,32 @@ proceeds, so the session can be picked up at any point).
 
 ## Read this first — where we are right now
 
+## LATEST — 20 September 2026, 23:10. RESUME FROM HERE.
+
+**PACKAGE 2 IS DONE: committed `bd1ef12` and pushed, independent check PASS.** The owner's dead-link answer (one "not available" page
+for both cases, with a sign-in link, answering not-found underneath), #508, #512 parts 1-3, #528, #530 and #509 parts 1-3. 31 files,
+one migration (201 removes the browser description nobody read). The checker ran the committed code and the fixed code side by side
+against the same database, so every result has a control. All five issues are commented.
+
+**TWO OWNER DECISIONS, 23:05.**
+1. **Maintenance mode: narrow the bypass to GLOBAL administrators only.** Today any administrator walks past the closed sign,
+   including anyone holding the older all-organisations flag. Sign-in, the upgrade page and the health check stay open to everybody.
+   It is a one-word change in `Maintenance::currentUserCanBypass()`, and it is **folded into the #515 package now running** rather
+   than run as a package of its own.
+2. **The three issues package 2 raised all wait until after the #514 build:** **#534** any signed-in person can read another
+   organisation's internal event page and download it (verified: `event.php` has no membership check at all, unlike the registration
+   pages); **#535** "delete my data" silently skips four tables that DO link to a person, including the record of who opened somebody's
+   pastoral file (verified table by table: `uploadedByID`, `viewerID` and `actorUserID` are not in the eraser's list of known column
+   names; `recordedByID` is, so the fifth suspected table is fine); **#536** the navigation, sign-in and error pages drop the
+   organisation prefix (the navigation alone has 20 bare addresses; only 8 files in `web/` use the address builder).
+
+**RUNNING NOW: the #515 package** — organisation keys that can take over one of the portal's own addresses, plus the maintenance
+narrowing above.
+
+**THE ORDER FROM HERE:** #515 (+ maintenance) → #516 → #517 → Fable review of the #514 plan → #514 build → #534, #535, #536 →
+**one comprehensive Codex review of the whole branch** → fix or log every finding → one pull request to alpha. Then back to
+per-package Codex reviews.
+
 ## LATEST — 20 September 2026, 22:20. RESUME FROM HERE.
 
 **PACKAGE 1 IS DONE: committed `1e0809c` and pushed, independent check PASS.** #521, #522, #529, #531, #532, #533 and the
