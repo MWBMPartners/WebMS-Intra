@@ -19,6 +19,7 @@
 
 declare(strict_types=1);
 
+use Portal\Core\AnonymousCheckins;
 use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Site;
@@ -153,6 +154,39 @@ $monthNames = [
     5 => 'May', 6 => 'June', 7 => 'July', 8 => 'August',
     9 => 'September', 10 => 'October', 11 => 'November', 12 => 'December',
 ];
+
+// -----------------------------------------------------------------------------
+// 🚪 Anonymous check-ins (#525)
+// -----------------------------------------------------------------------------
+// The page's own sign-in rule at the top of this file is UNCHANGED: it asks
+// only that somebody is signed in. Who may see the anonymous section is decided
+// separately, by the organisation's own setting, and can only ever narrow from
+// there — `$passesPageGate` is true below because anybody still reading this
+// line got past the rule at the top.
+//
+// TWO SAFEGUARDS THAT ARE NOT OPTIONAL HERE:
+//
+// 1. This section shows the organisation's TOTALS and a line per month. It
+//    never shows an event name. That matters because an organisation may
+//    choose "anyone who can already open the page", and today that means every
+//    signed-in user on this installation, not only members of this organisation.
+//    A total tells nobody which events took place; a list of names would — and
+//    internal events collect anonymous check-ins too. Narrowing who may open
+//    this page at all is issue #529, not this work.
+//
+// 2. There is no single event here, so "this event's coordinator" cannot be
+//    tested at all. `$isEventScoped` is false, which makes the
+//    administrators-and-coordinators choice mean administrators only on this
+//    page. That is deliberate: showing a coordinator an organisation-wide total
+//    that includes events they have nothing to do with is exactly what this
+//    work set out to avoid.
+$anonChoice  = AnonymousCheckins::readVisibilityChoice($siteId);
+$mayViewAnon = AnonymousCheckins::mayView($anonChoice, true, App::isAdmin(), false, false);
+
+$anon = null;
+if ($mayViewAnon === true) {
+    $anon = AnonymousCheckins::summaryForSite($mysqli, $siteId, $reportYear, $reportMonth);
+}
 
 // 📄 Include shared header template
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
@@ -359,6 +393,146 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 </div>
             <?php endforeach; ?>
         </div>
+    </div>
+</div>
+<?php endif; ?>
+
+<!-- 🚪 Anonymous check-ins (#525) — the organisation's totals only, never an
+     event name. See the long note beside $mayViewAnon above for why. -->
+<?php if ($mayViewAnon === true && $anon !== null): ?>
+<div class="card mb-4 border-info">
+    <div class="card-header bg-body-tertiary">
+        <h5 class="mb-0">
+            <i class="fa-solid fa-door-open me-2 text-info"></i>Anonymous check-ins at the door
+            <?php if ($reportMonth > 0): ?>
+                <!-- $reportMonth comes straight from the address (?month=) and is only ever checked
+                     for being > 0, never for being <= 12. `?month=99` used to read a key that is not
+                     in $monthNames at all, which PHP treats as a warning — and unlike the two older
+                     copies of this same line (further up this file, inside "if there is data" blocks
+                     that a made-up month never reaches because there is never data for month 99), this
+                     card renders whenever the viewer may see the figures at all, data or none, so the
+                     warning fired on every single request. Found by the #525 independent check: three
+                     requests wrote 33 rows to tblErrors. Fixed the same way this file already prints an
+                     unchecked month 66 lines below ($am['month']): fall back to the raw number rather
+                     than trust the address to be 1-12. -->
+                — <?php echo htmlspecialchars($monthNames[$reportMonth] ?? (string) $reportMonth, ENT_QUOTES, 'UTF-8'); ?> <?php echo $reportYear; ?>
+            <?php else: ?>
+                — <?php echo $reportYear; ?>
+            <?php endif; ?>
+        </h5>
+    </div>
+    <div class="card-body">
+        <div class="alert alert-secondary small">
+            <p class="mb-1">
+                <strong>These are counted on a different basis from everything above, and must never
+                be added to it or subtracted from it.</strong> The figures above are counted by the
+                date of an attendance session. These are counted by the day a check-in arrived. They
+                are not two views of one thing.
+            </p>
+            <p class="mb-0">
+                An anonymous check-in is somebody pressing a button at the door or scanning a QR code
+                without signing in. Nothing links one to a person, and nothing here can identify
+                anybody.
+            </p>
+        </div>
+
+        <?php if ($anon['checkins'] === 0): ?>
+            <p class="mb-0 text-muted">No anonymous check-ins in this period.</p>
+        <?php else: ?>
+            <div class="row g-3 mb-3">
+                <div class="col-6 col-md-3">
+                    <div class="card text-center h-100">
+                        <div class="card-body py-2">
+                            <h4 class="mb-0"><?php echo number_format($anon['checkins']); ?></h4>
+                            <small class="text-muted">Check-ins</small>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-6 col-md-3">
+                    <div class="card text-center h-100">
+                        <div class="card-body py-2">
+                            <h4 class="mb-0"><?php echo number_format($anon['people']); ?></h4>
+                            <small class="text-muted">People claimed</small>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-6 col-md-3">
+                    <div class="card text-center h-100">
+                        <div class="card-body py-2">
+                            <h4 class="mb-0"><?php echo number_format($anon['groups']); ?></h4>
+                            <small class="text-muted">Were a group, not one person</small>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-6 col-md-3">
+                    <div class="card text-center h-100">
+                        <div class="card-body py-2">
+                            <h4 class="mb-0"><?php echo number_format($anon['senders']); ?></h4>
+                            <small class="text-muted">Probably different senders</small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <p class="small text-muted">
+                How they arrived:
+                <span class="badge bg-secondary">Their own phone: <?php echo (int) $anon['bySource']['self']; ?></span>
+                <span class="badge bg-secondary">Kiosk at the door: <?php echo (int) $anon['bySource']['kiosk']; ?></span>
+                <span class="badge bg-secondary">QR code: <?php echo (int) $anon['bySource']['qr']; ?></span>
+            </p>
+
+            <?php if ($reportMonth === 0 && count($anon['byMonth']) > 0): ?>
+                <div class="portal-data-list">
+                    <div class="portal-data-row portal-data-header d-none d-md-flex">
+                        <div class="col-md-4">Month</div>
+                        <div class="col-md-2 text-center">Check-ins</div>
+                        <div class="col-md-3 text-center">People claimed</div>
+                        <div class="col-md-3 text-center">Probably different senders</div>
+                    </div>
+                    <?php foreach ($anon['byMonth'] as $am): ?>
+                        <div class="portal-data-row">
+                            <div class="col-12 col-md-4">
+                                <span class="d-md-none fw-semibold">Month: </span>
+                                <strong><?php echo htmlspecialchars(
+                                    $monthNames[(int) $am['month']] ?? (string) $am['month'],
+                                    ENT_QUOTES,
+                                    'UTF-8'
+                                ); ?></strong>
+                            </div>
+                            <div class="col-12 col-md-2 text-md-center">
+                                <span class="d-md-none fw-semibold">Check-ins: </span>
+                                <?php echo number_format((int) $am['checkins']); ?>
+                            </div>
+                            <div class="col-12 col-md-3 text-md-center">
+                                <span class="d-md-none fw-semibold">People claimed: </span>
+                                <?php echo number_format((int) $am['people']); ?>
+                            </div>
+                            <div class="col-12 col-md-3 text-md-center">
+                                <span class="d-md-none fw-semibold">Probably different senders: </span>
+                                <?php echo number_format((int) $am['senders']); ?>
+                            </div>
+                        </div>
+                    <?php endforeach; ?>
+                </div>
+            <?php endif; ?>
+
+            <p class="small text-muted mt-3 mb-0">
+                &ldquo;Probably different senders&rdquo; counts different internet connections, not
+                different people. Everybody on the building's own wifi looks like one sender, so the
+                real number of people is usually higher. Somebody who comes back on another day is
+                counted again on that day.
+                <?php if ($anon['sendersIncludeLateArrivals'] === true): ?>
+                    At least one day in this period gained check-ins after its figure had already been
+                    worked out and stored, so that figure includes late arrivals and may count one
+                    visitor twice.
+                <?php endif; ?>
+                <?php if (App::isAdmin() === true): ?>
+                    A spreadsheet of these figures, broken down by event and day, is on the
+                    <a href="/attendance">attendance page</a> — that download is for administrators
+                    only, whatever this organisation's visibility setting says.
+                <?php endif; ?>
+            </p>
+        <?php endif; ?>
     </div>
 </div>
 <?php endif; ?>

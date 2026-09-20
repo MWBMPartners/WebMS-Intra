@@ -168,6 +168,17 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                class="btn btn-outline-success" title="Export CSV">
                 <i class="fa-solid fa-file-csv"></i>
             </a>
+            <!-- 📊 The anonymous check-in spreadsheet (#525). A SEPARATE file
+                 from the one beside it, because the two have different columns
+                 and because "anonymous check-ins are never merged into the
+                 named attendance record" should be literally true in the files
+                 as well as on the screens. Administrators only, whatever the
+                 organisation's visibility setting says — a file leaves the
+                 building, and unlike the screens it names the events. -->
+            <a href="/attendance/export/anonymous?csrf_token=<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>"
+               class="btn btn-outline-info" title="Download the anonymous check-in counts (administrators only)">
+                <i class="fa-solid fa-door-open"></i>
+            </a>
         <?php endif; ?>
         <a href="/attendance/record" class="btn btn-success">
             <i class="fa-solid fa-plus me-1"></i> Record Attendance
@@ -175,6 +186,15 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <?php if (App::isAdmin() === true): ?>
             <a href="/attendance/manage" class="btn btn-outline-primary">
                 <i class="fa-solid fa-gear me-1"></i> Manage Types
+            </a>
+            <!-- ⚙️ The way in to the anonymous check-in settings (#525). This
+                 link is NOT optional. /admin/settings/organisation was shipped
+                 with nothing anywhere linking to it, so it can only be reached
+                 by typing its address and almost nobody knows it exists. A new
+                 page with the same problem would be a second one. -->
+            <a href="/admin/settings/attendance" class="btn btn-outline-secondary"
+               title="Who may see the anonymous check-in counts">
+                <i class="fa-solid fa-door-open me-1"></i> Check-in counts
             </a>
         <?php endif; ?>
     </div>

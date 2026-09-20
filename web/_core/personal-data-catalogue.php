@@ -98,9 +98,63 @@ return [
         'columns'  => ['userID'],
     ],
     'tblAnonymousCheckins' => [
-        'decision' => 'erase',
-        'reason'   => 'Holds information about the person themselves',
+        'decision' => 'retain',
+        // CORRECTED by the #525 round-1 independent check, 18 September 2026:
+        // this said 'erase' while the reason right below it explains why an
+        // erasure request can never reach this table at all — the
+        // machine-readable half was claiming something the code cannot do,
+        // while the human-readable half beside it said plainly that it
+        // cannot. 'retain' is the value that actually matches the reason:
+        // the row is kept, not because the law requires it (the usual reason
+        // for 'retain' elsewhere in this file), but because there is no
+        // column to erase it BY — and it is kept only until the retention
+        // timer clears the personal part of it, which 'period' below says.
+        //
+        // KEEP 'decision' => '...' on the line straight after the opening
+        // bracket above, with nothing but whitespace between them: an
+        // earlier draft of this fix put this whole comment BEFORE the
+        // 'decision' line instead of after it, which reads fine to a person
+        // but silently broke tools/audit-checks/check_personal_data_coverage.py
+        // — its parser is a plain regex
+        // ('tblXxx' => [ \s* 'decision' => '...') that reads the catalogue as
+        // TEXT rather than running the PHP (deliberately, so the check needs
+        // no PHP interpreter — see that script's own docstring), and `\s*`
+        // does not match a `//` comment line. The check started reporting
+        // this table as having "no decision recorded" even though it
+        // plainly does; caught by actually running that check against this
+        // file rather than only the newer gdpr-coverage-selftest.php, which
+        // parses the catalogue by executing it and did not notice.
+        // Honest wording, replacing "Holds information about the person
+        // themselves", which was true but misleading about what can be done
+        // about it. An anonymous check-in is somebody pressing a button at the
+        // door without signing in. There is NO column anywhere on the row that
+        // links it to an account, so a "delete everything you hold about me"
+        // request can never reach one: there is nothing to match the person
+        // against, and the erasure routine therefore skips this table entirely.
+        // That is not a gap being ignored — since #525 the browser description
+        // and the scrambled sender address are emptied out on a timer instead
+        // (the setting attend.detailRetentionDays, 90 days by default, 0 to
+        // keep for ever, set per organisation at /admin/settings/attendance).
+        // Nobody should have to ask for something that cannot be found by
+        // asking. See issue #479.
+        'reason'   => 'Somebody checking in at the door without signing in. Nothing on the row links it to an account, '
+                    . 'so an erasure request cannot reach it — there is nothing to match the person against. The browser '
+                    . 'description and the scrambled sender address are cleared on a timer instead '
+                    . '(attend.detailRetentionDays, 90 days by default, 0 means keep for ever). See #479 and #525.',
+        // Required whenever decision is 'retain' (tools/gdpr-coverage-selftest.php
+        // checks every 'retain' entry has one). Not a legal minimum — this row
+        // is cleared by a technical timer the organisation controls, not by law
+        // — but the self-test's rule is the same either way: say for how long.
+        'period'   => '90 days by default, per the organisation\'s attend.detailRetentionDays setting (0 = keep for ever)',
         'columns'  => ['userAgent'],
+    ],
+    'tblAnonymousCheckinDays' => [
+        'decision' => 'not-personal',
+        'reason'   => 'Counts and dates only. It exists so that clearing the personal detail on an anonymous check-in '
+                    . 'does not change a number that was already correct: the "probably how many different senders" '
+                    . 'figure is worked out from the scrambled sender address, so it is written down before that '
+                    . 'address is emptied. Nothing here can be traced to a person, and nothing here names an event.',
+        'columns'  => [],
     ],
     'tblAssetEventAssignments' => [
         'decision' => 'unlink',

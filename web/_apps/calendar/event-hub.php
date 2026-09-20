@@ -34,6 +34,7 @@
 
 declare(strict_types=1);
 
+use Portal\Core\AnonymousCheckins;
 use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\CloudflareStream;
@@ -73,6 +74,30 @@ if ($event === null) {
 }
 
 $canManage = App::isAdmin() === true || Auth::isCoordinatorOf($eventId) === true;
+
+// 🚪 Anonymous check-ins (#525) — a small tile inside the coordinator/admin
+//    tool strip below.
+//
+//    TWO separate gates, on purpose. The hub itself lets in any member of the
+//    event team: a crew member, somebody holding a job, anybody with a
+//    tblEventPeople row. `$canManage` is the narrower "runs this event" test,
+//    and the door figures sit inside it, so a crew member never sees them. The
+//    organisation's own setting is then applied on top of that and can only
+//    narrow it further — it can never show the tile to somebody `$canManage`
+//    already refused.
+$anonChoice  = AnonymousCheckins::readVisibilityChoice($siteId);
+$mayViewAnon = AnonymousCheckins::mayView(
+    $anonChoice,
+    $canManage,
+    App::isAdmin(),
+    Auth::isCoordinatorOf($eventId),
+    true
+);
+
+$anon = null;
+if ($mayViewAnon === true) {
+    $anon = AnonymousCheckins::summaryForEvent($mysqli, $eventId, $siteId);
+}
 
 // 🎫 Viewer's own roster context — crew(s), job(s), event-person role(s).
 $rosterChips = [];
@@ -297,6 +322,33 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     <i class="fa-solid fa-clipboard-list me-1"></i>Registrations
                 </a>
             </div>
+
+            <!-- 🚪 Anonymous check-ins at the door (#525). Inside the
+                 coordinator/admin strip, so a crew member or job holder never
+                 sees it, and inside its own visibility test on top of that.
+                 Two figures and a link — the full breakdown lives on the
+                 attendance page and is not repeated here. -->
+            <?php if ($mayViewAnon === true && $anon !== null && $anon['checkins'] > 0): ?>
+                <div class="card-footer bg-body-tertiary">
+                    <div class="d-flex flex-wrap align-items-center gap-3">
+                        <span class="small">
+                            <i class="fa-solid fa-door-open me-1 text-info"></i>
+                            <strong>Anonymous check-ins at the door:</strong>
+                            <?php echo number_format($anon['people']); ?> people claimed,
+                            from <?php echo number_format($anon['checkins']); ?>
+                            check-in<?php echo $anon['checkins'] === 1 ? '' : 's'; ?>.
+                        </span>
+                        <a href="/calendar/event/attendance?eventID=<?php echo $eventId; ?>"
+                           class="btn btn-outline-info btn-sm">
+                            See the breakdown
+                        </a>
+                    </div>
+                    <p class="small text-muted mb-0 mt-1">
+                        Not part of the attendance record unless an administrator adds them to a
+                        session on purpose.
+                    </p>
+                </div>
+            <?php endif; ?>
         </div>
     <?php endif; ?>
 

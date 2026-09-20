@@ -45,6 +45,7 @@
 
 declare(strict_types=1);
 
+use Portal\Core\AnonymousCheckins;
 use Portal\Core\App;
 
 /**
@@ -145,14 +146,69 @@ function registration_sweep_sites(): array
 }
 
 /**
+ * 🏢 Every site, with the number of days it keeps anonymous check-in detail for.
+ *
+ * "Detail" here means the browser description and the scrambled version of the
+ * sender's internet address that are stored on each anonymous check-in. Nothing
+ * reads either of them, and nothing here or anywhere else ever shows them.
+ *
+ * A site that keeps them for ever is left out of the list entirely, so nothing
+ * of its is touched.
+ *
+ * ONE DELIBERATE DIFFERENCE FROM registration_sweep_sites() ABOVE. There, a
+ * negative number of days is turned back into the ordinary 90-day default,
+ * because somebody typing "-1" has made a mistake and keeping a child's medical
+ * notes for ever is the dangerous outcome. Here a negative is treated the same
+ * as 0 — keep for ever — because nothing sensitive is being kept and, for a
+ * clear-out, doing nothing on a number nobody meant to type is the safe
+ * direction. The two differ on purpose, and `AnonymousCheckins::
+ * readRetentionDays()` is where that rule lives.
+ *
+ * @return array<int, int> The site's identity number, mapped to its number of days.
+ */
+function anon_checkin_sweep_sites(): array
+{
+    $db  = App::db();
+    $out = [];
+
+    $result = $db->query('SELECT siteID FROM tblSites');
+    if ($result === false) {
+        return $out;
+    }
+
+    while ($row = $result->fetch_assoc()) {
+        $siteId = (int) $row['siteID'];
+
+        // Read INSIDE the loop, so every organisation's own setting decides
+        // what happens to its own rows. Reading one organisation's setting and
+        // applying it everywhere is the fault the registrations sweep below
+        // explains at length; the same reasoning applies exactly here.
+        $days = AnonymousCheckins::readRetentionDays($siteId);
+        if ($days < 1) {
+            continue;
+        }
+
+        $out[$siteId] = $days;
+    }
+    $result->free();
+
+    return $out;
+}
+
+/**
  * Count rows that WOULD be deleted at the current window.
  *
- * @return array{activity:int,errors:int,registrations:int}
+ * `checkinDetail` is the odd one out and is named differently on purpose:
+ * nothing is deleted there. It counts anonymous check-in ROWS that still hold a
+ * browser description or a scrambled address and would have both emptied out.
+ * The rows themselves, and every count on them, stay.
+ *
+ * @return array{activity:int,errors:int,registrations:int,checkinDetail:int}
  */
 function preview_retention_counts(int $activityDays, int $errorDays): array
 {
     $db = App::db();
-    $out = ['activity' => 0, 'errors' => 0, 'registrations' => 0];
+    $out = ['activity' => 0, 'errors' => 0, 'registrations' => 0, 'checkinDetail' => 0];
 
     $stmt = $db->prepare(
         'SELECT COUNT(*) AS cnt FROM tblActivityLogs '
@@ -198,13 +254,25 @@ function preview_retention_counts(int $activityDays, int $errorDays): array
         $stmt->close();
     }
 
+    // 🚪 Anonymous check-in detail, counted one organisation at a time with
+    //    that organisation's own setting — the same loop the clear-out itself
+    //    uses, so the number shown and the number acted on come from one rule.
+    foreach (anon_checkin_sweep_sites() as $siteId => $days) {
+        $out['checkinDetail'] += AnonymousCheckins::countDetailToClear($db, $siteId, $days);
+    }
+
     return $out;
 }
 
 /**
  * Perform the actual delete. Returns counts per table.
  *
- * @return array{activityDeleted:int,errorsDeleted:int,registrationsDeleted:int,totalDeleted:int}
+ * Two of the returned numbers are NOT deletions and are named so that nobody
+ * mistakes them for any: `checkinDaysStored` and `checkinDetailCleared`. See
+ * the note beside them at the bottom of this function.
+ *
+ * @return array{activityDeleted:int,errorsDeleted:int,registrationsDeleted:int,
+ *               checkinDaysStored:int,checkinDetailCleared:int,totalDeleted:int}
  */
 function run_retention_sweep(): array
 {
@@ -301,10 +369,46 @@ function run_retention_sweep(): array
         $stmt->close();
     }
 
+    // 🚪 Anonymous check-in detail.
+    //
+    //    Not a delete. The rows stay exactly where they are, with their counts,
+    //    their headcounts, how each check-in arrived and when it happened all
+    //    untouched. What is emptied is the browser description and the
+    //    scrambled version of the sender's internet address — two pieces of
+    //    personal information that nothing in the portal has ever read.
+    //
+    //    They cannot simply be left. An anonymous check-in has no link to any
+    //    person at all, so a "delete everything you hold about me" request can
+    //    never reach one: there is nothing to match somebody against. Nobody
+    //    should have to ask, so a time limit is the answer instead.
+    //
+    //    The figure for "probably how many different senders" is worked out
+    //    from the scrambled address, so it would silently change the moment the
+    //    address went. That is why the clear-out writes the figure down for
+    //    each day BEFORE emptying that day's detail, and why this returns two
+    //    numbers rather than one.
+    //
+    //    One organisation at a time, with its own setting, for exactly the
+    //    reasons set out for the registrations sweep above.
+    $checkinDaysStored    = 0;
+    $checkinDetailCleared = 0;
+    foreach (anon_checkin_sweep_sites() as $siteId => $days) {
+        $result = AnonymousCheckins::clearOldDetail($db, $siteId, $days);
+        $checkinDaysStored    += (int) $result['daysStored'];
+        $checkinDetailCleared += (int) $result['rowsCleared'];
+    }
+
     return [
         'activityDeleted'      => $activityDeleted,
         'errorsDeleted'        => $errorsDeleted,
         'registrationsDeleted' => $registrationsDeleted,
+        // 🚫 NEITHER of these two is added to totalDeleted, on purpose. Nothing
+        //    was deleted: personal detail was emptied out of rows that remain.
+        //    Adding them would make the scheduled job's own "deleted N rows"
+        //    line untrue, and that line is what somebody reads when they are
+        //    trying to work out what a sweep did.
+        'checkinDaysStored'    => $checkinDaysStored,
+        'checkinDetailCleared' => $checkinDetailCleared,
         'totalDeleted'         => $activityDeleted + $errorsDeleted + $registrationsDeleted,
     ];
 }

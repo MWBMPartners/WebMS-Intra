@@ -8776,3 +8776,57 @@ ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
 
 INSERT INTO `tblMigrations` (`filename`) VALUES ('197_attend_rate_limit.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- ── from 198_anonymous_checkin_visibility.sql (#525) ─────────────────────────
+-- The anonymous check-in counts were recorded and nothing read them. This adds
+-- the stored per-day figures table, the two settings that decide who may see
+-- the counts and how long the personal detail is kept, and the four addresses
+-- the new screens answer on.
+--
+-- `tblAnonymousCheckinDays` holds counts and dates only — nothing about any
+-- person. It exists because the "probably unique senders" figure is worked out
+-- from the scrambled sender address, which is emptied after 90 days by default;
+-- writing the figure down BEFORE the detail goes is the only way the number
+-- stays the same afterwards. `rowsCounted` is how a later reader tells a row
+-- whose scramble was removed from one that never had a scramble at all, and
+-- `hasLateArrivals` marks a day that gained check-ins after its figure was
+-- stored, so every screen can say plainly that the figure is less exact.
+--
+-- No siteID column, deliberately: the event is the only link to an
+-- organisation, exactly as on tblAnonymousCheckins, and a second copy of that
+-- link is a second thing that could disagree with the first.
+--
+-- The migration file carries the fuller explanation, including why there are
+-- three visibility choices rather than four and why 0 days means keep for ever.
+CREATE TABLE IF NOT EXISTS `tblAnonymousCheckinDays` (
+    `dayID`           INT         NOT NULL AUTO_INCREMENT,
+    `eventID`         INT         NOT NULL COMMENT 'FK → tblEvents.eventID — the only link to an organisation',
+    `checkinDay`      DATE        NOT NULL COMMENT 'The calendar day these check-ins happened on',
+    `uniqueSenders`   INT         NOT NULL DEFAULT 0
+                      COMMENT 'The senders figure for that day, worked out while the scrambled addresses still existed: how many different internet connections, plus one for each check-in that had no scrambled address at all. Cannot be worked out again afterwards, which is the whole reason this row exists.',
+    `rowsCounted`     INT         NOT NULL DEFAULT 0
+                      COMMENT 'How many check-in rows had their detail cleared at that moment. Lets a later reader tell a row whose detail was cleared from one that arrived afterwards: rows of that day beyond this number must be later arrivals.',
+    `hasLateArrivals` TINYINT(1)  NOT NULL DEFAULT 0
+                      COMMENT '1 when check-ins arrived for this day AFTER its figure was stored, so the figure may count one visitor twice and every screen must say so.',
+    `storedAt`        DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`dayID`),
+    UNIQUE KEY `uq_anon_day` (`eventID`, `checkinDay`),
+    CONSTRAINT `fk_anon_day_event` FOREIGN KEY (`eventID`)
+        REFERENCES `tblEvents`(`eventID`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+COMMENT='One stored figure per event per day, written just before the detail behind it is cleared (#525)';
+
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'attend.anonCounts.visibleTo', 'admins', 'admins', 0),
+    (NULL, 'attend.detailRetentionDays',  '90',     '90',     0)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('attendance/export/anonymous',             'attendance/export-anonymous.php',         1),
+    ('calendar/event/attendance/anonymous/add', 'calendar/event-attendance-anon-add.php',  1),
+    ('admin/settings/attendance',               'admin/settings/attendance/index.php',     1),
+    ('admin/settings/attendance/save',          'admin/settings/attendance/save.php',      1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('198_anonymous_checkin_visibility.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;

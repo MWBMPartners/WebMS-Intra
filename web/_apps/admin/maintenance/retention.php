@@ -49,11 +49,22 @@
  *
  *   audit.retentionDays        (default 365) — activity logs
  *   errors.retentionDays       (default 365) — error logs
+ *   attend.detailRetentionDays (default 90) — how long the browser description
+ *                               and the scrambled sender address are kept on an
+ *                               anonymous check-in. Each organisation has its
+ *                               own; 0 means keep for ever. Changed at
+ *                               /admin/settings/attendance.
  *   maintenance.cronToken      ('' by default — used by /cron/retention-sweep;
  *                               an empty value switches the job off)
  *
  * Deletions are hard (no soft-delete column on these tables). This page shows
  * an HTML report; the scheduled job returns JSON.
+ *
+ * ONE PART OF THIS SWEEP DELETES NOTHING, and it is worth saying here because
+ * everything else on this page does. The anonymous check-in clear-out (#525)
+ * empties two columns out of rows that stay exactly where they are. Its two
+ * numbers are reported separately and are deliberately NOT added to the
+ * "deleted N rows" total.
  *
  * @package   Portal\Admin
  * @author    MWBM Partners Ltd (t/a MWservices)
@@ -131,7 +142,9 @@ if (App::isRootAdmin() === false) {
         This sweep deletes activity-log and error rows, and event
         registrations — including children's names, dates of birth, allergies
         and medical notes — across every organisation on this installation,
-        not only yours. So only a global administrator can use this page.
+        not only yours. It also empties the browser description and the
+        scrambled sender address out of old anonymous check-ins, again across
+        every organisation. So only a global administrator can use this page.
         Nothing has been changed.
     </div>
     <?php
@@ -159,7 +172,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         Logger::activity('AuditRetentionSweep', 'Admin sweep deleted ' . $result['totalDeleted'] . ' rows');
         $flashMsg  = 'Sweep complete. Deleted ' . $result['activityDeleted']
                    . ' activity log row(s), ' . $result['errorsDeleted'] . ' error row(s) and '
-                   . $result['registrationsDeleted'] . ' event registration(s).';
+                   . $result['registrationsDeleted'] . ' event registration(s). '
+                   // 🚪 Said as a separate sentence, with the word "emptied"
+                   //    rather than "deleted", because nothing was deleted here
+                   //    and the difference matters: the check-in rows and every
+                   //    count on them are still there.
+                   . 'Also stored the sender figure for ' . $result['checkinDaysStored']
+                   . ' event-day(s) of anonymous check-ins and then emptied the browser description '
+                   . 'and scrambled address out of ' . $result['checkinDetailCleared']
+                   . ' check-in row(s). Those rows and their counts were not deleted.';
         $flashType = 'success';
     }
 }
@@ -234,13 +255,39 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             </div>
         </div>
     </div>
+    <!-- 🚪 Anonymous check-ins. Given its own card because it is the one part
+         of this sweep that does NOT delete anything, and somebody pressing the
+         button should know that before they press it rather than afterwards. -->
+    <div class="col-12">
+        <div class="card shadow-sm">
+            <div class="card-body">
+                <h2 class="h6"><i class="fa-solid fa-door-open me-1"></i>Anonymous check-in detail (<code>tblAnonymousCheckins</code>)</h2>
+                <p class="text-muted small mb-2">
+                    Kept for <strong><?php echo (int) (App::settings('attend.detailRetentionDays') ?? 90); ?> days</strong>
+                    by default (setting: <code>attend.detailRetentionDays</code>).
+                    Each organisation uses its own setting, and 0 means keep for ever.
+                </p>
+                <p class="mb-2">Check-in rows whose detail would be emptied now: <strong><?php echo number_format($preview['checkinDetail']); ?></strong></p>
+                <p class="small text-muted mb-0">
+                    <strong>Nothing is deleted here.</strong> The rows stay, with their counts, their
+                    headcounts, how each check-in arrived and when. What is emptied is the browser
+                    description and a scrambled version of the sender's internet address &mdash; two
+                    things nothing in the portal ever shows. An anonymous check-in has no link to any
+                    person, so a &ldquo;delete everything you hold about me&rdquo; request cannot reach
+                    one; the time limit is the answer instead. Before each day's detail goes, the
+                    &ldquo;probably how many different senders&rdquo; figure for that day is worked out
+                    and stored, so the number an organisation sees does not change afterwards.
+                </p>
+            </div>
+        </div>
+    </div>
 </div>
 
 <form method="post" action="/admin/maintenance/retention"
-      data-confirm="About <?php echo number_format($preview['activity'] + $preview['errors']); ?> log row(s) and <?php echo number_format($preview['registrations']); ?> event registration(s) are currently eligible, including any children's details they hold. The exact number may differ slightly, because more records become eligible as time passes. This cannot be undone. Continue?"
+      data-confirm="About <?php echo number_format($preview['activity'] + $preview['errors']); ?> log row(s) and <?php echo number_format($preview['registrations']); ?> event registration(s) are currently eligible, including any children's details they hold, and <?php echo number_format($preview['checkinDetail']); ?> anonymous check-in row(s) would have their browser description and scrambled address emptied out (those rows and their counts are kept). The exact numbers may differ slightly, because more records become eligible as time passes. This cannot be undone. Continue?"
       data-confirm-destructive="true">
     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
-    <button type="submit" class="btn btn-warning" <?php echo ($preview['activity'] + $preview['errors'] + $preview['registrations']) === 0 ? 'disabled' : ''; ?>>
+    <button type="submit" class="btn btn-warning" <?php echo ($preview['activity'] + $preview['errors'] + $preview['registrations'] + $preview['checkinDetail']) === 0 ? 'disabled' : ''; ?>>
         <i class="fa-solid fa-broom me-1"></i> Run Sweep Now
     </button>
     <a href="/settings" class="btn btn-outline-secondary">Adjust retention settings</a>

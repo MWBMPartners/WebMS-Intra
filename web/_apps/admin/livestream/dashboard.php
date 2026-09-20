@@ -2,6 +2,7 @@
 // _apps/admin/livestream/dashboard.php (#318)
 declare(strict_types=1);
 
+use Portal\Core\AnonymousCheckins;
 use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Site;
@@ -29,15 +30,57 @@ $dayUnique = (int) ($stmt->get_result()->fetch_assoc()['c'] ?? 0);
 $stmt->close();
 
 // 🔝 Per-event last 7 days
+//
+//    WHAT WAS WRONG BEFORE (#527). This list was not limited to one
+//    organisation at all. The two figures above it were — both carry
+//    `siteID = ?` — but this one had no organisation condition anywhere, and
+//    it was not even a prepared statement. So an administrator of one
+//    organisation opening this page saw the NAMES of another organisation's
+//    livestreamed events and how many people had watched them, mixed in with
+//    their own, with nothing on screen to say which was which. Nobody had
+//    noticed, because the numbers looked perfectly plausible.
+//
+//    Fixed by adding `e.siteID = ?` and preparing the statement the same way
+//    as its two neighbours above.
+//
+//    `e.isDeleted` is deliberately NOT added to the condition. A soft-deleted
+//    event of an administrator's OWN organisation appearing in their own
+//    dashboard is not a leak, and quietly changing what administrators see
+//    today, for a reason nobody asked for, is not part of this fix.
 $perEvent = [];
-$result = $mysqli->query(
+$stmt = $mysqli->prepare(
     'SELECT e.eventID, e.eventName, COUNT(s.sessionID) AS sessions, '
     . '       MIN(s.joinedAt) AS firstJoin, MAX(s.lastPingAt) AS lastPing '
     . 'FROM tblLivestreamSessions s JOIN tblEvents e ON e.eventID = s.eventID '
-    . 'WHERE s.joinedAt >= DATE_SUB(NOW(), INTERVAL 7 DAY) '
+    . 'WHERE s.joinedAt >= DATE_SUB(NOW(), INTERVAL 7 DAY) AND e.siteID = ? '
     . 'GROUP BY e.eventID ORDER BY sessions DESC LIMIT 20'
 );
-while ($r = $result->fetch_assoc()) { $perEvent[] = $r; }
+if ($stmt !== false) {
+    $stmt->bind_param('i', $siteId);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    while ($r = $result->fetch_assoc()) { $perEvent[] = $r; }
+    $stmt->close();
+}
+
+// 🚪 Anonymous check-ins per listed event (#525).
+//
+//    The organisation's visibility setting is NOT consulted on this page, and
+//    that is deliberate rather than an oversight: the whole page already
+//    refuses anybody who is not an administrator (line 11), and administrators
+//    see these figures under every one of the three choices. Nobody should
+//    later "fix" the omission by adding a check here.
+//
+//    One small query per listed event, and the list is capped at 20, so at most
+//    20 of them. A single grouped query would be faster; it was considered and
+//    left out on purpose, because it would mean a second copy of the
+//    senders-and-stored-figures arithmetic living outside the one class that
+//    owns it, purely to save a few milliseconds on an administrator-only page.
+foreach ($perEvent as $i => $r) {
+    $summary = AnonymousCheckins::summaryForEvent($mysqli, (int) $r['eventID'], $siteId);
+    $perEvent[$i]['anonCheckins'] = $summary['checkins'];
+    $perEvent[$i]['anonPeople']   = $summary['people'];
+}
 
 $pageTitle = 'Livestream Analytics';
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
@@ -90,6 +133,17 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 </div>
                 <div class="portal-data-row-aside">
                     <span class="badge bg-primary"><?php echo (int) $r['sessions']; ?> sessions</span>
+                    <?php if ((int) ($r['anonCheckins'] ?? 0) > 0): ?>
+                        <!-- 🚪 People who checked in at the door without signing
+                             in (#525). Shown beside the watching figures so the
+                             two are easy to compare, but they are NOT two views
+                             of one thing and neither should be added to the
+                             other. -->
+                        <span class="badge bg-info text-dark"
+                              title="Anonymous check-ins at the door: <?php echo (int) $r['anonCheckins']; ?> press<?php echo (int) $r['anonCheckins'] === 1 ? '' : 'es'; ?> of the button, claiming <?php echo (int) ($r['anonPeople'] ?? 0); ?> people">
+                            <?php echo (int) ($r['anonPeople'] ?? 0); ?> at the door
+                        </span>
+                    <?php endif; ?>
                 </div>
             </div>
         <?php endforeach; ?>

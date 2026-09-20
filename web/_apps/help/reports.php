@@ -126,6 +126,28 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <p class="small text-muted mb-0">Every report is re-checked against these rules every single time it runs — a saved report can never "leak" access it shouldn't have, even if roles change after it was created.</p>
 </div>
 
+<!-- 🚪 Cross-reference to the anonymous check-in figures (#525). They are NOT
+     part of the report builder and never will be: they are anonymous counts
+     with no link to a person, they are counted on a different basis from named
+     attendance, and mixing the two in one report would invite exactly the
+     subtraction the figures cannot survive. -->
+<div class="portal-card p-4 mb-4" id="anon-checkins">
+    <h2 class="h4 mb-3"><i class="fa-solid fa-door-open me-2 text-primary"></i>Anonymous Check-ins Are Somewhere Else</h2>
+    <p>
+        People who check in at the door without signing in &mdash; by scanning a QR code or pressing a
+        button on a kiosk &mdash; are counted separately and are <strong>not</strong> part of the report
+        builder or of the named attendance figures. Those counts appear on an event's attendance page,
+        on the attendance reports page, and in a spreadsheet administrators can download from
+        <a href="/attendance">/attendance</a>.
+    </p>
+    <p class="small text-muted mb-0">
+        They are counted by the day the check-in arrived, while attendance figures are counted by the
+        date of an attendance session, so the two are not two views of one thing and one should never be
+        subtracted from the other. <a href="/help/calendar#anon-checkins">The calendar guide explains
+        what those figures can and cannot tell you</a>, including who in your organisation may see them.
+    </p>
+</div>
+
 <!-- Navigation -->
 <div class="d-flex justify-content-end">
     <a href="/help/admin" class="btn btn-primary">
