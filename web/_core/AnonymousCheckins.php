@@ -687,7 +687,10 @@ class AnonymousCheckins
             return $out;
         }
 
-        foreach (self::eventDayRows($db, $siteId, $year, $month, false) as $row) {
+        // true: a deleted event's headcount stays in the organisation's totals
+        // (owner decision, 20 September 2026) — only the per-event spreadsheet
+        // (rowsForCsv, below) leaves deleted events out.
+        foreach (self::eventDayRows($db, $siteId, $year, $month, false, true) as $row) {
             $senders = (int) $row['senders'];
             $monthNo = (int) substr((string) $row['dayText'], 5, 2);
 
@@ -737,6 +740,14 @@ class AnonymousCheckins
      * file. A download that quietly dropped the warning would be the one copy
      * of the number that looked exact.
      *
+     * DELETED EVENTS ARE LEFT OUT (owner decision, 20 September 2026). The
+     * per-event totals page keeps a deleted event's headcount in the
+     * organisation's running figures, but a FILE is different: it leaves the
+     * building, and a deleted event's name must never be able to reappear in
+     * one that is still sitting in somebody's downloads folder. So this
+     * method's rows can add up to LESS than the totals on the reports page —
+     * that difference is the deleted events' rows, on purpose, not a bug.
+     *
      * @param mysqli $db     An open connection.
      * @param int    $siteId The organisation.
      * @param int    $year   Four-digit year.
@@ -748,7 +759,8 @@ class AnonymousCheckins
     {
         $rows = [];
 
-        foreach (self::eventDayRows($db, $siteId, $year, $month, true) as $row) {
+        // false: deleted events are left out of the file (see the docblock above).
+        foreach (self::eventDayRows($db, $siteId, $year, $month, true, false) as $row) {
             $rows[] = [
                 'Event'                   => (string) $row['eventName'],
                 'Date'                    => (string) $row['dayText'],
@@ -769,15 +781,31 @@ class AnonymousCheckins
      * The shared query behind `summaryForSite()` and `rowsForCsv()`.
      *
      * One row per event per day, with the senders figure already worked out
-     * against any stored figure for that same event and day. Written once so
-     * the screen and the download can never disagree about a number.
+     * against any stored figure for that same event and day.
      *
-     * @param mysqli $db        An open connection.
-     * @param int    $siteId    The organisation.
-     * @param int    $year      Four-digit year.
-     * @param int    $month     1-12, or 0 for the whole year.
-     * @param bool   $withNames Include the event's name (never for a screen a
-     *                          plain member can reach — see summaryForSite).
+     * THIS NO LONGER GUARANTEES THE SCREEN AND THE DOWNLOAD AGREE ON A NUMBER
+     * (that used to be the whole point of sharing this method — see the git
+     * history for the sentence this replaces). Since the owner's 20 September
+     * 2026 decision, `summaryForSite()` passes `$includeDeleted = true` and
+     * `rowsForCsv()` passes `false`, so the two callers can legitimately add
+     * up to different totals. What sharing this method still buys: the
+     * senders arithmetic and the stored-figure lookup are written once, so
+     * THAT part can never drift between the two callers, even though the
+     * deleted-event filter now can.
+     *
+     * @param mysqli $db             An open connection.
+     * @param int    $siteId         The organisation.
+     * @param int    $year           Four-digit year.
+     * @param int    $month          1-12, or 0 for the whole year.
+     * @param bool   $withNames      Include the event's name (never for a screen a
+     *                               plain member can reach — see summaryForSite).
+     * @param bool   $includeDeleted True: count a deleted event's check-ins too
+     *                               (summaryForSite — the owner keeps headcounts
+     *                               in the organisation's totals after deletion).
+     *                               False: leave deleted events out entirely
+     *                               (rowsForCsv — a deleted event's name must
+     *                               never be able to reappear in a downloaded
+     *                               file).
      *
      * @return array<int, array<string, mixed>>
      */
@@ -786,7 +814,8 @@ class AnonymousCheckins
         int $siteId,
         int $year,
         int $month,
-        bool $withNames
+        bool $withNames,
+        bool $includeDeleted
     ): array {
         $out = [];
         if ($siteId <= 0 || $year <= 0) {
@@ -794,6 +823,11 @@ class AnonymousCheckins
         }
 
         $nameColumn = $withNames === true ? 'e.eventName AS eventName, ' : '';
+
+        // The deleted-event filter is a literal in the JOIN condition, not a
+        // bound value, so it adds no placeholder and does not shift the bind
+        // order below.
+        $deletedCondition = $includeDeleted === true ? '' : ' AND e.isDeleted = 0';
 
         $sql = 'SELECT tblAnonymousCheckins.eventID AS ev, '
              . $nameColumn
@@ -807,7 +841,7 @@ class AnonymousCheckins
              . 'COUNT(DISTINCT tblAnonymousCheckins.ipHash) AS liveDistinct, '
              . 'SUM(CASE WHEN tblAnonymousCheckins.ipHash IS NULL THEN 1 ELSE 0 END) AS nullRows '
              . 'FROM tblAnonymousCheckins '
-             . 'INNER JOIN tblEvents e ON e.eventID = tblAnonymousCheckins.eventID AND e.siteID = ? '
+             . 'INNER JOIN tblEvents e ON e.eventID = tblAnonymousCheckins.eventID AND e.siteID = ?' . $deletedCondition . ' '
              . 'WHERE YEAR(tblAnonymousCheckins.checkedInAt) = ?';
 
         // Three bound values when a month is chosen, two otherwise. The ? in the

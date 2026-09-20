@@ -53,6 +53,16 @@ if ($slug === '') {
 // 🌐 Multi-site scope
 $siteId = Site::id();
 
+// 🛡️ #532 (20 September 2026, Q3 folded in — see the settled plan). Both
+//    account questions are asked BEFORE the lookup, not after it, and
+//    every request asks them equally, whatever it turns out to find —
+//    the same discipline calendar/rsvp.php's own comment already applies,
+//    because App::isAdmin()'s FIRST call is what actually runs the
+//    account query. Asking only sometimes would make the two paths cost
+//    different amounts of database work, which is itself a timing signal.
+$canManage = App::isAdmin();
+$signedIn  = Auth::check();
+
 // 📋 Fetch event
 $event = null;
 $stmt = $mysqli->prepare(
@@ -70,61 +80,70 @@ if ($stmt !== false) {
     $stmt->close();
 }
 
-if ($event === null) {
-    Router::renderError(404);
-    return;
-}
-
-// 🛡️ Who may see this event (#503)
+// 🛡️ Who may see this event (#503, folded together with #532's fix on
+//    20 September 2026 — read this whole comment before touching either
+//    decision below, they are now ONE decision, not three).
 //
-// 1. Only an event whose status is published, cancelled or postponed is shown
-//    to people in general. Those are the same three statuses the search-engine
-//    block further down already required. Cancelled and postponed stay visible
-//    on purpose: somebody who already has the link needs to learn it is off.
+// WHAT #503 ALREADY FIXED (kept below, unchanged in effect)
+// A DRAFT is shown only to people who can manage events — App::isAdmin(),
+// exactly the check every page under calendar/manage/ makes. Everybody
+// else asking for a draft, or for an address that matches no event at
+// all, must see EXACTLY the same thing: saying "you may not see this"
+// would confirm the event exists, and slugs are made from event names, so
+// they are easy to guess.
 //
-// 2. A DRAFT is shown only to people who can manage events. "Can manage
-//    events" is App::isAdmin(): EXACTLY the check every page under
-//    calendar/manage/ makes before it lets anybody create, edit or delete an
-//    event (calendar/manage/index.php, save.php, delete.php and the rest). It
-//    is true for a global administrator and for an administrator of the
-//    organisation (site) being viewed. It is deliberately not a new rule, so if
-//    who may manage events ever changes, this page follows automatically.
+// WHAT #532 FOUND STILL WRONG, ON THIS SAME PAGE
+// A signed-out visitor asking for a REAL internal (non-public) event used
+// to be sent to sign in (302), while a signed-out visitor asking for a
+// MADE-UP slug was told "not found" (404) by the `if ($event === null)`
+// check that used to sit right after the lookup, before this comment's
+// rule even ran. That difference is exactly the same leak #532 fixed on
+// the registration pages and the number-keyed download
+// (calendar/export.php): a stranger could not open an internal event this
+// way, but could still learn it exists, on a PUBLIC, search-indexed page.
 //
-// 3. Everybody else asking for a draft gets EXACTLY the same "not found" as an
-//    address that matches no event at all: the same call, made before anything
-//    has been sent. Saying "you may not see this" would confirm that the event
-//    exists, and addresses are made from event names, so they are easy to guess.
+// THE FIX: one combined visibility test, `$visible`, covering "does an
+// event even exist here" and "is its status one the public may see (or
+// can this viewer manage events)" together — then ONE decision for a
+// signed-out visitor (sign in whenever NOT visible, OR visible but not
+// public) and a SEPARATE, simpler one for a signed-in visitor (404 when
+// not visible; a signed-in member may always read a published non-public
+// event, only drafts and missing events are held back from them, exactly
+// as before). `$visible === false` is checked FIRST inside the
+// signed-out branch specifically so `(int) $event['isPublic']` is never
+// evaluated when `$event` is null — PHP's `||` short-circuits, so this
+// never reads a property of a missing event.
 //
-// The draft check runs BEFORE the sign-in request for non-public events below.
-// The other way round, a signed-out visitor asking for a non-public draft would
-// be sent to the sign-in page while a made-up address says "not found", and the
-// difference would give the draft away. The cost is that an administrator who
-// is not signed in also gets "not found" for a draft until they sign in.
+// THE COST, STATED PLAINLY (accepted, per the settled plan's Q3): a
+// signed-out visitor with a WRONG address on this public, search-indexed
+// page is now sent to sign in rather than shown "not found" straight
+// away, and only learns the truth after signing in. That is the same
+// trade-off already made on the registration pages for the same reason:
+// closing the "does this exist" leak has to apply consistently, or a
+// stranger simply asks whichever page still leaks it.
 //
-// What was wrong before: the event was loaded with no condition on status, and
-// the only check asked for sign-in when the event was NOT public. New events
-// start as drafts and are public by default, so most drafts could be read in
-// full (description, dates, location) by anybody with the address, signed in
-// or not, even though the calendar listings hide them.
-//
-// Why the page checks this itself: the router does not yet ask anybody to sign
-// in for any page (#497), so nothing before this point protects it.
-//
-// ⚠️ This protects THIS page only. calendar/export.php applies the same rule to
-//    its single-event download; other pages that show an event make their own
-//    checks.
+// ⚠️ This protects THIS page only. calendar/export.php applies the
+//    matching rule to its own single-event download; other pages that
+//    show an event make their own checks.
 $publicEventStatuses = ['published', 'cancelled', 'postponed'];
-$isVisibleStatus     = in_array((string) ($event['status'] ?? ''), $publicEventStatuses, true) === true;
+// $isVisibleStatus is kept as ITS OWN variable, separate from the combined
+// $visible test below, because two places further down this file
+// (the JSON-LD search-engine markup and the "Draft - not visible to the
+// public" notice) need to know the status test ALONE, without the
+// can-manage escape hatch folded in — an event manager reaching this page
+// for a draft must still see the draft notice and must still be held back
+// from the search-engine markup, even though $visible is true for them.
+$isVisibleStatus = $event !== null
+    && in_array((string) ($event['status'] ?? ''), $publicEventStatuses, true) === true;
+$visible = $event !== null && ($isVisibleStatus === true || $canManage === true);
 
-if ($isVisibleStatus === false && App::isAdmin() === false) {
+if ($signedIn === false) {
+    if ($visible === false || (int) $event['isPublic'] === 0) {
+        Auth::requireLogin(); // sends to /login?redirect=… and exits; never returns
+    }
+} elseif ($visible === false) {
     Router::renderError(404);
     return;
-}
-
-// 🛡️ Non-public events require sign-in (unchanged). A signed-in member may
-//    read a published non-public event; only drafts are held back from them.
-if (($event['isPublic'] === '0' || (int) $event['isPublic'] === 0) && Auth::check() === false) {
-    Auth::requireLogin();
 }
 
 // 🗺️ #456 Chunk A — page-scoped CSP widening for OSM tiles, ONLY when the

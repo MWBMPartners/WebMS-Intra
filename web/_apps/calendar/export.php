@@ -107,9 +107,31 @@ if ($eventId > 0) {
     ) {
         $row = null;
     }
-    if ($row !== null && (int) $row['isPublic'] === 0 && Auth::check() === false) {
+
+    // 🛡️ #532 (20 September 2026) — WHAT WAS WRONG. This used to read
+    //    `if ($row !== null && (int) $row['isPublic'] === 0 && Auth::check()
+    //    === false)`, so a signed-out visitor got a 302 to sign in for a
+    //    real internal event but a plain 404 (from the `count($events) ===
+    //    0` check below) for an event number that matched nothing. Event
+    //    numbers count upward from 1, so a stranger could simply walk
+    //    through them and learn which internal events exist without ever
+    //    being able to open one — the issue's own words describe exactly
+    //    this page ("event numbers count upward… walk through them"). THE
+    //    FIX: a signed-out visitor is sent to sign in whenever the row is
+    //    missing OR not public, so a real internal number and a made-up one
+    //    look identical until AFTER signing in. This has to run AFTER the
+    //    draft rule above, not before it: that rule already nulls $row for
+    //    a non-administrator asking for a draft, so a signed-out visitor
+    //    requesting a draft number reaches this line with $row === null and
+    //    is sent to sign in exactly like everyone else refused here — one
+    //    test now covers every refused case for a signed-out visitor. A
+    //    SIGNED-IN visitor who may not see the event is untouched by this
+    //    line and falls through to the ordinary `count($events) === 0 →
+    //    Router::renderError(404)` below, same as before.
+    if (Auth::check() === false && ($row === null || (int) $row['isPublic'] === 0)) {
         Auth::requireLogin();
     }
+
     if ($row !== null) {
         $events[] = $row;
     }

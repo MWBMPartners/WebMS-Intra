@@ -17,6 +17,15 @@
  * button is replaced with a plain badge for any account a non-global
  * administrator is not allowed to change.
  *
+ * #533 FIX (20 September 2026): a GLOBAL administrator only now sees one
+ * extra warning above the list, when at least one account on the whole
+ * installation has no organisation at all (see
+ * `admin/users/unplaced.php`). It is shown only to a global administrator
+ * because only a global administrator can act on it — an ordinary
+ * organisation administrator would just see a number they cannot do
+ * anything about.
+ *
+
  * @package   Portal\Admin
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
@@ -179,6 +188,22 @@ $flashMsg  = $_SESSION['flash_msg']  ?? '';
 $flashType = $_SESSION['flash_type'] ?? 'info';
 unset($_SESSION['flash_msg'], $_SESSION['flash_type']);
 
+// 🛡️ #533: a GLOBAL administrator only sees how many accounts on the WHOLE
+//    installation have no organisation at all — installation-wide, not
+//    scoped to the organisation open right now, because the count itself
+//    is only useful to someone who can act on it. Nothing here writes
+//    anything; it only decides whether to draw one line of text.
+$unplacedCount = 0;
+if ($actorGlobal === true) {
+    $unplacedResult = $mysqli->query(
+        'SELECT COUNT(*) AS cnt FROM tblUsers u '
+        . 'WHERE NOT EXISTS (SELECT 1 FROM tblUserSites us WHERE us.userID = u.userID)'
+    );
+    if ($unplacedResult !== false) {
+        $unplacedCount = (int) ($unplacedResult->fetch_assoc()['cnt'] ?? 0);
+    }
+}
+
 // 🔐 Password policy for inline hints + strength meter
 $policy = Auth::passwordPolicy();
 
@@ -213,6 +238,17 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <div class="alert alert-<?php echo htmlspecialchars($flashType, ENT_QUOTES, 'UTF-8'); ?> alert-dismissible fade show">
         <?php echo htmlspecialchars($flashMsg, ENT_QUOTES, 'UTF-8'); ?>
         <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+    </div>
+<?php endif; ?>
+
+<?php if ($actorGlobal === true && $unplacedCount > 0): ?>
+    <div class="alert alert-warning">
+        <i class="fa-solid fa-triangle-exclamation me-1"></i>
+        <?php echo (int) $unplacedCount; ?> account<?php echo $unplacedCount !== 1 ? 's' : ''; ?>
+        belong<?php echo $unplacedCount === 1 ? 's' : ''; ?> to no organisation, so
+        <?php echo $unplacedCount === 1 ? 'its' : 'their'; ?> calendar subscription<?php echo $unplacedCount !== 1 ? 's do' : ' does'; ?> not work
+        and no organisation's administrator can see <?php echo $unplacedCount === 1 ? 'it' : 'them'; ?>.
+        <a href="/admin/users/unplaced" class="alert-link">Place <?php echo $unplacedCount === 1 ? 'it' : 'them'; ?></a>.
     </div>
 <?php endif; ?>
 

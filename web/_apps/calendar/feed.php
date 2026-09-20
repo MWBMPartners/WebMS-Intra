@@ -52,6 +52,22 @@ $db = App::db();
 //    had left kept receiving site 1's calendar, internal events included, for
 //    as long as their calendar app kept asking.
 //
+//    🤝 #533 (20 September 2026): this page's strict rule — no membership row
+//    means no feed, full stop — used to be the ODD ONE OUT among the pages
+//    that decide who may see an internal event. The check-in page
+//    (anon-checkin.php) and the waitlist promotion (Events.php) both used to
+//    make a single-organisation exception for an account with no membership
+//    row at all, because before #518 creating an account never wrote one. This
+//    page never had that exception, so those three row-less accounts could
+//    check in and be promoted off a waiting list while their OWN calendar
+//    subscription answered "Invalid token" — a real disagreement, not merely
+//    an inconsistency in wording. Migration 199 fixes the underlying DATA (a
+//    real membership row for every such account) instead of leaving code to
+//    paper over it, and the other two pages have now dropped their exceptions
+//    to match this one. All three now apply the SAME rule — an active
+//    membership row for the organisation, or a global root administrator —
+//    and this page needed no code change to get there.
+//
 //    ⚠️ Cannot do: it does not stop the address working for somebody who is
 //    still a member. Only regenerating or revoking it on the Calendar feed page
 //    (calendar/account-feed.php) does that.

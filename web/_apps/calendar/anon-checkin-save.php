@@ -9,11 +9,18 @@
 // anon-checkin.php uses (see that file's header for the full account of
 // what was wrong and why the rule is shaped the way it is): a public event
 // stays open to everyone; an internal event needs a real, active member of
-// THAT event's own organisation, a global root administrator, or (single-
-// organisation installations only) an account with no switched-off
-// membership row. Keeping the two statements identical matters: when #514
-// replaces both with one call, both call sites must be replaceable the same
-// way, so this file must never quietly drift from the other one.
+// THAT event's own organisation, or a global root administrator. Keeping
+// the two statements identical matters: when #514 replaces both with one
+// call, both call sites must be replaceable the same way, so this file must
+// never quietly drift from the other one.
+//
+// #533 (20 September 2026): the single-organisation compatibility branch
+// this used to also accept (an active account with no membership row at
+// all) is REMOVED — see anon-checkin.php's header for the full reasoning.
+// In short: migration 199 fixes the DATA (a real membership row for every
+// such account) instead of leaving the CODE to work around a data gap, so
+// this handler is now strict everywhere on the viewer side, agreeing with
+// the calendar feed and the waitlist promotion.
 //
 // ---------------------------------------------------------------------------
 // THE RATE LIMIT — THERE WAS NONE BEFORE THIS FIX
@@ -56,7 +63,6 @@
 // impossible.
 declare(strict_types=1);
 
-use Portal\Core\AccountGuard;
 use Portal\Core\Auth;
 use Portal\Core\RateLimiter;
 use Portal\Core\Site;
@@ -142,13 +148,14 @@ if ($rateMax > 0) {
     }
 }
 
-$viewerId  = (int) ($_SESSION['user_id'] ?? 0);
-$singleOrg = AccountGuard::isSingleOrganisation() === true ? 1 : 0;
+$viewerId = (int) ($_SESSION['user_id'] ?? 0);
 
 // Same statement as anon-checkin.php (selecting eventID only — see that
 // file's header for the full explanation of every branch). The `LIMIT 1`
 // is new here and changes nothing: the handler already only ever reads one
-// row.
+// row. Five `?`, five letters in the type string, five bound values — two
+// fewer of each since #533 removed the single-organisation compatibility
+// branch (see the file header).
 $stmt = $mysqli->prepare(
     'SELECT eventID FROM tblEvents '
     . 'WHERE eventID = ? AND siteID = ? AND isDeleted = 0 '
@@ -158,14 +165,11 @@ $stmt = $mysqli->prepare(
     . '                    WHERE va.userID = ? AND va.isActive = 1 AND va.isRootAdmin = 1) '
     . '        OR EXISTS (SELECT 1 FROM tblUsers vm '
     . '                    WHERE vm.userID = ? AND vm.isActive = 1 '
-    . '                      AND ( EXISTS (SELECT 1 FROM tblUserSites ms '
-    . '                                     WHERE ms.userID = vm.userID AND ms.siteID = ? AND ms.isActive = 1) '
-    . '                            OR ( ? = 1 AND NOT EXISTS (SELECT 1 FROM tblUserSites mx '
-    . '                                                        WHERE mx.userID = vm.userID AND mx.siteID = ? '
-    . '                                                          AND mx.isActive = 0) ) ) ) '
+    . '                      AND EXISTS (SELECT 1 FROM tblUserSites ms '
+    . '                                   WHERE ms.userID = vm.userID AND ms.siteID = ? AND ms.isActive = 1)) '
     . '      ) LIMIT 1'
 );
-$stmt->bind_param('iiiiiii', $eventId, $siteId, $viewerId, $viewerId, $siteId, $singleOrg, $siteId);
+$stmt->bind_param('iiiii', $eventId, $siteId, $viewerId, $viewerId, $siteId);
 $stmt->execute();
 $ok = (bool) $stmt->get_result()->fetch_assoc();
 $stmt->close();

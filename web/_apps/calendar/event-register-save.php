@@ -40,29 +40,43 @@ if ($slug === '' || preg_match('/^[a-z0-9][a-z0-9\-]{0,79}$/i', $slug) !== 1) {
     http_response_code(400); exit('Invalid event.');
 }
 
-$siteId = Site::id();
+// 🛡️ #532 (20 September 2026): the SAME visibility rule as
+//    calendar/event-register.php, word for word — see that file's header
+//    for the full account of what was wrong (a real internal event's
+//    registration was silently ACCEPTED from anybody at all, whatever this
+//    page's sign-in check said, because this handler can be posted to
+//    directly without ever opening the form) and why the rule is shaped
+//    the way it is. The viewer test sits INSIDE the WHERE clause so a
+//    refused row and a missing one cost the database the same work.
+$viewerId = (int) ($_SESSION['user_id'] ?? 0);
+$siteId   = Site::id();
 $stmt = $mysqli->prepare(
     'SELECT eventID, eventName, registrationEnabled, registrationOpensAt, registrationClosesAt, isPublic '
-    . 'FROM tblEvents WHERE eventSlug = ? AND siteID = ? AND isDeleted = 0 AND status = "published" LIMIT 1'
+    . 'FROM tblEvents '
+    . 'WHERE eventSlug = ? AND siteID = ? AND isDeleted = 0 '
+    . "  AND status = 'published' "
+    . '  AND ( isPublic = 1 '
+    . '        OR EXISTS (SELECT 1 FROM tblUsers va '
+    . '                    WHERE va.userID = ? AND va.isActive = 1 AND va.isRootAdmin = 1) '
+    . '        OR EXISTS (SELECT 1 FROM tblUsers vm '
+    . '                    WHERE vm.userID = ? AND vm.isActive = 1 '
+    . '                      AND EXISTS (SELECT 1 FROM tblUserSites ms '
+    . '                                   WHERE ms.userID = vm.userID AND ms.siteID = ? AND ms.isActive = 1)) '
+    . '      ) LIMIT 1'
 );
-$stmt->bind_param('si', $slug, $siteId);
+$stmt->bind_param('siiii', $slug, $siteId, $viewerId, $viewerId, $siteId);
 $stmt->execute();
 $event = $stmt->get_result()->fetch_assoc() ?: null;
 $stmt->close();
 
-// 🛡️ Events not marked public need sign-in (#503), exactly as the form page
-//    (calendar/event-register.php) and the event's own page require. Checked
-//    here too because somebody can post to this address without ever opening
-//    the form. Drafts and deleted events never get this far: the query above
-//    asks for status = "published" and isDeleted = 0.
-//
-//    What was wrong before: this handler asked nobody to sign in, so a
-//    registration for an INTERNAL event was accepted from anybody at all.
-if ($event !== null && (int) $event['isPublic'] === 0 && Auth::check() === false) {
-    Auth::requireLogin();
+if ($event === null) {
+    if (Auth::check() === false) {
+        Auth::requireLogin(); // sends to /login?redirect=… and exits; never returns
+    }
+    http_response_code(404); exit('Registration not available.');
 }
 
-if ($event === null || (int) $event['registrationEnabled'] !== 1) {
+if ((int) $event['registrationEnabled'] !== 1) {
     http_response_code(404); exit('Registration not available.');
 }
 $now = time();

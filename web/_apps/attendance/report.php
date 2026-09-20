@@ -22,6 +22,8 @@ declare(strict_types=1);
 use Portal\Core\AnonymousCheckins;
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\AttendanceAccess;
+use Portal\Core\Router;
 use Portal\Core\Site;
 
 // 📌 Page metadata
@@ -37,10 +39,57 @@ if (Auth::check() === false) {
 }
 
 // -----------------------------------------------------------------------------
+// 🔒 #529 (20 September 2026) — who may open this page at all
+// -----------------------------------------------------------------------------
+// WHAT WAS WRONG BEFORE: the only test above this comment was "is somebody
+// signed in" — Auth::check(). It did not ask which organisation they belong
+// to, so ANY signed-in account on the WHOLE installation could open ANY
+// organisation's attendance totals, simply by visiting this address with that
+// organisation's site open. Confirmed on a real database: a signed-in member
+// of organisation B could read organisation A's attendance figures in full.
+//
+// THE FIX, in two steps, both through the new Portal\Core\AttendanceAccess
+// class (the single reader #526 is expected to extend later, alongside
+// AnonymousCheckins::readVisibilityChoice() — see that class's own docblock):
+//
+// 1. A viewer who is not even a MEMBER of this organisation (and not a global
+//    administrator) is refused with a 404 — Router::renderError(404) — the
+//    same "looks exactly like a page that does not exist" answer #503 already
+//    uses elsewhere, because a stranger has no business learning this page
+//    exists for an organisation they do not belong to.
+// 2. A viewer who IS a member is then checked against the organisation's OWN
+//    choice of who may see the totals (`attend.reports.visibleTo`, seeded
+//    'admins' — administrators only — by default, the same narrowest-first
+//    default #525 used). A member refused by that choice gets 403, not 404:
+//    they may know the page exists, they simply may not open it right now.
+//
+// The coordinator test ($coord) is only even ASKED when the setting is
+// 'admins_coordinators' AND the viewer is not already an administrator — an
+// administrator never needs it (rule 2 of AttendanceAccess::mayView()), and
+// asking it needlessly would be an extra query for no reason on every other
+// setting value.
+$siteId   = Site::id();
+$viewerId = (int) ($_SESSION['user_id'] ?? 0);
+
+if (AttendanceAccess::viewerIsMember($mysqli, $viewerId, $siteId) === false) {
+    Router::renderError(404);
+    return;
+}
+
+$isAdmin        = App::isAdmin();
+$reportsChoice  = AttendanceAccess::readChoice($siteId);
+$reportsCoord   = ($isAdmin === false && $reportsChoice === AttendanceAccess::VISIBLE_ADMINS_COORDINATORS)
+    ? AttendanceAccess::coordinatesAnyEvent($mysqli, $viewerId, $siteId)
+    : false;
+
+if (AttendanceAccess::mayView($reportsChoice, true, $isAdmin, $reportsCoord) === false) {
+    Router::renderError(403);
+    return;
+}
+
+// -----------------------------------------------------------------------------
 // 📅 Report parameters
 // -----------------------------------------------------------------------------
-// 🌐 Multi-site scope
-$siteId = Site::id();
 
 $reportYear  = (int) ($_GET['year'] ?? (int) date('Y'));
 $reportMonth = (int) ($_GET['month'] ?? 0); // 0 = full year
@@ -158,21 +207,24 @@ $monthNames = [
 // -----------------------------------------------------------------------------
 // 🚪 Anonymous check-ins (#525)
 // -----------------------------------------------------------------------------
-// The page's own sign-in rule at the top of this file is UNCHANGED: it asks
-// only that somebody is signed in. Who may see the anonymous section is decided
-// separately, by the organisation's own setting, and can only ever narrow from
-// there — `$passesPageGate` is true below because anybody still reading this
-// line got past the rule at the top.
+// The page's own gate ABOVE THIS COMMENT is no longer just "is somebody
+// signed in" — since #529 (20 September 2026) it also requires membership of
+// this organisation and passes the organisation's own `attend.reports
+// .visibleTo` choice. Who may see the ANONYMOUS section is decided
+// separately again, by ITS OWN setting (`attend.anonCounts.visibleTo`), and
+// can only ever narrow further from there — `$passesPageGate` is true below
+// because anybody still reading this line got past the page's own gate,
+// #529's membership+visibility check included.
 //
 // TWO SAFEGUARDS THAT ARE NOT OPTIONAL HERE:
 //
 // 1. This section shows the organisation's TOTALS and a line per month. It
-//    never shows an event name. That matters because an organisation may
-//    choose "anyone who can already open the page", and today that means every
-//    signed-in user on this installation, not only members of this organisation.
-//    A total tells nobody which events took place; a list of names would — and
-//    internal events collect anonymous check-ins too. Narrowing who may open
-//    this page at all is issue #529, not this work.
+//    never shows an event name. That still matters even after #529, because
+//    an organisation may choose "anyone who can already open the page" for
+//    THIS section's own setting, and "the page" now means members of this
+//    organisation (narrower than before #529, but still more than one
+//    person) — a total tells nobody which events took place; a list of names
+//    would, and internal events collect anonymous check-ins too.
 //
 // 2. There is no single event here, so "this event's coordinator" cannot be
 //    tested at all. `$isEventScoped` is false, which makes the

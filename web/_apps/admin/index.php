@@ -1,5 +1,5 @@
 <?php
-// Path: public_html/admin/index.php
+// Path: _apps/admin/index.php
 /**
  * -----------------------------------------------------------------------------
  * Admin Dashboard 🛡️
@@ -13,18 +13,58 @@
  *
  * Only accessible to users with isAdmin=1 or isRootAdmin=1.
  *
+ * WHAT WAS WRONG BEFORE (issue #522, fixed 20 September 2026)
+ * -------------------------------------------------------------
+ * On a portal with more than one organisation, every one of the five counts
+ * below queried the WHOLE installation with no organisation condition at all
+ * — so an administrator of organisation A, looking at their own dashboard, saw
+ * organisation B's errors, activity and members mixed in with their own, with
+ * nothing on screen to say so. `admin/errors/index.php` and
+ * `admin/activity/index.php` already scope a non-umbrella administrator to
+ * their own organisation; this page simply never learned to.
+ *
+ * THE FIX
+ * -------
+ * On a SINGLE-organisation portal the installation IS the organisation, so
+ * nothing changes — the unscoped queries are already correct and scoping them
+ * "for tidiness" would be actively wrong: `tblErrors.siteID` and
+ * `tblActivityLogs.siteID` are NULL for pre-bootstrap rows and for
+ * AccountGuard's own security records, and adding `siteID = ?` would silently
+ * drop those from the only administrator who exists to see them.
+ *
+ * On a MULTI-organisation portal every card counts the OPEN organisation, the
+ * card subtitles say which organisation that is, and — only for a global
+ * ("umbrella") administrator, so the two figures can never be confused — a
+ * small "All organisations" line appears underneath using today's old,
+ * unscoped queries. `App::isUmbrellaAdmin()` is used (not `App::isRootAdmin()`)
+ * because that is the same word `errors/index.php` and `activity/index.php`
+ * already use for the same distinction, so all three pages agree on who is
+ * "global" here.
+ *
+ * WHY NOT `AccountGuard::memberScopeSql()`
+ * -----------------------------------------
+ * That helper deliberately returns an EMPTY scope for a global administrator
+ * (so they can see everyone when the page is asking "may this administrator
+ * reach this account"). Used here it would put installation-wide numbers
+ * under one organisation's name on the global administrator's own dashboard —
+ * exactly the mislabelling #522 says must not happen. So this page writes its
+ * own `siteID = ?` conditions instead of reusing that helper.
+ *
  * @package   Portal\Admin
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   0.4.0
+ * @version   0.5.0
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/522
  * -----------------------------------------------------------------------------
  */
 
 declare(strict_types=1);
 
+use Portal\Core\AccountGuard;
 use Portal\Core\App;
 use Portal\Core\Router;
+use Portal\Core\Site;
 
 // 📌 Page metadata for the template system
 $pageTitle   = 'Admin Dashboard';
@@ -38,15 +78,34 @@ if (App::isAdmin() === false) {
 }
 
 // -----------------------------------------------------------------------------
+// 🌐 Which organisation this dashboard is about, and who is looking at it.
+//    Read once, at the top, because every card below depends on both.
+// -----------------------------------------------------------------------------
+$siteId     = Site::id();
+$singleOrg  = AccountGuard::isSingleOrganisation();
+$isUmbrella = App::isUmbrellaAdmin();
+$orgName    = (string) (Site::branding('name') ?? '');
+
+// -----------------------------------------------------------------------------
 // 📊 Gather summary data for dashboard cards
 // -----------------------------------------------------------------------------
 
-// 🔴 Recent errors (last 24 hours)
+// 🔴 Recent errors (last 24 hours) — this organisation on a multi-org portal,
+//    the whole installation on a single-org one (see the file header).
 $errorCount24h = 0;
-$stmt = $mysqli->prepare(
-    'SELECT COUNT(*) AS cnt FROM tblErrors WHERE createdAt >= DATE_SUB(NOW(), INTERVAL 24 HOUR)'
-);
+if ($singleOrg === true) {
+    $stmt = $mysqli->prepare(
+        'SELECT COUNT(*) AS cnt FROM tblErrors WHERE createdAt >= DATE_SUB(NOW(), INTERVAL 24 HOUR)'
+    );
+} else {
+    $stmt = $mysqli->prepare(
+        'SELECT COUNT(*) AS cnt FROM tblErrors WHERE siteID = ? AND createdAt >= DATE_SUB(NOW(), INTERVAL 24 HOUR)'
+    );
+}
 if ($stmt !== false) {
+    if ($singleOrg === false) {
+        $stmt->bind_param('i', $siteId);
+    }
     $stmt->execute();
     $row = $stmt->get_result()->fetch_assoc();
     $errorCount24h = (int) ($row['cnt'] ?? 0);
@@ -55,28 +114,59 @@ if ($stmt !== false) {
 
 // 🔴 Total errors
 $errorCountTotal = 0;
-$stmt = $mysqli->prepare('SELECT COUNT(*) AS cnt FROM tblErrors');
+if ($singleOrg === true) {
+    $stmt = $mysqli->prepare('SELECT COUNT(*) AS cnt FROM tblErrors');
+} else {
+    $stmt = $mysqli->prepare('SELECT COUNT(*) AS cnt FROM tblErrors WHERE siteID = ?');
+}
 if ($stmt !== false) {
+    if ($singleOrg === false) {
+        $stmt->bind_param('i', $siteId);
+    }
     $stmt->execute();
     $row = $stmt->get_result()->fetch_assoc();
     $errorCountTotal = (int) ($row['cnt'] ?? 0);
     $stmt->close();
 }
 
-// 👥 Active users (total enabled users)
+// 👥 Active members — on a multi-org portal, an account with an ACTIVE
+//    membership row for THIS organisation; on a single-org portal, every
+//    active account on the installation (unchanged from before #522).
 $userCountActive = 0;
-$stmt = $mysqli->prepare('SELECT COUNT(*) AS cnt FROM tblUsers WHERE isActive = 1');
+if ($singleOrg === true) {
+    $stmt = $mysqli->prepare('SELECT COUNT(*) AS cnt FROM tblUsers WHERE isActive = 1');
+} else {
+    $stmt = $mysqli->prepare(
+        'SELECT COUNT(*) AS cnt FROM tblUsers u WHERE u.isActive = 1 AND EXISTS ('
+        . 'SELECT 1 FROM tblUserSites us WHERE us.userID = u.userID AND us.siteID = ? AND us.isActive = 1)'
+    );
+}
 if ($stmt !== false) {
+    if ($singleOrg === false) {
+        $stmt->bind_param('i', $siteId);
+    }
     $stmt->execute();
     $row = $stmt->get_result()->fetch_assoc();
     $userCountActive = (int) ($row['cnt'] ?? 0);
     $stmt->close();
 }
 
-// 👥 Total users
+// 👥 Total members — "everyone who has ever belonged here" on a multi-org
+//    portal (any membership row, active or ended), every account on the
+//    installation on a single-org one.
 $userCountTotal = 0;
-$stmt = $mysqli->prepare('SELECT COUNT(*) AS cnt FROM tblUsers');
+if ($singleOrg === true) {
+    $stmt = $mysqli->prepare('SELECT COUNT(*) AS cnt FROM tblUsers');
+} else {
+    $stmt = $mysqli->prepare(
+        'SELECT COUNT(*) AS cnt FROM tblUsers u WHERE EXISTS ('
+        . 'SELECT 1 FROM tblUserSites us WHERE us.userID = u.userID AND us.siteID = ?)'
+    );
+}
 if ($stmt !== false) {
+    if ($singleOrg === false) {
+        $stmt->bind_param('i', $siteId);
+    }
     $stmt->execute();
     $row = $stmt->get_result()->fetch_assoc();
     $userCountTotal = (int) ($row['cnt'] ?? 0);
@@ -85,14 +175,66 @@ if ($stmt !== false) {
 
 // 📋 Recent activity (last 24 hours)
 $activityCount24h = 0;
-$stmt = $mysqli->prepare(
-    'SELECT COUNT(*) AS cnt FROM tblActivityLogs WHERE timestamp >= DATE_SUB(NOW(), INTERVAL 24 HOUR)'
-);
+if ($singleOrg === true) {
+    $stmt = $mysqli->prepare(
+        'SELECT COUNT(*) AS cnt FROM tblActivityLogs WHERE timestamp >= DATE_SUB(NOW(), INTERVAL 24 HOUR)'
+    );
+} else {
+    $stmt = $mysqli->prepare(
+        'SELECT COUNT(*) AS cnt FROM tblActivityLogs WHERE siteID = ? AND timestamp >= DATE_SUB(NOW(), INTERVAL 24 HOUR)'
+    );
+}
 if ($stmt !== false) {
+    if ($singleOrg === false) {
+        $stmt->bind_param('i', $siteId);
+    }
     $stmt->execute();
     $row = $stmt->get_result()->fetch_assoc();
     $activityCount24h = (int) ($row['cnt'] ?? 0);
     $stmt->close();
+}
+
+// -----------------------------------------------------------------------------
+// 🌍 "All organisations" figures — a GLOBAL administrator on a MULTI-org
+//    portal only. Run only when they can matter, so a scoped card is never
+//    even tempted to fall back to these by accident.
+// -----------------------------------------------------------------------------
+$allOrgErrors24h   = null;
+$allOrgErrorsTotal = null;
+$allOrgActive       = null;
+$allOrgTotal        = null;
+$allOrgActivity24h  = null;
+if ($isUmbrella === true && $singleOrg === false) {
+    $stmt = $mysqli->prepare('SELECT COUNT(*) AS cnt FROM tblErrors WHERE createdAt >= DATE_SUB(NOW(), INTERVAL 24 HOUR)');
+    if ($stmt !== false) {
+        $stmt->execute();
+        $allOrgErrors24h = (int) ($stmt->get_result()->fetch_assoc()['cnt'] ?? 0);
+        $stmt->close();
+    }
+    $stmt = $mysqli->prepare('SELECT COUNT(*) AS cnt FROM tblErrors');
+    if ($stmt !== false) {
+        $stmt->execute();
+        $allOrgErrorsTotal = (int) ($stmt->get_result()->fetch_assoc()['cnt'] ?? 0);
+        $stmt->close();
+    }
+    $stmt = $mysqli->prepare('SELECT COUNT(*) AS cnt FROM tblUsers WHERE isActive = 1');
+    if ($stmt !== false) {
+        $stmt->execute();
+        $allOrgActive = (int) ($stmt->get_result()->fetch_assoc()['cnt'] ?? 0);
+        $stmt->close();
+    }
+    $stmt = $mysqli->prepare('SELECT COUNT(*) AS cnt FROM tblUsers');
+    if ($stmt !== false) {
+        $stmt->execute();
+        $allOrgTotal = (int) ($stmt->get_result()->fetch_assoc()['cnt'] ?? 0);
+        $stmt->close();
+    }
+    $stmt = $mysqli->prepare('SELECT COUNT(*) AS cnt FROM tblActivityLogs WHERE timestamp >= DATE_SUB(NOW(), INTERVAL 24 HOUR)');
+    if ($stmt !== false) {
+        $stmt->execute();
+        $allOrgActivity24h = (int) ($stmt->get_result()->fetch_assoc()['cnt'] ?? 0);
+        $stmt->close();
+    }
 }
 
 // 🔧 Pending migrations count
@@ -157,9 +299,14 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <div class="card-body">
                 <div class="d-flex justify-content-between align-items-start">
                     <div>
-                        <h6 class="card-subtitle mb-2 text-danger">Errors (24h)</h6>
+                        <h6 class="card-subtitle mb-2 text-danger">
+                            Errors (24h)<?php echo $singleOrg === false ? ' — ' . htmlspecialchars($orgName, ENT_QUOTES, 'UTF-8') : ''; ?>
+                        </h6>
                         <h2 class="card-title mb-0"><?php echo $errorCount24h; ?></h2>
                         <small class="text-muted"><?php echo number_format($errorCountTotal); ?> total</small>
+                        <?php if ($allOrgErrors24h !== null): ?>
+                            <div class="text-muted small mt-1">All organisations: <?php echo number_format($allOrgErrors24h); ?> / <?php echo number_format((int) $allOrgErrorsTotal); ?></div>
+                        <?php endif; ?>
                     </div>
                     <div class="fs-1 text-danger opacity-25">
                         <i class="fa-solid fa-triangle-exclamation"></i>
@@ -180,9 +327,14 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <div class="card-body">
                 <div class="d-flex justify-content-between align-items-start">
                     <div>
-                        <h6 class="card-subtitle mb-2 text-primary">Active Users</h6>
+                        <h6 class="card-subtitle mb-2 text-primary">
+                            Active Members<?php echo $singleOrg === false ? ' — ' . htmlspecialchars($orgName, ENT_QUOTES, 'UTF-8') : ''; ?>
+                        </h6>
                         <h2 class="card-title mb-0"><?php echo $userCountActive; ?></h2>
                         <small class="text-muted"><?php echo number_format($userCountTotal); ?> total</small>
+                        <?php if ($allOrgActive !== null): ?>
+                            <div class="text-muted small mt-1">All organisations: <?php echo number_format($allOrgActive); ?> / <?php echo number_format((int) $allOrgTotal); ?></div>
+                        <?php endif; ?>
                     </div>
                     <div class="fs-1 text-primary opacity-25">
                         <i class="fa-solid fa-users"></i>
@@ -203,9 +355,14 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <div class="card-body">
                 <div class="d-flex justify-content-between align-items-start">
                     <div>
-                        <h6 class="card-subtitle mb-2 text-success">Activity (24h)</h6>
+                        <h6 class="card-subtitle mb-2 text-success">
+                            Activity (24h)<?php echo $singleOrg === false ? ' — ' . htmlspecialchars($orgName, ENT_QUOTES, 'UTF-8') : ''; ?>
+                        </h6>
                         <h2 class="card-title mb-0"><?php echo number_format($activityCount24h); ?></h2>
                         <small class="text-muted">audit log entries</small>
+                        <?php if ($allOrgActivity24h !== null): ?>
+                            <div class="text-muted small mt-1">All organisations: <?php echo number_format($allOrgActivity24h); ?></div>
+                        <?php endif; ?>
                     </div>
                     <div class="fs-1 text-success opacity-25">
                         <i class="fa-solid fa-clock-rotate-left"></i>

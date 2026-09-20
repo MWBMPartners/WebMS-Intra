@@ -399,5 +399,47 @@ expectThrows('a bare column with no table qualifier', static function () {
     AccountGuard::memberScopeSql('userID');
 });
 
+// -----------------------------------------------------------------------------
+// #521 (20 September 2026) — emailMessage() is the fourth pure method this
+// file can exercise with no database: a plain string-in, string-out lookup
+// against the four EMAIL_* verdicts. emailAvailability() itself needs a real
+// connection (it queries tblUsers and calls RateLimiter), so it is proved
+// separately, against a real database, in the settled plan's §6.5 proof —
+// not here.
+// -----------------------------------------------------------------------------
+echo "\n=== Assertion 10 — the four emailMessage() texts, exactly, and only one is empty ===\n";
+$emailFreeMsg   = AccountGuard::emailMessage(AccountGuard::EMAIL_FREE);
+$emailInUseMsg  = AccountGuard::emailMessage(AccountGuard::EMAIL_IN_USE_HERE);
+$emailNotAvailMsg = AccountGuard::emailMessage(AccountGuard::EMAIL_NOT_AVAILABLE);
+$emailTooManyMsg  = AccountGuard::emailMessage(AccountGuard::EMAIL_TOO_MANY);
+
+assertTrue('EMAIL_FREE message is empty (never shown)', $emailFreeMsg === '');
+assertTrue(
+    'EMAIL_IN_USE_HERE message is exact',
+    $emailInUseMsg === 'Another account in this organisation already uses that email address.'
+);
+assertTrue(
+    'EMAIL_NOT_AVAILABLE message is exact',
+    $emailNotAvailMsg === 'That email address can\'t be used here. If you believe this person should be a '
+        . 'member of this organisation, ask a global administrator.'
+);
+assertTrue(
+    'EMAIL_TOO_MANY message is exact',
+    $emailTooManyMsg === 'Too many email addresses that can\'t be used here have been tried from this account '
+        . 'in the last hour. Try again later, or ask a global administrator.'
+);
+assertTrue(
+    'exactly one of the four messages is empty, and it is the free one',
+    $emailFreeMsg === '' && $emailInUseMsg !== '' && $emailNotAvailMsg !== '' && $emailTooManyMsg !== ''
+);
+assertTrue(
+    'an unrecognised verdict string returns empty, not a fatal error',
+    AccountGuard::emailMessage('nonsense') === ''
+);
+assertTrue(
+    'the limit and window constants are the ones the docblock describes',
+    AccountGuard::EMAIL_CLASH_LIMIT === 5 && AccountGuard::EMAIL_CLASH_WINDOW === 3600
+);
+
 echo "\n" . ($failures === 0 ? "ALL PASS ({$failures} failures)\n" : "{$failures} FAILURE(S)\n");
 exit($failures === 0 ? 0 : 1);

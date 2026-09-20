@@ -101,19 +101,23 @@ if ($action === 'create') {
         exit();
     }
 
-    // 🔍 Check for duplicate email
-    $stmt = $mysqli->prepare('SELECT userID FROM tblUsers WHERE emailAddress = ? LIMIT 1');
-    if ($stmt !== false) {
-        $stmt->bind_param('s', $emailAddress);
-        $stmt->execute();
-        $existing = $stmt->get_result()->fetch_assoc();
-        $stmt->close();
-        if ($existing !== null) {
-            $_SESSION['flash_msg']  = 'A user with that email address already exists.';
-            $_SESSION['flash_type'] = 'danger';
-            header('Location: /admin/users');
-            exit();
-        }
+    // 🔍 #521 (20 September 2026): addresses must stay unique across the
+    //    WHOLE installation (one local-login row per address), so the old
+    //    flat "a user with that email address already exists" message
+    //    cannot simply be removed — but it used to tell a non-global
+    //    administrator whether an address belongs to an account in ANOTHER
+    //    organisation, which is not theirs to know. AccountGuard::
+    //    emailAvailability() bounds that: an address in reach reads back
+    //    plainly, one outside reach is refused with vaguer wording, rate
+    //    limited (5/hour per administrator) and recorded for a global
+    //    administrator — see that method's own docblock for the full design
+    //    and what it deliberately still allows.
+    $emailVerdict = AccountGuard::emailAvailability($emailAddress, null, 'create account');
+    if ($emailVerdict !== AccountGuard::EMAIL_FREE) {
+        $_SESSION['flash_msg']  = AccountGuard::emailMessage($emailVerdict);
+        $_SESSION['flash_type'] = 'danger';
+        header('Location: /admin/users');
+        exit();
     }
 
     // 🔍 If username provided, password is required
@@ -359,23 +363,23 @@ if ($action === 'update') {
         }
     }
 
-    // 🔍 Step 9: email uniqueness — only worth checking (and only worth
-    //    the tiny "does this email exist somewhere" leak it always had,
-    //    see AccountGuard's docblock, "WHAT THIS CLASS CANNOT DO") when
-    //    the email address genuinely changed.
+    // 🔍 Step 9: email uniqueness — only worth checking when the email
+    //    address genuinely changed. #521 (20 September 2026): this used to
+    //    be a flat "another user with that email address already exists",
+    //    the same installation-wide oracle the create branch had — see
+    //    AccountGuard::emailAvailability()'s own docblock for the bounded
+    //    design that replaces it.
     if ($emailAddress !== trim((string) ($stored['emailAddress'] ?? ''))) {
-        $stmt = $mysqli->prepare('SELECT userID FROM tblUsers WHERE emailAddress = ? AND userID != ? LIMIT 1');
-        if ($stmt !== false) {
-            $stmt->bind_param('si', $emailAddress, $userID);
-            $stmt->execute();
-            $existing = $stmt->get_result()->fetch_assoc();
-            $stmt->close();
-            if ($existing !== null) {
-                $_SESSION['flash_msg']  = 'Another user with that email address already exists.';
-                $_SESSION['flash_type'] = 'danger';
-                header('Location: /admin/users');
-                exit();
-            }
+        $emailVerdict = AccountGuard::emailAvailability(
+            $emailAddress,
+            $userID,
+            'change email on account #' . $userID
+        );
+        if ($emailVerdict !== AccountGuard::EMAIL_FREE) {
+            $_SESSION['flash_msg']  = AccountGuard::emailMessage($emailVerdict);
+            $_SESSION['flash_type'] = 'danger';
+            header('Location: /admin/users');
+            exit();
         }
     }
 

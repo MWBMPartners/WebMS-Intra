@@ -1,0 +1,77 @@
+-- =============================================================================
+-- Migration 200: who may see the attendance reports page (#529)
+-- =============================================================================
+-- One new setting. No ALTER, no new table.
+--
+-- -----------------------------------------------------------------------------
+-- WHAT WAS WRONG BEFORE
+-- -----------------------------------------------------------------------------
+-- `attendance/report.php` asked only "is somebody signed in" before showing
+-- an organisation's attendance totals, month by month, plus (if the SEPARATE
+-- #525 setting allowed it) the anonymous check-in totals. It never checked
+-- which organisation the signed-in account belonged to, so ANY signed-in
+-- account on the WHOLE installation could read ANY organisation's figures.
+--
+-- -----------------------------------------------------------------------------
+-- WHY A SETTING, AND WHY THREE CHOICES
+-- -----------------------------------------------------------------------------
+-- The owner decided to restrict the page rather than simply require
+-- membership and stop there — organisations differ in how widely they want
+-- their own attendance trends seen, the same reasoning #525 already used for
+-- the anonymous check-in counts. So this is a per-organisation choice, seeded
+-- once for the whole installation and overridable per organisation, in the
+-- SAME `attend.` settings family as #525's `attend.anonCounts.visibleTo` —
+-- deliberately, so the two sit together in the settings editor and so a
+-- future four-level settings resolver (#526: installation, organisation,
+-- venue, event) can extend both through one small change each rather than
+-- inventing a second vocabulary.
+--
+-- Three choices, and only three:
+--
+--   admins               Administrators only. The default, and the
+--                         narrowest — see "WHY `admins` IS THE DEFAULT" below.
+--   admins_coordinators  Administrators, plus anyone who currently
+--                         coordinates one of this organisation's events. On
+--                         a page that has no single event, "coordinates any
+--                         of this organisation's events" is what that
+--                         phrase means — there is nothing more specific to
+--                         test.
+--   members              Any member of this organisation.
+--
+-- Whatever the choice, somebody who is not even a MEMBER of the organisation
+-- being viewed (and not a global administrator) is refused outright — the
+-- setting can only decide who AMONG an organisation's own people sees the
+-- figures, it can never open the page to a stranger. That rule lives in
+-- code (`Portal\Core\AttendanceAccess::mayView()`), not in this migration,
+-- and is re-checked on every request; it cannot be turned off by any value
+-- stored here.
+--
+-- -----------------------------------------------------------------------------
+-- WHY `admins` IS THE DEFAULT
+-- -----------------------------------------------------------------------------
+-- The owner chose to restrict access, so starting at the narrowest choice on
+-- every install and upgrade is the safe direction — nobody's access is
+-- accidentally widened by an upgrade they did not ask for. It matches #525's
+-- own default (`attend.anonCounts.visibleTo` also seeds 'admins'), and
+-- nothing in the existing help pages ever promised ordinary members the
+-- attendance totals, so this narrows nothing anybody was told to expect.
+-- Widening it is a deliberate act by an administrator who knows their own
+-- congregation, at /admin/settings/attendance.
+--
+-- -----------------------------------------------------------------------------
+-- `defaultValue` ONLY ON REPLAY (the #525/migration-198 rule, repeated here)
+-- -----------------------------------------------------------------------------
+-- `ON DUPLICATE KEY UPDATE defaultValue = VALUES(defaultValue)` touches only
+-- the DEFAULT column, never `settingValue` itself — so replaying this
+-- migration on an upgraded installation can never silently overwrite an
+-- organisation's own choice with the seed value again.
+--
+-- @link https://github.com/MWBMPartners/WebMS-Intra/issues/529
+-- =============================================================================
+
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'attend.reports.visibleTo', 'admins', 'admins', 0)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('200_attendance_report_visibility.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;

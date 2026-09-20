@@ -372,6 +372,22 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <h5 class="mt-4 mb-3">User management list</h5>
 
     <p>The user management page now includes <strong>pagination</strong> and a <strong>search bar</strong> for easier navigation of large user lists. Use the search field to filter users by name or email, and use the page controls at the bottom to browse through results.</p>
+
+    <h5 class="mt-4 mb-3">Accounts that belong to no organisation</h5>
+
+    <p>
+        On a portal running more than one organisation, an account can occasionally have no organisation
+        recorded against it at all &mdash; usually because it was created before a fix shipped in September
+        2026, or because &ldquo;Remove from site&rdquo; was used without adding the account anywhere else.
+        Such an account's calendar subscription stops working, it cannot check in to an internal event, and
+        no organisation's administrator can see it.
+    </p>
+    <p class="mb-0">
+        A <strong>global administrator</strong> sees a warning above the Users list whenever this has
+        happened, with a link to <code>/admin/users/unplaced</code>, where each affected account can be
+        placed into the right organisation. Only a global administrator can see this list or place anybody
+        from it &mdash; the portal deliberately does not guess which organisation an account belongs to.
+    </p>
 </div>
 
 <!-- Section 3: Gatekeeper (Dev Site Access) -->

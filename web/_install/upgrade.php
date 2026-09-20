@@ -32,6 +32,7 @@ use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Migrator;
 use Portal\Core\Router;
+use Portal\Core\Site;
 
 // Require authentication and admin access
 Auth::requireLogin();
@@ -59,6 +60,7 @@ $pending  = $migrator->pending();
 $results  = [];
 $error    = '';
 $ranMigrations = false;
+$unplacedAfterUpgrade = 0; // #533 — only computed for real after a run; see below
 
 // Handle POST to run migrations
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -122,6 +124,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $results = $migrator->runAll($userId);
     $ranMigrations = true;
     $pending = $migrator->pending(); // Refresh pending list
+
+    // 🛡️ #533: how many accounts, across the WHOLE installation, still
+    //    belong to no organisation after migration 199 has had its chance
+    //    to run. On a single-organisation portal this is 0 unless 199
+    //    itself failed — which is exactly when this card should show, so
+    //    no extra "did 199 succeed" test is needed here. Nothing is
+    //    guessed here either: this only counts and reports, it never
+    //    places anybody — that is what /admin/users/unplaced is for.
+    $unplacedAfterUpgrade = 0;
+    $unplacedResult = $mysqli->query(
+        'SELECT COUNT(*) AS cnt FROM tblUsers u '
+        . 'WHERE NOT EXISTS (SELECT 1 FROM tblUserSites us WHERE us.userID = u.userID)'
+    );
+    if ($unplacedResult !== false) {
+        $unplacedAfterUpgrade = (int) ($unplacedResult->fetch_assoc()['cnt'] ?? 0);
+    }
 
     // 🪞 Mark every migration as successful → record current version and
     //    release maintenance. If any migration failed, keep maintenance
@@ -239,6 +257,26 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                 <?php endforeach; ?>
                             </tbody>
                         </table>
+                    </div>
+                </div>
+            <?php endif; ?>
+
+            <!-- #533: accounts left for a global administrator to place by hand -->
+            <?php if ($ranMigrations === true && $unplacedAfterUpgrade > 0): ?>
+                <div class="card mb-4 border-warning">
+                    <div class="card-header bg-warning-subtle">
+                        <h2 class="h6 mb-0">Accounts with no organisation</h2>
+                    </div>
+                    <div class="card-body">
+                        <p class="mb-2">
+                            <?php echo (int) $unplacedAfterUpgrade; ?> account<?php echo $unplacedAfterUpgrade !== 1 ? 's' : ''; ?>
+                            still belong<?php echo $unplacedAfterUpgrade === 1 ? 's' : ''; ?> to no organisation. Nothing was
+                            guessed &mdash; this portal has more than one organisation, so this migration could not
+                            safely decide which one each account belongs to.
+                        </p>
+                        <a href="<?php echo htmlspecialchars(Site::url('admin/users/unplaced'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-sm btn-warning">
+                            Place them
+                        </a>
                     </div>
                 </div>
             <?php endif; ?>

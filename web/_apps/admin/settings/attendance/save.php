@@ -68,6 +68,7 @@ declare(strict_types=1);
 use Portal\Core\AnonymousCheckins;
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\AttendanceAccess;
 use Portal\Core\Logger;
 use Portal\Core\Router;
 use Portal\Core\Site;
@@ -186,6 +187,7 @@ if ($scope === 'global' && App::isRootAdmin() === false) {
     Logger::activity(
         'AttendanceVisibilitySaveRefused',
         'Refused: the installation-wide default for ' . AnonymousCheckins::VISIBILITY_KEY
+        . ' and ' . AttendanceAccess::VISIBILITY_KEY
         . ' may only be changed by a global administrator',
         $userId > 0 ? $userId : null
     );
@@ -230,14 +232,29 @@ if ($days < 0 || $days > 3650) {
     exit();
 }
 
+// ✅ #529 — the reports-page visibility choice must be one of the three
+//    exact stored values, checked against AttendanceAccess's own list for
+//    the same reason as the door-figures choice above: a mistyped or forged
+//    value must never be written, even one that the reader would fall back
+//    to the narrowest choice for anyway.
+$postedReportsChoice = trim((string) ($_POST['reportsVisibleTo'] ?? ''));
+if (array_key_exists($postedReportsChoice, AttendanceAccess::VISIBILITY_CHOICES) === false) {
+    $_SESSION['flash_msg']  = '"Who can see the attendance reports page" is not one of the three '
+        . 'choices, so nothing was saved. Please pick one of the options on the page and save again.';
+    $_SESSION['flash_type'] = 'danger';
+    header('Location: /admin/settings/attendance');
+    exit();
+}
+
 if ($scope === 'global') {
     attendance_settings_write_installation_wide($mysqli, AnonymousCheckins::VISIBILITY_KEY, $postedChoice);
     attendance_settings_write_installation_wide($mysqli, AnonymousCheckins::RETENTION_KEY, (string) $days);
+    attendance_settings_write_installation_wide($mysqli, AttendanceAccess::VISIBILITY_KEY, $postedReportsChoice);
 
     Logger::activity(
         'AttendanceVisibilitySaved',
         'Installation-wide default set to "' . $postedChoice . '", technical detail kept for '
-        . $days . ' days',
+        . $days . ' days, reports page visibility set to "' . $postedReportsChoice . '"',
         $userId > 0 ? $userId : null
     );
 
@@ -250,11 +267,12 @@ if ($scope === 'global') {
 
 attendance_settings_write_for_site($mysqli, $siteId, AnonymousCheckins::VISIBILITY_KEY, $postedChoice);
 attendance_settings_write_for_site($mysqli, $siteId, AnonymousCheckins::RETENTION_KEY, (string) $days);
+attendance_settings_write_for_site($mysqli, $siteId, AttendanceAccess::VISIBILITY_KEY, $postedReportsChoice);
 
 Logger::activity(
     'AttendanceVisibilitySaved',
     'Organisation ' . $siteId . ' set to "' . $postedChoice . '", technical detail kept for '
-    . $days . ' days',
+    . $days . ' days, reports page visibility set to "' . $postedReportsChoice . '"',
     $userId > 0 ? $userId : null
 );
 

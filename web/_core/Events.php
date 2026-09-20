@@ -58,6 +58,15 @@ class Events
      * exception) is caught, logged via `error_log()`, the transaction
      * rolled back, and 0 returned.
      *
+     * SINCE #531 (20 September 2026): `web/_apps/calendar/rsvp.php` takes
+     * the SAME event-row lock this method takes, in its own transaction,
+     * before it counts seats for an ordinary "going" answer. Two different
+     * things fill a seat — an ordinary answer and this promotion — and
+     * before that fix both could count the same free seat and both fill it,
+     * overbooking the event by one. Now whichever of the two gets the event
+     * row's lock first runs to completion (commits or rolls back) before
+     * the other is even allowed to count, so they can no longer race.
+     *
      * @param int $eventId
      *
      * @return int Number of RSVPs promoted from 'waitlist' to 'confirmed'.
@@ -78,15 +87,12 @@ class Events
                 return 0;
             }
 
-            // 🛡️ Codex catch-up B1 (20 September 2026): read OUTSIDE the
-            //    transaction/lock below — AccountGuard::isSingleOrganisation()
-            //    caches its answer for the whole request, so this either
-            //    answers from that cache or is the one query that fills
-            //    it; keeping it out of the locked section below keeps the
-            //    lock as short as possible. Same rule anon-checkin-save.php
-            //    already uses for its own membership test.
-            $singleOrg = AccountGuard::isSingleOrganisation() === true ? 1 : 0;
-
+            // 🛡️ #533 (20 September 2026): there used to be a read here of
+            //    AccountGuard::isSingleOrganisation(), feeding a single-
+            //    organisation exception in the candidate query below. That
+            //    exception is REMOVED — see the query's own comment for why
+            //    — so nothing needs reading before the transaction opens any
+            //    more.
             App::beginTransaction();
 
             // 🔒 Lock the event row first — serialises two concurrent
@@ -184,44 +190,59 @@ class Events
             //    RSVP row, so a departed person could still be promoted
             //    off the waitlist and emailed "you are now confirmed" for
             //    an event they no longer have any right to attend. THE
-            //    FIX: require an active account AND the SAME membership
-            //    rule anon-checkin-save.php uses for a viewer (word for
-            //    word, so #514 can later replace both call sites with one
-            //    shared method) — an active membership row for the
-            //    event's own organisation, OR, on a single-organisation
-            //    installation only, an account with no switched-OFF
-            //    membership row at all (the compatibility exception
-            //    AccountGuard/anon-checkin.php already use, for accounts
-            //    that predate #518 and never got a membership row in the
-            //    first place). WHAT THIS CANNOT DO: it cannot tell a
-            //    member removed before #518 (row deleted outright) from
-            //    an account that never had a row — both look the same to
-            //    this query, which is the same limit AccountGuard itself
-            //    already accepts. A person excluded by this rule is left
-            //    on the waitlist with no email; offboarding cancelling a
-            //    leaver's own RSVPs outright is a separate tidy-up, not
-            //    done here. ON LOCKING: this `FOR UPDATE` now also locks
-            //    the `tblUserSites` rows it examines, in the order tblUsers
-            //    then tblUserSites — the same order `offboarding/do.php`
-            //    writes them in, and that transaction never touches
-            //    `tblEventRSVPs`, so this adds no new deadlock ordering
-            //    between the two.
+            //    FIX (as first shipped): require an active account AND an
+            //    active membership row for the event's own organisation, OR,
+            //    on a single-organisation installation only, an account with
+            //    no switched-OFF membership row at all — a compatibility
+            //    exception for accounts that predated #518 and had never
+            //    been given a membership row in the first place.
+            //
+            // 🛡️ #533 (20 September 2026): THAT COMPATIBILITY EXCEPTION IS
+            //    NOW REMOVED. Migration 199 backfills a membership row for
+            //    every such account (see its own header for the two cases —
+            //    automatic on a single-organisation portal, listed for a
+            //    global administrator to place on a multi-organisation
+            //    one), so after the upgrade has run, an account with no
+            //    membership row on a single-organisation portal is one a
+            //    global administrator deliberately removed by hand
+            //    ("Remove from site"), not one the old portal simply never
+            //    got round to placing. Refusing to promote that account is
+            //    now the INTENDED answer, the same answer the check-in page
+            //    and the calendar feed already gave it — see
+            //    `calendar/feed.php`'s own comment for how the three now
+            //    agree. WHAT THIS MEANS BEFORE THE UPGRADE HAS RUN: a
+            //    row-less account on a single-organisation portal stops
+            //    being promoted the moment this code deploys, even before
+            //    migration 199 runs — the ordering trap the migration's own
+            //    header spells out.
+            //
+            //    ON LOCKING: this `FOR UPDATE` also locks the `tblUserSites`
+            //    row it examines, in the order tblUsers then tblUserSites —
+            //    the same order `offboarding/do.php` writes them in, and
+            //    that transaction never touches `tblEventRSVPs`, so this
+            //    adds no new deadlock ordering between the two.
+            //
+            // 🔒 #531 (20 September 2026): since this method already locks
+            //    the event row (above) before counting confirmed seats,
+            //    `calendar/rsvp.php` now takes THE SAME event-row lock, in
+            //    its own transaction, before IT counts — see that file's
+            //    comment. So this promotion and an ordinary "going" answer
+            //    can no longer both count the same free seat: whichever
+            //    transaction gets the lock first runs to completion, and the
+            //    other counts only after it has committed.
             $stmt = $db->prepare(
                 'SELECT r.rsvpID, r.userID, r.guestCount, u.emailAddress AS email, u.fullName '
                 . 'FROM tblEventRSVPs r '
                 . 'JOIN tblUsers u ON u.userID = r.userID '
                 . 'WHERE r.eventID = ? AND r.siteID = ? AND r.response = "going" AND r.status = "waitlist" '
                 . '  AND u.isActive = 1 '
-                . '  AND ( EXISTS (SELECT 1 FROM tblUserSites ms '
-                . '                 WHERE ms.userID = u.userID AND ms.siteID = r.siteID AND ms.isActive = 1) '
-                . '        OR ( ? = 1 AND NOT EXISTS (SELECT 1 FROM tblUserSites mx '
-                . '                                     WHERE mx.userID = u.userID AND mx.siteID = r.siteID '
-                . '                                       AND mx.isActive = 0) ) ) '
+                . '  AND EXISTS (SELECT 1 FROM tblUserSites ms '
+                . '               WHERE ms.userID = u.userID AND ms.siteID = r.siteID AND ms.isActive = 1) '
                 . 'ORDER BY r.waitlistedAt ASC, r.createdAt ASC '
                 . 'FOR UPDATE'
             );
             if ($stmt !== false) {
-                $stmt->bind_param('iii', $eventId, $siteId, $singleOrg);
+                $stmt->bind_param('ii', $eventId, $siteId);
                 $stmt->execute();
                 $result = $stmt->get_result();
                 while (($row = $result->fetch_assoc()) !== null) {

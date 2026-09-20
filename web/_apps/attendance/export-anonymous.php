@@ -32,6 +32,15 @@
  * never merged into the named attendance record" should be literally true, in
  * the files as well as on the screens.
  *
+ * DELETED EVENTS ARE LEFT OUT OF THIS FILE (owner decision, 20 September 2026)
+ * -----------------------------------------------------------------------------
+ * The reports page keeps a deleted event's headcount in the organisation's
+ * running totals, but this file does not carry that event's row at all — a
+ * deleted event's name must never be able to reappear in a spreadsheet that is
+ * still sitting in somebody's downloads folder. So this file's column can add
+ * up to LESS than the total shown on the reports page. That is the deleted
+ * events' rows, left out on purpose, not a mistake in the file.
+ *
  * @package   Portal\Attendance
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2026-present MWBM Partners Ltd (t/a MWservices)

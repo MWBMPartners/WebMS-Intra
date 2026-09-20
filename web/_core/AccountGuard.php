@@ -79,6 +79,24 @@
  * the same spirit as `RateLimiter` and `Gatekeeper::portalWideSetting()`
  * already reading settings no single organisation may influence.
  *
+ * THIS EXCEPTION STAYS, EVEN THOUGH #533 REMOVED THE MATCHING ONE FROM THE
+ * VIEWER-SIDE PAGES (20 September 2026). The check-in page, its save
+ * handler and the waitlist promotion used to each carry their own copy of
+ * "a single-organisation account with no membership row still belongs
+ * here" — added because, before #518, creating an account never wrote a
+ * membership row at all. Migration 199 fixes that DATA GAP directly (a real
+ * membership row for every such account, backfilled on upgrade), so those
+ * three pages have dropped their copies and are now strict: no row, no
+ * access, full stop. This class's OWN exception is not the same question.
+ * It answers "may THIS ADMINISTRATOR reach this account", not "does this
+ * VIEWER belong here" — and it must stay yes for a row-less account, or the
+ * very account that migration 199 could not place automatically (because
+ * the portal has more than one organisation) would become invisible to
+ * everybody except a global administrator, including to the
+ * `/admin/users/unplaced` page built to let a global administrator place
+ * it. Removing this exception would not tidy anything up; it would hide
+ * the accounts the rest of #533 exists to surface.
+ *
  * -------------------------------------------------------------------------
  * WHY A MISSING ACCOUNT AND ANOTHER ORGANISATION'S ACCOUNT MUST LOOK — AND
  * RECORD — THE SAME
@@ -140,11 +158,21 @@
  *    that both include the same person. This class only decides WHO may
  *    change them, not whether the underlying data itself is per
  *    organisation.
- *  - The "an account with that email address already exists" message on
- *    create, import, the API's 409, and editing your own account still
- *    reveals whether an email address has an account SOMEWHERE on the
- *    installation, even when it belongs to another organisation. Not
- *    fixed here — see the #518 follow-ups list.
+ *  - THE EMAIL-CLASH MESSAGE IS NOW BOUNDED, NOT CLOSED (#521, 20 September
+ *    2026). `emailAvailability()` still lets a non-global administrator
+ *    learn, once per attempt, that an address "can't be used here" — the
+ *    same fact as "belongs to an account somewhere on the installation" —
+ *    but only up to EMAIL_CLASH_LIMIT (5) times per EMAIL_CLASH_WINDOW (one
+ *    hour), and every one of those refusals is recorded where a global
+ *    administrator can see it and act. That bounds a systematic sweep of a
+ *    customer list to something slow and on the record; it does not stop a
+ *    single, deliberate guess. A truly closed design (a blind invitation
+ *    flow indistinguishable whether the address is free or taken) is
+ *    bigger than this fix and is a follow-up issue, not built here. Editing
+ *    your own account (`auth/account/index.php`'s `email_taken` check) is a
+ *    MEMBER testing their own address change, not an administrator testing
+ *    someone else's, and is deliberately out of this method's scope — see
+ *    the #518/#521 follow-ups list.
  *  - The `/admin` dashboard still shows installation-wide totals (errors,
  *    users, activity) to every site administrator, not only their own
  *    organisation's figures. This class only makes sure a refusal moves
@@ -767,5 +795,249 @@ final class AccountGuard
         $sql = 'EXISTS (SELECT 1 FROM tblUserSites gm WHERE gm.userID = ' . $userIdColumn . ' AND gm.siteID = ?' . $activeOnly . ')';
 
         return [$sql, 'i', [Site::id()]];
+    }
+
+    // =========================================================================
+    // 📧 #521 — does an email address block "create account" or "change email"?
+    // =========================================================================
+
+    /** Free — nothing on the whole installation uses this address. */
+    public const EMAIL_FREE = 'free';
+
+    /** In use, but by an account the ACTING administrator may already see — no oracle, nothing recorded. */
+    public const EMAIL_IN_USE_HERE = 'in_use_here';
+
+    /** In use by an account OUTSIDE the acting administrator's reach — refused, bounded, recorded. */
+    public const EMAIL_NOT_AVAILABLE = 'not_available';
+
+    /** The acting administrator (or key) has collected too many EMAIL_NOT_AVAILABLE refusals recently. */
+    public const EMAIL_TOO_MANY = 'too_many';
+
+    /** How many "not available here" refusals one non-global actor may collect in EMAIL_CLASH_WINDOW seconds. */
+    public const EMAIL_CLASH_LIMIT = 5;
+
+    /** The window, in seconds, EMAIL_CLASH_LIMIT applies over — one hour. */
+    public const EMAIL_CLASH_WINDOW = 3600;
+
+    /**
+     * Is an email address available for "create account" or "change email",
+     * and — if not — is that because it belongs to an account the acting
+     * administrator may already see, or one outside their reach?
+     *
+     * WHAT WAS WRONG BEFORE (issue #521)
+     * -----------------------------------------------------------------------
+     * "Another user with that email address already exists" told an
+     * administrator, on a MULTI-organisation installation, whether an
+     * address belongs to an account ANYWHERE on the installation — including
+     * organisations that administrator has no business knowing anything
+     * about. Addresses must stay unique across the whole installation (one
+     * local-login row per address), so the fix is not simply to remove the
+     * message; it is to bound what the message can be used to learn.
+     *
+     * THE DESIGN, IN ONE SENTENCE: an administrator may learn, once per
+     * attempt, that an address "can't be used here" (which is the same fact
+     * as "belongs to an account somewhere"), at most EMAIL_CLASH_LIMIT times
+     * per EMAIL_CLASH_WINDOW seconds, with every one of those attempts
+     * recorded where a GLOBAL administrator can see it and act (typically:
+     * add that person to the organisation that needs them).
+     *
+     * WHAT THIS DELIBERATELY STILL ALLOWS (say this plainly; do not imply
+     * the oracle is closed)
+     * -----------------------------------------------------------------------
+     * An administrator still learns, once per attempt and at most five times
+     * an hour, that a specific address belongs to SOMEBODY, somewhere. This
+     * BOUNDS the oracle — a systematic sweep of a customer list is slow and
+     * conspicuous, and every attempt is on the record — it does NOT CLOSE
+     * it. Fully closing it needs a different design entirely (a blind
+     * invitation flow that looks identical whether the address is free or
+     * taken), which is bigger than this package and is recorded as a
+     * follow-up issue rather than built here.
+     *
+     * ORDER OF OPERATIONS, AND WHY THE LIMIT IS CHECKED FIRST
+     * -----------------------------------------------------------------------
+     * The rate limit is checked BEFORE the address is even looked up. If the
+     * lookup ran first and the limit only applied to the RESULT, the limit
+     * itself would become a second oracle: an administrator could tell an
+     * address was "interesting" by noticing whether it counted toward their
+     * hourly allowance. Checking the limit first means once an actor is over
+     * it, EVERY address — used or not — gets the same "too many" wording,
+     * so the limit reveals nothing about any particular address.
+     *
+     * A GLOBAL actor is NEVER limited and NEVER recorded: there is nothing
+     * to hide from an administrator who can already see every account on
+     * the installation.
+     *
+     * @param string   $email         The address being checked. Normalised
+     *                                (lower-cased, trimmed) before anything
+     *                                else, so the same address in different
+     *                                letter-casing hits the same bucket and
+     *                                the same lookup.
+     * @param int|null $excludeUserId On an UPDATE, the account whose own
+     *                                current address should not count
+     *                                against itself. Null on create.
+     * @param string   $action        Plain-English text describing the
+     *                                attempt (see check()'s own parameter of
+     *                                the same name) — containing ONLY what
+     *                                the person themselves supplied, never
+     *                                the address itself or the account it
+     *                                turned out to belong to.
+     *
+     * @return string One of EMAIL_FREE / EMAIL_IN_USE_HERE / EMAIL_NOT_AVAILABLE / EMAIL_TOO_MANY.
+     */
+    public static function emailAvailability(string $email, ?int $excludeUserId, string $action): string
+    {
+        $normalised = strtolower(trim($email));
+
+        $actorGlobal = self::actorIsGlobal();
+        $bucket      = self::emailClashBucket();
+
+        // 🚦 Checked FIRST, before any lookup — see the docblock above for
+        //    why: once a non-global actor is over the limit, an UNUSED
+        //    address is refused too, so the limit itself cannot be used to
+        //    learn anything about any one address.
+        if ($actorGlobal === false && RateLimiter::tooMany($bucket, self::EMAIL_CLASH_LIMIT, self::EMAIL_CLASH_WINDOW) === true) {
+            return self::EMAIL_TOO_MANY;
+        }
+
+        $sql = 'SELECT userID FROM tblUsers WHERE emailAddress = ?';
+        $types  = 's';
+        $params = [$normalised];
+        if ($excludeUserId !== null) {
+            $sql     .= ' AND userID != ?';
+            $types   .= 'i';
+            $params[] = $excludeUserId;
+        }
+        $sql .= ' LIMIT 1';
+
+        $stmt = App::db()->prepare($sql);
+        if ($stmt === false) {
+            // 🛡️ Fail the same direction as a genuine database fault
+            // elsewhere in this class: refuse the specific claim (nothing is
+            // asserted to be free when the check could not actually run),
+            // without recording anything for an address that was never
+            // successfully looked up at all.
+            return self::EMAIL_NOT_AVAILABLE;
+        }
+        $stmt->bind_param($types, ...$params);
+        $stmt->execute();
+        $existing = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+
+        if ($existing === null) {
+            return self::EMAIL_FREE;
+        }
+
+        $existingId = (int) $existing['userID'];
+
+        // 👀 Found, but it is an account this actor may already see — no
+        //    oracle: they can already find this out on the users list, so
+        //    there is nothing to bound or record.
+        if (self::verdict($existingId, self::REACH_VIEW) === self::ALLOW) {
+            return self::EMAIL_IN_USE_HERE;
+        }
+
+        // 🚫 Found, and OUTSIDE this actor's reach — the bounded, recorded
+        //    branch. A global actor never reaches here (verdict() above
+        //    always allows REACH_VIEW for them), so everything below only
+        //    ever runs for a non-global actor.
+        RateLimiter::recordHit($bucket, self::EMAIL_CLASH_WINDOW, 'emailclash:');
+
+        $actorId = ApiAuth::actorUserId();
+
+        // 1. Activity-log line — visible to THIS organisation's own
+        //    administrators. Carries no address and no account number, the
+        //    same discipline logRefusal() already applies.
+        Logger::activity(
+            'EmailClashRefused',
+            'Refused: ' . $action . '. That email address is not available in this organisation.',
+            $actorId
+        );
+
+        // 2. Security record — organisation left NULL, exactly as
+        //    logRefusal() does, so ONLY a global administrator sees it
+        //    (errors/index.php scopes a non-umbrella administrator to
+        //    `siteID = ?`, which a NULL row never matches). Unlike the
+        //    activity line, THIS record carries the address and the
+        //    existing account number — a global administrator needs both
+        //    to act (typically: add the person to the organisation that
+        //    needs them).
+        $source      = ApiAuth::source();
+        $cameThrough = ($source === 'apikey')
+            ? ('API key #' . (ApiAuth::apiKeyId() ?? 0))
+            : 'a signed-in session';
+        $detail = 'Action: ' . $action . "\n"
+            . 'Email address: ' . $normalised . "\n"
+            . 'Belongs to account number: ' . $existingId . "\n"
+            . 'Organisation open: #' . Site::id() . "\n"
+            . 'Came through: ' . $cameThrough;
+        Logger::errorPlatformForSite(
+            null,
+            'Security',
+            'Warning',
+            'EMAIL_CLASH_OUTSIDE_ORG',
+            'Email address refused: belongs to an account outside the open organisation',
+            $detail,
+            $actorId
+        );
+
+        return self::EMAIL_NOT_AVAILABLE;
+    }
+
+    /**
+     * The plain-English message for one of emailAvailability()'s verdicts.
+     *
+     * @param string $verdict One of the EMAIL_* constants.
+     *
+     * @return string Empty string for EMAIL_FREE (never shown).
+     */
+    public static function emailMessage(string $verdict): string
+    {
+        if ($verdict === self::EMAIL_IN_USE_HERE) {
+            return 'Another account in this organisation already uses that email address.';
+        }
+        if ($verdict === self::EMAIL_NOT_AVAILABLE) {
+            return 'That email address can\'t be used here. If you believe this person should be a '
+                . 'member of this organisation, ask a global administrator.';
+        }
+        if ($verdict === self::EMAIL_TOO_MANY) {
+            return 'Too many email addresses that can\'t be used here have been tried from this account '
+                . 'in the last hour. Try again later, or ask a global administrator.';
+        }
+
+        return '';
+    }
+
+    /**
+     * How many seconds until the acting administrator's (or key's) email
+     * rate limit bucket has room for another EMAIL_NOT_AVAILABLE attempt.
+     * Used to populate a Retry-After header on the API's 429 response.
+     *
+     * @return int Seconds, or 0 if not currently over the limit.
+     */
+    public static function emailRetryAfter(): int
+    {
+        return RateLimiter::retryAfter(self::emailClashBucket(), self::EMAIL_CLASH_LIMIT, self::EMAIL_CLASH_WINDOW);
+    }
+
+    /**
+     * The rate-limit bucket for the CURRENT actor's email-clash allowance.
+     *
+     * Keyed by API key number for a bearer request (an API key has no
+     * `actorUserId()` of its own — that method returns null for a key), or
+     * by account number for a session request. Deliberately does NOT fold
+     * in the email address itself: the bucket is about how many refusals
+     * ONE ACTOR has collected, not about any one address, which is exactly
+     * what stops the limit itself becoming a second oracle (see
+     * emailAvailability()'s own docblock).
+     *
+     * @return string
+     */
+    private static function emailClashBucket(): string
+    {
+        if (ApiAuth::source() === 'apikey') {
+            return 'emailclash:key:' . (int) ApiAuth::apiKeyId();
+        }
+
+        return 'emailclash:user:' . (int) ApiAuth::actorUserId();
     }
 }

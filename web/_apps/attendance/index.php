@@ -20,6 +20,7 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\AttendanceAccess;
 use Portal\Core\Site;
 
 // 📌 Page metadata
@@ -42,6 +43,22 @@ $offset      = ($page - 1) * $perPage;
 
 // 🌐 Multi-site scope
 $siteId = Site::id();
+
+// 🔒 #529 (20 September 2026) — the "View Reports" card is drawn only when
+//    the SAME test `attendance/report.php` itself applies would answer yes
+//    for this viewer, so the card is never a promise the target page then
+//    breaks. This does NOT gate the sessions list on THIS page — that stays
+//    open to any signed-in account for now; see AttendanceAccess's own
+//    docblock ("WHAT THIS CLASS DELIBERATELY DOES NOT DO") for why that is
+//    a separate, wider piece of work, tracked in the #529 closing comment.
+$viewerId       = (int) ($_SESSION['user_id'] ?? 0);
+$reportsIsAdmin = App::isAdmin();
+$reportsIsMember = AttendanceAccess::viewerIsMember($mysqli, $viewerId, $siteId);
+$reportsChoice  = AttendanceAccess::readChoice($siteId);
+$reportsCoord   = ($reportsIsMember === true && $reportsIsAdmin === false && $reportsChoice === AttendanceAccess::VISIBLE_ADMINS_COORDINATORS)
+    ? AttendanceAccess::coordinatesAnyEvent($mysqli, $viewerId, $siteId)
+    : false;
+$mayViewReports = AttendanceAccess::mayView($reportsChoice, $reportsIsMember, $reportsIsAdmin, $reportsCoord);
 
 // 📊 Build WHERE clause
 $conditions = ['s.isDeleted = 0', 's.siteID = ?'];
@@ -226,6 +243,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             </div>
         </div>
     </div>
+    <?php if ($mayViewReports === true): ?>
     <div class="col-6 col-md-3">
         <div class="card text-center shadow-sm">
             <div class="card-body">
@@ -236,6 +254,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             </div>
         </div>
     </div>
+    <?php endif; ?>
 </div>
 
 <!-- 🔍 Filters -->

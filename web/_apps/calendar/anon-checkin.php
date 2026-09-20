@@ -20,18 +20,36 @@
 // is the whole point of the page (migration 130's own header: "no login...
 // used at the door or via a phone QR scan"), and is unchanged from before.
 //
-// An INTERNAL event: only a member of THAT event's own organisation, a
-// global root administrator, or (in a single-organisation installation
-// only) an active account with no switched-off membership row at all. The
-// last branch exists because, before commit e1d0a34 (#518), creating a new
-// account never created a membership row, so many real members on an
-// upgraded single-organisation portal have none — see AccountGuard's own
-// header for the fuller account of what changed and when. Everybody else,
-// including a signed-in member of a DIFFERENT organisation, gets exactly
-// the same "Event not found." as a made-up event number. That is
-// deliberate: it stops a refused event and a missing one being told apart
-// by anything at all, the same discipline #503 already applied to four
-// other calendar handlers.
+// An INTERNAL event: only a member of THAT event's own organisation, or a
+// global root administrator. Everybody else, including a signed-in member
+// of a DIFFERENT organisation, gets exactly the same "Event not found." as
+// a made-up event number. That is deliberate: it stops a refused event and
+// a missing one being told apart by anything at all, the same discipline
+// #503 already applied to four other calendar handlers.
+//
+// ---------------------------------------------------------------------------
+// #533 (20 September 2026): THE SINGLE-ORGANISATION COMPATIBILITY BRANCH IS
+// REMOVED
+// ---------------------------------------------------------------------------
+// This page used to ALSO admit an active account with NO membership row at
+// all, on a single-organisation installation, because before commit
+// e1d0a34 (#518) creating a new account never created one, and the check-in
+// page did not want to lock those real members out. That left this page
+// disagreeing with `calendar/feed.php`, which has required an active
+// membership row since `110e47d` and gave those same accounts "Invalid
+// token" instead. Migration 199 fixes the DATA instead of leaving the CODE
+// to work around it: it back-fills a membership row for every such account
+// (automatically on a single-organisation portal; listed at
+// `/admin/users/unplaced` for a global administrator to place on a
+// multi-organisation one — see that migration's own header). So this page
+// is now STRICT everywhere on the viewer side, exactly like the calendar
+// feed and the waitlist promotion (`Events::promoteFromWaitlist()`) — the
+// three now agree. AccountGuard's OWN single-organisation exception is
+// unaffected by this (see its class docblock, "THE SINGLE-ORGANISATION
+// EXCEPTION") — that one answers a different question, whether an
+// ADMINISTRATOR may reach an account, and removing it here would make the
+// very account that needs placing invisible to everybody but a global
+// administrator.
 //
 // WHAT THIS DOES NOT DO: it does not test the older, portal-wide `isAdmin`
 // flag (rsvp-by-link.php:207 does; this page deliberately does not,
@@ -44,7 +62,6 @@
 // an account that has simply never had one.
 declare(strict_types=1);
 
-use Portal\Core\AccountGuard;
 use Portal\Core\Auth;
 use Portal\Core\Site;
 
@@ -56,8 +73,7 @@ if ($eventId <= 0) { http_response_code(400); exit('Invalid event.'); }
 // so $_SESSION['user_id'] is simply there — a second session-start call was
 // tried while drafting this fix and dropped once that was confirmed; adding
 // one here would be a change nobody asked for.
-$viewerId  = (int) ($_SESSION['user_id'] ?? 0);
-$singleOrg = AccountGuard::isSingleOrganisation() === true ? 1 : 0;
+$viewerId = (int) ($_SESSION['user_id'] ?? 0);
 
 $siteId = Site::id();
 // The visibility rule sits INSIDE the WHERE clause, not decided in PHP
@@ -75,21 +91,19 @@ $stmt = $mysqli->prepare(
     . '                    WHERE va.userID = ? AND va.isActive = 1 AND va.isRootAdmin = 1) '
     . '        OR EXISTS (SELECT 1 FROM tblUsers vm '
     . '                    WHERE vm.userID = ? AND vm.isActive = 1 '
-    . '                      AND ( EXISTS (SELECT 1 FROM tblUserSites ms '
-    . '                                     WHERE ms.userID = vm.userID AND ms.siteID = ? AND ms.isActive = 1) '
-    . '                            OR ( ? = 1 AND NOT EXISTS (SELECT 1 FROM tblUserSites mx '
-    . '                                                        WHERE mx.userID = vm.userID AND mx.siteID = ? '
-    . '                                                          AND mx.isActive = 0) ) ) ) '
+    . '                      AND EXISTS (SELECT 1 FROM tblUserSites ms '
+    . '                                   WHERE ms.userID = vm.userID AND ms.siteID = ? AND ms.isActive = 1)) '
     . '      ) LIMIT 1'
 );
-// Seven `?`, seven letters in the type string, seven bound values, in this
+// Five `?`, five letters in the type string, five bound values, in this
 // order: eventId, siteId, viewerId (root-admin test), viewerId (member
-// test), siteId (member test), singleOrg, siteId (single-org "no
-// switched-off row" test). check_bind_param_arity.py checks the type
-// string against the argument COUNT; it does NOT check the number of `?`
-// in the SQL against either, so a mismatch there only shows up as a live
-// HTTP 500 — proved during this fix by deliberately miscounting.
-$stmt->bind_param('iiiiiii', $eventId, $siteId, $viewerId, $viewerId, $siteId, $singleOrg, $siteId);
+// test), siteId (member test). Two fewer of each since #533 removed the
+// single-organisation compatibility branch (see the file header).
+// check_bind_param_arity.py checks the type string against the argument
+// COUNT; it does NOT check the number of `?` in the SQL against either, so
+// a mismatch there only shows up as a live HTTP 500 — proved during the
+// #519 fix by deliberately miscounting.
+$stmt->bind_param('iiiii', $eventId, $siteId, $viewerId, $viewerId, $siteId);
 $stmt->execute();
 $event = $stmt->get_result()->fetch_assoc() ?: null;
 $stmt->close();

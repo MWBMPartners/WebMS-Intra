@@ -26,43 +26,86 @@ if ($slug === '' || preg_match('/^[a-z0-9][a-z0-9\-]{0,79}$/i', $slug) !== 1) {
     http_response_code(400); exit('Invalid event.');
 }
 
-$siteId = Site::id();
+// 🛡️ #532 (20 September 2026): WHAT WAS WRONG BEFORE. The lookup above
+//    tested only "published, not deleted", and the sign-in decision ran
+//    AFTERWARDS, in PHP, once the row was already known to exist. That let a
+//    signed-out visitor tell a REAL internal event apart from a MADE-UP
+//    slug: a real one sent them to sign in (302), a made-up one said "Event
+//    not found." (404). Event slugs are made from event names — often
+//    guessable ("staff-meeting-march", "safeguarding-review") — so that
+//    difference alone told a stranger which internal events exist, even
+//    though the same visitor could never actually open one. #503 and #519
+//    already closed this exact shape of leak on four other calendar
+//    handlers; this is the same fix applied here.
+//
+//    THE RULE NOW. The viewer test moves INSIDE the WHERE clause, so a
+//    refused row and a genuinely missing one cost the database exactly the
+//    same work and come back as exactly the same "no row" — nothing is
+//    decided in PHP afterwards. This WHERE clause is deliberately
+//    byte-for-byte the same shape as `calendar/anon-checkin.php`'s (after
+//    #533 removed that page's single-organisation branch), so a future
+//    change (#514) can replace all such call sites with one shared method
+//    without any of them behaving differently first.
+//
+//    A public, published event: open to everyone, exactly as before.
+//    An internal event: a member of THAT event's own organisation, or a
+//    global root administrator. Everybody else — a signed-in member of a
+//    DIFFERENT organisation, an account holding only the older portal-wide
+//    `isAdmin` flag with no membership row here, or a signed-out visitor —
+//    gets refused. The older `isAdmin` flag is deliberately NOT tested here,
+//    for the same reason anon-checkin.php does not test it: any site
+//    administrator can switch it on for any account in any organisation, so
+//    it proves nothing about which organisation somebody actually belongs
+//    to (#511, #514 finding 3).
+//
+//    WHY SIGN-IN, NOT 404, FOR A SIGNED-OUT VISITOR. The check-in page
+//    (anon-checkin.php) chose 404 for everyone refused, because it is
+//    designed to be used AT THE DOOR, signed out, with no expectation of
+//    ever signing in. This page is different: a member gets sent a
+//    registration LINK by email and is expected to sign in to use it, so a
+//    signed-out visitor is sent to sign in for anything that is not a
+//    public published event — a real internal event, a draft, a deleted
+//    event and a made-up slug ALL alike — and only finds out afterwards,
+//    once signed in, whether the event was real. A SIGNED-IN visitor who
+//    may not see the event gets the plain 404 straight away, the same as a
+//    made-up slug.
+//
+//    WHAT THIS CANNOT DO. Inside MySQL, a slug that matches a real internal
+//    row still costs reading that row before the WHERE clause rejects it —
+//    microseconds, the same limit `rsvp.php`'s own comment already accepts
+//    for the same reason. It also cannot stop a signed-out visitor with a
+//    WRONG slug being sent to sign in rather than told "not found"
+//    straight away — accepted, deliberately: see the settled plan's
+//    "Rejected" list for why 404-for-everyone-signed-out was not chosen.
+$viewerId = (int) ($_SESSION['user_id'] ?? 0); // 0 when signed out — both EXISTS branches below are then false
+$siteId   = Site::id();
 $stmt = $mysqli->prepare(
     'SELECT eventID, eventName, eventSlug, startDateTime, registrationEnabled, '
     . '       registrationOpensAt, registrationClosesAt, isPublic '
-    . 'FROM tblEvents WHERE eventSlug = ? AND siteID = ? AND isDeleted = 0 AND status = "published" LIMIT 1'
+    . 'FROM tblEvents '
+    . 'WHERE eventSlug = ? AND siteID = ? AND isDeleted = 0 '
+    . "  AND status = 'published' "
+    . '  AND ( isPublic = 1 '
+    . '        OR EXISTS (SELECT 1 FROM tblUsers va '
+    . '                    WHERE va.userID = ? AND va.isActive = 1 AND va.isRootAdmin = 1) '
+    . '        OR EXISTS (SELECT 1 FROM tblUsers vm '
+    . '                    WHERE vm.userID = ? AND vm.isActive = 1 '
+    . '                      AND EXISTS (SELECT 1 FROM tblUserSites ms '
+    . '                                   WHERE ms.userID = vm.userID AND ms.siteID = ? AND ms.isActive = 1)) '
+    . '      ) LIMIT 1'
 );
-$stmt->bind_param('si', $slug, $siteId);
+$stmt->bind_param('siiii', $slug, $siteId, $viewerId, $viewerId, $siteId);
 $stmt->execute();
 $event = $stmt->get_result()->fetch_assoc() ?: null;
 $stmt->close();
 
-// 🛡️ Drafts and deleted events (#503) were already handled by the query: it
-//    asks for status = "published" and isDeleted = 0, so both get the same
-//    "Event not found." as a slug that matches nothing.
-if ($event === null) { http_response_code(404); exit('Event not found.'); }
-
-// 🛡️ Events not marked public need sign-in (#503). The same rule as the
-//    event's own page (calendar/event.php): members only.
-//
-//    What was wrong before: this form asked nobody to sign in, whatever the
-//    event, so anybody with the address of an INTERNAL event could open its
-//    registration form, and the save handler accepted the registration, even
-//    though the event's own page would have asked them to sign in first.
-//
-//    Why this is not a deliberate feature being taken away: the form is meant
-//    to be public so that a parent can register a child for a public event
-//    without an account (this file's header, #348, and the comment in
-//    event-register-save.php). Nothing in the help pages, the issues (#347,
-//    #348), the changelog or the settings says the same should apply to an
-//    event that is not public. A public event is unchanged: no sign-in.
-//
-//    Checked in the same place as on the event page: after "not found", before
-//    anything about registration itself, so a signed-out visitor learns no more
-//    here than the event page would tell them.
-if ((int) $event['isPublic'] === 0 && Auth::check() === false) {
-    Auth::requireLogin();
+if ($event === null) {
+    if (Auth::check() === false) {
+        Auth::requireLogin(); // sends to /login?redirect=… and exits; never returns
+    }
+    http_response_code(404); exit('Event not found.');
 }
+
 if ((int) $event['registrationEnabled'] !== 1) {
     http_response_code(404); exit('Registration is not open for this event.');
 }

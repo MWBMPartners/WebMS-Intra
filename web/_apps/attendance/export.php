@@ -4,6 +4,15 @@
  *
  * CSV export endpoint for attendance sessions with counts. Requires Admin role.
  *
+ * 🔒 #529 (20 September 2026): this file stays ADMINISTRATORS-ONLY whatever
+ *    the new `attend.reports.visibleTo` setting says — the same reason the
+ *    anonymous check-in spreadsheet (`export-anonymous.php`) does. A file
+ *    leaves the building, gets forwarded, and is still sitting in somebody's
+ *    downloads folder after a setting has been tightened again; the owner's
+ *    18 September 2026 decision that a download stays administrators-only
+ *    applies here too. Nothing here reads AttendanceAccess at all — do not
+ *    "fix" that omission.
+ *
  * @package   WebMS Intra
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present All Rights Reserved

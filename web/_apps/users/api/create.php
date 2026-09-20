@@ -95,18 +95,26 @@ if ($fullName === '' || mb_strlen($fullName) > 255) {
     ApiResponse::error('fullName is required and must be ≤255 characters', 400);
 }
 
-// 🔍 Global uniqueness — tblUsers.emailAddress has a UNIQUE key
-$dupCheck = $db->prepare('SELECT userID FROM tblUsers WHERE emailAddress = ? LIMIT 1');
-if ($dupCheck === false) {
-    Logger::errorPlatform('MySQL', 'Error', 'API_USER_CREATE_DUP_PREP', $db->error, '');
-    ApiResponse::error('Database error', 500);
+// 🔍 #521 (20 September 2026): tblUsers.emailAddress has a UNIQUE key, so
+//    global uniqueness still has to be checked — but the old flat "already
+//    exists" 409 told a non-global caller (a session-mode organisation
+//    administrator, or a site-scoped API key) whether an address belongs
+//    to an account on ANOTHER organisation, the same installation-wide
+//    oracle #521 closes on the admin members page. AccountGuard::
+//    emailAvailability() bounds it instead: an address in this caller's
+//    reach still reads back plainly (409), one outside reach is refused
+//    with vaguer wording (also 409 — a caller reaching this endpoint at
+//    all already knows SOMETHING is wrong with the address, so 409 stays
+//    right for both), rate limited (429, 5/hour per administrator or key,
+//    with a Retry-After header) and recorded for a global administrator.
+//    See that method's own docblock for the full design.
+$emailVerdict = AccountGuard::emailAvailability($emailAddress, null, 'create account via API');
+if ($emailVerdict === AccountGuard::EMAIL_TOO_MANY) {
+    header('Retry-After: ' . AccountGuard::emailRetryAfter());
+    ApiResponse::error(AccountGuard::emailMessage($emailVerdict), 429);
 }
-$dupCheck->bind_param('s', $emailAddress);
-$dupCheck->execute();
-$exists = $dupCheck->get_result()->fetch_assoc() !== null;
-$dupCheck->close();
-if ($exists === true) {
-    ApiResponse::error('A user with that email address already exists', 409);
+if ($emailVerdict === AccountGuard::EMAIL_IN_USE_HERE || $emailVerdict === AccountGuard::EMAIL_NOT_AVAILABLE) {
+    ApiResponse::error(AccountGuard::emailMessage($emailVerdict), 409);
 }
 
 // -----------------------------------------------------------------------------

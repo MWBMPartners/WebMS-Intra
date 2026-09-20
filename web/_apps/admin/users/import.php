@@ -57,6 +57,7 @@ $preview = [];
 $results = [];
 $error = '';
 $imported = false;
+$emailTooManyRows = 0; // #521 — how many preview rows hit the per-hour email-clash limit
 
 // ---------------------------------------------------------------------------
 // Handle POST — preview or import
@@ -100,17 +101,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     if ($nameCol === false || $emailCol === false) {
                         $error = 'CSV must contain "fullName" and "emailAddress" columns. Found: ' . implode(', ', $header);
                     } else {
-                        // 📋 Fetch existing emails for duplicate detection
-                        $existingEmails = [];
-                        $exStmt = $mysqli->prepare('SELECT LOWER(emailAddress) AS email FROM tblUsers');
-                        if ($exStmt !== false) {
-                            $exStmt->execute();
-                            $exResult = $exStmt->get_result();
-                            while ($exRow = $exResult->fetch_assoc()) {
-                                $existingEmails[$exRow['email']] = true;
-                            }
-                            $exStmt->close();
-                        }
+                        // 🔍 #521 (20 September 2026): WHAT WAS WRONG BEFORE —
+                        //    this used to load EVERY email address on the
+                        //    WHOLE installation into memory and test each
+                        //    CSV row against that list in PHP. That told a
+                        //    non-global administrator, row by row, whether
+                        //    an address belongs to an account in ANOTHER
+                        //    organisation — the same installation-wide
+                        //    oracle #521 closes on the members page and the
+                        //    API. It is replaced below with
+                        //    AccountGuard::emailAvailability(), called ONCE
+                        //    PER ROW: a preview reveals something to the
+                        //    administrator reading it, per row, so each row
+                        //    counts toward the SAME hourly limit as any
+                        //    other attempt (see that method's own docblock).
+                        //    Once the limit is reached, every LATER row —
+                        //    used address or not — gets the "too many"
+                        //    wording, which is the bound doing its job: it
+                        //    reveals nothing further about any one address.
+                        $emailTooManyRows = 0;
 
                         $rowNum = 1;
                         while (($row = fgetcsv($handle)) !== false) {
@@ -130,11 +139,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             if ($name === '') {
                                 $rowErrors[] = 'Name is required';
                             }
-                            if ($email === '' || filter_var($email, FILTER_VALIDATE_EMAIL) === false) {
+                            $emailFormatOk = $email !== '' && filter_var($email, FILTER_VALIDATE_EMAIL) !== false;
+                            if ($emailFormatOk === false) {
                                 $rowErrors[] = 'Invalid email';
                             }
-                            if ($email !== '' && isset($existingEmails[$email]) === true) {
-                                $rowErrors[] = 'Email already exists';
+                            // 🔍 #521: only rows whose address is well-formed are worth
+                            //    checking at all — an obviously invalid address should
+                            //    never count toward the hourly limit.
+                            if ($emailFormatOk === true) {
+                                $emailVerdict = AccountGuard::emailAvailability($email, null, 'import row ' . $rowNum);
+                                if ($emailVerdict === AccountGuard::EMAIL_TOO_MANY) {
+                                    $emailTooManyRows++;
+                                }
+                                if ($emailVerdict !== AccountGuard::EMAIL_FREE) {
+                                    $rowErrors[] = AccountGuard::emailMessage($emailVerdict);
+                                }
                             }
                             // 🛡️ #518: the portal-wide isAdmin flag reaches every
                             //    organisation this account is ever added to, so an import
@@ -246,7 +265,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $row['result'] = 'Created';
                         $created++;
                     } catch (\mysqli_sql_exception $e) {
-                        $row['result'] = 'Error: ' . $e->getMessage();
+                        // 🛡️ #521 (20 September 2026): WHAT WAS WRONG BEFORE
+                        //    — `$e->getMessage()` was shown straight to the
+                        //    administrator, and MySQL's own duplicate-key
+                        //    message reads "Duplicate entry 'jane@example
+                        //    .com' for key 'emailAddress'" — the SAME
+                        //    installation-wide "does this address exist"
+                        //    oracle by a different door, even after the
+                        //    preview check above was fixed. THE FIX: the
+                        //    raw message is never shown again. Error 1062
+                        //    (the address was taken by somebody else between
+                        //    preview and import — a real race, not
+                        //    hypothetical, since the two steps are separated
+                        //    by however long the administrator takes to
+                        //    press "Import") gets the SAME bounded wording
+                        //    as the preview check, and emailAvailability()
+                        //    is called once more for this address so the
+                        //    attempt is actually recorded — the preview's
+                        //    OWN check ran against a different point in time
+                        //    and must not be trusted as the only record of
+                        //    this attempt. Any OTHER database error gets a
+                        //    generic message and is logged server-side only.
+                        if ($e->getCode() === 1062) {
+                            AccountGuard::emailAvailability($row['email'], null, 'import row ' . $row['row']);
+                            $row['result'] = 'Skipped: ' . AccountGuard::emailMessage(AccountGuard::EMAIL_NOT_AVAILABLE);
+                        } else {
+                            $row['result'] = 'Error: this account could not be created';
+                            Logger::exception($e);
+                        }
                         $skipped++;
                     }
                 }
@@ -350,6 +396,12 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <div class="alert alert-info">
         <strong>Preview:</strong> <?php echo $validCount; ?> valid row(s) ready to import<?php echo ($invalidCount > 0) ? ', ' . $invalidCount . ' with errors (will be skipped)' : ''; ?>.
     </div>
+    <?php if ($emailTooManyRows > 0): ?>
+        <div class="alert alert-warning">
+            <?php echo (int) $emailTooManyRows; ?> row(s) were not checked because too many unavailable
+            addresses were tried in the last hour; a global administrator can import them.
+        </div>
+    <?php endif; ?>
 
     <div class="card mb-3">
         <div class="card-body p-0">

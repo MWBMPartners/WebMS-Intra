@@ -8830,3 +8830,46 @@ ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 
 INSERT INTO `tblMigrations` (`filename`) VALUES ('198_anonymous_checkin_visibility.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- ── from 199_membership_backfill.sql (#533) ───────────────────────────────────
+-- Before #518, creating an account never wrote a `tblUserSites` membership row,
+-- so a real account can belong to no organisation at all — its calendar
+-- subscription then answers "Invalid token", and (before this same pull
+-- request) the check-in page and the waitlist promotion disagreed with the
+-- feed about whether such an account could still act. The migration file
+-- backfills a membership row for every such account where doing so is not a
+-- guess (a single-organisation portal, or a multi-organisation one holding
+-- exactly one organisation row) and otherwise leaves the account for a global
+-- administrator to place at the new `/admin/users/unplaced` page these two
+-- route rows register.
+--
+-- The DATA statements themselves are deliberately NOT repeated here. A
+-- database built fresh from this file has no `tblUsers` rows yet — there is
+-- nobody to place — and the installer replays every numbered migration after
+-- this file in order, so migration 015 (which creates the very first account)
+-- runs before 199 does, placing that account the ordinary way as it is
+-- created. Replaying 199 against a fresh install therefore finds nothing left
+-- to do and inserts nothing; only the two route rows and the migration's own
+-- mark are needed here.
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('admin/users/unplaced',      'admin/users/unplaced.php',      1),
+    ('admin/users/unplaced/save', 'admin/users/unplaced-save.php', 1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('199_membership_backfill.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- ── from 200_attendance_report_visibility.sql (#529) ──────────────────────────
+-- The attendance reports page used to ask only "is somebody signed in" — any
+-- signed-in account on the WHOLE installation could read ANY organisation's
+-- attendance totals. This seeds the setting that decides who among an
+-- organisation's OWN members may see its reports page: administrators only
+-- (the default), administrators plus event coordinators, or any member. A
+-- non-member is always refused regardless of this value — see
+-- Portal\Core\AttendanceAccess for the rule itself.
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'attend.reports.visibleTo', 'admins', 'admins', 0)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('200_attendance_report_visibility.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
