@@ -22,7 +22,11 @@ numbered to 198 with gaps at 168, 169 and 195, 803 PHP files, 552 addresses, 575
 standing rule that wrongly said thirteen checks, this week's changelog entries, and two stale changelog facts (the check-in limit is
 500, not 300; the check-in counts are no longer "for somebody to pick up").
 
-**FOUR THINGS WAITING ON THE OWNER** (none blocks the queue; all are recorded in the issues too):
+**THE FOUR QUESTIONS WERE ANSWERED AT 19:55, all confirming what was built, so nothing changed:** the check-in limit counts attempts rather than accepted check-ins; the waiting list keeps promoting for postponed events; no tidy-up migration for old demo records; and the feature list is left describing what is true today, with the history staying in the changelog.
+
+**PACKAGE 1 IS RUNNING: run `wf_8e4e27d5-3ff`, task `wah6coqwm`, script `.claude-work/resume/wf-package1.js`, outputs `.claude-work/resume/p1--*.md`.** It covers #533, #522, #531, #532, #529, #521 and leaving deleted events out of the check-in spreadsheet. The plan step is told to say plainly if any piece is bigger than it looks and should be split out.
+
+**The questions as they were put (kept for the record):**
 1. Refused check-in attempts now count toward the 500-in-five-minutes allowance, so the limit counts attempts rather than accepted
    check-ins. Recommended: accept.
 2. The waiting list still promotes for POSTPONED events (not cancelled, not draft). Recommended: keep.
