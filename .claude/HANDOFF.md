@@ -9,6 +9,37 @@ proceeds, so the session can be picked up at any point).
 
 ## Read this first — where we are right now
 
+## LATEST — 20 September 2026, 17:10. RESUME FROM HERE.
+
+**Both AI services are available again.** The Claude weekly limit reset at 16:00 today (it stopped work at about 02:40 on 18 September,
+mid-way through #525's round-2 check), and Codex came back at 16:30. Both were probed at 17:00 and answered.
+
+**TWO TRACKS ARE RUNNING RIGHT NOW.**
+
+1. **#525 round-2 check** — a fresh FABLE background agent (Fable is available again, so it is no longer on Opus), brief
+   `.claude-work/briefs/525-check-r2.md`, report `.claude-work/resume/p525--verify-r2.md`. It re-proves the five findings the round-1
+   check raised and re-runs enough of round 1 to show the fixes broke nothing. **#525 stays UNCOMMITTED until this passes** (17 entries
+   in the working tree: 11 modified, 6 untracked).
+
+2. **The owed Codex catch-up review** — running as a background queue, one review at a time:
+   `bash .claude-work/codex-queue.sh cat-accounts brief-cat-accounts.txt cat-calendar brief-cat-calendar.txt cat-offline
+   brief-cat-offline.txt cat-demo brief-cat-demo.txt cat-checks brief-cat-checks.txt`
+   (log `.claude-work/reviews/catchup-queue.log`; answers land as `.claude-work/reviews/cat-*.txt`). **If the session ends, re-run that
+   command by hand for whichever names have no answer file yet.**
+   Rather than replaying each commit, each review gets the NET change since Codex last reviewed (`git diff 110e47d~1..HEAD` limited to
+   that area), because later work already replaced some of the earlier versions. The five areas: accounts (#518), calendar (#519,
+   #520, #523, #524 and the final state of #503), offline cache (#507), demo data and erasure (#498 and the rest of the owner's backup
+   commit 110e47d), and the automatic checks (#501 and the short-table-name support).
+
+**AFTER THE CATCH-UP COMES BACK:** fix whatever it finds, re-review until clean, then commit and push each fix on its own, and comment
+on the issues. Everything committed since `110e47d` carries "NOT YET REVIEWED BY CODEX" in its message; once a package is reviewed and
+clean, say so on its issue so the record is honest.
+
+**THE QUEUE AFTER THAT** (unchanged by the interruption): #526 (four-level check-in limit), #515 (site keys that clash with portal
+addresses), #516 (giving roles, per organisation), #517 (user groups and departments), then the #514 build (11 parts, P6 onward needs
+#518 which is now done, P10 needs #516 and #517), then the thorough documentation pass. A Fable review of the #514 planning steps that
+Opus produced is still owed before that build starts.
+
 ## LATEST — 16 September 2026, about 22:15. RESUME FROM HERE.
 
 **The owner's new instructions (16 Sept, evening), now standing:**
