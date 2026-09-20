@@ -297,6 +297,15 @@ Two parts, and the second is the one that gets missed:
 2. **Never have two analysis runs going at once.** Ordering the agents correctly
    inside each run and then starting two runs together defeats the purpose. That
    exact mistake was made and corrected on 10 September 2026.
+   **This covers checking too (owner, 20 September 2026): nothing new starts —
+   not even planning the next package — while a finished one is being
+   independently checked.** One package is in flight at a time, from planning
+   through checking to commit. Asked directly whether the next package could be
+   planned during a check with an hour left to run, the owner said no; the idle
+   time is deliberate. Two reasons it holds up: the next plan would be read
+   against a working tree still holding the current package's uncommitted
+   changes, which may shift under it; and the checker verifies exactly which
+   files have changed, so anything else editing the tree muddies that test.
 
 Stopping a run to keep the order is cheap: relaunch with `resumeFromRunId` and
 the script path, and every agent that already finished returns its cached answer
