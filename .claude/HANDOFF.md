@@ -9,6 +9,41 @@ proceeds, so the session can be picked up at any point).
 
 ## Read this first — where we are right now
 
+## LATEST — 20 September 2026, 18:15. RESUME FROM HERE.
+
+**SEVEN OWNER DECISIONS TAKEN AT 18:00. These set the order of everything that follows.**
+
+1. **Calendar subscriptions and accounts with no organisation:** keep the strict rule and FIX THE DATA. New issue **#533** (high): the
+   members page must always create a membership record, and existing accounts with none get one. On a portal with exactly one
+   organisation that happens automatically; where there are several, **nothing is guessed** — the accounts are listed for a global
+   administrator to place, on screen and in the upgrade notes.
+2. **A deleted event's check-ins:** keep the headcounts in the organisation totals, but leave deleted events OUT of the per-event
+   spreadsheet, so a deleted event's name cannot reappear. (A small change inside #525's code — do it in package 1 below.)
+3. **The ten smaller issues: two themed packages, next.**
+   **Package 1 (things that leak or reveal):** #522 dashboard counts every organisation, #531 two people can take the same last seat,
+   #532 registration reveals whether an internal event exists, #529 restrict who may see attendance totals (the owner already chose
+   "restrict"), #521 the "email already exists" message, **plus #533** and **plus decision 2 above**.
+   **Package 2 (plain faults and tidy-ups):** #508 breadcrumb crash on the upgrade and import pages, #512 path mode drops the
+   organisation prefix, #528 the attendance grid can repeat or skip a day at the clock change, #530 whether to keep recording the
+   browser description, #509 maintenance-mode side faults.
+4. **Documentation:** small factual corrections NOW (a scribe agent is doing them: the counts table, "thirteen" checks that are really
+   sixteen, the migration counts, and CHANGELOG/FEATURES entries for this week's work), and the FULL pass after #514.
+5. **The pull request to alpha: not yet.** Only at the very end, one pull request for everything. Keep committing to
+   `claude/alpha-wip`.
+6. **The Fable review of the #514 plan:** just before its build starts, not now, because #515, #516 and #517 change the ground it
+   stands on.
+7. (From earlier today.) #525 is committed; the Codex catch-up findings are being fixed.
+
+**RUNNING NOW:** the Codex-fix package (`wf_e5eead5f-fa6`, task `w2lc0vibe`) — draft plan done, challenge-and-settle step started about
+18:10; and the documentation scribe agent. The scribe may only touch `.claude/CLAUDE.md`, `CHANGELOG.md`, `FEATURES.md` and
+`DEV_NOTES.md`; commit its work promptly so the tree is clean before the fix package's build starts, or its checker will see
+unexpected files.
+
+**THE FULL ORDER FROM HERE:** Codex-fix package → package 1 → package 2 → #515 → #516 → #517 → Fable review of the #514 plan → #514
+build (11 parts) → full documentation pass → one pull request to alpha. Codex reviews every package as it lands, and the fifth
+catch-up area (`bash .claude-work/codex-queue.sh cat-checks brief-cat-checks.txt`) plus a first review of #525 (`12e637a`) are still
+owed once its usage limit resets.
+
 ## LATEST — 20 September 2026, 17:45. RESUME FROM HERE.
 
 **#525 IS DONE: committed `12e637a` and pushed.** Its round-2 check (Fable) PASSED, with a control proving its own test could fail
