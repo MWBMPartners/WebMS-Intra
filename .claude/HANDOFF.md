@@ -9,6 +9,35 @@ proceeds, so the session can be picked up at any point).
 
 ## Read this first — where we are right now
 
+## LATEST — 20 September 2026, 18:30. RESUME FROM HERE.
+
+**HOW CODEX REVIEWS ARE DONE HAS CHANGED, TEMPORARILY. OWNER DECISION, 18:25.**
+
+- **For the whole of the current queue: do NOT send each finished package to Codex as it lands.** One comprehensive Codex sweep
+  happens **after the #514 build**, covering BOTH the older work that was never reviewed (the owner committed some of it to GitHub so
+  it could not be lost) AND everything built since, today's work included.
+- **Nothing is raised as a pull request until that sweep is done** and every finding is either fixed and re-reviewed clean, or written
+  up as its own issue the owner has seen and agreed to leave for later.
+- **This is temporary.** Once the current queue is finished and the pull request is raised, go back to sending each finished piece to
+  Codex as it lands.
+- Claude-side independent checking does NOT change: every package still gets a fresh agent that did not build it, before it is
+  committed.
+
+**What this changes in practice, right now:** the fifth catch-up area (the automatic checks) and a first review of #525 are NO LONGER
+run separately — they fold into the final sweep. That also keeps Codex's usage for the sweep itself, which matters: it hit its limit
+today after four areas.
+
+**WHAT THE FINAL SWEEP MUST COVER** (build the list from the branch, do not trust this one): everything from `110e47d~1` to the tip of
+`claude/alpha-wip`. That is the owner's backup commit and everything after it — #498 demo data, #503, #507, #501 and the column
+check's short-table-name support, #518 accounts, #519/#520/#523/#524 calendar, #525/#527 check-in counts, the Codex-fix package now
+running, the two themed packages, #515, #516, #517, and the #514 build. Reviews run one area at a time through
+`.claude-work/codex-queue.sh`, because a single giant review would not survive Codex's usage limit.
+
+**STILL RUNNING NOW:** the Codex-fix package (`wf_e5eead5f-fa6`, task `w2lc0vibe`) fixing the thirteen findings Codex already gave us,
+and the documentation scribe correcting stale facts in `.claude/CLAUDE.md`, `CHANGELOG.md`, `FEATURES.md` and `DEV_NOTES.md`.
+**OWED once the scribe finishes:** add this temporary arrangement to the standing rule in `.claude/CLAUDE.md` (do not edit that file
+while the scribe is working on it).
+
 ## LATEST — 20 September 2026, 18:15. RESUME FROM HERE.
 
 **SEVEN OWNER DECISIONS TAKEN AT 18:00. These set the order of everything that follows.**

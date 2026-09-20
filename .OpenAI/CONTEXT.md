@@ -171,6 +171,17 @@ in `.claude/CLAUDE.md` under the heading named in brackets.
    by a different system is still required for every change before it
    counts as reviewed — only the timing relative to the commit changes.
 
+   **TEMPORARY ARRANGEMENT, set by the owner on 20 September 2026.** Reviews are
+   NOT being run package by package at the moment. One comprehensive review of
+   the whole branch happens after the #514 build: it covers the work that was
+   never reviewed while Codex was out of usage (13 to 20 September) and
+   everything built since. No pull request is raised until that review is done
+   and every finding is either fixed and re-reviewed clean, or written up as an
+   issue the owner has agreed to leave for later. Once that pull request is
+   raised, the normal arrangement returns: each finished piece goes to Codex as
+   it lands. Claude-side independent checking never stopped — every package
+   still gets a fresh agent that did not build it, before it is committed.
+
    **How to tell what has actually been reviewed: read `.claude/
    HANDOFF.md`, never the commit message alone.** Which commits Codex has
    reviewed is recorded in the handoff, not inferred from whether a commit
