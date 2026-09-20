@@ -9,6 +9,37 @@ proceeds, so the session can be picked up at any point).
 
 ## Read this first — where we are right now
 
+## LATEST — 20 September 2026, 22:20. RESUME FROM HERE.
+
+**PACKAGE 1 IS DONE: committed `1e0809c` and pushed, independent check PASS.** #521, #522, #529, #531, #532, #533 and the
+deleted-events rule, 33 files, two new database changes (199 fills in missing membership records, 200 adds the attendance-report
+visibility setting). The checker ran the current code and the fixed code side by side against the same database, so every result has
+a control. All six issues are commented. The "one package in flight, checking included" rule is now written into `.claude/CLAUDE.md`.
+
+**THE OWNER ANSWERED PACKAGE 1's FOUR QUESTIONS.** Three confirmed what was built: three visibility choices for the attendance
+totals with administrators only as the default; the bulk import counts toward the same five-an-hour bound as the page and the API; and
+a switched-off organisation still counts as an organisation, so a portal with one active and one inactive gets the list to place by
+hand rather than an automatic placement.
+
+**The fourth changed something already shipped, and is now the FIRST item of package 2.** Package 1 made a refused event answer the
+same way as one that does not exist — but the answer chosen was "go and sign in", so somebody following a dead link (an old shared
+link, a search result, a bookmark for a deleted event) is asked to sign in for something that no longer exists. The owner chose a
+third answer instead: **ONE page for both cases**, saying the event is not available, with a sign-in link for anybody who has an
+account, answering with a not-found status underneath so search engines drop dead addresses. The two cases must stay byte-identical
+for a signed-out visitor and cost the same database work, and the same treatment must be applied wherever else this shape now exists,
+including the check-in page.
+
+**PACKAGE 2 IS RUNNING: run `wf_7c0e9359-5cb`, task `wnz2uk9ma`, script `.claude-work/resume/wf-package2.js`, outputs
+`.claude-work/resume/p2--*.md`.** Six pieces: the dead-link answer above (first), #508 the two admin pages that crash part way through
+drawing themselves, #512 calendar links that drop the organisation prefix, #528 the attendance grid repeating or skipping a day at
+the clock change, #530 the browser description nothing reads, and #509 maintenance-mode side faults. Nothing is committed by the run.
+
+**NOTE:** the run's own summary line says "Package 1" because the script was copied from package 1's; the agent instructions are
+package 2's. Cosmetic only.
+
+**AFTER PACKAGE 2:** #515 → #516 → #517 → Fable review of the #514 plan → #514 build → **one comprehensive Codex review of the whole
+branch** → fix or log every finding → one pull request to alpha. Then back to per-package Codex reviews.
+
 ## LATEST — 20 September 2026, 21:55. RESUME FROM HERE.
 
 **OWNER DECISION, 21:55: STRICTLY SEQUENTIAL, and checking counts.** Nothing new starts — not even planning — while a package is
