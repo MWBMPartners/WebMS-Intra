@@ -105,81 +105,87 @@ if (array_key_exists('isActive', $body) === true) {
 }
 
 // -----------------------------------------------------------------------------
-// 🛠️ Collect provided, updatable fields (email + password are excluded — not
-//    read from the body at all, so they are silently ignored if present)
+// 🛡️ #518 catch-up (A1, 20 September 2026, Codex): WHAT WAS WRONG — every
+//    field present in the request body was queued into the UPDATE below
+//    regardless of whether it actually differed from what is already
+//    stored, but the AccountGuard checks further down only run for a field
+//    that had genuinely changed. So a caller re-sending a field's CURRENT
+//    value (an "unchanged" request) skipped every guard below and still
+//    ran the UPDATE. Picture a site administrator re-submitting
+//    isAdmin=true for an account that is already a portal administrator,
+//    while — in the moment between this page reading the row and writing
+//    it back — a global administrator removes that same right: the stale
+//    1 would be written straight back over the removal, with no
+//    REACH_PORTAL check and no refusal record, because nothing ever
+//    treated it as a change.
+//
+//    THE FIX: read and validate every provided field first, without
+//    queuing anything for the database. Work out what really differs from
+//    the row fetched above. If nothing differs, answer straight away
+//    without touching the database at all (mirrors
+//    admin/users/save.php's "Nothing was changed."). The guards further
+//    down then run only for a field that is a real change, and the write
+//    block after them queues ONLY those changed fields — a field that is
+//    not changing is never written, so it can never carry a stale value
+//    over the top of somebody else's change.
+//
+//    WHAT THIS CANNOT DO: a field that genuinely IS changing is still a
+//    check, then a separate write, two statements apart — the caller held
+//    the right at the moment it was checked, not necessarily still at the
+//    moment the write runs a few lines later. Locking the row for the
+//    whole request was considered and rejected: it is heavier, and on its
+//    own would still write an unchanged field back over someone else's
+//    change unless combined with this same change-detection anyway.
 // -----------------------------------------------------------------------------
-$userSet    = [];
-$userTypes  = '';
-$userParams = [];
-
-if (array_key_exists('fullName', $body) === true) {
-    $fullName = trim((string) $body['fullName']);
-    if ($fullName === '' || mb_strlen($fullName) > 255) {
-        ApiResponse::error('fullName must be non-empty and ≤255 characters', 400);
-    }
-    $userSet[]    = 'fullName = ?';
-    $userTypes   .= 's';
-    $userParams[] = $fullName;
-    $new['fullName'] = $fullName;
+$fullNameProvided = array_key_exists('fullName', $body) === true;
+$fullName         = $fullNameProvided === true ? trim((string) $body['fullName']) : null;
+if ($fullNameProvided === true && ($fullName === '' || mb_strlen($fullName) > 255)) {
+    ApiResponse::error('fullName must be non-empty and ≤255 characters', 400);
 }
 
-if (array_key_exists('isActive', $body) === true) {
-    $isActive = (bool) $body['isActive'] === true ? 1 : 0;
-    $userSet[]    = 'isActive = ?';
-    $userTypes   .= 'i';
-    $userParams[] = $isActive;
-    $new['isActive'] = $isActive;
-}
+$isActiveProvided = array_key_exists('isActive', $body) === true;
+$isActive         = $isActiveProvided === true ? ((bool) $body['isActive'] === true ? 1 : 0) : null;
 
-// 🛡️ isAdmin is the PORTAL-WIDE admin flag. `sessionNeedsAdmin` (passed to
-//    ApiAuth::requireWrite() above) means ANY administrator of the
-//    organisation that is open — including an ordinary site
-//    administrator, NOT only a global one (App::isAdmin(); see
-//    ApiAuth.php's own corrected comment, #518). That is why a bearer
-//    key is excluded here (a site-scoped key must never promote a member
-//    to portal admin, #323 Phase 2 review) AND why, further down, this
-//    write is also re-checked against AccountGuard::REACH_PORTAL — which
-//    is where the actual "only a GLOBAL administrator" rule is enforced.
-//    isSiteAdmin (site-scoped, below) remains available to bearer keys.
-if (ApiAuth::source() === 'session' && array_key_exists('isAdmin', $body) === true) {
-    $isAdmin = (bool) $body['isAdmin'] === true ? 1 : 0;
-    $userSet[]    = 'isAdmin = ?';
-    $userTypes   .= 'i';
-    $userParams[] = $isAdmin;
-    $new['isAdmin'] = $isAdmin;
-}
+// 🛡️ isAdmin is the PORTAL-WIDE admin flag, read ONLY from a session
+//    caller — a bearer key's isAdmin is ignored, exactly as before (a
+//    site-scoped key must never promote a member to portal admin, #323
+//    Phase 2 review; see ApiAuth.php's own corrected comment, #518). This
+//    write is also re-checked below against AccountGuard::REACH_PORTAL —
+//    which is where the actual "only a GLOBAL administrator" rule is
+//    enforced. isSiteAdmin (site-scoped, below) remains available to
+//    bearer keys.
+$isAdminProvided = ApiAuth::source() === 'session' && array_key_exists('isAdmin', $body) === true;
+$isAdmin         = $isAdminProvided === true ? ((bool) $body['isAdmin'] === true ? 1 : 0) : null;
 
 $hasSiteAdmin = array_key_exists('isSiteAdmin', $body) === true;
-$isSiteAdmin  = null;
-if ($hasSiteAdmin === true) {
-    $isSiteAdmin = (bool) $body['isSiteAdmin'] === true ? 1 : 0;
-    $new['isSiteAdmin'] = $isSiteAdmin;
-}
+$isSiteAdmin  = $hasSiteAdmin === true ? ((bool) $body['isSiteAdmin'] === true ? 1 : 0) : null;
 
-if (count($userSet) === 0 && $hasSiteAdmin === false) {
+if ($fullNameProvided === false && $isActiveProvided === false && $isAdminProvided === false && $hasSiteAdmin === false) {
+    // A bearer key sending only isAdmin lands here too (isAdminProvided is
+    // false for a bearer caller), exactly as it did before this fix.
     ApiResponse::error('No updatable fields in request body', 400);
 }
 
 // -----------------------------------------------------------------------------
-// 🛡️ #518: work out what is REALLY changing, against the row already
-//    fetched — a field re-submitted with its own current value is not a
-//    change, and does not get checked (or refused). $old's flags came
-//    from a prepared statement, so they are compared here as whole
-//    numbers, never as text (#497).
+// 🛡️ Work out what really changes, against the row already fetched above —
+//    a field re-submitted with its own current value is not a change.
+//    $old's flags came from a prepared statement, so they are compared
+//    here as whole numbers, never as text (#497).
 // -----------------------------------------------------------------------------
-$portalChange = (
-    ApiAuth::source() === 'session'
-    && array_key_exists('isAdmin', $body) === true
-    && ((bool) $body['isAdmin'] === true ? 1 : 0) !== (int) $old['isAdmin']
-);
-$accountChange = (
-    (array_key_exists('fullName', $body) === true && trim((string) $body['fullName']) !== (string) $old['fullName'])
-    || (array_key_exists('isActive', $body) === true && ((bool) $body['isActive'] === true ? 1 : 0) !== (int) $old['isActive'])
-);
-$thisOrgChange = (
-    $hasSiteAdmin === true
-    && $isSiteAdmin !== (int) $old['isSiteAdmin']
-);
+$portalChange  = $isAdminProvided === true  && $isAdmin  !== (int) $old['isAdmin'];
+$nameChange    = $fullNameProvided === true && $fullName !== (string) $old['fullName'];
+$activeChange  = $isActiveProvided === true && $isActive !== (int) $old['isActive'];
+$accountChange = $nameChange === true || $activeChange === true;
+$thisOrgChange = $hasSiteAdmin === true     && $isSiteAdmin !== (int) $old['isSiteAdmin'];
+
+if ($portalChange === false && $accountChange === false && $thisOrgChange === false) {
+    // Nothing differs from what is stored: nothing to check, nothing to
+    // write, nothing to audit. Mirrors admin/users/save.php's "Nothing
+    // was changed." The caller already passed the REACH_VIEW check above,
+    // so answering with the current record tells them nothing new — and,
+    // critically, it means this request never reaches the UPDATE below.
+    ApiResponse::success(ApiResponse::filterSensitive($old), 200);
+}
 
 // 🛡️ Portal-wide rights first, on their own — this is where "only a
 //    GLOBAL administrator" is actually enforced (see the isAdmin comment
@@ -217,6 +223,38 @@ if ($thisOrgChange === true) {
 }
 
 // -----------------------------------------------------------------------------
+// 💾 Queue ONLY the fields that genuinely changed, now that every guard
+//    above has had a chance to refuse a real change (see the A1 comment
+//    higher up). A field that is not changing is never queued, so it can
+//    never be written — which is the whole point of this fix.
+// -----------------------------------------------------------------------------
+$userSet    = [];
+$userTypes  = '';
+$userParams = [];
+
+if ($nameChange === true) {
+    $userSet[]    = 'fullName = ?';
+    $userTypes   .= 's';
+    $userParams[] = $fullName;
+    $new['fullName'] = $fullName;
+}
+if ($activeChange === true) {
+    $userSet[]    = 'isActive = ?';
+    $userTypes   .= 'i';
+    $userParams[] = $isActive;
+    $new['isActive'] = $isActive;
+}
+if ($portalChange === true) {
+    $userSet[]    = 'isAdmin = ?';
+    $userTypes   .= 'i';
+    $userParams[] = $isAdmin;
+    $new['isAdmin'] = $isAdmin;
+}
+if ($thisOrgChange === true) {
+    $new['isSiteAdmin'] = $isSiteAdmin;
+}
+
+// -----------------------------------------------------------------------------
 // 💾 Transaction: tblUsers (role/active) + tblUserSites (site-membership)
 // -----------------------------------------------------------------------------
 App::beginTransaction();
@@ -236,7 +274,9 @@ try {
         $stmt->close();
     }
 
-    if ($hasSiteAdmin === true) {
+    if ($thisOrgChange === true) {
+        // Only when isSiteAdmin is actually CHANGING (before this fix this
+        // ran whenever the field was merely present, even unchanged).
         $usStmt = $db->prepare(
             'UPDATE tblUserSites SET isSiteAdmin = ? WHERE userID = ? AND siteID = ?'
         );

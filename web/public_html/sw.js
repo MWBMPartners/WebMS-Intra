@@ -37,7 +37,14 @@
  *     arrives without the marker (an older server, an entry point that never
  *     starts a session, a future bug) is simply not kept.
  *   - Nothing marked "private" in Cache-Control is ever kept by the fetch
- *     handler. Auth.php adds "private" to responses for signed-in visitors.
+ *     handler. Auth.php makes sure a response for a signed-in visitor
+ *     carries "no-store" (PHP's session start already sends it on every
+ *     page) or, where a page replaced that with its own value, "private";
+ *     and it adds "Vary: *" where an old worker could store the response.
+ *     (Codex catch-up C3, 20 September 2026: this used to say Auth.php
+ *     "adds private to responses for signed-in visitors", which overstated
+ *     it — the normal case is "no-store", already sent by PHP itself;
+ *     "private" is only a fallback for the rarer page that replaced it.)
  *     The install step is the exception: it stores the install list
  *     (PRECACHE_ASSETS) with cache.add(), which does not look at
  *     Cache-Control. So the copies of the manifest and the offline page it

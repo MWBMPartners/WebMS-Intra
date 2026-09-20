@@ -257,6 +257,36 @@ class ApiResponse
         header('X-Content-Type-Options: nosniff');
         header('Cache-Control: no-store, no-cache, must-revalidate');
 
+        // 🛡️ Codex catch-up C1 (20 September 2026): WHAT WAS WRONG —
+        //    Auth::sendOfflineCopyHeaders() adds "Vary: *" to stop an old
+        //    service worker storing a personal answer, but only for a
+        //    request whose SESSION identifies a person. A bearer-key (API
+        //    key) request has a session too — the front controller starts
+        //    one for every request — but nothing in it identifies anyone,
+        //    so that code takes its "nothing to protect" branch and this
+        //    class's JSON answers never got "Vary: *" at all. On an
+        //    installation whose site key happens to be exactly "assets",
+        //    an address like "/assets/api/v1/users" is read by the portal
+        //    as the API (the prefix is stripped before routing) but by an
+        //    OLD, already-installed service worker as an ordinary
+        //    "/assets/..." address — outside that worker's "/api/"
+        //    exclusion — so it could store the personal JSON answer in the
+        //    visitor's browser. THE FIX: every answer through this class
+        //    carries "Vary: *" as well, closing that one gap regardless of
+        //    which worker version is installed. WHAT THIS COSTS: nothing —
+        //    the Cache-Control line above already says "no-store", so no
+        //    correctly-behaving cache was ever going to keep this answer;
+        //    this header exists only for the OLD worker that does not read
+        //    Cache-Control before deciding to store a response. WHAT THIS
+        //    CANNOT DO: it only covers JSON sent THROUGH this class. A
+        //    handler that builds its own response without calling
+        //    ApiResponse (push/api/* is POST-only, which the old worker
+        //    never stored anyway; worship/api/*, api/translate.php,
+        //    api/ai-improve.php all answer only a signed-in SESSION,
+        //    which Auth.php's own "Vary: *" already covers) is untouched
+        //    by this line.
+        header('Vary: *', false);
+
         // 🔒 CORS headers - restrict to same origin by default
         // Individual API endpoints can override if cross-origin access is needed
         header('X-Frame-Options: DENY');

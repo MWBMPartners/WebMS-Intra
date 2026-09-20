@@ -979,6 +979,14 @@ function demo_data_load(\mysqli $db, int $siteId): array
         ['[DEMO] Community potluck this weekend', 'demo-potluck', 'Join us after the service for a community potluck.', 0, 'elder'],
     ];
 
+    // 🛡️ Codex catch-up D1 (20 September 2026): tracks which stage the work
+    //    reached, so the catch block below can tell a genuinely rolled-back
+    //    failure from one where the database itself SAVED the work and only
+    //    the confirmation of that save (the reply to commit()) never
+    //    arrived — see the catch block for the full account. Mirrors the
+    //    same $stage pattern GdprEraser::eraseUser() already uses for the
+    //    same reason.
+    $stage = 'work';
     $db->begin_transaction();
     try {
         if (demo_data_switch_is_on($db, true) === false) {
@@ -1051,9 +1059,33 @@ function demo_data_load(\mysqli $db, int $siteId): array
             );
         }
 
+        $stage = 'commit';
         $db->commit();
+        $stage = 'done';
     } catch (\Throwable $problem) {
         demo_data_rollback($db);
+        // 🛡️ Codex catch-up D1: WHAT WAS WRONG — this always said "was
+        //    undone. Nothing was changed.", even when $db->commit() itself
+        //    was the thing that threw. The portal runs mysqli in strict
+        //    mode, so a lost reply to commit() throws into this SAME catch
+        //    block — but a commit that the SERVER completed and only the
+        //    confirmation of which went missing (a dropped connection, a
+        //    timeout on the reply) cannot be undone by a rollback that
+        //    runs after the fact: the work was already saved. Only a
+        //    failure at an EARLIER stage — still inside the transaction —
+        //    is genuinely, truly undone by the rollback above; this page
+        //    cannot tell those two situations apart from the exception
+        //    alone, so it says so honestly instead of guessing. Mirrors
+        //    GdprEraser::eraseUser()'s own $stage-based reasoning for the
+        //    exact same shape of problem.
+        if ($stage === 'commit') {
+            return [
+                'type'    => 'warning',
+                'message' => 'Loading reached its final save, but the database did not confirm it, so this page cannot say whether the demo rows were saved. Reload this page: if it lists demo rows, the load worked; if it lists none, nothing was saved and you can load again. The database said: ' . $problem->getMessage(),
+                'items'   => [],
+                'log'     => 'DemoDataLoadUnconfirmed',
+            ];
+        }
         return [
             'type'    => 'danger',
             'message' => 'Loading failed part way, so everything it had done was undone. Nothing was changed. The database said: ' . $problem->getMessage(),
@@ -1310,6 +1342,12 @@ function demo_data_wipe(\mysqli $db): array
     $toDelete    = [];
     $alreadyGone = [];
 
+    // 🛡️ Codex catch-up D1 (20 September 2026): see the matching comment
+    //    in demo_data_load() for the full reasoning — tracks which stage
+    //    the work reached, so the catch block below can tell a genuinely
+    //    rolled-back failure from one where the database SAVED the
+    //    deletions and only the confirmation of the commit was lost.
+    $stage = 'work';
     $db->begin_transaction();
     try {
         if (demo_data_switch_is_on($db, true) === false) {
@@ -1456,9 +1494,23 @@ function demo_data_wipe(\mysqli $db): array
             demo_data_query($db, 'DELETE FROM tblDemoDataRegister WHERE registerID = ?', 'i', [(int) $entry['registerID']])->close();
         }
 
+        $stage = 'commit';
         $db->commit();
+        $stage = 'done';
     } catch (\Throwable $problem) {
         demo_data_rollback($db);
+        // 🛡️ Codex catch-up D1: see demo_data_load()'s matching comment for
+        //    the full account of why a lost reply to commit() cannot
+        //    honestly be reported as "everything was undone" — the rollback
+        //    that runs above cannot undo work the server already saved.
+        if ($stage === 'commit') {
+            return [
+                'type'    => 'warning',
+                'message' => 'The wipe reached its final save, but the database did not confirm it, so this page cannot say whether the rows were deleted. Reload this page to see what is still listed; running Wipe again is safe, because it only ever deletes rows that are still listed and still exactly as loaded. The database said: ' . $problem->getMessage(),
+                'items'   => [],
+                'log'     => 'DemoDataWipeUnconfirmed',
+            ];
+        }
         return [
             'type'    => 'danger',
             'message' => 'Wipe failed part way, so everything it had done was undone. Nothing was deleted. The database said: ' . $problem->getMessage(),

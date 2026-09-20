@@ -372,14 +372,54 @@ class RateLimiter
 
     /**
      * Record one hit for the given bucket. Roughly 1-in-64 calls also prunes
-     * rows older than 2× the window for this bucket, keeping the table small
-     * without needing a separate cron/cleanup job.
+     * old rows, keeping the table small without needing a separate
+     * cron/cleanup job.
      *
-     * @param string $bucket        Limiter bucket key, e.g. 'apikey:42'
-     * @param int    $windowSeconds Sliding window size, in seconds — used to
-     *                              size the opportunistic prune horizon
+     * 🛡️ Codex catch-up B5 (20 September 2026): WHAT WAS WRONG — the
+     *    opportunistic prune only ever cleaned the bucket being inserted
+     *    into (`WHERE bucket = ?`). That is fine for a bucket that keeps
+     *    getting hit — every insert is a chance to prune it — but a bucket
+     *    that is NEVER hit again is never pruned either, because nothing
+     *    ever calls recordHit() for it again to trigger the check. The
+     *    attend-check-in caller's bucket includes the EVENT NUMBER
+     *    (`attend:save:<hash of connection + event id>`), so somebody
+     *    varying the event number on every attempt — or simply every
+     *    genuine one-off event, once it is over — leaves a row nothing
+     *    ever removes.
+     *
+     *    THE FIX: an optional `$pruneFamily` lets a caller ask this method
+     *    to prune every bucket that SHARES A PREFIX with its own, not only
+     *    its own exact bucket. With `$pruneFamily === null` (every existing
+     *    caller — 2FA, forms, push, API keys, kiosk, found-item — is
+     *    unchanged by this fix) the prune is exactly what it always was:
+     *    `bucket = ?`. `$pruneFamily` must be shared ONLY by buckets that
+     *    all use the SAME window, because the prune horizon below is 2×
+     *    THIS call's own window — a family mixing a five-minute caller
+     *    with a five-day one would prune the five-day caller's rows far
+     *    too early.
+     *
+     *    WHAT WAS TRIED AND REJECTED: a global prune of every row older
+     *    than a fixed horizon, run occasionally regardless of bucket. It
+     *    has no index it can use — `idx_ratelimit_bucket` is `(bucket,
+     *    hitAt)`, so a `WHERE hitAt < ...` with no `bucket` predicate at
+     *    the front cannot use it and would scan the whole table — and it
+     *    would rest on an assumption nothing enforces: that no caller
+     *    anywhere ever uses a window longer than whatever horizon was
+     *    chosen. A prefix `LIKE` still uses the same index as a range
+     *    scan (a fixed prefix followed by `%` is a "range" as far as a
+     *    B-tree index is concerned), so the family prune stays cheap
+     *    however many abandoned buckets pile up.
+     *
+     * @param string      $bucket        Limiter bucket key, e.g. 'apikey:42'
+     * @param int         $windowSeconds Sliding window size, in seconds — used to
+     *                                  size the opportunistic prune horizon
+     * @param string|null $pruneFamily   When given, the prune deletes every bucket
+     *                                  starting with this text (not only $bucket
+     *                                  itself) — see the WHAT WAS WRONG note above.
+     *                                  Every bucket sharing a family MUST use the
+     *                                  same $windowSeconds.
      */
-    public static function recordHit(string $bucket, int $windowSeconds): void
+    public static function recordHit(string $bucket, int $windowSeconds, ?string $pruneFamily = null): void
     {
         $db = App::db();
 
@@ -396,16 +436,38 @@ class RateLimiter
         //    call so a single unlucky request never pays for a huge sweep.
         if (random_int(1, 64) === 1) {
             $pruneSeconds = $windowSeconds * 2;
-            $pruneStmt = $db->prepare(
-                'DELETE FROM tblApiRateLimits '
-                . 'WHERE bucket = ? '
-                . 'AND hitAt < NOW() - INTERVAL ? SECOND '
-                . 'LIMIT 500'
-            );
-            if ($pruneStmt !== false) {
-                $pruneStmt->bind_param('si', $bucket, $pruneSeconds);
-                @$pruneStmt->execute();
-                $pruneStmt->close();
+            if ($pruneFamily === null) {
+                // Today's behaviour, byte for byte: only THIS bucket.
+                $pruneStmt = $db->prepare(
+                    'DELETE FROM tblApiRateLimits '
+                    . 'WHERE bucket = ? '
+                    . 'AND hitAt < NOW() - INTERVAL ? SECOND '
+                    . 'LIMIT 500'
+                );
+                if ($pruneStmt !== false) {
+                    $pruneStmt->bind_param('si', $bucket, $pruneSeconds);
+                    @$pruneStmt->execute();
+                    $pruneStmt->close();
+                }
+            } else {
+                // Every bucket in the FAMILY — e.g. every 'attend:save:*'
+                // bucket, whichever event number or connection it was
+                // hashed from — not only the one this call happened to
+                // hit. addcslashes() escapes any literal %, _ or \ already
+                // in the prefix text so it cannot widen the LIKE pattern
+                // beyond what the caller actually asked for.
+                $pattern = addcslashes($pruneFamily, '%_\\') . '%';
+                $pruneStmt = $db->prepare(
+                    'DELETE FROM tblApiRateLimits '
+                    . 'WHERE bucket LIKE ? '
+                    . 'AND hitAt < NOW() - INTERVAL ? SECOND '
+                    . 'LIMIT 500'
+                );
+                if ($pruneStmt !== false) {
+                    $pruneStmt->bind_param('si', $pattern, $pruneSeconds);
+                    @$pruneStmt->execute();
+                    $pruneStmt->close();
+                }
             }
         }
     }

@@ -103,7 +103,29 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <h1 class="h3 mb-2"><?php echo htmlspecialchars((string) $event['eventName'], ENT_QUOTES, 'UTF-8'); ?></h1>
     <p class="text-muted small mb-4"><?php echo htmlspecialchars(date('l j M Y', strtotime((string) $event['startDateTime'])), ENT_QUOTES, 'UTF-8'); ?></p>
 
-    <form method="post" action="/attend/save">
+    <?php
+    // 🛡️ Codex catch-up B4 (20 September 2026): WHAT WAS WRONG — this form
+    //    posted to the bare address "/attend/save", with no organisation
+    //    prefix. On a path-prefix multi-organisation installation (this
+    //    page itself is reached at "/{siteKey}/attend"), a bare address
+    //    with no prefix is read by Site::detectFromPath() as organisation
+    //    1 — so organisation B's own visitor, checking in to organisation
+    //    B's own event, had their check-in run against organisation 1
+    //    instead, which then refused it with "Event not found" because
+    //    the event does not belong there. THE FIX: build the address with
+    //    Site::url() — the same helper rsvp-by-link.php already uses to
+    //    build the invitation link — which prepends the organisation's
+    //    own prefix only when multi-site is on, in path mode, with a
+    //    prefix detected; in every other mode it returns the address
+    //    unchanged. This is the portal's own way of building an address,
+    //    never a prefix written into the code by hand (#500). WHAT THIS
+    //    CANNOT DO: it only fixes the PATH the form posts to — it still
+    //    relies on this page itself having been opened as the right
+    //    organisation, which is what the QR code or link an organiser
+    //    hands out has to carry.
+    $checkinSaveUrl = htmlspecialchars(Site::url('attend/save'), ENT_QUOTES, 'UTF-8');
+    ?>
+    <form method="post" action="<?php echo $checkinSaveUrl; ?>">
         <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
         <input type="hidden" name="eventID" value="<?php echo $eventId; ?>">
         <div class="mb-3">

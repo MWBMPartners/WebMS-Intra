@@ -35,6 +35,20 @@
 // the limit off entirely — deliberate, and the reason it is read with a
 // `??` fallback rather than Settings::get() is explained just below.
 //
+// RECORD FIRST, THEN COUNT (Codex catch-up B6, 20 September 2026) — the hit
+// is written to the database BEFORE it is counted, not after. Counting and
+// recording used to be two separate, unlocked statements, which meant two
+// requests arriving together could both see a count just under the limit
+// and both be let through, letting the true total run past what the limit
+// promised. Recording first closes that: see the full reasoning, and the
+// two small behaviour changes it brings, at the call site below.
+//
+// ABANDONED BUCKETS ARE PRUNED BY FAMILY, NOT JUST BY EXACT BUCKET (Codex
+// catch-up B5) — because the bucket folds in the event number, a bucket
+// that is only ever hit once (a made-up event number, or a genuine
+// one-off event once it is over) would otherwise sit in the table
+// forever. See RateLimiter::recordHit()'s own doc comment.
+//
 // WHAT THIS CANNOT DO: it does not stop somebody spreading check-ins across
 // many different events, or across many different addresses, and it cannot
 // tell one genuine person at a venue from another when they share the
@@ -72,11 +86,61 @@ if (in_array($source, ['self', 'kiosk', 'qr'], true) === false) { $source = 'sel
 $rateMax     = (int) ($SETTINGS['attend']['rateLimit']['max'] ?? '500');
 $rateWindow  = (int) ($SETTINGS['attend']['rateLimit']['windowSeconds'] ?? '300');
 $rateBucket  = 'attend:save:' . hash('sha256', RateLimiter::clientIp() . '|' . $eventId);
-if ($rateMax > 0 && RateLimiter::tooMany($rateBucket, $rateMax, $rateWindow) === true) {
-    http_response_code(429);
-    exit('Too many check-ins from this connection — please try again shortly.');
+//
+// 🛡️ Codex catch-up B5 + B6 (20 September 2026): TWO separate faults lived
+//    in these four lines, and this comment covers both.
+//
+//    B5 — abandoned buckets were never cleaned up. The bucket above folds
+//    in the EVENT NUMBER, so somebody varying the number on every attempt
+//    — or simply every genuine one-off event, once it is over — creates a
+//    bucket that is never hit again, and RateLimiter's opportunistic prune
+//    only ever cleaned the bucket it was currently inserting into. The
+//    third argument below ('attend:save:') tells recordHit() to prune
+//    every bucket that starts with that text, not only this one — see
+//    RateLimiter::recordHit()'s own doc comment for the full reasoning and
+//    what was tried and rejected. Every 'attend:save:' bucket shares the
+//    same window (attend.rateLimit.windowSeconds), which is what makes
+//    sharing one prune family safe.
+//
+//    B6 — counting and recording used to be two separate, unlocked
+//    statements (tooMany() then recordHit()), so two requests that both
+//    arrive while the count is just under the limit could both pass the
+//    count and both insert, letting the true total run past the stated
+//    allowance. THE FIX: record the hit FIRST, then count — with the
+//    limit tested against max + 1, so a count of exactly max+1 (this
+//    request's own insert included) is the one that gets refused. WHY
+//    THIS BOUNDS THE COUNT: every INSERT here commits immediately
+//    (autocommit; there is no open transaction in this file), before this
+//    request's own COUNT runs, and a COUNT only ever sees rows already
+//    committed. Take whichever accepted request's COUNT ran LAST: every
+//    OTHER accepted request's INSERT committed before that COUNT started
+//    (each request inserts before it counts, and this is the latest
+//    count), so that COUNT saw every one of them plus itself — and it was
+//    accepted, so that total is at most max + 1, i.e. at most max
+//    ACCEPTED requests can exist. Two requests arriving at the exact
+//    boundary: at most one is accepted (both MAY be refused, which is the
+//    safe side, never the unsafe one).
+//
+//    TWO BEHAVIOUR CHANGES this produces, both worth stating plainly: a
+//    REFUSED attempt now also counts toward the 500-in-5-minutes
+//    allowance (the limit is on ATTEMPTS, not on accepted check-ins —
+//    for a flood this is the better reading, and the owner set 500 high
+//    enough that a genuine busy door never gets near it); and when the
+//    limit is switched off (attend.rateLimit.max = '0') nothing is
+//    recorded at all any more — before this fix, hits were still recorded
+//    even with the limit off, even though nothing ever reads them in that
+//    case.
+if ($rateMax > 0) {
+    RateLimiter::recordHit($rateBucket, $rateWindow, 'attend:save:');
+    // Our own hit is now already counted (see the reasoning above). Asking
+    // tooMany() about max + 1 means "has the count gone BEYOND the stated
+    // allowance" — the max-th attempt sees a count of max and passes; the
+    // (max+1)-th attempt sees max + 1 and is refused.
+    if (RateLimiter::tooMany($rateBucket, $rateMax + 1, $rateWindow) === true) {
+        http_response_code(429);
+        exit('Too many check-ins from this connection — please try again shortly.');
+    }
 }
-RateLimiter::recordHit($rateBucket, $rateWindow);
 
 $viewerId  = (int) ($_SESSION['user_id'] ?? 0);
 $singleOrg = AccountGuard::isSingleOrganisation() === true ? 1 : 0;

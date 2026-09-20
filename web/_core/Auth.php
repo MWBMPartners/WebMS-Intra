@@ -163,10 +163,23 @@ class Auth
 
     /**
      * Runs as the headers are about to be sent. Marks a page built for an
-     * unidentified visitor as keepable, and makes sure a response for an
-     * identified one carries "private" — plus `Vary: *` where a service worker
-     * from before #507 would otherwise store it (see
-     * oldServiceWorkerWouldStore()).
+     * unidentified visitor as keepable. For an identified visitor it makes
+     * sure the response carries "no-store" or "private" — normally
+     * "no-store" is already there from PHP's session start, and "private"
+     * is added only when a page replaced that with its own value — and
+     * adds `Vary: *` where a service worker from before #507 would
+     * otherwise store it (see oldServiceWorkerWouldStore()).
+     *
+     * 🛡️ Codex catch-up C3 (20 September 2026): this doc comment used to
+     *    say an identified visitor's response "carries private", which
+     *    overstated what the code below actually does — the loop further
+     *    down RETURNS as soon as it finds "private" OR "no-store" already
+     *    on the response, which is the NORMAL case (PHP's own session
+     *    start sends "no-store" on every page). "private" is only ever
+     *    added as a fallback, for the rarer page that replaced that
+     *    default with a Cache-Control value of its own. Worth writing
+     *    down: a comment that promises more than the code delivers is
+     *    exactly the fault this entry exists to fix.
      *
      * @return void
      */
@@ -2056,8 +2069,29 @@ class Auth
         //    copies from an older worker version go too.
         //    Deliberately NOT keeping everything under /assets/: the Asset
         //    Tracker's signed-in pages live there (/assets/my, /assets/item).
-        //    It waits for the deletions to finish before leaving the page,
-        //    because leaving could stop them part way.
+        //    IT WAITS FOR EVERY DELETION TO SETTLE — succeeded OR failed —
+        //    before leaving the page, because leaving early could stop the
+        //    rest part way through. Codex catch-up C2 (20 September 2026):
+        //    WHAT WAS WRONG — the two nested Promise.all() calls below used
+        //    to wait on the deletions directly. Promise.all() gives up and
+        //    rejects the moment its FIRST promise rejects; the .catch()
+        //    right after this script then ran immediately and sent the
+        //    visitor home, while any OTHER deletion that had not yet
+        //    finished kept running in the background, unwatched — the
+        //    opposite of what this comment already promised. Reproduced
+        //    with stubbed caches: one deletion rejecting at once and
+        //    another settling 200ms later produced the order "delete A
+        //    rejects, THEN goHome, THEN delete B settles" — the visitor was
+        //    already on the next page before every deletion had actually
+        //    finished. THE FIX: settle() below turns any promise into one
+        //    that always resolves (with null), whether the original
+        //    succeeded or failed, so wrapping every per-store and
+        //    per-request promise in it means Promise.all() only completes
+        //    once EVERY deletion has truly finished, in either direction —
+        //    this is Promise.allSettled() written by hand, because this
+        //    page has to keep working in a browser that does not have it.
+        //    With the fix, the same stubbed test produces "delete A
+        //    rejects, delete B settles, THEN goHome" — last, as promised.
         echo '<!doctype html>
 <html lang="en">
 <head>
@@ -2077,6 +2111,14 @@ class Auth
     var MARKER = "' . self::OFFLINE_COPY_HEADER . '";
     var STATIC_FILE = /\.(css|js|png|jpg|jpeg|gif|svg|ico|woff2?|ttf|eot|webp)$/i;
     function goHome() { window.location.replace("/"); }
+    // 🛡️ Codex catch-up C2: turns ANY promise into one that always
+    //    resolves, whichever way the original one went, so wrapping every
+    //    per-store and per-request deletion in this means Promise.all()
+    //    below only finishes once EVERY deletion has genuinely settled —
+    //    see the long comment above the echo() in Auth::logout() for the
+    //    full account of what was wrong before this and how it was
+    //    reproduced.
+    function settle(p) { return p.then(null, function () { return null; }); }
     function keep(storeName, request, response) {
         if (!response) { return false; }
         var path = new URL(request.url).pathname;
@@ -2090,15 +2132,15 @@ class Auth
     if (typeof window.caches === "undefined") { goHome(); return; }
     caches.keys().then(function (names) {
         return Promise.all(names.map(function (name) {
-            return caches.open(name).then(function (cache) {
+            return settle(caches.open(name).then(function (cache) {
                 return cache.keys().then(function (requests) {
                     return Promise.all(requests.map(function (request) {
-                        return cache.match(request).then(function (response) {
+                        return settle(cache.match(request).then(function (response) {
                             return keep(name, request, response) ? null : cache.delete(request);
-                        });
+                        }));
                     }));
                 });
-            });
+            }));
         }));
     }).catch(function () { /* nothing more can be done here; still move on */ }).then(goHome);
 }());

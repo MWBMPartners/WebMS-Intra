@@ -170,14 +170,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } else {
             $created = 0;
             $skipped = 0;
-            // 🛡️ #518: this is the BACKSTOP, not the main defence — the
-            //    preview step above already marks an isAdmin=1 row invalid
-            //    for anyone who is not a global administrator. This second
-            //    check exists because a preview sits in the SESSION between
-            //    the two steps, so the person's rights could have changed
-            //    in between, and a preview built on a copy of this page
-            //    from before this fix shipped would never have been
-            //    checked at all.
+            // 🛡️ #518: this test runs at IMPORT time, not just preview
+            //    time, because a preview sits in the SESSION between the
+            //    two steps, so the person's rights could have changed in
+            //    between, and a preview built on a copy of this page from
+            //    before this fix shipped would never have been checked at
+            //    all. Codex catch-up A4 (20 September 2026): it now runs
+            //    FIRST in the loop below, for every row, before the
+            //    ordinary valid/invalid skip — see the comment at the
+            //    loop for why that ordering matters. WHAT THIS CANNOT DO:
+            //    it counts an ATTEMPT to import portal-wide rights, not a
+            //    successful one — a row can be refused for this reason
+            //    and never reach the "is this email already taken"
+            //    check, so $refusedPortal can include a row that would
+            //    also have failed for another reason.
             $actorGlobal   = AccountGuard::actorIsGlobal();
             $refusedPortal = 0;
 
@@ -196,19 +202,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             if ($insertStmt !== false && $siteStmt !== false) {
                 foreach ($preview as &$row) {
-                    if ($row['valid'] === false) {
-                        $row['result'] = 'Skipped';
-                        $skipped++;
-                        continue;
-                    }
-
-                    // 🛡️ #518 backstop (see the comment above the loop) —
-                    //    re-checked here, at IMPORT time, not just preview
-                    //    time.
+                    // 🛡️ Codex catch-up A4 (20 September 2026): WHAT WAS
+                    //    WRONG — this portal-grant check used to run AFTER
+                    //    the ordinary $row['valid'] === false skip below,
+                    //    so the everyday case — the preview itself already
+                    //    marked an isAdmin=1 row invalid for a non-global
+                    //    administrator — was skipped before ever reaching
+                    //    $refusedPortal, and so it never reached the one
+                    //    security record written after this loop either.
+                    //    Only a row that slipped PAST the preview (rights
+                    //    changed since, or an older copy of this page)
+                    //    was ever counted or logged. THE FIX: judge the
+                    //    portal-grant refusal FIRST, for every row,
+                    //    whatever else is wrong with it — so every row
+                    //    asking for portal-wide rights from a non-global
+                    //    administrator is counted here, whether the
+                    //    preview already caught it or not. A row refused
+                    //    for this reason AND invalid for another reason
+                    //    too (a bad email, say) is counted here as a
+                    //    portal-grant attempt, because that is what it
+                    //    is — the "skipped" total below still counts the
+                    //    row once, not twice.
                     if ((int) $row['isAdmin'] === 1 && $actorGlobal === false) {
                         $row['result'] = 'Skipped: only a global administrator can create accounts with administrator rights across the whole portal';
                         $skipped++;
                         $refusedPortal++;
+                        continue;
+                    }
+
+                    if ($row['valid'] === false) {
+                        $row['result'] = 'Skipped';
+                        $skipped++;
                         continue;
                     }
 

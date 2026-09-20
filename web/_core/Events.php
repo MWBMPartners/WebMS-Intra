@@ -78,13 +78,41 @@ class Events
                 return 0;
             }
 
+            // 🛡️ Codex catch-up B1 (20 September 2026): read OUTSIDE the
+            //    transaction/lock below — AccountGuard::isSingleOrganisation()
+            //    caches its answer for the whole request, so this either
+            //    answers from that cache or is the one query that fills
+            //    it; keeping it out of the locked section below keeps the
+            //    lock as short as possible. Same rule anon-checkin-save.php
+            //    already uses for its own membership test.
+            $singleOrg = AccountGuard::isSingleOrganisation() === true ? 1 : 0;
+
             App::beginTransaction();
 
             // 🔒 Lock the event row first — serialises two concurrent
             // slot-freeing writes for the same event against each other.
+            //
+            // 🛡️ Codex catch-up B1: WHAT WAS WRONG — this lookup tested
+            //    only "not deleted", with no status test at all, so a
+            //    CANCELLED event, or one returned to DRAFT after being
+            //    published, still ran the whole promotion below and sent
+            //    "you are now confirmed for <event name>" emails for an
+            //    event that will not happen. THE FIX: only a PUBLISHED or
+            //    POSTPONED event promotes anybody. Postponed stays IN —
+            //    rsvp.php lets people answer and waitlist for a postponed
+            //    event, and the event page keeps showing it ("check back
+            //    for the new date"); promotion only ever runs on a
+            //    slot-freeing write, and nothing re-runs it when an event
+            //    is later re-published, so excluding postponed here would
+            //    mean a seat freed DURING a postponement is never filled.
+            //    Cancelled is excluded even though rsvp.php also lets
+            //    people answer a cancelled event, because confirming a
+            //    seat at an event that will not happen at all is exactly
+            //    the fault this fix closes.
             $stmt = $db->prepare(
                 'SELECT capacity, siteID, eventName FROM tblEvents '
-                . 'WHERE eventID = ? AND isDeleted = 0 LIMIT 1 FOR UPDATE'
+                . "WHERE eventID = ? AND isDeleted = 0 AND status IN ('published', 'postponed') "
+                . 'LIMIT 1 FOR UPDATE'
             );
             if ($stmt === false) {
                 App::rollback();
@@ -147,16 +175,53 @@ class Events
             // ordinary "RSVP cancelled" flash regardless. `AS email` is kept
             // on purpose so `$c['email']` further down (the confirmation
             // email step) needs no change at all.
+            //
+            // 🛡️ Codex catch-up B1 (continued): WHAT WAS ALSO WRONG — this
+            //    query tested neither that the account was still active
+            //    nor that the person still belonged to the event's own
+            //    organisation. `offboarding/do.php` switches both of
+            //    those off when someone leaves but does not touch their
+            //    RSVP row, so a departed person could still be promoted
+            //    off the waitlist and emailed "you are now confirmed" for
+            //    an event they no longer have any right to attend. THE
+            //    FIX: require an active account AND the SAME membership
+            //    rule anon-checkin-save.php uses for a viewer (word for
+            //    word, so #514 can later replace both call sites with one
+            //    shared method) — an active membership row for the
+            //    event's own organisation, OR, on a single-organisation
+            //    installation only, an account with no switched-OFF
+            //    membership row at all (the compatibility exception
+            //    AccountGuard/anon-checkin.php already use, for accounts
+            //    that predate #518 and never got a membership row in the
+            //    first place). WHAT THIS CANNOT DO: it cannot tell a
+            //    member removed before #518 (row deleted outright) from
+            //    an account that never had a row — both look the same to
+            //    this query, which is the same limit AccountGuard itself
+            //    already accepts. A person excluded by this rule is left
+            //    on the waitlist with no email; offboarding cancelling a
+            //    leaver's own RSVPs outright is a separate tidy-up, not
+            //    done here. ON LOCKING: this `FOR UPDATE` now also locks
+            //    the `tblUserSites` rows it examines, in the order tblUsers
+            //    then tblUserSites — the same order `offboarding/do.php`
+            //    writes them in, and that transaction never touches
+            //    `tblEventRSVPs`, so this adds no new deadlock ordering
+            //    between the two.
             $stmt = $db->prepare(
                 'SELECT r.rsvpID, r.userID, r.guestCount, u.emailAddress AS email, u.fullName '
                 . 'FROM tblEventRSVPs r '
                 . 'JOIN tblUsers u ON u.userID = r.userID '
                 . 'WHERE r.eventID = ? AND r.siteID = ? AND r.response = "going" AND r.status = "waitlist" '
+                . '  AND u.isActive = 1 '
+                . '  AND ( EXISTS (SELECT 1 FROM tblUserSites ms '
+                . '                 WHERE ms.userID = u.userID AND ms.siteID = r.siteID AND ms.isActive = 1) '
+                . '        OR ( ? = 1 AND NOT EXISTS (SELECT 1 FROM tblUserSites mx '
+                . '                                     WHERE mx.userID = u.userID AND mx.siteID = r.siteID '
+                . '                                       AND mx.isActive = 0) ) ) '
                 . 'ORDER BY r.waitlistedAt ASC, r.createdAt ASC '
                 . 'FOR UPDATE'
             );
             if ($stmt !== false) {
-                $stmt->bind_param('ii', $eventId, $siteId);
+                $stmt->bind_param('iii', $eventId, $siteId, $singleOrg);
                 $stmt->execute();
                 $result = $stmt->get_result();
                 while (($row = $result->fetch_assoc()) !== null) {

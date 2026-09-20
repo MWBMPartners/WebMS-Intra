@@ -49,6 +49,15 @@ if ($id <= 0) {
     exit();
 }
 
+// 🛡️ Codex catch-up A2 (20 September 2026): asked here, before the lookup
+//    below, so that EVERY request that reaches the lookup pays for this
+//    one read, whatever it finds — a missing record number and a record
+//    belonging to another organisation must cost the same amount of
+//    database work, not just look the same on screen (#503). The result
+//    is cached for the request, so AccountGuard's own later call (inside
+//    check(), below) is answered from that cache, not a second query.
+AccountGuard::isSingleOrganisation();
+
 // Locate the offboarding row.
 $o = null;
 $stmt = $db->prepare(
@@ -60,24 +69,35 @@ if ($stmt !== false) {
     $o = $stmt->get_result()->fetch_assoc();
     $stmt->close();
 }
-if ($o === null) {
-    // 🛡️ #518: the page stays SILENT here, exactly as it did before this
-    //    fix — the redirect gives nothing away. It is still recorded, so a
-    //    global administrator can see the attempt in /admin/errors.
-    AccountGuard::logRefusal('undo offboarding record #' . $id, AccountGuard::NOT_FOUND, 'missing', null);
-    header('Location: /offboarding');
-    exit();
-}
-
-// 🛡️ #518: the guard runs BEFORE the "already undone" and "undo window
-//    has passed" checks below, on purpose — otherwise a record belonging
-//    to another organisation would say one of those two specific things,
-//    which is exactly the "does this record exist" signal a refusal must
-//    not give. An ENDED membership in the open organisation still counts
-//    as "belongs here" for AccountGuard::REACH_REHIRE — see that class's
-//    own docblock for why.
-$verdict = AccountGuard::check((int) $o['userID'], AccountGuard::REACH_REHIRE, 'undo offboarding record #' . $id);
-if ($verdict === AccountGuard::NOT_FOUND) {
+// 🛡️ Codex catch-up A2 (20 September 2026), fixing #518's own leftover: a
+//    missing record number and a record belonging to another organisation
+//    used to be TWO separate code paths that happened to produce the same
+//    redirect — but a missing number skipped the account read entirely,
+//    so it did strictly less database work than a foreign record, and
+//    that difference is exactly what #503 says a refusal must not have.
+//    Both cases now go through the SAME AccountGuard::check() call:
+//    - a missing record ($o === null) passes account number 0, which
+//      evaluate() refuses as NOT_FOUND with reason "missing" before any
+//      query — byte for byte the record logRefusal() used to write here
+//      by hand;
+//    - a record belonging elsewhere passes the real account number, and
+//      the guard runs BEFORE the "already undone" / "undo window has
+//      passed" checks below, on purpose — otherwise a foreign record
+//      would say one of those two specific things, which is exactly the
+//      "does this record exist" signal a refusal must not give. An ENDED
+//      membership in the open organisation still counts as "belongs
+//      here" for AccountGuard::REACH_REHIRE — see that class's own
+//      docblock for why.
+//    WHAT THIS CANNOT PROMISE: for a record that exists but belongs
+//    elsewhere, the guard still reads that account's facts (one indexed
+//    query); for a number that matches nothing there is no account to
+//    read, so that one read is skipped. A fake read to make the timing
+//    match exactly was rejected — it would add a query nobody needs, and
+//    #503 already accepts the same residue ("a number that matches a row
+//    still costs reading that row").
+$targetUserId = $o === null ? 0 : (int) $o['userID'];
+$verdict = AccountGuard::check($targetUserId, AccountGuard::REACH_REHIRE, 'undo offboarding record #' . $id);
+if ($verdict === AccountGuard::NOT_FOUND || $o === null) {
     header('Location: /offboarding');
     exit();
 }

@@ -413,10 +413,31 @@ class Newsletter
                 //    removes its register entry. Leaving a real notice out is
                 //    the safe direction to be wrong in; sending a [DEMO] one to
                 //    every member is not.
+                //
+                //    🛡️ Codex catch-up D2 (20 September 2026): WHAT WAS WRONG —
+                //    migration 194's register can hold entries with a NULL
+                //    siteID: it carried some rows forward from an earlier
+                //    development draft that ran before this page recorded
+                //    which organisation a demo row belonged to. "siteID = ?"
+                //    is never true for a NULL siteID in SQL (NULL is never
+                //    equal to anything, including itself), so a "[DEMO]" row
+                //    from that earlier draft was NOT excluded, and a
+                //    newsletter would have sent it out. THE FIX: also exclude
+                //    a register entry with NO recorded organisation at all,
+                //    from EVERY organisation's newsletter — the same safe
+                //    direction the surrounding comment already chose (a real
+                //    notice left out is safer than a demo one sent out). WHAT
+                //    THIS CANNOT DO: an entry with no recorded organisation is
+                //    never removed by Wipe (see demo-data.php's own header),
+                //    so if a REAL announcement later reuses that same row
+                //    number, it would also be excluded until the stale
+                //    register entry is removed by hand — the identical
+                //    trade-off the matched-organisation rule above already
+                //    accepts for a reused row number.
                 $demoFilterSql = '';
                 if (self::demoRegisterExists($db) === true) {
                     $demoFilterSql = ' AND announcementID NOT IN '
-                        . '(SELECT rowID FROM tblDemoDataRegister WHERE tableName = ? AND siteID = ?)';
+                        . '(SELECT rowID FROM tblDemoDataRegister WHERE tableName = ? AND (siteID = ? OR siteID IS NULL))';
                 }
 
                 $stmt = $db->prepare(
