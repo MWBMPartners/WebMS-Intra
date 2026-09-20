@@ -9,6 +9,29 @@ proceeds, so the session can be picked up at any point).
 
 ## Read this first — where we are right now
 
+## LATEST — 20 September 2026, 21:55. RESUME FROM HERE.
+
+**OWNER DECISION, 21:55: STRICTLY SEQUENTIAL, and checking counts.** Nothing new starts — not even planning — while a package is
+being independently checked. The standing rule "never have two analysis runs going at once" now explicitly covers verification runs
+too: one package is in flight at a time, from planning through checking to commit. **OWED: write this into the "Deep analysis" rule in
+`.claude/CLAUDE.md` as soon as package 1 is committed** (not before, because the checker verifies which files have changed and that
+file is not on package 1's list).
+
+Asked because package 1's check had an hour or more to run and package 2's planning could have used the time. The answer is no: the
+time is left idle deliberately.
+
+**PACKAGE 1 IS BUILT AND UNDER INDEPENDENT CHECK** (run `wf_8e4e27d5-3ff`, task `wah6coqwm`). Plan drafted 20:01, settled 20:23, built
+21:26, checking since 21:27 on a fresh Fable agent with its own database and two servers (the fixed tree and the current code side by
+side). 33 files: 27 changed, 6 new, including two new database changes (199 fills in missing membership records, 200 adds the
+attendance-report visibility setting) and two new pieces of code (`AttendanceAccess.php`, and an admin page listing accounts that
+belong to no organisation).
+
+The builder reported two things honestly rather than hiding them: one genuine deviation from the plan, and one sub-proof (a 20-way
+simultaneous flood) it could not finish because of a tooling limit. **Both must be checked before this is committed.**
+
+**NOTHING FROM PACKAGE 1 IS COMMITTED YET.** The working tree holds all 33 files. If this session ends, read
+`.claude-work/resume/p1--build.md` and `p1--verify-r1.md` first.
+
 ## LATEST — 20 September 2026, 19:45. RESUME FROM HERE.
 
 **THE CODEX-FIX PACKAGE IS DONE: committed `5f278cb` and pushed.** All thirteen findings fixed, each proved real on the old code and
