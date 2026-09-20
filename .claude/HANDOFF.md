@@ -9,6 +9,40 @@ proceeds, so the session can be picked up at any point).
 
 ## Read this first — where we are right now
 
+## LATEST — 20 September 2026, 17:45. RESUME FROM HERE.
+
+**#525 IS DONE: committed `12e637a` and pushed.** Its round-2 check (Fable) PASSED, with a control proving its own test could fail
+(0 error rows with the month fix, 33 without). One LOW residual it raised — the same "every signed-in member of your organisation"
+understatement on the transfer form — was fixed in three places by a Haiku edit and a fourth by hand before committing. #525 and #527
+are commented; #527 stays open on GitHub until the branch merges, which is normal.
+
+**THE CODEX CATCH-UP RAN, AND EVERY AREA CAME BACK NOT CLEAN.** Four of five areas were reviewed before Codex hit its usage limit
+again. **Every finding, with what happens to each, is written up in `.claude-work/reviews/codex-catchup-findings.md`** — read that
+first. The answers themselves are `.claude-work/reviews/cat-{accounts,calendar,offline,demo}.answer.md`.
+
+Five of the findings were re-read in the code by the orchestrator and hold up, including one in our own pull-request wiring: the new
+account-change check cannot fail a build, because the workflow step throws its exit code away with `|| true`.
+
+**STILL OWED FROM CODEX:** the fifth area (the automatic checks). Re-run when its limit resets:
+`bash .claude-work/codex-queue.sh cat-checks brief-cat-checks.txt`
+And then a first Codex review of #525 itself (`12e637a`), which was committed after the catch-up diffs were made.
+
+**RUNNING NOW: the fix package for the thirteen in-scope findings** — run `wf_e5eead5f-fa6`, task `w2lc0vibe`, script
+`.claude-work/resume/wf-codex-fixes.js`, outputs `.claude-work/resume/pcx--*.md`. Plan (Fable first), challenge and settle, Sonnet
+build, independent check with fix rounds. It commits nothing. The plan step is told to judge each finding for itself and to say so
+plainly if Codex is wrong about one.
+
+**OPENED FROM THE CATCH-UP (pre-existing, not in this fix package):** **#531** an ordinary answer and a waiting-list promotion can take
+the same last seat, so an event can be overbooked; **#532** the registration pages reveal whether an internal event exists.
+
+**TWO SMALLER THINGS OWED:** check whether accounts with no membership row can exist on a real installation (they would lose their
+calendar subscription under the newer feed rule — Codex flagged it as worth checking, not as a fault); and ask the owner whether a
+deleted event's check-ins should still count in the organisation totals (found by the #525 round-2 check).
+
+**THE QUEUE AFTER THIS:** #526 (four-level settings resolver, covering both the check-in limit and who may see the figures), #515,
+#516, #517, then the #514 build (11 parts), then the thorough documentation pass. A Fable review of the #514 planning steps that Opus
+produced is still owed before that build starts.
+
 ## LATEST — 20 September 2026, 17:10. RESUME FROM HERE.
 
 **Both AI services are available again.** The Claude weekly limit reset at 16:00 today (it stopped work at about 02:40 on 18 September,
