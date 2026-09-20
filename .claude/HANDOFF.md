@@ -9,6 +9,39 @@ proceeds, so the session can be picked up at any point).
 
 ## Read this first — where we are right now
 
+## LATEST — 20 September 2026, 19:45. RESUME FROM HERE.
+
+**THE CODEX-FIX PACKAGE IS DONE: committed `5f278cb` and pushed.** All thirteen findings fixed, each proved real on the old code and
+fixed afterwards by an independent agent with its own database and web server (`p525`-style controls: the accounts API wrote one
+UPDATE before and none after; the waiting list promoted in all six cases it should not have and none after; twenty simultaneous
+check-ins let ten through before and at most five after; the sign-out page left before a slow deletion finished before, and leaves
+last after). Issues #498, #507, #518, #519, #520 and #533 are commented.
+
+**The documentation corrections are also committed (`afa4665`):** the counts table (81 framework classes, 213 tables, 196 migrations
+numbered to 198 with gaps at 168, 169 and 195, 803 PHP files, 552 addresses, 575 settings, 16 automatic checks, 8 self-tests), the
+standing rule that wrongly said thirteen checks, this week's changelog entries, and two stale changelog facts (the check-in limit is
+500, not 300; the check-in counts are no longer "for somebody to pick up").
+
+**FOUR THINGS WAITING ON THE OWNER** (none blocks the queue; all are recorded in the issues too):
+1. Refused check-in attempts now count toward the 500-in-five-minutes allowance, so the limit counts attempts rather than accepted
+   check-ins. Recommended: accept.
+2. The waiting list still promotes for POSTPONED events (not cancelled, not draft). Recommended: keep.
+3. Whether a hygiene migration should also fill in the organisation number on old demo-register entries. The code fix already
+   excludes them from every newsletter, so this is tidiness only. Recommended: not needed.
+4. Whether FEATURES.md should note that the waiting list, live chat moderation and the leadership endpoint were broken for a period.
+   They are described correctly today.
+
+**#533 IS CONFIRMED AS A REGRESSION, not just a tidy-up:** accounts with no membership record really do exist on upgraded portals
+(pre-#518 "Add User" created none), and the calendar-feed rule that needs one arrived in `110e47d`. Their calendar subscriptions now
+answer "Invalid token". The owner has chosen to create the missing records. Worth settling at the same time: the check-in page and the
+account guard treat "no membership record" as belonging on a single-organisation portal, and the feed does not — the three should
+agree.
+
+**NEXT, in order:** package 1 (things that leak or reveal: #522, #531, #532, #529, #521, #533, plus leaving deleted events out of the
+per-event spreadsheet) → package 2 (plain faults: #508, #512, #528, #530, #509) → #515 → #516 → #517 → Fable review of the #514 plan →
+#514 build → **the one comprehensive Codex review of the whole branch** → fix or log every finding → one pull request to alpha. After
+that pull request, go back to sending each finished piece to Codex as it lands.
+
 ## LATEST — 20 September 2026, 18:30. RESUME FROM HERE.
 
 **HOW CODEX REVIEWS ARE DONE HAS CHANGED, TEMPORARILY. OWNER DECISION, 18:25.**
