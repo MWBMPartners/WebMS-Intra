@@ -9,6 +9,29 @@ proceeds, so the session can be picked up at any point).
 
 ## Read this first — where we are right now
 
+## LATEST — 21 September 2026, about 20:45. RESUME FROM HERE.
+
+**#514 P1 is BUILT (uncommitted, 9 files in the working tree) and PASSED its independent check** (run `wf_9898d9d7-5f4`; reports
+`.claude-work/resume/p514-p1--build.md`, `p514-p1--verify-r1.md`). Migration **204** (`204_external_calendar_visibility.sql`), new
+`web/_core/EventVisibility.php`, new `tools/event-visibility-selftest.php`, plus data-export, GdprEraser, catalogue, feeds-save,
+import-feeds and full_schema.sql.
+
+**FALLBACK RECORDED:** the P1 check's Fable attempt failed with "You're out of usage credits"; **Opus ran that check** (the script's
+per-step fallback). Try Fable first again on every later step. Say this in P1's commit message.
+
+**A FIX ROUND IS RUNNING** before P1 is committed (run `wf_f7256878-cb6`; `wf-514-part.js` with `args.fixPlan`; the previous script is
+saved as `wf-514-part.before-fixplan.js`; reports `p514-p1--fixes.md`, `p514-p1--verify-r1.md` is overwritten by the new check):
+1. the self-test missed 8 of 9 realistic planted faults: strengthen it until all nine fail it;
+2. **API keys follow owner answer 3 literally**: full detail only when the calendar ITSELF is Public (the plan's 1.3 formula read it
+   wrongly and gave a key full detail on a Members calendar); a note goes into p514--plan-r2.md section 0.4 for P2 rows g/h and P7;
+3. the self-test exits 255 instead of the promised 1 when a table is missing;
+4. two over-claiming comments (204's A11; EventVisibility's "five other pages").
+**When it passes:** run my own checks, commit ONLY P1's files (list them explicitly; never `git add -A`), push, comment on #514, then
+launch P2: `args: { part: "P2", tier: "opus" }` (no fixPlan).
+
+**New issues:** **#546** no JSON format in the project has a schema (standing rule), including the personal-data download. Comment
+added to **#543**: the erasure-coverage self-test passes when erasure is switched off for a table. Both are follow-ups after #514.
+
 ## LATEST — 21 September 2026, about 19:15. RESUME FROM HERE.
 
 **#542 IS DONE: `8e7fb21`, independent check PASS in round 1.** A department flag (lead, approver, required approver of the claim's
