@@ -9,6 +9,21 @@ proceeds, so the session can be picked up at any point).
 
 ## Read this first — where we are right now
 
+## LATEST — 21 September 2026, about 15:45. FOUR OWNER ANSWERS.
+
+1. **#542 (approval trap): a department flag is enough.** Anyone an administrator has made a lead, approver or required approver
+   of the claim's OWN department may approve its claims, with or without the Expense Approver role.
+2. **Order: #542 goes straight after the #514 plan review and BEFORE the #514 build**, as its own small package. #543 goes with
+   the follow-ups after #514.
+3. **YES: wire the three new checks into `.github/workflows/pr-security.yml`** (`check_reserved_site_keys.py`, `check_role_keys.py`,
+   `check_membership_queries_scoped.py`), in the documentation/CI pass. This is the owner's explicit approval for that workflow
+   edit ONLY: adding steps that run existing checks, nothing loosened.
+4. **Psalm's step-level "allowed to fail" flag on alpha may travel to beta and main** at the next promotion. (The owner asked what
+   Psalm is: explain tool names in plain words the first time; it is a code-checking tool on GitHub, not part of the product.)
+
+**ORDER NOW:** Fable review of the #514 plan (launching) -> #542 -> #514 build, one commit per part -> #534, #535, #536, #539, #540,
+#541, #543 -> documentation/CI pass -> comprehensive Codex review -> stop for the owner before any pull request.
+
 ## LATEST — 21 September 2026, about 15:30. RESUME FROM HERE.
 
 **#517 IS DONE: committed `d3b906d` and pushed, independent check PASS in round 1, no fallbacks.** User groups and departments
