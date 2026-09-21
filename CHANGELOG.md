@@ -2,6 +2,18 @@
 
 
 ## [Unreleased] (alpha)
+- fix(expenses): the treasury list (`/expenses/treasury`) is now refused to
+  anyone who is not a treasurer of the organisation whose address is open,
+  or an administrator (#538). Before this, the page needed only a sign-in
+  and then listed every approved claim awaiting payment — title, claimant's
+  full name, department, amount and date — to any signed-in account on the
+  whole installation, including members of a different organisation
+  (confirmed on a real database). Only the Pay button's handler ever
+  checked for a role. The list page now asks the same question the Pay
+  handler does, before it fetches anything, and answers with the standard
+  "Access Denied" page; the Pay handler's own refusal is now that same page
+  instead of a redirect back to a list the person can no longer see. The
+  treasury help page now says who can open it.
 - feat(admin,core): roles now belong to one organisation each, and can
   finally be given to somebody (#516). Before this, `tblRoles` was one
   portal-wide list and NOTHING anywhere could ever put a row into

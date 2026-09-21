@@ -59,12 +59,19 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
     <p>The treasury dashboard lists all expense claims that have been <strong>approved</strong> and are awaiting reimbursement.</p>
 
+    <div class="alert alert-warning d-flex gap-2 mb-3" role="alert">
+        <i class="fa-solid fa-lock mt-1"></i>
+        <div>
+            <strong>Who can open it:</strong> only a person who holds the <strong>Treasurer</strong> role in this organisation, or an administrator. Everybody else &mdash; including a treasurer of a <em>different</em> organisation on the same portal &mdash; sees an &ldquo;Access Denied&rdquo; page and none of the claims. If you process payments and cannot open the page, ask an administrator of your organisation to give you the Treasurer role (Admin &rarr; Users &rarr; the <strong>Roles</strong> button).
+        </div>
+    </div>
+
     <div class="list-group list-group-flush mb-3">
         <div class="list-group-item d-flex gap-3 align-items-start">
             <span class="badge text-bg-primary rounded-pill mt-1">1</span>
             <div>
-                <strong>Navigate to the Treasury section</strong>
-                <p class="mb-0 small text-secondary">Access the treasury page via the Expenses navigation. You will see the heading <strong>"Treasury -- Approved Claims"</strong>.</p>
+                <strong>Open the Treasury page</strong>
+                <p class="mb-0 small text-secondary">Go to <code>/expenses/treasury</code> on your organisation's own address. There is no menu entry for it: type or bookmark the address, or use the <strong>Go to Treasury</strong> button that treasurers and administrators see on an approved claim's page. You will see the heading <strong>"Treasury -- Approved Claims"</strong>.</p>
             </div>
         </div>
         <div class="list-group-item d-flex gap-3 align-items-start">

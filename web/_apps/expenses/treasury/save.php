@@ -7,11 +7,15 @@
  * Records reimbursement, marks claim as Reimbursed, regenerates PDF with
  * COMPLETE watermark, logs action, and sends email notification to claimant.
  *
+ * Refuses anyone who is not a treasurer of the organisation whose address is
+ * open, or an administrator, with the standard "Access Denied" page — before
+ * the form token is even checked (#538).
+ *
  * @package   Portal\Expenses
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   0.4.0
+ * @version   0.4.1
  * -----------------------------------------------------------------------------
  */
 
@@ -23,22 +27,36 @@ use Portal\Core\Auth;
 use Portal\Core\Logger;
 use Portal\Core\ExpensePdf;
 use Portal\Core\ExpenseMailer;
+use Portal\Core\Router;
 use Portal\Core\Site;
 
-// 🛡️ Session and CSRF checks
+// 🛡️ Session check first, then the role check, then the form token.
 Auth::ensureSession();
 Auth::requireLogin();
 
-if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
-    $_SESSION['flash_msg']  = 'Invalid CSRF token.';
-    $_SESSION['flash_type'] = 'danger';
-    header('Location: /expenses/treasury');
-    exit();
+// 🛡️ Only a treasurer of THIS organisation, or an administrator, may record a
+//    payment — the same test the list page (index.php) now asks before it
+//    shows anything (#538), asked here BEFORE the form-token check, in the
+//    order the other management handlers use (payments/save.php, the calendar
+//    manage handlers): somebody who may not act here is answered first,
+//    whatever else they sent.
+//
+//    WHAT WAS WRONG BEFORE: this refusal set a flash message and sent the
+//    visitor back to /expenses/treasury. That made sense while the list page
+//    was open to everybody. Since #538 the list page refuses exactly the same
+//    people, so the old redirect would have landed on an "Access Denied" page
+//    that never prints the flash, leaving "Access denied — Treasurer or Admin
+//    role required" in the session to pop up on whatever page the person
+//    opened next (confirmed on a real database: it appeared on the approvals
+//    page). A POST from somebody who cannot even see the form is a forged or
+//    stale request, and now gets the same 403 page as the list.
+if (App::hasRole('treasurer') === false && App::isAdmin() === false) {
+    Router::renderError(403);
+    return;
 }
 
-// 🛡️ Require Treasurer or Admin role
-if (App::hasRole('Treasurer') === false && App::isAdmin() === false) {
-    $_SESSION['flash_msg']  = 'Access denied — Treasurer or Admin role required.';
+if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
+    $_SESSION['flash_msg']  = 'Invalid CSRF token.';
     $_SESSION['flash_type'] = 'danger';
     header('Location: /expenses/treasury');
     exit();

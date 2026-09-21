@@ -7,11 +7,16 @@
  * Lists approved expense claims awaiting reimbursement. Treasury users can
  * mark claims as Reimbursed and record payment references via a modal form.
  *
+ * Who may open it (#538): only a treasurer of the organisation whose address
+ * is open, or an administrator — the same test save.php applies before it
+ * records a payment. Everybody else gets the standard "Access Denied" page
+ * before any claim is fetched.
+ *
  * @package   Portal\Expenses
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   0.4.0
+ * @version   0.4.1
  * -----------------------------------------------------------------------------
  */
 
@@ -19,12 +24,61 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\Router;
 use Portal\Core\Site;
 
 // 📌 Page metadata for the template system
 $pageTitle   = 'Treasury';
 $pageSection = 'expenses';
 $breadcrumbs = ['Dashboard' => '/', 'Expenses' => '/expenses/treasury', 'Treasury' => ''];
+
+// -----------------------------------------------------------------------------
+// 🔒 #538 (21 September 2026) — who may open this page at all
+// -----------------------------------------------------------------------------
+// WHAT WAS WRONG BEFORE: nothing in this file asked who was looking. The
+// address needs a sign-in (its row in tblRoutes is protected) and that was
+// the only test, so ANY signed-in account on the whole installation could
+// open this page and read every approved claim of whichever organisation's
+// address they were on: the claim title, the claimant's full name, their
+// department, the amount and the date. That included accounts belonging to
+// a DIFFERENT organisation altogether — confirmed on a real database: a
+// member of organisation B, opening organisation A's address, was shown A's
+// whole queue. Only the Pay button's handler (save.php) ever checked for a
+// role, so a member could look at everything but pay nothing.
+//
+// THE FIX: the same test the Pay handler uses, asked here BEFORE the claims
+// are fetched, so a refused visitor never causes the claims query to run.
+// Since #516, App::hasRole() answers for the organisation whose address is
+// open, and only through an active membership there — so a treasurer of
+// organisation B is refused on organisation A's address, and so is somebody
+// whose membership here has ended. App::isAdmin() is true for an
+// administrator of THIS organisation (through their active membership row),
+// for a global administrator, and for an account carrying the older
+// portal-wide isAdmin flag; that last flag opens every organisation's
+// treasury, which is what it already does on every other page here, and is
+// not changed by this fix.
+//
+// WHY THE ANSWER IS 403 AND NOT 404: the portal's standard "Access Denied"
+// page is what every other role-gated page gives (expenses/view/index.php,
+// the calendar, giving and payments management pages). This page is
+// described in the help centre, so its existence is not a secret worth
+// hiding; what must never leak is the list. Refusing here means every
+// refused visitor — a member without the role, a member of another
+// organisation, an ended membership — gets the same page for the same cost:
+// one role lookup and no claims query.
+//
+// WHAT THIS CANNOT DO: it does not stop a non-member reaching this
+// organisation's address at all, or seeing its name and navigation on the
+// refusal page — every page of the portal behaves that way today, and that
+// is not this page's to change.
+//
+// 'treasurer' is written as the stored key. Roles::has() lower-cases the key
+// before comparing, so the 'Treasurer' spelling other files use works too;
+// the stored form is used here so this test and save.php's read identically.
+if (App::hasRole('treasurer') === false && App::isAdmin() === false) {
+    Router::renderError(403);
+    return;
+}
 
 // 📋 Flash message
 $flashMsg  = $_SESSION['flash_msg']  ?? '';
