@@ -3827,8 +3827,12 @@ class Venues
         $placeholders = implode(',', array_fill(0, count($roleKeys), '?'));
         $sql = 'SELECT DISTINCT u.emailAddress AS email FROM tblUsers u '
             . 'INNER JOIN tblUserSites us ON us.userID = u.userID AND us.siteID = ? AND us.isActive = 1 '
-            . 'LEFT JOIN tblUserRoles ur ON ur.userID = u.userID '
-            . 'LEFT JOIN tblRoles r ON r.roleID = ur.roleID '
+            // 🏷️ #516: tblUserSites joined first, so tblUserRoles ties to
+            // it and tblRoles to tblUserRoles — a venue_manager (or
+            // configured reminder role) held in a DIFFERENT organisation
+            // must not count for this one.
+            . 'LEFT JOIN tblUserRoles ur ON ur.userID = u.userID AND ur.siteID = us.siteID '
+            . 'LEFT JOIN tblRoles r ON r.roleID = ur.roleID AND r.siteID = ur.siteID '
             . 'WHERE u.isActive = 1 AND u.emailAddress IS NOT NULL AND u.emailAddress != "" '
             . "AND (u.isAdmin = 1 OR u.isRootAdmin = 1 OR us.isSiteAdmin = 1 OR us.isSiteRootAdmin = 1 OR r.roleKey IN ({$placeholders}))";
         $stmt = $db->prepare($sql);

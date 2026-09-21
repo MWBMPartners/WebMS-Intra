@@ -88,6 +88,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         // ➖ Remove user from site
         $removeUserId = (int) ($_POST['userID'] ?? 0);
         if ($removeUserId > 0) {
+            // 🏷️ #516: this DELETE now also removes, via the composite
+            //    foreign key `fk_user_role_membership` on tblUserRoles,
+            //    every role this person held IN THIS ORGANISATION ONLY —
+            //    a role they hold in a DIFFERENT organisation is untouched,
+            //    because that holding's own membership row is unaffected
+            //    by this DELETE. No code change needed here; recorded so
+            //    the next reader knows this DELETE now does more than it
+            //    used to.
             $rmStmt = $db->prepare('DELETE FROM tblUserSites WHERE userID = ? AND siteID = ?');
             if ($rmStmt !== false) {
                 $rmStmt->bind_param('ii', $removeUserId, $siteId);

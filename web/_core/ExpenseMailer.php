@@ -110,7 +110,11 @@ class ExpenseMailer
             case 'approved':
                 // 📧 Notify claimant + treasury
                 $recipients   = [$claim['claimantEmail']];
-                $recipients   = array_merge($recipients, self::getTreasuryEmails());
+                // 🏷️ #516: treasury email now goes to THIS claim's own
+                //    organisation's treasurers only — $siteId is the claim's
+                //    own siteID, already fetched above and used to look the
+                //    claim up in the first place.
+                $recipients   = array_merge($recipients, self::getTreasuryEmails($siteId));
                 $approverName = htmlspecialchars($extra['approverName'] ?? 'An approver', ENT_QUOTES, 'UTF-8');
                 $subject      = '[' . $siteName . '] Expense Claim #' . $claimID . ' Approved';
                 $body         = self::buildHtml(
@@ -220,24 +224,38 @@ class ExpenseMailer
     }
 
     /**
-     * 💳 Get email addresses of treasury users
+     * 💳 Get email addresses of treasury users FOR ONE ORGANISATION (#516).
+     *
+     * Was a bare, portal-wide tblUserRoles/tblRoles join with no
+     * organisation at all — used to email EVERY treasurer on the whole
+     * portal about a single organisation's claim. Now uses a prepared
+     * statement scoped to $siteId, with an active-membership join added
+     * (there was none before), matching what `Roles::has()` itself
+     * requires before it will answer yes for a holding.
+     *
+     * @param int $siteId The organisation the claim belongs to.
      */
-    private static function getTreasuryEmails(): array
+    private static function getTreasuryEmails(int $siteId): array
     {
         global $mysqli;
         $emails = [];
-        $result = $mysqli->query(
-            'SELECT U.emailAddress FROM tblUserRoles UR '
-            . 'JOIN tblRoles R ON R.roleID = UR.roleID '
+        $stmt = $mysqli->prepare(
+            'SELECT DISTINCT U.emailAddress FROM tblUserRoles UR '
+            . 'JOIN tblRoles R ON R.roleID = UR.roleID AND R.siteID = UR.siteID '
             . 'JOIN tblUsers U ON U.userID = UR.userID '
-            . "WHERE R.roleKey = 'Treasurer' AND U.isActive = 1"
+            . 'JOIN tblUserSites US ON US.userID = U.userID AND US.siteID = UR.siteID AND US.isActive = 1 '
+            . "WHERE UR.siteID = ? AND R.roleKey = 'treasurer' AND U.isActive = 1"
         );
-        if ($result !== false) {
+        if ($stmt !== false) {
+            $stmt->bind_param('i', $siteId);
+            $stmt->execute();
+            $result = $stmt->get_result();
             while ($r = $result->fetch_assoc()) {
                 if ($r['emailAddress'] !== null && $r['emailAddress'] !== '') {
                     $emails[] = $r['emailAddress'];
                 }
             }
+            $stmt->close();
         }
         return $emails;
     }

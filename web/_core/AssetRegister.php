@@ -1261,9 +1261,11 @@ class AssetRegister
      * ordered by sortOrder. Migration 159's seed data puts GIAI/GRAI first
      * (the two GS1 keys purpose-built for identifying assets), then the
      * rest of the GS1-key family, retail barcodes, RFID/EPC carriers, and
-     * classification codes. GLOBAL reference data — no siteID column
-     * (mirrors tblRoles, see migration 159's header) — so no site filter
-     * applies. Feeds the add-identifier `<select>`'s `<optgroup>` grouping
+     * classification codes. GLOBAL reference data — no siteID column at
+     * all, see migration 159's header — so no site filter applies. (Roles
+     * used to be portal-wide global reference data too; since #516 each
+     * organisation has its own list, so tblRoles is no longer a comparable
+     * example here.) Feeds the add-identifier `<select>`'s `<optgroup>` grouping
      * on item.php; `category` is the grouping key.
      *
      * @return array<int, array<string, mixed>>
@@ -3176,10 +3178,12 @@ class AssetRegister
      * section's header comment for why that's a deliberate deviation from
      * createAsset()/updateAsset()'s "caller validates" convention.
      *
-     * tblGroups carries no siteID column (global reference data, like
-     * tblRoles — see full_schema.sql) so a group is checked for existence
-     * only, with no site filter; every other party type is scoped to
-     * $siteId.
+     * tblGroups carries no siteID column at all (global reference data —
+     * see full_schema.sql) so a group is checked for existence only, with
+     * no site filter; every other party type is scoped to $siteId. (Roles
+     * used to be portal-wide global reference data too; since #516 each
+     * organisation has its own list, so tblRoles is no longer a comparable
+     * example here.)
      */
     private static function partyExistsOnSite(string $partyType, int $partyId, int $siteId): bool
     {
@@ -8390,8 +8394,12 @@ class AssetRegister
         $stmt = $db->prepare(
             'SELECT DISTINCT u.emailAddress AS email FROM tblUsers u '
             . 'INNER JOIN tblUserSites us ON us.userID = u.userID AND us.siteID = ? AND us.isActive = 1 '
-            . 'LEFT JOIN tblUserRoles ur ON ur.userID = u.userID '
-            . 'LEFT JOIN tblRoles r ON r.roleID = ur.roleID '
+            // 🏷️ #516: tblUserSites is joined FIRST here, so tblUserRoles is
+            // tied to it (ur.siteID = us.siteID) and tblRoles to
+            // tblUserRoles (r.siteID = ur.siteID) — otherwise
+            // asset_manager held in a DIFFERENT organisation would count.
+            . 'LEFT JOIN tblUserRoles ur ON ur.userID = u.userID AND ur.siteID = us.siteID '
+            . 'LEFT JOIN tblRoles r ON r.roleID = ur.roleID AND r.siteID = ur.siteID '
             . 'WHERE u.isActive = 1 AND u.emailAddress IS NOT NULL AND u.emailAddress != "" '
             . 'AND (u.isAdmin = 1 OR u.isRootAdmin = 1 OR us.isSiteAdmin = 1 OR us.isSiteRootAdmin = 1 OR r.roleKey = ?)'
         );

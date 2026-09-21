@@ -37,6 +37,9 @@
  *   tblDemoDataRegister   (Demo Data list entries pointing at your account or
  *                          your memberships — only possible if a made-up demo
  *                          person was edited into your real account — #498)
+ *   tblUserRoles          (roles you hold, and in which organisation — #516)
+ *   tblUserRolesUnplaced  (a role key waiting for a global administrator to
+ *                          place, if a hand-edited database left you one — #516)
  *
  * Sensitive fields (password hashes, TOTP secret, tokenHash etc.) are
  * EXCLUDED — exporting them would be a security regression, not a feature.
@@ -135,6 +138,24 @@ $payload = [
         ),
         'trustedDevices' => $fetchUserRows(
             'SELECT deviceID, label, createdIP, lastSeenAt, expiresAt, revokedAt, createdAt FROM tblTrustedDevices WHERE userID = ?'
+        ),
+        // 🏷️ Roles (#516) — export↔erasure parity with the GdprEraser
+        // catalogue entries added alongside this block. `grantedByID` is
+        // deliberately left out (another person's account number, not
+        // this subject's own data — the same reasoning already applied to
+        // every other "who did this to me" column in this export).
+        'roles' => $fetchUserRows(
+            'SELECT ur.userRoleID, ur.siteID, s.siteName, r.roleKey, r.roleName, ur.grantedAt '
+            . 'FROM tblUserRoles ur '
+            . 'JOIN tblRoles r ON r.roleID = ur.roleID AND r.siteID = ur.siteID '
+            . 'JOIN tblSites s ON s.siteID = ur.siteID '
+            . 'WHERE ur.userID = ?'
+        ),
+        // 🖊️ A role key migration 202 could not place automatically on a
+        // hand-edited database, still waiting for a global administrator
+        // to place it at /admin/users/roles-unplaced (#516).
+        'rolesAwaitingPlacement' => $fetchUserRows(
+            'SELECT unplacedID, roleKey, roleName, createdAt FROM tblUserRolesUnplaced WHERE userID = ?'
         ),
         // 🏛️ Venue Bookings (#429) — export↔erasure parity with the three
         // GdprEraser::catalogue() entries added alongside this block.

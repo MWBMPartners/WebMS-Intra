@@ -22,6 +22,7 @@ use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Logger;
 use Portal\Core\ReservedKeys;
+use Portal\Core\Roles;
 
 // 🛡️ POST only
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
@@ -219,38 +220,49 @@ if ($siteID > 0) {
         exit();
     }
 
-    // ➕ INSERT new site
-    $stmt = $db->prepare(
-        'INSERT INTO tblSites (siteName, siteKey, hostPattern, logoPath, faviconPath, primaryColor, copyrightOrg, timezone, isActive) '
-        . 'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
-    );
-    if ($stmt === false) {
-        $_SESSION['flash_msg'] = t('error.db_with_detail', ['detail' => $db->error]);
-        $_SESSION['flash_type'] = 'danger';
-        header('Location: /admin/sites', true, 302);
-        exit();
-    }
+    // ➕ INSERT new site, and seed its standard role set, IN ONE
+    //    TRANSACTION (#516). An organisation that existed with no roles at
+    //    all would make every role-gated feature (Expenses treasury,
+    //    Care, Kids check-in, and the rest) unusable there from the
+    //    moment it was created, until somebody happened to notice and add
+    //    roles by hand — so the two writes succeed or fail together.
+    $db->begin_transaction();
+    try {
+        $stmt = $db->prepare(
+            'INSERT INTO tblSites (siteName, siteKey, hostPattern, logoPath, faviconPath, primaryColor, copyrightOrg, timezone, isActive) '
+            . 'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        );
+        if ($stmt === false) {
+            throw new \RuntimeException('tblSites prepare failed: ' . $db->error);
+        }
 
-    $hostPatternVal = ($hostPattern !== '') ? $hostPattern : null;
-    $copyrightVal   = ($copyrightOrg !== '') ? $copyrightOrg : null;
-    $faviconVal     = ($faviconPath !== '') ? $faviconPath : null;
+        $hostPatternVal = ($hostPattern !== '') ? $hostPattern : null;
+        $copyrightVal   = ($copyrightOrg !== '') ? $copyrightOrg : null;
+        $faviconVal     = ($faviconPath !== '') ? $faviconPath : null;
 
-    $stmt->bind_param(
-        'ssssssssi',
-        $siteName, $siteKey, $hostPatternVal, $logoPath, $faviconVal,
-        $primaryColor, $copyrightVal, $timezone, $isActive
-    );
+        $stmt->bind_param(
+            'ssssssssi',
+            $siteName, $siteKey, $hostPatternVal, $logoPath, $faviconVal,
+            $primaryColor, $copyrightVal, $timezone, $isActive
+        );
+        $stmt->execute();
+        $newSiteId = (int) $stmt->insert_id;
+        $stmt->close();
 
-    if ($stmt->execute() === true) {
-        $newSiteId = $stmt->insert_id;
+        // 🏷️ #516: the fourteen standard roles, for this organisation only.
+        Roles::seedStandardSet($db, $newSiteId);
+
+        $db->commit();
+
         Logger::activity('SiteCreate', 'Created site #' . $newSiteId . ' (' . $siteName . ')');
         $_SESSION['flash_msg'] = 'Site "' . $siteName . '" created successfully.';
         $_SESSION['flash_type'] = 'success';
-    } else {
-        $_SESSION['flash_msg'] = 'Failed to create site: ' . $stmt->error;
+    } catch (\Throwable $e) {
+        $db->rollback();
+        Logger::errorPlatform('Sites', 'Error', 'ROLE_SEED_FAILED', 'Failed to create site and seed its roles', $e->getMessage());
+        $_SESSION['flash_msg'] = t('error.db_with_detail', ['detail' => $e->getMessage()]);
         $_SESSION['flash_type'] = 'danger';
     }
-    $stmt->close();
 }
 
 header('Location: /admin/sites', true, 302);

@@ -53,8 +53,14 @@ class PrayerChain
             . '       AND pr.status IN ("pending", "active")) AS openCount '
             . 'FROM tblUsers u '
             . 'INNER JOIN tblUserRoles ur ON ur.userID = u.userID '
-            . 'INNER JOIN tblRoles r ON r.roleID = ur.roleID AND r.roleKey = "prayer_team" '
-            . 'INNER JOIN tblUserSites us ON us.userID = u.userID AND us.siteID = ? AND us.isActive = 1 '
+            // 🏷️ #516: tblRoles is tied to tblUserRoles (r.siteID =
+            // ur.siteID) and tblUserSites (joined after, below) is tied
+            // back to BOTH (us.siteID = ? for the site parameter AND
+            // us.siteID = ur.siteID) — otherwise somebody holding
+            // prayer_team in a DIFFERENT organisation would be offered as
+            // an eligible partner here.
+            . 'INNER JOIN tblRoles r ON r.roleID = ur.roleID AND r.siteID = ur.siteID AND r.roleKey = "prayer_team" '
+            . 'INNER JOIN tblUserSites us ON us.userID = u.userID AND us.siteID = ? AND us.isActive = 1 AND us.siteID = ur.siteID '
             . 'WHERE u.isActive = 1 '
             . 'ORDER BY openCount ASC, u.userID ASC'
         );

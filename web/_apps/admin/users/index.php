@@ -39,6 +39,7 @@ declare(strict_types=1);
 use Portal\Core\AccountGuard;
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\Roles;
 use Portal\Core\Router;
 use Portal\Core\Site;
 
@@ -158,28 +159,31 @@ $actorGlobal = AccountGuard::actorIsGlobal();
 $singleOrg   = AccountGuard::isSingleOrganisation();
 $rowFacts    = AccountGuard::facts(array_map(static fn (array $u): int => (int) $u['userID'], $users), Site::id());
 
-// 📋 Fetch all roles for the role assignment checkboxes
-$allRoles = [];
-$result = $mysqli->query('SELECT roleID, roleKey, roleName FROM tblRoles ORDER BY roleName');
-if ($result !== false) {
-    while ($r = $result->fetch_assoc()) {
-        $allRoles[] = $r;
-    }
+// 📋 #516: every role THIS organisation has (roles used to be one
+//    portal-wide list; each organisation now has its own), and who holds
+//    what, here — one query each via Portal\Core\Roles, the single class
+//    that knows the role tables.
+$allRoles  = Roles::forSite($mysqli, Site::id());
+$roleNamesById = [];
+foreach ($allRoles as $r) {
+    $roleNamesById[$r['roleID']] = $r['roleName'];
+}
+$holdingsByUser = Roles::holdingsForSite($mysqli, Site::id());
+$userRoles = [];
+foreach ($holdingsByUser as $uid => $held) {
+    $userRoles[$uid] = array_values($held);
 }
 
-// 📋 Fetch user→role mappings
-$userRoles = [];
-$result = $mysqli->query(
-    'SELECT ur.userID, r.roleKey, r.roleName FROM tblUserRoles ur '
-    . 'JOIN tblRoles r ON r.roleID = ur.roleID'
-);
-if ($result !== false) {
-    while ($r = $result->fetch_assoc()) {
-        $uid = (int) $r['userID'];
-        if (isset($userRoles[$uid]) === false) {
-            $userRoles[$uid] = [];
-        }
-        $userRoles[$uid][] = $r['roleName'];
+// 🛡️ #516: a GLOBAL administrator only sees how many role holdings across
+//    the WHOLE installation are still waiting to be placed at
+//    /admin/users/roles-unplaced — the same "only show it to someone who
+//    can act on it" reasoning the #533 unplaced-accounts warning above
+//    already uses.
+$unplacedRoleCount = 0;
+if ($actorGlobal === true) {
+    $unplacedRoleResult = $mysqli->query('SELECT COUNT(*) AS cnt FROM tblUserRolesUnplaced');
+    if ($unplacedRoleResult !== false) {
+        $unplacedRoleCount = (int) ($unplacedRoleResult->fetch_assoc()['cnt'] ?? 0);
     }
 }
 
@@ -252,6 +256,15 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     </div>
 <?php endif; ?>
 
+<?php if ($actorGlobal === true && $unplacedRoleCount > 0): ?>
+    <div class="alert alert-warning">
+        <i class="fa-solid fa-triangle-exclamation me-1"></i>
+        <?php echo (int) $unplacedRoleCount; ?> role holding<?php echo $unplacedRoleCount !== 1 ? 's' : ''; ?>
+        <?php echo $unplacedRoleCount === 1 ? 'is' : 'are'; ?> waiting to be placed into an organisation (#516).
+        <a href="<?php echo htmlspecialchars(Site::url('admin/users/roles-unplaced'), ENT_QUOTES, 'UTF-8'); ?>" class="alert-link">Place <?php echo $unplacedRoleCount === 1 ? 'it' : 'them'; ?></a>.
+    </div>
+<?php endif; ?>
+
 <!-- 🔍 Search and filter bar -->
 <form method="get" class="row g-2 mb-3 align-items-end">
     <div class="col-12 col-md-5">
@@ -291,7 +304,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <div class="portal-data-row portal-data-header d-none d-md-flex">
         <div class="col-md-3">Name</div>
         <div class="col-md-3">Email / Username</div>
-        <div class="col-md-2">Roles</div>
+        <div class="col-md-2">Roles here</div>
         <div class="col-md-2">Status</div>
         <div class="col-md-2 text-end">Actions</div>
     </div>
@@ -317,6 +330,22 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             AccountGuard::REACH_ACCOUNT,
             $singleOrg
         )['verdict'];
+        // 🏷️ #516: a SEPARATE verdict for granting ROLES, using
+        //    REACH_THIS_ORG rather than REACH_ACCOUNT — deliberately
+        //    different from $rowVerdict above. A site administrator whose
+        //    member also belongs to another organisation sees "Changed by
+        //    a global administrator" for the ACCOUNT (their email/phone/
+        //    password reach beyond this organisation) yet may still grant
+        //    a ROLE here, because a role only ever applies to THIS
+        //    organisation and cannot reach the other one.
+        $roleVerdict = AccountGuard::decide(
+            $actorGlobal,
+            $rowFacts[$uid] ?? null,
+            AccountGuard::REACH_THIS_ORG,
+            $singleOrg
+        )['verdict'];
+        // #497: the flag arrives as the whole number 1, not the text '1'.
+        $memberHere = (($rowFacts[$uid]['thisOrgActive'] ?? null) === 1 || ($rowFacts[$uid]['thisOrgActive'] ?? null) === '1');
         ?>
         <div class="portal-data-row <?php echo $isActive === false ? 'opacity-50' : ''; ?>">
             <div class="col-12 col-md-3">
@@ -379,6 +408,27 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 <?php // A NOT_FOUND verdict here means the account changed between the
                       // list query and this render (e.g. it was offboarded a moment
                       // ago); drawing neither control is the safe, honest answer. ?>
+                <?php if ($roleVerdict === AccountGuard::ALLOW && $memberHere === true): ?>
+                    <?php
+                    // 🏷️ #516: a global administrator viewing a NON-member of
+                    //    the organisation open right now has nothing to grant
+                    //    here ($memberHere === false) — kept as a SEPARATE
+                    //    condition from $roleVerdict, because REACH_THIS_ORG
+                    //    alone does not know whether the row is even a member
+                    //    of this organisation to begin with.
+                    $heldIds = [];
+                    foreach ($holdingsByUser[$uid] ?? [] as $rid => $rname) {
+                        $heldIds[] = $rid;
+                    }
+                    ?>
+                    <button class="btn btn-sm btn-outline-secondary portal-roles-btn"
+                            data-bs-toggle="modal" data-bs-target="#rolesModal"
+                            data-uid="<?php echo $uid; ?>"
+                            data-name="<?php echo htmlspecialchars($user['fullName'] ?? '', ENT_QUOTES, 'UTF-8'); ?>"
+                            data-roles="<?php echo htmlspecialchars(implode(',', $heldIds), ENT_QUOTES, 'UTF-8'); ?>">
+                        <i class="fa-solid fa-user-tag me-1"></i>Roles
+                    </button>
+                <?php endif; ?>
             </div>
         </div>
     <?php endforeach; ?>
@@ -615,6 +665,66 @@ editUserModal.addEventListener('show.bs.modal', function (event) {
     if (rootEl !== null) {
         rootEl.checked = btn.getAttribute('data-rootadmin') === '1';
     }
+});
+</script>
+
+<!-- 🏷️ Roles Modal (#516) — one checkbox per role THIS organisation has -->
+<div class="modal fade" id="rolesModal" tabindex="-1" aria-labelledby="rolesLabel" aria-hidden="true">
+    <div class="modal-dialog modal-fullscreen-sm-down">
+        <div class="modal-content">
+            <form method="post" action="<?php echo htmlspecialchars(Site::url('admin/users/roles/save'), ENT_QUOTES, 'UTF-8'); ?>">
+                <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
+                <input type="hidden" name="userID" id="roles-userID">
+                <div class="modal-header">
+                    <?php $rolesModalSite = Site::current(); ?>
+                    <h5 class="modal-title" id="rolesLabel">
+                        <i class="fa-solid fa-user-tag me-1"></i>Roles for <span id="roles-name"></span>
+                        <?php if ($rolesModalSite !== null): ?>
+                            in <?php echo htmlspecialchars((string) $rolesModalSite['siteName'], ENT_QUOTES, 'UTF-8'); ?>
+                        <?php endif; ?>
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <?php if (count($allRoles) === 0): ?>
+                        <p class="text-muted mb-0">This organisation has no roles yet. Add one at <a href="<?php echo htmlspecialchars(Site::url('admin/roles'), ENT_QUOTES, 'UTF-8'); ?>">Admin &rarr; Roles</a>.</p>
+                    <?php else: ?>
+                        <?php foreach ($allRoles as $role): ?>
+                            <div class="form-check">
+                                <input class="form-check-input portal-role-checkbox" type="checkbox"
+                                       name="roles[]" value="<?php echo (int) $role['roleID']; ?>"
+                                       id="role-<?php echo (int) $role['roleID']; ?>">
+                                <label class="form-check-label" for="role-<?php echo (int) $role['roleID']; ?>">
+                                    <?php echo htmlspecialchars($role['roleName'], ENT_QUOTES, 'UTF-8'); ?>
+                                    <?php if (($role['description'] ?? null) !== null && $role['description'] !== ''): ?>
+                                        <br><small class="text-muted"><?php echo htmlspecialchars($role['description'], ENT_QUOTES, 'UTF-8'); ?></small>
+                                    <?php endif; ?>
+                                </label>
+                            </div>
+                        <?php endforeach; ?>
+                    <?php endif; ?>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary"><i class="fa-solid fa-floppy-disk me-1"></i>Save Roles</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- 📦 Roles modal population script (#516) -->
+<script>
+var rolesModal = document.getElementById('rolesModal');
+rolesModal.addEventListener('show.bs.modal', function (event) {
+    var btn = event.relatedTarget;
+    document.getElementById('roles-userID').value = btn.getAttribute('data-uid');
+    document.getElementById('roles-name').textContent = btn.getAttribute('data-name');
+    var heldCsv = btn.getAttribute('data-roles') || '';
+    var held = heldCsv.split(',').filter(function (v) { return v !== ''; });
+    document.querySelectorAll('.portal-role-checkbox').forEach(function (box) {
+        box.checked = held.indexOf(box.value) !== -1;
+    });
 });
 </script>
 

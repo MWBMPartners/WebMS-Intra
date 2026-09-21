@@ -153,7 +153,9 @@
  *    organisation A can still expose organisation B's members-only pages
  *    once that account is (legitimately) added to B. It also does not
  *    stop one administrator of an organisation taking over a FELLOW
- *    administrator of that SAME organisation — that is #516.
+ *    administrator of that SAME organisation — not addressed by #516
+ *    either (which is about roles, not administrator accounts); it needs
+ *    its own issue.
  *  - Account details and DBS records stay shared between organisations
  *    that both include the same person. This class only decides WHO may
  *    change them, not whether the underlying data itself is per
@@ -221,7 +223,7 @@ final class AccountGuard
     /** Showing an account. Also the first check run before any change. */
     public const REACH_VIEW = 'view';
 
-    /** The users API's `isSiteAdmin` flag on THIS organisation's own membership row. */
+    /** The users API's `isSiteAdmin` flag on THIS organisation's own membership row, and (#516) a role holding in THIS organisation. */
     public const REACH_THIS_ORG = 'this_org';
 
     /** Anything stored on the account itself: name, email, phone, password, on/off switch, DBS records. */

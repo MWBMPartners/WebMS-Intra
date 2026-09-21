@@ -14,6 +14,8 @@
 
 declare(strict_types=1);
 
+use Portal\Core\Roles;
+
 $pageTitle   = 'Help - Admin Guide';
 $pageSection = 'help';
 $breadcrumbs = ['Dashboard' => '/', 'Help' => '/help', 'Admin Guide' => ''];
@@ -316,9 +318,14 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <div class="portal-card p-4 mb-4" id="roles">
     <h2 class="h4 mb-3"><i class="fa-solid fa-users-gear me-2 text-primary"></i>User Roles</h2>
 
-    <p>The portal uses a role-based access control system. Each user can have one or more roles that determine what they can access.</p>
+    <p>
+        The portal uses a role-based access control system. Administrator and Root Administrator are given
+        by a checkbox on the account itself, and reach the whole portal. Every other role is an <strong>access
+        role, held per organisation</strong> (since #516) &mdash; a person can be Treasurer of one organisation
+        without being Treasurer of another they also belong to.
+    </p>
 
-    <h5 class="mt-3 mb-3">Built-in role levels</h5>
+    <h5 class="mt-3 mb-3">Standard User, Admin and Root Admin</h5>
 
     <div class="list-group list-group-flush mb-3">
         <div class="list-group-item d-flex gap-3 align-items-start">
@@ -326,20 +333,6 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <div>
                 <strong>Standard User</strong>
                 <p class="mb-0 small text-secondary">Can access the dashboard and any enabled apps. Can submit expense claims and view their own claims.</p>
-            </div>
-        </div>
-        <div class="list-group-item d-flex gap-3 align-items-start">
-            <span class="badge text-bg-warning rounded-pill mt-1"><i class="fa-solid fa-user-check"></i></span>
-            <div>
-                <strong>Approver</strong>
-                <p class="mb-0 small text-secondary">Can review and approve/reject expense claims in addition to standard user permissions.</p>
-            </div>
-        </div>
-        <div class="list-group-item d-flex gap-3 align-items-start">
-            <span class="badge text-bg-info rounded-pill mt-1"><i class="fa-solid fa-building-columns"></i></span>
-            <div>
-                <strong>Treasury</strong>
-                <p class="mb-0 small text-secondary">Can access the treasury dashboard and record reimbursements for approved claims.</p>
             </div>
         </div>
         <div class="list-group-item d-flex gap-3 align-items-start">
@@ -358,14 +351,50 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         </div>
     </div>
 
+    <h5 class="mt-4 mb-3">The standard access roles every organisation starts with</h5>
+
+    <p>
+        Every organisation gets the same starting set of roles, listed below straight from the code that
+        defines them &mdash; so this page can never drift out of date with what the portal actually offers.
+        An organisation may rename any of these to suit its own language (Admin &rarr; Roles), and may add
+        roles of its own; the description below always describes what the role is FOR, whatever it is
+        currently called.
+    </p>
+
+    <div class="list-group list-group-flush mb-3">
+        <?php foreach (Roles::STANDARD as $roleKey => $role): ?>
+            <div class="list-group-item d-flex gap-3 align-items-start">
+                <span class="badge text-bg-info rounded-pill mt-1"><i class="fa-solid fa-user-tag"></i></span>
+                <div>
+                    <strong><?php echo htmlspecialchars($role['label'], ENT_QUOTES, 'UTF-8'); ?></strong>
+                    <code class="ms-1 small text-secondary"><?php echo htmlspecialchars($roleKey, ENT_QUOTES, 'UTF-8'); ?></code>
+                    <p class="mb-0 small text-secondary"><?php echo htmlspecialchars($role['description'], ENT_QUOTES, 'UTF-8'); ?></p>
+                </div>
+            </div>
+        <?php endforeach; ?>
+    </div>
+
     <h5 class="mt-4 mb-3">How roles are assigned</h5>
 
-    <p>Roles are stored in the <code>tblUserRoles</code> table and linked to role definitions in <code>tblRoles</code>. The Admin and Root Admin flags are stored directly on the user record (<code>isAdmin</code>, <code>isRootAdmin</code> columns in <code>tblUsers</code>).</p>
+    <p>
+        A role is held per organisation, in the <code>tblUserRoles</code> table, linked to that
+        organisation's own copy of the role in <code>tblRoles</code>. Grant or remove a role for somebody
+        from the <strong>Roles</strong> button on their row at Admin &rarr; Users &mdash; available to any
+        administrator of the organisation currently open, or a global administrator anywhere. An
+        organisation's administrators rename roles, or add roles of their own, at
+        <strong>Admin &rarr; Roles</strong>. The Admin and Root Admin flags are different: they stay checkboxes
+        directly on the account itself (<code>isAdmin</code>, <code>isRootAdmin</code> columns in
+        <code>tblUsers</code>), not something granted per organisation.
+    </p>
 
     <div class="alert alert-info d-flex gap-2" role="alert">
         <i class="fa-solid fa-circle-info mt-1"></i>
         <div>
-            <strong>Note:</strong> Role assignment is currently managed at the database level. Contact your system administrator to change a user's role.
+            <strong>&ldquo;Roles awaiting placement&rdquo;.</strong> On a portal with more than one
+            organisation, a role that was written directly into the database by hand before this feature
+            existed cannot be placed automatically &mdash; a <strong>global administrator</strong> sees a
+            warning above the Users list whenever this has happened, with a link to place each one into the
+            right organisation. On an ordinary installation this never appears.
         </div>
     </div>
 

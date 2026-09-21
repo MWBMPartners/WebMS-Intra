@@ -125,16 +125,33 @@ CREATE TABLE IF NOT EXISTS `tblRoutes` (
 
 
 -- -----------------------------------------------------------------------------
--- 🏷️ tblRoles — role definitions (Admin, Treasurer, Developer, etc.)
+-- 🏷️ tblRoles — role definitions, ONE LIST PER ORGANISATION (#516)
 -- -----------------------------------------------------------------------------
+-- `siteID` defaults to 1 ONLY so the six older seed blocks further down this
+-- file (each written before this column existed, and each inserting only
+-- `roleKey`/`roleName`) land on organisation 1 — the portal's own first
+-- organisation, never a customer's address. Every write in the #516 build
+-- itself (`Roles::seedStandardSet()`, `admin/roles/save.php`) sets `siteID`
+-- explicitly, so nothing relies on that default beyond this file's own
+-- fold-in block further down (see "from 202_roles_per_organisation.sql").
+-- See migration 202's header for the full story of why roles moved from a
+-- portal-wide list to one list per organisation.
 CREATE TABLE IF NOT EXISTS `tblRoles` (
-    `roleID`   INT          NOT NULL AUTO_INCREMENT,
-    `roleKey`  VARCHAR(50)  COLLATE utf8mb4_general_ci NOT NULL
-               COMMENT 'Unique machine-readable role identifier',
-    `roleName` VARCHAR(100) COLLATE utf8mb4_general_ci NOT NULL
-               COMMENT 'Human-readable role name',
+    `roleID`      INT          NOT NULL AUTO_INCREMENT,
+    `siteID`      INT          NOT NULL DEFAULT 1
+                  COMMENT 'Which organisation this role belongs to (#516)',
+    `roleKey`     VARCHAR(50)  COLLATE utf8mb4_general_ci NOT NULL
+                  COMMENT 'Fixed machine-readable role identifier — what App::hasRole() and every workflow/report gate compares against. Never changes after creation.',
+    `roleName`    VARCHAR(100) COLLATE utf8mb4_general_ci NOT NULL
+                  COMMENT 'Human-readable role label — what a person sees. An organisation may rename this freely.',
+    `description` VARCHAR(255) COLLATE utf8mb4_general_ci DEFAULT NULL
+                  COMMENT 'One sentence shown under the label on the members page and Admin -> Roles',
+    `isStandard`  TINYINT(1)   NOT NULL DEFAULT 0
+                  COMMENT '1 = one of the fourteen roles every organisation starts with; can be renamed but never deleted',
     PRIMARY KEY (`roleID`),
-    UNIQUE KEY `roleKey` (`roleKey`)
+    UNIQUE KEY `uq_roles_site_key` (`siteID`,`roleKey`),
+    KEY `idx_roles_id_site` (`roleID`,`siteID`),
+    CONSTRAINT `fk_roles_site` FOREIGN KEY (`siteID`) REFERENCES `tblSites`(`siteID`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 
@@ -336,19 +353,70 @@ COMMENT='WebAuthn/PassKey credentials for passwordless authentication.';
 
 
 -- -----------------------------------------------------------------------------
--- 🏷️ tblUserRoles — many-to-many: users ↔ roles
+-- 🏷️ tblUserRoles — who holds which role, IN WHICH ORGANISATION (#516)
 -- -----------------------------------------------------------------------------
+-- `siteID` is required (never NULL) — holding a role always means holding it
+-- in ONE specific organisation. The two composite foreign keys below are
+-- what makes an invalid holding impossible at the database level, not just
+-- in application code: `fk_user_role_membership` refuses a holding for
+-- somebody who is not a member of that organisation, and
+-- `fk_user_role_role_site` refuses a holding that names another
+-- organisation's role. The two original single-column constraints
+-- (`tblUserRoles_ibfk_1`/`_2`, from before #516) are kept — redundant now
+-- that the composite ones exist, but harmless, and removing them here would
+-- only mean re-adding them in the migration for no benefit.
 CREATE TABLE IF NOT EXISTS `tblUserRoles` (
-    `userRoleID` INT NOT NULL AUTO_INCREMENT,
-    `userID`     INT NOT NULL,
-    `roleID`     INT NOT NULL,
+    `userRoleID`   INT NOT NULL AUTO_INCREMENT,
+    `userID`       INT NOT NULL,
+    `roleID`       INT NOT NULL,
+    `siteID`       INT NOT NULL
+                   COMMENT 'The organisation this holding applies to (#516) — must match the role''s own siteID',
+    `grantedAt`    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `grantedByID`  INT DEFAULT NULL
+                   COMMENT 'Who granted this holding, for the audit trail. NULL after the granter''s account is erased (GdprEraser).',
     PRIMARY KEY (`userRoleID`),
     KEY `userID` (`userID`),
     KEY `roleID` (`roleID`),
+    UNIQUE KEY `uq_user_role` (`userID`,`roleID`),
+    KEY `idx_user_role_site` (`userID`,`siteID`),
+    KEY `idx_user_role_role_site` (`roleID`,`siteID`),
+    KEY `idx_user_role_org` (`siteID`),
+    KEY `idx_user_role_granter` (`grantedByID`),
     CONSTRAINT `tblUserRoles_ibfk_1` FOREIGN KEY (`userID`)
         REFERENCES `tblUsers` (`userID`) ON DELETE CASCADE,
     CONSTRAINT `tblUserRoles_ibfk_2` FOREIGN KEY (`roleID`)
-        REFERENCES `tblRoles` (`roleID`) ON DELETE CASCADE
+        REFERENCES `tblRoles` (`roleID`) ON DELETE CASCADE,
+    CONSTRAINT `fk_user_role_membership` FOREIGN KEY (`userID`,`siteID`)
+        REFERENCES `tblUserSites` (`userID`,`siteID`) ON DELETE CASCADE,
+    CONSTRAINT `fk_user_role_role_site` FOREIGN KEY (`roleID`,`siteID`)
+        REFERENCES `tblRoles` (`roleID`,`siteID`) ON DELETE CASCADE,
+    CONSTRAINT `fk_user_role_site` FOREIGN KEY (`siteID`)
+        REFERENCES `tblSites` (`siteID`) ON DELETE CASCADE,
+    CONSTRAINT `fk_user_role_granter` FOREIGN KEY (`grantedByID`)
+        REFERENCES `tblUsers` (`userID`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+
+-- -----------------------------------------------------------------------------
+-- 🖊️ tblUserRolesUnplaced — a role holding migration 202 could not place
+--     automatically on a hand-edited database (#516) — the same "pen"
+--     shape as tblUsersUnplaced-style handling introduced for #533. A
+--     global administrator places each row by hand at
+--     /admin/users/roles-unplaced. Empty on every fresh install: there is
+--     nobody yet for this migration to have found anything to carry over.
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `tblUserRolesUnplaced` (
+    `unplacedID`         INT NOT NULL AUTO_INCREMENT,
+    `originalUserRoleID` INT NOT NULL
+                         COMMENT 'The tblUserRoles.userRoleID this was copied from, before that row was removed',
+    `userID`             INT NOT NULL,
+    `roleKey`            VARCHAR(50)  COLLATE utf8mb4_general_ci NOT NULL,
+    `roleName`           VARCHAR(100) COLLATE utf8mb4_general_ci NOT NULL,
+    `createdAt`          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`unplacedID`),
+    UNIQUE KEY `uq_unplaced_original` (`originalUserRoleID`),
+    KEY `idx_unplaced_user` (`userID`),
+    CONSTRAINT `fk_unplaced_user` FOREIGN KEY (`userID`) REFERENCES `tblUsers`(`userID`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 
@@ -8891,4 +8959,75 @@ ON DUPLICATE KEY UPDATE `filename` = `filename`;
 -- 201_drop_checkin_browser_description.sql for the guarded ALTER itself and
 -- the fuller reasoning.
 INSERT INTO `tblMigrations` (`filename`) VALUES ('201_drop_checkin_browser_description.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- ── from 202_roles_per_organisation.sql (#516) ────────────────────────────────
+-- The CREATE TABLE statements above (tblRoles, tblUserRoles,
+-- tblUserRolesUnplaced) already carry every column, key and constraint this
+-- migration adds — a fresh install never needs the guarded ALTER TABLE
+-- statements, only the DATA this migration seeds. Only the A9 seed (the
+-- standard fourteen-role set) and its marking UPDATE are repeated here,
+-- because `tblSites` already has its own row (organisation 1) by the time
+-- this file finishes running, so there is a real organisation to seed roles
+-- for. The dedupe, carry-over and pen-fill statements (steps B2-B5 in the
+-- migration) are DELIBERATELY NOT repeated: a database built fresh from this
+-- file has no `tblUserRoles` rows yet — there is nothing to carry over —
+-- exactly the same reasoning migration 199's own fold-in block above gives
+-- for skipping ITS data statements here.
+--
+-- Proven on a fresh install during this feature's own build: 14 roles for
+-- organisation 1, all 14 marked isStandard, 0 NULL descriptions, and the
+-- six older `INSERT INTO tblRoles (roleKey, roleName)` seed blocks earlier
+-- in this file (which land on organisation 1 through the column default)
+-- left with their existing labels completely untouched.
+INSERT INTO `tblRoles` (`siteID`, `roleKey`, `roleName`, `description`, `isStandard`)
+SELECT s.`siteID`, k.`roleKey`, k.`roleName`, k.`description`, 1
+FROM `tblSites` s
+CROSS JOIN (
+          SELECT 'treasurer' AS roleKey, 'Treasurer' AS roleName, 'Records giving, sees every expense claim and pays approved ones' AS description
+UNION ALL SELECT 'approver', 'Expense Approver', 'Approves or rejects expense claims'
+UNION ALL SELECT 'care_team', 'Care Team', 'Opens the confidential pastoral care register'
+UNION ALL SELECT 'kids_team', 'Kids Team', 'Runs children''s check-in and check-out'
+UNION ALL SELECT 'prayer_team', 'Prayer Team', 'Moderates prayer requests and can be assigned them'
+UNION ALL SELECT 'asset_manager', 'Asset Manager', 'Manages the asset register'
+UNION ALL SELECT 'venue_manager', 'Venue Manager', 'Manages venue bookings'
+UNION ALL SELECT 'announcement_approver', 'Announcement Approver', 'Approves announcements before they publish'
+UNION ALL SELECT 'groups_coordinator', 'Small Groups Coordinator', 'Manages every small group'
+UNION ALL SELECT 'stream_moderator', 'Stream Moderator', 'Moderates livestream chat'
+UNION ALL SELECT 'staff', 'Staff', 'Sees photos shared with staff'
+UNION ALL SELECT 'volunteer', 'Volunteer', 'Sees photos shared with volunteers'
+UNION ALL SELECT 'visitor_coordinator', 'Visitor Coordinator', 'Can be assigned first-time visitors to follow up'
+UNION ALL SELECT 'event_coordinator', 'Event Coordinator', 'An audience for newsletters, workflows, reminders and shared calendars. Coordinating a particular event is set on that event, not here.'
+) k
+WHERE NOT EXISTS (SELECT 1 FROM `tblRoles` r WHERE r.`siteID` = s.`siteID` AND r.`roleKey` = k.`roleKey`);
+
+UPDATE `tblRoles` r
+JOIN (
+          SELECT 'treasurer' AS roleKey, 'Records giving, sees every expense claim and pays approved ones' AS description
+UNION ALL SELECT 'approver', 'Approves or rejects expense claims'
+UNION ALL SELECT 'care_team', 'Opens the confidential pastoral care register'
+UNION ALL SELECT 'kids_team', 'Runs children''s check-in and check-out'
+UNION ALL SELECT 'prayer_team', 'Moderates prayer requests and can be assigned them'
+UNION ALL SELECT 'asset_manager', 'Manages the asset register'
+UNION ALL SELECT 'venue_manager', 'Manages venue bookings'
+UNION ALL SELECT 'announcement_approver', 'Approves announcements before they publish'
+UNION ALL SELECT 'groups_coordinator', 'Manages every small group'
+UNION ALL SELECT 'stream_moderator', 'Moderates livestream chat'
+UNION ALL SELECT 'staff', 'Sees photos shared with staff'
+UNION ALL SELECT 'volunteer', 'Sees photos shared with volunteers'
+UNION ALL SELECT 'visitor_coordinator', 'Can be assigned first-time visitors to follow up'
+UNION ALL SELECT 'event_coordinator', 'An audience for newsletters, workflows, reminders and shared calendars. Coordinating a particular event is set on that event, not here.'
+) k ON k.roleKey = r.`roleKey`
+SET r.`isStandard` = 1, r.`description` = COALESCE(r.`description`, k.description)
+WHERE r.`isStandard` = 0 OR r.`description` IS NULL;
+
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('admin/roles',                     'admin/roles/index.php',                1),
+    ('admin/roles/save',                'admin/roles/save.php',                 1),
+    ('admin/users/roles/save',          'admin/users/roles-save.php',           1),
+    ('admin/users/roles-unplaced',      'admin/users/roles-unplaced.php',       1),
+    ('admin/users/roles-unplaced/save', 'admin/users/roles-unplaced-save.php',  1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('202_roles_per_organisation.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;

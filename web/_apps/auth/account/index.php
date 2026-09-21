@@ -81,19 +81,23 @@ if ($stmt !== false) {
     }
 }
 
-// 🏷️ Fetch user roles
+// 🏷️ Fetch user roles, across EVERY organisation this person belongs to
+//    (#516 — a role now belongs to one organisation, so "Treasurer" alone
+//    would no longer say which organisation it applies to). Shown as
+//    "Treasurer — Organisation A" on this page.
 $roles = [];
 $roleStmt = $mysqli->prepare(
-    'SELECT R.roleName FROM tblUserRoles UR '
-    . 'JOIN tblRoles R ON R.roleID = UR.roleID '
-    . 'WHERE UR.userID = ? ORDER BY R.roleName'
+    'SELECT R.roleName, S.siteName FROM tblUserRoles UR '
+    . 'JOIN tblRoles R ON R.roleID = UR.roleID AND R.siteID = UR.siteID '
+    . 'JOIN tblSites S ON S.siteID = UR.siteID '
+    . 'WHERE UR.userID = ? ORDER BY S.siteName, R.roleName'
 );
 if ($roleStmt !== false) {
     $roleStmt->bind_param('i', $userId);
     $roleStmt->execute();
     $roleResult = $roleStmt->get_result();
     while ($roleRow = $roleResult->fetch_assoc()) {
-        $roles[] = $roleRow['roleName'];
+        $roles[] = $roleRow['roleName'] . ' — ' . $roleRow['siteName'];
     }
     $roleStmt->close();
 }

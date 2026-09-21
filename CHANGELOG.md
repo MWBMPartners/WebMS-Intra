@@ -2,6 +2,41 @@
 
 
 ## [Unreleased] (alpha)
+- feat(admin,core): roles now belong to one organisation each, and can
+  finally be given to somebody (#516). Before this, `tblRoles` was one
+  portal-wide list and NOTHING anywhere could ever put a row into
+  `tblUserRoles` — the members page showed a person's roles, the help page
+  described where they live, but no button, form or script could give
+  one, so every one of the 61 files (66 call sites) that call
+  `App::hasRole()` only ever answered yes for a global administrator.
+  Every organisation now gets its own copy of the same standard fourteen
+  roles (treasurer, expense approver, care team, kids team, prayer team,
+  asset manager, venue manager, announcement approver, small groups
+  coordinator, stream moderator, staff, volunteer, visitor coordinator,
+  event coordinator), may rename any of them, and may add roles of its
+  own — the internal KEY each of those 61 files looks up never changes,
+  only the LABEL a person sees. Holding a role is per organisation too:
+  treasurer of one organisation is not treasurer of another. Grant or
+  remove a role for somebody from the new "Roles" button on the Users
+  page (an administrator of the organisation currently open, or a global
+  administrator anywhere); rename or add roles at the new `/admin/roles`
+  page. New `Portal\Core\Roles` class is the one place that knows the
+  role tables, including `holdsSql()` — the exact SQL fragment #514's
+  calendar-import audience picker will call to ask "does this person hold
+  this role, in this organisation" directly inside a query. A hand-edited
+  database's existing role holdings are carried over the same careful way
+  #533 carries over accounts with no organisation: automatically where
+  the portal has exactly one organisation, listed at the new
+  `/admin/users/roles-unplaced` page for a global administrator to place
+  by hand everywhere else. GDPR lockstep in the same change: erasure,
+  the "what we hold about you" export and the personal-data catalogue all
+  cover the new tables. Migration 202 (`tblRoles` gains `siteID`,
+  `isStandard`, `description`; `tblUserRoles` gains `siteID`,
+  `grantedAt`, `grantedByID`; new `tblUserRolesUnplaced` pen table), plus
+  a new automatic check (`check_role_keys.py`) that fails the build if
+  the standard role list, the migration's seed and the fresh-install
+  fold-in ever disagree with each other or with what the code actually
+  asks for.
 - fix(core): a global administrator only, not any administrator, now walks
   past the closed sign while the portal is in maintenance mode (owner
   decision, 20 September 2026). Before this, `Maintenance::

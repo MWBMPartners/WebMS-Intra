@@ -350,40 +350,24 @@ class Gatekeeper
     }
 
     /**
-     * Check tblUserRoles against allowed roleKey list.
+     * Check the allowed roleKey list against every organisation this user
+     * belongs to (#516).
+     *
+     * WHY "ANYWHERE", NOT "IN THE ORGANISATION OPEN RIGHT NOW": the
+     * pre-release channel gate this backs (`portal.devAccessRoles`) is a
+     * PORTAL-WIDE setting, not scoped to one organisation — a developer
+     * with the right role in ANY one of their organisations should be able
+     * to reach a non-production channel, the same as `isAdmin`/
+     * `isRootAdmin` already work portal-wide two lines above this call.
+     * This is the owner's explicit decision for #516 (plan section 3, Q3),
+     * and is why this delegates to `Roles::hasAnywhere()` rather than
+     * `Roles::has()`, which would need one particular organisation to be
+     * "open" — something a channel gate running before routing even starts
+     * cannot assume.
      */
     private static function userHasRole(int $userId, array $roleKeys): bool
     {
-        if (count($roleKeys) === 0) {
-            return false;
-        }
-
         global $mysqli;
-
-        $placeholders = implode(',', array_fill(0, count($roleKeys), '?'));
-        $types        = 'i' . str_repeat('s', count($roleKeys));
-        $sql          = 'SELECT 1 FROM tblUserRoles UR '
-                      . 'JOIN tblRoles R ON R.roleID = UR.roleID '
-                      . 'WHERE UR.userID = ? AND R.roleKey IN (' . $placeholders . ') LIMIT 1';
-
-        $stmt = $mysqli->prepare($sql);
-        if ($stmt === false) {
-            return false;
-        }
-
-        // Build bind params dynamically
-        $bindParams = array_merge([$types], [$userId], $roleKeys);
-        $ref        = [];
-        foreach ($bindParams as $k => $_unused) {
-            $ref[$k] = &$bindParams[$k];
-        }
-        call_user_func_array([$stmt, 'bind_param'], $ref);
-
-        $stmt->execute();
-        $stmt->store_result();
-        $has = $stmt->num_rows > 0;
-        $stmt->close();
-
-        return $has;
+        return Roles::hasAnywhere($mysqli, $userId, $roleKeys);
     }
 }

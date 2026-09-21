@@ -135,6 +135,7 @@ ALLOWED: dict[str, str] = {
     "_core/Auth.php": "sign-in: updates the signed-in person's own record, links and devices, and adds a new single-sign-on account to the organisation where they signed in",
     "_core/I18n.php": "own language choice",
     "_core/Ical.php": "own calendar token",
+    "_core/Roles.php": "helper only — every caller decides reach first (admin/users/roles-save.php runs AccountGuard::check(); roles-unplaced-save.php and admin/sites/save.php are for global/organisation administrators); see the class docblock",
 }
 
 

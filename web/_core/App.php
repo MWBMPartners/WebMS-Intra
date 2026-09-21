@@ -395,11 +395,27 @@ class App
     }
 
     /**
-     * Check if the current user has a specific role.
+     * Check if the current user has a specific role, IN THE ORGANISATION
+     * THAT IS OPEN RIGHT NOW (#516).
      *
-     * @param string $roleKey The role key to check (e.g. "admin", "treasurer")
+     * WHAT WAS WRONG BEFORE #516: `tblRoles` used to be one portal-wide
+     * list, so this method asked "does this person hold this role
+     * anywhere" — a treasurer of Organisation A was answered yes for
+     * Organisation B too, because the query never looked at an
+     * organisation at all (proven during the #516 build: 200 in BOTH
+     * organisations with a single hand-inserted row). Roles now belong to
+     * one organisation each, and `Roles::has()` answers strictly for
+     * `Site::id()` — the organisation open right now — which is the
+     * correct scope for every one of the 66 call sites, across 61 files,
+     * that call this method.
      *
-     * @return bool True if the user has the specified role
+     * The role KEY is compared case-insensitively at the database
+     * (`Roles::has()` normalises it before the query), so a hand-typed key
+     * such as 'Approver' still matches the stored 'approver' row.
+     *
+     * @param string $roleKey The role key to check (e.g. "treasurer") — always the fixed KEY, never the label a person sees.
+     *
+     * @return bool True if the user holds the specified role in the open organisation.
      */
     public static function hasRole(string $roleKey): bool
     {
@@ -408,7 +424,9 @@ class App
             return false;
         }
 
-        // 🔑 Root admin has all roles implicitly
+        // 🔑 Root admin has all roles implicitly, everywhere — unchanged by
+        //    #516 (a global administrator is still given every role in
+        //    every organisation without a row for any of them).
         //    🔢 Was `$user['isRootAdmin'] === '1'`. The flag arrives as the
         //    whole number 1, so this shortcut never fired and a global
         //    administrator only had the roles written against their own name.
@@ -417,25 +435,7 @@ class App
             return true;
         }
 
-        // 🔍 Check tblUserRoles for the specific role
-        $db   = self::db();
-        $stmt = $db->prepare(
-            'SELECT 1 FROM tblUserRoles UR '
-            . 'JOIN tblRoles R ON R.roleID = UR.roleID '
-            . 'WHERE UR.userID = ? AND R.roleKey = ? LIMIT 1'
-        );
-        if ($stmt === false) {
-            return false;
-        }
-
-        $userId = (int) $user['userID'];
-        $stmt->bind_param('is', $userId, $roleKey);
-        $stmt->execute();
-        $stmt->store_result();
-        $has = $stmt->num_rows > 0;
-        $stmt->close();
-
-        return $has;
+        return Roles::has(self::db(), (int) $user['userID'], Site::id(), $roleKey);
     }
 
     /**

@@ -95,8 +95,13 @@ class Newsletter
 
         if (isset($rule['roles']) === true && is_array($rule['roles']) === true && count($rule['roles']) > 0) {
             $placeholders = implode(',', array_fill(0, count($rule['roles']), '?'));
-            $sql .= 'INNER JOIN tblUserRoles ur ON ur.userID = u.userID '
-                .  'INNER JOIN tblRoles r ON r.roleID = ur.roleID ';
+            // 🏷️ #516: tblUserSites (aliased `us` earlier in this method) is
+            //    already joined on `us.siteID = ?`, so tblUserRoles is tied
+            //    to it here and tblRoles to tblUserRoles, otherwise a role
+            //    held in a DIFFERENT organisation would count towards this
+            //    segment.
+            $sql .= 'INNER JOIN tblUserRoles ur ON ur.userID = u.userID AND ur.siteID = us.siteID '
+                .  'INNER JOIN tblRoles r ON r.roleID = ur.roleID AND r.siteID = ur.siteID ';
             $where .= ' AND r.roleKey IN (' . $placeholders . ')';
             foreach ($rule['roles'] as $rk) {
                 $types .= 's';

@@ -523,6 +523,16 @@ $keysLiveNow = ReservedKeys::keysAreAddresses();
                 </a>
             </div>
             <div class="col-6 col-md-4 col-lg-2">
+                <!-- 🏷️ #516: roles held per organisation — grant on the Users
+                     page, rename/add here. New link, so it uses Site::url()
+                     rather than the bare "/admin/roles" the tiles around it
+                     still use (#536, not fixed by this package). -->
+                <a href="<?php echo htmlspecialchars(Site::url('admin/roles'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-primary w-100 d-flex flex-column align-items-center gap-1 py-3">
+                    <i class="fa-solid fa-user-tag fa-lg"></i>
+                    <span class="small">Roles</span>
+                </a>
+            </div>
+            <div class="col-6 col-md-4 col-lg-2">
                 <a href="/admin/migrations" class="btn btn-outline-warning w-100 d-flex flex-column align-items-center gap-1 py-3">
                     <i class="fa-solid fa-database fa-lg"></i>
                     <span class="small">Migrations</span>

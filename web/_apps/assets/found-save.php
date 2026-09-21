@@ -268,8 +268,11 @@ try {
     $mStmt = $db->prepare(
         'SELECT DISTINCT u.emailAddress AS email, u.fullName FROM tblUsers u '
         . 'INNER JOIN tblUserSites us ON us.userID = u.userID AND us.siteID = ? AND us.isActive = 1 '
-        . 'LEFT JOIN tblUserRoles ur ON ur.userID = u.userID '
-        . 'LEFT JOIN tblRoles r ON r.roleID = ur.roleID '
+        // 🏷️ #516: tblUserSites joined first, so tblUserRoles ties to it
+        // and tblRoles to tblUserRoles — an asset_manager held in a
+        // DIFFERENT organisation must not be notified about a find here.
+        . 'LEFT JOIN tblUserRoles ur ON ur.userID = u.userID AND ur.siteID = us.siteID '
+        . 'LEFT JOIN tblRoles r ON r.roleID = ur.roleID AND r.siteID = ur.siteID '
         . 'WHERE u.isActive = 1 AND u.emailAddress IS NOT NULL AND u.emailAddress != "" '
         . 'AND (u.isAdmin = 1 OR r.roleKey = ?)'
     );

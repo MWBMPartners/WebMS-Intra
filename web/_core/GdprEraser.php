@@ -96,6 +96,19 @@ class GdprEraser
             ['table' => 'tblPasswordResets',   'userCol' => 'userID', 'action' => 'delete'],
             ['table' => 'tblUserSites',        'userCol' => 'userID', 'action' => 'delete'],
             ['table' => 'tblUserRoles',        'userCol' => 'userID', 'action' => 'delete'],
+            // #516 — a role holding names WHO GRANTED IT (grantedByID) as
+            // well as who holds it. The row above already removes every
+            // holding belonging to the erased person; this second entry
+            // handles the DIFFERENT case — a holding that belongs to
+            // SOMEBODY ELSE, which this person happened to grant. That
+            // holding stays (it is about the holder, not the granter);
+            // only the "who granted it" attribution is detached.
+            ['table' => 'tblUserRoles',        'userCol' => 'grantedByID', 'action' => 'anonymise', 'nullCols' => [], 'reason' => 'the holding stays (it is about the holder, not the granter); who granted it is detached'],
+            // #516 — a role key parked in the pen, waiting for a global
+            // administrator to place it. About the person themselves, so
+            // it is removed outright, the same as the holding it was
+            // copied from would have been.
+            ['table' => 'tblUserRolesUnplaced', 'userCol' => 'userID', 'action' => 'delete'],
             ['table' => 'tblUserSmsPreference','userCol' => 'userID', 'action' => 'delete'],
             ['table' => 'tblNewsletterSubscription','userCol' => 'userID', 'action' => 'delete'],
             ['table' => 'tblPaymentMethod',    'userCol' => 'userID', 'action' => 'delete'],

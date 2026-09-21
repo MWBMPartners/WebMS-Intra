@@ -530,7 +530,12 @@ class Workflow
         $stmt->execute();
         $result = $stmt->get_result();
 
-        $roleKeys = $isAdmin === true ? [] : self::userRoleKeys($db, $userId);
+        // 🏷️ #516: roles now belong to one organisation each, so "which
+        //    roles does this user hold" must be asked FOR THIS SITE — the
+        //    private userRoleKeys() helper this used to call read
+        //    portal-wide, which would have shown this user every step
+        //    assigned to a role they hold in a DIFFERENT organisation.
+        $roleKeys = $isAdmin === true ? [] : Roles::keysHeldBy($db, $userId, $siteId);
         $groupIds = $isAdmin === true ? [] : self::userGroupIds($db, $userId);
 
         $seen = [];
@@ -552,7 +557,7 @@ class Workflow
             $isActionable = false;
             if ($atype === 'user' && $aval !== '' && (int) $aval === $userId) {
                 $isActionable = true;
-            } elseif ($atype === 'role' && in_array($aval, $roleKeys, true) === true) {
+            } elseif ($atype === 'role' && in_array(Roles::normaliseKey($aval), $roleKeys, true) === true) {
                 $isActionable = true;
             } elseif ($atype === 'group' && $aval !== '' && in_array((int) $aval, $groupIds, true) === true) {
                 $isActionable = true;
@@ -1003,16 +1008,11 @@ class Workflow
         if ($assigneeType === 'user' && $assigneeValue !== '') {
             $isAssignee = ((int) $assigneeValue === $actorId);
         } elseif ($assigneeType === 'role' && $assigneeValue !== '') {
-            $stmt = $db->prepare(
-                'SELECT 1 FROM tblUserRoles ur JOIN tblRoles r ON r.roleID = ur.roleID '
-                . 'WHERE ur.userID = ? AND r.roleKey = ? LIMIT 1'
-            );
-            if ($stmt !== false) {
-                $stmt->bind_param('is', $actorId, $assigneeValue);
-                $stmt->execute();
-                $isAssignee = $stmt->get_result()->fetch_assoc() !== null;
-                $stmt->close();
-            }
+            // 🏷️ #516: was a bare, portal-wide tblUserRoles/tblRoles join —
+            //    replaced with Roles::has(), which scopes the check to
+            //    THIS instance's own organisation, so a role held in a
+            //    different organisation can no longer act here.
+            $isAssignee = Roles::has($db, $actorId, $siteId, $assigneeValue);
         } elseif ($assigneeType === 'group' && $assigneeValue !== '') {
             $groupId = (int) $assigneeValue;
             $stmt = $db->prepare('SELECT 1 FROM tblUserGroups WHERE userID = ? AND groupID = ? LIMIT 1');
@@ -1149,11 +1149,16 @@ class Workflow
                 $stmt->close();
             }
         } elseif ($assigneeType === 'role' && $assigneeValue !== '') {
+            // 🏷️ #516: tblUserSites is joined first here, so tblUserRoles
+            //    is tied to it (AND ur.siteID = us.siteID) and tblRoles to
+            //    tblUserRoles (AND r.siteID = ur.siteID) — otherwise a
+            //    holder of this role in ANY organisation would be notified
+            //    for an instance in this one.
             $stmt = $db->prepare(
                 'SELECT DISTINCT u.userID, u.emailAddress, u.notifyPrefs FROM tblUsers u '
                 . 'JOIN tblUserSites us ON us.userID = u.userID AND us.siteID = ? AND us.isActive = 1 '
-                . 'JOIN tblUserRoles ur ON ur.userID = u.userID '
-                . 'JOIN tblRoles r ON r.roleID = ur.roleID '
+                . 'JOIN tblUserRoles ur ON ur.userID = u.userID AND ur.siteID = us.siteID '
+                . 'JOIN tblRoles r ON r.roleID = ur.roleID AND r.siteID = ur.siteID '
                 . 'WHERE u.isActive = 1 AND r.roleKey = ?'
             );
             if ($stmt !== false) {
@@ -1541,22 +1546,11 @@ class Workflow
         return $exists;
     }
 
-    /** @return list<string> roleKeys the user holds. */
-    private static function userRoleKeys(mysqli $db, int $userId): array
-    {
-        $keys = [];
-        $stmt = $db->prepare('SELECT r.roleKey FROM tblUserRoles ur JOIN tblRoles r ON r.roleID = ur.roleID WHERE ur.userID = ?');
-        if ($stmt !== false) {
-            $stmt->bind_param('i', $userId);
-            $stmt->execute();
-            $result = $stmt->get_result();
-            while ($row = $result->fetch_assoc()) {
-                $keys[] = (string) $row['roleKey'];
-            }
-            $stmt->close();
-        }
-        return $keys;
-    }
+    // 🏷️ #516: userRoleKeys() used to live here (a bare, portal-wide
+    //    tblUserRoles/tblRoles join). Removed — every caller now uses
+    //    Roles::keysHeldBy($db, $userId, $siteId), which is scoped to one
+    //    organisation, the way every role lookup must be since roles
+    //    stopped being portal-wide.
 
     /** @return list<int> groupIDs the user belongs to. */
     private static function userGroupIds(mysqli $db, int $userId): array

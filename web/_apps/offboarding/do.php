@@ -150,7 +150,12 @@ try {
         [$effective, $userId], 'si'
     );
 
-    // 6. Remove user role assignments.
+    // 6. Remove EVERY role holding, in EVERY organisation (#516: a role now
+    //    belongs to one organisation, but offboarding ends every
+    //    membership this person has, everywhere — see
+    //    admin/sites/users.php for the "leave ONE organisation" case,
+    //    where the composite foreign key on tblUserRoles removes only that
+    //    organisation's holdings when the membership row is deleted).
     $run('delete_user_roles',
         'DELETE FROM tblUserRoles WHERE userID = ?',
         [$userId], 'i'

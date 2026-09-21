@@ -68,10 +68,13 @@ $coordRole = (string) (App::settings()['visitors']['coordinator_role'] ?? 'visit
 $users     = [];
 if ($coordRole !== '') {
     $stmt = $db->prepare(
+        // 🏷️ #516: tblRoles is tied to tblUserRoles (r.siteID = ur.siteID)
+        // and tblUserSites (joined after) is tied back to both — see
+        // new.php's matching coordinator picker for the full reasoning.
         'SELECT DISTINCT u.userID, u.fullName FROM tblUsers u '
         . 'INNER JOIN tblUserRoles ur ON ur.userID = u.userID '
-        . 'INNER JOIN tblRoles r ON r.roleID = ur.roleID AND r.roleKey = ? '
-        . 'INNER JOIN tblUserSites us ON us.userID = u.userID AND us.siteID = ? AND us.isActive = 1 '
+        . 'INNER JOIN tblRoles r ON r.roleID = ur.roleID AND r.siteID = ur.siteID AND r.roleKey = ? '
+        . 'INNER JOIN tblUserSites us ON us.userID = u.userID AND us.siteID = ? AND us.isActive = 1 AND us.siteID = ur.siteID '
         . 'WHERE u.isActive = 1 ORDER BY u.fullName'
     );
     if ($stmt !== false) {

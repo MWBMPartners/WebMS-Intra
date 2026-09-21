@@ -221,10 +221,13 @@ function resolveMilestoneDigestRecipients(\mysqli $db, int $siteId, string $csv)
     }
 
     $placeholders = implode(',', array_fill(0, count($roleKeys), '?'));
+    // 🏷️ #516: tblUserSites joined first, so tblUserRoles ties to it and
+    // tblRoles to tblUserRoles — a role held in a DIFFERENT organisation
+    // must not be emailed about THIS organisation's reminder.
     $sql = 'SELECT DISTINCT u.emailAddress AS email FROM tblUsers u '
         . 'INNER JOIN tblUserSites us ON us.userID = u.userID AND us.siteID = ? AND us.isActive = 1 '
-        . 'INNER JOIN tblUserRoles ur ON ur.userID = u.userID '
-        . 'INNER JOIN tblRoles r ON r.roleID = ur.roleID '
+        . 'INNER JOIN tblUserRoles ur ON ur.userID = u.userID AND ur.siteID = us.siteID '
+        . 'INNER JOIN tblRoles r ON r.roleID = ur.roleID AND r.siteID = ur.siteID '
         . "WHERE u.isActive = 1 AND u.emailAddress IS NOT NULL AND u.emailAddress != '' "
         . "AND r.roleKey IN ({$placeholders})";
     $stmt = $db->prepare($sql);

@@ -926,7 +926,7 @@
       },
       "UserCreate": {
         "type": "object",
-        "description": "Passwords are NEVER accepted here — the new account gets a random, unusable password hash and must go through the existing forgot-password flow to set a real one. `isAdmin` (portal-wide) is honoured in session mode only — a bearer key can never mint a portal admin, even with `users:write`; use `isSiteAdmin` (site-scoped) instead. #456 Chunk B: a member's Directory home coordinates/what3words (`latitude`/`longitude`/`what3words`/`visibilityCoords`, migration 181) are never readable or writable via this API in any mode — a deliberate safest-floor stance, since a bearer/session API caller has no per-viewer visibility-tier context to apply the member's own `visibilityCoords` gate against.",
+        "description": "Passwords are NEVER accepted here — the new account gets a random, unusable password hash and must go through the existing forgot-password flow to set a real one. `isAdmin` (portal-wide) is honoured in session mode only — a bearer key can never mint a portal admin, even with `users:write`; use `isSiteAdmin` (site-scoped) instead. #456 Chunk B: a member's Directory home coordinates/what3words (`latitude`/`longitude`/`what3words`/`visibilityCoords`, migration 181) are never readable or writable via this API in any mode — a deliberate safest-floor stance, since a bearer/session API caller has no per-viewer visibility-tier context to apply the member's own `visibilityCoords` gate against. #516: role holdings (`tblUserRoles`) are likewise never readable or writable through this API in any mode — grant or remove a role from the members page or Admin -> Roles instead.",
         "required": [
           "emailAddress",
           "fullName"

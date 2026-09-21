@@ -227,13 +227,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $invoiceDueLeadDays  = max(0, min(3650, (int) ($_POST['invoice_due_lead_days'] ?? 7)));
     $remindersEnabled    = isset($_POST['reminders_enabled']) === true ? '1' : '0';
 
-    // 🎭 reminder_roles — CSV of valid tblRoles.roleKey values only.
+    // 🎭 reminder_roles — CSV of valid tblRoles.roleKey values only, scoped
+    //    to THIS organisation's own role list (#516 — roles are no longer
+    //    portal-wide, so a role key from a DIFFERENT organisation must not
+    //    be accepted here).
     $validRoleKeys = [];
-    $roleResult = $db->query('SELECT roleKey FROM tblRoles ORDER BY roleName');
-    if ($roleResult !== false) {
+    $roleStmt = $db->prepare('SELECT roleKey FROM tblRoles WHERE siteID = ? ORDER BY roleName');
+    if ($roleStmt !== false) {
+        $roleStmt->bind_param('i', $siteId);
+        $roleStmt->execute();
+        $roleResult = $roleStmt->get_result();
         while ($r = $roleResult->fetch_assoc()) {
             $validRoleKeys[] = (string) $r['roleKey'];
         }
+        $roleStmt->close();
     }
     $postedRoles = array_filter((array) ($_POST['reminder_roles'] ?? []), static fn ($v): bool => is_string($v) === true);
     $chosenRoles = array_values(array_intersect($validRoleKeys, $postedRoles));
@@ -258,11 +265,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 // 🖼️ GET — render current effective values for this site.
 $activeVenues = Venues::listVenues($siteId, true);
 $roles = [];
-$roleResult = $db->query('SELECT roleKey, roleName FROM tblRoles ORDER BY roleName');
-if ($roleResult !== false) {
+// 🏷️ #516: scoped to THIS organisation's own roles — the picker used to
+//    offer every organisation's role keys, including ones this
+//    organisation cannot possibly hold a member of.
+$roleGetStmt = $db->prepare('SELECT roleKey, roleName FROM tblRoles WHERE siteID = ? ORDER BY roleName');
+if ($roleGetStmt !== false) {
+    $roleGetStmt->bind_param('i', $siteId);
+    $roleGetStmt->execute();
+    $roleResult = $roleGetStmt->get_result();
     while ($r = $roleResult->fetch_assoc()) {
         $roles[] = $r;
     }
+    $roleGetStmt->close();
 }
 
 $calendarDefaultVenue = (int) Settings::get('venues.calendar_default_venue', '0');

@@ -1314,12 +1314,16 @@ To grant a non-admin user access to the dev site:
 1. Go to **Settings** in the portal admin UI
 2. Find or create the setting `portal.devAccessRoles`
 3. Set the value to a comma-separated list of role keys, e.g.: `Developer,Tester`
-4. Ensure the user has the matching role assigned in `tblUserRoles`
+4. Grant the user that role on the Users page (the "Roles" button on their row) — since
+   roles belong to one organisation each (#516), this gate deliberately reads it
+   differently from an ordinary `App::hasRole()` check: it counts a role held in **ANY**
+   organisation the user belongs to (`Roles::hasAnywhere()`), because `portal.devAccessRoles`
+   is itself a portal-wide setting, not scoped to one organisation
 
 This approach is better than `.htaccess` because:
 
 - Uses the same SSO login (no separate passwords to manage)
-- Role-based (grant/revoke via DB, not file editing)
+- Role-based (grant/revoke via the Users page, not file editing)
 - Audit trail (denied access is logged via Logger)
 - Consistent UX with the rest of the portal
 
@@ -5796,6 +5800,90 @@ explicitly passed in as a function parameter from a caller that itself
 has `$mysqli`. `web/_apps/announcements/_workflow-gate.php` is a correct
 example of the second pattern — it takes the connection as a parameter
 rather than assuming a global variable exists — and is not a bug.
+
+---
+
+## Roles per organisation (#516)
+
+Before this, `tblRoles` was one list for the whole portal, and **nothing anywhere could ever put
+a row into `tblUserRoles`** — the members page showed a person's roles and the help page
+described where they live, but no button, form or script could give one. Every one of the 61
+files (66 call sites) that call `App::hasRole()`, plus `App.php` itself, only ever answered yes
+for a global administrator, because a global administrator is given every role automatically and
+nobody else could ever be given anything.
+
+### The key/label split — why a rename can never break a role check
+
+Every role row has always carried two names: `roleKey` (a short, fixed, lower-case word such as
+`treasurer` — what the CODE compares against) and `roleName` (the label a person sees). This did
+not change. What changed is that `(siteID, roleKey)` is now the unique pair, instead of `roleKey`
+alone — so each organisation has its OWN `treasurer` row, and may rename its own `roleName`
+freely without touching the key any of the 61 files look up.
+
+### Everything is per organisation, including the list itself
+
+Each organisation gets the same standard fourteen roles a new organisation is seeded with
+(`Portal\Core\Roles::STANDARD`), may rename any of them, and may add roles of its own. A holding
+in `tblUserRoles` names both the account AND the organisation — treasurer of Organisation A is
+not treasurer of Organisation B. `App::hasRole()` now answers strictly for `Site::id()`, the
+organisation open right now.
+
+### `Portal\Core\Roles` — granting, revoking, seeding and the shared role lookups
+
+`web/_core/Roles.php` owns granting, revoking and seeding roles, and the shared "does this person
+hold this role here" lookups. It is not the only code that touches `tblRoles`/`tblUserRoles`:
+the role-list page (`web/_apps/admin/roles/save.php`) writes `tblRoles` itself, and about a dozen
+hand-written queries elsewhere still read both tables directly, each repeating the
+per-organisation join rule by hand. Change that rule and you must change those sites too;
+searching for `tblUserRoles` finds them. The one method worth knowing about beyond the obvious
+`has()`/`grant()`/`revoke()`:
+
+- `Roles::holdsSql(string $userExpr, string $roleIdExpr, string $siteExpr): string` — builds the
+  exact `EXISTS (...)` SQL fragment a caller can drop straight into a hand-written WHERE clause,
+  for a caller (starting with #514's calendar-import audience query) that needs "does this
+  person hold this role" as part of a bigger query rather than as a separate PHP call. Every
+  argument must be a plain, developer-written identifier or the literal `?` — never
+  request-derived — checked BEFORE anything else runs, so a bad argument throws with no database
+  connection needed at all.
+
+### Who may grant a role, and the refusal shape
+
+Granting or removing a role for a specific account is an `AccountGuard`-guarded action —
+`AccountGuard::REACH_THIS_ORG`, the same reach a membership row's `isSiteAdmin` flag already
+uses. An administrator of the organisation currently open may grant a role within their own
+organisation; a global administrator may do it anywhere. A refusal looks and costs exactly the
+same as an account that does not exist (the standing #503 rule) — see
+`web/_apps/admin/users/roles-save.php`. Managing the LIST itself (rename, add, delete) is a
+plainer `App::isAdmin()` gate — see `web/_apps/admin/roles/save.php` — because no particular
+account is being changed.
+
+### The pen — `tblUserRolesUnplaced`
+
+`tblUserRoles` had no organisation column before migration 202. A hand-edited database (there
+should be none on a real installation — this only matters if somebody wrote a row in directly
+before this feature existed) might hold a role that cannot be placed automatically. The migration
+places it automatically ONLY where doing so is not a guess (a single-organisation portal, or a
+multi-organisation one holding exactly one organisation row — the exact #533 reasoning) and
+otherwise copies it into `tblUserRolesUnplaced` for a global administrator to place by hand at
+`/admin/users/roles-unplaced` — the same shape `/admin/users/unplaced` already proved for
+accounts with no organisation at all.
+
+### `check_role_keys.py` — what it protects, and what it cannot see
+
+The standard fourteen roles exist in three places that have to agree: `Roles::STANDARD`, the A9
+seed in `202_roles_per_organisation.sql`, and the matching fold-in block in `full_schema.sql`.
+`tools/audit-checks/check_role_keys.py` compares all three, plus every place in the code that
+names a role key by a fixed string literal (`hasRole('...')`, `Giving::ROLE_KEY`, a
+`ReportRegistry` `'gates'` entry, the `visitors.coordinator_role` setting default). It **cannot**
+see a role key read from a variable (`hasRole($variable)`, `ReportRegistry::callerPassesGates()`'s
+own run-time comparison), a key typed into a saved workflow step or newsletter segment (data, not
+code), or anything referenced only from JavaScript.
+
+### What #514 gets from this
+
+`Roles::holdsSql('V', 'am.refID', 'E.siteID')` is the exact call #514's calendar-import audience
+picker uses to ask "is this person in role R for organisation S" inside a database query, without
+needing to know this class's table names or join shape.
 
 ---
 

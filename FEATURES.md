@@ -117,6 +117,7 @@ Central operations hub for admins / site admins.
 | --- | --- |
 | `/admin` | Dashboard with summary cards (errors, users, activity, pending migrations) |
 | `/admin/users` + `/users/import` + `/users/export` | User CRUD + CSV bulk import + export |
+| `/admin/roles` | **Roles per organisation (#516)** — rename any of the fourteen standard roles or add roles of your own; grant or remove a role for somebody from the "Roles" button on the Users page; the internal key a role is looked up by never changes, only the label |
 | `/admin/errors` | Error log viewer (`tblErrors`) |
 | `/admin/activity` + `/activity/export` | Activity log viewer + CSV export |
 | `/admin/audit` | Before/after change tracking (#91) |

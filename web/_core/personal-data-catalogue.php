@@ -545,7 +545,12 @@ return [
     ],
     'tblUserRoles' => [
         'decision' => 'erase',
-        'reason'   => 'Holds information about the person themselves',
+        'reason'   => "Which role somebody holds, and in which organisation - that is about them, so it goes. The table also carries grantedByID, saying who gave them the role; that is a separate instruction (#516), and it only removes the name.",
+        'columns'  => ['userID'],
+    ],
+    'tblUserRolesUnplaced' => [
+        'decision' => 'erase',
+        'reason'   => 'A parked role key waiting for a global administrator to place it; about the person themselves',
         'columns'  => ['userID'],
     ],
     'tblUserSites' => [
