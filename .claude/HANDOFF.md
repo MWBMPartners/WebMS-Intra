@@ -23,10 +23,13 @@ has no such value; MySQL error 1265; #73 promised the migration and closed witho
 open a claim). **Default placement: both with #534-#536 and #539 after the #514 build, like #539. Not yet confirmed by the owner.**
 Also recorded, not raised: the older portal-wide `tblUsers.isAdmin` flag opens every organisation's treasury, as on every other page.
 
-**Alpha's copy of `actions: read`** is written in the working tree (`.github/workflows/php-static-analysis.yml`), byte-identical to
-production, with alpha's existing upload-step comment reconciled. Its independent check is running. Commit it, then **relaunch #517**:
-`Workflow({scriptPath: ".claude-work/resume/wf-517.js"})`. The stopped run `wf_11f8fb60-55d` had finished nothing, so a fresh run
-loses nothing.
+**Alpha's copy of `actions: read` is DONE: `26aa70d`**, byte-identical to production, with alpha's existing upload-step comment
+reconciled (two review rounds, the second clean). **The whole Dependabot request is now finished.** Note for the owner: alpha's
+EXISTING step-level `continue-on-error` on the Psalm upload (from #463/#464) will travel to beta and main at the next promotion; the
+"dropped for good" note above is about NEW flags only.
+
+**12:05 — #517 RELAUNCHED** as a fresh run of `.claude-work/resume/wf-517.js` (the stopped run `wf_11f8fb60-55d` had finished
+nothing). It stops after planning if the owner has questions.
 
 **NEW ORDER:** alpha permission commit -> #517 -> Fable review of the #514 plan -> #514 build (one commit per part) -> #534, #535,
 #536, #539, #540, #541 -> full documentation pass -> comprehensive Codex review (including `560a4f2` on main and `1830dd7` on beta by
