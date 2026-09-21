@@ -32,7 +32,7 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2026 MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.0.0
+ * @version   1.0.1
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/517
  * -----------------------------------------------------------------------------
  */
@@ -97,11 +97,13 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 <?php echo htmlspecialchars($flag['description'], ENT_QUOTES, 'UTF-8'); ?>.</li>
         <?php endforeach; ?>
     </ul>
+    <!-- #542: this used to say a non-administrator ALSO needed the Expense Approver role (given on the
+         Users page). That was true, and it stranded claims: a lead or required approver without the role
+         was refused while the claim still waited for them. The flags alone decide now. -->
     <p class="mb-0">
-        To record a decision on a claim, a non-administrator also needs the Expense Approver role in this
-        organisation (given on the <a href="<?php echo htmlspecialchars(Site::url('admin/users'), ENT_QUOTES, 'UTF-8'); ?>">Users</a> page).
-        Retiring a department stops new claims being charged to it; claims already submitted to it are still
-        finished by its own approvers.
+        These flags are enough on their own: a non-administrator does not also need the Expense Approver role
+        to decide this department's claims. Retiring a department stops new claims being charged to it;
+        claims already submitted to it are still finished by its own approvers.
     </p>
 </div>
 

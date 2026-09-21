@@ -2,6 +2,31 @@
 
 
 ## [Unreleased] (alpha)
+- fix(expenses): an expense claim can no longer get stuck for ever because a
+  department's lead or required approver lacks the Expense Approver role
+  (#542). Before this, the decision handler (`expenses/approve/save.php`) and
+  the claim page (`expenses/view/index.php`) asked for the role before they
+  looked at any department flag. The role (#516) and the flags (#517) are set
+  on different pages, so a lead or required approver without the role was
+  refused, while the claim still waited for their approval, which an
+  administrator's approval never stands in for. Confirmed on a real database:
+  the administrator's approval was recorded, the lead was refused on the claim
+  page and by the handler, and the claim never reached the treasury. Now, by
+  the owner's decision of 21 September 2026, a lead, approver or required
+  approver of the claim's OWN department (through an active membership of the
+  organisation) may open and decide that department's claims, with or without
+  the role; the same kind of claim was taken to Approved and then Reimbursed.
+  The join lives in one new reader, `Departments::approverDepts()`, used by
+  both pages; a retired department's approvers still finish its pending
+  claims. Role holders, administrators, claimants and treasurers see exactly
+  what they did before, and someone with neither the role nor a flag is
+  refused byte-for-byte as before, without any claim lookup. One deliberate
+  change: a person whose only flag is in a DIFFERENT department now gets the
+  same plain "Forbidden" answer a role holder without a flag has always had,
+  instead of the "role required" redirect. The four pages that said the role
+  was also needed now say the flags are enough. Not changed here: whether any
+  role holder may open any claim, and who may export the CSV (#541); a person
+  may still decide their own claim, as a role holder always could.
 - fix(calendar): the calendar's series download (`/calendar/export?series=N`)
   no longer hands internal events to a visitor who is not signed in (#544).
   Before this, the address needed no sign-in — correctly, so that a public

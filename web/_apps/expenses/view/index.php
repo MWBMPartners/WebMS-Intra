@@ -12,7 +12,7 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   0.4.0
+ * @version   0.4.1
  * -----------------------------------------------------------------------------
  */
 
@@ -20,6 +20,7 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\Departments;
 use Portal\Core\Router;
 use Portal\Core\Site;
 
@@ -71,7 +72,27 @@ $isAdmin       = App::isAdmin();
 $hasApprover   = App::hasRole('Approver');
 $hasTreasurer  = App::hasRole('Treasurer');
 
-if ($isClaimant === false && $isAdmin === false && $hasApprover === false && $hasTreasurer === false) {
+// 🏢 #542: a lead, approver or required approver of THIS claim's department,
+//    through an active membership of this organisation, may open the claim
+//    too. Before this, the page asked for the Expense Approver role (or an
+//    administrator, the claimant, a treasurer) and nothing else, so a
+//    department lead without the role saw the claim in their approvals list
+//    and was refused the moment they opened it — and refused again when they
+//    tried to decide it, leaving the claim waiting for them for ever (see
+//    approve/save.php). The read is skipped for an administrator or a role
+//    holder, who are let in anyway, so their cost is unchanged.
+//
+//    This opens ONE department's claims, not every claim in the organisation:
+//    whether a role holder should be able to open any claim here at all is
+//    #541 item 3, and is not changed by this. Someone with none of these is
+//    refused exactly as before.
+$hasDeptFlag = false;
+if ($isAdmin === false && $hasApprover === false) {
+    $hasDeptFlag = isset(Departments::approverDepts($mysqli, $currentUserId, $siteId)[(int) $claim['deptID']]);
+}
+
+if ($isClaimant === false && $isAdmin === false && $hasApprover === false && $hasTreasurer === false
+    && $hasDeptFlag === false) {
     Router::renderError(403);
     return;
 }
@@ -419,7 +440,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <a href="/expenses/submit" class="btn btn-outline-secondary">
         <i class="fa-solid fa-arrow-left me-1"></i> Back to Submit
     </a>
-    <?php if ($claim['status'] === 'Pending' && ($hasApprover === true || $isAdmin === true)): ?>
+    <?php if ($claim['status'] === 'Pending' && ($hasApprover === true || $isAdmin === true || $hasDeptFlag === true)): ?>
         <a href="/expenses/approve" class="btn btn-outline-primary">
             <i class="fa-solid fa-check me-1"></i> Go to Approvals
         </a>

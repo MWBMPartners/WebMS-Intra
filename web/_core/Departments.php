@@ -63,7 +63,7 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2026 MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.0.0
+ * @version   1.0.1
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/517
  * -----------------------------------------------------------------------------
  */
@@ -269,6 +269,74 @@ final class Departments
         $stmt->close();
 
         return $ids;
+    }
+
+    /**
+     * The departments of ONE organisation whose expense claims this account
+     * may decide, keyed by department number, each with which of the three
+     * approval flags the person holds there (#542).
+     *
+     * This is the per-department flag test `expenses/approve/save.php` has
+     * always made before recording a decision, lifted into the class so the
+     * decision handler and the claim page (`expenses/view/index.php`) ask
+     * the same question from one place rather than a third copy of the
+     * join. The conditions are exactly the handler's: a membership row for
+     * THIS organisation (`ud.siteID`), an ACTIVE membership of the
+     * organisation itself (the `tblUserSites` join), and at least one of
+     * lead, approver or required approver.
+     *
+     * WHAT WAS WRONG BEFORE (#542): the decision handler and the claim page
+     * both asked for the Expense Approver ROLE before they looked at any
+     * department flag. The role (#516) and the flags (#517) are set on
+     * different pages, so a lead or required approver without the role was
+     * refused, while the claim still waited for their approval, which an
+     * administrator's approval never stands in for. Such a claim could never
+     * be approved, and so never paid. The owner's decision (21 September
+     * 2026): a flag in the claim's own department is enough.
+     *
+     * DELIBERATELY NOT `isMember()` or `memberSql()`: those answer "is this
+     * person in this department NOW?" and leave out a retired department.
+     * Here a retired department is INCLUDED when the person holds a flag in
+     * it, because its pending claims are finished by its own approvers
+     * (owner's answer Q3, 21 September 2026); nothing tests `tblDepts` at all.
+     *
+     * A flag held in another organisation's department never appears: the
+     * query asks for one `siteID`, and the composite foreign keys on
+     * `tblUserDepts` stop a row naming another organisation's department
+     * from existing in the first place. An empty array means "no authority
+     * over any department here".
+     *
+     * @param mysqli $db     An open connection.
+     * @param int    $userId The account.
+     * @param int    $siteId The organisation.
+     *
+     * @return array<int, array{isDeptLead: bool, isMandatoryApprover: bool, isApprover: bool}>
+     */
+    public static function approverDepts(mysqli $db, int $userId, int $siteId): array
+    {
+        $out  = [];
+        $stmt = $db->prepare(
+            'SELECT ud.deptID, ud.isDeptLead, ud.isMandatoryApprover, ud.isApprover FROM tblUserDepts ud '
+            . 'JOIN tblUserSites us ON us.userID = ud.userID AND us.siteID = ud.siteID AND us.isActive = 1 '
+            . 'WHERE ud.userID = ? AND ud.siteID = ? '
+            . 'AND (ud.isDeptLead = 1 OR ud.isApprover = 1 OR ud.isMandatoryApprover = 1)'
+        );
+        if ($stmt === false) {
+            return [];
+        }
+        $stmt->bind_param('ii', $userId, $siteId);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        while (($row = $result->fetch_assoc()) !== null) {
+            $out[(int) $row['deptID']] = [
+                'isDeptLead'          => self::flagOn($row['isDeptLead']),
+                'isMandatoryApprover' => self::flagOn($row['isMandatoryApprover']),
+                'isApprover'          => self::flagOn($row['isApprover']),
+            ];
+        }
+        $stmt->close();
+
+        return $out;
     }
 
     /**

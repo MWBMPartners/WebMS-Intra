@@ -19,7 +19,7 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   0.4.1
+ * @version   0.4.2
  * -----------------------------------------------------------------------------
  */
 
@@ -29,6 +29,7 @@ require_once dirname(__DIR__, 3) . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEP
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\Departments;
 use Portal\Core\Logger;
 use Portal\Core\ExpensePdf;
 use Portal\Core\ExpenseMailer;
@@ -45,16 +46,51 @@ if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
     exit();
 }
 
-// 🛡️ Require Approver or Admin role
-if (App::hasRole('Approver') === false && App::isAdmin() === false) {
-    $_SESSION['flash_msg']  = 'Access denied — Approver or Admin role required.';
-    $_SESSION['flash_type'] = 'danger';
-    header('Location: /expenses/approve');
-    exit();
+// 🛡️ Who may record a decision at all: an administrator, a holder of the
+//    Expense Approver role, or — since #542 — anyone holding an approval
+//    flag (lead, approver or required approver) in at least one department
+//    of THIS organisation, through an active membership of it.
+//
+//    WHAT WAS WRONG BEFORE (#542): this gate asked for the role or an
+//    administrator and nothing else, before the claim was even loaded. The
+//    role (#516) and the department flags (#517) are set on different
+//    pages, so a lead or required approver without the role was refused
+//    here, while the claim below still waited for their approval, which an
+//    administrator's approval never stands in for. The claim could never be
+//    approved, and so never paid. Owner's decision (21 September 2026): a
+//    flag in the claim's own department is enough.
+//
+//    The flags are read only when the two cheaper tests both say no, so an
+//    administrator or a role holder costs exactly what they did before. The
+//    one read is kept for the per-department gate further down. This gate
+//    asks "any department here?" rather than "this claim's department?" on
+//    purpose: the claim is not loaded yet, and it must stay that way, so a
+//    visitor with no authority at all is answered before any claim lookup
+//    and can learn nothing about which claim numbers exist or are pending.
+//    Which department they may decide is settled below, once the claim is
+//    known; a flag in some OTHER department gets the same "Forbidden" answer
+//    there that a role holder without a flag has always had.
+//
+//    The refusal is byte-for-byte what it was — the same message, the same
+//    redirect — for someone with neither the role nor a flag; the message's
+//    wording is kept for that reason even though a flag is now a third way in.
+$userId  = (int) ($_SESSION['user_id'] ?? 0);
+$siteId  = Site::id();
+$isAdmin = App::isAdmin();
+
+/** @var array<int, array{isDeptLead: bool, isMandatoryApprover: bool, isApprover: bool}>|null */
+$approverDepts = null;
+if ($isAdmin === false && App::hasRole('Approver') === false) {
+    $approverDepts = Departments::approverDepts($mysqli, $userId, $siteId);
+    if (count($approverDepts) === 0) {
+        $_SESSION['flash_msg']  = 'Access denied — Approver or Admin role required.';
+        $_SESSION['flash_type'] = 'danger';
+        header('Location: /expenses/approve');
+        exit();
+    }
 }
 
 // 📝 Extract and validate input
-$userId   = (int) ($_SESSION['user_id'] ?? 0);
 $claimID  = (int) ($_POST['claimID'] ?? 0);
 $decision = ($_POST['decision'] ?? '') === 'Rejected' ? 'Rejected' : 'Approved';
 $comment  = trim($_POST['comments'] ?? '');
@@ -70,7 +106,6 @@ if ($claimID === 0) {
 // 📋 Fetch claim details to determine dept and amount
 // -----------------------------------------------------------------------------
 $claim = null;
-$siteId = Site::id();
 $stmt = $mysqli->prepare(
     'SELECT EC.claimID, EC.deptID, EC.totalAmount, EC.status, EC.userID, U.fullName AS claimantName '
     . 'FROM tblExpenseClaims EC '
@@ -96,52 +131,35 @@ if ($claim === null) {
 // 🔍 Determine approver's role for this department
 // -----------------------------------------------------------------------------
 $approverRole = null;
-$deptRole     = null;
-if (App::isAdmin() === true) {
+if ($isAdmin === true) {
     $approverRole = 'admin';
 } else {
-    // 🛡️ Mirror approve/index.php's dept-scoped listing filter — only a row
-    // with an actual approve/lead/mandatory-approver flag counts as authority
-    // over this department, not merely any tblUserDepts membership row.
-    //
-    // #517: the membership must also be in THIS claim's organisation
-    // (UD.siteID = ?, the claim was loaded above by EC.siteID = Site::id()),
-    // and the approver's own membership of that organisation must be active.
-    // Before #517 a leftover row from an organisation the person had left
-    // still let them decide. Deliberately NO test that the department is
-    // switched on — see approve/index.php: a retired department's pending
-    // claims are finished by its own approvers (owner's answer Q3).
-    $stmt = $mysqli->prepare(
-        'SELECT UD.isDeptLead, UD.isApprover, UD.isMandatoryApprover '
-        . 'FROM tblUserDepts UD '
-        . 'JOIN tblUserSites US ON US.userID = UD.userID AND US.siteID = UD.siteID AND US.isActive = 1 '
-        . 'WHERE UD.userID = ? AND UD.deptID = ? AND UD.siteID = ? '
-        . 'AND (UD.isDeptLead = 1 OR UD.isApprover = 1 OR UD.isMandatoryApprover = 1)'
-    );
-    if ($stmt !== false) {
-        $claimDeptId = (int) $claim['deptID'];
-        $stmt->bind_param('iii', $userId, $claimDeptId, $siteId);
-        $stmt->execute();
-        $deptRole = $stmt->get_result()->fetch_assoc();
-        $stmt->close();
-
-        if ($deptRole !== null) {
-            if ((int) $deptRole['isDeptLead'] === 1) {
-                $approverRole = 'dept_lead';
-            } elseif ((int) $deptRole['isMandatoryApprover'] === 1) {
-                $approverRole = 'mandatory_approver';
-            } elseif ((int) $deptRole['isApprover'] === 1) {
-                $approverRole = 'dept_approver';
-            }
-        }
+    // 🛡️ Per-department authorisation gate — mirrors approve/index.php's
+    // listing filter: only a lead, approver or required-approver flag in
+    // THIS claim's department, held through an active membership of THIS
+    // organisation, is authority to decide it; the site-wide 'Approver'
+    // role on its own is not (it never was). The join lives in
+    // Departments::approverDepts() since #542, so this handler and the
+    // claim page test the same thing; before #517 a leftover row from an
+    // organisation the person had left still let them decide, and there is
+    // deliberately NO test that the department is switched on, because a
+    // retired department's pending claims are finished by its own approvers
+    // (owner's answer Q3). A role holder skipped the read at the top, so it
+    // happens here instead — still one read per decision, as before.
+    if ($approverDepts === null) {
+        $approverDepts = Departments::approverDepts($mysqli, $userId, $siteId);
     }
-
-    // 🛡️ Per-department authorisation gate — a non-admin with no qualifying
-    // tblUserDepts row for THIS claim's department has no authority to
-    // record a decision on it, regardless of the site-wide 'Approver' role.
-    if ($deptRole === null) {
+    $deptFlags = $approverDepts[(int) $claim['deptID']] ?? null;
+    if ($deptFlags === null) {
         http_response_code(403);
         exit('Forbidden');
+    }
+    if ($deptFlags['isDeptLead'] === true) {
+        $approverRole = 'dept_lead';
+    } elseif ($deptFlags['isMandatoryApprover'] === true) {
+        $approverRole = 'mandatory_approver';
+    } elseif ($deptFlags['isApprover'] === true) {
+        $approverRole = 'dept_approver';
     }
 }
 

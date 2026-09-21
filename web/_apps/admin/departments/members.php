@@ -36,7 +36,7 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2026 MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.0.0
+ * @version   1.0.1
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/517
  * -----------------------------------------------------------------------------
  */
@@ -157,7 +157,9 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <li><strong><?php echo htmlspecialchars($flag['label'], ENT_QUOTES, 'UTF-8'); ?></strong> —
                 <?php echo htmlspecialchars($flag['description'], ENT_QUOTES, 'UTF-8'); ?>.</li>
         <?php endforeach; ?>
-        <li>To record a decision on a claim, a non-administrator also needs the Expense Approver role here.</li>
+        <!-- #542: this used to say the Expense Approver role was ALSO needed. It was, and that stranded
+             claims whose lead or required approver lacked it. The flags alone decide now. -->
+        <li>These flags are enough on their own: a non-administrator does not also need the Expense Approver role to decide this department's claims.</li>
     </ul>
 </details>
 

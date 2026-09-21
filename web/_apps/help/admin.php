@@ -457,10 +457,14 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             </div>
         <?php endforeach; ?>
     </div>
+    <!-- #542: this used to say a non-administrator ALSO needed the Expense Approver role. That was
+         true, and it stranded claims: the role and the flags are set on different pages, so a lead or
+         required approver without the role was refused while the claim still waited for them. -->
     <p>
-        To record a decision on a claim, a person who is not an administrator also needs the
-        <strong>Expense Approver</strong> role in that organisation (Admin &rarr; Users, the Roles button).
-        If the list of departments is empty, nobody can submit a claim: the claim form says so.
+        The flags are enough on their own: a person who is not an administrator does not also need the
+        <strong>Expense Approver</strong> role to decide a department's claims, and the role on its own
+        does not let anyone decide them. If the list of departments is empty, nobody can submit a claim:
+        the claim form says so.
     </p>
 
     <h5 class="mt-3 mb-2">Who manages them</h5>

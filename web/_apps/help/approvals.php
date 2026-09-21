@@ -128,11 +128,16 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         in that organisation, who are flagged there as <strong>lead</strong>, <strong>approver</strong> or
         <strong>required approver</strong> (Admin &rarr; Departments, the Members page). Any rejection rejects the
         claim at once. A claim is fully approved only when every lead and every required approver has approved
-        it; if the department has neither, one approval is enough. To record a decision you also need the
-        <strong>Expense Approver</strong> role in that organisation, unless you are an administrator. If a
+        it; if the department has neither, one approval is enough. The flag is all you need: you do not also
+        need the <strong>Expense Approver</strong> role, and the role on its own does not let you decide a
+        department's claims. An administrator can decide any claim. If a
         department is retired, no new claim can be charged to it, but claims already submitted to it are still
         finished by its approvers in the usual way.
     </p>
+    <!-- #542: this used to say the Expense Approver role was ALSO needed unless you were an
+         administrator. That was true, and it was a trap: the role and the flags are set on different
+         pages, so a lead or required approver without the role was refused while the claim still
+         waited for their approval, which an administrator's approval never stands in for. -->
 
     <div class="alert alert-warning d-flex gap-2" role="alert">
         <i class="fa-solid fa-triangle-exclamation mt-1"></i>
