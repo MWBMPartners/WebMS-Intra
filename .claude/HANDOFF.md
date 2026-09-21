@@ -53,12 +53,25 @@ any copied workflow script: treat a builder's "I decline / route elsewhere" retu
 - The owner made the repository **public (temporarily)**, which cleared the Actions billing refusal and the code scanning refusal.
 - **#537 (alpha)** was auto-merged by alpha's own workflow at 08:28 UTC. **#506 (beta)** was squash-merged at 08:41 UTC (`a6931d1`);
   its post-merge CodeQL, lint and Psalm runs were all green. Nothing deploys: `deploy.yml` only runs for `web/**` changes.
-- **#504 (main): every check green, NOT merged yet.** Merging it would start `security-backport.yml` (it exists on main only), whose
-  alpha step fails on every workflow-only update (#424 on 7 September). **The owner allowed** (10:05) a guard line there, skipping
-  `dependabot/github_actions/` branches, plus `actions: read` in `php-static-analysis.yml` on **all three** branches, with identical text.
-  The edits are prepared in scratch worktrees `wt-504` and `wt-beta`, diffs in `.claude-work/reviews/dependabot-*-fix.diff`, and an
-  independent Claude check is running. Then: push onto #504's branch, commit to beta, re-run checks, merge #504, and watch every
-  post-merge run until green. The alpha copy of the permission goes on this working branch.
+- **#504 (main): every check green, NOT merged yet.** Merging it would start `security-backport.yml` (it exists on main only),
+  which copies merged Dependabot PRs down to the other branches. For a workflow-only update the copy is refused whenever there is
+  anything to copy, because the built-in token may not change workflow files (alpha's copy of #424, 7 September; the August copies
+  were green only because they were empty). #504's copy onto alpha would conflict and be refused the same way. **The owner allowed**
+  (10:05) a guard line there, skipping `dependabot/github_actions/` branches, plus `actions: read` in `php-static-analysis.yml` on
+  **all three** branches, with identical text.
+- **The edits were reviewed in four rounds** by an independent Claude agent. The final diffs are
+  `.claude-work/reviews/dependabot-{504,beta}-fix-r3.diff` (scratch worktrees `wt-504` and `wt-beta`); round 3 found the file changes
+  clean, and round 4's two wording points on the commit messages were corrected. Messages: `.claude-work/commit-504-fix.txt`,
+  `commit-beta-fix.txt`, `merge-504-body.txt`. Then: commit onto #504's branch, commit to beta, re-run checks, merge #504 with the
+  edited squash subject and body, check main holds all three files as reviewed, and watch every run after the merge until green.
+  **The alpha copy of the permission goes on this working branch after #538 is committed**, with the same text, and must also
+  reconcile alpha's own upload-step comment (it blames Code Scanning for the "Resource not accessible" message, which was really the
+  missing permission).
+- **Round 1 also warned:** Dependabot logged this morning that #504 "should be superseded" by a 4.38.1 update, so merge promptly. After
+  the merge, expect Dependabot to raise a fresh 4.38.0 -> 4.38.1 PR for main (and beta).
+- **CODEX SWEEP: these commits live OUTSIDE the working branch, so `git diff 110e47d~1..HEAD` will never show them. Review them by
+  name:** (1) the #504 squash commit on **main** (commit ID: to be filled in after the merge); (2) the commit on **beta** adding
+  `actions: read` (commit ID: to be filled in). Both say in their messages that they are listed here.
 - **Claude Code's auto-mode safety check refuses workflow-file edits ("CI Bypass")** unless the owner has explicitly allowed them. A
   first attempt that also added step-level `continue-on-error` flags was refused and **dropped for good**: the owner was not asked
   about those. Never work round the refusal with another tool.
