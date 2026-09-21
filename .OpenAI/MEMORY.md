@@ -445,3 +445,16 @@ not push workflow files. On 21 September 2026 the owner approved skipping
 `dependabot/github_actions/` branches there. Merging a PR into `alpha` can
 happen automatically (`auto-merge-alpha.yml`) the moment its checks go green.
 Nothing deploys unless `web/**` or `deploy.yml` changes.
+
+**User groups and departments belong to one organisation each (since #517,
+commit `d3b906d`, 21 September 2026).** They stay two different things:
+groups are committees; departments carry the lead, assistant, secretary,
+approver and required-approver flags that expense approval uses. A retired
+group matches nobody; a retired department takes no NEW claims, but its own
+approvers still finish claims already waiting (anything else was proven to
+strand them). `Portal\Core\UserGroups` and `Portal\Core\Departments` own the
+writes and give `memberSql()`, the in-query test #514 uses. Membership rows
+are tied by composite keys to the person's membership of that organisation,
+so a cross-organisation row cannot be stored. Known open trap: #542, the
+Expense Approver role is tested before the department, so a required
+approver without the role can block a claim for ever.

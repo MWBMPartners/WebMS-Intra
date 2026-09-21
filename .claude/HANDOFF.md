@@ -9,6 +9,30 @@ proceeds, so the session can be picked up at any point).
 
 ## Read this first — where we are right now
 
+## LATEST — 21 September 2026, about 15:30. RESUME FROM HERE.
+
+**#517 IS DONE: committed `d3b906d` and pushed, independent check PASS in round 1, no fallbacks.** User groups and departments
+per organisation, manageable at `/admin/groups` and `/admin/departments` (plus `/admin/users/memberships-unplaced`); migration 203;
+new classes `UserGroups` and `Departments` with `memberSql()` for #514 P10; new check `check_membership_queries_scoped.py`; new
+self-test `memberships-selftest.php`. 43 files, exactly the plan's list. One small fault from the check (the Add-member list offered
+accounts a site administrator could never add) was fixed and proven on a throwaway MySQL 8.0.36 before the commit. **Next free
+migration number: 204.** Counts now: 19 audit checks, 11 self-tests, 86 framework classes, 201 numbered migrations, 218 tables
+(CLAUDE.md's counts table is stale; the documentation pass updates it).
+
+**New issues from #517:** **#542** (high) an expense claim can get stuck for ever when a department's lead or required approver lacks
+the Expense Approver role (`expenses/approve/save.php:49` tests the role before the department) — **needs the owner's decision**
+(recommended: a department must-approve flag counts as authority). **#543** two automatic checks can pass when they should not.
+Notes added to #536 (unprefixed Expenses addresses) and #541 (the claim form never shows its messages).
+
+**Left for the documentation/CI pass (from the #517 plan, section 15):** wire `check_reserved_site_keys.py` (#515),
+`check_role_keys.py` (#516) and `check_membership_queries_scoped.py` (#517) into `.github/workflows/pr-security.yml` — a WORKFLOW
+edit, so it needs the owner's explicit yes first (the auto-mode safety check refuses workflow edits otherwise); one sentence in
+`help/small-groups.php` saying committees are "user groups" under Admin; the CLAUDE.md counts.
+
+**NEXT: the Fable review of the #514 plan** (`.claude-work/resume/p514--plan.md`), now that #516 and #517 have built the contracts its
+part P10 relies on (`Roles::holdsSql()`, `UserGroups::memberSql()`, `Departments::memberSql()`). If it finds real changes, re-plan the
+affected parts (owner decision 10), then build #514 one commit per part.
+
 ## LATEST — 21 September 2026, 11:45. RESUME FROM HERE.
 
 **#538 IS DONE: committed `5753bf3` and pushed, independent check PASS in round 1, no fallbacks.** `/expenses/treasury` now

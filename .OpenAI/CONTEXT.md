@@ -185,7 +185,9 @@ in `.claude/CLAUDE.md` under the heading named in brackets.
    `5f278cb`, `12e637a`, `1e0809c`, `bd1ef12`, `6989b26` (#515) and
    `c99dc87` (#516, roles per organisation, 21 September 2026) and
    `5753bf3` (#538, the treasury list limited to treasurers and
-   administrators), plus the documentation and handoff commits in between.
+   administrators), `26aa70d` (alpha's copy of Psalm's `actions: read`) and
+   `d3b906d` (#517, user groups and departments per organisation), plus the
+   documentation and handoff commits in between.
    Two commits live OUTSIDE the working branch and must be reviewed by
    name: `560a4f2` on main (the #504 squash: codeql-action bump, the
    security-backport guard, Psalm's `actions: read`, a DEV_NOTES paragraph)
