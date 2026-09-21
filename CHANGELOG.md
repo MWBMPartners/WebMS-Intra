@@ -2,6 +2,61 @@
 
 
 ## [Unreleased] (alpha)
+- fix(core): a global administrator only, not any administrator, now walks
+  past the closed sign while the portal is in maintenance mode (owner
+  decision, 20 September 2026). Before this, `Maintenance::
+  currentUserCanBypass()` returned `App::isAdmin()`, which is true for a
+  site administrator of whichever one organisation happens to be open, and
+  for an account still carrying the older, portal-wide `isAdmin` flag — so
+  a half-upgraded database was reachable by far more people than the one
+  kind of account that can actually finish an upgrade
+  (`web/_install/upgrade.php` has always required a global administrator).
+  The change is one word — `App::isUmbrellaAdmin()` — so the two gates now
+  visibly agree. Nobody is locked out of anything they could actually use:
+  signing in, the upgrade page itself, and the read-only health check stay
+  open to everybody either way, because a site administrator who could not
+  bypass maintenance was never going to be able to complete the upgrade
+  regardless.
+- fix(core,admin): an organisation's key can no longer take over one of the
+  portal's own addresses (#515). When several organisations share one
+  installation, a "path" address prefix (`/youth/calendar`) is built from
+  each organisation's own key — and the key was checked only for its
+  shape (lower-case letters, digits, hyphens), never for whether it
+  clashed with an address the portal itself relies on. Measured on a real
+  database: an organisation keyed `login` turns the bare `/login` address
+  into a redirect loop that never resolves, and one keyed `offline` can
+  make a signed-in visitor's browser store that organisation's own
+  dashboard as the offline fallback page — the case
+  `web/_core/Auth.php`'s `oldServiceWorkerWouldStore()`/`logout()`
+  comments describe and point here to fix. A new class,
+  `Portal\Core\ReservedKeys` (`web/_core/ReservedKeys.php`), is the one
+  place that decides which keys are reserved, built from what the portal
+  really answers on rather than a hand-typed list: every address
+  registered in `tblRoutes` and every real file or folder in the web root
+  are read LIVE, so a newly-seeded address or a newly-added folder is
+  covered the instant it exists; the small set of addresses the router
+  answers itself without ever consulting `tblRoutes` (sign-in, sign-out,
+  the API prefix, health, the short public-link prefixes) is typed once
+  as `Router::SPECIAL_ROUTE_FIRST_SEGMENTS`, and a new automatic check
+  (`tools/audit-checks/check_reserved_site_keys.py`) fails the build the
+  moment that list and the router's own code disagree in either
+  direction. `web/_apps/admin/sites/save.php` now refuses to create an
+  organisation with a reserved key, and refuses to change an EXISTING
+  organisation's key to a reserved one, or to switch on an organisation
+  whose already-stored key is reserved — but an organisation that already
+  carried a reserved key before this fix existed is deliberately left
+  working and NOT renamed automatically, because changing a key changes
+  every address that organisation's members have bookmarked, shared or
+  printed. Instead it is flagged in three places with the same wording
+  everywhere: a new health-page probe ("Organisation keys" — amber only
+  when the clash is doing real harm right now, i.e. address prefixes are
+  actually in use and the clashing organisation is active; otherwise
+  reported without alarming, since a light that goes amber for something
+  currently harmless is exactly the kind of check people learn to
+  ignore), a warning banner on the admin dashboard, and a badge on the
+  organisations page. The check also confirms `save.php` is the ONLY
+  code that writes `tblSites`, so a future second writer cannot quietly
+  bypass the refusal.
 - fix(calendar,privacy): dropped the anonymous check-in "browser
   description" column (#530). Every anonymous check-in has recorded the
   visitor's browser description alongside a scrambled sender address since

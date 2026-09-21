@@ -33,7 +33,7 @@ use Portal\Core\Maintenance;
 use Portal\Core\Router;
 
 // 🔑 Start (or resume) the session BEFORE the maintenance gate below.
-//    Maintenance::currentUserCanBypass() → App::isAdmin() → App::user()
+//    Maintenance::currentUserCanBypass() → App::isUmbrellaAdmin() → App::user()
 //    reads $_SESSION, but only if session_status() === PHP_SESSION_ACTIVE
 //    (see App::user()) — and nothing upstream in bootstrap.php starts a
 //    session (it's started lazily by individual app pages via this same
@@ -51,13 +51,16 @@ Auth::ensureSession();
 //    If portal.maintenance.active = '1' OR the installed_version is
 //    behind PORTAL_VERSION (indicating new code was deployed but the
 //    DB hasn't been brought up yet), gate non-admin / non-allow-listed
-//    requests to a 503 maintenance page. Admins, and the addresses on
-//    the two allow lists in web/_core/Maintenance.php, pass through: the
-//    sign-in pages, admin/upgrade, admin/maintenance, the static asset
-//    folders and offline, so admins can sign in and run the upgrade; and
-//    the one exact address cron/health, so an uptime monitor still gets
-//    its read-only health report. Those lists are the real ones; this
-//    summary is only a guide and has gone out of date before.
+//    requests to a 503 maintenance page. Global administrators, and the
+//    addresses on the two allow lists in web/_core/Maintenance.php, pass
+//    through: the sign-in pages, admin/upgrade, admin/maintenance, the
+//    static asset folders and offline, so a global administrator can sign
+//    in and run the upgrade; and the one exact address cron/health, so an
+//    uptime monitor still gets its read-only health report. Those lists
+//    are the real ones; this summary is only a guide and has gone out of
+//    date before. Narrowed from "any administrator" to "global
+//    administrator only" by an owner decision on 20 September 2026 (#515)
+//    — see Maintenance::currentUserCanBypass()'s own doc comment for why.
 //
 //    #509 point 3 — CHANGED: the three-part condition this line used to
 //    spell out here has moved into Maintenance::blocks(), which adds one

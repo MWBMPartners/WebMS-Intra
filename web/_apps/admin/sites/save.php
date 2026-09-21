@@ -21,6 +21,7 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Logger;
+use Portal\Core\ReservedKeys;
 
 // 🛡️ POST only
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
@@ -83,7 +84,96 @@ if (in_array($timezone, timezone_identifiers_list(), true) === false) {
     $timezone = 'UTC';
 }
 
+// 🔒 #515 — refuse a key that would take over an address the portal itself
+// already answers on. Before this existed, the only check here was the
+// lowercase/digits/hyphen format above — nothing stopped an administrator
+// keying an organisation "offline" or "login". That is not a cosmetic
+// clash: measured on a real database, an active organisation keyed "login"
+// turns the bare /login address into a redirect loop that never resolves
+// (Site::detectFromPath() matches the key, strips it, and the sign-in
+// redirect it produces has the key stripped straight back off again), and
+// one keyed "offline" can make a signed-in visitor's browser store THAT
+// organisation's dashboard as the offline fallback page — see Auth.php's
+// oldServiceWorkerWouldStore()/logout() comments for the full case this
+// closes.
+//
+// ReservedKeys::kindsFor() is asked ONCE here, before either the create or
+// the update branch, so a reserved key can never be written by either path.
+// If the check itself cannot run — the routes query breaks, say — nothing
+// is saved. That is deliberate: proceeding on a check that never actually
+// ran would defeat the whole point of having it, so this fails CLOSED
+// rather than falling back to "let it through".
+try {
+    $reservedKinds = ReservedKeys::kindsFor($db, $siteKey);
+} catch (\Throwable $e) {
+    Logger::errorPlatform('ReservedKeys', 'Error', 'CHECK_FAIL', $e->getMessage(), 'siteKey=' . $siteKey);
+    $_SESSION['flash_msg'] = 'The portal could not check whether that site key is reserved, so nothing was saved. Try again.';
+    $_SESSION['flash_type'] = 'danger';
+    header('Location: /admin/sites', true, 302);
+    exit();
+}
+// 📝 Not touched here: a key that is merely a DUPLICATE of another
+// organisation's own (non-reserved) key still fails only with the
+// database's raw "Duplicate entry" text further down. That is a separate,
+// pre-existing rough edge — this package's job is the reserved-key clash,
+// not every unfriendly message this page can produce.
+
 if ($siteID > 0) {
+    // 📖 #515 — read the row exactly as it is stored NOW, before anything is
+    // written, so the refusal below can tell "this key was ALREADY like
+    // this" (leave it alone — the issue asks that an existing clash is not
+    // broken or renamed automatically) apart from "this edit is ABOUT to
+    // create a new clash, or switch on an organisation that already has
+    // one" (refuse it). A row that no longer exists (deleted by someone else
+    // mid-edit) leaves $storedKey as '', so the comparison below treats it
+    // exactly like a brand-new key rather than silently skipping the check.
+    $storedKey = '';
+    $storedActive = 0;
+    $rowStmt = $db->prepare('SELECT siteKey, isActive FROM tblSites WHERE siteID = ?');
+    if ($rowStmt !== false) {
+        $rowStmt->bind_param('i', $siteID);
+        $rowStmt->execute();
+        $storedRow = $rowStmt->get_result()->fetch_assoc();
+        $rowStmt->close();
+        if ($storedRow !== null) {
+            $storedKey = strtolower((string) $storedRow['siteKey']);
+            // 🔢 Arrives from this prepared statement as the whole NUMBER 1
+            //    or 0, never the text '1' (#497) — cast with (int), never
+            //    compared with === '1'.
+            $storedActive = (int) $storedRow['isActive'];
+        }
+    }
+
+    // 🔒 #515 — refuse only the two edits that would actually CHANGE how
+    // much harm a reserved key does: changing the key itself (to, or onto, a
+    // reserved value), or switching on an organisation whose key is already
+    // reserved (one checkbox turning a harmless-while-off row into a live
+    // takeover of the address it clashes with). Everything else — the
+    // name, colours, host pattern, timezone, or switching such an
+    // organisation OFF — stays editable with the reserved key untouched.
+    // That is the issue's own answer to "what happens to an organisation
+    // that already has a reserved key": leave it working, warn until an
+    // administrator changes it (see the health probe, admin dashboard and
+    // organisations-page badge this package also adds), never rename or
+    // break it automatically.
+    $keyChanged  = ($siteKey !== $storedKey);
+    $switchingOn = ($isActive === 1 && $storedActive === 0);
+    if ($reservedKinds !== [] && ($keyChanged === true || $switchingOn === true)) {
+        if ($keyChanged === true) {
+            $_SESSION['flash_msg'] = ReservedKeys::describe($siteKey, $reservedKinds)
+                . ' An organisation with that key would take over the address /' . $siteKey . '/ '
+                . 'whenever the portal uses address prefixes. Choose a different key.';
+        } else {
+            $_SESSION['flash_msg'] = ReservedKeys::describe($siteKey, $reservedKinds)
+                . ' The organisation cannot be switched on until its key is changed, because as soon '
+                . 'as it is on its pages would take over /' . $siteKey . '/. Change the key, then '
+                . 'switch it on.';
+        }
+        $_SESSION['flash_type'] = 'danger';
+        header('Location: /admin/sites', true, 302);
+        exit();
+    }
+
     // ♻️ UPDATE existing site
     $stmt = $db->prepare(
         'UPDATE tblSites SET siteName = ?, siteKey = ?, hostPattern = ?, logoPath = ?, '
@@ -117,6 +207,18 @@ if ($siteID > 0) {
     }
     $stmt->close();
 } else {
+    // 🔒 #515 — a brand-new organisation has no existing row to compare
+    // against, so any reserved key at all is refused outright: there is no
+    // "it was already like this" case for a create.
+    if ($reservedKinds !== []) {
+        $_SESSION['flash_msg'] = ReservedKeys::describe($siteKey, $reservedKinds)
+            . ' An organisation with that key would take over the address /' . $siteKey . '/ '
+            . 'whenever the portal uses address prefixes. Choose a different key.';
+        $_SESSION['flash_type'] = 'danger';
+        header('Location: /admin/sites', true, 302);
+        exit();
+    }
+
     // ➕ INSERT new site
     $stmt = $db->prepare(
         'INSERT INTO tblSites (siteName, siteKey, hostPattern, logoPath, faviconPath, primaryColor, copyrightOrg, timezone, isActive) '

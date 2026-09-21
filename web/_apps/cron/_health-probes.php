@@ -239,6 +239,78 @@ function maintenance_health_probes(\mysqli $db): array
         'detail' => $maintFlag === '1' ? 'Public access is gated' : 'Portal is open',
     ];
 
+    // 9. Organisation keys (#515) — an organisation whose site key is the
+    //    same as an address the portal itself relies on (a route prefix, a
+    //    router special address, or a real file/folder in the web root —
+    //    see Portal\Core\ReservedKeys for the full reasoning). Existing
+    //    clashes are deliberately left working rather than renamed (the
+    //    issue's own answer to "what happens to one that already has a
+    //    reserved key"), so this probe is the warning that tells staff one
+    //    exists, not a gate that stops anything.
+    //
+    //    THE LIGHT ONLY GOES AMBER WHEN THE CLASH IS DOING HARM RIGHT NOW —
+    //    multi-site switched on, path-based address prefixes in use, AND at
+    //    least one clashing organisation ACTIVE. In every other case (session
+    //    or subdomain detection, multi-site off, or every clashing
+    //    organisation switched off) the same key sitting in tblSites is
+    //    harmless today — measured: in session mode a clashing "login" key
+    //    changes nothing at all; an inactive one never matches at all — so
+    //    this probe reports 'ok' with a count rather than alarming. A light
+    //    that turns amber for something that is currently fine is exactly
+    //    the "crying wolf" this project's own rule warns against: a check
+    //    people learn to ignore ends up protecting nothing. The count is
+    //    still shown either way, because it is useful even when nothing is
+    //    on fire — an administrator can act on it before it becomes urgent.
+    try {
+        $clashes = \Portal\Core\ReservedKeys::clashingSites($db);
+        $keysLive = \Portal\Core\ReservedKeys::keysAreAddresses();
+        $activeClashes = array_filter($clashes, static fn (array $c): bool => $c['isActive'] === 1);
+
+        if ($clashes === []) {
+            $probes['Organisation keys'] = ['state' => 'ok', 'label' => 'None', 'detail' => 'No organisation key is reserved.'];
+        } else {
+            $detailParts = [];
+            foreach ($clashes as $clash) {
+                $inactiveNote = $clash['isActive'] === 0 ? ', inactive' : '';
+                $detailParts[] = sprintf(
+                    '#%d "%s" (%s%s): %s',
+                    $clash['siteID'],
+                    $clash['siteName'],
+                    $clash['siteKey'],
+                    $inactiveNote,
+                    \Portal\Core\ReservedKeys::describe($clash['siteKey'], $clash['kinds'])
+                );
+            }
+
+            if ($keysLive === true && $activeClashes !== []) {
+                // ⚠️ Real harm, right now — name the key so staff know which
+                //    address is actually unreachable.
+                $firstKey = (string) reset($activeClashes)['siteKey'];
+                $detailParts[] = 'Its pages are answering /' . $firstKey . '/ now, so the portal\'s own '
+                    . 'address is unreachable for everyone. Change the key at Admin → Sites (Edit). '
+                    . 'Links already shared under /' . $firstKey . '/ will stop working when it changes.';
+                $probes['Organisation keys'] = [
+                    'state'  => 'warn',
+                    'label'  => sprintf('%d reserved', count($clashes)),
+                    'detail' => implode(' · ', $detailParts),
+                ];
+            } else {
+                // 😌 Not doing any harm today — reported, not alarmed.
+                $detailParts[] = 'Harmless while the portal is not using address prefixes and the '
+                    . 'organisation is off; it would take over the address the moment that changes. The '
+                    . 'save page now refuses to switch such an organisation on. Change the key at '
+                    . 'Admin → Sites (Edit).';
+                $probes['Organisation keys'] = [
+                    'state'  => 'ok',
+                    'label'  => sprintf('%d reserved (not in use)', count($clashes)),
+                    'detail' => implode(' · ', $detailParts),
+                ];
+            }
+        }
+    } catch (\Throwable $e) {
+        $probes['Organisation keys'] = ['state' => 'warn', 'label' => 'Query failed', 'detail' => $e->getMessage()];
+    }
+
     // 🚦 Overall
     $overall = 'ok';
     foreach ($probes as $p) {

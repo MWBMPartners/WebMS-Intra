@@ -22,7 +22,7 @@
  * gets bumped; the explicit flag is cleared by whoever set it.
  *
  * Allow-list (always pass through, even when gated):
- *   • /login, /logout        — admins need to sign in to fix it
+ *   • /login, /logout        — a global administrator needs to sign in to fix it
  *   • /forgot-password,
  *     /reset-password        — and to get back in if they have forgotten it
  *   • /admin/upgrade*        — the upgrader itself
@@ -270,27 +270,40 @@ class Maintenance
     }
 
     /**
-     * Is the current session an admin user? Admins can pass through
-     * the gate to access /admin/* routes (covered by ALLOW_LIST) and
-     * to fix the problem.
+     * Is the current session a GLOBAL administrator? Only a global
+     * administrator can pass through the gate to reach anything other than
+     * the always-open addresses on the two allow lists above.
      *
-     * STATED PLAINLY, so nobody has to go and check: "admin" here is
-     * `App::isAdmin()`, which is true for a SITE administrator of any one
-     * organisation and for an account carrying the older, portal-wide
-     * `isAdmin` flag, not only a GLOBAL (root) administrator. Every one of
-     * them skips maintenance mode completely today, cron addresses
-     * included until `blocks()` below was added (#509 point 3) — the
-     * issue's own wording undersold this, because it only mentions "a
-     * global administrator". Narrowing this to global administrators only
-     * is a real, separate policy question (raised for the owner, #509's
-     * plan Q1), not built here.
+     * OWNER DECISION, 20 September 2026 — narrowed from "any administrator"
+     * to "a global administrator only". Before this change, the gate used
+     * `App::isAdmin()`, which is true for a SITE administrator of whichever
+     * ONE organisation happens to be open, and for an account carrying the
+     * older, portal-wide `isAdmin` flag — neither of whom can necessarily
+     * finish an upgrade, and both of whom could otherwise browse a
+     * half-upgraded database while everybody else saw the closed sign. That
+     * let far more people in than the one kind of account that can actually
+     * complete the upgrade (`web/_install/upgrade.php` has always required
+     * `App::isUmbrellaAdmin()`, so this wrapper now agrees with it — the
+     * SAME word, so the two gates visibly match rather than quietly
+     * diverging). Nobody is locked out of anything they could actually use:
+     * sign-in, the upgrade page and the health check stay open to everybody
+     * regardless of this method (see the allow lists above), so a site
+     * administrator who cannot bypass maintenance was never going to be
+     * able to run the upgrade either way.
+     *
+     * WHAT THIS CANNOT DO: it does not close `cron/health` — that stays
+     * reachable by design, on EXACT_ALLOW_LIST, before this method is ever
+     * consulted. A global administrator who signs in during maintenance
+     * still SEES a half-upgraded portal; that is the point of letting them
+     * in at all — to finish the upgrade, not to use the portal normally.
      */
     public static function currentUserCanBypass(): bool
     {
-        // 🪞 `App::isAdmin()` is the canonical predicate; this wrapper
-        //    exists so future logic (e.g. "only root admins") can be
-        //    centralised without touching the front controller.
-        return App::isAdmin();
+        // 🪞 `App::isUmbrellaAdmin()` is the canonical predicate for "global
+        //    administrator" — the same word `web/_install/upgrade.php` uses
+        //    for the same distinction, so the two gates cannot quietly drift
+        //    apart from each other again.
+        return App::isUmbrellaAdmin();
     }
 
     /**
@@ -315,8 +328,8 @@ class Maintenance
      *
      * Order matters for cost, not just correctness: `isActive()` only
      * reads settings already in memory; `currentUserCanBypass()` may query
-     * the account (App::isAdmin() → App::user()), so it is asked LAST,
-     * once every cheaper answer has already failed to settle the
+     * the account (App::isUmbrellaAdmin() → App::user()), so it is asked
+     * LAST, once every cheaper answer has already failed to settle the
      * question.
      *
      * @param string $routeKey The address the visitor asked for — pass
@@ -475,7 +488,7 @@ class Maintenance
            . '<p><span class="dot"></span><span class="dot"></span><span class="dot"></span></p>'
            . '<p style="font-size:.85em;color:var(--muted);">'
            . 'This page will reload automatically.<br>'
-           . 'Administrators can <a href="/login">sign in</a> to complete the upgrade.'
+           . 'A global administrator can <a href="/login">sign in</a> to complete the upgrade.'
            . '</p>'
            . '</div></body></html>';
         exit();

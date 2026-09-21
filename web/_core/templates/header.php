@@ -310,20 +310,20 @@ require __DIR__ . DIRECTORY_SEPARATOR . 'nav.php';
 <div class="container">
 
 <?php
-// 🚧 #509 point 3 — the maintenance-bypass banner. Today ANY administrator
-// (site, global or the legacy `isAdmin` flag — see
-// Maintenance::currentUserCanBypass()'s own doc comment) can carry on
-// using the portal untouched while maintenance mode holds everybody else
-// back, with nothing anywhere telling them that is what is happening.
-// Drawn only for exactly that visitor, so it costs nothing for anyone
-// else and nothing at all when maintenance is off. Plain text, not a
-// t() key on purpose — this is a one-off operational notice for an
-// administrator mid-upgrade, not user-facing product copy that needs
-// translating.
+// 🚧 #509 point 3 — the maintenance-bypass banner. A GLOBAL administrator
+// (see Maintenance::currentUserCanBypass()'s own doc comment — narrowed
+// from "any administrator" to global-only by an owner decision on
+// 20 September 2026, #515) can carry on using the portal untouched while
+// maintenance mode holds everybody else back, with nothing anywhere telling
+// them that is what is happening. Drawn only for exactly that visitor, so
+// it costs nothing for anyone else and nothing at all when maintenance is
+// off. Plain text, not a t() key on purpose — this is a one-off operational
+// notice for an administrator mid-upgrade, not user-facing product copy
+// that needs translating.
 if (Maintenance::isActive() === true && Maintenance::currentUserCanBypass() === true): ?>
     <div class="alert alert-warning small mb-3" role="status">
         <i class="fa-solid fa-triangle-exclamation me-1"></i>
-        Maintenance mode is on. Everyone who is not an administrator sees a holding page until it is finished.
+        Maintenance mode is on. Everyone who is not a global administrator sees a holding page until it is finished.
     </div>
 <?php endif; ?>
 

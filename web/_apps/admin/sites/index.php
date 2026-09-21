@@ -20,6 +20,7 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\ReservedKeys;
 use Portal\Core\Site;
 
 // 🛡️ Umbrella admin only
@@ -43,6 +44,21 @@ if ($countResult !== false) {
     while ($row = $countResult->fetch_assoc()) {
         $userCounts[(int) $row['siteID']] = (int) $row['cnt'];
     }
+}
+
+// 🔒 #515 — which organisations (if any) carry a key that clashes with an
+// address the portal relies on, keyed by siteID so the card loop below can
+// look each one up with an O(1) isset() rather than scanning the list per
+// card. A failure here must never stop this page rendering — it just means
+// the badge is silently absent, same as "no clash" (#508's own lesson: an
+// admin page must never crash part way through drawing itself).
+$clashMap = [];
+try {
+    foreach (ReservedKeys::clashingSites($db) as $clash) {
+        $clashMap[$clash['siteID']] = $clash;
+    }
+} catch (\Throwable) {
+    $clashMap = [];
 }
 
 // 📋 Check for flash messages
@@ -108,11 +124,26 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 <?php else: ?>
                 <span class="badge bg-success ms-auto">Active</span>
                 <?php endif; ?>
+                <?php if (isset($clashMap[$sId])): ?>
+                <!-- 🔒 #515 — this organisation's key is the same as an address the portal itself relies on. -->
+                <span class="badge bg-warning text-dark">Key is reserved</span>
+                <?php endif; ?>
             </div>
             <div class="card-body">
                 <dl class="row mb-0 small">
                     <dt class="col-5">Key</dt>
-                    <dd class="col-7"><code><?php echo $sKey; ?></code></dd>
+                    <dd class="col-7">
+                        <code><?php echo $sKey; ?></code>
+                        <?php if (isset($clashMap[$sId])): ?>
+                        <div class="small text-warning-emphasis">
+                            <?php echo htmlspecialchars(
+                                ReservedKeys::describe($clashMap[$sId]['siteKey'], $clashMap[$sId]['kinds']),
+                                ENT_QUOTES,
+                                'UTF-8'
+                            ); ?>
+                        </div>
+                        <?php endif; ?>
+                    </dd>
 
                     <dt class="col-5">Host Pattern</dt>
                     <dd class="col-7"><?php echo $sHost; ?></dd>

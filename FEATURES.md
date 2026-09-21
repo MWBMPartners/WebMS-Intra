@@ -1569,6 +1569,7 @@ CI-runnable static audits invoked from PHP-static-analysis workflow:
 | `check_cdn_sri.py` | `<script>`/`<link>` to a known CDN host without `integrity=` |
 | `check_migration_idempotency.py` | DDL without `IF NOT EXISTS` / inserts without `ON DUPLICATE KEY UPDATE` |
 | `check_mobile_readiness.py` | Hard-coded widths > 320 px, bare `<table>`, missing `accept=`, modal without `modal-fullscreen-sm-down` |
+| `check_reserved_site_keys.py` | An organisation's site key clashing with an address the portal already answers on (a route, a router special address, or a real file/folder in the web root) — seeded keys, the hand-typed router constant agreeing with the code, and `tblSites` having exactly one writer that still checks `ReservedKeys::` (#515) |
 
 Audit pass status as of 2026-06-03: **0 missing routes · 0 column mismatches · 0 native confirms · 0 CDN tags without SRI**. Mobile readiness reports 29 informational findings (concrete fix targets); migration idempotency reports 19 historical (pre-multi-site cohort, already deployed and Migrator-protected).
 

@@ -63,6 +63,7 @@ declare(strict_types=1);
 
 use Portal\Core\AccountGuard;
 use Portal\Core\App;
+use Portal\Core\ReservedKeys;
 use Portal\Core\Router;
 use Portal\Core\Site;
 
@@ -290,6 +291,61 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h1 class="mb-0"><i class="fa-solid fa-shield-halved me-2"></i>Admin Dashboard</h1>
 </div>
+
+<?php
+// 🔒 #515 — warn staff when an organisation's key is the same as an address
+// the portal itself relies on (Portal\Core\ReservedKeys explains what
+// "reserved" means and why an existing clash is left working rather than
+// renamed automatically). Shown in EVERY detection mode, not only when
+// address prefixes are actually in use — this alert is advice for the one
+// person who can act on it, not a monitor light, so it is useful even
+// before a portal ever switches multisite on. A failure here must NEVER
+// break this page (#508 was exactly this shape of fault — an admin page
+// crashing part way through drawing itself) — any exception simply leaves
+// the alert absent, same as "nothing is reserved".
+$keyClashes = [];
+try {
+    $keyClashes = ReservedKeys::clashingSites($mysqli);
+} catch (\Throwable) {
+    $keyClashes = [];
+}
+// 🔭 A site administrator (not a global one) only ever sees their OWN
+// organisation's figures on this page — the #522 scoping this file already
+// applies to every card below — so only their own organisation's clash, if
+// it has one, belongs here too. A global administrator sees every clash,
+// because only a global administrator can do anything about any of them.
+if ($isUmbrella === false) {
+    $keyClashes = array_values(array_filter(
+        $keyClashes,
+        static fn (array $clash): bool => $clash['siteID'] === $siteId
+    ));
+}
+$keysLiveNow = ReservedKeys::keysAreAddresses();
+?>
+<?php if ($keyClashes !== []): ?>
+<div class="alert alert-warning" role="alert">
+    <h2 class="h6 alert-heading mb-2"><i class="fa-solid fa-triangle-exclamation me-1"></i> An organisation key is reserved</h2>
+    <?php foreach ($keyClashes as $clash): ?>
+    <?php $clashKey = htmlspecialchars($clash['siteKey'], ENT_QUOTES, 'UTF-8'); ?>
+    <p class="mb-1 small">
+        <strong><?php echo htmlspecialchars($clash['siteName'], ENT_QUOTES, 'UTF-8'); ?></strong>
+        (<code><?php echo $clashKey; ?></code>)
+        — <?php echo htmlspecialchars(ReservedKeys::describe($clash['siteKey'], $clash['kinds']), ENT_QUOTES, 'UTF-8'); ?>
+        <?php if ($keysLiveNow === true): ?>
+        Its pages are taking over /<?php echo $clashKey; ?>/ now.
+        <?php else: ?>
+        It would take over /<?php echo $clashKey; ?>/ if the portal were switched to address prefixes.
+        <?php endif; ?>
+        <?php if ($isUmbrella === true): ?>
+        Change the key at <a href="<?php echo htmlspecialchars(Router::url('admin/sites'), ENT_QUOTES, 'UTF-8'); ?>">Admin &rarr; Sites</a> (Edit).
+        Links already shared under /<?php echo $clashKey; ?>/ will stop working when it changes.
+        <?php else: ?>
+        Ask a global administrator to change it.
+        <?php endif; ?>
+    </p>
+    <?php endforeach; ?>
+</div>
+<?php endif; ?>
 
 <!-- 📊 Summary Cards -->
 <div class="row g-4 mb-4">

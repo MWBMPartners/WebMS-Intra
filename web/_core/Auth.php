@@ -2067,9 +2067,12 @@ class Auth
         //    Reproduced 15 September 2026 in Edge 153, Firefox 155 and
         //    WebKit 26.6. The cause is a site key taking over a fixed portal
         //    address. That belongs where site keys are saved
-        //    (web/_apps/admin/sites/save.php, which does not yet refuse such
-        //    keys), not here. A cookie-free install fetch was tried and
-        //    rejected; see the install step in sw.js.
+        //    (web/_apps/admin/sites/save.php, which now refuses such keys,
+        //    #515) — an organisation keyed that way BEFORE the refusal
+        //    existed is not renamed by it, and stays flagged on the health
+        //    page, the admin dashboard and the organisations page until an
+        //    administrator changes its key. A cookie-free install fetch was
+        //    tried and rejected; see the install step in sw.js.
         //    WHAT THIS COSTS: during the changeover, a browser still running
         //    a worker from before #507 on such a server shows the bare "you
         //    appear to be offline" message after sign-out, instead of the

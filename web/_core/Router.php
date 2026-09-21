@@ -39,6 +39,34 @@ use mysqli;
 class Router
 {
     /**
+     * The first part of every address handleSpecialRoutes() answers itself,
+     * WITHOUT ever consulting tblRoutes — 'login', 'logout', 'offline',
+     * 'health', the OAuth callback prefix 'login/...', the API prefix 'api',
+     * and every short public-link prefix ('e', 'a', 'os', 'f') and GS1
+     * Digital Link prefix ('01', '8003', '8004') handleSpecialRoutes() below
+     * recognises.
+     *
+     * This is the ONLY hand-typed part of the reserved-organisation-key list
+     * (#515, see ReservedKeys::all()) — everything else that list reserves is
+     * read LIVE from tblRoutes or the real web root, so it cannot go stale.
+     * This constant CAN go stale, because handleSpecialRoutes() is a method
+     * body full of `$path === '...'` and `str_starts_with($path, '...')`
+     * literals, not rows in a table nothing here can query.
+     *
+     * `tools/audit-checks/check_reserved_site_keys.py` closes that gap by
+     * PARSING handleSpecialRoutes() itself and failing the build the moment
+     * this constant and that method disagree in EITHER direction — an
+     * address added to the method without being added here, or a name kept
+     * here after the matching code was removed. Add a special route → add
+     * its first part here, in the SAME change, or the build fails.
+     *
+     * @var list<string>
+     */
+    public const SPECIAL_ROUTE_FIRST_SEGMENTS = [
+        '01', '8003', '8004', 'a', 'api', 'e', 'f', 'health', 'login', 'logout', 'offline', 'os',
+    ];
+
+    /**
      * Main dispatch method - called by front controllers.
      *
      * @param mysqli $db Active MySQLi database connection
