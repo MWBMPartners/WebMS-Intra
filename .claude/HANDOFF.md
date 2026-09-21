@@ -9,6 +9,22 @@ proceeds, so the session can be picked up at any point).
 
 ## Read this first — where we are right now
 
+## LATEST — 21 September 2026, about 22:00. RESUME FROM HERE.
+
+**#514 P1 IS COMMITTED: `2cd68f1`, pushed, #514 commented.** Two independent checks passed (both on OPUS: Fable was out of usage
+credits, recorded in the commit). Fixes made before the commit: the self-test now catches all nine planted faults (131 checks); API keys
+follow owner answer 3 literally (full detail only when the calendar itself is Public; noted in p514--plan-r2.md section 0.4 for P2
+rows g/h and P7); the self-test's exit code; two comments; and, by me with a proof, the error handler registered before the rule file
+loads.
+
+**NOTE FOR EVERY LATER PART:** `tools/event-visibility-selftest.php` needs a throwaway database (`SELFTEST_DB_NAME=selftest_…` plus
+host/port/user/pass) built the installer's way. Without one it REFUSES with exit 1 **by design**, so "nothing checked" never looks
+like a pass. The part script's HOUSE text now says so. Every other self-test runs without a database. (Also: never read an exit code
+through a pipe; `$?` after `| tail` is the tail's.)
+
+**NOW: P2 launching** (`args: { part: "P2", tier: "opus" }`): the rule and the detail level in every place events are shown, about
+twenty files; closes #534 items 1-2; replaces #544's interim test. Reports `p514-p2--*.md`.
+
 ## LATEST — 21 September 2026, about 20:45. RESUME FROM HERE.
 
 **#514 P1 is BUILT (uncommitted, 9 files in the working tree) and PASSED its independent check** (run `wf_9898d9d7-5f4`; reports
