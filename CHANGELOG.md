@@ -2,6 +2,21 @@
 
 
 ## [Unreleased] (alpha)
+- fix(calendar): the calendar's series download (`/calendar/export?series=N`)
+  no longer hands internal events to a visitor who is not signed in (#544).
+  Before this, the address needed no sign-in — correctly, so that a public
+  series can be subscribed to — but its lookup asked only whether an event
+  was published, never whether it was public, so anybody could download every
+  published event of an internal series, descriptions and locations included,
+  by trying series=1, 2, 3 and so on (confirmed on a real database). The
+  single-event download and the "all upcoming" download already refused
+  internal events to a signed-out visitor; only the series path was missed.
+  Now a signed-out visitor gets a series' public events only, and a series
+  with nothing left for them answers the same "not available" page as a
+  series number that matches nothing, at the same database cost. Signed-in
+  behaviour is unchanged. Whether a signed-in account belongs to the event's
+  own organisation is still not asked here; that comes with #514 part P2 and
+  #534.
 - feat(admin,core): user groups and departments now belong to one
   organisation each, and can finally be created and filled (#517). Before
   this, nothing anywhere could create a group or a department or add a

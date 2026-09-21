@@ -31,12 +31,18 @@
  * draft only for people who can manage events (anybody else gets the same
  * "not found" as a missing event), and sign-in for an event not marked public.
  *
+ * #544 — the `series=` download follows the same rule for internal events: a
+ * signed-out visitor gets only the series' public events, and a series with
+ * nothing left for them answers the same "not available" page as a series
+ * number that matches nothing. Before this, anybody could download every
+ * published event of an internal series without signing in.
+ *
  * @see       https://datatracker.ietf.org/doc/html/rfc5545
  * @package   Portal\Calendar
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   0.4.0
+ * @version   0.4.1
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/338
  * -----------------------------------------------------------------------------
  */
@@ -144,10 +150,57 @@ if ($eventId > 0) {
 
     $events[] = $row;
 } elseif ($seriesId > 0) {
-    // 🔄 All events in a series
-    $stmt = $db->prepare(
-        'SELECT * FROM tblEvents WHERE seriesID = ? AND isDeleted = 0 AND status = \'published\' AND siteID = ? ORDER BY startDateTime'
-    );
+    // 🔄 All events in a series — with the SAME "who may see an internal
+    //    event" test as the single-event download above, applied to every
+    //    row of the series (#544).
+    //
+    //    What was wrong before: this lookup asked only for published rows of
+    //    this organisation. It never asked whether an event was public, or
+    //    whether the visitor was signed in. The address needs no sign-in (its
+    //    route is seeded with isProtected = 0, so that a public series can be
+    //    downloaded and subscribed to), so anybody could download every
+    //    published event of an INTERNAL series, descriptions and locations
+    //    included, by trying series=1, series=2 and so on. Series numbers
+    //    count upward from 1, so no guessing was needed. The single-event
+    //    download above and the "all upcoming" download below both already
+    //    kept internal events from a signed-out visitor; only this branch was
+    //    missed.
+    //
+    //    The rule, the same as the single-event branch's isPublic test: a
+    //    signed-out visitor gets only the series' PUBLIC events (the second
+    //    statement below); a signed-in visitor gets every published event of
+    //    the series, exactly as before (the first). A series with some public
+    //    and some internal events therefore gives a signed-out visitor its
+    //    public events only. The test is part of the SQL rather than applied
+    //    to the fetched rows, so that an internal series and a series number
+    //    that matches nothing cost the database the same work and return the
+    //    same nothing (#503): no internal row leaves the database for a
+    //    visitor who may not see it.
+    //
+    //    Why two whole statements, and why isPublic and siteID sit BEFORE
+    //    status: tools/audit-checks/check_sql_columns.py checks the column
+    //    names a WHERE clause tests, but only in a whole, literal statement,
+    //    and it stops reading at the first quoted value ('published' here).
+    //    A fragment added with `. ($signedIn === false ? '...' : '')` was
+    //    proved invisible to it on 21 September 2026 (a misspelt column name
+    //    passed), and so is any column written after the quoted value. Keep
+    //    each statement whole, on one line, with status last.
+    //
+    //    Drafts stay out for EVERYBODY, including people who can manage
+    //    events, through the unchanged status test, so $canManage plays no
+    //    part here; it matters only to the single-event download's draft rule.
+    //    That is today's behaviour, kept on purpose.
+    //
+    //    WHAT THIS DOES NOT DO: ask whether a signed-in visitor belongs to the
+    //    event's own organisation. Any signed-in account still gets any
+    //    organisation's internal series, exactly as with the single-event
+    //    download today. That is #514 part P2 and #534, which will replace
+    //    this test with the full visibility rule.
+    $sql = 'SELECT * FROM tblEvents WHERE seriesID = ? AND isDeleted = 0 AND siteID = ? AND status = \'published\' ORDER BY startDateTime';
+    if ($signedIn === false) {
+        $sql = 'SELECT * FROM tblEvents WHERE seriesID = ? AND isDeleted = 0 AND siteID = ? AND isPublic = 1 AND status = \'published\' ORDER BY startDateTime';
+    }
+    $stmt = $db->prepare($sql);
     if ($stmt !== false) {
         $stmt->bind_param('ii', $seriesId, $siteId);
         $stmt->execute();
@@ -156,6 +209,25 @@ if ($eventId > 0) {
             $events[] = $r;
         }
         $stmt->close();
+    }
+
+    // 🛡️ ONE answer for "nothing here for you" — Router::renderEventUnavailable(),
+    //    the page the single-event branch already uses (#532, #544). A series
+    //    number that matches nothing, another organisation's series, a series
+    //    with no events, a series with only drafts, and an internal series
+    //    asked for by a signed-out visitor all reach this line the same way:
+    //    one query, no rows. The page is a 404 underneath, with a sign-in link
+    //    for a visitor who is not signed in.
+    //
+    //    What was wrong before: an empty result fell through to the generic
+    //    "page not found" page at the end of the selection below. That was not
+    //    itself a leak (the rows above were), but once a signed-out visitor is
+    //    refused an internal series, the refusal MUST look exactly like a
+    //    missing series, and this page is the one answer the owner chose for
+    //    that on 20 September 2026.
+    if (count($events) === 0) {
+        Router::renderEventUnavailable();
+        return;
     }
 } elseif ($exportAll === true) {
     // 📅 All upcoming public events
@@ -174,6 +246,11 @@ if ($eventId > 0) {
     }
 }
 
+// 📭 Only the "all upcoming" download and a request that names nothing
+//    (no id=, series= or all=1) can reach this line with nothing to send;
+//    the single-event and series branches above answer their own
+//    "not available" page. Nothing about a visitor's rights is decided
+//    here, so the plain "page not found" answer is kept for these two.
 if (count($events) === 0) {
     Router::renderError(404);
     return;
