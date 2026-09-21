@@ -54,12 +54,23 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
     <div class="mb-3">
         <label class="form-label">Department</label>
+        <?php if (count($depts) === 0): ?>
+            <!-- 🏢 #517: with no departments there is nothing a claim can be
+                 charged to, and the save handler would refuse every claim.
+                 This used to show an empty list with no explanation; now it
+                 says why, and the Submit button below is switched off. -->
+            <div class="alert alert-info mb-0">
+                <i class="fa-solid fa-circle-info me-1"></i>No departments have been set up for this organisation yet.
+                An administrator adds them at Admin &rarr; Departments.
+            </div>
+        <?php else: ?>
         <select class="form-select" name="deptID" required>
             <option value="" disabled selected>Select department...</option>
             <?php foreach ($depts as $dept): ?>
                 <option value="<?php echo (int) $dept['deptID']; ?>"><?php echo htmlspecialchars($dept['deptName'], ENT_QUOTES, 'UTF-8'); ?></option>
             <?php endforeach; ?>
         </select>
+        <?php endif; ?>
     </div>
 
     <h4 class="mt-4">Items</h4>
@@ -116,7 +127,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <!-- 🤖 Captcha widget (if configured) -->
     <?php echo Captcha::widget(); ?>
 
-    <button type="submit" class="btn btn-primary">Submit Claim</button>
+    <button type="submit" class="btn btn-primary"<?php echo count($depts) === 0 ? ' disabled' : ''; ?>>Submit Claim</button>
 </form>
 
 <style>

@@ -533,6 +533,23 @@ $keysLiveNow = ReservedKeys::keysAreAddresses();
                 </a>
             </div>
             <div class="col-6 col-md-4 col-lg-2">
+                <!-- 👥 #517: this organisation's user groups (committees and
+                     working groups) — create, rename, retire, and who is in
+                     each. Site::url(), as the Roles tile above. -->
+                <a href="<?php echo htmlspecialchars(Site::url('admin/groups'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-primary w-100 d-flex flex-column align-items-center gap-1 py-3">
+                    <i class="fa-solid fa-people-group fa-lg"></i>
+                    <span class="small">Groups</span>
+                </a>
+            </div>
+            <div class="col-6 col-md-4 col-lg-2">
+                <!-- 🏢 #517: this organisation's departments — what expense
+                     claims are charged to, and who approves them. -->
+                <a href="<?php echo htmlspecialchars(Site::url('admin/departments'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-primary w-100 d-flex flex-column align-items-center gap-1 py-3">
+                    <i class="fa-solid fa-building fa-lg"></i>
+                    <span class="small">Departments</span>
+                </a>
+            </div>
+            <div class="col-6 col-md-4 col-lg-2">
                 <a href="/admin/migrations" class="btn btn-outline-warning w-100 d-flex flex-column align-items-center gap-1 py-3">
                     <i class="fa-solid fa-database fa-lg"></i>
                     <span class="small">Migrations</span>

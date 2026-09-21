@@ -5885,6 +5885,106 @@ code), or anything referenced only from JavaScript.
 picker uses to ask "is this person in role R for organisation S" inside a database query, without
 needing to know this class's table names or join shape.
 
+## User groups and departments per organisation (#517)
+
+Two kinds of grouping had existed in the database for a long time with **nothing anywhere able to
+create one or add a person**: user groups (`tblGroups`, members in `tblUserGroups`) and departments
+(`tblDepts`, members in `tblUserDepts`). Code READ them — workflow approval by group, asset
+ownership by group or department, expense approval by department — so those options only ever
+worked after a hand edit, and the installer seeds neither. `tblGroups` also had **no organisation
+column**, so a group was visible and usable in every organisation. The owner's decision (21
+September 2026): both belong to one organisation each, are managed by that organisation's
+administrators, and stay two different things — groups are committees and working groups;
+departments carry the five flags expense approval depends on.
+
+### The shape (migration 203 + the `full_schema.sql` fold)
+
+- `tblGroups` gains `siteID` (required) and `isActive` (the "retire" switch). `tblDepts` already had
+  both; it gains only `idx_depts_id_site (deptID, siteID)`.
+- Both membership tables gain `siteID` (required), `addedAt`, `addedByID`, a unique key on
+  `(userID, groupID)` / `(userID, deptID)`, and two **composite foreign keys** (rules the database
+  enforces over two columns at once): `(userID, siteID)` → `tblUserSites` (the person's own
+  membership of that organisation) and `(groupID, siteID)` → `tblGroups` / `(deptID, siteID)` →
+  `tblDepts` (the SAME organisation's group or department). So a membership for a non-member, or
+  naming another organisation's group, is refused by the database itself (error 1452), and deleting
+  a person's membership row of ONE organisation ("remove from site") removes only that
+  organisation's group and department memberships.
+- **The index trap:** InnoDB needs the columns a composite foreign key POINTS AT to lead an index.
+  `idx_groups_id_site` and `idx_depts_id_site` exist for exactly that; without them adding the key
+  fails with `ERROR 1822 Missing index for constraint` (proven while planning).
+- `tblDepts.isActive` stays nullable: a NULL from a hand edit already means "off" everywhere.
+  `Departments::setActive()` compares `COALESCE(isActive, 0) <> ?`, because a plain `<>` against
+  NULL matches nothing and such a department could never be retired or reinstated.
+
+### Carry-over, and the pens
+
+Nothing could write these tables, so a real installation has no rows to carry. For a hand-edited
+one: a GROUP is placed automatically only where that is not a guess (single-organisation portal,
+or exactly one organisation row — the #533/#516 reading); a group membership follows its group if
+the person has a membership row there. DEPARTMENT memberships follow the department's own
+`siteID` **without** the single-organisation condition, because that `siteID` has been real data
+since migration 015 (the claim form and the API already treat a department as living there) —
+only a person with no membership row there is parked. Duplicate department memberships have their
+flags folded ("set if either copy has it") into the kept row before the duplicates are removed, so
+no approver loses the flag. Anything not placed goes to `tblGroupsUnplaced`,
+`tblUserGroupsUnplaced` or `tblUserDeptsUnplaced`, for a global administrator at
+`/admin/users/memberships-unplaced`. A parked group keeps its **number** and gets it back when
+placed (workflow steps name a group by typing its number); if a dump-and-restore has since let
+another group take that number, placement uses a new one and says so. That new number is chosen
+one above every number in use or still waiting in a pen, and the group's still-parked members are
+moved to it, so a later "Place" can never put them into a different group that happens to hold
+the old number (proven wrong otherwise during the #517 build). A parked group's asset
+ownership rows are removed by migration 159's `fk_asto_group` cascade and must be re-added by hand.
+
+### `Portal\Core\UserGroups` and `Portal\Core\Departments`
+
+The two classes own every write to the four tables and the shared lookups, in the `Roles` shape:
+connection passed first, no cache, no global-administrator shortcut in SQL, a plain `INSERT`
+catching 1062/1452 (never `INSERT IGNORE`, which turns a foreign-key refusal into a silent
+warning), audit and activity records with account NUMBERS only. They do not decide WHO may act:
+the list pages gate on `App::isAdmin()`; the Members pages run `AccountGuard::check(…,
+REACH_THIS_ORG, …)` for the particular account, so a refusal reads exactly "That account could
+not be found." `Departments::FLAGS` is the single description of the five flags; the pages and
+the help page render it. Nothing in the portal reads `isDeptAssistant` or `isDeptSecretary`, and
+their descriptions say so.
+
+**The column-checker trap.** `check_sql_columns.py` misreads `FROM tblUserGroups <short name>` (and
+`FROM tblUserGroupsUnplaced p`, or `… tblUserGroupsUnplaced GROUP BY …`) on a SELECT as an unknown
+table — the word "Group" inside the name (its blind spot 15). Start from `tblGroups`, or reach the
+membership table through a `JOIN`.
+
+### Why expense APPROVAL carries no "department switched on" test (owner's answer Q3)
+
+Retiring a department stops NEW claims (the claim form's list, `expenses/submit/save.php` and
+`expenses/api/create.php` all require `isActive = 1`). The approval listing, the decision gate, the
+required-approver list and the approver e-mails deliberately do NOT test it, so claims already
+charged to a retired department are finished by its own approvers. Adding the test was proven to
+strand such a claim for ever: `approve/save.php` requires every lead and required approver to
+approve, and an administrator's approval never satisfies that. Every approval query does now require
+the membership to be in the claim's own organisation and the person's membership there to be
+active, so somebody who has left can neither approve nor block a claim.
+
+### What #514 calls
+
+`UserGroups::memberSql('V', 'am.refID', 'E.siteID')` and `Departments::memberSql('V', 'am.refID',
+'E.siteID')` — one `EXISTS (…)` fragment each, answering "is this person a CURRENT member of that
+group / department in that organisation": membership row in that organisation, the group or
+department belongs to it and is switched on, and the person's organisation membership is active.
+A retired or deleted group or department matches nobody (fail closed). The pickers are
+`UserGroups::forSite($db, $siteId, true)` and `Departments::forSite($db, $siteId, true)`.
+`tools/memberships-selftest.php` pins both strings.
+
+### `check_membership_queries_scoped.py` — what it protects, and what it cannot see
+
+Every line of PHP under `web/` that names `tblUserGroups` or `tblUserDepts` must have the text
+`siteID` within 10 lines either side (comments ignored). It exists to stop the next
+`JOIN tblUserGroups ug ON ug.userID = u.userID` with no organisation — the shape every old reader
+had. It **cannot** tell whether the `siteID` it finds actually scopes THAT query: on the pre-#517
+tree it found 13 of the 17 old unscoped lines, and missed four whose statements tested ANOTHER
+table's `siteID` nearby. It does not read SQL held in variables, and does not check the two pen
+tables (by design). `ALLOWED` names offboarding (a whole-portal exit on purpose) and the two erasure
+lists.
+
 ---
 
 Last updated: September 2026

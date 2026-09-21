@@ -121,6 +121,19 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         </div>
     </div>
 
+    <!-- 🏢 #517: who approves a claim, in plain words, matching
+         expenses/approve/index.php and approve/save.php. -->
+    <p>
+        <strong>Who approves a claim.</strong> A claim is approved by members of the department it is charged to,
+        in that organisation, who are flagged there as <strong>lead</strong>, <strong>approver</strong> or
+        <strong>required approver</strong> (Admin &rarr; Departments, the Members page). Any rejection rejects the
+        claim at once. A claim is fully approved only when every lead and every required approver has approved
+        it; if the department has neither, one approval is enough. To record a decision you also need the
+        <strong>Expense Approver</strong> role in that organisation, unless you are an administrator. If a
+        department is retired, no new claim can be charged to it, but claims already submitted to it are still
+        finished by its approvers in the usual way.
+    </p>
+
     <div class="alert alert-warning d-flex gap-2" role="alert">
         <i class="fa-solid fa-triangle-exclamation mt-1"></i>
         <div>

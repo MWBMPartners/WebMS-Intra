@@ -4,8 +4,9 @@
  * -----------------------------------------------------------------------------
  * Help Centre -- Admin Guide
  * -----------------------------------------------------------------------------
- * Guide for portal administrators: managing settings, user roles, Gatekeeper
- * (dev/alpha/beta site access), and viewing system logs.
+ * Guide for portal administrators: managing settings, user roles, user groups
+ * and departments (#517), Gatekeeper (dev/alpha/beta site access), and
+ * viewing system logs.
  * -----------------------------------------------------------------------------
  * @package    Portal\Help
  * @license   All Rights Reserved
@@ -14,6 +15,7 @@
 
 declare(strict_types=1);
 
+use Portal\Core\Departments;
 use Portal\Core\Roles;
 
 $pageTitle   = 'Help - Admin Guide';
@@ -50,6 +52,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <a href="#settings" class="badge text-bg-secondary text-decoration-none">Settings Management</a>
             <a href="#site-branding" class="badge text-bg-secondary text-decoration-none">Site Branding</a>
             <a href="#roles" class="badge text-bg-secondary text-decoration-none">User Roles</a>
+            <a href="#groups-departments" class="badge text-bg-secondary text-decoration-none">Groups and Departments</a>
             <a href="#gatekeeper" class="badge text-bg-secondary text-decoration-none">Dev Site Access (Gatekeeper)</a>
             <a href="#logs" class="badge text-bg-secondary text-decoration-none">Viewing Logs</a>
             <a href="#csv-export" class="badge text-bg-secondary text-decoration-none">CSV Export</a>
@@ -417,6 +420,92 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         placed into the right organisation. Only a global administrator can see this list or place anybody
         from it &mdash; the portal deliberately does not guess which organisation an account belongs to.
     </p>
+</div>
+
+<!-- Groups and departments (#517) -->
+<div class="portal-card p-4 mb-4" id="groups-departments">
+    <h2 class="h4 mb-3"><i class="fa-solid fa-people-group me-2 text-primary"></i>Groups and Departments</h2>
+
+    <p>
+        Besides roles, an organisation can gather its people in two other ways. They are deliberately two
+        different things, and both belong to <strong>one organisation</strong>: a group or department made in
+        one organisation is never visible or usable in another.
+    </p>
+
+    <h5 class="mt-3 mb-2">User groups &mdash; committees and working groups</h5>
+    <p>
+        A user group is a committee or working group, such as a finance committee or a building committee.
+        A group can be named as the approver of a <strong>workflow step</strong> (type the group's
+        <strong>number</strong>, shown on the Groups page, into the step's &ldquo;Assignee value&rdquo; box), and
+        it can <strong>own an asset</strong> in the asset register. Home groups, Bible studies and classes with
+        meeting rolls are a different thing: the separate Small Groups app.
+    </p>
+
+    <h5 class="mt-3 mb-2">Departments &mdash; what expense claims are charged to</h5>
+    <p>
+        Every expense claim is charged to a department, and the flags on the department's members decide who
+        approves it. The flags, listed here straight from the code that uses them:
+    </p>
+    <div class="list-group list-group-flush mb-3">
+        <?php foreach (Departments::FLAGS as $flagKey => $flag): ?>
+            <div class="list-group-item d-flex gap-3 align-items-start">
+                <span class="badge text-bg-info rounded-pill mt-1"><i class="fa-solid fa-flag"></i></span>
+                <div>
+                    <strong><?php echo htmlspecialchars($flag['label'], ENT_QUOTES, 'UTF-8'); ?></strong>
+                    <p class="mb-0 small text-secondary"><?php echo htmlspecialchars($flag['description'], ENT_QUOTES, 'UTF-8'); ?>.</p>
+                </div>
+            </div>
+        <?php endforeach; ?>
+    </div>
+    <p>
+        To record a decision on a claim, a person who is not an administrator also needs the
+        <strong>Expense Approver</strong> role in that organisation (Admin &rarr; Users, the Roles button).
+        If the list of departments is empty, nobody can submit a claim: the claim form says so.
+    </p>
+
+    <h5 class="mt-3 mb-2">Who manages them</h5>
+    <p>
+        Any administrator of an organisation manages that organisation's groups at
+        <strong>Admin &rarr; Groups</strong> and its departments at <strong>Admin &rarr; Departments</strong>:
+        add, rename, retire, reinstate and delete, and on each one's <strong>Members</strong> page, add and
+        remove people (and, for departments, set their flags). A global administrator can do this in any
+        organisation. Only people who are active members of the organisation can be added. As with roles, a
+        site administrator cannot change a global administrator's account; the page says &ldquo;That account
+        could not be found&rdquo; exactly as it does for a number that does not exist. Every change is written
+        to the audit trail.
+    </p>
+
+    <h5 class="mt-3 mb-2">Retire or delete?</h5>
+    <ul>
+        <li><strong>Retire</strong> is always allowed and keeps the history. A retired <strong>group</strong>
+            counts for nothing anywhere &mdash; it approves no workflow step and its asset ownership grants
+            nothing &mdash; until it is reinstated. A retired <strong>department</strong> takes no new expense
+            claims, while claims already submitted to it are still finished by its own approvers.</li>
+        <li><strong>Delete</strong> is refused while a group still has members, owns an asset or is named by a
+            workflow step of the organisation, or while a department still has members, owns an asset or has
+            any expense claim. The message says what is in the way; retire it instead.</li>
+    </ul>
+
+    <h5 class="mt-3 mb-2">When somebody leaves</h5>
+    <p>
+        Removing a person from one organisation (Admin &rarr; Sites &rarr; Users) removes their group and
+        department memberships in that organisation only. Offboarding removes them in every organisation, and
+        undoing an offboarding does not bring them back &mdash; add them again if needed.
+    </p>
+
+    <div class="alert alert-info d-flex gap-2 mb-0" role="alert">
+        <i class="fa-solid fa-circle-info mt-1"></i>
+        <div>
+            <strong>&ldquo;Groups and departments awaiting placement&rdquo;.</strong> Before this feature, groups
+            and memberships could only be written into the database by hand. On a portal with more than one
+            organisation, anything the upgrade could not place without guessing is set aside, and a
+            <strong>global administrator</strong> sees a warning above the Users list with a link to place each
+            item. A parked group keeps its number when it is placed, so workflow steps that name it keep
+            working; in the rare case that another group has taken that number since, the page gives it a
+            new one and says so, so those steps can be updated. On an ordinary installation this never
+            appears.
+        </div>
+    </div>
 </div>
 
 <!-- Section 3: Gatekeeper (Dev Site Access) -->

@@ -530,12 +530,22 @@ return [
     ],
     'tblUserDepts' => [
         'decision' => 'erase',
-        'reason'   => 'Holds information about the person themselves',
+        'reason'   => "Which department somebody belongs to, with its flags, and in which organisation - that is about them, so it goes. The table also carries addedByID, saying who added them; that is a separate instruction (#517), and it only removes the name.",
+        'columns'  => ['userID'],
+    ],
+    'tblUserDeptsUnplaced' => [
+        'decision' => 'erase',
+        'reason'   => 'A parked department membership waiting for a global administrator to place it; about the person themselves (#517)',
         'columns'  => ['userID'],
     ],
     'tblUserGroups' => [
         'decision' => 'erase',
-        'reason'   => 'Holds information about the person themselves',
+        'reason'   => "Which user group somebody belongs to, and in which organisation - that is about them, so it goes. The table also carries addedByID, saying who added them; that is a separate instruction (#517), and it only removes the name.",
+        'columns'  => ['userID'],
+    ],
+    'tblUserGroupsUnplaced' => [
+        'decision' => 'erase',
+        'reason'   => 'A parked group membership waiting for a global administrator to place it; about the person themselves (#517)',
         'columns'  => ['userID'],
     ],
     'tblUserMilestone' => [

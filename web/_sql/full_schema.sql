@@ -156,15 +156,42 @@ CREATE TABLE IF NOT EXISTS `tblRoles` (
 
 
 -- -----------------------------------------------------------------------------
--- 👥 tblGroups — committees / working groups
+-- 👥 tblGroups — user groups: committees and working groups OF ONE
+--    ORGANISATION (#517)
 -- -----------------------------------------------------------------------------
+-- Before #517 this table had no organisation column, so a group made in one
+-- organisation was visible, and usable as a workflow approver or an asset
+-- owner, in every organisation on the portal. It is no longer portal-wide
+-- "reference data": every group belongs to exactly one organisation
+-- (`siteID`, required, never NULL for "all"), and is managed by that
+-- organisation's administrators at /admin/groups.
+--
+-- `isActive` is the "retire" switch: a retired group keeps its history and
+-- its members' rows, but matches NOBODY anywhere — workflow steps, asset
+-- ownership and the #514 shared-calendar audience all require
+-- `isActive = 1`. Home groups and classes with meeting rolls are a
+-- different thing: the Small Groups app (tblSmallGroup*).
+--
+-- `siteID` has no default on purpose: nothing in any migration or seed
+-- inserts a group, and every write in the code (Portal\Core\UserGroups and
+-- the "awaiting placement" page) sets it explicitly. `idx_groups_id_site`
+-- is required, not optional: the composite foreign key
+-- `fk_user_group_group_site` on tblUserGroups points at (groupID, siteID),
+-- and InnoDB needs those columns to lead an index.
 CREATE TABLE IF NOT EXISTS `tblGroups` (
     `groupID`         INT          NOT NULL AUTO_INCREMENT,
+    `siteID`          INT          NOT NULL COMMENT 'The organisation this group belongs to (#517)',
     `groupName`       VARCHAR(100) COLLATE utf8mb4_general_ci DEFAULT NULL,
     `description`     TEXT         COLLATE utf8mb4_general_ci,
+    `isActive`        TINYINT(1)   NOT NULL DEFAULT 1
+                      COMMENT '1 = in use; 0 = retired (kept for history, matches nobody) (#517)',
     `dateAdded`       TIMESTAMP    NULL DEFAULT CURRENT_TIMESTAMP,
     `dateLastUpdated` TIMESTAMP    NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    PRIMARY KEY (`groupID`)
+    PRIMARY KEY (`groupID`),
+    KEY `idx_groups_site` (`siteID`),
+    KEY `idx_groups_id_site` (`groupID`,`siteID`),
+    CONSTRAINT `fk_groups_site` FOREIGN KEY (`siteID`)
+        REFERENCES `tblSites` (`siteID`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 
@@ -179,6 +206,10 @@ CREATE TABLE IF NOT EXISTS `tblDepts` (
     `isActive` TINYINT(1)   DEFAULT 1,
     PRIMARY KEY (`deptID`),
     KEY `idx_depts_site` (`siteID`),
+    -- #517: the composite foreign key `fk_user_dept_dept_site` on
+    -- tblUserDepts points at (deptID, siteID), and InnoDB needs those
+    -- columns to lead an index (without it: ERROR 1822 Missing index).
+    KEY `idx_depts_id_site` (`deptID`,`siteID`),
     CONSTRAINT `fk_depts_site` FOREIGN KEY (`siteID`)
         REFERENCES `tblSites` (`siteID`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
@@ -421,41 +452,162 @@ CREATE TABLE IF NOT EXISTS `tblUserRolesUnplaced` (
 
 
 -- -----------------------------------------------------------------------------
--- 👥 tblUserGroups — many-to-many: users ↔ groups
+-- 👥 tblUserGroups — who is in which user group, IN WHICH ORGANISATION (#517)
 -- -----------------------------------------------------------------------------
+-- `siteID` is required (never NULL) — being in a group always means being in
+-- it in ONE specific organisation. The two composite foreign keys below make
+-- a wrong membership impossible at the database level, not just in page
+-- code: `fk_user_group_membership` refuses a membership for somebody who is
+-- not a member of that organisation (and, when that membership row is
+-- deleted — "remove from this organisation" — removes only that
+-- organisation's group memberships), and `fk_user_group_group_site` refuses
+-- a membership naming another organisation's group. `uq_user_group` stops
+-- the same person being added twice. The two original single-column
+-- constraints (`tblUserGroups_ibfk_1`/`_2`, from before #517) are kept —
+-- redundant now, but harmless. Written only through Portal\Core\UserGroups.
 CREATE TABLE IF NOT EXISTS `tblUserGroups` (
     `userGroupID` INT NOT NULL AUTO_INCREMENT,
     `userID`      INT NOT NULL,
     `groupID`     INT NOT NULL,
+    `siteID`      INT NOT NULL
+                  COMMENT 'The organisation this membership applies to (#517) — must match the group''s own siteID',
+    `addedAt`     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `addedByID`   INT DEFAULT NULL
+                  COMMENT 'Who added this person, for the audit trail. NULL after that account is erased (GdprEraser).',
     PRIMARY KEY (`userGroupID`),
     KEY `userID`  (`userID`),
     KEY `groupID` (`groupID`),
+    UNIQUE KEY `uq_user_group` (`userID`,`groupID`),
+    KEY `idx_user_group_site` (`userID`,`siteID`),
+    KEY `idx_user_group_group_site` (`groupID`,`siteID`),
+    KEY `idx_user_group_org` (`siteID`),
+    KEY `idx_user_group_adder` (`addedByID`),
     CONSTRAINT `tblUserGroups_ibfk_1` FOREIGN KEY (`userID`)
         REFERENCES `tblUsers` (`userID`) ON DELETE CASCADE,
     CONSTRAINT `tblUserGroups_ibfk_2` FOREIGN KEY (`groupID`)
-        REFERENCES `tblGroups` (`groupID`) ON DELETE CASCADE
+        REFERENCES `tblGroups` (`groupID`) ON DELETE CASCADE,
+    CONSTRAINT `fk_user_group_membership` FOREIGN KEY (`userID`,`siteID`)
+        REFERENCES `tblUserSites` (`userID`,`siteID`) ON DELETE CASCADE,
+    CONSTRAINT `fk_user_group_group_site` FOREIGN KEY (`groupID`,`siteID`)
+        REFERENCES `tblGroups` (`groupID`,`siteID`) ON DELETE CASCADE,
+    CONSTRAINT `fk_user_group_site` FOREIGN KEY (`siteID`)
+        REFERENCES `tblSites` (`siteID`) ON DELETE CASCADE,
+    CONSTRAINT `fk_user_group_adder` FOREIGN KEY (`addedByID`)
+        REFERENCES `tblUsers` (`userID`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 
 -- -----------------------------------------------------------------------------
--- 🏢 tblUserDepts — many-to-many: users ↔ departments (with role flags)
+-- 🏢 tblUserDepts — who is in which department, IN WHICH ORGANISATION, and
+--    with which flags (#517)
 -- -----------------------------------------------------------------------------
+-- The same shape and the same four rules as tblUserGroups above (required
+-- `siteID`, `uq_user_dept`, and composite foreign keys to the person's own
+-- membership row and to the SAME organisation's department). The five flags
+-- are unchanged. Expense approval reads three of them: a lead or a required
+-- approver must approve before a claim is fully approved, and an approver
+-- may approve or reject. Nothing in the portal reads `isDeptAssistant` or
+-- `isDeptSecretary` yet; they are recorded for the department's own use
+-- (see Portal\Core\Departments::FLAGS). Written only through
+-- Portal\Core\Departments.
 CREATE TABLE IF NOT EXISTS `tblUserDepts` (
     `userDeptID`          INT        NOT NULL AUTO_INCREMENT,
     `userID`              INT        NOT NULL,
     `deptID`              INT        NOT NULL,
+    `siteID`              INT        NOT NULL
+                          COMMENT 'The organisation this membership applies to (#517) — must match the department''s own siteID',
     `isDeptLead`          TINYINT(1) DEFAULT 0,
     `isDeptAssistant`     TINYINT(1) DEFAULT 0,
     `isDeptSecretary`     TINYINT(1) DEFAULT 0,
     `isApprover`          TINYINT(1) DEFAULT 0,
     `isMandatoryApprover` TINYINT(1) DEFAULT 0,
+    `addedAt`             DATETIME   NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `addedByID`           INT        DEFAULT NULL
+                          COMMENT 'Who added this person, for the audit trail. NULL after that account is erased (GdprEraser).',
     PRIMARY KEY (`userDeptID`),
     KEY `userID` (`userID`),
     KEY `deptID` (`deptID`),
+    UNIQUE KEY `uq_user_dept` (`userID`,`deptID`),
+    KEY `idx_user_dept_site` (`userID`,`siteID`),
+    KEY `idx_user_dept_dept_site` (`deptID`,`siteID`),
+    KEY `idx_user_dept_org` (`siteID`),
+    KEY `idx_user_dept_adder` (`addedByID`),
     CONSTRAINT `tblUserDepts_ibfk_1` FOREIGN KEY (`userID`)
         REFERENCES `tblUsers` (`userID`) ON DELETE CASCADE,
     CONSTRAINT `tblUserDepts_ibfk_2` FOREIGN KEY (`deptID`)
-        REFERENCES `tblDepts` (`deptID`) ON DELETE CASCADE
+        REFERENCES `tblDepts` (`deptID`) ON DELETE CASCADE,
+    CONSTRAINT `fk_user_dept_membership` FOREIGN KEY (`userID`,`siteID`)
+        REFERENCES `tblUserSites` (`userID`,`siteID`) ON DELETE CASCADE,
+    CONSTRAINT `fk_user_dept_dept_site` FOREIGN KEY (`deptID`,`siteID`)
+        REFERENCES `tblDepts` (`deptID`,`siteID`) ON DELETE CASCADE,
+    CONSTRAINT `fk_user_dept_site` FOREIGN KEY (`siteID`)
+        REFERENCES `tblSites` (`siteID`) ON DELETE CASCADE,
+    CONSTRAINT `fk_user_dept_adder` FOREIGN KEY (`addedByID`)
+        REFERENCES `tblUsers` (`userID`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+
+-- -----------------------------------------------------------------------------
+-- 🖊️ The three "awaiting placement" pens (#517) — rows migration 203 could
+--    not place automatically on a hand-edited database, the same shape as
+--    tblUserRolesUnplaced above (#516). A global administrator places or
+--    discards each row by hand at /admin/users/memberships-unplaced. EMPTY
+--    on every fresh install: nothing could ever create a group, a department
+--    or a membership before #517, so a new database has nothing to carry
+--    over. The column, key and constraint text is identical to migration
+--    203's own CREATE TABLE IF NOT EXISTS statements.
+-- -----------------------------------------------------------------------------
+-- tblUserGroupsUnplaced: a group membership whose group is parked, or whose
+-- person had no membership row in the group's organisation. `groupName` is
+-- a copy, because a parked group's own row is no longer in tblGroups.
+CREATE TABLE IF NOT EXISTS `tblUserGroupsUnplaced` (
+    `unplacedID`          INT NOT NULL AUTO_INCREMENT,
+    `originalUserGroupID` INT NOT NULL,
+    `userID`              INT NOT NULL,
+    `groupID`             INT NOT NULL,
+    `groupName`           VARCHAR(100) COLLATE utf8mb4_general_ci DEFAULT NULL,
+    `createdAt`           DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`unplacedID`),
+    UNIQUE KEY `uq_ug_unplaced_original` (`originalUserGroupID`),
+    KEY `idx_ug_unplaced_user` (`userID`),
+    KEY `idx_ug_unplaced_group` (`groupID`),
+    CONSTRAINT `fk_ug_unplaced_user` FOREIGN KEY (`userID`) REFERENCES `tblUsers`(`userID`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- tblGroupsUnplaced: a hand-made group on a portal with several
+-- organisations. `originalGroupID` is kept so placing it re-creates the
+-- group with its ORIGINAL number — a workflow step names a group by typing
+-- its number, so a new number would silently break the step.
+CREATE TABLE IF NOT EXISTS `tblGroupsUnplaced` (
+    `unplacedID`      INT NOT NULL AUTO_INCREMENT,
+    `originalGroupID` INT NOT NULL,
+    `groupName`       VARCHAR(100) COLLATE utf8mb4_general_ci DEFAULT NULL,
+    `description`     TEXT COLLATE utf8mb4_general_ci,
+    `createdAt`       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`unplacedID`),
+    UNIQUE KEY `uq_g_unplaced_original` (`originalGroupID`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- tblUserDeptsUnplaced: a department membership whose person had no
+-- membership row in the department's organisation. The five flags are kept
+-- (a NULL counted as 0) so placing the row restores exactly what it said.
+CREATE TABLE IF NOT EXISTS `tblUserDeptsUnplaced` (
+    `unplacedID`          INT NOT NULL AUTO_INCREMENT,
+    `originalUserDeptID`  INT NOT NULL,
+    `userID`              INT NOT NULL,
+    `deptID`              INT NOT NULL,
+    `isDeptLead`          TINYINT(1) NOT NULL DEFAULT 0,
+    `isDeptAssistant`     TINYINT(1) NOT NULL DEFAULT 0,
+    `isDeptSecretary`     TINYINT(1) NOT NULL DEFAULT 0,
+    `isApprover`          TINYINT(1) NOT NULL DEFAULT 0,
+    `isMandatoryApprover` TINYINT(1) NOT NULL DEFAULT 0,
+    `createdAt`           DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`unplacedID`),
+    UNIQUE KEY `uq_ud_unplaced_original` (`originalUserDeptID`),
+    KEY `idx_ud_unplaced_user` (`userID`),
+    KEY `idx_ud_unplaced_dept` (`deptID`),
+    CONSTRAINT `fk_ud_unplaced_user` FOREIGN KEY (`userID`) REFERENCES `tblUsers`(`userID`) ON DELETE CASCADE,
+    CONSTRAINT `fk_ud_unplaced_dept` FOREIGN KEY (`deptID`) REFERENCES `tblDepts`(`deptID`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 
@@ -9030,4 +9182,30 @@ INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
 ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 
 INSERT INTO `tblMigrations` (`filename`) VALUES ('202_roles_per_organisation.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- ── from 203_groups_departments_per_organisation.sql (#517) ─────────────────────
+-- The CREATE TABLE statements above (tblGroups, tblDepts, tblUserGroups,
+-- tblUserDepts and the three "awaiting placement" pens) already carry every
+-- column, key and constraint this migration adds, so a fresh install never
+-- needs its guarded ALTER TABLE statements. Only the ten addresses and the
+-- self-record are repeated here. The dedupe, carry-over and pen-fill
+-- statements (A3-A5, B2-B4, D2-D4 in the migration) are DELIBERATELY NOT
+-- repeated: a database built fresh from this file has no groups,
+-- departments or memberships yet, so there is nothing to carry over —
+-- the same reasoning the 199 and 202 blocks above give.
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('admin/groups',                         'admin/groups/index.php',                    1),
+    ('admin/groups/save',                    'admin/groups/save.php',                     1),
+    ('admin/groups/members',                 'admin/groups/members.php',                  1),
+    ('admin/groups/members/save',            'admin/groups/members-save.php',             1),
+    ('admin/departments',                    'admin/departments/index.php',               1),
+    ('admin/departments/save',               'admin/departments/save.php',                1),
+    ('admin/departments/members',            'admin/departments/members.php',             1),
+    ('admin/departments/members/save',       'admin/departments/members-save.php',        1),
+    ('admin/users/memberships-unplaced',     'admin/users/memberships-unplaced.php',      1),
+    ('admin/users/memberships-unplaced/save','admin/users/memberships-unplaced-save.php', 1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('203_groups_departments_per_organisation.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;

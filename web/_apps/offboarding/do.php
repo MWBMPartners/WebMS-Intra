@@ -161,6 +161,28 @@ try {
         [$userId], 'i'
     );
 
+    // 6a/6b. Remove EVERY user-group and department membership, in EVERY
+    //    organisation (#517), flags included — the same reasoning as step 6.
+    //    Offboarding is a WHOLE-PORTAL exit, and step 4 above only switches
+    //    membership rows OFF (it does not delete them), so the composite
+    //    foreign keys on tblUserGroups/tblUserDepts do not remove anything
+    //    by themselves here. "Leave ONE organisation" is
+    //    admin/sites/users.php, where deleting the membership row removes
+    //    only that organisation's group and department memberships. The
+    //    "awaiting placement" pens (tblUserGroupsUnplaced,
+    //    tblUserDeptsUnplaced) are deliberately NOT touched, exactly as
+    //    step 6 leaves tblUserRolesUnplaced alone: a parked row waits for a
+    //    global administrator's decision, and grants nothing meanwhile.
+    //    rehire.php restores none of these.
+    $run('delete_user_groups',
+        'DELETE FROM tblUserGroups WHERE userID = ?',
+        [$userId], 'i'
+    );
+    $run('delete_user_depts',
+        'DELETE FROM tblUserDepts WHERE userID = ?',
+        [$userId], 'i'
+    );
+
     // 7. Delete linked SSO accounts (#B7a). Without this, tblLinkedAccounts
     //    rows survive deactivation — findUserByLink()/findUserByEmail() in
     //    Auth::callbackMS365()/callbackGoogle() both filter `isActive = 1`,

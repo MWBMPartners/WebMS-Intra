@@ -79,7 +79,15 @@ $siteId = Site::id();
 // 🛡️ Site-scoped department check — mirror expenses/api/create.php:94-105 so
 // a claim can't be filed against another site's department (deptID is a
 // plain client-supplied int).
-$deptCheck = $mysqli->prepare('SELECT deptID FROM tblDepts WHERE deptID = ? AND siteID = ? LIMIT 1');
+//
+// #517: the department must also be switched on (`isActive = 1`), matching
+// the claim form's own list (submit/index.php) and the API description.
+// Retiring a department means "no new claims through any door"; before #517
+// the list hid a retired department but a crafted POST could still charge a
+// new claim to it. A NULL `isActive` (from a hand edit) counts as off here,
+// as everywhere else. Claims ALREADY charged to a retired department are
+// untouched: its own approvers still finish them (owner's answer Q3).
+$deptCheck = $mysqli->prepare('SELECT deptID FROM tblDepts WHERE deptID = ? AND siteID = ? AND isActive = 1 LIMIT 1');
 if ($deptCheck === false) {
     $_SESSION['flash_msg']  = 'Error saving claim. Please try again.';
     $_SESSION['flash_type'] = 'danger';

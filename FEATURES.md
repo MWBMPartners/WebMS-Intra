@@ -118,6 +118,8 @@ Central operations hub for admins / site admins.
 | `/admin` | Dashboard with summary cards (errors, users, activity, pending migrations) |
 | `/admin/users` + `/users/import` + `/users/export` | User CRUD + CSV bulk import + export |
 | `/admin/roles` | **Roles per organisation (#516)** — rename any of the fourteen standard roles or add roles of your own; grant or remove a role for somebody from the "Roles" button on the Users page; the internal key a role is looked up by never changes, only the label |
+| `/admin/groups` | **User groups per organisation (#517)** — committees and working groups: add, rename, retire, reinstate, delete (only while unused); each group's Members page adds and removes people. A group can be a workflow step's approver (by its number) and an asset owner. A retired group counts for nothing anywhere. Not the Small Groups app |
+| `/admin/departments` | **Departments per organisation (#517)** — what expense claims are charged to: add, rename, retire, reinstate, delete (only while unused); each department's Members page adds people and sets their lead / required approver / approver / assistant / secretary flags, which decide who approves its claims. A retired department takes no new claims; claims already submitted are finished by its own approvers |
 | `/admin/errors` | Error log viewer (`tblErrors`) |
 | `/admin/activity` + `/activity/export` | Activity log viewer + CSV export |
 | `/admin/audit` | Before/after change tracking (#91) |

@@ -536,7 +536,13 @@ class Workflow
         //    portal-wide, which would have shown this user every step
         //    assigned to a role they hold in a DIFFERENT organisation.
         $roleKeys = $isAdmin === true ? [] : Roles::keysHeldBy($db, $userId, $siteId);
-        $groupIds = $isAdmin === true ? [] : self::userGroupIds($db, $userId);
+        // 👥 #517: the same for user groups. The private userGroupIds()
+        //    helper this used to call read tblUserGroups with no
+        //    organisation and no "switched on" test, so a member of a group
+        //    was shown steps naming that group NUMBER in every organisation.
+        //    UserGroups::idsForUser() answers only for groups of THIS site
+        //    that are not retired, through an active membership here.
+        $groupIds = $isAdmin === true ? [] : UserGroups::idsForUser($db, $userId, $siteId);
 
         $seen = [];
         $rows = [];
@@ -1014,14 +1020,20 @@ class Workflow
             //    different organisation can no longer act here.
             $isAssignee = Roles::has($db, $actorId, $siteId, $assigneeValue);
         } elseif ($assigneeType === 'group' && $assigneeValue !== '') {
-            $groupId = (int) $assigneeValue;
-            $stmt = $db->prepare('SELECT 1 FROM tblUserGroups WHERE userID = ? AND groupID = ? LIMIT 1');
-            if ($stmt !== false) {
-                $stmt->bind_param('ii', $actorId, $groupId);
-                $stmt->execute();
-                $isAssignee = $stmt->get_result()->fetch_assoc() !== null;
-                $stmt->close();
-            }
+            // 👥 #517: was a bare `SELECT 1 FROM tblUserGroups WHERE userID
+            //    = ? AND groupID = ?` — no organisation and no "switched on"
+            //    test, so a step in THIS organisation naming a group number
+            //    let any member of this organisation who was in a group with
+            //    that number act here, whichever organisation the group was
+            //    meant for (measured before #517: a member of organisation B
+            //    approved a B step through a group that belonged to no
+            //    organisation at all). Replaced with UserGroups::isMember(),
+            //    which asks for THIS instance's own organisation: the group
+            //    must belong to it, must not be retired, and the person's
+            //    membership of the organisation must be active. A step naming
+            //    another organisation's group number therefore matches
+            //    nobody here (fails closed).
+            $isAssignee = UserGroups::isMember($db, $actorId, $siteId, (int) $assigneeValue);
         }
 
         if ($isAssignee === true) {
@@ -1174,11 +1186,21 @@ class Workflow
                 $stmt->close();
             }
         } elseif ($assigneeType === 'group' && $assigneeValue !== '') {
+            // 👥 #517: tblUserGroups is tied to the membership row's own
+            //    organisation (AND ug.siteID = us.siteID) and tblGroups to
+            //    the membership (AND g.siteID = ug.siteID), exactly as the
+            //    role branch above ties tblUserRoles. Before #517 the group
+            //    join had no organisation at all, so a step here naming a
+            //    group number e-mailed every member of THIS organisation who
+            //    was in a group with that number, whichever organisation the
+            //    group was meant for. A retired group (g.isActive = 0) now
+            //    e-mails nobody.
             $groupId = (int) $assigneeValue;
             $stmt = $db->prepare(
                 'SELECT DISTINCT u.userID, u.emailAddress, u.notifyPrefs FROM tblUsers u '
                 . 'JOIN tblUserSites us ON us.userID = u.userID AND us.siteID = ? AND us.isActive = 1 '
-                . 'JOIN tblUserGroups ug ON ug.userID = u.userID '
+                . 'JOIN tblUserGroups ug ON ug.userID = u.userID AND ug.siteID = us.siteID '
+                . 'JOIN tblGroups g ON g.groupID = ug.groupID AND g.siteID = ug.siteID AND g.isActive = 1 '
                 . 'WHERE u.isActive = 1 AND ug.groupID = ?'
             );
             if ($stmt !== false) {
@@ -1552,22 +1574,12 @@ class Workflow
     //    organisation, the way every role lookup must be since roles
     //    stopped being portal-wide.
 
-    /** @return list<int> groupIDs the user belongs to. */
-    private static function userGroupIds(mysqli $db, int $userId): array
-    {
-        $ids = [];
-        $stmt = $db->prepare('SELECT groupID FROM tblUserGroups WHERE userID = ?');
-        if ($stmt !== false) {
-            $stmt->bind_param('i', $userId);
-            $stmt->execute();
-            $result = $stmt->get_result();
-            while ($row = $result->fetch_assoc()) {
-                $ids[] = (int) $row['groupID'];
-            }
-            $stmt->close();
-        }
-        return $ids;
-    }
+    // 👥 #517: userGroupIds() used to live here (a bare, portal-wide
+    //    `SELECT groupID FROM tblUserGroups WHERE userID = ?`, with no
+    //    organisation and no "switched on" test). Removed — every caller
+    //    now uses UserGroups::idsForUser($db, $userId, $siteId), scoped to
+    //    one organisation, the way every group lookup must be since groups
+    //    stopped being portal-wide.
 
     /** Uniform failure-shape helper — see act()'s return contract. */
     private static function result(bool $ok, ?string $error): array

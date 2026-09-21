@@ -125,6 +125,10 @@ $userId = (int) $o['userID'];
 try {
     $db->begin_transaction();
     // Reactivate user + site membership. NOT credentials — user must reset.
+    // Nor roles, user-group or department memberships (#516, #517):
+    // offboarding DELETED those rows (do.php steps 6, 6a, 6b), so there is
+    // nothing here to switch back on; an administrator adds them again at
+    // Admin → Users (roles), Admin → Groups and Admin → Departments.
     $stmt = $db->prepare('UPDATE tblUsers SET isActive = 1 WHERE userID = ?');
     if ($stmt !== false) {
         $stmt->bind_param('i', $userId);

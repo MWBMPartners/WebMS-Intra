@@ -187,6 +187,23 @@ if ($actorGlobal === true) {
     }
 }
 
+// 👥 #517: the same, for the groups, group memberships and department
+//    memberships migration 203 could not place on its own — every row
+//    waiting at /admin/users/memberships-unplaced, installation-wide, added
+//    up into one number. Global administrators only, like the two counts
+//    above. Empty on every installation nobody edited by hand.
+$unplacedMembershipCount = 0;
+if ($actorGlobal === true) {
+    $unplacedMembershipResult = $mysqli->query(
+        'SELECT (SELECT COUNT(*) FROM tblGroupsUnplaced) '
+        . '+ (SELECT COUNT(*) FROM tblUserGroupsUnplaced) '
+        . '+ (SELECT COUNT(*) FROM tblUserDeptsUnplaced) AS cnt'
+    );
+    if ($unplacedMembershipResult !== false) {
+        $unplacedMembershipCount = (int) ($unplacedMembershipResult->fetch_assoc()['cnt'] ?? 0);
+    }
+}
+
 // 📋 Flash message from save handler
 $flashMsg  = $_SESSION['flash_msg']  ?? '';
 $flashType = $_SESSION['flash_type'] ?? 'info';
@@ -262,6 +279,16 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <?php echo (int) $unplacedRoleCount; ?> role holding<?php echo $unplacedRoleCount !== 1 ? 's' : ''; ?>
         <?php echo $unplacedRoleCount === 1 ? 'is' : 'are'; ?> waiting to be placed into an organisation (#516).
         <a href="<?php echo htmlspecialchars(Site::url('admin/users/roles-unplaced'), ENT_QUOTES, 'UTF-8'); ?>" class="alert-link">Place <?php echo $unplacedRoleCount === 1 ? 'it' : 'them'; ?></a>.
+    </div>
+<?php endif; ?>
+
+<?php if ($actorGlobal === true && $unplacedMembershipCount > 0): ?>
+    <div class="alert alert-warning">
+        <i class="fa-solid fa-triangle-exclamation me-1"></i>
+        <?php echo (int) $unplacedMembershipCount; ?> item<?php echo $unplacedMembershipCount !== 1 ? 's' : ''; ?> from user groups and departments
+        (whole groups, or people's group and department memberships)
+        <?php echo $unplacedMembershipCount === 1 ? 'is' : 'are'; ?> waiting to be placed into an organisation (#517).
+        <a href="<?php echo htmlspecialchars(Site::url('admin/users/memberships-unplaced'), ENT_QUOTES, 'UTF-8'); ?>" class="alert-link">Place <?php echo $unplacedMembershipCount === 1 ? 'it' : 'them'; ?></a>.
     </div>
 <?php endif; ?>
 

@@ -91,7 +91,13 @@ $deptId = (int) ($body['deptID'] ?? 0);
 if ($deptId <= 0) {
     ApiResponse::error('deptID is required', 400);
 }
-$deptCheck = $db->prepare('SELECT deptID FROM tblDepts WHERE deptID = ? AND siteID = ? LIMIT 1');
+// 🏢 #517: the department must belong to this organisation AND be switched
+//    on — the same rule as the claim form (expenses/submit/save.php), so a
+//    retired department takes no new claims through the API either. The
+//    API description (_core/api-spec.json, deptID) says "must exist for the
+//    current site and be active". The error text below is unchanged on
+//    purpose: a retired department and a missing one answer identically.
+$deptCheck = $db->prepare('SELECT deptID FROM tblDepts WHERE deptID = ? AND siteID = ? AND isActive = 1 LIMIT 1');
 if ($deptCheck === false) {
     Logger::errorPlatform('MySQL', 'Error', 'API_EXP_CREATE_DEPT_PREP', $db->error, '');
     ApiResponse::error('Database error', 500);

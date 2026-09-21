@@ -223,6 +223,7 @@ use Portal\Core\AssetRegister;
 use Portal\Core\Auth;
 use Portal\Core\Router;
 use Portal\Core\Site;
+use Portal\Core\UserGroups;
 
 Auth::ensureSession();
 Auth::requireLogin();
@@ -370,15 +371,13 @@ if ($canManage === true) {
         $dStmt->close();
     }
 
-    // 👥 Groups — GLOBAL reference data, no siteID column (see
-    // AssetRegister::partyExistsOnSite()'s matching comment), so no site
-    // filter applies here, unlike users/depts/orgs above.
-    $gResult = $db->query('SELECT groupID, groupName FROM tblGroups ORDER BY groupName ASC');
-    if ($gResult !== false) {
-        while ($row = $gResult->fetch_assoc()) {
-            $ownerCandidateGroups[] = $row;
-        }
-    }
+    // 👥 Groups of THIS organisation that are switched on (#517), one query.
+    //    This used to list every group on the whole portal, because
+    //    tblGroups had no organisation column; an asset could then be given
+    //    to another organisation's group. Since migration 203 each group
+    //    belongs to one organisation, and AssetRegister::partyExistsOnSite()
+    //    refuses a group from anywhere else even if a crafted form posts one.
+    $ownerCandidateGroups = UserGroups::forSite($db, $siteId, true);
 
     // 🏢 External organisations (#396) — active only, mirrors edit.php's
     // own "active-only for pickers" convention for categories/locations.

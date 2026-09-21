@@ -2,6 +2,52 @@
 
 
 ## [Unreleased] (alpha)
+- feat(admin,core): user groups and departments now belong to one
+  organisation each, and can finally be created and filled (#517). Before
+  this, nothing anywhere could create a group or a department or add a
+  person to one — no page, form, script or seed ever wrote the four
+  tables — so department-based expense approval, workflow approval by
+  group and asset ownership by group only worked if somebody edited the
+  database by hand, and the installer seeds no department. Worse,
+  `tblGroups` had no organisation column: measured on a real database, a
+  workflow step in one organisation naming a hand-made group was offered to
+  somebody who was not even a member of that organisation, a member could
+  approve it through a group that belonged to no organisation at all, and
+  an asset could be given to another organisation's group. Now: an organisation's
+  administrators manage its groups at the new `/admin/groups` and its
+  departments at `/admin/departments` (add, rename, retire, reinstate,
+  delete only while unused), and add or remove people — with the lead,
+  required-approver, approver, assistant and secretary flags on
+  departments — on each one's Members page, through `AccountGuard`, so a
+  refusal reads exactly like an account that does not exist. The two stay
+  different things (owner, 21 September 2026). Every reader now matches
+  only within the right organisation and only through an active
+  membership: workflow approval and its e-mails by group, asset ownership
+  and authority by group or department, expense approval by department
+  and the expense e-mails (which now also reach a member flagged only as
+  "required approver", who could see the claim but was never told). A
+  retired group matches nobody; a retired department takes no new claims
+  (the claim form, its save handler and the API all refuse it) while
+  claims already submitted are finished by its own approvers (owner's
+  answer Q3 — the alternative was proven to strand a claim for ever).
+  Offboarding removes every group and department membership; "remove from
+  site" removes only that organisation's. Erasure, the data export and the
+  personal-data catalogue cover the new tables. New `Portal\Core\UserGroups`
+  and `Portal\Core\Departments` classes, each with a proven `memberSql()`
+  fragment for #514's shared-calendar audience query. Migration 203
+  (`tblGroups` gains `siteID` and `isActive`; both membership tables gain
+  `siteID`, `addedAt`, `addedByID`, a rule against duplicates and
+  composite foreign keys tying each membership to the person's own
+  membership of that organisation AND to the same organisation's group or
+  department; a hand-edited database's rows are carried over the #533/#516
+  way, with anything that cannot be placed without guessing listed at the
+  new `/admin/users/memberships-unplaced` page for a global administrator;
+  a parked group keeps its number). New automatic check
+  `check_membership_queries_scoped.py` (a membership query with no
+  organisation near it fails the build), and `check_account_writes_guarded.py`
+  now covers the two membership tables. NOT covered: MariaDB (untested, as
+  everywhere here); an independent review by Codex (not yet run — the
+  comprehensive review after #514 covers it).
 - fix(expenses): the treasury list (`/expenses/treasury`) is now refused to
   anyone who is not a treasurer of the organisation whose address is open,
   or an administrator (#538). Before this, the page needed only a sign-in

@@ -6,7 +6,8 @@ Before this issue, several pages that write to `tblUsers` or the tables
 that sit alongside it — `tblLocalAccounts`, `tblUserSites`,
 `tblWebAuthnCredentials`, `tblLinkedAccounts`, `tblTrustedDevices`,
 `tblPasswordResets`, `tblTotpBackupCodes`, `tblDbsChecks`,
-`tblUserRoles` — trusted nothing more than "is this person an
+`tblUserRoles`, and since #517 `tblUserGroups` and `tblUserDepts` —
+trusted nothing more than "is this person an
 administrator of whichever organisation is open right now"
 (`App::isAdmin()`). That let an administrator of ONE organisation change,
 or create, an account belonging to ANY organisation, including a global
@@ -89,6 +90,14 @@ GUARDED_TABLES = (
     "tblTotpBackupCodes",
     "tblDbsChecks",
     "tblUserRoles",
+    # 👥🏢 #517: group and department memberships. Adding a person to a
+    # department with the approver flag decides who may approve money, and
+    # the owner's rule (21 September 2026) is "use AccountGuard wherever a
+    # person's membership is changed". The two "awaiting placement" pens
+    # (tblUserGroupsUnplaced / tblUserDeptsUnplaced) are NOT matched: the
+    # word boundary after each name stops them, and they grant nothing.
+    "tblUserGroups",
+    "tblUserDepts",
 )
 
 # Matches: UPDATE tblX / INSERT INTO tblX / INSERT IGNORE INTO tblX /
@@ -136,6 +145,8 @@ ALLOWED: dict[str, str] = {
     "_core/I18n.php": "own language choice",
     "_core/Ical.php": "own calendar token",
     "_core/Roles.php": "helper only — every caller decides reach first (admin/users/roles-save.php runs AccountGuard::check(); roles-unplaced-save.php and admin/sites/save.php are for global/organisation administrators); see the class docblock",
+    "_core/UserGroups.php": "helper only — every caller decides reach first: admin/groups/members-save.php runs AccountGuard::check(); admin/users/memberships-unplaced-save.php is global-administrator only; see the class docblock (#517)",
+    "_core/Departments.php": "helper only — every caller decides reach first: admin/departments/members-save.php runs AccountGuard::check(); admin/users/memberships-unplaced-save.php is global-administrator only; see the class docblock (#517)",
 }
 
 

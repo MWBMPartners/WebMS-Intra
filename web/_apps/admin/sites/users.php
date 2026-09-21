@@ -96,6 +96,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             //    by this DELETE. No code change needed here; recorded so
             //    the next reader knows this DELETE now does more than it
             //    used to.
+            // 👥 #517: the same DELETE also removes, through the composite
+            //    foreign keys `fk_user_group_membership` (tblUserGroups) and
+            //    `fk_user_dept_membership` (tblUserDepts), this person's
+            //    user-group and department memberships IN THIS ORGANISATION
+            //    ONLY, flags included. Their memberships in any other
+            //    organisation are untouched, and so are memberships they
+            //    ADDED for other people here (those rows only record who
+            //    added them in `addedByID`, which is not part of either key).
+            //    Proven on a real database while building #517.
             $rmStmt = $db->prepare('DELETE FROM tblUserSites WHERE userID = ? AND siteID = ?');
             if ($rmStmt !== false) {
                 $rmStmt->bind_param('ii', $removeUserId, $siteId);

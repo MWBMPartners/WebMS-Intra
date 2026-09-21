@@ -1274,9 +1274,11 @@ class AssetRegister
     {
         $db = App::db();
         // 🪞 No user input in this query (a static, unparameterised read of
-        // global reference data) — a plain query() is safe and matches the
-        // house convention already used for the equally-global tblGroups
-        // read in _apps/assets/item.php's owner-picker.
+        // global reference data) — a plain query() is safe. (This comment
+        // used to cite "the equally-global tblGroups read" in
+        // _apps/assets/item.php's owner picker as the precedent. Since #517
+        // groups belong to one organisation each and that picker is a
+        // per-organisation lookup, so it is no longer a comparable example.)
         $result = $db->query(
             'SELECT * FROM tblAssetIdentifierTypes WHERE isActive = 1 ORDER BY sortOrder ASC, label ASC'
         );
@@ -2113,9 +2115,20 @@ class AssetRegister
 
         // 🏢 Department ownership — the asset is owned by a dept this user
         //    belongs to (tblUserDepts).
+        //    #517: the membership must be in the SAME organisation as the
+        //    ownership row (o.siteID is always the asset's own organisation:
+        //    addOwner() writes Site::id() into it), the department must not
+        //    be retired, and the person's membership of that organisation
+        //    must be active. Before #517 this join had none of the three, so
+        //    a membership row left behind in an organisation the person had
+        //    left still counted. The same shape is used by every department
+        //    and group join in this file (canApproveLoan(), the maintenance
+        //    check, the "my assets" list and the authority e-mail list).
         $stmt = $db->prepare(
             'SELECT 1 FROM tblAssetOwners o '
-            . 'JOIN tblUserDepts ud ON ud.deptID = o.deptID '
+            . 'JOIN tblUserDepts ud ON ud.deptID = o.deptID AND ud.siteID = o.siteID '
+            . 'JOIN tblDepts dd ON dd.deptID = ud.deptID AND dd.siteID = ud.siteID AND dd.isActive = 1 '
+            . 'JOIN tblUserSites uds ON uds.userID = ud.userID AND uds.siteID = ud.siteID AND uds.isActive = 1 '
             . 'WHERE o.assetID = ? AND o.partyType = "dept" AND ud.userID = ? LIMIT 1'
         );
         if ($stmt !== false) {
@@ -2129,10 +2142,13 @@ class AssetRegister
         }
 
         // 👥 Group ownership — the asset is owned by a group this user
-        //    belongs to (tblUserGroups).
+        //    belongs to (tblUserGroups). #517: the same three conditions as
+        //    the department join above; a retired group grants nothing.
         $stmt = $db->prepare(
             'SELECT 1 FROM tblAssetOwners o '
-            . 'JOIN tblUserGroups ug ON ug.groupID = o.groupID '
+            . 'JOIN tblUserGroups ug ON ug.groupID = o.groupID AND ug.siteID = o.siteID '
+            . 'JOIN tblGroups gg ON gg.groupID = ug.groupID AND gg.siteID = ug.siteID AND gg.isActive = 1 '
+            . 'JOIN tblUserSites ugs ON ugs.userID = ug.userID AND ugs.siteID = ug.siteID AND ugs.isActive = 1 '
             . 'WHERE o.assetID = ? AND o.partyType = "group" AND ug.userID = ? LIMIT 1'
         );
         if ($stmt !== false) {
@@ -3140,8 +3156,11 @@ class AssetRegister
             . '      org.orgName  AS orgName '
             . 'FROM tblAssetOwners o '
             . 'LEFT JOIN tblUsers u      ON u.userID = o.userID '
-            . 'LEFT JOIN tblDepts d      ON d.deptID = o.deptID '
-            . 'LEFT JOIN tblGroups g     ON g.groupID = o.groupID '
+            // #517: the names are looked up within the ownership row's own
+            // organisation too. o.siteID and the party's siteID always agree
+            // (addOwner() checks it), so this is a belt, not a behaviour change.
+            . 'LEFT JOIN tblDepts d      ON d.deptID = o.deptID AND d.siteID = o.siteID '
+            . 'LEFT JOIN tblGroups g     ON g.groupID = o.groupID AND g.siteID = o.siteID '
             . 'LEFT JOIN tblAssetOrgs org ON org.orgID = o.orgID '
             . 'WHERE o.assetID = ? '
             . "ORDER BY FIELD(o.roleKind, 'owner', 'co-owner', 'custodian', 'stakeholder'), o.ownerID ASC"
@@ -3178,12 +3197,19 @@ class AssetRegister
      * section's header comment for why that's a deliberate deviation from
      * createAsset()/updateAsset()'s "caller validates" convention.
      *
-     * tblGroups carries no siteID column at all (global reference data —
-     * see full_schema.sql) so a group is checked for existence only, with
-     * no site filter; every other party type is scoped to $siteId. (Roles
-     * used to be portal-wide global reference data too; since #516 each
-     * organisation has its own list, so tblRoles is no longer a comparable
-     * example here.)
+     * Every party type is scoped to $siteId. Before #517 a group was the
+     * exception: tblGroups had no organisation column, so a group was
+     * checked for existence only, and an asset in one organisation could be
+     * given to a group belonging to ANY organisation (measured before #517:
+     * an organisation B asset accepted a hand-made group attached to an
+     * organisation A asset). Since migration 203 every group belongs to one
+     * organisation, and the group case below matches the department case.
+     *
+     * WHAT THIS DOES NOT CHECK: whether the department or group is retired.
+     * The owner picker only offers ones that are switched on, and a retired
+     * one's ownership grants nothing anyway — every membership join in this
+     * file requires the department or group to be switched on
+     * (`dd.isActive = 1` / `gg.isActive = 1`).
      */
     private static function partyExistsOnSite(string $partyType, int $partyId, int $siteId): bool
     {
@@ -3217,12 +3243,12 @@ class AssetRegister
                 break;
 
             case 'group':
-                // 🌐 Global — no siteID column on tblGroups, see doc above.
-                $stmt = $db->prepare('SELECT 1 FROM tblGroups WHERE groupID = ? LIMIT 1');
+                // 👥 #517: scoped to this organisation, exactly like 'dept'.
+                $stmt = $db->prepare('SELECT 1 FROM tblGroups WHERE groupID = ? AND siteID = ? LIMIT 1');
                 if ($stmt === false) {
                     return false;
                 }
-                $stmt->bind_param('i', $partyId);
+                $stmt->bind_param('ii', $partyId, $siteId);
                 break;
 
             case 'org':
@@ -3779,7 +3805,9 @@ class AssetRegister
         //    isResponsibleFor()'s dept join.
         $stmt = $db->prepare(
             'SELECT 1 FROM tblAssetOwners o '
-            . 'JOIN tblUserDepts ud ON ud.deptID = o.deptID '
+            . 'JOIN tblUserDepts ud ON ud.deptID = o.deptID AND ud.siteID = o.siteID '
+            . 'JOIN tblDepts dd ON dd.deptID = ud.deptID AND dd.siteID = ud.siteID AND dd.isActive = 1 '
+            . 'JOIN tblUserSites uds ON uds.userID = ud.userID AND uds.siteID = ud.siteID AND uds.isActive = 1 '
             . 'WHERE o.assetID = ? AND o.partyType = "dept" AND o.isLendingAuthority = 1 AND ud.userID = ? LIMIT 1'
         );
         if ($stmt !== false) {
@@ -3795,7 +3823,9 @@ class AssetRegister
         // 👥 Group lending authority — mirrors isResponsibleFor()'s group join.
         $stmt = $db->prepare(
             'SELECT 1 FROM tblAssetOwners o '
-            . 'JOIN tblUserGroups ug ON ug.groupID = o.groupID '
+            . 'JOIN tblUserGroups ug ON ug.groupID = o.groupID AND ug.siteID = o.siteID '
+            . 'JOIN tblGroups gg ON gg.groupID = ug.groupID AND gg.siteID = ug.siteID AND gg.isActive = 1 '
+            . 'JOIN tblUserSites ugs ON ugs.userID = ug.userID AND ugs.siteID = ug.siteID AND ugs.isActive = 1 '
             . 'WHERE o.assetID = ? AND o.partyType = "group" AND o.isLendingAuthority = 1 AND ug.userID = ? LIMIT 1'
         );
         if ($stmt !== false) {
@@ -5220,7 +5250,9 @@ class AssetRegister
         //    dept join, narrowed to isMaintenanceAuthority.
         $stmt = $db->prepare(
             'SELECT 1 FROM tblAssetOwners o '
-            . 'JOIN tblUserDepts ud ON ud.deptID = o.deptID '
+            . 'JOIN tblUserDepts ud ON ud.deptID = o.deptID AND ud.siteID = o.siteID '
+            . 'JOIN tblDepts dd ON dd.deptID = ud.deptID AND dd.siteID = ud.siteID AND dd.isActive = 1 '
+            . 'JOIN tblUserSites uds ON uds.userID = ud.userID AND uds.siteID = ud.siteID AND uds.isActive = 1 '
             . 'WHERE o.assetID = ? AND o.partyType = "dept" AND o.isMaintenanceAuthority = 1 AND ud.userID = ? LIMIT 1'
         );
         if ($stmt !== false) {
@@ -5236,7 +5268,9 @@ class AssetRegister
         // 👥 Group maintenance authority — mirrors canApproveLoan()'s group join.
         $stmt = $db->prepare(
             'SELECT 1 FROM tblAssetOwners o '
-            . 'JOIN tblUserGroups ug ON ug.groupID = o.groupID '
+            . 'JOIN tblUserGroups ug ON ug.groupID = o.groupID AND ug.siteID = o.siteID '
+            . 'JOIN tblGroups gg ON gg.groupID = ug.groupID AND gg.siteID = ug.siteID AND gg.isActive = 1 '
+            . 'JOIN tblUserSites ugs ON ugs.userID = ug.userID AND ugs.siteID = ug.siteID AND ugs.isActive = 1 '
             . 'WHERE o.assetID = ? AND o.partyType = "group" AND o.isMaintenanceAuthority = 1 AND ug.userID = ? LIMIT 1'
         );
         if ($stmt !== false) {
@@ -8048,7 +8082,9 @@ class AssetRegister
         $stmt = $db->prepare(
             'SELECT a.assetID, a.name, a.assetKind, a.assetTagCode, a.status, a.conditionState '
             . 'FROM tblAssetOwners o '
-            . 'JOIN tblUserDepts ud ON ud.deptID = o.deptID '
+            . 'JOIN tblUserDepts ud ON ud.deptID = o.deptID AND ud.siteID = o.siteID '
+            . 'JOIN tblDepts dd ON dd.deptID = ud.deptID AND dd.siteID = ud.siteID AND dd.isActive = 1 '
+            . 'JOIN tblUserSites uds ON uds.userID = ud.userID AND uds.siteID = ud.siteID AND uds.isActive = 1 '
             . 'JOIN tblAssets a ON a.assetID = o.assetID '
             . "WHERE o.partyType = 'dept' AND ud.userID = ? AND a.siteID = ? AND a.isDeleted = 0"
         );
@@ -8066,7 +8102,9 @@ class AssetRegister
         $stmt = $db->prepare(
             'SELECT a.assetID, a.name, a.assetKind, a.assetTagCode, a.status, a.conditionState '
             . 'FROM tblAssetOwners o '
-            . 'JOIN tblUserGroups ug ON ug.groupID = o.groupID '
+            . 'JOIN tblUserGroups ug ON ug.groupID = o.groupID AND ug.siteID = o.siteID '
+            . 'JOIN tblGroups gg ON gg.groupID = ug.groupID AND gg.siteID = ug.siteID AND gg.isActive = 1 '
+            . 'JOIN tblUserSites ugs ON ugs.userID = ug.userID AND ugs.siteID = ug.siteID AND ugs.isActive = 1 '
             . 'JOIN tblAssets a ON a.assetID = o.assetID '
             . "WHERE o.partyType = 'group' AND ug.userID = ? AND a.siteID = ? AND a.isDeleted = 0"
         );
@@ -8360,10 +8398,19 @@ class AssetRegister
             $joins = [
                 // direct
                 'JOIN tblUsers u ON u.userID = o.userID WHERE o.assetID = ? AND o.partyType = "user" AND o.' . $authorityColumn . ' = 1',
-                // dept
-                'JOIN tblUserDepts ud ON ud.deptID = o.deptID JOIN tblUsers u ON u.userID = ud.userID WHERE o.assetID = ? AND o.partyType = "dept" AND o.' . $authorityColumn . ' = 1',
-                // group
-                'JOIN tblUserGroups ug ON ug.groupID = o.groupID JOIN tblUsers u ON u.userID = ug.userID WHERE o.assetID = ? AND o.partyType = "group" AND o.' . $authorityColumn . ' = 1',
+                // dept — #517: the same three conditions as isResponsibleFor()'s
+                // department join (membership in the ownership row's own
+                // organisation, department not retired, organisation
+                // membership active), so nobody who has left is e-mailed.
+                'JOIN tblUserDepts ud ON ud.deptID = o.deptID AND ud.siteID = o.siteID '
+                    . 'JOIN tblDepts dd ON dd.deptID = ud.deptID AND dd.siteID = ud.siteID AND dd.isActive = 1 '
+                    . 'JOIN tblUserSites uds ON uds.userID = ud.userID AND uds.siteID = ud.siteID AND uds.isActive = 1 '
+                    . 'JOIN tblUsers u ON u.userID = ud.userID WHERE o.assetID = ? AND o.partyType = "dept" AND o.' . $authorityColumn . ' = 1',
+                // group — #517: the same, for groups; a retired group e-mails nobody.
+                'JOIN tblUserGroups ug ON ug.groupID = o.groupID AND ug.siteID = o.siteID '
+                    . 'JOIN tblGroups gg ON gg.groupID = ug.groupID AND gg.siteID = ug.siteID AND gg.isActive = 1 '
+                    . 'JOIN tblUserSites ugs ON ugs.userID = ug.userID AND ugs.siteID = ug.siteID AND ugs.isActive = 1 '
+                    . 'JOIN tblUsers u ON u.userID = ug.userID WHERE o.assetID = ? AND o.partyType = "group" AND o.' . $authorityColumn . ' = 1',
             ];
             foreach ($joins as $joinSql) {
                 $stmt = $db->prepare(

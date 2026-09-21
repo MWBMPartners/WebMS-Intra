@@ -48,13 +48,33 @@ if (App::isAdmin() === true) {
         . 'ORDER BY EC.createdAt DESC'
     );
 } else {
-    // 📋 Approvers see claims from their assigned departments
+    // 📋 Approvers see claims from their assigned departments.
+    //
+    //    #517: the department membership must belong to the CLAIM's own
+    //    organisation (UD.siteID = EC.siteID), and the approver's own
+    //    membership of that organisation must be active (the join to
+    //    tblUserSites). Before #517 neither was tested: a membership row
+    //    left behind after somebody left the organisation, or a hand-made
+    //    row naming this department from another organisation, still
+    //    showed them the claim (measured before #517: a member of another
+    //    organisation only was listed as an approver here).
+    //
+    //    DELIBERATELY NO TEST THAT THE DEPARTMENT IS SWITCHED ON (owner's
+    //    answer Q3, 21 September 2026): retiring a department stops NEW
+    //    claims being charged to it, while claims already submitted are
+    //    finished by its own approvers, exactly as before it was retired.
+    //    Adding `D.isActive = 1` here was considered and rejected: it was
+    //    proven during planning to strand such a claim for ever, because
+    //    save.php still requires every lead and required approver to
+    //    approve, and an administrator's approval alone never satisfies
+    //    that.
     $stmt = $mysqli->prepare(
         'SELECT DISTINCT EC.claimID, EC.claimTitle, U.fullName, D.deptName, EC.totalAmount, EC.createdAt '
         . 'FROM tblExpenseClaims EC '
         . 'JOIN tblUsers U ON U.userID = EC.userID '
         . 'JOIN tblDepts D ON D.deptID = EC.deptID '
-        . 'JOIN tblUserDepts UD ON UD.deptID = EC.deptID AND UD.userID = ? '
+        . 'JOIN tblUserDepts UD ON UD.deptID = EC.deptID AND UD.siteID = EC.siteID AND UD.userID = ? '
+        . 'JOIN tblUserSites US ON US.userID = UD.userID AND US.siteID = UD.siteID AND US.isActive = 1 '
         . "WHERE EC.status = 'Pending' AND EC.siteID = ? "
         . 'AND (UD.isApprover = 1 OR UD.isDeptLead = 1 OR UD.isMandatoryApprover = 1) '
         . 'ORDER BY EC.createdAt DESC'

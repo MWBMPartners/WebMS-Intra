@@ -103,13 +103,24 @@ if (App::isAdmin() === true) {
     // 🛡️ Mirror approve/index.php's dept-scoped listing filter — only a row
     // with an actual approve/lead/mandatory-approver flag counts as authority
     // over this department, not merely any tblUserDepts membership row.
+    //
+    // #517: the membership must also be in THIS claim's organisation
+    // (UD.siteID = ?, the claim was loaded above by EC.siteID = Site::id()),
+    // and the approver's own membership of that organisation must be active.
+    // Before #517 a leftover row from an organisation the person had left
+    // still let them decide. Deliberately NO test that the department is
+    // switched on — see approve/index.php: a retired department's pending
+    // claims are finished by its own approvers (owner's answer Q3).
     $stmt = $mysqli->prepare(
-        'SELECT isDeptLead, isApprover, isMandatoryApprover '
-        . 'FROM tblUserDepts WHERE userID = ? AND deptID = ? '
-        . 'AND (isDeptLead = 1 OR isApprover = 1 OR isMandatoryApprover = 1)'
+        'SELECT UD.isDeptLead, UD.isApprover, UD.isMandatoryApprover '
+        . 'FROM tblUserDepts UD '
+        . 'JOIN tblUserSites US ON US.userID = UD.userID AND US.siteID = UD.siteID AND US.isActive = 1 '
+        . 'WHERE UD.userID = ? AND UD.deptID = ? AND UD.siteID = ? '
+        . 'AND (UD.isDeptLead = 1 OR UD.isApprover = 1 OR UD.isMandatoryApprover = 1)'
     );
     if ($stmt !== false) {
-        $stmt->bind_param('ii', $userId, $claim['deptID']);
+        $claimDeptId = (int) $claim['deptID'];
+        $stmt->bind_param('iii', $userId, $claimDeptId, $siteId);
         $stmt->execute();
         $deptRole = $stmt->get_result()->fetch_assoc();
         $stmt->close();
@@ -182,13 +193,21 @@ try {
     } else {
         // ✅ Check if all mandatory approvers for this dept have approved
         // Mandatory approvers: dept leads + users flagged as isMandatoryApprover
+        //
+        // #517: only members of this claim's organisation whose membership
+        // there is still ACTIVE count. Before #517 a required approver who
+        // had left the organisation stayed on this list for ever, so a claim
+        // could never be fully approved by anybody. Still no test that the
+        // department is switched on (owner's answer Q3; see the gate above).
         $mandatoryApprovers = [];
         $stmt = $mysqli->prepare(
             'SELECT UD.userID FROM tblUserDepts UD '
-            . 'WHERE UD.deptID = ? AND (UD.isDeptLead = 1 OR UD.isMandatoryApprover = 1)'
+            . 'JOIN tblUserSites US ON US.userID = UD.userID AND US.siteID = UD.siteID AND US.isActive = 1 '
+            . 'WHERE UD.deptID = ? AND UD.siteID = ? AND (UD.isDeptLead = 1 OR UD.isMandatoryApprover = 1)'
         );
         if ($stmt !== false) {
-            $stmt->bind_param('i', $claim['deptID']);
+            $mandatoryDeptId = (int) $claim['deptID'];
+            $stmt->bind_param('ii', $mandatoryDeptId, $siteId);
             $stmt->execute();
             $result = $stmt->get_result();
             while ($r = $result->fetch_assoc()) {

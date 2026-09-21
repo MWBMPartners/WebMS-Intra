@@ -221,6 +221,10 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     </div>
                     <div class="col-md-2">
                         <input type="text" class="form-control" name="assigneeValue" placeholder="Assignee value" maxlength="100">
+                        <!-- 👥 #517: a group step is matched by the group's NUMBER,
+                             compared as typed, so say where to find it. A picker
+                             for this box is a separate piece of work. -->
+                        <small class="text-muted">Role: the role's key (Admin &rarr; Roles). User: the account number. Group: the group's number, shown at Admin &rarr; Groups.</small>
                     </div>
                     <div class="col-md-1">
                         <input type="number" class="form-control" name="timeoutHours" placeholder="Timeout (h)" min="1">

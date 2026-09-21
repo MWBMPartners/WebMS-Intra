@@ -40,6 +40,13 @@
  *   tblUserRoles          (roles you hold, and in which organisation — #516)
  *   tblUserRolesUnplaced  (a role key waiting for a global administrator to
  *                          place, if a hand-edited database left you one — #516)
+ *   tblUserGroups         (user groups you are in, and in which organisation — #517)
+ *   tblUserDepts          (departments you are in, with your flags such as
+ *                          lead or approver, and in which organisation — #517)
+ *   tblUserGroupsUnplaced (a group membership waiting for a global
+ *                          administrator to place — #517)
+ *   tblUserDeptsUnplaced  (a department membership waiting for a global
+ *                          administrator to place — #517)
  *
  * Sensitive fields (password hashes, TOTP secret, tokenHash etc.) are
  * EXCLUDED — exporting them would be a security regression, not a feature.
@@ -156,6 +163,42 @@ $payload = [
         // to place it at /admin/users/roles-unplaced (#516).
         'rolesAwaitingPlacement' => $fetchUserRows(
             'SELECT unplacedID, roleKey, roleName, createdAt FROM tblUserRolesUnplaced WHERE userID = ?'
+        ),
+        // 👥🏢 User groups and departments (#517) — export↔erasure parity
+        // with the GdprEraser::catalogue() entries added alongside these
+        // blocks. `addedByID` is deliberately left out of all four: it is
+        // ANOTHER person's account number (who added you), not your own
+        // data — the same reasoning as `grantedByID` on roles above. The
+        // group query starts from tblGroups rather than tblUserGroups with a
+        // short name, because tools/audit-checks/check_sql_columns.py
+        // misreads that second shape (its own header, blind spot 15).
+        'userGroups' => $fetchUserRows(
+            'SELECT ug.userGroupID, ug.siteID, s.siteName, g.groupName, ug.addedAt '
+            . 'FROM tblGroups g '
+            . 'JOIN tblUserGroups ug ON ug.groupID = g.groupID AND ug.siteID = g.siteID '
+            . 'JOIN tblSites s ON s.siteID = ug.siteID '
+            . 'WHERE ug.userID = ?'
+        ),
+        'departments' => $fetchUserRows(
+            'SELECT ud.userDeptID, ud.siteID, s.siteName, d.deptName, d.deptCode, ud.isDeptLead, ud.isDeptAssistant, '
+            . 'ud.isDeptSecretary, ud.isApprover, ud.isMandatoryApprover, ud.addedAt '
+            . 'FROM tblDepts d '
+            . 'JOIN tblUserDepts ud ON ud.deptID = d.deptID AND ud.siteID = d.siteID '
+            . 'JOIN tblSites s ON s.siteID = ud.siteID '
+            . 'WHERE ud.userID = ?'
+        ),
+        // 🖊️ Memberships migration 203 could not place automatically on a
+        // hand-edited database, still waiting for a global administrator at
+        // /admin/users/memberships-unplaced (#517).
+        'groupMembershipsAwaitingPlacement' => $fetchUserRows(
+            'SELECT unplacedID, groupID, groupName, createdAt FROM tblUserGroupsUnplaced WHERE userID = ?'
+        ),
+        'departmentMembershipsAwaitingPlacement' => $fetchUserRows(
+            'SELECT p.unplacedID, p.deptID, d.deptName, p.isDeptLead, p.isDeptAssistant, p.isDeptSecretary, '
+            . 'p.isApprover, p.isMandatoryApprover, p.createdAt '
+            . 'FROM tblUserDeptsUnplaced p '
+            . 'JOIN tblDepts d ON d.deptID = p.deptID '
+            . 'WHERE p.userID = ?'
         ),
         // 🏛️ Venue Bookings (#429) — export↔erasure parity with the three
         // GdprEraser::catalogue() entries added alongside this block.

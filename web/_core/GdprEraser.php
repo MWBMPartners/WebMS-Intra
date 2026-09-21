@@ -109,6 +109,24 @@ class GdprEraser
             // it is removed outright, the same as the holding it was
             // copied from would have been.
             ['table' => 'tblUserRolesUnplaced', 'userCol' => 'userID', 'action' => 'delete'],
+            // #517 — user-group and department memberships, the same shape as
+            // the two tblUserRoles entries above. The person's OWN
+            // memberships go (flags included). A membership that belongs to
+            // SOMEBODY ELSE, which this person happened to add, stays — it is
+            // about the member, not whoever added them — and only the "who
+            // added it" number (addedByID) is detached. The tblUserSites
+            // delete above already removes the person's own rows through the
+            // composite foreign keys; the explicit entries stay so the audit
+            // trail says what happened (the #516 reasoning).
+            ['table' => 'tblUserGroups',       'userCol' => 'userID', 'action' => 'delete'],
+            ['table' => 'tblUserGroups',       'userCol' => 'addedByID', 'action' => 'anonymise', 'nullCols' => [], 'reason' => 'the membership stays (it is about the member, not who added them); who added it is detached'],
+            ['table' => 'tblUserDepts',        'userCol' => 'userID', 'action' => 'delete'],
+            ['table' => 'tblUserDepts',        'userCol' => 'addedByID', 'action' => 'anonymise', 'nullCols' => [], 'reason' => 'the membership stays (it is about the member, not who added them); who added it is detached'],
+            // #517 — group and department memberships parked by migration 203,
+            // waiting for a global administrator to place them. About the
+            // person themselves, so removed outright.
+            ['table' => 'tblUserGroupsUnplaced', 'userCol' => 'userID', 'action' => 'delete'],
+            ['table' => 'tblUserDeptsUnplaced',  'userCol' => 'userID', 'action' => 'delete'],
             ['table' => 'tblUserSmsPreference','userCol' => 'userID', 'action' => 'delete'],
             ['table' => 'tblNewsletterSubscription','userCol' => 'userID', 'action' => 'delete'],
             ['table' => 'tblPaymentMethod',    'userCol' => 'userID', 'action' => 'delete'],

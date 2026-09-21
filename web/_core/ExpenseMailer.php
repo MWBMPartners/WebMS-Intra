@@ -97,7 +97,7 @@ class ExpenseMailer
         switch ($event) {
             case 'submitted':
                 // 📧 Notify dept approvers + treasury
-                $recipients = self::getApproverEmails((int) $claim['deptID']);
+                $recipients = self::getApproverEmails((int) $claim['deptID'], $siteId);
                 $subject    = '[' . $siteName . '] New Expense Claim #' . $claimID . ' — ' . $claim['claimTitle'];
                 $body       = self::buildHtml(
                     'New Expense Claim Submitted',
@@ -142,7 +142,7 @@ class ExpenseMailer
 
             case 'withdrawn':
                 // 📧 Notify dept approvers that claim was withdrawn
-                $recipients   = self::getApproverEmails((int) $claim['deptID']);
+                $recipients   = self::getApproverEmails((int) $claim['deptID'], $siteId);
                 $claimantNote = htmlspecialchars($extra['claimantName'] ?? $claim['claimantName'], ENT_QUOTES, 'UTF-8');
                 $subject      = '[' . $siteName . '] Expense Claim #' . $claimID . ' Withdrawn';
                 $body         = self::buildHtml(
@@ -156,7 +156,7 @@ class ExpenseMailer
             case 'reimbursed':
                 // 📧 Notify claimant + approvers
                 $recipients = [$claim['claimantEmail']];
-                $recipients = array_merge($recipients, self::getApproverEmails((int) $claim['deptID']));
+                $recipients = array_merge($recipients, self::getApproverEmails((int) $claim['deptID'], $siteId));
                 $subject    = '[' . $siteName . '] Expense Claim #' . $claimID . ' Reimbursed';
                 $followUp   = (int) ($SETTINGS['expenses']['followUpDays'] ?? 7);
                 $body       = self::buildHtml(
@@ -198,19 +198,42 @@ class ExpenseMailer
     }
 
     /**
-     * 📋 Get email addresses of dept approvers
+     * 📋 Get email addresses of dept approvers FOR ONE ORGANISATION (#517).
+     *
+     * Was a department-only join with no organisation and no membership
+     * test — a membership row left behind in an organisation the person had
+     * left still e-mailed them about new claims. Now scoped to the claim's
+     * organisation, with an active-membership join, mirroring
+     * `getTreasuryEmails()` below line for line.
+     *
+     * Also now includes members flagged ONLY as required approver
+     * (`isMandatoryApprover`). The approval list (`expenses/approve/index.php`)
+     * and the decision handler (`approve/save.php`) have always counted such
+     * a person as an approver — the claim cannot be fully approved without
+     * them — but this list did not, so they saw the claim in their queue and
+     * were never told about it. Proven while planning #517: the old flags
+     * listed two addresses, the new list adds the required-approver-only one.
+     *
+     * Like the approval queries, deliberately no test that the department is
+     * switched on: a retired department's pending claims are still finished
+     * (and so announced) by its own approvers (owner's answer Q3).
+     *
+     * @param int $deptID The claim's department.
+     * @param int $siteId The organisation the claim belongs to.
      */
-    private static function getApproverEmails(int $deptID): array
+    private static function getApproverEmails(int $deptID, int $siteId): array
     {
         global $mysqli;
         $emails = [];
         $stmt = $mysqli->prepare(
-            'SELECT U.emailAddress FROM tblUserDepts UD '
+            'SELECT DISTINCT U.emailAddress FROM tblUserDepts UD '
             . 'JOIN tblUsers U ON U.userID = UD.userID '
-            . 'WHERE UD.deptID = ? AND (UD.isApprover = 1 OR UD.isDeptLead = 1) AND U.isActive = 1'
+            . 'JOIN tblUserSites US ON US.userID = U.userID AND US.siteID = UD.siteID AND US.isActive = 1 '
+            . 'WHERE UD.deptID = ? AND UD.siteID = ? '
+            . 'AND (UD.isApprover = 1 OR UD.isDeptLead = 1 OR UD.isMandatoryApprover = 1) AND U.isActive = 1'
         );
         if ($stmt !== false) {
-            $stmt->bind_param('i', $deptID);
+            $stmt->bind_param('ii', $deptID, $siteId);
             $stmt->execute();
             $result = $stmt->get_result();
             while ($r = $result->fetch_assoc()) {

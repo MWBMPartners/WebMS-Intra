@@ -72,7 +72,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <span class="badge text-bg-success rounded-pill mt-1">3</span>
             <div>
                 <strong>Select a Department</strong>
-                <p class="mb-0 small text-secondary">Choose the department this expense should be charged to from the dropdown list.</p>
+                <p class="mb-0 small text-secondary">Choose the department this expense should be charged to from the dropdown list. Departments are set up by an administrator at Admin &rarr; Departments; if the list is empty, ask them.</p>
             </div>
         </div>
         <div class="list-group-item d-flex gap-3 align-items-start">

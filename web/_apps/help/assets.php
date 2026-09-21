@@ -138,7 +138,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     </p>
     <ul>
         <li>a specific <strong>person</strong>,</li>
-        <li>a <strong>department</strong> or <strong>team/group</strong> within your organisation, or</li>
+        <li>a <strong>department</strong> or <strong>team/group</strong> within your organisation (set up at
+            Admin &rarr; Groups / Departments), or</li>
         <li>an <strong>outside organisation</strong> — a hire company, a partner charity, or anyone else you
             share equipment with.</li>
     </ul>
