@@ -9,6 +9,25 @@ proceeds, so the session can be picked up at any point).
 
 ## Read this first — where we are right now
 
+## LATEST — 21 September 2026, about 18:10. RESUME FROM HERE.
+
+**The #514 re-plan is SETTLED** (run `wf_59816f10-2d2`, all Fable, no fallbacks, no owner questions). **The plan to build from is now
+`.claude-work/resume/p514--plan-r2.md`** (section 0.4 lists every change; `p514--review.md`, `p514--replan.md`, `p514--settle.md` have
+the reasoning). The challenge step made eleven corrections in place, among them: the new check keeps marker comments (candidates from
+comment-stripped text, markers searched in the original); the scheduled job's push link must NOT go through `Site::url()` (the prefix
+is fixed from the job's own address); P2's bind order on calendar/index.php; P6 proofs 11/13 contradicted P2 row a.
+- **Build order, one commit each:** P1 (migration 204, opus) -> P2 (opus; closes #534 items 1-2; replaces #544's interim test) -> P3
+  (sonnet; adds `check_event_visibility.py` AND wires it into pr-security.yml) -> P4 (opus) -> P5 (opus) -> P6 (migration 205, opus)
+  -> P7 (206, opus) -> P8 (207, sonnet) -> P9 (sonnet) -> P10 (sonnet) -> P11 (sonnet). Migration numbers are re-read at build time;
+  if #542 takes one, every #514 number moves up by one.
+- **Owner, 18:05: YES, P3 may wire `check_event_visibility.py` into `.github/workflows/pr-security.yml`** (a fourth check, same as the
+  three approved earlier). The owner first checked it was repository-side only: all Python lives in `tools/`, 0 files under `web/`,
+  and only `web/` deploys. **Never put Python under `web/`** (shared hosts may not run it).
+- Real Google/Microsoft 365 calendars: still NOT PROVEN (decision 9); P5's real-export proof prints SKIPPED.
+
+**NOW: #542** (department flag is enough to view and approve) launching as `.claude-work/resume/wf-542.js`, reports `p542--*.md`,
+containers p542-mysql/p542-check, ports 9180-9189. **Then the #514 build, P1 first.**
+
 ## LATEST — 21 September 2026, about 16:35. RESUME FROM HERE.
 
 **The #514 catch-up review is DONE** (run `wf_59816f10-2d2`, Fable, no fallbacks; report `.claude-work/resume/p514--review.md`, proof
