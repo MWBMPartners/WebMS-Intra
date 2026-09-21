@@ -9,6 +9,24 @@ proceeds, so the session can be picked up at any point).
 
 ## Read this first — where we are right now
 
+## LATEST — 21 September 2026, 01:30. RESUME FROM HERE.
+
+**#515 IS DONE: committed `6989b26` and pushed, independent check PASS.** Reserved organisation keys (built from three live sources,
+so the list cannot go stale), the refusal at save time, the refusal to switch a clashing organisation back on, warnings for
+organisations that already clash, a health light that only goes amber where the clash actually bites, and a new automatic check. The
+maintenance bypass is narrowed to global administrators only (#509 part 4). 13 files, no migration — 202 stays free.
+
+Two residuals the checker raised were fixed before committing: a comment naming the old rule, and — the one that mattered — the new
+check only recognised the exact words "INSERT INTO", so the "INSERT IGNORE INTO" shape used in eleven files here would have slipped
+past it. Fixed with a contrast proof, along with a multi-line case and a third fault found while testing. #515 and #509 are commented.
+
+**NEXT: #516** (nobody can be given a role; roles are not tied to an organisation), then **#517** (user groups and departments exist
+only in the database). Both are prerequisites for the #514 build's last part. Then the Fable review of the #514 plan, then the #514
+build, then #534, #535 and #536, then **one comprehensive Codex review of the whole branch**, then one pull request to alpha.
+
+**Everything committed since Codex last reviewed:** 5f278cb, 12e637a, 1e0809c, bd1ef12, 6989b26 and the documentation commits. The
+review list to build for the sweep is still "everything from `110e47d~1` to the tip".
+
 ## LATEST — 20 September 2026, 23:10. RESUME FROM HERE.
 
 **PACKAGE 2 IS DONE: committed `bd1ef12` and pushed, independent check PASS.** The owner's dead-link answer (one "not available" page
