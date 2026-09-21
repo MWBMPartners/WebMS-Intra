@@ -189,7 +189,8 @@ in `.claude/CLAUDE.md` under the heading named in brackets.
    `d3b906d` (#517, user groups and departments per organisation), `e49ae58` (#544,
    the series download refuses internal events to signed-out visitors), `8e7fb21`
    (#542, a department flag is enough to approve its claims), `2cd68f1` (#514
-   part 1: the event visibility rule, migration 204), plus the
+   part 1: the event visibility rule, migration 204), `de31cb8` (#514 part 2:
+   the rule in every place events are shown), plus the
    documentation and handoff commits in between.
    Two commits live OUTSIDE the working branch and must be reviewed by
    name: `560a4f2` on main (the #504 squash: codeql-action bump, the

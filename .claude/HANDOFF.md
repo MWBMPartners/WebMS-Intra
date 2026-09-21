@@ -9,6 +9,19 @@ proceeds, so the session can be picked up at any point).
 
 ## Read this first — where we are right now
 
+## LATEST — 21 September 2026, about 23:25. RESUME FROM HERE.
+
+**#514 P2 IS COMMITTED: `de31cb8`, pushed.** The rule and detail level in every outlet (18 files). Independent check PASS in round 1 (on
+OPUS; Fable still out of credits). Two small no-behaviour-change fixes made by me after the check (full notation in event-reminders.php;
+an API description that named a field not added until P6). Comments posted: #514, #534 (items 1-2 DONE; re-scoped to items 3-4), #544
+(superseded by the full rule), #536 (sitemap has no organisation prefix).
+**For P11's follow-up list:** the events API still returns `isPublic` (1) on imported events, where it means nothing; hiding it changes
+the API contract, so it needs its own issue.
+
+**NOW: P3 launching** (`args: { part: "P3", tier: "sonnet" }`): imported events read-only everywhere else, and the new
+`tools/audit-checks/check_event_visibility.py` WIRED INTO `.github/workflows/pr-security.yml` (owner's explicit yes, 18:05 — the only
+workflow edit any part may make). Reports `p514-p3--*.md`.
+
 ## LATEST — 21 September 2026, about 22:00. RESUME FROM HERE.
 
 **#514 P1 IS COMMITTED: `2cd68f1`, pushed, #514 commented.** Two independent checks passed (both on OPUS: Fable was out of usage
