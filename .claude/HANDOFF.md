@@ -24,10 +24,14 @@ check allow-list additions; collation note; line drift).
 download an internal event series from `/calendar/export?series=N`. Raised as **#544**; running as workflow `wf_a5200c76-f44` (script
 `.claude-work/resume/wf-544.js`, reports `p544--*.md`, containers p544-mysql/p544-check, ports 9170-9179).
 
+**#544 IS DONE: `e49ae58`, independent check PASS in round 1** (78-request matrix against the committed code; refusals byte-identical to a missing series; everything else unchanged). #544 commented; the live site stays exposed until promotion.
+
+**17:30 — #514 re-plan RESUMED** with the owner's answer (the command below, with the commit ID filled in). It is the same run ID.
+
 **THEN resume the #514 re-plan:** `Workflow({scriptPath: ".claude-work/resume/wf-514-review.js", resumeFromRunId: "wf_59816f10-2d2",
 args: { answers: "..." }})`. The script now accepts `args.answers` (the review step's prompt is unchanged, so it replays from cache;
 the previous version is saved as `wf-514-review.before-answers.js`). The answer to pass: the owner chose (b), the series download was
-fixed ahead of #514 as #544 in commit <ID>; P2 row d2 replaces that fix with the full rule.
+fixed ahead of #514 as #544 in commit e49ae58; P2 row d2 replaces that fix with the full rule.
 
 **ORDER:** #544 -> #514 re-plan (resume) -> #542 -> #514 build, one commit per part -> follow-ups (#534 re-scoped to its items 3-4,
 #535, #536, #539, #540, #541, #543) -> documentation/CI pass -> comprehensive Codex review -> stop for the owner.

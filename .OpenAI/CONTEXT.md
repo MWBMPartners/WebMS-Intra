@@ -186,7 +186,8 @@ in `.claude/CLAUDE.md` under the heading named in brackets.
    `c99dc87` (#516, roles per organisation, 21 September 2026) and
    `5753bf3` (#538, the treasury list limited to treasurers and
    administrators), `26aa70d` (alpha's copy of Psalm's `actions: read`) and
-   `d3b906d` (#517, user groups and departments per organisation), plus the
+   `d3b906d` (#517, user groups and departments per organisation), `e49ae58` (#544,
+   the series download refuses internal events to signed-out visitors), plus the
    documentation and handoff commits in between.
    Two commits live OUTSIDE the working branch and must be reviewed by
    name: `560a4f2` on main (the #504 squash: codeql-action bump, the
