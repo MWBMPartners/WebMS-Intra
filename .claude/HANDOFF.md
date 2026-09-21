@@ -9,6 +9,29 @@ proceeds, so the session can be picked up at any point).
 
 ## Read this first — where we are right now
 
+## LATEST — 21 September 2026, about 16:35. RESUME FROM HERE.
+
+**The #514 catch-up review is DONE** (run `wf_59816f10-2d2`, Fable, no fallbacks; report `.claude-work/resume/p514--review.md`, proof
+logs in `/private/tmp/p514-review/`). Verdict: **re-plan needed, but small.** The design and the leak hunt's 33 findings still hold, and
+the P10 contract from #516/#517 is met exactly (16/16 on MySQL 8.0.36). Three things settled since 17 September contradict the plan's
+TEXT: (1) P1's membership rule keeps the single-organisation "no row counts as a member" branch the owner removed on 20 September (#533);
+(2) P1 turns "remove from site" into an UPDATE, which would now leave #516/#517 roles, groups and department approver flags behind and
+restore them on re-add, so P1 must NOT touch `admin/sites/users.php`; (3) P2 sends signed-out visitors to sign in, where the owner chose
+the one not-available page. Plus stale facts (#518, #519, #520 are fixed; P2 delivers #534 items 1-2; P9/P8 links need `Site::url()`;
+check allow-list additions; collation note; line drift).
+
+**It found a LIVE LEAK and asked one question. The owner chose (b): fix it NOW as a tiny package.** Anyone, even signed out, can
+download an internal event series from `/calendar/export?series=N`. Raised as **#544**; running as workflow `wf_a5200c76-f44` (script
+`.claude-work/resume/wf-544.js`, reports `p544--*.md`, containers p544-mysql/p544-check, ports 9170-9179).
+
+**THEN resume the #514 re-plan:** `Workflow({scriptPath: ".claude-work/resume/wf-514-review.js", resumeFromRunId: "wf_59816f10-2d2",
+args: { answers: "..." }})`. The script now accepts `args.answers` (the review step's prompt is unchanged, so it replays from cache;
+the previous version is saved as `wf-514-review.before-answers.js`). The answer to pass: the owner chose (b), the series download was
+fixed ahead of #514 as #544 in commit <ID>; P2 row d2 replaces that fix with the full rule.
+
+**ORDER:** #544 -> #514 re-plan (resume) -> #542 -> #514 build, one commit per part -> follow-ups (#534 re-scoped to its items 3-4,
+#535, #536, #539, #540, #541, #543) -> documentation/CI pass -> comprehensive Codex review -> stop for the owner.
+
 ## LATEST — 21 September 2026, about 15:45. FOUR OWNER ANSWERS.
 
 1. **#542 (approval trap): a department flag is enough.** Anyone an administrator has made a lead, approver or required approver
