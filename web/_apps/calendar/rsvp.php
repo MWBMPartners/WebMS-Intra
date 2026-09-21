@@ -29,6 +29,7 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\EventVisibility;
 use Portal\Core\Events;
 use Portal\Core\Logger;
 use Portal\Core\Site;
@@ -118,11 +119,25 @@ if ($eventId <= 0 || in_array($response, $validResponses, true) === false) {
 //    (calendar/rsvp-by-link.php). A fixed or random delay was also rejected: it
 //    slows everybody, and random noise can be averaged away.
 //
-//    Deleted events are refused by the query too (isDeleted = 0). Sign-in is
-//    already required at the top (Auth::requireLogin), which covers the event
-//    page's rule for events not marked public: members may answer those.
-//    Answering a cancelled or postponed event is unchanged by this.
+//    Deleted events are refused by the query too (isDeleted = 0). Answering a
+//    cancelled or postponed event is unchanged by this.
+//
+// 👁️ WHO may answer at all — #514 part P2 (21 September 2026). Until then
+//    this handler relied on the sign-in at the top: any signed-in account
+//    could answer any event of this organisation that was not a draft,
+//    including a members-only event of an organisation it does not belong to.
+//    Now the one shared rule, EventVisibility::where() in "session" mode, is
+//    appended to the lookup below: a public event for anybody signed in, a
+//    members-only event for an active member of the event's own organisation
+//    (or its administrator), an imported event by its own level. A refused
+//    event comes back as no row, so it gets exactly the same "Event not
+//    found." flash and redirect as a number that matches nothing, for the
+//    same statements. (This handler keeps its flash-and-redirect answer
+//    rather than the shared "not available" page, because it is a form
+//    handler whose callers expect a message back on the page they came from.)
 $canManageFlag = App::isAdmin() === true ? 1 : 0;
+$viewerId      = EventVisibility::sessionViewerId();
+$visibility    = EventVisibility::where('e', EventVisibility::MODE_SESSION, $viewerId, date('Y-m-d'));
 
 // 🔓 #531 (20 September 2026): `capacity` is still read here, UNLOCKED, but
 //    it is no longer what any capacity DECISION is made against — it is
@@ -134,10 +149,16 @@ $canManageFlag = App::isAdmin() === true ? 1 : 0;
 //    event's capacity at any moment, and the write has to use whichever
 //    value holds at the instant it happens, not whatever this early,
 //    unlocked read happened to see.
+//    The rule's fragment is appended LAST, after the literal conditions
+//    (tools/audit-checks/check_sql_columns.py reads only those; the
+//    fragment's own column names are checked by
+//    tools/event-visibility-selftest.php), and its values are bound after
+//    the three the literal conditions take.
 $evStmt = $mysqli->prepare(
-    'SELECT eventID, eventName, capacity FROM tblEvents '
-    . 'WHERE eventID = ? AND siteID = ? AND isDeleted = 0 '
-    . "AND (status IN ('published', 'cancelled', 'postponed') OR ? = 1) LIMIT 1"
+    'SELECT e.eventID, e.eventName, e.capacity FROM tblEvents e '
+    . 'WHERE e.eventID = ? AND e.siteID = ? AND e.isDeleted = 0 '
+    . "AND (e.status IN ('published', 'cancelled', 'postponed') OR ? = 1)"
+    . $visibility['sql'] . ' LIMIT 1'
 );
 if ($evStmt === false) {
     $_SESSION['flash_msg']  = t('error.database');
@@ -145,7 +166,7 @@ if ($evStmt === false) {
     header('Location: ' . $redirect);
     exit();
 }
-$evStmt->bind_param('iii', $eventId, $siteId, $canManageFlag);
+$evStmt->bind_param('iii' . $visibility['types'], $eventId, $siteId, $canManageFlag, ...$visibility['params']);
 $evStmt->execute();
 $event = $evStmt->get_result()->fetch_assoc();
 $evStmt->close();
@@ -186,6 +207,11 @@ if ($response === 'cancel') {
     //    uses, so there is no cycle between the two.
     App::beginTransaction();
     try {
+        // 👁️ EventVisibility::where() — re-read by number after the gated lookup
+        //    above, which ran the rule (#514 part P2). This locked read only
+        //    takes the row lock and the current capacity for an event this
+        //    viewer has already been allowed to answer; it decides nothing
+        //    about who may see the event, so it does not repeat the rule.
         $lockStmt = $mysqli->prepare('SELECT capacity FROM tblEvents WHERE eventID = ? AND siteID = ? LIMIT 1 FOR UPDATE');
         if ($lockStmt === false) {
             throw new \RuntimeException('prepare failed: ' . $mysqli->error);
@@ -285,6 +311,11 @@ try {
     //    an event's capacity at any moment, and the decision below has to
     //    use whichever value holds at the instant this row is written, not
     //    whatever it was when the page was first requested.
+    // 👁️ EventVisibility::where() — re-read by number after the gated lookup
+    //    above, which ran the rule (#514 part P2). This locked read only takes
+    //    the row lock and the current capacity for an event this viewer has
+    //    already been allowed to answer; it decides nothing about who may see
+    //    the event, so it does not repeat the rule.
     $lockStmt = $mysqli->prepare('SELECT capacity FROM tblEvents WHERE eventID = ? AND siteID = ? LIMIT 1 FOR UPDATE');
     if ($lockStmt === false) {
         throw new \RuntimeException('prepare failed: ' . $mysqli->error);

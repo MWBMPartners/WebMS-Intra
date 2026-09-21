@@ -73,6 +73,7 @@
 declare(strict_types=1);
 
 use Portal\Core\App;
+use Portal\Core\EventVisibility;
 use Portal\Core\Site;
 
 // -----------------------------------------------------------------------------
@@ -206,31 +207,49 @@ $siteId = Site::id();
 // 📅 Public events, each at its own page.
 //
 //    Three conditions, and every one matters:
-//      isPublic = 1        the organisation marked it as public. An internal
-//                          meeting must never reach a search engine.
-//      status = published  drafts are not finished and may say anything.
-//      isDeleted = 0       an event somebody removed.
+//      the visibility rule  only an event the whole world may see. An
+//                           internal meeting must never reach a search engine.
+//      status = published   drafts are not finished and may say anything.
+//      isDeleted = 0        an event somebody removed.
 //
 //    Only events that have not yet finished. A sitemap full of last year's
 //    events wastes a search engine's time and the reader's.
+//
+// 👁️ #514 part P2: the first condition used to be the literal `isPublic = 1`.
+//    It is now the one shared rule, Portal\Core\EventVisibility::where(), in
+//    "website" mode (it looks as NOBODY): the portal's own events only when
+//    marked public, and an event copied in from an outside calendar only when
+//    it is public AND ticked for the organisation's website (owner decision
+//    D4). The fragment is appended after the literal conditions, which
+//    tools/audit-checks/check_sql_columns.py can read (the fragment's own
+//    column names are checked by tools/event-visibility-selftest.php).
+//    An imported event is listed with NO last-changed date (`lastmod`), so a
+//    search engine is never told when its outside calendar last changed it
+//    (the #514 plan, section 1.4).
+//    ⚠️ The sitemap is cached for an hour, and a search engine keeps what it
+//    already took; narrowing an event cannot pull back an earlier copy.
 try {
+    $today      = date('Y-m-d');
+    $visibility = EventVisibility::where('e', EventVisibility::MODE_WEBSITE, 0, $today);
     $stmt = $db->prepare(
-        'SELECT eventSlug, updatedAt '
-        . 'FROM tblEvents '
-        . 'WHERE siteID = ? AND isPublic = 1 AND status = "published" AND isDeleted = 0 '
-        . '  AND eventSlug IS NOT NULL AND eventSlug <> "" '
-        . '  AND (endDateTime IS NULL OR endDateTime >= NOW()) '
-        . 'ORDER BY startDateTime ASC '
+        'SELECT e.eventSlug, e.updatedAt, e.externalFeedID '
+        . 'FROM tblEvents e '
+        . 'WHERE e.siteID = ? AND e.isDeleted = 0 '
+        . '  AND e.eventSlug IS NOT NULL '
+        . '  AND (e.endDateTime IS NULL OR e.endDateTime >= NOW()) '
+        . '  AND e.eventSlug <> "" AND e.status = "published"'
+        . $visibility['sql'] . ' '
+        . 'ORDER BY e.startDateTime ASC '
         . 'LIMIT 5000'
     );
     if ($stmt !== false) {
-        $stmt->bind_param('i', $siteId);
+        $stmt->bind_param('i' . $visibility['types'], $siteId, ...$visibility['params']);
         $stmt->execute();
         $rs = $stmt->get_result();
         while ($row = $rs->fetch_assoc()) {
             $entries[] = [
                 'loc'     => portalAbsoluteUrl('/e/' . rawurlencode((string) $row['eventSlug'])),
-                'lastmod' => portalSitemapDate($row['updatedAt'] ?? null),
+                'lastmod' => $row['externalFeedID'] === null ? portalSitemapDate($row['updatedAt'] ?? null) : '',
             ];
         }
         $stmt->close();

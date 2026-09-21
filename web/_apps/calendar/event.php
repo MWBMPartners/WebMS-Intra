@@ -17,8 +17,18 @@
  *
  * Draft events (#503) — a draft is shown only to people who can manage events
  * (App::isAdmin(), the calendar/manage/ check), with a "Draft - not visible to
- * the public" notice. Everybody else gets the same "not found" as an address
- * that matches no event. See the visibility rule after the event is loaded.
+ * the public" notice. Everybody else gets the same "not available" page as an
+ * address that matches no event. See the visibility rule after the event is
+ * loaded.
+ *
+ * Who may see an event at all, and in how much detail (#514 part P2) — decided
+ * by the one shared rule, Portal\Core\EventVisibility, inside the lookup
+ * itself: a public event for anybody, a members-only event for an active member
+ * of THAT event's own organisation (or its administrator), and an event copied
+ * in from an outside calendar by its own level. When the viewer may see only
+ * "title, date and time" of an imported event, its description, location,
+ * image, people, links, materials, documents, assets, search-engine markup and
+ * answer counts are all left out (see "canSeeFull" below).
  *
  * @package   Portal\Calendar
  * @author    MWBM Partners Ltd (t/a MWservices)
@@ -34,6 +44,7 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\AssetRegister;
 use Portal\Core\Auth;
+use Portal\Core\EventVisibility;
 use Portal\Core\Router;
 use Portal\Core\Site;
 
@@ -53,28 +64,63 @@ if ($slug === '') {
 // 🌐 Multi-site scope
 $siteId = Site::id();
 
-// 🛡️ #532 (20 September 2026, Q3 folded in — see the settled plan). Both
-//    account questions are asked BEFORE the lookup, not after it, and
-//    every request asks them equally, whatever it turns out to find —
-//    the same discipline calendar/rsvp.php's own comment already applies,
-//    because App::isAdmin()'s FIRST call is what actually runs the
-//    account query. Asking only sometimes would make the two paths cost
-//    different amounts of database work, which is itself a timing signal.
+// 🛡️ #532 (20 September 2026, Q3 folded in — see the settled plan). The
+//    account question is asked BEFORE the lookup, not after it, and every
+//    request asks it equally, whatever it turns out to find — the same
+//    discipline calendar/rsvp.php's own comment already applies, because
+//    App::isAdmin()'s FIRST call is what actually runs the account query.
+//    Asking only sometimes would make the two paths cost different amounts
+//    of database work, which is itself a timing signal. (#514 part P2
+//    removed the second question, "is anybody signed in", which only the
+//    old sign-in test below read; the viewer's number and today's date are
+//    read here instead, and cost no database work.)
 $canManage = App::isAdmin();
-$signedIn  = Auth::check();
+$viewerId  = EventVisibility::sessionViewerId();
+$today     = date('Y-m-d');
 
 // 📋 Fetch event
+//
+// 👁️ #514 part P2: the shared visibility rule is part of THIS lookup, so an
+//    event this viewer may not see comes back from the database exactly as
+//    an event that does not exist — no row — and costs the same statement.
+//    The rule's fragment is appended LAST, after the page's own literal
+//    conditions (which tools/audit-checks/check_sql_columns.py can read; it
+//    cannot read inside a fragment built in a variable, so the fragment's own
+//    column names are checked by tools/event-visibility-selftest.php).
+//    Binding is by position: the canSeeFull column's values come first (the
+//    SELECT list is before the WHERE), then the slug and organisation, then
+//    the fragment's values.
+//
+//    `importedFrom` is the outside calendar's name, shown only when the
+//    viewer may see full details (it is cleared below otherwise; the #514
+//    plan, section 1.4: a limited event says "Imported event" instead). The
+//    join is on the calendar number AND the organisation, so another
+//    organisation's calendar can never lend this page its name.
+$visibility = EventVisibility::where('e', EventVisibility::MODE_SESSION, $viewerId, $today);
+$fullDetail = EventVisibility::fullDetailSelect('e', EventVisibility::MODE_SESSION, $viewerId, $today, 'canSeeFull');
+// 🧩 The canSeeFull expression goes in through sprintf()'s `%s`, not by
+//    joining it in with `.`: tools/audit-checks/check_sql_columns.py does
+//    not recognise a statement at all when PHP code sits between SELECT
+//    and FROM, which would hide this whole statement — the page's own
+//    column names included — from it (measured while building #514 part
+//    P2). The text sprintf() puts in is SQL built by EventVisibility
+//    itself, never anything a visitor sent; every value is still bound.
 $event = null;
-$stmt = $mysqli->prepare(
-    'SELECT e.*, c.categoryName, t.typeName, s.seriesName, s.seriesSlug '
+$stmt = $mysqli->prepare(sprintf(
+    'SELECT e.*, c.categoryName, t.typeName, s.seriesName, s.seriesSlug, ef.name AS importedFrom, %s '
     . 'FROM tblEvents e '
     . 'LEFT JOIN tblEventCategories c ON c.categoryID = e.categoryID '
     . 'LEFT JOIN tblEventTypes t ON t.typeID = e.typeID '
     . 'LEFT JOIN tblEventSeries s ON s.seriesID = e.seriesID '
-    . 'WHERE e.eventSlug = ? AND e.isDeleted = 0 AND e.siteID = ? LIMIT 1'
-);
+    . 'LEFT JOIN tblExternalFeeds ef ON ef.feedID = e.externalFeedID AND ef.siteID = e.siteID '
+    . 'WHERE e.eventSlug = ? AND e.isDeleted = 0 AND e.siteID = ?',
+    $fullDetail['sql']
+) . $visibility['sql'] . ' LIMIT 1');
 if ($stmt !== false) {
-    $stmt->bind_param('si', $slug, $siteId);
+    $stmt->bind_param(
+        $fullDetail['types'] . 'si' . $visibility['types'],
+        ...array_merge($fullDetail['params'], [$slug, $siteId], $visibility['params'])
+    );
     $stmt->execute();
     $event = $stmt->get_result()->fetch_assoc();
     $stmt->close();
@@ -106,28 +152,34 @@ if ($stmt !== false) {
 // event even exist here" and "is its status one the public may see (or
 // can this viewer manage events)" together.
 //
-// WHY SIGN-IN, NOT 404 — CHANGED AGAIN, 20 September 2026. Between #532 and
-// now, a refused event sent a signed-out visitor to sign in (302) and a
-// missing one answered 404 — closing the "does this exist" leak, but at the
-// cost of asking somebody who followed a DEAD link (an old shared link, a
-// search result, a bookmark for an event since deleted) to sign in for
-// something that no longer exists at all. The owner chose a third answer:
-// ONE page for both cases (`Router::renderEventUnavailable()`), which says
-// the event is not available, offers a sign-in link for anybody who does
-// have an account, and answers 404 underneath so a search engine drops a
-// dead address instead of a portal treating it as a live sign-in gate. The
-// two cases still cost the same database work — `$canManage` and
-// `$signedIn` are read at the top of this file, before the lookup, on
-// every request, whatever it turns out to find — and now produce the same
-// page too. `$visible === false` is checked FIRST in `$refused` below so
-// `(int) $event['isPublic']` is never evaluated when `$event` is null —
-// PHP's `||` short-circuits, so this never reads a property of a missing
-// event.
+// WHY ONE PAGE, NOT A SIGN-IN REDIRECT — CHANGED AGAIN, 20 September 2026.
+// Between #532 and then, a refused event sent a signed-out visitor to sign
+// in (302) and a missing one answered 404 — closing the "does this exist"
+// leak, but at the cost of asking somebody who followed a DEAD link (an old
+// shared link, a search result, a bookmark for an event since deleted) to
+// sign in for something that no longer exists at all. The owner chose a
+// third answer: ONE page for both cases (`Router::renderEventUnavailable()`),
+// which says the event is not available, offers a sign-in link for anybody
+// who does have an account, and answers 404 underneath so a search engine
+// drops a dead address instead of a portal treating it as a live sign-in
+// gate.
+//
+// WHO MAY SEE THE EVENT AT ALL — #514 part P2 (21 September 2026). Until
+// then this page decided it here, in PHP: an event not marked public was
+// refused to a signed-out visitor, and shown to ANY signed-in account — a
+// member of a different organisation included (#534 items 1 and 2). That
+// test is gone. The shared rule (EventVisibility::where(), in the lookup
+// above) now decides, inside the database: a public event for anybody; a
+// members-only event for an active member of the event's own organisation,
+// or its administrator; an imported event by its own level. A refused event
+// therefore comes back as no row, exactly like a missing one, so the only
+// thing left to decide here is the draft rule below. The two cases still
+// cost the same database work — `$canManage` is read at the top of this
+// file, before the lookup, on every request — and produce the same page.
 //
 // ⚠️ This protects THIS page only. calendar/export.php, the registration
-//    pages and the check-in pages apply the matching rule to their own
-//    single-event addresses; other pages that show an event make their
-//    own checks.
+//    pages and the check-in pages apply the rule to their own single-event
+//    addresses; other pages that show an event make their own checks.
 $publicEventStatuses = ['published', 'cancelled', 'postponed'];
 // $isVisibleStatus is kept as ITS OWN variable, separate from the combined
 // $visible test below, because two places further down this file
@@ -140,13 +192,30 @@ $isVisibleStatus = $event !== null
     && in_array((string) ($event['status'] ?? ''), $publicEventStatuses, true) === true;
 $visible = $event !== null && ($isVisibleStatus === true || $canManage === true);
 
-// One decision, one page. `$visible === false` is tested FIRST so
-// `$event['isPublic']` is never read when `$event` is null (PHP's ||
-// short-circuits).
-$refused = $visible === false || ($signedIn === false && (int) $event['isPublic'] === 0);
+// One decision, one page. The rule in the lookup has already decided who may
+// see the event, so a refusal here is only ever "no row" or "a draft this
+// viewer cannot manage" (#514 part P2 removed the sign-in test that used to
+// sit beside this).
+$refused = $visible === false;
 if ($refused === true) {
     Router::renderEventUnavailable();
     return;
+}
+
+// 👁️ #514 part P2 — how much of the event this viewer may see. canSeeFull is
+//    1 for the portal's own events (always) and for an imported event whose
+//    full details the viewer may see; 0 means "title, date and time only"
+//    (the #514 plan, section 1.4). It comes back from the database as the
+//    number 1 or 0, never true/false. redact() empties the description,
+//    location, images, host and partner names, external link and venue in
+//    one place; the related queries further down are skipped as well,
+//    because redact() only knows the event row's own columns.
+$canSeeFull = (int) $event['canSeeFull'] === 1;
+$isImported = $event['externalFeedID'] !== null;
+$event      = EventVisibility::redact($event, $canSeeFull);
+if ($canSeeFull === false) {
+    // The outside calendar's name is itself a detail (section 1.4).
+    $event['importedFrom'] = null;
 }
 
 // 🗺️ #456 Chunk A — page-scoped CSP widening for OSM tiles, ONLY when the
@@ -185,12 +254,18 @@ $pageSection = 'calendar';
 $breadcrumbs = ['Dashboard' => Site::url(''), 'Calendar' => Site::url('calendar'), $event['eventName'] => ''];
 
 // 📋 Fetch event people
+//
+// 👁️ #514 part P2: for an event this viewer may see only as "title, date and
+//    time", NONE of the related material is fetched — people, links,
+//    materials, documents and assigned assets below all stay empty lists
+//    (the #514 plan, section 1.4). They are simply not queried, rather than
+//    fetched and hidden, so nothing about them can reach the page.
 $people = [];
-$stmt = $mysqli->prepare(
+$stmt = $canSeeFull === true ? $mysqli->prepare(
     'SELECT ep.*, u.fullName FROM tblEventPeople ep '
     . 'LEFT JOIN tblUsers u ON u.userID = ep.userID '
     . 'WHERE ep.eventID = ? ORDER BY ep.sortOrder, ep.role'
-);
+) : false;
 if ($stmt !== false) {
     $stmt->bind_param('i', $event['eventID']);
     $stmt->execute();
@@ -203,7 +278,7 @@ if ($stmt !== false) {
 
 // 📋 Fetch event links
 $links = [];
-$stmt = $mysqli->prepare('SELECT * FROM tblEventLinks WHERE eventID = ? ORDER BY sortOrder');
+$stmt = $canSeeFull === true ? $mysqli->prepare('SELECT * FROM tblEventLinks WHERE eventID = ? ORDER BY sortOrder') : false;
 if ($stmt !== false) {
     $stmt->bind_param('i', $event['eventID']);
     $stmt->execute();
@@ -216,7 +291,7 @@ if ($stmt !== false) {
 
 // 📋 Fetch event materials
 $materials = [];
-$stmt = $mysqli->prepare('SELECT * FROM tblEventMaterials WHERE eventID = ? ORDER BY sortOrder');
+$stmt = $canSeeFull === true ? $mysqli->prepare('SELECT * FROM tblEventMaterials WHERE eventID = ? ORDER BY sortOrder') : false;
 if ($stmt !== false) {
     $stmt->bind_param('i', $event['eventID']);
     $stmt->execute();
@@ -233,14 +308,14 @@ if ($stmt !== false) {
 //     set to this event. Honours isPublished + isDeleted gates so drafts
 //     never leak to the public event page.
 $eventDocs = [];
-$stmt = $mysqli->prepare(
+$stmt = $canSeeFull === true ? $mysqli->prepare(
     'SELECT d.documentID, d.title, d.description, d.fileName, d.fileSize, d.mimeType, '
     . '       d.downloadCount, d.createdAt, c.categoryName '
     . 'FROM tblDocuments d '
     . 'LEFT JOIN tblDocCategories c ON c.categoryID = d.categoryID '
     . 'WHERE d.eventID = ? AND d.siteID = ? AND d.isPublished = 1 AND d.isDeleted = 0 '
     . 'ORDER BY c.sortOrder, d.title ASC'
-);
+) : false;
 if ($stmt !== false) {
     $stmt->bind_param('ii', $event['eventID'], $siteId);
     $stmt->execute();
@@ -262,7 +337,7 @@ if ($stmt !== false) {
 // gate on their own app's enabled flag either; an uninstalled/empty Asset
 // Tracker simply yields zero rows either way.
 $assignedAssets = [];
-if (Auth::check() === true) {
+if (Auth::check() === true && $canSeeFull === true) {
     $assignedAssets = AssetRegister::listAssetsForEvent((int) $event['eventID'], $siteId);
 }
 // 🛡️ Unassign-button gate — deliberately the general manager gate (not a
@@ -299,7 +374,9 @@ $rsvpCounts = ['going' => 0, 'maybe' => 0, 'not_going' => 0];
 $rsvpEnabled = ($event['status'] !== 'cancelled');
 
 if (Auth::check() === true) {
-    // 🔍 Current user's RSVP
+    // 🔍 Current user's RSVP — asked even at "title, date and time only":
+    //    a signed-in viewer can still give, see and change their OWN answer
+    //    (the #514 plan, owner answer 8).
     $rStmt = $mysqli->prepare(
         'SELECT response FROM tblEventRSVPs WHERE eventID = ? AND userID = ? LIMIT 1'
     );
@@ -314,10 +391,15 @@ if (Auth::check() === true) {
         $rStmt->close();
     }
 
-    // 📊 RSVP counts by response type
-    $cStmt = $mysqli->prepare(
+    // 📊 RSVP counts by response type — NOT asked at "title, date and time
+    //    only" (#514 part P2; owner answer 8 of 17 September 2026). The
+    //    Going / Maybe / Not going counts describe the organisation's
+    //    members, not the event's title, date or time, so a viewer limited
+    //    to those never sees them; the counts stay at 0 and are not printed
+    //    (see the RSVP card below).
+    $cStmt = $canSeeFull === true ? $mysqli->prepare(
         'SELECT response, COUNT(*) AS cnt FROM tblEventRSVPs WHERE eventID = ? GROUP BY response'
-    );
+    ) : false;
     if ($cStmt !== false) {
         $cStmt->bind_param('i', $event['eventID']);
         $cStmt->execute();
@@ -349,8 +431,24 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 //    is read through a prepared statement, which hands this flag back as the whole
 //    number 1, never the text '1', so the markup was never output for any event.
 //    It now accepts exactly 1 or '1' (a cast would also accept true, '01' and 1.5).
+//
+// 👁️ #514 part P2 — events copied in from an outside calendar. Their
+//    `isPublic` column says nothing about who may see them (their level is
+//    `importLevel`), so it is not read for them. Instead the markup goes out
+//    only when the viewer may see full details AND the event is ticked for
+//    the organisation's public website (`importWebsite`, the "also show on
+//    our public website" box of owner decision D4). At "title, date and
+//    time only" there is never any markup: a search engine must not be
+//    handed a description, a location or an image the page itself leaves
+//    out. A search engine visits signed out, so it only ever reaches this
+//    page at all for an event the rule shows to everybody.
 $eventPublicFlag = $event['isPublic'] ?? null;
-if (($eventPublicFlag === 1 || $eventPublicFlag === '1') && $isVisibleStatus === true):
+if ($isImported === true) {
+    $jsonLdAllowed = $canSeeFull === true && (int) $event['importWebsite'] === 1;
+} else {
+    $jsonLdAllowed = $eventPublicFlag === 1 || $eventPublicFlag === '1';
+}
+if ($jsonLdAllowed === true && $isVisibleStatus === true):
     $eventStatusSchema = [
         'published' => 'https://schema.org/EventScheduled',
         'cancelled' => 'https://schema.org/EventCancelled',
@@ -501,6 +599,19 @@ endif;
                 <?php endif; ?>
                 <?php if ($event['categoryName'] !== null): ?>
                     <span class="badge bg-primary"><?php echo htmlspecialchars($event['categoryName'], ENT_QUOTES, 'UTF-8'); ?></span>
+                <?php endif; ?>
+                <?php
+                // 📥 #514 part P2 — an event copied in from an outside calendar
+                //    says so. With full details it names the calendar
+                //    ("Imported from <name>"); at "title, date and time only"
+                //    the name is itself a hidden detail, so it says only
+                //    "Imported event" (the #514 plan, section 1.4).
+                if ($isImported === true): ?>
+                    <span class="badge bg-light text-dark border"><i class="fa-solid fa-file-import me-1"></i><?php
+                        echo $event['importedFrom'] !== null && (string) $event['importedFrom'] !== ''
+                            ? 'Imported from ' . htmlspecialchars((string) $event['importedFrom'], ENT_QUOTES, 'UTF-8')
+                            : 'Imported event';
+                    ?></span>
                 <?php endif; ?>
                 <?php if ($event['typeName'] !== null): ?>
                     <span class="badge bg-secondary"><?php echo htmlspecialchars($event['typeName'], ENT_QUOTES, 'UTF-8'); ?></span>
@@ -816,6 +927,12 @@ endif;
                         $capacity   = $event['capacity'] !== null ? (int) $event['capacity'] : null;
                         $atCapacity = ($capacity !== null && $rsvpCounts['going'] >= $capacity);
                         ?>
+                        <?php
+                        // 👁️ #514 part P2 — at "title, date and time only" the
+                        //    counts and the capacity line are not printed (owner
+                        //    answer 8); the viewer's own answer and the buttons
+                        //    below stay.
+                        if ($canSeeFull === true): ?>
                         <!-- 📊 Counts -->
                         <div class="d-flex gap-3 mb-3 text-center">
                             <div>
@@ -840,6 +957,7 @@ endif;
                                 <?php endif; ?>
                             </p>
                         <?php endif; ?>
+                        <?php endif; // canSeeFull: counts and capacity ?>
 
                         <!-- 🎯 Current status -->
                         <?php if ($userRsvp !== null): ?>

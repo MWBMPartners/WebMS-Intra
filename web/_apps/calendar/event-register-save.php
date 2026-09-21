@@ -16,6 +16,7 @@ declare(strict_types=1);
 
 use Portal\Core\Auth;
 use Portal\Core\Captcha;
+use Portal\Core\EventVisibility;
 use Portal\Core\Logger;
 use Portal\Core\Mailer;
 use Portal\Core\Router;
@@ -53,23 +54,25 @@ if ($slug === '' || preg_match('/^[a-z0-9][a-z0-9\-]{0,79}$/i', $slug) !== 1) {
 //    (Router::renderEventUnavailable()) rather than a sign-in redirect, so
 //    a dead link is not met with "please sign in" for something that no
 //    longer exists — see event-register.php's header for the full reason.
-$viewerId = (int) ($_SESSION['user_id'] ?? 0);
-$siteId   = Site::id();
+//
+//    #514 part P2 (21 September 2026): the hand-written block that used to sit
+//    in this WHERE clause is replaced by the shared rule,
+//    EventVisibility::where() in "session" mode — see event-register.php's
+//    header for exactly what that changes (nothing for the portal's own
+//    events, in meaning; events copied in from outside calendars now follow
+//    their own level). Both files must keep using the SAME rule, which is now
+//    guaranteed by both calling the same method.
+$viewerId   = EventVisibility::sessionViewerId();
+$siteId     = Site::id();
+$visibility = EventVisibility::where('e', EventVisibility::MODE_SESSION, $viewerId, date('Y-m-d'));
 $stmt = $mysqli->prepare(
-    'SELECT eventID, eventName, registrationEnabled, registrationOpensAt, registrationClosesAt, isPublic '
-    . 'FROM tblEvents '
-    . 'WHERE eventSlug = ? AND siteID = ? AND isDeleted = 0 '
-    . "  AND status = 'published' "
-    . '  AND ( isPublic = 1 '
-    . '        OR EXISTS (SELECT 1 FROM tblUsers va '
-    . '                    WHERE va.userID = ? AND va.isActive = 1 AND va.isRootAdmin = 1) '
-    . '        OR EXISTS (SELECT 1 FROM tblUsers vm '
-    . '                    WHERE vm.userID = ? AND vm.isActive = 1 '
-    . '                      AND EXISTS (SELECT 1 FROM tblUserSites ms '
-    . '                                   WHERE ms.userID = vm.userID AND ms.siteID = ? AND ms.isActive = 1)) '
-    . '      ) LIMIT 1'
+    'SELECT e.eventID, e.eventName, e.registrationEnabled, e.registrationOpensAt, e.registrationClosesAt, e.isPublic '
+    . 'FROM tblEvents e '
+    . 'WHERE e.eventSlug = ? AND e.siteID = ? AND e.isDeleted = 0 '
+    . "  AND e.status = 'published'"
+    . $visibility['sql'] . ' LIMIT 1'
 );
-$stmt->bind_param('siiii', $slug, $siteId, $viewerId, $viewerId, $siteId);
+$stmt->bind_param('si' . $visibility['types'], $slug, $siteId, ...$visibility['params']);
 $stmt->execute();
 $event = $stmt->get_result()->fetch_assoc() ?: null;
 $stmt->close();

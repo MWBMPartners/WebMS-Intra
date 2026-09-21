@@ -27,6 +27,7 @@
 
 declare(strict_types=1);
 
+use Portal\Core\EventVisibility;
 use Portal\Core\Settings;
 use Portal\Core\Site;
 
@@ -37,30 +38,68 @@ if ($slug === '' || preg_match('/^[a-z0-9][a-z0-9\-]{0,79}$/i', $slug) !== 1) {
 
 $siteId = Site::id();
 
-$stmt = $mysqli->prepare(
-    'SELECT eventID, eventName, eventSlug, description, startDateTime, endDateTime, '
-    . '       locationName, locationAddress, status, capacityCount '
-    . 'FROM tblEvents WHERE eventSlug = ? AND siteID = ? AND isDeleted = 0 AND status = "published" '
-        // 🔒 AND it must be marked public. This page needs no sign-in, so
-        //    without this line an INTERNAL event - a leadership meeting, a
-        //    pastoral visit - would be shown in full to anybody who guessed or
-        //    was given its address.
-        //
-        //    This page was unreachable until 11 September 2026, because the part
-        //    of the router that loads it was never handing it a database
-        //    connection. Fixing that made the page work, and in the same moment
-        //    would have made this gap live. The identical gap was found in the
-        //    calendar widget the day before: a page nobody can open is a page
-        //    nobody has checked, so making one reachable is a security change,
-        //    not a repair.
-        . '  AND isPublic = 1 LIMIT 1'
+// 🔒 Only an event the whole world may see. This page needs no sign-in, so
+//    without a test here an INTERNAL event - a leadership meeting, a pastoral
+//    visit - would be shown in full to anybody who guessed or was given its
+//    address.
+//
+//    This page was unreachable until 11 September 2026, because the part of
+//    the router that loads it was never handing it a database connection.
+//    Fixing that made the page work, and in the same moment would have made
+//    this gap live. The identical gap was found in the calendar widget the day
+//    before: a page nobody can open is a page nobody has checked, so making one
+//    reachable is a security change, not a repair.
+//
+// 👁️ #514 part P2: the test used to be the literal `isPublic = 1`. It is now
+//    the one shared rule, EventVisibility::where(), in "anonymous" mode: this
+//    page never uses a session, so the rule looks as NOBODY (viewer 0) — the
+//    portal's own events only when marked public, and an event copied in from
+//    an outside calendar only at its public level. The rule's fragment goes
+//    LAST, after the page's own literal conditions, where
+//    tools/audit-checks/check_sql_columns.py can still read them; the
+//    fragment's own column names are checked by
+//    tools/event-visibility-selftest.php. canSeeFull (1 = full details, 0 =
+//    title, date and time only) is selected beside the row, and its values
+//    are bound first because the SELECT list comes before the WHERE.
+$today      = date('Y-m-d');
+$visibility = EventVisibility::where('e', EventVisibility::MODE_ANONYMOUS, 0, $today);
+$fullDetail = EventVisibility::fullDetailSelect('e', EventVisibility::MODE_ANONYMOUS, 0, $today, 'canSeeFull');
+// 🧩 The canSeeFull expression goes in through sprintf()'s `%s`, not by
+//    joining it in with `.`: tools/audit-checks/check_sql_columns.py does
+//    not recognise a statement at all when PHP code sits between SELECT
+//    and FROM, which would hide this whole statement — the page's own
+//    column names included — from it (measured while building #514 part
+//    P2). The text sprintf() puts in is SQL built by EventVisibility
+//    itself, never anything a visitor sent; every value is still bound.
+$stmt = $mysqli->prepare(sprintf(
+    'SELECT e.eventID, e.eventName, e.eventSlug, e.description, e.startDateTime, e.endDateTime, '
+    . '       e.locationName, e.locationAddress, e.status, e.capacityCount, %s '
+    . 'FROM tblEvents e WHERE e.eventSlug = ? AND e.siteID = ? AND e.isDeleted = 0 AND e.status = "published"',
+    $fullDetail['sql']
+) . $visibility['sql'] . ' LIMIT 1');
+$stmt->bind_param(
+    $fullDetail['types'] . 'si' . $visibility['types'],
+    ...array_merge($fullDetail['params'], [$slug, $siteId], $visibility['params'])
 );
-$stmt->bind_param('si', $slug, $siteId);
 $stmt->execute();
 $event = $stmt->get_result()->fetch_assoc() ?: null;
 $stmt->close();
 
+// 📭 Not found. Deliberately NOT changed to the shared "not available" page
+//    (Router::renderEventUnavailable()) by #514 part P2: that change was not
+//    asked of this page. It shows only events the whole world may see, so an
+//    event the rule refuses and a slug that matches nothing already reach
+//    this same line through the same single query and get this same answer —
+//    "refused" and "missing" already look alike here.
 if ($event === null) { http_response_code(404); exit('Event not found.'); }
+
+// 👁️ At "title, date and time only" (canSeeFull 0 — an imported event whose
+//    details are limited) the description, the location and the address are
+//    emptied here, so neither the page, its meta description nor anything
+//    else below can show them. The number comes back as 1 or 0, never
+//    true/false.
+$canSeeFull = (int) $event['canSeeFull'] === 1;
+$event      = EventVisibility::redact($event, $canSeeFull);
 
 $showQr        = ((string) Settings::get('public_landing.show_qr',        '1')) === '1';
 $showCountdown = ((string) Settings::get('public_landing.show_countdown', '1')) === '1';
@@ -98,10 +137,19 @@ $eventNameSafe = htmlspecialchars((string) $event['eventName'], ENT_QUOTES, 'UTF
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title><?php echo $eventNameSafe; ?> &middot; <?php echo htmlspecialchars($siteName, ENT_QUOTES, 'UTF-8'); ?></title>
+    <?php
+    // 👁️ #514 part P2: at "title, date and time only" there is no meta
+    //    description and the only Open Graph line is the title (the #514
+    //    plan, part P2 row c), so a link preview in a chat app shows no more
+    //    than the page itself does.
+    if ($canSeeFull === true): ?>
     <meta name="description" content="<?php echo htmlspecialchars(mb_substr((string) ($event['description'] ?? ''), 0, 160), ENT_QUOTES, 'UTF-8'); ?>">
+    <?php endif; ?>
     <meta property="og:title" content="<?php echo $eventNameSafe; ?>">
+    <?php if ($canSeeFull === true): ?>
     <meta property="og:type"  content="event">
     <meta property="og:url"   content="<?php echo htmlspecialchars($publicUrl, ENT_QUOTES, 'UTF-8'); ?>">
+    <?php endif; ?>
     <link rel="stylesheet" href="/assets/css/portal.css">
     <style>
         body { margin: 0; font-family: system-ui, -apple-system, sans-serif; background: #f8f9fa; }

@@ -48,6 +48,7 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\AppRegistry;
 use Portal\Core\Auth;
+use Portal\Core\EventVisibility;
 use Portal\Core\Site;
 use Portal\Core\Venues;
 
@@ -189,9 +190,82 @@ $totalPages  = 1;
 $page        = max(1, (int) ($_GET['page'] ?? 1));
 $perPage     = 20;
 
-$conditions = ["e.isDeleted = 0", "e.status = 'published'", "e.isPublic = 1", "e.siteID = ?"];
-$params     = [$siteId];
-$types      = 'i';
+// 👁️ Who may see which event, and in how much detail (#514 part P2).
+//
+//    WHAT WAS HERE BEFORE: the literal condition `e.isPublic = 1`, so every
+//    view listed only the organisation's PUBLIC events, to everybody —
+//    even its own members never saw its members-only events here. The
+//    owner decided on 17 September 2026 (answer 4 to the #514 plan) that
+//    members SHOULD see their own organisation's members-only events in
+//    these views. Events copied in from outside calendars (#514) also need
+//    their four levels (public, members, selected groups, hidden) honoured.
+//
+//    NOW: the one shared rule, `EventVisibility::where()` in "session"
+//    mode, decides row by row inside the database. It admits a public
+//    event to anybody, a members-only event to an active member of THAT
+//    event's own organisation (or its administrator), and an imported
+//    event by its own level. Nothing is decided in PHP afterwards.
+//
+//    Where the fragment goes, and why there: it is appended as the LAST
+//    element of this first array, straight after `e.siteID = ?`, and its
+//    values are appended to $types/$params at the same moment, BEFORE the
+//    category, type, location, search and date filters below add theirs.
+//    bind_param() matches values to `?` marks by position only, and
+//    $params starts with $siteId for `e.siteID = ?`. Putting the fragment
+//    where `isPublic` used to sit (ahead of `siteID`) would have needed its
+//    values bound before $siteId, which this file does not do. Keeping the
+//    page's own literal conditions first also keeps them where
+//    tools/audit-checks/check_sql_columns.py can read them; it cannot read
+//    inside a piece of SQL built in a variable, so the fragment's own
+//    column names are checked by tools/event-visibility-selftest.php
+//    instead, which prepares every mode against the real tables.
+//
+//    `where()` returns its SQL starting with " AND " (so most callers can
+//    add it straight after their own WHERE). This page joins its
+//    conditions with implode(' AND ', ...), so that leading " AND " is cut
+//    off first; the check below refuses anything else rather than guess.
+$viewerId   = EventVisibility::sessionViewerId();
+$today      = date('Y-m-d');
+$visibility = EventVisibility::where('e', EventVisibility::MODE_SESSION, $viewerId, $today);
+if (str_starts_with($visibility['sql'], ' AND ') === false) {
+    throw new \LogicException('EventVisibility::where() no longer starts with " AND "; calendar/index.php must be updated.');
+}
+
+$conditions = ["e.isDeleted = 0", "e.status = 'published'", "e.siteID = ?", substr($visibility['sql'], 5)];
+$params     = array_merge([$siteId], $visibility['params']);
+$types      = 'i' . $visibility['types'];
+
+// 🙈 Hidden imported events never appear in these grids and lists — not
+//    even to administrators, who can see them (the rule above lets them
+//    in). An administrator opens such an event by its direct link (and,
+//    once part P8 of #514 builds it, from the outside calendar's own
+//    page). Why: a grid shown on a shared screen
+//    or over somebody's shoulder must never carry an event its calendar's
+//    settings hid. The portal's OWN events are untouched by this line
+//    (their importLevel is never read). The #514 plan, part P2 row a.
+$conditions[] = "(e.externalFeedID IS NULL OR e.importLevel <> 'hidden')";
+
+// 🔎 "May this viewer see the full details?" — the same answer the rule
+//    gives for the canSeeFull column (1 = full details, 0 = title, date
+//    and time only). Selected beside every row below, and ALSO used inside
+//    the location and search filters, because a filter that matched on a
+//    hidden detail would tell the visitor that detail through the list of
+//    results (leak-hunt finding 5 in the #514 plan: searching for a word
+//    that appears only in a limited event's description would otherwise
+//    reveal it by returning the event).
+//
+//    MySQL does not let a WHERE clause use a name given in the SELECT
+//    list, so the filters need the bare CASE expression. fullDetailSelect()
+//    returns it as "CASE ... END AS canSeeFull" (its documented shape), so
+//    the name is cut off the end here, and anything else is refused rather
+//    than guessed at. Its values are bound wherever the expression's `?`
+//    marks sit, which differs between the SELECT list and each filter;
+//    each use below appends them at its own position.
+$fullDetail = EventVisibility::fullDetailSelect('e', EventVisibility::MODE_SESSION, $viewerId, $today, 'canSeeFull');
+if (str_ends_with($fullDetail['sql'], ' AS canSeeFull') === false) {
+    throw new \LogicException('EventVisibility::fullDetailSelect() no longer ends with " AS canSeeFull"; calendar/index.php must be updated.');
+}
+$fullDetailExpr = substr($fullDetail['sql'], 0, -strlen(' AS canSeeFull'));
 
 if ($filterCategory !== '') {
     $conditions[] = 'e.categoryID = ?';
@@ -204,17 +278,26 @@ if ($filterType !== '') {
     $types       .= 'i';
 }
 // 🔍 Faceted filters (#330)
+//    #514 part P2: the location, and the description half of the search,
+//    are matched only for rows whose full details this viewer may see (the
+//    canSeeFull expression above). Before, a filter matched on the stored
+//    text whatever the viewer could see, so a limited event would appear in
+//    the results for a word that is only in its hidden description or
+//    location — telling the visitor that word is there. The event's NAME
+//    is always shown, so the name half of the search stays open to all.
+//    The values are bound in the order the `?` marks appear: the
+//    expression's own values first, then the LIKE text (location); the name
+//    text, the expression's values, then the description text (search).
 if ($filterLocation !== '') {
-    $conditions[] = 'e.locationName LIKE ?';
-    $params[]     = '%' . $filterLocation . '%';
-    $types       .= 's';
+    $conditions[] = '(' . $fullDetailExpr . ' = 1 AND e.locationName LIKE ?)';
+    $params       = array_merge($params, $fullDetail['params'], ['%' . $filterLocation . '%']);
+    $types       .= $fullDetail['types'] . 's';
 }
 if ($filterSearch !== '') {
-    $conditions[] = '(e.eventName LIKE ? OR e.description LIKE ?)';
+    $conditions[] = '(e.eventName LIKE ? OR (' . $fullDetailExpr . ' = 1 AND e.description LIKE ?))';
     $needle       = '%' . $filterSearch . '%';
-    $params[]     = $needle;
-    $params[]     = $needle;
-    $types       .= 'ss';
+    $params       = array_merge($params, [$needle], $fullDetail['params'], [$needle]);
+    $types       .= 's' . $fullDetail['types'] . 's';
 }
 if ($filterFrom !== '') {
     $conditions[] = 'e.startDateTime >= ?';
@@ -233,7 +316,9 @@ if ($view === 'list') {
     }
     $where = 'WHERE ' . implode(' AND ', $conditions);
 
-    // 📋 Count
+    // 📋 Count — the same WHERE as the fetch below, visibility rule included
+    //    (#514 part P2), so the page count never includes rows the viewer
+    //    may not see.
     $stmt = $mysqli->prepare('SELECT COUNT(*) AS cnt FROM tblEvents e ' . $where);
     if ($stmt !== false) {
         $stmt->bind_param($types, ...$params);
@@ -246,22 +331,36 @@ if ($view === 'list') {
     $offset     = ($page - 1) * $perPage;
 
     $orderDir = $showPast === true ? 'DESC' : 'ASC';
-    $sql = 'SELECT e.eventID, e.eventName, e.eventSlug, e.description, '
+    // 👁️ #514 part P2: canSeeFull and externalFeedID are selected beside
+    //    every row, and the row goes through EventVisibility::redact()
+    //    before any view sees it, so a limited event reaches the views with
+    //    its description, location and image already emptied. The
+    //    expression's values are bound FIRST, because the SELECT list comes
+    //    before the WHERE in the statement text. It goes in through
+    //    sprintf()'s `%s` rather than by joining it in with `.`, because
+    //    tools/audit-checks/check_sql_columns.py does not recognise a
+    //    statement at all when PHP code sits between SELECT and FROM
+    //    (measured while building #514 part P2); the text sprintf() puts in
+    //    is SQL built by EventVisibility itself.
+    $sql = sprintf(
+        'SELECT e.eventID, e.eventName, e.eventSlug, e.description, '
          . 'e.startDateTime, e.endDateTime, e.timezone, e.isAllDay, '
          . 'e.locationName, e.locationAddress, e.status, e.isFeatured, '
-         . 'e.heroImage, '
+         . 'e.heroImage, e.externalFeedID, '
          . 'c.categoryName, c.color AS categoryColor, c.displayStyle AS categoryDisplayStyle, '
-         . 't.typeName, s.seriesName '
+         . 't.typeName, s.seriesName, %s '
          . 'FROM tblEvents e '
          . 'LEFT JOIN tblEventCategories c ON c.categoryID = e.categoryID '
          . 'LEFT JOIN tblEventTypes t ON t.typeID = e.typeID '
-         . 'LEFT JOIN tblEventSeries s ON s.seriesID = e.seriesID '
+         . 'LEFT JOIN tblEventSeries s ON s.seriesID = e.seriesID ',
+        $fullDetail['sql']
+    )
          . $where . ' '
          . 'ORDER BY e.startDateTime ' . $orderDir . ' '
          . 'LIMIT ? OFFSET ?';
 
-    $fetchTypes  = $types . 'ii';
-    $fetchParams = array_merge($params, [$perPage, $offset]);
+    $fetchTypes  = $fullDetail['types'] . $types . 'ii';
+    $fetchParams = array_merge($fullDetail['params'], $params, [$perPage, $offset]);
 
     $stmt = $mysqli->prepare($sql);
     if ($stmt !== false) {
@@ -269,7 +368,8 @@ if ($view === 'list') {
         $stmt->execute();
         $result = $stmt->get_result();
         while ($r = $result->fetch_assoc()) {
-            $events[] = $r;
+            // canSeeFull comes back as the number 1 or 0, never true/false.
+            $events[] = EventVisibility::redact($r, (int) $r['canSeeFull'] === 1);
         }
         $stmt->close();
     }
@@ -290,26 +390,41 @@ if ($view === 'list') {
 
     $where = 'WHERE ' . implode(' AND ', $conditions);
 
-    $sql = 'SELECT e.eventID, e.eventName, e.eventSlug, e.description, '
+    // 👁️ #514 part P2: canSeeFull and externalFeedID are selected beside
+    //    every row, and the row goes through EventVisibility::redact()
+    //    before any view sees it, so a limited event reaches the views with
+    //    its description, location and image already emptied. The
+    //    expression's values are bound FIRST, because the SELECT list comes
+    //    before the WHERE in the statement text. It goes in through
+    //    sprintf()'s `%s` rather than by joining it in with `.`, because
+    //    tools/audit-checks/check_sql_columns.py does not recognise a
+    //    statement at all when PHP code sits between SELECT and FROM
+    //    (measured while building #514 part P2); the text sprintf() puts in
+    //    is SQL built by EventVisibility itself.
+    $sql = sprintf(
+        'SELECT e.eventID, e.eventName, e.eventSlug, e.description, '
          . 'e.startDateTime, e.endDateTime, e.timezone, e.isAllDay, '
          . 'e.locationName, e.locationAddress, e.status, e.isFeatured, '
-         . 'e.heroImage, '
+         . 'e.heroImage, e.externalFeedID, '
          . 'c.categoryName, c.color AS categoryColor, c.displayStyle AS categoryDisplayStyle, '
-         . 't.typeName, s.seriesName '
+         . 't.typeName, s.seriesName, %s '
          . 'FROM tblEvents e '
          . 'LEFT JOIN tblEventCategories c ON c.categoryID = e.categoryID '
          . 'LEFT JOIN tblEventTypes t ON t.typeID = e.typeID '
-         . 'LEFT JOIN tblEventSeries s ON s.seriesID = e.seriesID '
+         . 'LEFT JOIN tblEventSeries s ON s.seriesID = e.seriesID ',
+        $fullDetail['sql']
+    )
          . $where . ' '
          . 'ORDER BY e.startDateTime ASC';
 
     $stmt = $mysqli->prepare($sql);
     if ($stmt !== false) {
-        $stmt->bind_param($types, ...$params);
+        $stmt->bind_param($fullDetail['types'] . $types, ...array_merge($fullDetail['params'], $params));
         $stmt->execute();
         $result = $stmt->get_result();
         while ($r = $result->fetch_assoc()) {
-            $events[] = $r;
+            // canSeeFull comes back as the number 1 or 0, never true/false.
+            $events[] = EventVisibility::redact($r, (int) $r['canSeeFull'] === 1);
         }
         $stmt->close();
     }

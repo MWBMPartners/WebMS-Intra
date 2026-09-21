@@ -19,6 +19,7 @@ declare(strict_types=1);
 
 use Portal\Core\Auth;
 use Portal\Core\Captcha;
+use Portal\Core\EventVisibility;
 use Portal\Core\Router;
 use Portal\Core\Site;
 
@@ -42,15 +43,17 @@ if ($slug === '' || preg_match('/^[a-z0-9][a-z0-9\-]{0,79}$/i', $slug) !== 1) {
 //    THE RULE NOW. The viewer test moves INSIDE the WHERE clause, so a
 //    refused row and a genuinely missing one cost the database exactly the
 //    same work and come back as exactly the same "no row" — nothing is
-//    decided in PHP afterwards. This WHERE clause is deliberately
-//    byte-for-byte the same shape as `calendar/anon-checkin.php`'s (after
-//    #533 removed that page's single-organisation branch), so a future
-//    change (#514) can replace all such call sites with one shared method
-//    without any of them behaving differently first.
+//    decided in PHP afterwards. Until #514 part P2 this WHERE clause was
+//    written out by hand in the same shape as `calendar/anon-checkin.php`'s
+//    (after #533 removed that page's single-organisation branch), so that
+//    #514 could replace such call sites with one shared method without any of
+//    them behaving differently first. Part P2 has now done that here (see
+//    the last paragraph of this comment).
 //
 //    A public, published event: open to everyone, exactly as before.
 //    An internal event: a member of THAT event's own organisation, or a
-//    global root administrator. Everybody else — a signed-in member of a
+//    global root administrator (or, since #514 part P2, that organisation's
+//    own site administrator — see below). Everybody else — a signed-in member of a
 //    DIFFERENT organisation, an account holding only the older portal-wide
 //    `isAdmin` flag with no membership row here, or a signed-out visitor —
 //    gets refused. The older `isAdmin` flag is deliberately NOT tested here,
@@ -77,24 +80,35 @@ if ($slug === '' || preg_match('/^[a-z0-9][a-z0-9\-]{0,79}$/i', $slug) !== 1) {
 //    row still costs reading that row before the WHERE clause rejects it —
 //    microseconds, the same limit `rsvp.php`'s own comment already accepts
 //    for the same reason.
-$viewerId = (int) ($_SESSION['user_id'] ?? 0); // 0 when signed out — both EXISTS branches below are then false
-$siteId   = Site::id();
+//
+//    #514 part P2 (21 September 2026): THE RULE NOW LIVES IN ONE PLACE. The
+//    hand-written block that used to sit in this WHERE clause (public, or a
+//    global administrator, or a member of THIS organisation) is replaced by
+//    the shared rule, EventVisibility::where() in "session" mode — the same
+//    test in meaning for the portal's own events, now also covering events
+//    copied in from outside calendars by their own level, and written once
+//    for every page instead of copied into each. The rule also has an
+//    administrator branch for an active site administrator of the event's
+//    own organisation. For the portal's own events that admits nobody new:
+//    such a person needs an active account and an active membership row
+//    there, which the old block's member test already accepted. The
+//    reasoning above still holds; only where the rule is written changed. It is appended LAST, after this page's own
+//    literal conditions (tools/audit-checks/check_sql_columns.py reads only
+//    those; the fragment's own column names are checked by
+//    tools/event-visibility-selftest.php), and its values are bound after
+//    the slug and the organisation.
+$viewerId   = EventVisibility::sessionViewerId(); // 0 when signed out — the rule then admits public events only
+$siteId     = Site::id();
+$visibility = EventVisibility::where('e', EventVisibility::MODE_SESSION, $viewerId, date('Y-m-d'));
 $stmt = $mysqli->prepare(
-    'SELECT eventID, eventName, eventSlug, startDateTime, registrationEnabled, '
-    . '       registrationOpensAt, registrationClosesAt, isPublic '
-    . 'FROM tblEvents '
-    . 'WHERE eventSlug = ? AND siteID = ? AND isDeleted = 0 '
-    . "  AND status = 'published' "
-    . '  AND ( isPublic = 1 '
-    . '        OR EXISTS (SELECT 1 FROM tblUsers va '
-    . '                    WHERE va.userID = ? AND va.isActive = 1 AND va.isRootAdmin = 1) '
-    . '        OR EXISTS (SELECT 1 FROM tblUsers vm '
-    . '                    WHERE vm.userID = ? AND vm.isActive = 1 '
-    . '                      AND EXISTS (SELECT 1 FROM tblUserSites ms '
-    . '                                   WHERE ms.userID = vm.userID AND ms.siteID = ? AND ms.isActive = 1)) '
-    . '      ) LIMIT 1'
+    'SELECT e.eventID, e.eventName, e.eventSlug, e.startDateTime, e.registrationEnabled, '
+    . '       e.registrationOpensAt, e.registrationClosesAt, e.isPublic '
+    . 'FROM tblEvents e '
+    . 'WHERE e.eventSlug = ? AND e.siteID = ? AND e.isDeleted = 0 '
+    . "  AND e.status = 'published'"
+    . $visibility['sql'] . ' LIMIT 1'
 );
-$stmt->bind_param('siiii', $slug, $siteId, $viewerId, $viewerId, $siteId);
+$stmt->bind_param('si' . $visibility['types'], $slug, $siteId, ...$visibility['params']);
 $stmt->execute();
 $event = $stmt->get_result()->fetch_assoc() ?: null;
 $stmt->close();

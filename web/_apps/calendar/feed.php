@@ -17,6 +17,7 @@
 declare(strict_types=1);
 
 use Portal\Core\App;
+use Portal\Core\EventVisibility;
 use Portal\Core\Ical;
 use Portal\Core\Site;
 
@@ -119,22 +120,56 @@ $events = [];
 //    What was wrong before: the query had no condition on status and none on
 //    isDeleted, so every subscriber's calendar received drafts, and even
 //    events that had been deleted, with their descriptions and locations.
-$stmt = $db->prepare(
-    'SELECT eventID, eventName, description, startDateTime, endDateTime, isAllDay, '
-    . '       timezone, locationName, locationAddress, eventSlug, updatedAt, status '
-    . 'FROM tblEvents '
-    . 'WHERE siteID = ? AND isDeleted = 0 '
-    . "  AND status IN ('published', 'cancelled', 'postponed') "
-    . '  AND startDateTime >= ? AND startDateTime <= ? '
-    . 'ORDER BY startDateTime'
-);
+//
+// 👁️ Which events, part two — #514 part P2. Until then every event of the
+//    holder's organisation that passed the status test above went into the
+//    feed, members-only ones included (the holder is a member, checked above).
+//    Events copied in from outside calendars (#514) have their own levels, so
+//    the one shared rule, EventVisibility::where(), now decides, in "token"
+//    mode with the feed's HOLDER as the viewer. Token mode deliberately leaves
+//    the administrator branches OFF (#514 leak-hunt finding 24): a feed
+//    address works without signing in and is copied into outside calendar
+//    apps, so it must never carry an administrator's hidden events out of the
+//    portal. canSeeFull (1 = full details, 0 = title, date and time only) is
+//    selected beside each row; at 0 the row goes out with no description, no
+//    location and no last-changed time. The fragment is appended after the
+//    literal conditions (tools/audit-checks/check_sql_columns.py reads only
+//    those; the fragment's own column names are the self-test's job), and the
+//    canSeeFull values are bound first because the SELECT list comes before
+//    the WHERE.
+$today      = date('Y-m-d');
+$visibility = EventVisibility::where('e', EventVisibility::MODE_TOKEN, $userId, $today);
+$fullDetail = EventVisibility::fullDetailSelect('e', EventVisibility::MODE_TOKEN, $userId, $today, 'canSeeFull');
+// 🧩 The canSeeFull expression goes in through sprintf()'s `%s`, not by
+//    joining it in with `.`: tools/audit-checks/check_sql_columns.py does
+//    not recognise a statement at all when PHP code sits between SELECT
+//    and FROM, which would hide this whole statement — the page's own
+//    column names included — from it (measured while building #514 part
+//    P2). The text sprintf() puts in is SQL built by EventVisibility
+//    itself, never anything a visitor sent; every value is still bound.
+$stmt = $db->prepare(sprintf(
+    'SELECT e.eventID, e.eventName, e.description, e.startDateTime, e.endDateTime, e.isAllDay, '
+    . '       e.timezone, e.locationName, e.locationAddress, e.eventSlug, e.updatedAt, e.status, %s '
+    . 'FROM tblEvents e '
+    . 'WHERE e.siteID = ? AND e.isDeleted = 0 '
+    . '  AND e.startDateTime >= ? AND e.startDateTime <= ? '
+    . "  AND e.status IN ('published', 'cancelled', 'postponed')",
+    $fullDetail['sql']
+) . $visibility['sql'] . ' ORDER BY e.startDateTime');
 if ($stmt !== false) {
-    $stmt->bind_param('iss', $siteId, $fromDate, $toDate);
+    $stmt->bind_param(
+        $fullDetail['types'] . 'iss' . $visibility['types'],
+        ...array_merge($fullDetail['params'], [$siteId, $fromDate, $toDate], $visibility['params'])
+    );
     $stmt->execute();
     $rs = $stmt->get_result();
     while ($r = $rs->fetch_assoc()) {
+        // 👁️ #514 part P2: empty the limited details before anything below
+        //    reads them. The number comes back as 1 or 0, never true/false.
+        $canSeeFull = (int) $r['canSeeFull'] === 1;
+        $r          = EventVisibility::redact($r, $canSeeFull);
         $location = trim((string) ($r['locationName'] ?? '') . ' ' . (string) ($r['locationAddress'] ?? ''));
-        $events[] = [
+        $entry = [
             // 🚦 The same status words the single-event download sends
             //    (calendar/export.php): CANCELLED, TENTATIVE for postponed,
             //    otherwise CONFIRMED. Calendar apps show a cancelled event
@@ -151,8 +186,15 @@ if ($stmt !== false) {
             'startsAt'     => (string) $r['startDateTime'],
             'endsAt'       => (string) ($r['endDateTime'] ?? ''),
             'allDay'       => (int) $r['isAllDay'] === 1,
-            'lastModified' => (string) ($r['updatedAt'] ?? ''),
         ];
+        // #514 part P2: no LAST-MODIFIED at "title, date and time only" — when
+        // an event last changed can itself tell somebody that its hidden
+        // details did (the #514 plan, section 1.4). Left out entirely, not
+        // sent empty.
+        if ($canSeeFull === true) {
+            $entry['lastModified'] = (string) ($r['updatedAt'] ?? '');
+        }
+        $events[] = $entry;
     }
     $stmt->close();
 }

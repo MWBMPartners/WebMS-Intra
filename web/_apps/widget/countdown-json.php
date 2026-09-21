@@ -22,6 +22,7 @@
 
 declare(strict_types=1);
 
+use Portal\Core\EventVisibility;
 use Portal\Core\Site;
 
 // 🌐 CORS — open to all origins (widget embeds across the internet).
@@ -36,20 +37,47 @@ $siteId = Site::id();
 //    leadership-only events leak via the public widget feed).
 $nextEvent = null;
 // 🛡️ Column names match the tblEvents schema: eventName (NOT title),
-//    locationName (NOT location), isPublic (NOT visibility), status
-//    ENUM with 'cancelled' value (NOT isCancelled bool).
-$stmt = $mysqli->prepare(
-    'SELECT eventID, eventName AS title, locationName AS location, startDateTime, endDateTime '
-    . 'FROM tblEvents '
-    . 'WHERE siteID = ? '
-    . '  AND isPublic = 1 '
-    . '  AND isDeleted = 0 '
-    . '  AND status = "published" '
-    . '  AND startDateTime >= NOW() '
-    . 'ORDER BY startDateTime ASC LIMIT 1'
-);
+//    locationName (NOT location), status ENUM with 'cancelled' value (NOT
+//    isCancelled bool).
+//
+// 👁️ #514 part P2: "public only" used to be the literal `isPublic = 1`. It is
+//    now the one shared rule, EventVisibility::where(), in "website" mode —
+//    the mode for feeds meant for the organisation's own public website. It
+//    looks as NOBODY: the portal's own events only when marked public, and an
+//    event copied in from an outside calendar only when it is public AND
+//    ticked for the website (owner decision D4). canSeeFull (1 = full
+//    details, 0 = title, date and time only) is selected beside the row;
+//    at 0 the location goes out as null (leak-hunt finding 23 in the #514
+//    plan). The fragment is appended after the literal conditions, which
+//    tools/audit-checks/check_sql_columns.py can read (it cannot read inside
+//    the fragment; tools/event-visibility-selftest.php checks the fragment's
+//    own column names). canSeeFull's values are bound first, because the
+//    SELECT list comes before the WHERE.
+//    ⚠️ This reply is cached for 60 seconds by browsers and by anything in
+//    between (Cache-Control above), so narrowing an event can take up to a
+//    minute to reach an embed; a copy already taken cannot be pulled back.
+$today      = date('Y-m-d');
+$visibility = EventVisibility::where('e', EventVisibility::MODE_WEBSITE, 0, $today);
+$fullDetail = EventVisibility::fullDetailSelect('e', EventVisibility::MODE_WEBSITE, 0, $today, 'canSeeFull');
+// 🧩 The canSeeFull expression goes in through sprintf()'s `%s`, not by
+//    joining it in with `.`: tools/audit-checks/check_sql_columns.py does not
+//    recognise a statement at all when PHP code sits between SELECT and FROM
+//    (measured while building #514 part P2). The text sprintf() puts in is
+//    SQL built by EventVisibility itself, never anything a visitor sent.
+$stmt = $mysqli->prepare(sprintf(
+    'SELECT e.eventID, e.eventName AS title, e.locationName AS location, e.startDateTime, e.endDateTime, %s '
+    . 'FROM tblEvents e '
+    . 'WHERE e.siteID = ? '
+    . '  AND e.isDeleted = 0 '
+    . '  AND e.startDateTime >= NOW() '
+    . '  AND e.status = "published"',
+    $fullDetail['sql']
+) . $visibility['sql'] . ' ORDER BY e.startDateTime ASC LIMIT 1');
 if ($stmt !== false) {
-    $stmt->bind_param('i', $siteId);
+    $stmt->bind_param(
+        $fullDetail['types'] . 'i' . $visibility['types'],
+        ...array_merge($fullDetail['params'], [$siteId], $visibility['params'])
+    );
     $stmt->execute();
     $nextEvent = $stmt->get_result()->fetch_assoc() ?: null;
     $stmt->close();
@@ -76,7 +104,9 @@ echo json_encode([
     'nextEvent'   => [
         'id'        => (int) $nextEvent['eventID'],
         'title'     => (string) $nextEvent['title'],
-        'location'  => (string) ($nextEvent['location'] ?? ''),
+        // #514 part P2: null at "title, date and time only" (canSeeFull 0,
+        // the number 0 from the database); otherwise exactly as before.
+        'location'  => (int) $nextEvent['canSeeFull'] === 1 ? (string) ($nextEvent['location'] ?? '') : null,
         'startsAt'  => date('c', strtotime((string) $nextEvent['startDateTime'])),
         'endsAt'    => $nextEvent['endDateTime'] !== null
             ? date('c', strtotime((string) $nextEvent['endDateTime']))

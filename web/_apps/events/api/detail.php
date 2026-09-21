@@ -21,6 +21,7 @@ use Portal\Core\ApiAuth;
 use Portal\Core\ApiKey;
 use Portal\Core\ApiResponse;
 use Portal\Core\App;
+use Portal\Core\EventVisibility;
 use Portal\Core\GeoLocation;
 use Portal\Core\Site;
 
@@ -60,10 +61,33 @@ if ($eventId <= 0 && $slug === '') {
 //     browser signed in as an administrator could lend its rights to a
 //     read-only key sent from that same browser.
 //
-// Deleted events are left out for everybody by the lookups below
-// (isDeleted = 0). Events not marked public were already limited to signed-in
-// members and API keys by ApiAuth::requireRead at the top, which matches the
-// event page: a member may read a published event that is not public.
+// Deleted events are left out for everybody by the lookup below
+// (isDeleted = 0).
+//
+// 3. WHO may read the event at all — #514 part P2 (21 September 2026). Until
+//    then an event not marked public was open to ANY signed-in session (a
+//    member of another organisation included) and to any key, because the only
+//    test was ApiAuth::requireRead at the top. Now the one shared rule,
+//    EventVisibility::where(), is part of the lookup below:
+//      - a session sees what the calendar would show that person ("session"
+//        mode): public events, members-only events of an organisation they are
+//        an active member of (or administer), imported events by their own
+//        level;
+//      - a key ("key" mode) sees the organisation's OWN events exactly as
+//        before (#127 and #511 track that separately), and an imported event
+//        only when it is public AND ticked for the public website, with full
+//        details only when its calendar itself is public (owner answer 3).
+//    A refused event comes back as no row — the same "Event not found" as a
+//    missing one, for the same statements.
+//
+// 4. HOW MUCH of it (#514 part P2). canSeeFull (1 = full details, 0 = title,
+//    date and time only) is selected beside the row; at 0 the detail columns
+//    are emptied (EventVisibility::redact()) before the reply is built, and
+//    the reply says so with `detailsLimited`. `imported` says whether the
+//    event came from an outside calendar. No `external*` or `import*` column
+//    is ever returned: `e.*` is replaced by an explicit list for exactly that
+//    reason (a new #514 column would otherwise leak through `e.*` the moment
+//    it was added).
 //
 // What was wrong before #503: there was no condition on status at all. Any
 // signed-in member, or any key with events:read, could read a draft's full
@@ -127,50 +151,91 @@ $canManageEvents = $apiKeyRow !== null
     : App::isAdmin();
 $canManageFlag   = $canManageEvents === true ? 1 : 0;
 
+// 👁️ #514 part P2 — the rule's mode follows the same test as $canManageEvents
+//    above: a request carrying a key is "key" mode, and its session (if any)
+//    is ignored. Key mode binds no values in either fragment; the statement
+//    below always binds the id or slug, so bind_param() is never empty.
+$ruleMode   = $apiKeyRow !== null ? EventVisibility::MODE_KEY : EventVisibility::MODE_SESSION;
+$viewerId   = $ruleMode === EventVisibility::MODE_SESSION ? EventVisibility::sessionViewerId() : 0;
+$today      = date('Y-m-d');
+$visibility = EventVisibility::where('e', $ruleMode, $viewerId, $today);
+$fullDetail = EventVisibility::fullDetailSelect('e', $ruleMode, $viewerId, $today, 'canSeeFull');
+
+// 📋 ONE lookup for both ways in (id or slug). Until #514 part P2 there were
+//    two statements, one per key, each selecting `e.*`.
+//
+//    The column list is every tblEvents column (web/_sql/full_schema.sql,
+//    CREATE TABLE tblEvents) EXCEPT externalFeedID, externalUid and the #514
+//    import*/external* columns, which must never leave the portal through this
+//    API. It is written out instead of `e.*` so that a column added to
+//    tblEvents later is NOT returned until somebody decides it should be.
+//    `(e.externalFeedID IS NOT NULL) AS imported` gives the yes/no the reply
+//    needs without selecting the calendar number itself.
+//
+//    The two `%s` marks are filled by sprintf(): the canSeeFull expression
+//    (SQL built by EventVisibility itself) and the key column, taken from the
+//    fixed pair below — never from anything the caller sent. Why sprintf()
+//    and not joining with `.`: tools/audit-checks/check_sql_columns.py does
+//    not recognise a statement at all when PHP code sits between SELECT and
+//    FROM, so joining would hide this whole column list from it (measured
+//    while building #514 part P2). Written as one literal, the list is
+//    checked against the schema on every pull request.
+//
+//    The statement text depends only on whether an id or a slug was asked for
+//    and on the caller's mode — never on the event — so a refused event and a
+//    missing one still send the same statement. The rule's fragment goes
+//    after the literal conditions (the draft rule included); canSeeFull's
+//    values are bound first because the SELECT list comes before the WHERE.
+[$keyColumn, $keyType, $keyValue] = $eventId > 0
+    ? ['e.eventID', 'i', $eventId]
+    : ['e.eventSlug', 's', $slug];
 $event = null;
-if ($eventId > 0) {
-    $stmt = $db->prepare(
-        'SELECT e.*, c.categoryName, t.typeName, s.seriesName '
-        . 'FROM tblEvents e '
-        . 'LEFT JOIN tblEventCategories c ON c.categoryID = e.categoryID '
-        . 'LEFT JOIN tblEventTypes t ON t.typeID = e.typeID '
-        . 'LEFT JOIN tblEventSeries s ON s.seriesID = e.seriesID '
-        . 'WHERE e.eventID = ? AND e.siteID = ? AND e.isDeleted = 0 '
-        . "AND (e.status IN ('published', 'cancelled', 'postponed') OR ? = 1) "
-        . 'LIMIT 1'
+$stmt = $db->prepare(sprintf(
+    'SELECT e.eventID, e.siteID, e.seriesID, e.categoryID, e.typeID, e.eventName, e.eventSlug, e.description, '
+    . 'e.startDateTime, e.endDateTime, e.timezone, e.eventTimezone, e.isAllDay, '
+    . 'e.locationName, e.locationAddress, e.locationWebURL, e.locationGeoLat, e.locationGeoLng, e.locationW3W, '
+    . 'e.locationPhone, e.locationEmail, e.hostOrgName, e.partnerOrgs, e.heroImage, e.posterImage, e.profileImage, '
+    . 'e.status, e.isPublic, e.isFeatured, e.isDeleted, e.deletedAt, e.capacity, '
+    . 'e.createdByID, e.updatedByID, e.createdAt, e.updatedAt, '
+    . 'e.submissionStatus, e.submittedByID, e.submitterName, e.submitterEmail, e.submittedAt, '
+    . 'e.moderatedByID, e.moderatedAt, e.moderationNote, e.cancelReason, e.statusChangedByID, e.statusChangedAt, '
+    . 'e.capacityCount, e.registrationEnabled, e.registrationOpensAt, e.registrationClosesAt, '
+    . 'e.registrationRetentionDays, e.venueID, e.roomID, '
+    . '(e.externalFeedID IS NOT NULL) AS imported, %s, '
+    . 'c.categoryName, t.typeName, s.seriesName '
+    . 'FROM tblEvents e '
+    . 'LEFT JOIN tblEventCategories c ON c.categoryID = e.categoryID '
+    . 'LEFT JOIN tblEventTypes t ON t.typeID = e.typeID '
+    . 'LEFT JOIN tblEventSeries s ON s.seriesID = e.seriesID '
+    . 'WHERE %s = ? AND e.siteID = ? AND e.isDeleted = 0 '
+    . "AND (e.status IN ('published', 'cancelled', 'postponed') OR ? = 1)",
+    $fullDetail['sql'],
+    $keyColumn
+) . $visibility['sql'] . ' LIMIT 1');
+if ($stmt !== false) {
+    $stmt->bind_param(
+        $fullDetail['types'] . $keyType . 'ii' . $visibility['types'],
+        ...array_merge($fullDetail['params'], [$keyValue, $siteId, $canManageFlag], $visibility['params'])
     );
-    if ($stmt !== false) {
-        $stmt->bind_param('iii', $eventId, $siteId, $canManageFlag);
-        $stmt->execute();
-        $event = $stmt->get_result()->fetch_assoc();
-        $stmt->close();
-    }
-} else {
-    $stmt = $db->prepare(
-        'SELECT e.*, c.categoryName, t.typeName, s.seriesName '
-        . 'FROM tblEvents e '
-        . 'LEFT JOIN tblEventCategories c ON c.categoryID = e.categoryID '
-        . 'LEFT JOIN tblEventTypes t ON t.typeID = e.typeID '
-        . 'LEFT JOIN tblEventSeries s ON s.seriesID = e.seriesID '
-        . 'WHERE e.eventSlug = ? AND e.siteID = ? AND e.isDeleted = 0 '
-        . "AND (e.status IN ('published', 'cancelled', 'postponed') OR ? = 1) "
-        . 'LIMIT 1'
-    );
-    if ($stmt !== false) {
-        $stmt->bind_param('sii', $slug, $siteId, $canManageFlag);
-        $stmt->execute();
-        $event = $stmt->get_result()->fetch_assoc();
-        $stmt->close();
-    }
+    $stmt->execute();
+    $event = $stmt->get_result()->fetch_assoc();
+    $stmt->close();
 }
 
 if ($event === null) {
     ApiResponse::error('Event not found', 404);
 }
 
+// 👁️ #514 part P2: cut what this caller may not see BEFORE the location object
+//    below is built from it. Both values come back as the number 1 or 0.
+$event = EventVisibility::redact($event, (int) $event['canSeeFull'] === 1);
+$event['imported'] = (int) $event['imported'] === 1;
+unset($event['canSeeFull']);
+
 // 📍 #456 Chunk A — canonical `location` object (cross-repo contract §2),
 // additive alongside the existing legacy location* columns already
-// present in $event via `e.*` (backward-compatible — nothing removed).
+// present in $event (selected by name above since #514 part P2; they used to
+// come through `e.*`) — backward-compatible, nothing removed.
 $event['location'] = GeoLocation::toLocationObject(
     [
         'name' => $event['locationName'], 'addressLine1' => $event['locationAddress'],

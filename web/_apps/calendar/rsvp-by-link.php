@@ -19,6 +19,7 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\EventVisibility;
 use Portal\Core\Logger;
 use Portal\Core\Site;
 
@@ -200,22 +201,59 @@ $openedAsSiteId = Site::id();
 //    knowingly: anyone the email is forwarded to sees this event's name, date
 //    and location. Do not "fix" this by adding an isPublic check here without
 //    going back to the owner (decision recorded on #503).
-$stmt = $mysqli->prepare(
+//
+// 👁️ #514 part P2 — events copied in from OUTSIDE calendars. The owner decision
+//    above is about the portal's OWN events, and it still stands: the shared
+//    rule, EventVisibility::where(), is appended here in "invite" mode, which
+//    leaves the portal's own events exactly as this page already treats them
+//    (not restricted by audience; the draft test above still applies) and
+//    applies the #514 levels only to an imported event. An imported event is
+//    therefore shown only to somebody its own level admits, with the viewer
+//    taken from the session (0 for a guest), whatever the token says. Its
+//    location is shown only when the viewer may see full details (canSeeFull
+//    1; for the portal's own events that is always 1). The manager branch
+//    above (`U.isAdmin = 1` included) is this page's own older test for
+//    drafts of the portal's own events, which "invite" mode leaves alone; it is
+//    not changed here.
+//    Binding is by position: canSeeFull's values first (the SELECT list comes
+//    before the joins and the WHERE), then the viewer for the manager join,
+//    then the token, then the rule's own values.
+$ruleViewerId = EventVisibility::sessionViewerId();
+$today        = date('Y-m-d');
+$visibility   = EventVisibility::where('e', EventVisibility::MODE_INVITE, $ruleViewerId, $today);
+$fullDetail   = EventVisibility::fullDetailSelect('e', EventVisibility::MODE_INVITE, $ruleViewerId, $today, 'canSeeFull');
+// 🧩 The canSeeFull expression goes in through sprintf()'s `%s`, not by
+//    joining it in with `.`: tools/audit-checks/check_sql_columns.py does
+//    not recognise a statement at all when PHP code sits between SELECT
+//    and FROM, which would hide this whole statement — the page's own
+//    column names included — from it (measured while building #514 part
+//    P2). The text sprintf() puts in is SQL built by EventVisibility
+//    itself, never anything a visitor sent; every value is still bound.
+$stmt = $mysqli->prepare(sprintf(
     'SELECT i.inviteID, i.eventID, i.email, i.displayName, i.expiresAt, i.usedAt, i.response, '
-    . '       e.eventName, e.eventSlug, e.startDateTime, e.endDateTime, e.locationName, e.status, e.siteID '
+    . '       e.eventName, e.eventSlug, e.startDateTime, e.endDateTime, e.locationName, e.status, e.siteID, %s '
     . 'FROM tblEventRSVPInvites i '
     . 'JOIN tblEvents e ON e.eventID = i.eventID '
     . 'LEFT JOIN tblUsers U ON U.userID = ? AND U.isActive = 1 '
     . 'LEFT JOIN tblUserSites US ON US.userID = U.userID AND US.siteID = e.siteID AND US.isActive = 1 '
     . 'WHERE i.token = ? AND e.isDeleted = 0 '
     . "  AND (e.status IN ('published', 'cancelled', 'postponed') "
-    . '       OR U.isRootAdmin = 1 OR U.isAdmin = 1 OR US.isSiteAdmin = 1 OR US.isSiteRootAdmin = 1) '
-    . 'LIMIT 1'
+    . '       OR U.isRootAdmin = 1 OR U.isAdmin = 1 OR US.isSiteAdmin = 1 OR US.isSiteRootAdmin = 1)',
+    $fullDetail['sql']
+) . $visibility['sql'] . ' LIMIT 1');
+$stmt->bind_param(
+    $fullDetail['types'] . 'is' . $visibility['types'],
+    ...array_merge($fullDetail['params'], [$viewerId, $token], $visibility['params'])
 );
-$stmt->bind_param('is', $viewerId, $token);
 $stmt->execute();
 $invite = $stmt->get_result()->fetch_assoc() ?: null;
 $stmt->close();
+
+// 👁️ At "title, date and time only" the location is emptied before anything
+//    below can print it (#514 part P2). The number comes back as 1 or 0.
+if ($invite !== null) {
+    $invite = EventVisibility::redact($invite, (int) $invite['canSeeFull'] === 1);
+}
 
 if ($invite === null) {
     http_response_code(404); exit('Invitation not found.');

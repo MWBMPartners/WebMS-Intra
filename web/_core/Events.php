@@ -115,9 +115,25 @@ class Events
             //    people answer a cancelled event, because confirming a
             //    seat at an event that will not happen at all is exactly
             //    the fault this fix closes.
+            //
+            // 👁️ #514 part P2: `externalFeedID IS NULL` — the portal's OWN
+            //    events only. Events copied in from an outside calendar have
+            //    no capacity and so no waiting list; this line keeps it that
+            //    way even if a capacity were ever set on one, so a promotion
+            //    can never email "you are now confirmed" about an imported
+            //    event whatever its level. This line is also the marker the
+            //    #514 visibility check (check_event_visibility.py, part P3)
+            //    looks for: the lookup below reads tblEvents by number
+            //    without EventVisibility::where(), on purpose. Its only
+            //    caller (21 September 2026) is calendar/rsvp.php, after that
+            //    handler's own lookup has run the rule for the person freeing
+            //    the seat; the people this method promotes are checked for an
+            //    active membership of the event's organisation by the
+            //    candidate query further down.
             $stmt = $db->prepare(
                 'SELECT capacity, siteID, eventName FROM tblEvents '
-                . "WHERE eventID = ? AND isDeleted = 0 AND status IN ('published', 'postponed') "
+                . 'WHERE eventID = ? AND isDeleted = 0 AND externalFeedID IS NULL '
+                . "AND status IN ('published', 'postponed') "
                 . 'LIMIT 1 FOR UPDATE'
             );
             if ($stmt === false) {

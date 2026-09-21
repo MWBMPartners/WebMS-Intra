@@ -29,6 +29,7 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\AppRegistry;
 use Portal\Core\AssetRegister;
+use Portal\Core\EventVisibility;
 use Portal\Core\Router;
 use Portal\Core\Site;
 
@@ -90,14 +91,30 @@ if (isset($SETTINGS['expenses']['enabled']) === true && $SETTINGS['expenses']['e
 }
 
 // 📅 Upcoming events this week
+//
+// 👁️ #514 part P2: the count now uses the one shared visibility rule
+//    (EventVisibility::where(), "session" mode, the signed-in person as the
+//    viewer), so it counts exactly the events this person may see. Before, it
+//    counted every published event of the organisation, whoever was asking —
+//    including events copied in from outside calendars at levels this person
+//    is not in. (Hidden imported events are still counted for an
+//    administrator, who may open them; the calendar grids leave those out.)
+//    The fragment is appended after the literal conditions
+//    (tools/audit-checks/check_sql_columns.py reads only those; the
+//    fragment's own column names are checked by
+//    tools/event-visibility-selftest.php), and its values are bound after the
+//    organisation's.
 if (isset($SETTINGS['calendar']['enabled']) === true && $SETTINGS['calendar']['enabled'] === 'true') {
+    $visibility = EventVisibility::where('e', EventVisibility::MODE_SESSION, EventVisibility::sessionViewerId(), date('Y-m-d'));
     $evStmt = $mysqli->prepare(
-        'SELECT COUNT(*) AS cnt FROM tblEvents '
-        . 'WHERE isDeleted = 0 AND status = \'published\' AND siteID = ? '
-        . 'AND startDateTime >= NOW() AND startDateTime <= DATE_ADD(NOW(), INTERVAL 7 DAY)'
+        'SELECT COUNT(*) AS cnt FROM tblEvents e '
+        . 'WHERE e.isDeleted = 0 AND e.siteID = ? '
+        . 'AND e.startDateTime >= NOW() AND e.startDateTime <= DATE_ADD(NOW(), INTERVAL 7 DAY) '
+        . 'AND e.status = \'published\''
+        . $visibility['sql']
     );
     if ($evStmt !== false) {
-        $evStmt->bind_param('i', $siteId);
+        $evStmt->bind_param('i' . $visibility['types'], $siteId, ...$visibility['params']);
         $evStmt->execute();
         $cnt = (int) ($evStmt->get_result()->fetch_assoc()['cnt'] ?? 0);
         $evStmt->close();

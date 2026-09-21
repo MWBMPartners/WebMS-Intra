@@ -483,16 +483,43 @@ class Newsletter
                 return $html;
 
             case 'events':
+                // 👁️ #514 part P2 (and acceptance 9 of #514). WHAT WAS WRONG
+                //    BEFORE: this block listed every published event of the
+                //    organisation in the window — deleted ones included (there
+                //    was no `isDeleted` test), and, once #514 imports events
+                //    from outside calendars, every imported event whatever its
+                //    level. A newsletter is emailed OUT of the portal to a whole
+                //    list at once, so nothing narrower than "every member may
+                //    see it" belongs in it.
+                //    NOW: `isDeleted = 0`, plus the one shared rule,
+                //    EventVisibility::where(), in "bulkMembers" mode: the
+                //    organisation's OWN events as before (the recipients are its
+                //    active members), and an imported event only at the public
+                //    or members level — never selected groups or hidden. This
+                //    mode binds no values. The fragment goes after the literal
+                //    conditions (tools/audit-checks/check_sql_columns.py reads
+                //    only those; tools/event-visibility-selftest.php checks the
+                //    fragment's own column names).
+                //    `locationName` used to be selected here although it was
+                //    never printed; it is no longer selected.
+                //    ⚠️ Each item is ONLY the name and the date. A location, a
+                //    description or any other detail must NEVER be added here
+                //    without the canSeeFull column
+                //    (EventVisibility::fullDetailSelect()): an imported event
+                //    can be listed while its details are limited.
                 $days = max(1, min(60, (int) ($cfg['days'] ?? 14)));
                 $items = [];
+                $visibility = EventVisibility::where('e', EventVisibility::MODE_BULK_MEMBERS, 0, date('Y-m-d'));
                 $stmt = $db->prepare(
-                    'SELECT eventName, startDateTime, locationName FROM tblEvents '
-                    . 'WHERE siteID = ? AND status = "published" '
-                    . 'AND startDateTime BETWEEN NOW() AND DATE_ADD(NOW(), INTERVAL ? DAY) '
-                    . 'ORDER BY startDateTime LIMIT 20'
+                    'SELECT e.eventName, e.startDateTime FROM tblEvents e '
+                    . 'WHERE e.siteID = ? AND e.isDeleted = 0 '
+                    . 'AND e.startDateTime BETWEEN NOW() AND DATE_ADD(NOW(), INTERVAL ? DAY) '
+                    . 'AND e.status = "published"'
+                    . $visibility['sql'] . ' '
+                    . 'ORDER BY e.startDateTime LIMIT 20'
                 );
                 if ($stmt !== false) {
-                    $stmt->bind_param('ii', $siteId, $days);
+                    $stmt->bind_param('ii' . $visibility['types'], $siteId, $days, ...$visibility['params']);
                     $stmt->execute();
                     $rs = $stmt->get_result();
                     while ($r = $rs->fetch_assoc()) {

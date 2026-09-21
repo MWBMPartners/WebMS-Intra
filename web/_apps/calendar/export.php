@@ -27,15 +27,22 @@
  * RRULE even if that event belongs to a recurring series — the caller asked
  * for one occurrence, not a subscription to the whole series.
  *
- * #503 — a single `id=` download now follows the event page's own rule: a
+ * #503 — a single `id=` download follows the event page's own draft rule: a
  * draft only for people who can manage events (anybody else gets the same
- * "not found" as a missing event), and sign-in for an event not marked public.
+ * "not available" page as a missing event).
  *
- * #544 — the `series=` download follows the same rule for internal events: a
- * signed-out visitor gets only the series' public events, and a series with
- * nothing left for them answers the same "not available" page as a series
- * number that matches nothing. Before this, anybody could download every
- * published event of an internal series without signing in.
+ * #544 — the `series=` download stopped handing a signed-out visitor the
+ * internal events of a series (an interim test, 21 September 2026).
+ *
+ * #514 part P2 — all three downloads now use the one shared visibility rule,
+ * Portal\Core\EventVisibility, inside their queries: a public event for
+ * anybody, a members-only event for an active member of THAT event's own
+ * organisation (or its administrator), an event copied in from an outside
+ * calendar by its own level. This replaced the separate sign-in tests (and
+ * #544's interim test), which let ANY signed-in account download another
+ * organisation's internal events (#534 items 1 and 2). An event the viewer may
+ * see only as "title, date and time" goes into the file with no description,
+ * location, web link, map position or last-changed time.
  *
  * @see       https://datatracker.ietf.org/doc/html/rfc5545
  * @package   Portal\Calendar
@@ -50,7 +57,7 @@
 declare(strict_types=1);
 
 use Portal\Core\App;
-use Portal\Core\Auth;
+use Portal\Core\EventVisibility;
 use Portal\Core\Ical;
 use Portal\Core\Router;
 use Portal\Core\Site;
@@ -80,19 +87,49 @@ $siteId = Site::id();
 //    number cost one more database query than one asking for a missing
 //    number — a small but real timing difference between "exists but
 //    refused" and "does not exist" (#503/#532 discipline applied here too).
+//    Only the single-event draft rule reads it.
+//
+//    (#514 part P2 removed the second question read here, "is anybody
+//    signed in": the shared visibility rule in each query now decides who
+//    may see what, so nothing reads it any more. The viewer's number and
+//    today's date are read instead; they cost no database work.)
 $canManage = App::isAdmin();
-$signedIn  = Auth::check();
+$viewerId  = EventVisibility::sessionViewerId();
+$today     = date('Y-m-d');
 
 $events = [];
 
 if ($eventId > 0) {
     // 📅 Single event
+    //
+    // 👁️ #514 part P2: the shared rule (session mode) is part of the lookup,
+    //    appended after the page's own literal conditions, so an event this
+    //    viewer may not see comes back as no row — exactly like a missing one,
+    //    for the same one statement. canSeeFull is selected beside the row;
+    //    its values are bound first (the SELECT list comes before the WHERE).
+    //
+    //    Why sprintf() with `%s` for the canSeeFull expression, and not plain
+    //    joining: tools/audit-checks/check_sql_columns.py does not recognise
+    //    a statement at all when PHP code sits between SELECT and FROM, so
+    //    joining the expression in with `.` hid this whole statement — the
+    //    page's own column names included — from it (measured on 21 September
+    //    2026 while building #514 part P2: this file went from 5 statements
+    //    it could read to 1). Written as one literal with `%s`, the statement
+    //    is read and its own columns are checked again. The text put in by
+    //    sprintf() is SQL built by EventVisibility itself, never anything a
+    //    visitor sent; every value is still bound.
+    $visibility = EventVisibility::where('e', EventVisibility::MODE_SESSION, $viewerId, $today);
+    $fullDetail = EventVisibility::fullDetailSelect('e', EventVisibility::MODE_SESSION, $viewerId, $today, 'canSeeFull');
     $row  = null;
-    $stmt = $db->prepare(
-        'SELECT * FROM tblEvents WHERE eventID = ? AND isDeleted = 0 AND siteID = ? LIMIT 1'
-    );
+    $stmt = $db->prepare(sprintf(
+        'SELECT e.*, %s FROM tblEvents e WHERE e.eventID = ? AND e.isDeleted = 0 AND e.siteID = ?',
+        $fullDetail['sql']
+    ) . $visibility['sql'] . ' LIMIT 1');
     if ($stmt !== false) {
-        $stmt->bind_param('ii', $eventId, $siteId);
+        $stmt->bind_param(
+            $fullDetail['types'] . 'ii' . $visibility['types'],
+            ...array_merge($fullDetail['params'], [$eventId, $siteId], $visibility['params'])
+        );
         $stmt->execute();
         $row = $stmt->get_result()->fetch_assoc();
         $stmt->close();
@@ -110,10 +147,12 @@ if ($eventId > 0) {
     //    1. A draft goes only to people who can manage events: App::isAdmin(),
     //       exactly the check every page under calendar/manage/ makes. For
     //       anybody else the row is dropped, so the request falls through to
-    //       the same "not found" as a number that matches no event, and the
-    //       answer does not reveal that the draft exists. This runs before the
-    //       sign-in request below for the same reason as on the event page.
-    //    2. An event not marked public needs sign-in, as on the event page.
+    //       the same "not available" page as a number that matches no event,
+    //       and the answer does not reveal that the draft exists.
+    //    2. Who may see the event at all is decided by the shared rule inside
+    //       the lookup above (#514 part P2). Until then this was "an event not
+    //       marked public needs sign-in", which let ANY signed-in account —
+    //       a member of another organisation included — download it (#534).
     //
     //    The series and "all upcoming" downloads below already leave drafts out
     //    with their own status test, so they are not changed here.
@@ -124,25 +163,15 @@ if ($eventId > 0) {
         $row = null;
     }
 
-    // 🛡️ ONE page for a refused download and a missing one — changed again,
-    //    20 September 2026, matching calendar/event.php. WHAT WAS WRONG
-    //    BEFORE #532's FIX: a signed-out visitor got a 302 to sign in for a
-    //    real internal event but a plain 404 for an event number that
-    //    matched nothing — event numbers count upward from 1, so a stranger
-    //    could walk through them and learn which internal events exist.
-    //    #532 closed that by sending a signed-out visitor to sign in for
-    //    BOTH cases, but that meant somebody following a DEAD link (an old
-    //    shared download link for an event since deleted) was asked to
-    //    sign in for something that no longer exists. The owner's answer:
-    //    treat "exists but not public, and you are signed out" exactly as
-    //    "missing", then answer both the SAME way —
-    //    Router::renderEventUnavailable() — which is a 404 with a sign-in
-    //    link, not a sign-in redirect. This still runs AFTER the draft rule
-    //    above, so a signed-out visitor asking for a draft number reaches
-    //    here with $row already null.
-    if ($row !== null && (int) $row['isPublic'] === 0 && $signedIn === false) {
-        $row = null; // an internal event is not for a signed-out visitor: treat exactly as missing
-    }
+    // 🛡️ ONE page for a refused download and a missing one — the owner's
+    //    answer of 20 September 2026, matching calendar/event.php:
+    //    Router::renderEventUnavailable(), a 404 with a sign-in link for a
+    //    signed-out visitor, never a sign-in redirect (a DEAD link must not
+    //    ask anybody to sign in for something that no longer exists). An
+    //    event the rule refuses, a draft this visitor cannot manage and a
+    //    number that matches nothing all reach this line with $row null.
+    //    (#514 part P2 removed the sign-in test that used to sit here; the
+    //    rule in the lookup above has already decided.)
     if ($row === null) {
         Router::renderEventUnavailable();
         return;
@@ -150,59 +179,64 @@ if ($eventId > 0) {
 
     $events[] = $row;
 } elseif ($seriesId > 0) {
-    // 🔄 All events in a series — with the SAME "who may see an internal
-    //    event" test as the single-event download above, applied to every
-    //    row of the series (#544).
+    // 🔄 All events in a series — with the ONE shared visibility rule
+    //    (#514 part P2) applied to every row, inside the query.
     //
-    //    What was wrong before: this lookup asked only for published rows of
-    //    this organisation. It never asked whether an event was public, or
-    //    whether the visitor was signed in. The address needs no sign-in (its
-    //    route is seeded with isProtected = 0, so that a public series can be
-    //    downloaded and subscribed to), so anybody could download every
+    //    What was wrong before #544 (21 September 2026): this lookup asked
+    //    only for published rows of this organisation. It never asked whether
+    //    an event was public, or who was asking. The address needs no sign-in
+    //    (its route is seeded with isProtected = 0, so that a public series
+    //    can be downloaded and subscribed to), so anybody could download every
     //    published event of an INTERNAL series, descriptions and locations
-    //    included, by trying series=1, series=2 and so on. Series numbers
-    //    count upward from 1, so no guessing was needed. The single-event
-    //    download above and the "all upcoming" download below both already
-    //    kept internal events from a signed-out visitor; only this branch was
-    //    missed.
+    //    included, by trying series=1, series=2 and so on.
     //
-    //    The rule, the same as the single-event branch's isPublic test: a
-    //    signed-out visitor gets only the series' PUBLIC events (the second
-    //    statement below); a signed-in visitor gets every published event of
-    //    the series, exactly as before (the first). A series with some public
-    //    and some internal events therefore gives a signed-out visitor its
-    //    public events only. The test is part of the SQL rather than applied
-    //    to the fetched rows, so that an internal series and a series number
-    //    that matches nothing cost the database the same work and return the
-    //    same nothing (#503): no internal row leaves the database for a
-    //    visitor who may not see it.
+    //    #544 was the INTERIM fix: two whole statements, chosen by "is anybody
+    //    signed in", the signed-out one adding `isPublic = 1`. It deliberately
+    //    did not ask whether a signed-in visitor belonged to the event's own
+    //    organisation, so any signed-in account still got any organisation's
+    //    internal series (#534).
     //
-    //    Why two whole statements, and why isPublic and siteID sit BEFORE
-    //    status: tools/audit-checks/check_sql_columns.py checks the column
-    //    names a WHERE clause tests, but only in a whole, literal statement,
-    //    and it stops reading at the first quoted value ('published' here).
-    //    A fragment added with `. ($signedIn === false ? '...' : '')` was
-    //    proved invisible to it on 21 September 2026 (a misspelt column name
-    //    passed), and so is any column written after the quoted value. Keep
-    //    each statement whole, on one line, with status last.
+    //    NOW (#514 part P2): ONE statement for everybody, with
+    //    EventVisibility::where() in session mode appended after the page's
+    //    own conditions. A signed-out visitor (viewer 0) still gets only the
+    //    series' public events — exactly what #544 gave — and a signed-in
+    //    visitor gets its members-only events only as an active member of the
+    //    event's own organisation, or its administrator. Imported events follow
+    //    their own level. A series with some events a visitor may see and some
+    //    they may not gives them only the first kind.
+    //
+    //    The test is part of the SQL rather than applied to the fetched rows,
+    //    so an internal series and a series number that matches nothing cost
+    //    the database the same work — one statement, the same text whoever
+    //    asks — and return the same nothing (#503): no refused row leaves the
+    //    database.
+    //
+    //    ⚠️ Keep the page's own conditions whole, literal and FIRST, with the
+    //    fragment added after them. tools/audit-checks/check_sql_columns.py
+    //    checks the column names a WHERE clause tests only in literal SQL
+    //    text, and stops reading at the first quoted value ('published' here);
+    //    a piece added in a variable is invisible to it (proved on 21 September
+    //    2026: a misspelt column in such a piece passed). The fragment's own
+    //    column names are checked instead by tools/event-visibility-selftest.php,
+    //    which prepares every mode against the real tables.
     //
     //    Drafts stay out for EVERYBODY, including people who can manage
     //    events, through the unchanged status test, so $canManage plays no
     //    part here; it matters only to the single-event download's draft rule.
     //    That is today's behaviour, kept on purpose.
-    //
-    //    WHAT THIS DOES NOT DO: ask whether a signed-in visitor belongs to the
-    //    event's own organisation. Any signed-in account still gets any
-    //    organisation's internal series, exactly as with the single-event
-    //    download today. That is #514 part P2 and #534, which will replace
-    //    this test with the full visibility rule.
-    $sql = 'SELECT * FROM tblEvents WHERE seriesID = ? AND isDeleted = 0 AND siteID = ? AND status = \'published\' ORDER BY startDateTime';
-    if ($signedIn === false) {
-        $sql = 'SELECT * FROM tblEvents WHERE seriesID = ? AND isDeleted = 0 AND siteID = ? AND isPublic = 1 AND status = \'published\' ORDER BY startDateTime';
-    }
-    $stmt = $db->prepare($sql);
+    $visibility = EventVisibility::where('e', EventVisibility::MODE_SESSION, $viewerId, $today);
+    $fullDetail = EventVisibility::fullDetailSelect('e', EventVisibility::MODE_SESSION, $viewerId, $today, 'canSeeFull');
+    //    (The canSeeFull expression goes in through sprintf()'s `%s` for the
+    //    same reason as in the single-event branch above.)
+    $stmt = $db->prepare(sprintf(
+        'SELECT e.*, %s FROM tblEvents e WHERE e.seriesID = ? AND e.isDeleted = 0 AND e.siteID = ? AND e.status = \'published\'',
+        $fullDetail['sql']
+    ) . $visibility['sql'] . ' ORDER BY e.startDateTime');
     if ($stmt !== false) {
-        $stmt->bind_param('ii', $seriesId, $siteId);
+        $stmt->bind_param(
+            $fullDetail['types'] . 'ii' . $visibility['types'],
+            ...array_merge($fullDetail['params'], [$seriesId, $siteId], $visibility['params'])
+        );
         $stmt->execute();
         $result = $stmt->get_result();
         while ($r = $result->fetch_assoc()) {
@@ -216,8 +250,10 @@ if ($eventId > 0) {
     //    number that matches nothing, another organisation's series, a series
     //    with no events, a series with only drafts, and an internal series
     //    asked for by a signed-out visitor all reach this line the same way:
-    //    one query, no rows. The page is a 404 underneath, with a sign-in link
-    //    for a visitor who is not signed in.
+    //    one query, no rows (#514 part P2: and so does an internal series
+    //    asked for by a signed-in member of ANOTHER organisation). The page is
+    //    a 404 underneath, with a sign-in link for a visitor who is not signed
+    //    in.
     //
     //    What was wrong before: an empty result fell through to the generic
     //    "page not found" page at the end of the selection below. That was not
@@ -230,13 +266,27 @@ if ($eventId > 0) {
         return;
     }
 } elseif ($exportAll === true) {
-    // 📅 All upcoming public events
-    $stmt = $db->prepare(
-        'SELECT * FROM tblEvents WHERE isDeleted = 0 AND status = \'published\' '
-        . 'AND isPublic = 1 AND startDateTime >= NOW() AND siteID = ? ORDER BY startDateTime LIMIT 200'
-    );
+    // 📅 All upcoming events the whole world may see
+    //
+    // 👁️ #514 part P2: the literal `isPublic = 1` became the shared rule in
+    //    "anonymous" mode (viewer 0, administrator branches off), whoever is
+    //    asking. This download is a public subscription address that calendar
+    //    apps fetch without signing in, so it must never depend on a session:
+    //    the portal's own events only when marked public, and an imported event
+    //    only at its public level. The fragment goes after the literal
+    //    conditions (see the series branch above for why), and the canSeeFull
+    //    expression through sprintf()'s `%s` (see the single-event branch).
+    $visibility = EventVisibility::where('e', EventVisibility::MODE_ANONYMOUS, 0, $today);
+    $fullDetail = EventVisibility::fullDetailSelect('e', EventVisibility::MODE_ANONYMOUS, 0, $today, 'canSeeFull');
+    $stmt = $db->prepare(sprintf(
+        'SELECT e.*, %s FROM tblEvents e WHERE e.isDeleted = 0 AND e.startDateTime >= NOW() AND e.siteID = ? AND e.status = \'published\'',
+        $fullDetail['sql']
+    ) . $visibility['sql'] . ' ORDER BY e.startDateTime LIMIT 200');
     if ($stmt !== false) {
-        $stmt->bind_param('i', $siteId);
+        $stmt->bind_param(
+            $fullDetail['types'] . 'i' . $visibility['types'],
+            ...array_merge($fullDetail['params'], [$siteId], $visibility['params'])
+        );
         $stmt->execute();
         $result = $stmt->get_result();
         while ($r = $result->fetch_assoc()) {
@@ -419,6 +469,15 @@ $seenSeriesIds    = [];
 $icalEvents       = [];
 
 foreach ($events as $ev) {
+    // 👁️ #514 part P2 — "title, date and time only" (canSeeFull 0, which the
+    //    number 1 or 0 from the database says). redact() empties the
+    //    description, location, address, map position, web link and images, so
+    //    the entry below carries none of them; the web link back to the event's
+    //    page and the last-changed time are left out further down as well (the
+    //    #514 plan, section 1.4).
+    $canSeeFull = (int) $ev['canSeeFull'] === 1;
+    $ev         = EventVisibility::redact($ev, $canSeeFull);
+
     $sid      = (int) ($ev['seriesID'] ?? 0);
     $isAllDay = ((int) $ev['isAllDay']) === 1;
 
@@ -483,13 +542,17 @@ foreach ($events as $ev) {
         //    event with the same slug (slugs are only unique within one
         //    organisation), or "not found". Empty when there is no host (see
         //    $siteUrl above), which leaves the link out of the file.
-        'url'         => $siteUrl !== ''
+        //    #514 part P2: no link at "title, date and time only" (an empty
+        //    value leaves URL out of the file).
+        'url'         => $siteUrl !== '' && $canSeeFull === true
             ? $siteUrl . Site::url('calendar/event') . '?slug=' . urlencode((string) $ev['eventSlug'])
             : '',
         'status'      => $status,
     ];
 
-    if ($ev['updatedAt'] !== null) {
+    // #514 part P2: no LAST-MODIFIED at "title, date and time only" — when an
+    // event last changed can itself tell somebody that its hidden details did.
+    if ($ev['updatedAt'] !== null && $canSeeFull === true) {
         $entry['lastModified'] = (string) $ev['updatedAt'];
     }
 
