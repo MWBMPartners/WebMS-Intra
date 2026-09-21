@@ -11,6 +11,26 @@ proceeds, so the session can be picked up at any point).
 
 ## LATEST — 21 September 2026, 10:25. RESUME FROM HERE.
 
+**10:55 — OWNER ANSWERS, and the order changed.**
+- **#538 (treasury list visible to any member) goes FIRST, ahead of #517**, because it is probably live on production. The #517 run
+  (`wf_11f8fb60-55d`) was STOPPED part way through its first planning step. Nothing had finished, so a resume will simply start
+  planning again; no containers or files were left. Relaunch #517 once #538 is committed.
+- **#538 LAUNCHED** as `wf_cd961b65-531` (script `.claude-work/resume/wf-538.js`, reports `p538--*.md`, containers p538-mysql /
+  p538-check, ports 9150-9159). One self-challenging Fable planning step, sweeping the whole Expenses app for the same gap and hiding
+  the Treasury link from people who will be refused.
+- **#539 (invitations grant no role) goes with #534-#536, after the #514 build.**
+- **#516's six defaults are all kept.**
+- The fix lands on this working branch, so **production stays exposed until the branch is promoted** (or the owner orders a
+  separate hotfix, which needs a pull request and therefore the owner's explicit go-ahead).
+
+**NEW ORDER:** #538 → #517 → Fable review of the #514 plan → #514 build (one commit per part) → #534, #535, #536, #539 → full
+documentation pass → comprehensive Codex review → stop and wait for the owner before any pull request.
+
+**10:45 — #517 LAUNCHED** as workflow run `wf_11f8fb60-55d` (script `.claude-work/resume/wf-517.js`; reports land in
+`.claude-work/resume/p517--*.md`). It carries the three fixes from the #516 lesson below, and **stops after planning if the owner has
+questions** (overnight rule 1). Then relaunch with `resumeFromRunId` and `args: { answers: "..." }`; the planning steps replay from
+cache. Container names p517-mysql / p517-check, ports 9140-9149.
+
 **#516 IS DONE: committed `c99dc87` and pushed, independent check round 3 PASS.** Roles per organisation, grantable at last:
 39 files, migration 202, new `Portal\Core\Roles`, `/admin/roles`, `/admin/users/roles-unplaced`, new check `check_role_keys.py`,
 new self-test `roles-selftest.php`. Three over-claiming comments the checker found were corrected before the commit (wording only;
