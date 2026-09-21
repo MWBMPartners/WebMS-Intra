@@ -49,7 +49,13 @@ offer volunteer/staff as the role on acceptance and grant nothing. Neither is in
 RETURNED a refusal, so two check rounds found the package unbuilt. It was finally built on the Sonnet tier in fix round 2. Fix this in
 any copied workflow script: treat a builder's "I decline / route elsewhere" return as a failure and escalate.
 
-**DEPENDENCY PRs (owner's request, 21 September): see `.claude-work/dependabot-status.md` for the full record.**
+**DEPENDENCY PRs (owner's request, 21 September): ALL THREE DONE AND GREEN at 11:10 BST.** #537 (alpha) and #506 (beta) merged
+earlier; **#504 squash-merged at 10:07 UTC as `560a4f2`** on the production branch, after the fix commit `a19f57e` was added to it.
+Production now matches the four reviewed files exactly. After the merge: CodeQL, Lint Workflows and PHP Static Analysis all green, and
+**Security Backport ran and was SKIPPED**, which proves the new guard applies to the merge that adds it. Beta got the permission as
+`1830dd7`; its three runs were green. Nothing deployed (no `web/**` change). No Dependabot PRs are open now; expect fresh
+4.38.0 -> 4.38.1 ones for the production branch and beta at Dependabot's next run. **Still to do: the alpha copy of `actions: read`**
+(see below). Full record: `.claude-work/dependabot-status.md`.
 - The owner made the repository **public (temporarily)**, which cleared the Actions billing refusal and the code scanning refusal.
 - **#537 (alpha)** was auto-merged by alpha's own workflow at 08:28 UTC. **#506 (beta)** was squash-merged at 08:41 UTC (`a6931d1`);
   its post-merge CodeQL, lint and Psalm runs were all green. Nothing deploys: `deploy.yml` only runs for `web/**` changes.
@@ -70,8 +76,8 @@ any copied workflow script: treat a builder's "I decline / route elsewhere" retu
 - **Round 1 also warned:** Dependabot logged this morning that #504 "should be superseded" by a 4.38.1 update, so merge promptly. After
   the merge, expect Dependabot to raise a fresh 4.38.0 -> 4.38.1 PR for main (and beta).
 - **CODEX SWEEP: these commits live OUTSIDE the working branch, so `git diff 110e47d~1..HEAD` will never show them. Review them by
-  name:** (1) the #504 squash commit on **main** (commit ID: to be filled in after the merge); (2) the commit on **beta** adding
-  `actions: read` (commit ID: to be filled in). Both say in their messages that they are listed here.
+  name:** (1) **`560a4f2`** on **main** (the #504 squash: the codeql-action bump plus the backport guard, the permission and the
+  DEV_NOTES paragraph); (2) **`1830dd7`** on **beta** (adds `actions: read`). Both say in their messages that they are listed here.
 - **Claude Code's auto-mode safety check refuses workflow-file edits ("CI Bypass")** unless the owner has explicitly allowed them. A
   first attempt that also added step-level `continue-on-error` flags was refused and **dropped for good**: the owner was not asked
   about those. Never work round the refusal with another tool.
