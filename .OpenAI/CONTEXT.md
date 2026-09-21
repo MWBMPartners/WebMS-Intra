@@ -181,6 +181,10 @@ in `.claude/CLAUDE.md` under the heading named in brackets.
    raised, the normal arrangement returns: each finished piece goes to Codex as
    it lands. Claude-side independent checking never stopped — every package
    still gets a fresh agent that did not build it, before it is committed.
+   Committed under this arrangement so far (all NOT yet Codex-reviewed):
+   `5f278cb`, `12e637a`, `1e0809c`, `bd1ef12`, `6989b26` (#515) and
+   `c99dc87` (#516, roles per organisation, 21 September 2026), plus the
+   documentation and handoff commits in between.
 
    **How to tell what has actually been reviewed: read `.claude/
    HANDOFF.md`, never the commit message alone.** Which commits Codex has

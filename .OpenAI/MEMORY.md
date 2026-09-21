@@ -421,3 +421,27 @@ so can sweep somebody else's half-finished edit into a commit whose message
 never mentions it. Stage files by explicit path, and check the full list of
 what is about to be committed before committing it, rather than assuming
 everything currently different is meant to be included.
+
+**Roles belong to one organisation each (since #516, commit `c99dc87`, 21
+September 2026).** Every organisation has its own copy of the fourteen
+standard roles and may rename them or add its own. The role's KEY
+(`roleKey`, for example `treasurer`) never changes and is what the code
+checks with `App::hasRole()`; only the label (`roleName`) is renameable.
+Holding a role is per organisation, and the database refuses a holding
+without an active membership of that organisation. `Portal\Core\Roles`
+(`web/_core/Roles.php`) owns granting, revoking, seeding and the shared
+lookups, but it is NOT the only code that touches the role tables: the
+role-list page writes `tblRoles` itself, and about a dozen hand-written
+queries read both tables directly, each repeating the per-organisation join.
+When reviewing a change to how roles are matched, search for `tblUserRoles`
+and check every site, not just the class.
+
+**Dependency (Dependabot) pull requests.** Dependabot raises a separate
+GitHub Actions update for each of `alpha`, `beta` and `main` (`.github/
+dependabot.yml`). `security-backport.yml` exists on `main` only and copies
+merged Dependabot or security PRs from `main` down to the other branches. For
+a workflow-only update that copy always fails, because the built-in token may
+not push workflow files. On 21 September 2026 the owner approved skipping
+`dependabot/github_actions/` branches there. Merging a PR into `alpha` can
+happen automatically (`auto-merge-alpha.yml`) the moment its checks go green.
+Nothing deploys unless `web/**` or `deploy.yml` changes.
