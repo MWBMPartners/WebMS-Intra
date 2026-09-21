@@ -111,10 +111,24 @@ foreach ($feeds as $f) {
         $status = 'HTTP ' . $code . ' ' . substr($err, 0, 120);
     } else {
         $events = parseIcs((string) $body);
+        // 👁️ #514 part P1: a copied-in event now also carries who may see it
+        //    (importLevel and the columns beside it, added by migration 204).
+        //    Their column defaults are the narrow ones (hidden, basic), so a
+        //    row written without them would vanish for everybody except
+        //    administrators once the pages start using the visibility rule.
+        //    Until later parts of #514 let an administrator choose, every new
+        //    row is written exactly as migration 204 marked the existing ones:
+        //    public, full detail, owned by its own calendar (so the calendar's
+        //    number is bound a second time, for importAudienceID). The website
+        //    box (importWebsite) is left at its default of 0, as the backfill
+        //    left it. The ON DUPLICATE KEY UPDATE below deliberately does not
+        //    touch these columns, so an existing row keeps whatever it has.
+        //    Everything else in this job is unchanged; part P6 replaces it.
         $upsert = $mysqli->prepare(
             'INSERT INTO tblEvents (siteID, externalFeedID, externalUid, eventName, description, '
-            . '                     startDateTime, endDateTime, locationName, status, isPublic, isDeleted, eventSlug) '
-            . 'VALUES (?, ?, ?, ?, ?, ?, ?, ?, "published", 1, 0, ?) '
+            . '                     startDateTime, endDateTime, locationName, status, isPublic, isDeleted, eventSlug, '
+            . '                     importLevel, importDetail, importAudienceType, importAudienceID, importSource) '
+            . 'VALUES (?, ?, ?, ?, ?, ?, ?, ?, "published", 1, 0, ?, "public", "full", "feed", ?, "calendar") '
             . 'ON DUPLICATE KEY UPDATE eventName = VALUES(eventName), description = VALUES(description), '
             . '                       startDateTime = VALUES(startDateTime), endDateTime = VALUES(endDateTime), '
             . '                       locationName = VALUES(locationName)'
@@ -131,7 +145,7 @@ foreach ($feeds as $f) {
             $slug = strtolower(preg_replace('/[^a-z0-9]+/i', '-', $name . '-' . substr(md5($uid), 0, 6)) ?? '');
             $slug = trim((string) $slug, '-');
             $slug = mb_substr($slug, 0, 80);
-            $upsert->bind_param('iisssssss', $siteId, $feedId, $uid, $name, $desc, $start, $end, $loc, $slug);
+            $upsert->bind_param('iisssssssi', $siteId, $feedId, $uid, $name, $desc, $start, $end, $loc, $slug, $feedId);
             @$upsert->execute();
             $imported++;
         }

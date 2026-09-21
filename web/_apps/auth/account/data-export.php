@@ -47,6 +47,8 @@
  *                          administrator to place — #517)
  *   tblUserDeptsUnplaced  (a department membership waiting for a global
  *                          administrator to place — #517)
+ *   tblExternalAudienceMembers (outside calendars whose "who may see these
+ *                          events" list names you — #514)
  *
  * Sensitive fields (password hashes, TOTP secret, tokenHash etc.) are
  * EXCLUDED — exporting them would be a security regression, not a feature.
@@ -199,6 +201,22 @@ $payload = [
             . 'FROM tblUserDeptsUnplaced p '
             . 'JOIN tblDepts d ON d.deptID = p.deptID '
             . 'WHERE p.userID = ?'
+        ),
+        // 👁️ Outside calendars you have been named on (#514 part P1) —
+        // export↔erasure parity with the two GdprEraser::catalogue() entries
+        // added alongside this block. Each row says which calendar's list
+        // names you and whether that list belongs to the calendar itself or
+        // (in a later part) to one date or a rule. `createdByID` is
+        // deliberately left out: it is ANOTHER person's account number (who
+        // added you), the same reasoning as `addedByID` above. A plain JOIN
+        // to the calendar loses nothing: every list row belongs to a
+        // calendar that exists, because deleting a calendar deletes its
+        // lists (the foreign key fk_extaud_feed).
+        'outsideCalendarAudiences' => $fetchUserRows(
+            'SELECT am.audienceMemberID, am.siteID, xf.name AS calendarName, am.ownerType, am.createdAt '
+            . 'FROM tblExternalFeeds xf '
+            . 'JOIN tblExternalAudienceMembers am ON am.feedID = xf.feedID '
+            . 'WHERE am.userID = ?'
         ),
         // 🏛️ Venue Bookings (#429) — export↔erasure parity with the three
         // GdprEraser::catalogue() entries added alongside this block.

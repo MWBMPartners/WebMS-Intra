@@ -333,6 +333,21 @@ return [
         'reason'   => 'Who approved an expense claim. The approval belongs to the claim and its audit trail, not to the approver, so it is kept and the approver\'s name is removed.',
         'columns'  => ['userID'],
     ],
+    'tblExternalAudienceMembers' => [
+        'decision' => 'erase',
+        // #514 part P1. A "person" row names somebody as allowed to see an
+        // outside calendar's events (or, in a later part, one date or a
+        // rule), so it is about them and goes. Rows naming a small group, a
+        // leadership role, a role, a user group or a department carry no
+        // userID and are not about any one person, so they stay. The same
+        // shape as the tblUserGroups entry further down: createdByID (who
+        // added the entry) is a separate, hand-written instruction in
+        // GdprEraser::catalogue() that only empties the name, because an
+        // entry somebody ELSE is on must not vanish because the person who
+        // typed it in asked to be forgotten.
+        'reason'   => "Names a person as allowed to see an outside calendar's events. The table also carries createdByID, saying who added the entry; that is a separate instruction (#514), and it only removes the name.",
+        'columns'  => ['userID'],
+    ],
     'tblFormResponses' => [
         'decision' => 'erase',
         'reason'   => 'Holds information about the person themselves',

@@ -33,7 +33,15 @@ if ($action === 'add') {
         $_SESSION['flash_type'] = 'danger';
         header('Location: /admin/calendar/feeds', true, 302); exit();
     }
-    $stmt = $mysqli->prepare('INSERT INTO tblExternalFeeds (siteID, name, url, fetchEveryMins, createdByID) VALUES (?, ?, ?, ?, ?)');
+    // 👁️ #514 part P1: `audienceLevel` (the calendar's own "who may see its
+    //    events" setting, added by migration 204) is written as 'public'
+    //    until the calendar pages let an administrator choose (part P8).
+    //    Every calendar has been public in effect since #327, and migration
+    //    204 marked every existing one public for that reason; a new one
+    //    must behave the same until the choice exists. The column's own
+    //    default is 'members', the narrow one, so leaving it out here would
+    //    quietly change what a newly added calendar shows.
+    $stmt = $mysqli->prepare("INSERT INTO tblExternalFeeds (siteID, name, url, fetchEveryMins, createdByID, audienceLevel) VALUES (?, ?, ?, ?, ?, 'public')");
     $stmt->bind_param('issii', $siteId, $name, $url, $mins, $userId);
     $stmt->execute();
     $stmt->close();

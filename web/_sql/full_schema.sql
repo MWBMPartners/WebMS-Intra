@@ -1058,6 +1058,25 @@ CREATE TABLE IF NOT EXISTS `tblEvents` (
     `externalFeedID`     INT           DEFAULT NULL,
     `externalUid`        VARCHAR(255)  DEFAULT NULL,
 
+    -- 👁️ Who may see a copied-in event, and how much of it (#514 — added by
+    -- migration 204). Used ONLY on rows where externalFeedID is set; the
+    -- portal's own events keep using isPublic exactly as before. The
+    -- defaults are the narrow ones on purpose (hidden, basic), so anything
+    -- that writes an imported row and forgets these columns fails closed.
+    -- The rule that reads them is Portal\Core\EventVisibility. A fresh
+    -- install has no imported rows, so migration 204's backfill (public,
+    -- full, owned by its own calendar) has nothing to do here and is not
+    -- repeated.
+    `importLevel`        ENUM('public','members','groups','hidden') NOT NULL DEFAULT 'hidden' COMMENT 'Imported events only: who may see it, as worked out by FeedResolver. Ignored when externalFeedID IS NULL.',
+    `importDetail`       ENUM('full','basic') NOT NULL DEFAULT 'basic' COMMENT 'Imported events only: detail for viewers outside the calendar''s own audience.',
+    `importWebsite`      TINYINT(1) NOT NULL DEFAULT 0 COMMENT 'Imported events only: 1 = may go to the organisation''s public website feeds (D4).',
+    `importAudienceType` ENUM('feed','choice','rule') DEFAULT NULL COMMENT 'Owner of the audience list used at the groups level.',
+    `importAudienceID`   INT DEFAULT NULL COMMENT 'feedID, choiceID or ruleID matching importAudienceType. No foreign key: it points at one of three tables.',
+    `importSource`       ENUM('calendar','date','series','rule','waiting','private','conflict','duplicate') DEFAULT NULL COMMENT 'Why importLevel is what it is; shown to administrators.',
+    `importSourceID`     INT DEFAULT NULL,
+    `importRecheckAt`    DATETIME DEFAULT NULL COMMENT 'UTC moment after which the stored answer is not trusted; only administrators see the event until it is worked out again.',
+    `externalPrivate`    TINYINT(1) NOT NULL DEFAULT 0 COMMENT '1 = the outside calendar marked it private or confidential (any CLASS other than PUBLIC).',
+
     -- 🏛️ Per-event venue/room links (#436 — added by migration 179).
     -- Optional, NULL = no link (every pre-#436 event). The FKs
     -- (fk_event_venue -> tblVenues, fk_event_room -> tblVenueRooms) are
@@ -1080,6 +1099,8 @@ CREATE TABLE IF NOT EXISTS `tblEvents` (
     KEY `idx_event_status`   (`status`),
     KEY `idx_event_submission` (`submissionStatus`, `submittedAt`),
     KEY `idx_event_external` (`externalFeedID`, `externalUid`),
+    KEY `idx_event_import` (`externalFeedID`, `importLevel`),
+    KEY `idx_event_import_recheck` (`importRecheckAt`),
     KEY `idx_event_deleted`  (`isDeleted`),
     KEY `idx_event_public`   (`isPublic`, `status`, `isDeleted`),
     KEY `idx_events_site`    (`siteID`),
@@ -5991,6 +6012,11 @@ CREATE TABLE IF NOT EXISTS `tblExternalFeeds` (
     `url`             VARCHAR(2000) NOT NULL,
     `fetchEveryMins`  INT          NOT NULL DEFAULT 360 COMMENT 'How often to refetch (default 6h)',
     `categoryID`      INT          DEFAULT NULL COMMENT 'Auto-assign imported events to this category',
+    -- 👁️ The calendar's own setting (#514 — added by migration 204). The
+    -- default is the narrow one on purpose; the "add a calendar" form
+    -- writes 'public' until the calendar pages let an administrator choose.
+    `audienceLevel`   ENUM('public','members','groups') NOT NULL DEFAULT 'members' COMMENT 'The calendar''s own setting (D7).',
+    `websiteOptIn`    TINYINT(1)   NOT NULL DEFAULT 0 COMMENT 'D4: also show on the public website; only meaningful at public.',
     `isActive`        TINYINT(1)   NOT NULL DEFAULT 1,
     `lastFetchedAt`   DATETIME     DEFAULT NULL,
     `lastFetchStatus` VARCHAR(255) DEFAULT NULL,
@@ -6002,6 +6028,37 @@ CREATE TABLE IF NOT EXISTS `tblExternalFeeds` (
     CONSTRAINT `fk_feed_site`    FOREIGN KEY (`siteID`)     REFERENCES `tblSites`(`siteID`) ON DELETE CASCADE,
     CONSTRAINT `fk_feed_creator` FOREIGN KEY (`createdByID`) REFERENCES `tblUsers`(`userID`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- ── from 204_external_calendar_visibility.sql (#514) ─────────────────────────
+-- Who may see a "groups"-level outside calendar (and, in a later part of
+-- #514, a single-date choice or a rule). feedID is ALWAYS the calendar the
+-- list belongs to, so deleting the calendar removes every list it owns.
+-- userID is set on "person" rows only, for the account foreign key and for
+-- erasure. COLLATE utf8mb4_general_ci is written out on purpose and must
+-- stay: on a database created through a hosting panel (default
+-- utf8mb4_0900_ai_ci) a table without it would make the visibility rule
+-- fail with "ERROR 1267 Illegal mix of collations" where ownerType meets
+-- tblEvents.importAudienceType. Migration 204's header explains in full.
+CREATE TABLE IF NOT EXISTS `tblExternalAudienceMembers` (
+    `audienceMemberID` INT NOT NULL AUTO_INCREMENT,
+    `siteID`      INT NOT NULL COMMENT 'The organisation the list belongs to.',
+    `feedID`      INT NOT NULL COMMENT 'Always the calendar the list belongs to, so deleting the calendar removes every list.',
+    `ownerType`   ENUM('feed','choice','rule') NOT NULL COMMENT 'What owns this list: the calendar itself, a single-date or series choice, or a rule.',
+    `ownerID`     INT NOT NULL COMMENT 'feedID, choiceID or ruleID matching ownerType. No foreign key: it points at one of three tables.',
+    `kind`        ENUM('person','small_group','leadership_role','role','user_group','department') NOT NULL COMMENT 'What refID names.',
+    `refID`       INT NOT NULL COMMENT 'Group, role or department number; for person the user number again.',
+    `userID`      INT DEFAULT NULL COMMENT 'person rows only; foreign key for erasure',
+    `createdByID` INT DEFAULT NULL COMMENT 'Who added this entry; emptied, never cascaded, if that account is removed.',
+    `createdAt`   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`audienceMemberID`),
+    UNIQUE KEY `uq_extaud_owner_member` (`ownerType`,`ownerID`,`kind`,`refID`),
+    KEY `idx_extaud_feed` (`feedID`),
+    KEY `idx_extaud_user` (`userID`),
+    CONSTRAINT `fk_extaud_feed`    FOREIGN KEY (`feedID`)      REFERENCES `tblExternalFeeds`(`feedID`) ON DELETE CASCADE,
+    CONSTRAINT `fk_extaud_user`    FOREIGN KEY (`userID`)      REFERENCES `tblUsers`(`userID`)         ON DELETE CASCADE,
+    CONSTRAINT `fk_extaud_creator` FOREIGN KEY (`createdByID`) REFERENCES `tblUsers`(`userID`)         ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+COMMENT='Who may see a groups-level outside calendar, single-date choice or rule (#514). Membership is tested live in the visibility rule.';
 
 -- ── from 130_anonymous_attendance.sql, `userAgent` removed by
 --    201_drop_checkin_browser_description.sql (#530) — it was written on
@@ -9208,4 +9265,16 @@ INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
 ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 
 INSERT INTO `tblMigrations` (`filename`) VALUES ('203_groups_departments_per_organisation.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- ── from 204_external_calendar_visibility.sql (#514, part P1) ────────────────
+-- The CREATE TABLE statements above (tblEvents, tblExternalFeeds and
+-- tblExternalAudienceMembers) already carry every column, key and
+-- constraint this migration adds, so a fresh install never needs its
+-- guarded ALTER TABLE statements. Its two backfills (existing copied-in
+-- events and existing calendars marked public) are DELIBERATELY NOT
+-- repeated: a database built fresh from this file has no calendars and no
+-- copied-in events yet, so there is nothing to carry over — the same
+-- reasoning the 199, 202 and 203 blocks above give. Only the self-record.
+INSERT INTO `tblMigrations` (`filename`) VALUES ('204_external_calendar_visibility.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;

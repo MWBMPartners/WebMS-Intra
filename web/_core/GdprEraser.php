@@ -127,6 +127,17 @@ class GdprEraser
             // person themselves, so removed outright.
             ['table' => 'tblUserGroupsUnplaced', 'userCol' => 'userID', 'action' => 'delete'],
             ['table' => 'tblUserDeptsUnplaced',  'userCol' => 'userID', 'action' => 'delete'],
+            // #514 part P1 — the lists of who may see an outside calendar's
+            // events (and, later, one date or a rule). A row naming THIS
+            // person goes. The account row itself is emptied rather than
+            // deleted (the tblUsers step at the end), so the table's own
+            // "delete with the account" foreign key never fires, and this
+            // explicit entry is what actually removes it. A row somebody
+            // ELSE is on, which this person happened to add, stays, and only
+            // the "who added it" number is detached — the tblUserGroups shape
+            // above.
+            ['table' => 'tblExternalAudienceMembers', 'userCol' => 'userID', 'action' => 'delete'],
+            ['table' => 'tblExternalAudienceMembers', 'userCol' => 'createdByID', 'action' => 'anonymise', 'nullCols' => [], 'reason' => 'the entry stays (it is about the person named on it, or about a group); who added it is detached'],
             ['table' => 'tblUserSmsPreference','userCol' => 'userID', 'action' => 'delete'],
             ['table' => 'tblNewsletterSubscription','userCol' => 'userID', 'action' => 'delete'],
             ['table' => 'tblPaymentMethod',    'userCol' => 'userID', 'action' => 'delete'],
