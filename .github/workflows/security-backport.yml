@@ -15,6 +15,9 @@
 #   commit is cherry-picked onto each of alpha / beta / release-candidate
 #   and a backport PR is opened per tier.
 #
+#   Exception (21 September 2026): Dependabot's GitHub Actions updates are
+#   skipped. See the comment on the resolve job's `if:` for why.
+#
 # Clean cherry-pick   -> normal PR  (deps-backport/<tier>/pr-<num> -> <tier>)
 # Conflicted pick     -> DRAFT PR with the conflict markers committed and a
 #                        "manual conflict resolution required" warning body —
@@ -101,10 +104,32 @@ jobs:
     # as security/dependency work. NOTE: contains() is an exact-match on
     # label names, so both the generic names and this repo's "type: security"
     # scheme are listed.
+    #
+    # Deliberately skipped: Dependabot's updates to GitHub Actions versions
+    # (branch names starting "dependabot/github_actions/"), whatever labels
+    # they carry. Copying them is pointless, because .github/dependabot.yml
+    # already asks Dependabot for a separate update PR on every branch
+    # (#504 main, #505 alpha and #506 beta were one such set, raised on 14
+    # September 2026). It also cannot work: every one of them changes a file
+    # under .github/workflows/, and GitHub refuses to let this workflow's
+    # built-in key push a workflow change. The alpha copy of #424 failed
+    # exactly that way on 7 September 2026. A BACKPORT_PAT token would get
+    # past that only if it ALSO had the separate "Workflows" permission,
+    # which the header of this file does not ask for; and even then it would
+    # only duplicate a PR Dependabot has already raised.
+    # What this gives up: a SECURITY update to an action, which Dependabot
+    # raises against main only, is no longer copied down; the other branches
+    # pick up the same new version from their own weekly Dependabot run
+    # instead. Dependabot security updates were switched off on this
+    # repository when this was written (21 September 2026), so today it
+    # costs nothing. Composer updates, and people's PRs labelled as security
+    # work, are copied exactly as before. A manual run (workflow_dispatch) is
+    # not affected by this line.
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (github.event.pull_request.merged == true &&
        github.event.pull_request.base.ref == 'main' &&
+       !startsWith(github.event.pull_request.head.ref, 'dependabot/github_actions/') &&
        (github.event.pull_request.user.login == 'dependabot[bot]' ||
         contains(github.event.pull_request.labels.*.name, 'security') ||
         contains(github.event.pull_request.labels.*.name, 'dependencies') ||

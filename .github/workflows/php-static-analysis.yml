@@ -23,6 +23,21 @@ on:
 permissions:
   contents: read
   security-events: write
+  # The SARIF upload step below asks GitHub about its own workflow run
+  # before it uploads anything. On a PRIVATE repository that needs this
+  # permission; without it the step stops with "Resource not accessible by
+  # integration" (seen on 14 September 2026, while the repository was
+  # private). A public repository does not need it.
+  # What this does NOT fix: on a private repository the upload itself also
+  # needs GitHub's paid "Code Security" add-on. Without it the upload is
+  # refused with "Code Security must be enabled", as CodeQL's uploads were
+  # while the repository was private. This line clears the first obstacle
+  # only.
+  # It gives read-only access to this repository's Actions data (such as
+  # workflow runs and their logs, artifacts and caches); it cannot change
+  # anything.
+  # codeql.yml already carries the same line.
+  actions: read
 
 jobs:
   psalm:
@@ -108,7 +123,7 @@ jobs:
 
       - name: Upload SARIF to GitHub Security
         if: always() && hashFiles('psalm.sarif') != ''
-        uses: github/codeql-action/upload-sarif@v4.37.7
+        uses: github/codeql-action/upload-sarif@v4.38.0
         with:
           sarif_file: psalm.sarif
           category: psalm
