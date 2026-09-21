@@ -9,6 +9,29 @@ proceeds, so the session can be picked up at any point).
 
 ## Read this first — where we are right now
 
+## LATEST — 21 September 2026, about 19:15. RESUME FROM HERE.
+
+**#542 IS DONE: `8e7fb21`, independent check PASS in round 1.** A department flag (lead, approver, required approver of the claim's
+OWN department) is enough to open and decide its claims; new `Departments::approverDepts()`; no migration, so **204 is still free for
+#514 P1**. One documented change: someone whose only flag is in another department gets the plain "Forbidden" role holders always got.
+
+**#545 raised and DECIDED by the owner (19:10):** refuse self-approval outright (no approving or rejecting your own claim; your own
+claims leave your approvals list; if you are the only lead or required approver, an administrator or another approver decides), and a
+treasurer may NOT pay their own claim (another treasurer or an administrator pays). **Queued with the follow-ups after #514.** A small
+"claim exists" signal in the decision handler was added to #541 as item 5.
+
+**NOW: the #514 BUILD, part by part.** One reusable script: `.claude-work/resume/wf-514-part.js`, run as
+`Workflow({scriptPath: ".claude-work/resume/wf-514-part.js", args: { part: "P1", tier: "opus" }})`. It builds ONE part from
+`p514--plan-r2.md` on the plan's tier, then independent Fable checks with re-plan and fix rounds; reports land in
+`.claude-work/resume/p514-p1--*.md` (and p514-p2--… for later parts). Containers p514-pN-mysql / p514-pN-check; ports 9190-9199. After
+each part passes: my own checks, commit ONLY that part's files, push, comment on #514, update this handoff, then the next part.
+Tiers from the settled plan: P1 opus, P2 opus, P3 sonnet (may wire its check into pr-security.yml), P4 opus, P5 opus, P6 opus, P7 opus,
+P8 sonnet, P9 sonnet, P10 sonnet, P11 sonnet.
+
+**FOLLOW-UPS after #514:** #534 (items 3-4 only), #535, #536, #539, #540, #541 (five items), #543, #545. Then the documentation/CI pass
+(wire the three approved checks; CLAUDE.md counts), the comprehensive Codex review (including `560a4f2` on main and `1830dd7` on beta
+by name), and stop for the owner before any pull request.
+
 ## LATEST — 21 September 2026, about 18:10. RESUME FROM HERE.
 
 **The #514 re-plan is SETTLED** (run `wf_59816f10-2d2`, all Fable, no fallbacks, no owner questions). **The plan to build from is now
