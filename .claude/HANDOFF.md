@@ -28,8 +28,15 @@ reconciled (two review rounds, the second clean). **The whole Dependabot request
 EXISTING step-level `continue-on-error` on the Psalm upload (from #463/#464) will travel to beta and main at the next promotion; the
 "dropped for good" note above is about NEW flags only.
 
-**12:05 — #517 RELAUNCHED** as a fresh run of `.claude-work/resume/wf-517.js` (the stopped run `wf_11f8fb60-55d` had finished
-nothing). It stops after planning if the owner has questions.
+**12:05 — #517 RELAUNCHED** as run `wf_276323d6-e95` (script `.claude-work/resume/wf-517.js`). Planning finished at about 13:00
+(settled plan `.claude-work/resume/p517--plan.md`, 702 lines, 15 proofs; migration **203**; builder **Opus**; 41 files) and stopped
+for three owner questions. **The owner chose the recommended answer to all three:**
+1. Placing a parked group: place the group and every qualifying member; leave the rest parked with their own Place/Discard buttons,
+   counted in the message.
+2. Delete a group or department only when nothing depends on it (no members, no owned assets, no workflow step naming the group, no
+   expense claims on the department); otherwise retire it.
+3. A retired department's pending claims are finished by its own approvers as before; retiring only stops NEW claims.
+**Resumed** with those answers as `args.answers` (same run ID); the planning steps replay from cache and the build is under way.
 
 **NEW ORDER:** alpha permission commit -> #517 -> Fable review of the #514 plan -> #514 build (one commit per part) -> #534, #535,
 #536, #539, #540, #541 -> full documentation pass -> comprehensive Codex review (including `560a4f2` on main and `1830dd7` on beta by
