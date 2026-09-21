@@ -9,6 +9,44 @@ proceeds, so the session can be picked up at any point).
 
 ## Read this first — where we are right now
 
+## LATEST — 21 September 2026, 01:45. RESUME FROM HERE.
+
+**TWELVE OWNER DECISIONS TAKEN AT 01:40, so the queue can run overnight. These govern everything that follows.**
+
+**How to work**
+1. **PAUSE on anything these answers do not cover.** Do not take a new decision alone: stop, write down what is needed and why, and
+   wait. (The owner chose this deliberately over "decide and log".)
+2. **A package whose check keeps failing: KEEP TRYING.** Do not park it and move on; keep fixing and re-checking.
+3. **A new fault found along the way: fix it if it is SMALL** — meaning it is in a file this package already changes, needs no design
+   decision, and can carry its own proof. Anything larger becomes its own issue, and the queue continues.
+4. **The Codex sweep at the end:** review as many areas as its usage allows, fix what comes back, and leave the rest clearly listed
+   for when its limit resets. **Never record an area as reviewed when it was not.**
+5. **DO NOT OPEN THE PULL REQUEST.** Not even a draft. Everything waits for the owner's explicit go-ahead.
+
+**What to build**
+6. **#516 roles: EVERYTHING per organisation, including the list of roles itself.** Each organisation gets the standard set
+   (treasurer, event coordinator, groups coordinator and the rest), can RENAME them for its own language, and can add its own. **The
+   internal name each feature looks for stays fixed**, so the 62 places in the code that check for a role keep working. New
+   organisations get the standard set automatically. Holding a role is per organisation. An organisation's administrator grants roles
+   in their own organisation; a global administrator anywhere. Any rows that already exist are carried over the way #533 does it:
+   automatic where there is one organisation, listed for a person to place where there are several.
+7. **#517: build BOTH user groups and departments, each belonging to one organisation**, managed by that organisation's
+   administrators. They stay two different things: groups are committees and working groups; departments carry the lead, assistant,
+   secretary and approver flags that expenses approval already depends on.
+8. **#514: one commit per part**, planned, built, checked and committed on its own, in the plan's safe order.
+9. **#514 test calendars do not exist yet.** Build and prove everything else with hand-written calendar files, and report the
+   acceptance criterion "works against a real Google or Microsoft 365 calendar" as **NOT PROVEN**. Do not claim it as covered.
+10. **If the Fable review of the #514 plan finds real changes are needed, re-plan the affected parts** (challenged as usual) and carry
+    on building. Do not build a plan the review says is out of date.
+11. **Do the full documentation pass** if the queue reaches it: every document, the in-app help and the API description, brought in
+    line with everything built this week.
+12. (From earlier.) Every package still gets a fresh Claude agent that did not build it, before it is committed; every commit message
+    still says Codex has not reviewed it.
+
+**THE ORDER:** #516 → #517 → Fable review of the #514 plan → #514 build (one commit per part) → #534, #535, #536 → full documentation
+pass → **the comprehensive Codex review of the whole branch** (`git diff 110e47d~1..HEAD`, area by area, through
+`.claude-work/codex-queue.sh`) → fix or log every finding → **stop, and wait for the owner before any pull request.**
+
 ## LATEST — 21 September 2026, 01:30. RESUME FROM HERE.
 
 **#515 IS DONE: committed `6989b26` and pushed, independent check PASS.** Reserved organisation keys (built from three live sources,
