@@ -654,7 +654,19 @@ Closes the Alert-driven gap above. When a PR authored by `dependabot[bot]`
 (or labelled `security` / `dependencies` / `type: security`) **merges into
 `main`**, the workflow cherry-picks the squash-merge commit onto each of
 `alpha` / `beta` / `release-candidate` (branch
-`deps-backport/<tier>/pr-<num>`) and opens a PR per tier:
+`deps-backport/<tier>/pr-<num>`) and opens a PR per tier.
+
+**Exception, since 21 September 2026: Dependabot's GitHub Actions updates
+are skipped** (any branch whose name starts `dependabot/github_actions/`).
+Dependabot already raises a separate one of those for every branch, so the
+copy only ever duplicated it. And whenever it had anything to copy, the
+push was refused: each one changes a workflow file, which the built-in token
+is not allowed to change (the alpha copy of #424 failed that way on
+7 September 2026). A `BACKPORT_PAT` would
+only get past that with the extra "Workflows" permission. Composer updates
+and PRs labelled as security work are copied as before.
+
+What happens on each tier:
 
 - **Clean pick** → normal PR, labels applied per-label with graceful
   fallback (`type: security` exists; generic `dependencies`/`security`
