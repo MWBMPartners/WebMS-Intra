@@ -9,6 +9,29 @@ proceeds, so the session can be picked up at any point).
 
 ## Read this first — where we are right now
 
+## LATEST — 21 September 2026, 11:45. RESUME FROM HERE.
+
+**#538 IS DONE: committed `5753bf3` and pushed, independent check PASS in round 1, no fallbacks.** `/expenses/treasury` now
+refuses anyone who is neither a treasurer of this organisation nor an administrator, with the standard 403 page and no claims query;
+the pay handler refuses the same way (role check now before the token check). Measured first: EVERY signed-in account could read the
+queue, including members and the treasurer of ANOTHER organisation. 4 files, no migration. #538 commented, left open for the sweep.
+**Production stays exposed until this branch is promoted.**
+
+**New issues from #538's check:** **#540** withdrawing an expense claim has never worked (the handler writes 'Withdrawn', the ENUM
+has no such value; MySQL error 1265; #73 promised the migration and closed without it). **#541** three small Expenses mismatches
+(Export button drawn for people it refuses; treasurers cannot export, which needs an owner decision; a comment understating who may
+open a claim). **Default placement: both with #534-#536 and #539 after the #514 build, like #539. Not yet confirmed by the owner.**
+Also recorded, not raised: the older portal-wide `tblUsers.isAdmin` flag opens every organisation's treasury, as on every other page.
+
+**Alpha's copy of `actions: read`** is written in the working tree (`.github/workflows/php-static-analysis.yml`), byte-identical to
+production, with alpha's existing upload-step comment reconciled. Its independent check is running. Commit it, then **relaunch #517**:
+`Workflow({scriptPath: ".claude-work/resume/wf-517.js"})`. The stopped run `wf_11f8fb60-55d` had finished nothing, so a fresh run
+loses nothing.
+
+**NEW ORDER:** alpha permission commit -> #517 -> Fable review of the #514 plan -> #514 build (one commit per part) -> #534, #535,
+#536, #539, #540, #541 -> full documentation pass -> comprehensive Codex review (including `560a4f2` on main and `1830dd7` on beta by
+name) -> stop and wait for the owner before any pull request.
+
 ## LATEST — 21 September 2026, 10:25. RESUME FROM HERE.
 
 **10:55 — OWNER ANSWERS, and the order changed.**

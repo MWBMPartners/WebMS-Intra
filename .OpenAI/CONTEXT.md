@@ -183,8 +183,13 @@ in `.claude/CLAUDE.md` under the heading named in brackets.
    still gets a fresh agent that did not build it, before it is committed.
    Committed under this arrangement so far (all NOT yet Codex-reviewed):
    `5f278cb`, `12e637a`, `1e0809c`, `bd1ef12`, `6989b26` (#515) and
-   `c99dc87` (#516, roles per organisation, 21 September 2026), plus the
-   documentation and handoff commits in between.
+   `c99dc87` (#516, roles per organisation, 21 September 2026) and
+   `5753bf3` (#538, the treasury list limited to treasurers and
+   administrators), plus the documentation and handoff commits in between.
+   Two commits live OUTSIDE the working branch and must be reviewed by
+   name: `560a4f2` on main (the #504 squash: codeql-action bump, the
+   security-backport guard, Psalm's `actions: read`, a DEV_NOTES paragraph)
+   and `1830dd7` on beta (Psalm's `actions: read`).
 
    **How to tell what has actually been reviewed: read `.claude/
    HANDOFF.md`, never the commit message alone.** Which commits Codex has
