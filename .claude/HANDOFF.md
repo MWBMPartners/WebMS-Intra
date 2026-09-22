@@ -9,6 +9,28 @@ proceeds, so the session can be picked up at any point).
 
 ## Read this first — where we are right now
 
+## LATEST — 22 September 2026, about 23:35. RESUME FROM HERE.
+
+**#514 P5's check came back NOT CLEAN (Fable, the first Fable check since the credits returned) and a FIX ROUND IS RUNNING** (Opus
+background agent, brief `.claude-work/briefs/514-p5-fix.md`, report `.claude-work/resume/p514-p5--fixes.md`). P5 is still uncommitted.
+The check report is `.claude-work/resume/p514-p5--verify-r1.md` — it is the most thorough yet (30 planted faults, 69 adversarial
+cases, memory measured at five file sizes).
+
+**The two that matter:**
+1. **Memory is not bounded.** A 2.80 MB calendar — inside the 5 MB the P4 fetcher allows — dies with an UNCATCHABLE PHP fatal
+   ("Allowed memory size … exhausted") at the default 128 MB, inside `buildOccurrence()`. In P6's job that would end the whole run.
+   The class header claims every limit "ends the work quietly with a warning", which is not true of memory.
+2. **The self-test passes on five realistic faults** (25 of 30 caught): `UNTIL` treated as exclusive (silently drops the last date of
+   every ended GOOGLE series), `INTERVAL` ignored (fortnightly becomes weekly), dates before `DTSTART` not skipped, `WKST` ignored,
+   and an all-day start pushed through a UTC conversion (invisible because every all-day fixture is in December).
+
+Five low findings as well: two yearly rule shapes read silently wrong with no warning; an all-day event whose end is before its start
+becomes three days; exactly 400 dates reported as cut short; the Windows list misses `Dateline Standard Time`; and comments that are
+not true (including "keep the characters that are" while it drops every non-ASCII byte).
+
+**When the fix round reports:** re-check with FABLE (it found what four Opus rounds' worth of checking on P4 would have taken longer
+to find), fix until clean, then my own standard checks, commit ONLY P5's files, push, comment on #514, then P6 (migration 205).
+
 ## LATEST — 22 September 2026, about 23:05. NOT BLOCKED ANY MORE. RESUME FROM HERE.
 
 **The limits lifted early.** At the owner's prompting I probed again: **Fable answered in 8 seconds and Opus in 5** — both are
