@@ -9,6 +9,30 @@ proceeds, so the session can be picked up at any point).
 
 ## Read this first — where we are right now
 
+## LATEST — 23 September 2026, about 04:35. RESUME FROM HERE.
+
+**#514 P5, round 3 (Fable): NOT CLEAN — six more uncatchable fatals, all one over-long line, all under the fetcher's 5 MB.** A THIRD
+FIX ROUND IS RUNNING (Opus, brief `.claude-work/briefs/514-p5-fix3.md`, report `p514-p5--fixes3.md`). P5 still uncommitted;
+fingerprints in `p514-p5-built-20260923-fixes2/` until that round saves its own.
+
+**The pattern, stated plainly, because it has now caught us three times:** every round's fix has been too narrow. Round 1 fixed the
+shapes measured; round 2 found four more and bounded the comma lists INSIDE a repeat rule's BY… values; round 3 found six more, each
+one a DIFFERENT `explode()` reached before any counted limit or the memory watch:
+`splitList()` at `:841` (CATEGORIES, EXDATE, RDATE — one array slot per comma, and CATEGORIES then copies every piece again),
+`parseRule()` at `:1362` (the rule's own semicolons), `parsePropertyLine()` at `:701` (a property line's semicolons, inside `parse()`
+where no per-event limit applies), and `resolveZone()` at `:1131` (a TZID's slashes, with an O(n^2) loop behind it). Growth is about
+64 MB per 4,000,000 separators.
+
+**The fix brief therefore demands the CLASS, not the shapes:** never turn untrusted text into an array before counting how many
+pieces it will make (`substr_count()` allocates nothing). Its chief deliverable is an AUDIT TABLE of every split in the file with its
+bound — that table, not six passing files, is what shows the class is covered. Also: the 500,000-line cap is off by one with a
+trailing newline; the self-test has no guard for any split path (all four unbounded still passes 184/0/2); and the header over-claims.
+
+**Ordinary calendars are untouched** (control: 66 KB, 300 weekly series, exit 0, 14 MB), and round 3's correctness spot-checks all
+passed on top of the 184 self-test checks, which it read in full.
+
+**Then: round 4 with Fable.** Keep going until a round finds nothing — the owner's standing rule, and it is earning its keep here.
+
 ## LATEST — 23 September 2026, about 03:50. RESUME FROM HERE.
 
 **#514 P5: the round-2 findings are all FIXED, and FABLE'S ROUND-3 CHECK IS RUNNING.** P5 is still uncommitted (5 entries, 50
