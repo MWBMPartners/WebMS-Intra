@@ -9,6 +9,19 @@ proceeds, so the session can be picked up at any point).
 
 ## Read this first — where we are right now
 
+## LATEST — 22 September 2026, about 08:10. RESUME FROM HERE.
+
+**#514 P4's first build was CUT OFF by a server overload (API error 529)** after ~27 minutes (run `wf_a80c9b76-188`), before any
+report or check. Its partial work is in the working tree, uncommitted: `web/_core/SafeFetch.php` (new), `web/_core/Hymnal.php`
+(changed as planned), `tools/safefetch-selftest.php` (new; last run 176/0/0). It was mid-way through a mutation run, where three planted
+faults were NOT caught (M5 ::/96 dropped; M18 user:pass allowed; M19 only the first resolved address checked), and normaliseUrl()
+accepted shortened IPv4 forms (`0x7f.1`, `127.1`, `010.0.0.1`). **A copy is saved in
+`.claude-work/resume/p514-p4-partial-20260922-0806/`.** No server or container was left running.
+
+**RESTARTED at 08:10** as run `wf_a2a2586e-88f` with the part script's new `args.continueNote` (the builder reviews and finishes the
+partial work rather than starting blind; the previous script version has no such option). Reports `p514-p4--*.md`. If this run also
+dies part way, save the tree's P4 files again BEFORE relaunching.
+
 ## LATEST — 22 September 2026, about 03:10. RESUME FROM HERE.
 
 **#514 P3 IS COMMITTED: `4a915db`, pushed** (73 files). Imported events read-only everywhere else; `check_event_visibility.py` wired
