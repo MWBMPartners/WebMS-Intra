@@ -9,6 +9,19 @@ proceeds, so the session can be picked up at any point).
 
 ## Read this first — where we are right now
 
+## LATEST — 22 September 2026, about 23:05. NOT BLOCKED ANY MORE. RESUME FROM HERE.
+
+**The limits lifted early.** At the owner's prompting I probed again: **Fable answered in 8 seconds and Opus in 5** — both are
+available, well before the 27 September reset the error message named. **Always probe before believing a limit is still in force.**
+
+**#514 P5's independent check is RUNNING, on FABLE** (the first Fable check since its credits ran out this morning), as a background
+agent from the new brief `.claude-work/briefs/514-p5-check.md`; report `.claude-work/resume/p514-p5--verify-r1.md`. P5 is still
+uncommitted (its five entries, copy and fingerprints in `.claude-work/resume/p514-p5-built-20260922/`).
+
+**When it passes:** my own standard checks, commit ONLY P5's files, push, comment on #514, then P6 (`args: { part: "P6", tier:
+"opus" }`, migration 205). The owner's two decisions of 22:40 stand otherwise: P5 is checked by a Claude agent (not Codex), and Codex
+does ONE sweep at the end of the whole queue.
+
 ## LATEST — 22 September 2026, about 22:45. THE QUEUE IS BLOCKED UNTIL SATURDAY. RESUME FROM HERE.
 
 **#514 P5 IS BUILT BUT NOT CHECKED, AND NOT COMMITTED.** Its builder finished; both checkers then died:
