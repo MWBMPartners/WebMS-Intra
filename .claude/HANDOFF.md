@@ -9,6 +9,29 @@ proceeds, so the session can be picked up at any point).
 
 ## Read this first — where we are right now
 
+## LATEST — 22 September 2026, about 20:30. RESUME FROM HERE.
+
+**#514 P4 is still UNCOMMITTED and in its fourth check round.** `SafeFetch.php` (`f054d157…`) and `Hymnal.php` (`598d9893…`) have not
+changed since they passed check r1; every round since has been about `tools/safefetch-selftest.php`, the regression guard for the
+fetcher. Reports: `p514-p4--verify-r1.md` … `r4.md`, and the builder's own `p514-p4--fixes.md` (rounds 1-3).
+
+- **Round 2** proved the first four fixes and found four more faults (part F's connection skip still decided by SafeFetch; the
+  certificate part FAILED on macOS LibreSSL; signals orphaned the servers; the K9 note too narrow). All fixed.
+- **Round 3** proved all eight and found two: the header understated WHEN part I is skipped (and that a broken certificate setting is
+  NOT caught on such a machine), and the bare-port fallback **listened on every network interface**. The fallback was REMOVED (only
+  `-accept 127.0.0.1:port`; otherwise SKIP with the reason), the header corrected, the five-second wait shortened. Proven: normal run
+  252/0/0 in 9 s; LibreSSL 248/0/1 in 9 s; **0 listening sockets opened by openssl during the LibreSSL run**; K1/K2 still fail where
+  the server works.
+- **Round 4 is running** (Opus; Fable refused again on credits, three times today).
+- **Every fix round since the first was done by the ORCHESTRATOR** after three builder agents stalled. Reason found: an agent is
+  killed after 10 minutes with no output, and one self-test run took 10-17 minutes while the network was slow. The checker brief now
+  tells agents to run it detached and poll.
+- Housekeeping: two `php -S` servers left listening since 20 September (#514 P2's scratch work, ports 9110/9111) were identified and
+  stopped.
+
+**WHEN ROUND 4 PASSES:** my own standard checks, commit ONLY the three P4 files (the message must say the orchestrator made the fixes
+after three stalled builders, and that every check ran on Opus because Fable is out of credits), push, comment on #514, then P5.
+
 ## LATEST — 22 September 2026, about 14:40. RESUME FROM HERE.
 
 **P4's four self-test fixes are DONE — by the ORCHESTRATOR itself, as a FALLBACK** (recorded in `.claude-work/resume/p514-p4--fixes.md`).
