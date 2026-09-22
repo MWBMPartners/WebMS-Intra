@@ -9,6 +9,18 @@ proceeds, so the session can be picked up at any point).
 
 ## Read this first — where we are right now
 
+## LATEST — 22 September 2026, about 11:20. RESUME FROM HERE.
+
+**The P4 fix round via the workflow (run `wf_9c79db1b-f8b`) FAILED without changing anything:** its builder was started SIX times and
+each was killed for three minutes without progress (the known "service is slow" pattern). The three P4 files still match the
+fingerprints of the version that passed the check (SafeFetch `f054d157…`, self-test `14fbbb84…`, Hymnal `598d9893…`).
+
+**The same four fixes now run as a BACKGROUND AGENT** (Agent tool, dev-team:opus-builder; no three-minute limit), from the brief
+`.claude-work/briefs/514-p4-fix.md`; progress in `.claude-work/resume/p514-p4--fixes.md`. **When it reports:** run an independent
+check the same way (a fresh background agent that did not build it; Fable first, Opus if Fable is still out of credits), then my own
+checks, commit ONLY the three P4 files, push, comment on #514, then P5. **If the service stays slow, keep using background agents with
+brief files rather than the workflow tool** for P5 onwards.
+
 ## LATEST — 22 September 2026, about 09:10. RESUME FROM HERE.
 
 **#514 P4 (the safe fetcher) PASSED its independent check** after the restart (run `wf_a2a2586e-88f`; check on OPUS, Fable still out
