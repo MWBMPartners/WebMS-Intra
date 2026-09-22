@@ -9,6 +9,21 @@ proceeds, so the session can be picked up at any point).
 
 ## Read this first — where we are right now
 
+## LATEST — 22 September 2026, about 14:40. RESUME FROM HERE.
+
+**P4's four self-test fixes are DONE — by the ORCHESTRATOR itself, as a FALLBACK** (recorded in `.claude-work/resume/p514-p4--fixes.md`).
+The background builder retry at 12:40 stalled too, while READING files (a stream stall, not a hung command), making three stalled
+attempts. Only `tools/safefetch-selftest.php` changed; SafeFetch.php and Hymnal.php are unchanged (`f054d157…`, `598d9893…`). Self-test
+253/0/0 in 10 s. Mutation proof: K1, K2, K3 and K18 now each fail the self-test on exactly the intended check; the unchanged code and
+the K14 control pass; nothing left running. Some runs took minutes because the network/AI service was slow at the time (the auto-mode
+safety check itself timed out once); a plain re-run took 10 s. The mutation script is `p4-mutate.py` in the session scratchpad.
+
+**NOW: independent check** by a separate background agent (dev-team:opus-builder with model **fable**, trying Fable first), brief
+`.claude-work/briefs/514-p4-fix-check.md`, report `.claude-work/resume/p514-p4--verify-r2.md`. If Fable is out of credits it fails
+fast: relaunch the same brief on Opus. **When it passes:** commit ONLY the three P4 files, saying plainly that the orchestrator made
+the fixes after three builders stalled; push; comment on #514; then P5 as a BACKGROUND AGENT with a brief file if the workflow tool
+keeps stalling.
+
 ## LATEST — 22 September 2026, about 11:20. RESUME FROM HERE.
 
 **The P4 fix round via the workflow (run `wf_9c79db1b-f8b`) FAILED without changing anything:** its builder was started SIX times and
