@@ -9,6 +9,22 @@ proceeds, so the session can be picked up at any point).
 
 ## Read this first — where we are right now
 
+## LATEST — 22 September 2026, about 03:10. RESUME FROM HERE.
+
+**#514 P3 IS COMMITTED: `4a915db`, pushed** (73 files). Imported events read-only everywhere else; `check_event_visibility.py` wired
+into pr-security.yml (owner's yes). First check NOT CLEAN (documents linkable to imported/hidden/other-organisation events, imported
+series offered on the event form, series update/delete doing different work for refused vs missing), fixed via re-plan + fix round;
+second check PASS. After it I corrected four over-claiming comments (no behaviour change). **All deep steps ran on OPUS: Fable is still
+out of usage credits** (check r1, re-plan r1, check r2). actionlint with CI's own settings (`SHELLCHECK_OPTS=--severity=error`) exits
+0; without them it prints two info notes that the committed file already had.
+
+**New issues:** **#547** "my volunteering" crashes for everyone (MySQL 1055, ONLY_FULL_GROUP_BY; older than #514). **#548** anyone can
+post livestream chat messages against any event number (ping.php issues sessions for any number). Both are follow-ups after #514.
+**Plan note for P6/P8** added at the end of section 0 of p514--plan-r2.md: series-edit still opens an imported SERIES by number.
+
+**NOW: P4 launching** (`args: { part: "P4", tier: "opus" }`): the safe fetcher (SafeFetch, the shared address test). Reports
+`p514-p4--*.md`.
+
 ## LATEST — 21 September 2026, about 23:25. RESUME FROM HERE.
 
 **#514 P2 IS COMMITTED: `de31cb8`, pushed.** The rule and detail level in every outlet (18 files). Independent check PASS in round 1 (on
