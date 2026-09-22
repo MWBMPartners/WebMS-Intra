@@ -9,6 +9,20 @@ proceeds, so the session can be picked up at any point).
 
 ## Read this first — where we are right now
 
+## LATEST — 22 September 2026, about 09:10. RESUME FROM HERE.
+
+**#514 P4 (the safe fetcher) PASSED its independent check** after the restart (run `wf_a2a2586e-88f`; check on OPUS, Fable still out
+of credits). SafeFetch itself was found correct (55 tricky addresses refused; pinning works). Still uncommitted: `web/_core/SafeFetch.php`,
+`web/_core/Hymnal.php`, `tools/safefetch-selftest.php`.
+
+**A FIX ROUND IS RUNNING before the commit** (run `wf_9c79db1b-f8b`, `args.fixPlan`): (1) the self-test decided two SKIPs with the code
+under test, so a fetcher that refused everything still passed; decide them with dns_get_record() instead; (2) the certificate checks are
+never tested; add a local self-signed `openssl s_server` test; (3) the one-number hex form `0x7f000001` added to part A; (4) K8, K9, K13
+listed in the self-test's "cannot prove" section. The checker's K1-K20 mutation set is re-run. **When it passes:** my own checks,
+commit ONLY the three P4 files, push, comment on #514, then P5 (`args: { part: "P5", tier: "opus" }`).
+For P11's follow-up list: the curl_close() deprecation in Hymnal.php (every remote hymn fetch logs a 'Fatal' 8192 row). #536 gained
+the hymn pages' unprefixed form targets.
+
 ## LATEST — 22 September 2026, about 08:10. RESUME FROM HERE.
 
 **#514 P4's first build was CUT OFF by a server overload (API error 529)** after ~27 minutes (run `wf_a80c9b76-188`), before any
