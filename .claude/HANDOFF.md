@@ -9,6 +9,33 @@ proceeds, so the session can be picked up at any point).
 
 ## Read this first — where we are right now
 
+## LATEST — 23 September 2026, about 03:50. RESUME FROM HERE.
+
+**#514 P5: the round-2 findings are all FIXED, and FABLE'S ROUND-3 CHECK IS RUNNING.** P5 is still uncommitted (5 entries, 50
+fixtures). **Current fingerprints: `.claude-work/resume/p514-p5-built-20260923-fixes2/`** — the `-fixed` and `20260922` folders are
+older states and no longer match. Reports so far: `verify-r1`, `fixes`, `verify-r2`, `fixes2`, and `verify-r3` being written.
+
+**The second fix round bounded the CAUSES, not the shapes that were measured** (which is the mistake round 1 made):
+- `parse()` no longer builds an array of every line; it walks line endings one at a time, with a counted `MAX_LINES_PER_FILE`
+  (500,000, justified from the folding rule in RFC 5545).
+- The two gathering guards moved INSIDE the per-event and per-changed-date loops (they ran once per UID, which is not "per event"
+  when the calendar chooses its own UIDs).
+- The per-event date limit now applies to the whole merged list, so added dates (`RDATE`) go through it too, and the added/skipped
+  lists are cut at a new `MAX_DATE_LIST_PER_EVENT` = **4,000, deliberately not 400**: skipped dates build up over a series' life and
+  are written in date order, so a low cut would drop the RECENT ones and silently bring deleted dates back.
+- Each `BY…` list is measured with `substr_count` BEFORE being split, refused when longer than the values it could possibly hold, and
+  de-duplicated — which also fixed repeats eating `COUNT`.
+**48 runs over 24 files at 128 MB: not one fatal.** A 31 KB same-UID file now ends 0 at 12 MB. The ordinary Google-shaped control
+(648 events) is untouched: complete, not capped, no warnings, 10 MB. Time on the BY-list shapes, never seen before because they died
+of memory first: 0.00 s.
+
+**The self-test: 140 → 184 checks**, five new fixtures, and a mutation run planting SEVENTEEN faults one at a time, every one now
+failing it — including the nine round 2 found (Google's all-day changed date, a private series' changed dates, Microsoft 365's
+comma-separated skipped dates, `COUNT` before the window, and the rest) and guard checks for the new limits themselves.
+
+**One honest limit the builder recorded:** with BOTH gathering guards removed outright, the self-test dies with a fatal at I9 instead
+of printing FAIL. CI still fails, just less helpfully; the comment beside I9 says so. Round 3 is asked to confirm that.
+
 ## LATEST — 23 September 2026, about 00:45. RESUME FROM HERE.
 
 **#514 P5, round 2 (Fable): NOT CLEAN again, and it matters. A SECOND FIX ROUND IS RUNNING** (Opus background agent, brief
