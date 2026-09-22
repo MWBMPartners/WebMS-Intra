@@ -9,6 +9,32 @@ proceeds, so the session can be picked up at any point).
 
 ## Read this first — where we are right now
 
+## LATEST — 23 September 2026, about 00:45. RESUME FROM HERE.
+
+**#514 P5, round 2 (Fable): NOT CLEAN again, and it matters. A SECOND FIX ROUND IS RUNNING** (Opus background agent, brief
+`.claude-work/briefs/514-p5-fix2.md`, report `.claude-work/resume/p514-p5--fixes2.md`). P5 is still uncommitted; current fingerprints
+in `.claude-work/resume/p514-p5-built-20260923-fixed/`. The check report is `p514-p5--verify-r2.md`.
+
+**Round 2 confirmed all seven round-1 fixes are real, then answered the brief's own question — can a file the fetcher allows still
+kill the reader? — with YES, four more ways, all inside the 5 MB cap:**
+- (a) a file of bare line breaks (4-5 MB): `explode()` at `:314` builds every line BEFORE the first memory check at `:331`;
+- (b) **250 never-ending series sharing ONE UID — 31 KB**: the guards at `:1986-1994` run once per UID, not per event;
+- (c) ONE event with 100,000 `RDATE` moments (1.6 MB): `RDATE`s are appended with no per-series cap;
+- (d) a rule repeating one BY… value 300,000 times (900 KB): dies inside `parseRule()` at `:1225`. Nothing de-duplicates the lists,
+  which also makes repeats eat `COUNT` (`BYMONTHDAY=1,1;COUNT=3` gives two dates).
+**Ordinary calendars are untouched** (648 events, 1,816 dates: complete, not capped, 10 MB), which is the other half of the test.
+
+**And the self-test still passes on NINE realistic faults**, three that would bite in real life: an all-day changed date the way
+GOOGLE writes it; a private series not keeping its changed dates private (a leak the class promises to prevent); and a comma-separated
+`EXDATE` line, which is how MICROSOFT 365 writes skipped dates. It also found `yearly-count.ics`'s own note untrue (its third date is
+outside the window), so that check never exercises `COUNT` stopping a series.
+
+Plus: exactly 6,000 events is called incomplete (the same edge as round 1's 400), and four comments describe guards as per-event when
+they are per-UID.
+
+**When the fix round reports: re-check with Fable (round 3).** This is the third time a Fable check has found things four Opus rounds
+would not have. Keep Fable as the checker for every remaining part.
+
 ## LATEST — 23 September 2026, about 00:20. RESUME FROM HERE.
 
 **#514 P5: all seven findings from Fable's check are FIXED (Opus builder), and FABLE'S ROUND-2 CHECK IS RUNNING.** P5 is still
