@@ -9,6 +9,29 @@ proceeds, so the session can be picked up at any point).
 
 ## Read this first — where we are right now
 
+## LATEST — 23 September 2026, about 00:20. RESUME FROM HERE.
+
+**#514 P5: all seven findings from Fable's check are FIXED (Opus builder), and FABLE'S ROUND-2 CHECK IS RUNNING.** P5 is still
+uncommitted. Reports: `p514-p5--verify-r1.md` (round 1), `p514-p5--fixes.md` (the fixes), `p514-p5--verify-r2.md` (round 2, being
+written). **The current copy with fingerprints is `.claude-work/resume/p514-p5-built-20260923-fixed/`** — the `20260922` snapshot is
+the build BEFORE the fixes and no longer matches.
+
+**What the fixes did:**
+- **Memory: three guards** — a cap on event blocks held while reading (6,000), a cap on dates gathered before the list is cut
+  (6,000), and a check of `memory_get_usage(true)` against the process's `memory_limit` beside the deadline checks; `parse()` frees
+  its copies of the file. Measured at 128 MB: a 2.52 MB file that used to die with a fatal now ends 0 with a warning and peaks at
+  49 MB; the fetcher's full 5 MB limit peaks at 71 MB; an ordinary 2,000-event calendar is untouched. **The builder found a case the
+  check had not: a 95 KB file holding 500 never-ending daily series killed the process just as dead** — no event count would have
+  caught it, which is why the second cap exists. The header now says a fatal is very unlikely, NOT impossible.
+- **The self-test:** seven new fixtures, 104 → 140 checks, and its own mutation run plants eleven faults one at a time, each of which
+  now fails it (including RFC 5545's own worked example for `WKST`).
+- Yearly `BYDAY` without an ordinal and yearly `BYMONTHDAY` are now SUPPORTED (52 and 12 dates, not 4 and 1); only ambiguous mixtures
+  are refused. A backwards all-day end gives one day. 400 dates is no longer called cut short. The Windows list gains
+  `Dateline Standard Time` (139). Invalid UTF-8 now loses only the bad bytes, not every accent.
+
+**When round 2 reports:** fix anything found, re-check until clean, then my own standard checks, commit ONLY P5's five entries, push,
+comment on #514, then P6 (`args: { part: "P6", tier: "opus" }`, migration 205).
+
 ## LATEST — 22 September 2026, about 23:35. RESUME FROM HERE.
 
 **#514 P5's check came back NOT CLEAN (Fable, the first Fable check since the credits returned) and a FIX ROUND IS RUNNING** (Opus
