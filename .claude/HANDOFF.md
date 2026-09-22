@@ -9,6 +9,26 @@ proceeds, so the session can be picked up at any point).
 
 ## Read this first — where we are right now
 
+## LATEST — 22 September 2026, about 22:15. RESUME FROM HERE.
+
+**#514 P4 IS COMMITTED: `51cb46b`, pushed, #514 commented.** SafeFetch (the safe fetcher), Hymnal's stricter refusal, and
+`tools/safefetch-selftest.php` (252 checks). **Five check rounds, every one by a separate agent, every one on OPUS** (Fable was out
+of usage credits all day, refusing four times). Rounds 2-5's fixes were made by the ORCHESTRATOR after three builder agents stalled.
+
+**The stalls are explained and the remedy is written into the briefs:** an agent is killed after 10 minutes with no output, and one
+self-test run took 10-17 minutes when the network was slow. Agents must run long commands detached and poll them, printing a line
+each time. Also: never read an exit code through a pipe, and read this test's output with `grep -a` (it prints one invalid byte on
+purpose).
+
+**What the rounds caught, worth remembering:** a self-test that printed "no outbound network" and passed while the fetcher was
+completely broken; a certificate test that failed on macOS's own openssl over tooling, not a fault; and a fallback server that
+listened on EVERY network interface (removed, not documented — measured afterwards: 0 listening sockets on the skip path, and only
+127.0.0.1 otherwise).
+
+**NOW: P5** (`args: { part: "P5", tier: "opus" }`): IcsReader and WindowsTimeZones with fixtures — repeats, skipped and changed
+dates, Windows zone names, all-day ends, daylight saving. No network and no database, so its runs should be fast; the workflow tool
+is fine for it. The real-export proof prints SKIPPED (no test calendars exist; owner decision 9). Reports `p514-p5--*.md`.
+
 ## LATEST — 22 September 2026, about 20:30. RESUME FROM HERE.
 
 **#514 P4 is still UNCOMMITTED and in its fourth check round.** `SafeFetch.php` (`f054d157…`) and `Hymnal.php` (`598d9893…`) have not
