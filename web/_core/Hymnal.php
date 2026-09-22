@@ -34,7 +34,15 @@
  *   • IP-literal / private / reserved-range hosts refused (both at save
  *     and again here — belt & braces; DNS-rebinding past this point is a
  *     documented residual risk, acceptable because the feature is
- *     default-off, owner-configured, single-host, GET-only).
+ *     default-off, owner-configured, single-host, GET-only). Since #514
+ *     part P4 the "is this address private or reserved?" test itself is
+ *     `SafeFetch::isPublicIp()`, shared with the outside-calendar importer,
+ *     so the two features refuse exactly the same ranges. Before that this
+ *     file used PHP's older NO_PRIV_RANGE | NO_RES_RANGE flags, which let
+ *     through (tested on PHP 8.5.10) the providers' shared range
+ *     100.64.0.0/10, multicast, the documentation and benchmark ranges,
+ *     6to4, and the IPv6 spellings `::ffff:0:7f00:1` and `::7f00:1` that
+ *     hold 127.0.0.1.
  *   • `CURLOPT_FOLLOWLOCATION = false` — a redirect is never followed.
  *   • `CURLOPT_PROTOCOLS` / `CURLOPT_REDIR_PROTOCOLS` locked to HTTPS.
  *   • Connect timeout 3s / total timeout 5s.
@@ -608,11 +616,21 @@ class Hymnal
     }
 
     /**
-     * True when `$host` is an IP literal in a private/reserved range, or
-     * resolves (A record) to one — the SSRF guard. A hostname that fails
-     * to resolve at all is treated as NOT reserved (its own connection
-     * attempt will simply fail); this function only ever makes the remote
-     * client MORE cautious, never determines reachability on its own.
+     * True when `$host` is an IP literal that is not an ordinary public
+     * address, or resolves (A/AAAA records) to one — the SSRF guard. The
+     * range test is `SafeFetch::isPublicIp()` (#514 part P4), shared with
+     * the outside-calendar importer.
+     *
+     * A hostname that fails to resolve at all is treated as NOT reserved
+     * (its own connection attempt will simply fail); this function only ever
+     * makes the remote client MORE cautious, never determines reachability
+     * on its own. That deliberately differs from `SafeFetch::check()`, which
+     * refuses a name that does not resolve. The difference is kept because
+     * the two situations differ: the hymn lookup's host is a fixed
+     * administrator setting, re-checked against the configured base URL on
+     * every request, and its fetch never follows a redirect; the calendar
+     * importer fetches whatever address was typed in and follows redirects,
+     * so it must refuse whatever it cannot vouch for.
      */
     private static function isPrivateOrReservedHost(string $host): bool
     {
@@ -620,7 +638,7 @@ class Hymnal
 
         // 🔍 If it's already an IP literal, check it directly.
         if (filter_var($host, FILTER_VALIDATE_IP) !== false) {
-            return filter_var($host, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE) === false;
+            return SafeFetch::isPublicIp($host) === false;
         }
 
         // 🌐 Otherwise resolve and check every returned address — DNS
@@ -637,7 +655,7 @@ class Hymnal
             if ($ip === '') {
                 continue;
             }
-            if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE) === false) {
+            if (SafeFetch::isPublicIp($ip) === false) {
                 return true;
             }
         }
@@ -648,6 +666,14 @@ class Hymnal
      * GET `$url` with every SSRF/size/timeout guard applied, returning the
      * body on a clean 200 JSON-looking response, or null on ANY failure.
      * NEVER logs `$url`'s query string or the Authorization header value.
+     *
+     * Deliberately unchanged by #514 part P4. What it still does NOT do:
+     * pin the connection to the addresses `isPrivateOrReservedHost()`
+     * checked, so a name re-pointed between the check and the connection
+     * (DNS rebinding) is not caught here; and it does not switch off a
+     * proxy set in the server's environment. `SafeFetch::get()` does both.
+     * Moving this onto it is a follow-up issue raised by part P11 of #514,
+     * not part of P4.
      *
      * @param list<string> $headers
      */
