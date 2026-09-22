@@ -9,6 +9,39 @@ proceeds, so the session can be picked up at any point).
 
 ## Read this first — where we are right now
 
+## LATEST — 22 September 2026, about 22:45. THE QUEUE IS BLOCKED UNTIL SATURDAY. RESUME FROM HERE.
+
+**#514 P5 IS BUILT BUT NOT CHECKED, AND NOT COMMITTED.** Its builder finished; both checkers then died:
+Fable "out of usage credits", then Opus **"You've hit your weekly limit · resets Sep 27 at 4pm (Europe/London)"**. So no helper
+agent can check anything until **Saturday 27 September 16:00**.
+
+**The owner decided (22:40):** P5 waits for a Claude agent check on Saturday — do NOT commit it unchecked, and do NOT have Codex
+check it. Codex still does **one sweep at the end of the whole queue**, unchanged.
+
+**WHAT IS IN THE WORKING TREE (uncommitted, 5 untracked entries):** `web/_core/IcsReader.php`, `web/_core/WindowsTimeZones.php`,
+`tools/ics-reader-selftest.php`, `tools/generate-windows-timezones.php`, `tools/fixtures/ics/`. **A durable copy with fingerprints is
+in `.claude-work/resume/p514-p5-built-20260922/`** (git-excluded but on disk), with `git-status.txt` and `fingerprints.txt`. The build
+report is `p514-p5--build.md`. If the working tree is ever lost, restore from that copy and re-check the fingerprints.
+**My own mechanical checks on it (NOT an independent check):** php -l clean on all four files; all 20 audit checks exit 0;
+check_static_calls.php exits 0; its own self-test 104 passed, 0 failed, 2 SKIPPED (the real Google and Microsoft 365 exports, which
+do not exist — owner decision 9). The dead checker's leftovers were cleaned up: container `p514-p5-check` removed, four `php -S`
+servers on 9196-9199 stopped.
+
+**ON SATURDAY, in this order:** (1) probe Fable first with a one-word agent task, then Opus; (2) run the P5 check as a background
+agent with a brief file (the workflow tool's steps die on long commands) — reuse `.claude-work/briefs/514-p4-fix-check.md` as the model
+and its "HOW TO RUN THE SELF-TEST WITHOUT BEING KILLED" section; (3) fix what it finds, re-check until clean; (4) commit ONLY P5's
+files; (5) then P6 (`args: { part: "P6", tier: "opus" }`, migration 205).
+
+**CODEX IS FIXED (22:35).** It had been refusing everything with "The 'gpt-6-sol' model is not supported when using Codex with a
+ChatGPT account". Its config named a model this account cannot use; the model that worked here on 20 September is **gpt-6-astra**.
+`~/.codex/config.toml` now says `model = "gpt-6-astra"` (backup: `~/.codex/config.toml.backup-2026-09-22`), and
+`codex exec --skip-git-repo-check "..." < /dev/null` answers normally. **Run it with stdin closed**, or it waits for typing. A CLI
+update is available (0.155.1 against 0.154.0); not installed. Connectivity and the ChatGPT login were both fine — only the model name
+was wrong.
+
+**WHAT IS AND IS NOT POSSIBLE UNTIL SATURDAY:** anything needing an independent check cannot be finished, and #514's parts must be
+built in order, so P6 onwards cannot start either. This session itself still works.
+
 ## LATEST — 22 September 2026, about 22:15. RESUME FROM HERE.
 
 **#514 P4 IS COMMITTED: `51cb46b`, pushed, #514 commented.** SafeFetch (the safe fetcher), Hymnal's stricter refusal, and
