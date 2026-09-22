@@ -74,10 +74,16 @@ class ServicePlanLink
     {
         $db = App::db();
 
+        // 👁️ EventVisibility (#514 D5, fix round 1: checker finding 2b). This resolver's result
+        // is shown on the run-sheet editor's paired-plan panel (service-plans/edit.php), reachable
+        // by anyone who can edit a run-sheet — proven that, with a pairing made before this fix,
+        // a HIDDEN imported event's name appeared there to an old-flag-only administrator the
+        // visibility rule refuses the event itself to. The pairing (eventID) is untouched; only
+        // the event's own NAME is hidden.
         $stmt = $db->prepare(
             'SELECT p.planID, p.name, p.isActive, p.eventID, e.eventName '
             . 'FROM tblServicePlans p '
-            . 'LEFT JOIN tblEvents e ON e.eventID = p.eventID AND e.isDeleted = 0 '
+            . 'LEFT JOIN tblEvents e ON e.eventID = p.eventID AND e.isDeleted = 0 AND e.externalFeedID IS NULL '
             . 'WHERE p.runSheetPlanID = ? AND p.siteID = ?'
         );
         $stmt->bind_param('ii', $runPlanId, $siteId);
@@ -179,11 +185,15 @@ class ServicePlanLink
         $db = App::db();
         $out = [];
 
+        // 👁️ EventVisibility (#514 D5, fix round 1: checker finding 2b). Same reasoning as
+        // worshipPlanForRunSheet() above: this list offers pairing candidates to a run-sheet
+        // editor, so an imported event's name must not appear here to somebody the visibility
+        // rule would refuse that event to.
         $stmt = $db->prepare(
             'SELECT p.planID, p.name, p.eventID, e.eventName, '
             . '       (SELECT COUNT(*) FROM tblServicePlanItems i WHERE i.planID = p.planID) AS itemCount '
             . 'FROM tblServicePlans p '
-            . 'LEFT JOIN tblEvents e ON e.eventID = p.eventID AND e.isDeleted = 0 '
+            . 'LEFT JOIN tblEvents e ON e.eventID = p.eventID AND e.isDeleted = 0 AND e.externalFeedID IS NULL '
             . 'WHERE p.siteID = ? AND p.isActive = 1 AND p.runSheetPlanID IS NULL '
             . 'ORDER BY p.updatedAt DESC LIMIT 50'
         );

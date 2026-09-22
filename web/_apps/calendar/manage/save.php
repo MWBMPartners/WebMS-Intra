@@ -278,6 +278,42 @@ $userId = $_SESSION['user_id'] ?? null;
 $siteId = Site::id();
 
 // -----------------------------------------------------------------------------
+// 👁️ EventVisibility (#514 D5, fix round 1: checker finding 6 — a plan gap, not
+// a slip in the original P3 build). Imported events are read-only, and so is
+// any series that holds one — but before this fix, nothing here re-checked a
+// posted seriesID at all. The manage form's own series picker
+// (calendar/manage/index.php) no longer OFFERS an imported series, but that
+// alone does not stop a forged POST naming one directly: reproduced before
+// this fix, posting an imported series's own number created a brand-new,
+// entirely ordinary OWN event silently inside an importer-managed series.
+// This repeats the exact same NOT EXISTS test the picker and the series page
+// itself both use, and — like the venue link resolved just below — silently
+// drops an invalid choice to NULL rather than blocking the save with an
+// error: choosing "no series" is always a valid choice, so a rejected one
+// simply becomes that.
+// -----------------------------------------------------------------------------
+if ($seriesID !== null) {
+    $stmtSeriesCheck = $mysqli->prepare(
+        'SELECT s.seriesID FROM tblEventSeries s WHERE s.seriesID = ? AND s.siteID = ? '
+        . '  AND NOT EXISTS (SELECT 1 FROM tblEvents xi WHERE xi.seriesID = s.seriesID AND xi.externalFeedID IS NOT NULL) '
+        . 'LIMIT 1'
+    );
+    if ($stmtSeriesCheck !== false) {
+        $stmtSeriesCheck->bind_param('ii', $seriesID, $siteId);
+        $stmtSeriesCheck->execute();
+        $validSeries = $stmtSeriesCheck->get_result()->fetch_assoc();
+        $stmtSeriesCheck->close();
+        if ($validSeries === null) {
+            $seriesID = null;
+        }
+    } else {
+        // Prepare failing is treated the same as "not found": never let a
+        // database hiccup silently accept an unchecked series number.
+        $seriesID = null;
+    }
+}
+
+// -----------------------------------------------------------------------------
 // 🏛️ Venue Bookings (#429, #436) — resolve the persisted venue/room links.
 // Tri-state:
 //   $venueLinkActive === false ⇒ Venues disabled/absent/threw ⇒ do NOT
@@ -409,6 +445,13 @@ if ($action === 'create') {
 
     $insertPlaceholders = implode(', ', array_fill(0, count($insertColumns), '?'));
 
+    // Imported events are read-only (#514 D5), but that rule is about READING and WRITING an
+    // existing imported row, not about this INSERT: $insertColumns never lists externalFeedID, so
+    // every row this statement creates takes the column's own default and is externalFeedID IS NULL
+    // by construction. (Fix round 1, G7: corrected wording — today `cron/import-feeds.php` is the
+    // only code that ever sets that column; #514 P6 REPLACES that importer with a new one, it is
+    // not the first thing to set the column.) Marker text for
+    // tools/audit-checks/check_event_visibility.py; no condition to add here.
     $stmt = $mysqli->prepare(
         'INSERT INTO tblEvents (' . implode(', ', $insertColumns) . ') VALUES (' . $insertPlaceholders . ')'
     );
@@ -501,7 +544,12 @@ if ($action === 'update') {
     $paramValues[] = $eventID;
     $paramValues[] = $siteId;
 
-    $sql = 'UPDATE tblEvents SET ' . implode(', ', $setClauses) . ' WHERE eventID = ? AND siteID = ?';
+    // Imported events are read-only (#514 D5). Nothing in the portal can link to this form for an
+    // imported event any more (manage/index.php's edit load and list both exclude them), but a posted
+    // eventID is never trusted on its own, so the condition is repeated here: a forged post against an
+    // imported event's id updates 0 rows rather than silently overwriting a row the next refresh from
+    // the source calendar would just overwrite again anyway.
+    $sql = 'UPDATE tblEvents SET ' . implode(', ', $setClauses) . ' WHERE eventID = ? AND siteID = ? AND externalFeedID IS NULL';
 
     $stmt = $mysqli->prepare($sql);
     if ($stmt !== false) {

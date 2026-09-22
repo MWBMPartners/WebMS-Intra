@@ -65,12 +65,14 @@ if ($report === 'attendance-by-quarter' && $qStart !== null) {
 } elseif ($report === 'events-summary' && $qStart !== null) {
     $data['title']   = 'Events held — ' . $quarter;
     $data['columns'] = ['Date', 'Event', 'RSVPs'];
+    // Imported events are read-only (#514 D5) and are not the organisation's own; this report only
+    // ever counts events an administrator here actually manages.
     $stmt = $mysqli->prepare(
         'SELECT e.startDateTime, e.eventName, COALESCE(c.cnt, 0) AS rsvps '
         . 'FROM tblEvents e LEFT JOIN ('
         . '  SELECT eventID, COUNT(*) cnt FROM tblEventRSVPs WHERE status = "confirmed" GROUP BY eventID'
         . ') c ON c.eventID = e.eventID '
-        . 'WHERE e.siteID = ? AND e.isDeleted = 0 AND e.startDateTime BETWEEN ? AND ? '
+        . 'WHERE e.siteID = ? AND e.isDeleted = 0 AND e.externalFeedID IS NULL AND e.startDateTime BETWEEN ? AND ? '
         . 'ORDER BY e.startDateTime'
     );
     if ($stmt !== false) {

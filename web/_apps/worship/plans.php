@@ -37,11 +37,17 @@ if (in_array($filter, ['active', 'archived', 'all'], true) === false) {
 }
 
 // 📋 Plans with item count derived inline (LEFT JOIN + GROUP BY).
+//
+// 👁️ EventVisibility (#514 D5, fix round 1: checker finding 2b). This page is reachable by any
+// signed-in member (Auth::requireLogin() only, no administrator gate), so a worship plan paired
+// with an imported event before this fix landed could show that event's name to somebody the
+// visibility rule refuses the event itself to. Excluding an imported event from the JOIN hides
+// only its NAME here — the plan row and its eventID link are untouched.
 $plans = [];
 $sql = 'SELECT p.planID, p.name, p.notes, p.isActive, p.updatedAt, p.eventID, '
      . '       e.eventName, COALESCE(c.itemCount, 0) AS itemCount, u.fullName AS creatorName '
      . 'FROM tblServicePlans p '
-     . 'LEFT JOIN tblEvents e ON e.eventID = p.eventID AND e.isDeleted = 0 '
+     . 'LEFT JOIN tblEvents e ON e.eventID = p.eventID AND e.isDeleted = 0 AND e.externalFeedID IS NULL '
      . 'LEFT JOIN tblUsers  u ON u.userID  = p.createdByID '
      . 'LEFT JOIN (SELECT planID, COUNT(*) AS itemCount FROM tblServicePlanItems GROUP BY planID) c '
      . '         ON c.planID = p.planID '

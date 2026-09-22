@@ -154,6 +154,10 @@ $visibility    = EventVisibility::where('e', EventVisibility::MODE_SESSION, $vie
 //    fragment's own column names are checked by
 //    tools/event-visibility-selftest.php), and its values are bound after
 //    the three the literal conditions take.
+// 👁️ EventVisibility::where() (#514 P3 marker: the call itself is a dozen-odd lines above, past
+//    the capacity explanation, so this short repeat keeps the query within
+//    tools/audit-checks/check_event_visibility.py's own search window — see that script's header
+//    for why the window is a fixed size rather than "wherever the call happens to sit").
 $evStmt = $mysqli->prepare(
     'SELECT e.eventID, e.eventName, e.capacity FROM tblEvents e '
     . 'WHERE e.eventID = ? AND e.siteID = ? AND e.isDeleted = 0 '

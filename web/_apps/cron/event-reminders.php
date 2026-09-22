@@ -191,7 +191,23 @@ function eventRsvpUserIds(\mysqli $db, int $eventId): array
 // 24h window
 // ─────────────────────────────────────────────────────────────────────
 // #514 part P2: every event in the window is looked at; WHO is reminded, and
-// with how much detail, is decided per recipient inside sendReminderBatch().
+// with how much detail, is decided per recipient inside sendReminderBatch(),
+// which is CALLED near the top of this file and reads the rule through
+// EventVisibility::whereForColumn() — the rule cannot be applied to this
+// outer query at all, because it has no single viewer yet: that is the whole
+// reason this query has to look at every event in the window first, before
+// anybody specific is known.
+//
+// 🩹 FIX ROUND 1 (checker finding 7, G7): corrected wording. The previous
+// text said whereForColumn() runs "once for each candidate recipient",
+// which reads as one database round trip per person. That is not how
+// sendReminderBatch() works: it is ONE statement per event, joined to every
+// candidate recipient's own row at once, with EACH recipient's user number
+// supplied as the viewer column (`whereForColumn`'s whole point — it takes a
+// COLUMN, not a bound value, so one statement filters every row for its own
+// viewer in a single pass). Marker text for
+// tools/audit-checks/check_event_visibility.py, since the real call sits
+// further up this file than the check's own search window reaches.
 $stmt = $mysqli->prepare(
     'SELECT e.eventID, e.eventName, e.eventSlug, e.startDateTime, e.locationName, e.externalFeedID FROM tblEvents e '
     . 'WHERE e.isDeleted = 0 AND e.status = "published" '
@@ -216,6 +232,10 @@ $stmt->close();
 // ─────────────────────────────────────────────────────────────────────
 // 1h window
 // ─────────────────────────────────────────────────────────────────────
+// Same shape as the 24h window above: every event in the window is looked
+// at here, and EventVisibility::whereForColumn() decides per recipient
+// inside sendReminderBatch() — see that query's own comment for the full
+// explanation of why the rule cannot apply to this outer query.
 $stmt = $mysqli->prepare(
     'SELECT e.eventID, e.siteID, e.eventName, e.eventSlug, e.startDateTime, e.locationName, e.externalFeedID FROM tblEvents e '
     . 'WHERE e.isDeleted = 0 AND e.status = "published" '

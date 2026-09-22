@@ -48,10 +48,14 @@ if ($isNew === true) {
         'isActive' => 1, 'eventID' => null, 'eventName' => null,
     ];
 } elseif ($planId > 0) {
+    // 👁️ EventVisibility (#514 D5, fix round 1: checker finding 2b). Today this page never
+    // prints $plan['eventName'] — only worship/plans.php's list does — but excluding an imported
+    // event's name here too closes the gap before any future change to this file starts printing
+    // it without re-discovering the rule. The eventID link itself is untouched.
     $stmt = $mysqli->prepare(
         'SELECT p.planID, p.name, p.notes, p.isActive, p.eventID, e.eventName '
         . 'FROM tblServicePlans p '
-        . 'LEFT JOIN tblEvents e ON e.eventID = p.eventID '
+        . 'LEFT JOIN tblEvents e ON e.eventID = p.eventID AND e.externalFeedID IS NULL '
         . 'WHERE p.planID = ? AND p.siteID = ?'
     );
     $stmt->bind_param('ii', $planId, $siteId);

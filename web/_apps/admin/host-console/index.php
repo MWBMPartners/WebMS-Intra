@@ -56,7 +56,8 @@ $stmt = $mysqli->prepare(
     . '       (SELECT MAX(s.lastPingAt) FROM tblLivestreamSessions s '
     . '         WHERE s.eventID = e.eventID) AS lastActivity '
     . 'FROM tblEvents e '
-    . 'WHERE e.siteID = ? AND e.isDeleted = 0 AND e.status = "published" '
+    // Imported events are read-only (#514 D5); this makes an imported event exactly as "not found" as a missing one.
+    . 'WHERE e.siteID = ? AND e.isDeleted = 0 AND e.externalFeedID IS NULL AND e.status = "published" '
     . '  AND ('
     . '    EXISTS (SELECT 1 FROM tblLivestreamSessions s WHERE s.eventID = e.eventID) '
     . '    OR DATE(e.startDateTime) = CURDATE() '

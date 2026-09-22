@@ -127,7 +127,9 @@ final class ReportRegistry
             'alias'      => 'e',
             'appSlug'    => 'calendar',
             'siteExpr'   => 'e.siteID',
-            'fixedWhere' => ['e.isDeleted = 0'],
+            // Imported events are read-only (#514 D5); the report builder only ever offers events
+            // this organisation actually manages, never one whose source calendar owns the data.
+            'fixedWhere' => ['e.isDeleted = 0', 'e.externalFeedID IS NULL'],
             'joins'      => [
                 'category' => 'LEFT JOIN tblEventCategories ecat ON ecat.categoryID = e.categoryID',
             ],

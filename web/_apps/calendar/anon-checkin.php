@@ -59,9 +59,9 @@
 // flag (rsvp-by-link.php:207 does; this page deliberately does not,
 // because #514's leak-hunt finding 3 decided that flag proves nothing — any
 // site administrator can tick it on any account, in any organisation). It
-// does not exclude an imported event (no `externalFeedID IS NULL` — the
-// importer already forces every imported row to `isPublic = 1`, so nothing
-// changes there; #514 P3 is where that gets revisited). It cannot tell a
+// excludes an imported event (`externalFeedID IS NULL` was added by #514 P3
+// — imported events are read-only, so a check-in QR code must never work on
+// one). It cannot tell a
 // member who was removed before #518 (whose row was deleted outright) from
 // an account that has simply never had one.
 declare(strict_types=1);
@@ -87,9 +87,10 @@ $siteId = Site::id();
 // are database yes/no flags: a prepared statement hands one back as the
 // NUMBER 1, not the text '1' (#497), so the comparison is done in SQL
 // rather than risking that trap in PHP.
+// Imported events are read-only (#514 D5); this makes an imported event exactly as "not found" as a missing one.
 $stmt = $mysqli->prepare(
     'SELECT eventID, eventName, startDateTime FROM tblEvents '
-    . 'WHERE eventID = ? AND siteID = ? AND isDeleted = 0 '
+    . 'WHERE eventID = ? AND siteID = ? AND isDeleted = 0 AND externalFeedID IS NULL '
     . "  AND status = 'published' "
     . '  AND ( isPublic = 1 '
     . '        OR EXISTS (SELECT 1 FROM tblUsers va '

@@ -94,8 +94,9 @@ if (isset($body['sessionTime']) === true && trim((string) $body['sessionTime']) 
 $eventId = null;
 if (isset($body['eventID']) === true && $body['eventID'] !== null && $body['eventID'] !== '') {
     $eventId = (int) $body['eventID'];
+    // Imported events are read-only (#514 D5); this makes an imported event exactly as "not found" as a missing one.
     $evCheck = $db->prepare(
-        'SELECT eventID FROM tblEvents WHERE eventID = ? AND siteID = ? AND isDeleted = 0 LIMIT 1'
+        'SELECT eventID FROM tblEvents WHERE eventID = ? AND siteID = ? AND isDeleted = 0 AND externalFeedID IS NULL LIMIT 1'
     );
     if ($evCheck === false) {
         Logger::errorPlatform('MySQL', 'Error', 'API_ATT_CREATE_EVENT_PREP', $db->error, '');

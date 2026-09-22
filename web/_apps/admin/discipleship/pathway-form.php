@@ -115,7 +115,8 @@ if ($isEdit === true) {
             if ($rule === 'attended_category') {
                 $chk = $db->prepare('SELECT categoryID FROM tblEventCategories WHERE categoryID = ? AND siteID = ?');
             } else {
-                $chk = $db->prepare('SELECT eventID FROM tblEvents WHERE eventID = ? AND siteID = ?');
+                // Imported events are read-only (#514 D5); this makes an imported event exactly as "not found" as a missing one.
+                $chk = $db->prepare('SELECT eventID FROM tblEvents WHERE eventID = ? AND siteID = ? AND externalFeedID IS NULL');
             }
             if ($chk !== false) {
                 $chk->bind_param('ii', $ref, $siteId);
@@ -132,9 +133,11 @@ if ($isEdit === true) {
 $eventOptions    = [];
 $categoryOptions = [];
 if ($isEdit === true) {
+    // Imported events are read-only (#514 D5); a discipleship step can only auto-complete against the
+    // organisation's own events, never one nobody here can edit or retire.
     $evStmt = $db->prepare(
         'SELECT eventID, eventName, startDateTime FROM tblEvents '
-        . 'WHERE siteID = ? AND isDeleted = 0 ORDER BY startDateTime DESC LIMIT 200'
+        . 'WHERE siteID = ? AND isDeleted = 0 AND externalFeedID IS NULL ORDER BY startDateTime DESC LIMIT 200'
     );
     if ($evStmt !== false) {
         $evStmt->bind_param('i', $siteId);

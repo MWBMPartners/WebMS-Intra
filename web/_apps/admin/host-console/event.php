@@ -48,8 +48,12 @@ $trend     = HostConsole::sessionTrend7d($eventId, $siteId);
 $decisions = HostConsole::decisionTallies($eventId);
 $cards     = HostConsole::recentCards($eventId, $siteId, 15);
 
-// 📋 Event header (cheap query — the gate above already touched the row).
-$stmt = $mysqli->prepare('SELECT eventName, startDateTime, locationName FROM tblEvents WHERE eventID = ?');
+// 📋 Event header (cheap query — the gate above already touched the row, and
+// HostConsole::eventBelongsToSite() now also refuses an imported event; the
+// condition is repeated here too so this line still carries its own marker
+// for tools/audit-checks/check_event_visibility.py, imported events are
+// read-only (#514 D5)).
+$stmt = $mysqli->prepare('SELECT eventName, startDateTime, locationName FROM tblEvents WHERE eventID = ? AND externalFeedID IS NULL');
 $stmt->bind_param('i', $eventId);
 $stmt->execute();
 $event = $stmt->get_result()->fetch_assoc();

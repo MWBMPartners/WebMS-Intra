@@ -33,9 +33,11 @@ if ($eventId <= 0) {
 $siteId = Site::id();
 $db     = App::db();
 
+// Imported events are read-only (#514 D5); this makes an imported event exactly as "not found" as a missing one
+// (affected_rows stays 0, the same as deleting a number that does not exist).
 $stmt = $db->prepare(
     'UPDATE tblEvents SET isDeleted = 1, deletedAt = NOW() '
-    . 'WHERE eventID = ? AND siteID = ? AND isDeleted = 0 LIMIT 1'
+    . 'WHERE eventID = ? AND siteID = ? AND isDeleted = 0 AND externalFeedID IS NULL LIMIT 1'
 );
 if ($stmt === false) {
     Logger::errorPlatform('MySQL', 'Error', 'API_EVENT_DELETE_PREP', $db->error, '');

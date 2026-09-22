@@ -184,8 +184,9 @@ if ($widgetEventId > 0) {
     //    See events/api/detail.php for the fuller write-up (rejected
     //    alternatives, what "cannot promise" means) — the same design.
     $canManageFlag = App::isAdmin() === true ? 1 : 0;
+    // Imported events are read-only (#514 D5); this makes an imported event exactly as "not found" as a missing one.
     $stmt = $mysqli->prepare(
-        'SELECT 1 FROM tblEvents WHERE eventID = ? AND siteID = ? AND isDeleted = 0 '
+        'SELECT 1 FROM tblEvents WHERE eventID = ? AND siteID = ? AND isDeleted = 0 AND externalFeedID IS NULL '
         . "AND (status IN ('published', 'cancelled', 'postponed') OR ? = 1) LIMIT 1"
     );
     $stmt->bind_param('iii', $widgetEventId, $siteId, $canManageFlag);

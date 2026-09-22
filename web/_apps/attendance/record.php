@@ -22,6 +22,7 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\EventVisibility;
 use Portal\Core\Router;
 use Portal\Core\Site;
 
@@ -153,15 +154,51 @@ if ($stmtTypes !== false) {
 }
 
 // 📅 Recent events for linking (optional — last 30 days + next 30 days)
+//
+// Imported events are read-only (#514 D5); this picker excludes them outright, because
+// attendance can only ever be linked to an event this organisation actually manages —
+// `externalFeedID IS NULL` on its own line, not folded into the visibility rule below.
+//
+// This also closes #511 for this picker. Before #514, every event of the site was offered
+// regardless of who was signing the attendance in, including a Members-only event to a viewer
+// with no membership row for this organisation. `EventVisibility::where()` in "session" mode is
+// the same rule every viewer-facing page in the portal now uses.
+//
+// 🩹 FIX ROUND 1 (checker finding 7, G7): corrected wording. This used to also say the rule
+// "applies the same test to a Selected-groups event too" — but the line above this comment
+// already excludes every imported event (`externalFeedID IS NULL`), and a Selected-groups level
+// only ever exists on an IMPORTED event (1.1 in the plan: the portal's own events have exactly
+// two levels, public or members, read straight from isPublic). So for THIS picker the rule can
+// only ever decide between public and members-only — Selected-groups and Hidden never reach it,
+// because those rows are excluded a line earlier, not because the rule treats them specially here.
 $recentEvents = [];
+$attViewerId   = EventVisibility::sessionViewerId();
+$attToday      = date('Y-m-d');
+$attVisibility = EventVisibility::where('e', EventVisibility::MODE_SESSION, $attViewerId, $attToday);
+if (str_starts_with($attVisibility['sql'], ' AND ') === false) {
+    throw new \LogicException('EventVisibility::where() no longer starts with " AND "; attendance/record.php must be updated.');
+}
+// Found and fixed while proving this part on a real database (#514 P3): the fragment
+// starts with " AND " so it can be appended straight after another condition (its own
+// docblock says so, and calendar/index.php relies on exactly that shape). An earlier
+// version of this edit used substr($attVisibility['sql'], 5) to strip that leading
+// " AND " — copying the shape calendar/index.php uses when it re-joins every condition
+// with implode(' AND ', ...) — but THIS query concatenates its pieces directly, with no
+// implode() to put an "AND" back in. Stripping it here left the date-range condition
+// and the rule's own parentheses sitting side by side with nothing between them, which
+// MySQL refused outright (error 1064). Using the fragment AS THE DOCS SAY, unstripped,
+// is correct here.
 $stmtEvents = $mysqli->prepare(
-    'SELECT eventID, eventName, startDateTime FROM tblEvents '
-    . "WHERE isDeleted = 0 AND status = 'published' AND siteID = ? "
-    . 'AND startDateTime BETWEEN DATE_SUB(NOW(), INTERVAL 30 DAY) AND DATE_ADD(NOW(), INTERVAL 30 DAY) '
-    . 'ORDER BY startDateTime DESC LIMIT 50'
+    'SELECT eventID, eventName, startDateTime FROM tblEvents e '
+    . "WHERE e.isDeleted = 0 AND e.status = 'published' AND e.siteID = ? AND e.externalFeedID IS NULL "
+    . 'AND e.startDateTime BETWEEN DATE_SUB(NOW(), INTERVAL 30 DAY) AND DATE_ADD(NOW(), INTERVAL 30 DAY) '
+    . $attVisibility['sql'] . ' '
+    . 'ORDER BY e.startDateTime DESC LIMIT 50'
 );
 if ($stmtEvents !== false) {
-    $stmtEvents->bind_param('i', $siteId);
+    $attTypes  = 'i' . $attVisibility['types'];
+    $attParams = array_merge([$siteId], $attVisibility['params']);
+    $stmtEvents->bind_param($attTypes, ...$attParams);
     $stmtEvents->execute();
     $resultEvents = $stmtEvents->get_result();
     while ($r = $resultEvents->fetch_assoc()) {

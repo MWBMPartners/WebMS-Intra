@@ -58,6 +58,28 @@ $sessionTime   = trim($_POST['sessionTime'] ?? '') !== '' ? trim($_POST['session
 $eventID       = ((int) ($_POST['eventID'] ?? 0)) > 0 ? (int) $_POST['eventID'] : null;
 $notes         = trim($_POST['notes'] ?? '') !== '' ? trim($_POST['notes']) : null;
 
+// 🔍 Validate the posted eventID before it is ever stored. Nothing before #514 checked this at
+// all, so a session could be linked to an event number belonging to another organisation, or to
+// one that no longer exists. Imported events are read-only (#514 D5), so a posted eventID that
+// names one is treated exactly the same as one that does not exist: silently dropped to NULL,
+// never stored, never an error shown to the person recording attendance (they picked an event
+// from a list that itself no longer offers imported events — see attendance/record.php).
+if ($eventID !== null) {
+    $eventCheck = $mysqli->prepare(
+        'SELECT eventID FROM tblEvents WHERE eventID = ? AND siteID = ? AND isDeleted = 0 AND externalFeedID IS NULL'
+    );
+    $eventValid = false;
+    if ($eventCheck !== false) {
+        $eventCheck->bind_param('ii', $eventID, $siteId);
+        $eventCheck->execute();
+        $eventValid = $eventCheck->get_result()->fetch_assoc() !== null;
+        $eventCheck->close();
+    }
+    if ($eventValid === false) {
+        $eventID = null;
+    }
+}
+
 // 🔢 Collect count rows
 $groups = $_POST['groups'] ?? [];
 $counts = $_POST['counts'] ?? [];

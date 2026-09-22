@@ -77,11 +77,47 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $parentID = ((int) ($_POST['parentID'] ?? 0)) ?: null;
 
         if ($seriesID > 0 && $name !== '') {
+            // Imported events are read-only (#514 D5), and so is any series that holds one. A
+            // series is recognised as imported by the events IN IT, checked fresh here — NEVER by
+            // its slug: the importer gives an imported series a seriesSlug of the form
+            // "imp-<16 hex characters>" (#514 P6), but an administrator typing a name that happens
+            // to produce the same string is not prevented, so the slug alone proves nothing.
+            //
+            // 🩹 FIX ROUND 1 (checker finding 1, p514-p3--verify-r1.md): the first version of this
+            // page SKIPPED the UPDATE statement entirely for an imported series, which meant the
+            // database did LESS work for an imported series than for a series number that does not
+            // exist at all (11 statements against 12, measured) — the exact shape #503 warns
+            // against: a refusal must cost the same work as "not found", or the difference in work
+            // itself becomes a way to tell the two apart. The fix keeps the statement TEXT the same
+            // in every case and instead binds an always-false condition, `AND ? = 0`, to a value
+            // that is 1 for an imported series and 0 otherwise — the same "same text, different
+            // bound value" shape #514 P1 already uses throughout EventVisibility. This adds no
+            // subquery on tblEvents, so it cannot hit MySQL error 1093 (see the delete action below
+            // for where that error comes from). What this CANNOT do: MySQL's own optimiser can see
+            // that "1 = 0" is always false and skip the index lookup a real (non-imported) update
+            // would make — that is a difference of microseconds inside the SAME statement, which
+            // the plan already accepts as a residual (section 1.3, "Cannot do: timing"), not a
+            // different statement being sent.
+            $importedCheck = $mysqli->prepare(
+                'SELECT 1 FROM tblEvents WHERE seriesID = ? AND siteID = ? AND externalFeedID IS NOT NULL LIMIT 1'
+            );
+            $isImportedSeries = false;
+            if ($importedCheck !== false) {
+                $importedCheck->bind_param('ii', $seriesID, $siteId);
+                $importedCheck->execute();
+                $isImportedSeries = $importedCheck->get_result()->fetch_assoc() !== null;
+                $importedCheck->close();
+            }
+            // 👁️ EventVisibility marker for tools/audit-checks/check_event_visibility.py: the
+            // SELECT immediately above tests externalFeedID IS NOT NULL, and its result is bound
+            // into every statement below through $refuse, so the imported case is always refused.
+            $refuse = $isImportedSeries === true ? 1 : 0;
+
             $stmt = $mysqli->prepare(
-                'UPDATE tblEventSeries SET seriesName = ?, description = ?, parentID = ? WHERE seriesID = ? AND siteID = ?'
+                'UPDATE tblEventSeries SET seriesName = ?, description = ?, parentID = ? WHERE seriesID = ? AND siteID = ? AND ? = 0'
             );
             if ($stmt !== false) {
-                $stmt->bind_param('ssiii', $name, $desc, $parentID, $seriesID, $siteId);
+                $stmt->bind_param('ssiiii', $name, $desc, $parentID, $seriesID, $siteId, $refuse);
                 $stmt->execute();
                 $stmt->close();
             }
@@ -94,16 +130,54 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($action === 'delete') {
         $seriesID = (int) ($_POST['seriesID'] ?? 0);
         if ($seriesID > 0) {
+            // Imported events are read-only (#514 D5) — see the update action above for the full
+            // explanation of why this is checked by the events IN the series, not by its slug, and
+            // for the fix-round-1 reasoning behind the bound "AND ? = 0" pattern used below.
+            $importedCheck = $mysqli->prepare(
+                'SELECT 1 FROM tblEvents WHERE seriesID = ? AND siteID = ? AND externalFeedID IS NOT NULL LIMIT 1'
+            );
+            $isImportedSeries = false;
+            if ($importedCheck !== false) {
+                $importedCheck->bind_param('ii', $seriesID, $siteId);
+                $importedCheck->execute();
+                $isImportedSeries = $importedCheck->get_result()->fetch_assoc() !== null;
+                $importedCheck->close();
+            }
+            // 👁️ EventVisibility marker for tools/audit-checks/check_event_visibility.py: the
+            // SELECT immediately above tests externalFeedID IS NOT NULL, and its result is bound
+            // into both statements below through $refuse.
+            $refuse = $isImportedSeries === true ? 1 : 0;
+
+            // NOTE (#514 P3, tried and rejected): this cannot be folded into one statement with a
+            // subquery on tblEvents in its own FROM clause. MySQL refuses that outright —
+            // "ERROR 1093 (HY000): You can't specify target table 'tblEvents' for update in FROM
+            // clause" — reproduced on mysql:8.0.36 while planning this part. Two statements, each
+            // carrying its own bound "AND ? = 0" refusal, is the shape that works.
+            //
+            // 🩹 FIX ROUND 1 (checker finding 1): both statements below used to be skipped
+            // outright for an imported series, so deleting an imported series cost the database
+            // LESS work (11 statements) than deleting a missing series number (13 statements) —
+            // the #503 shape a refusal must never fall into. They now always run, with the bound
+            // value deciding whether either statement actually matches a row, so an imported
+            // series and a missing one send the same statement text and count, every time. What
+            // this cannot do: it cannot make MySQL spend exactly the same number of CPU cycles —
+            // an always-false bound comparison can still be optimised away internally — only the
+            // same statements, in the same order, which is what "same work" means throughout #514
+            // (section 1.3, "Cannot do: timing").
+            // 👁️ EventVisibility::-equivalent marker for tools/audit-checks/check_event_visibility.py:
+            // both statements below only ever match a row when $refuse is 0, and $refuse is bound
+            // from the SELECT above that tests externalFeedID IS NOT NULL, so an imported series
+            // (externalFeedID IS NOT NULL on at least one of its events) can never be updated here.
             // 🔄 Unlink events from series before deleting
-            $stmt = $mysqli->prepare('UPDATE tblEvents SET seriesID = NULL WHERE seriesID = ? AND siteID = ?');
+            $stmt = $mysqli->prepare('UPDATE tblEvents SET seriesID = NULL WHERE seriesID = ? AND siteID = ? AND ? = 0');
             if ($stmt !== false) {
-                $stmt->bind_param('ii', $seriesID, $siteId);
+                $stmt->bind_param('iii', $seriesID, $siteId, $refuse);
                 $stmt->execute();
                 $stmt->close();
             }
-            $stmt = $mysqli->prepare('DELETE FROM tblEventSeries WHERE seriesID = ? AND siteID = ?');
+            $stmt = $mysqli->prepare('DELETE FROM tblEventSeries WHERE seriesID = ? AND siteID = ? AND ? = 0');
             if ($stmt !== false) {
-                $stmt->bind_param('ii', $seriesID, $siteId);
+                $stmt->bind_param('iii', $seriesID, $siteId, $refuse);
                 $stmt->execute();
                 $stmt->close();
             }
@@ -121,12 +195,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 // 📋 Fetch series list
 // -----------------------------------------------------------------------------
 $seriesList = [];
+// Imported events are read-only (#514 D5), and a series that holds one is managed on its own
+// calendar's page instead (that series was created by the importer, never by an administrator
+// here) — so this list leaves it out entirely, the same way it is recognised everywhere else in
+// this file: by the events IN it, never by its slug.
 $stmtSeries = $mysqli->prepare(
     'SELECT s.*, p.seriesName AS parentName, '
     . '(SELECT COUNT(*) FROM tblEvents e WHERE e.seriesID = s.seriesID AND e.isDeleted = 0) AS eventCount '
     . 'FROM tblEventSeries s '
     . 'LEFT JOIN tblEventSeries p ON p.seriesID = s.parentID '
     . 'WHERE s.siteID = ? '
+    . '  AND NOT EXISTS (SELECT 1 FROM tblEvents xi WHERE xi.seriesID = s.seriesID AND xi.externalFeedID IS NOT NULL) '
     . 'ORDER BY s.seriesName'
 );
 if ($stmtSeries !== false) {

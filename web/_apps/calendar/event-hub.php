@@ -57,10 +57,11 @@ $userId = (int) ($_SESSION['user_id'] ?? 0);
 
 // 📋 Fetch event (site-scoped, soft-delete aware).
 $event = null;
+// Imported events are read-only (#514 D5); this makes an imported event exactly as "not found" as a missing one.
 $stmt = $mysqli->prepare(
     'SELECT eventID, eventName, eventSlug, startDateTime, endDateTime, '
     . '       locationName, status '
-    . 'FROM tblEvents WHERE eventID = ? AND siteID = ? AND isDeleted = 0'
+    . 'FROM tblEvents WHERE eventID = ? AND siteID = ? AND isDeleted = 0 AND externalFeedID IS NULL'
 );
 if ($stmt !== false) {
     $stmt->bind_param('ii', $eventId, $siteId);

@@ -122,7 +122,8 @@ if ($autoRule === 'attended_event' || $autoRule === 'rsvpd_event') {
         header('Location: /admin/discipleship/pathways/edit?id=' . $pathwayId, true, 302);
         exit();
     }
-    $chk = $db->prepare('SELECT eventID FROM tblEvents WHERE eventID = ? AND siteID = ?');
+    // Imported events are read-only (#514 D5); this makes an imported event exactly as "not found" as a missing one.
+    $chk = $db->prepare('SELECT eventID FROM tblEvents WHERE eventID = ? AND siteID = ? AND externalFeedID IS NULL');
     if ($chk === false) {
         http_response_code(500);
         exit('Database error');

@@ -168,8 +168,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $paramValues[] = $seriesID;
     $paramValues[] = $siteId;
 
+    // Imported events are read-only (#514 D5); the fetch below already keeps them off the checkbox
+    // list, but the condition is repeated on the write itself so a forged eventID in the posted list
+    // updates 0 rows for that id rather than silently overwriting a row the source calendar owns.
     $sql = 'UPDATE tblEvents SET ' . implode(', ', $setClauses)
-         . ' WHERE eventID IN (' . $placeholders . ') AND seriesID = ? AND siteID = ?';
+         . ' WHERE eventID IN (' . $placeholders . ') AND seriesID = ? AND siteID = ? AND externalFeedID IS NULL';
 
     $stmt = $mysqli->prepare($sql);
     if ($stmt !== false) {
@@ -201,10 +204,12 @@ $stmt = $mysqli->prepare(
     'SELECT e.eventID, e.eventName, e.startDateTime, e.endDateTime, e.status, '
     . 'e.isPublic, e.isFeatured, e.categoryID, e.typeID, '
     . 'c.categoryName, t.typeName '
+    // Imported events are read-only (#514 D5); this keeps them off the bulk-edit checkbox list, since
+    // nothing here can save a change to one.
     . 'FROM tblEvents e '
     . 'LEFT JOIN tblEventCategories c ON c.categoryID = e.categoryID '
     . 'LEFT JOIN tblEventTypes t ON t.typeID = e.typeID '
-    . 'WHERE e.seriesID = ? AND e.siteID = ? AND e.isDeleted = 0 '
+    . 'WHERE e.seriesID = ? AND e.siteID = ? AND e.isDeleted = 0 AND e.externalFeedID IS NULL '
     . 'ORDER BY e.startDateTime ASC'
 );
 if ($stmt !== false) {

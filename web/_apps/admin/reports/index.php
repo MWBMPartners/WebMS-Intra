@@ -62,8 +62,10 @@ if ($s2 !== false) {
 }
 
 // 📊 Total events
+// Imported events are read-only (#514 D5) and are not the organisation's own; this count only
+// ever counts events an administrator here actually manages.
 $s3 = $mysqli->prepare(
-    'SELECT COUNT(*) AS cnt FROM tblEvents WHERE siteID = ? AND isDeleted = 0'
+    'SELECT COUNT(*) AS cnt FROM tblEvents WHERE siteID = ? AND isDeleted = 0 AND externalFeedID IS NULL'
 );
 if ($s3 !== false) {
     $s3->bind_param('i', $siteId);

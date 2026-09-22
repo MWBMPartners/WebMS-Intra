@@ -101,9 +101,10 @@ $agreements = array_values(array_filter(
 // 📅 Event picker: events within ±1 day of the relevant date, site-scoped.
 $anchorDate = $prefillDate !== '' ? $prefillDate : (string) ($booking['bookingDate'] ?? date('Y-m-d'));
 $events = [];
+// Imported events are read-only (#514 D5); a venue booking cannot be linked to an event nobody here can edit.
 $evStmt = $db->prepare(
     'SELECT eventID, eventName, startDateTime FROM tblEvents '
-    . 'WHERE siteID = ? AND isDeleted = 0 '
+    . 'WHERE siteID = ? AND isDeleted = 0 AND externalFeedID IS NULL '
     . 'AND DATE(startDateTime) BETWEEN DATE_SUB(?, INTERVAL 1 DAY) AND DATE_ADD(?, INTERVAL 1 DAY) '
     . 'ORDER BY startDateTime'
 );
@@ -118,7 +119,8 @@ if ($evStmt !== false) {
 }
 $currentEventId = (int) ($booking['eventID'] ?? 0);
 if ($currentEventId > 0 && isset($events[$currentEventId]) === false) {
-    $evStmt = $db->prepare('SELECT eventID, eventName, startDateTime FROM tblEvents WHERE eventID = ? AND siteID = ? AND isDeleted = 0 LIMIT 1');
+    // Imported events are read-only (#514 D5); this makes an imported event exactly as "not found" as a missing one.
+    $evStmt = $db->prepare('SELECT eventID, eventName, startDateTime FROM tblEvents WHERE eventID = ? AND siteID = ? AND isDeleted = 0 AND externalFeedID IS NULL LIMIT 1');
     if ($evStmt !== false) {
         $evStmt->bind_param('ii', $currentEventId, $siteId);
         $evStmt->execute();

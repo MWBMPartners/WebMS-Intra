@@ -29,12 +29,22 @@ $result = $mysqli->query('SELECT eventID, reminderType, recipientCount, sentAt F
 while ($r = $result->fetch_assoc()) { $recent[] = $r; }
 
 // 📅 Upcoming events with pending reminders.
+//
+// 👁️ EventVisibility (#514 D5, fix round 1: checker finding 2b). This "upcoming" list is for
+// administrators to see what the cron job is about to send reminders for, so it deliberately
+// leaves imported events OUT — this list is not where a viewer's own reminder is decided; the
+// reminder job itself (cron/event-reminders.php) still sends reminders for imported events under
+// P2's rule, this page just does not preview them here. Before this fix, an old-flag administrator
+// (or anybody the "no siteID condition" pre-existing gap lets in — see the follow-up issue this
+// fix round raises) could read a HIDDEN imported event's name here even though the event page
+// itself gives that same viewer a 404. This cannot fix the missing siteID scoping (a separate,
+// pre-existing cross-organisation gap, not #514's to fix inside P3).
 $upcoming = [];
 $result = $mysqli->query(
     'SELECT e.eventID, e.eventName, e.startDateTime, '
     . '  (SELECT COUNT(*) FROM tblEventReminderLog WHERE eventID = e.eventID) AS sentCount '
     . 'FROM tblEvents e '
-    . 'WHERE e.isDeleted = 0 AND e.status = "published" '
+    . 'WHERE e.isDeleted = 0 AND e.status = "published" AND e.externalFeedID IS NULL '
     . '  AND e.startDateTime BETWEEN NOW() AND DATE_ADD(NOW(), INTERVAL 48 HOUR) '
     . 'ORDER BY e.startDateTime ASC LIMIT 20'
 );

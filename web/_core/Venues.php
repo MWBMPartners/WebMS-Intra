@@ -1217,7 +1217,16 @@ class Venues
             . 'JOIN tblVenueStatuses st ON st.statusID = b.statusID '
             . 'LEFT JOIN tblVenueBookingGroups g ON g.groupID = b.groupID '
             . 'LEFT JOIN tblVenueAgreements ag ON ag.agreementID = b.agreementID '
-            . 'LEFT JOIN tblEvents e ON e.eventID = b.eventID '
+            // 👁️ EventVisibility (#514 D5, fix round 1: checker finding 2). Imported events are
+            // read-only, but a booking can still carry an eventID that was linked to one BEFORE
+            // this fix landed (validateEventForSite() below now refuses the link going forward,
+            // but it cannot reach back and unlink what is already in the database). This condition
+            // does not touch b.eventID itself — the stored number, and saveBooking()'s own audit
+            // snapshot which reads that number, are both untouched — it only stops the imported
+            // event's NAME (e.eventName above) reaching a viewer who the visibility rule would
+            // otherwise refuse the event to. Proven: without this, a plain member who gets a 404
+            // for the hidden event itself could still read its title on the booking page.
+            . 'LEFT JOIN tblEvents e ON e.eventID = b.eventID AND e.externalFeedID IS NULL '
             . 'WHERE b.bookingID = ? AND b.siteID = ? LIMIT 1'
         );
         if ($stmt === false) {
@@ -4089,7 +4098,16 @@ class Venues
             return null;
         }
         $db = self::db();
-        $stmt = $db->prepare('SELECT * FROM tblEvents WHERE eventID = ? AND siteID = ? AND isDeleted = 0 LIMIT 1');
+        // 👁️ EventVisibility (#514 D5, fix round 1: checker finding 2). Imported events are
+        // read-only everywhere outside the calendar itself, so a venue booking must never be able
+        // to link one — proven before this fix that a forged save linked a HIDDEN imported event
+        // to a booking, and the linked event's name then leaked (see getBooking() above) to a
+        // plain member the visibility rule refuses the event itself to. This makes an imported
+        // event's number answer "Invalid event." here exactly as a missing number already does —
+        // the #503 shape: a refusal must not be distinguishable from "not found".
+        $stmt = $db->prepare(
+            'SELECT * FROM tblEvents WHERE eventID = ? AND siteID = ? AND isDeleted = 0 AND externalFeedID IS NULL LIMIT 1'
+        );
         if ($stmt === false) {
             return null;
         }

@@ -112,7 +112,12 @@ $sql = 'SELECT s.sessionID, s.sessionDate, s.sessionTime, s.notes, '
      . 'u.fullName AS recorderName '
      . 'FROM tblAttendanceSessions s '
      . 'INNER JOIN tblAttendanceServiceTypes st ON st.serviceTypeID = s.serviceTypeID '
-     . 'LEFT JOIN tblEvents e ON e.eventID = s.eventID '
+     // Imported events are read-only (#514 D5); a session cannot store one any more
+     // (attendance/record/save.php validates it), but this JOIN carries its own marker so an
+     // older session that predates that validation still shows a blank event name rather than an
+     // imported event's own name. e.siteID = s.siteID also closes the same cross-organisation gap
+     // every other JOIN in this query already avoids by binding s.siteID separately.
+     . 'LEFT JOIN tblEvents e ON e.eventID = s.eventID AND e.siteID = s.siteID AND e.externalFeedID IS NULL '
      . 'LEFT JOIN tblAttendanceCounts c ON c.sessionID = s.sessionID '
      . 'LEFT JOIN tblUsers u ON u.userID = s.createdByID '
      . $where . ' '

@@ -39,8 +39,9 @@ $siteId = Site::id();
 $db     = App::db();
 
 // 🔍 Verify the event exists + belongs to this site
+// Imported events are read-only (#514 D5); this makes an imported event exactly as "not found" as a missing one.
 $check = $db->prepare(
-    'SELECT eventID FROM tblEvents WHERE eventID = ? AND siteID = ? AND isDeleted = 0 LIMIT 1'
+    'SELECT eventID FROM tblEvents WHERE eventID = ? AND siteID = ? AND isDeleted = 0 AND externalFeedID IS NULL LIMIT 1'
 );
 if ($check === false) {
     ApiResponse::error('Database error', 500);
@@ -146,8 +147,11 @@ $types   .= 'ii';
 $params[] = $eventId;
 $params[] = $siteId;
 
+// Imported events are read-only (#514 D5); the existence check above already refuses one, so this
+// statement is unreachable for an imported row — the condition is repeated here so the statement
+// still carries its own marker for tools/audit-checks/check_event_visibility.py.
 $sql = 'UPDATE tblEvents SET ' . implode(', ', $set)
-     . ' WHERE eventID = ? AND siteID = ? LIMIT 1';
+     . ' WHERE eventID = ? AND siteID = ? AND externalFeedID IS NULL LIMIT 1';
 $stmt = $db->prepare($sql);
 if ($stmt === false) {
     Logger::errorPlatform('MySQL', 'Error', 'API_EVENT_UPDATE_PREP', $db->error, '');
@@ -168,7 +172,9 @@ Logger::activity('ApiEventUpdate', 'API: updated event #' . $eventId);
 // (cross-repo contract §2) reflecting the post-update row, additive
 // alongside eventID.
 $locationObject = null;
-$locRow = $db->prepare('SELECT locationName, locationAddress, locationGeoLat, locationGeoLng, locationW3W FROM tblEvents WHERE eventID = ? AND siteID = ? LIMIT 1');
+// Imported events are read-only (#514 D5); the update above can never touch one, so this re-fetch cannot
+// either — the condition is repeated here so this line also carries its own marker for the checker.
+$locRow = $db->prepare('SELECT locationName, locationAddress, locationGeoLat, locationGeoLng, locationW3W FROM tblEvents WHERE eventID = ? AND siteID = ? AND externalFeedID IS NULL LIMIT 1');
 if ($locRow !== false) {
     $locRow->bind_param('ii', $eventId, $siteId);
     $locRow->execute();

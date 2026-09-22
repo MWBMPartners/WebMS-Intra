@@ -157,9 +157,10 @@ $viewerId = (int) ($_SESSION['user_id'] ?? 0);
 // row. Five `?`, five letters in the type string, five bound values — two
 // fewer of each since #533 removed the single-organisation compatibility
 // branch (see the file header).
+// Imported events are read-only (#514 D5); this makes an imported event exactly as "not found" as a missing one.
 $stmt = $mysqli->prepare(
     'SELECT eventID FROM tblEvents '
-    . 'WHERE eventID = ? AND siteID = ? AND isDeleted = 0 '
+    . 'WHERE eventID = ? AND siteID = ? AND isDeleted = 0 AND externalFeedID IS NULL '
     . "  AND status = 'published' "
     . '  AND ( isPublic = 1 '
     . '        OR EXISTS (SELECT 1 FROM tblUsers va '

@@ -44,6 +44,17 @@
 #                                                       below for the PR comment, and once
 #                                                       more near the end of this file as a
 #                                                       real hard gate (Codex catch-up A3)
+#  22. Event queries with no visibility rule            — a line that reads tblEvents with
+#                                                       neither Portal\Core\EventVisibility::
+#                                                       nearby nor an "externalFeedID IS
+#                                                       [NOT] NULL" refusal (#514 D5 — an
+#                                                       imported event must stay read-only
+#                                                       everywhere else in the portal).
+#                                                       Reported in the PR comment only; not
+#                                                       a hard gate (fix round 1, #514 P3,
+#                                                       checker finding 3 — corrected here so
+#                                                       this header never overstates what the
+#                                                       step below actually does).
 #
 # These are HEURISTICS — false positives are expected. Review the findings,
 # don't blindly fail the merge.
@@ -78,6 +89,13 @@
 # returned an error page; every event address in the sitemap was one. No
 # earlier check reads a method name at all, and there is no autoloader to
 # catch it, so it had shipped unnoticed.
+# Check 22 (#514) was added because #514 gave the portal one shared rule for
+# who may see an event, and made every event copied in from an outside
+# calendar read-only everywhere else — but neither promise is enforced by
+# the database itself. An ordinary "SELECT ... FROM tblEvents" compiles and
+# runs whether or not it carries the rule or the refusal. This check flags
+# any line that reads tblEvents with neither nearby, so a future page that
+# forgets the rule is caught before it merges rather than found by a leak.
 # The scripts live in tools/audit-checks/ and are runnable locally.
 # =============================================================================
 
@@ -447,6 +465,19 @@ jobs:
           ACCOUNT_GUARD=$(python3 tools/audit-checks/check_account_writes_guarded.py 2>&1 | tail -n +4 || true)
           if echo "$ACCOUNT_GUARD" | grep -q '•'; then
             add_section "Account or access changes written without asking AccountGuard (the #518 shape)" "$ACCOUNT_GUARD"
+          fi
+
+          # 22) Events read without the visibility rule or the imported-event
+          #     refusal (#514). #514 gave the portal one shared rule for who
+          #     may see an event (Portal\Core\EventVisibility) and made every
+          #     event copied in from an outside calendar read-only everywhere
+          #     else (D5). Neither is enforced by the database, so this flags
+          #     any line reading tblEvents with neither EventVisibility:: nor
+          #     an "externalFeedID IS [NOT] NULL" refusal nearby.
+          #     Reported in the PR comment only; not a hard gate.
+          EVENT_VISIBILITY=$(python3 tools/audit-checks/check_event_visibility.py 2>&1 | tail -n +3 || true)
+          if echo "$EVENT_VISIBILITY" | grep -q '•'; then
+            add_section "Events read without the visibility rule or the imported-event refusal (#514)" "$EVENT_VISIBILITY"
           fi
 
           echo "hits=$HITS" >> "$GITHUB_OUTPUT"

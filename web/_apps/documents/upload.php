@@ -53,6 +53,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     //     pre-fill via ?eventID=N query string (deep-link from event page).
     $eventId     = ($_POST['eventID'] ?? '') !== '' ? (int) $_POST['eventID'] : null;
 
+    // 👁️ EventVisibility (#514 D5, fix round 1: checker finding 4). The prefill lookup below
+    // (`$prefillEventId`) already refuses an imported event, so the FORM never offers one — but
+    // that alone does not stop a forged POST naming an event number directly, and this page had
+    // no check of its own at all. Reproduced before this fix: a forged upload linked to an
+    // imported event (even a HIDDEN one) succeeded, another organisation's event number was
+    // accepted too, and a made-up number crashed with HTTP 500 (the foreign key on tblDocuments
+    // refused the INSERT) instead of quietly doing nothing — so an imported event and a missing
+    // one did NOT behave alike, which is exactly the #503 shape D5 exists to close. This re-checks
+    // the posted number the same way `attendance/record/save.php` already does, and silently
+    // drops it to NULL when it fails — a document with no linked event is always a valid save.
+    if ($eventId !== null) {
+        $eventCheck = $mysqli->prepare(
+            'SELECT eventID FROM tblEvents WHERE eventID = ? AND siteID = ? AND isDeleted = 0 AND externalFeedID IS NULL LIMIT 1'
+        );
+        if ($eventCheck !== false) {
+            $eventCheck->bind_param('ii', $eventId, $siteId);
+            $eventCheck->execute();
+            $validEvent = $eventCheck->get_result()->fetch_assoc();
+            $eventCheck->close();
+            if ($validEvent === null) {
+                $eventId = null;
+            }
+        } else {
+            $eventId = null;
+        }
+    }
+
     // 🔍 Validate file
     if (isset($_FILES['document']) === false || $_FILES['document']['error'] !== UPLOAD_ERR_OK) {
         $errorMessages = [
@@ -144,7 +171,8 @@ if ($catStmt !== false) {
 $prefillEvent = null;
 $prefillEventId = (int) ($_GET['eventID'] ?? 0);
 if ($prefillEventId > 0) {
-    $eStmt = $mysqli->prepare('SELECT eventID, eventName FROM tblEvents WHERE eventID = ? AND siteID = ? AND isDeleted = 0 LIMIT 1');
+    // Imported events are read-only (#514 D5); this makes an imported event exactly as "not found" as a missing one.
+    $eStmt = $mysqli->prepare('SELECT eventID, eventName FROM tblEvents WHERE eventID = ? AND siteID = ? AND isDeleted = 0 AND externalFeedID IS NULL LIMIT 1');
     if ($eStmt !== false) {
         $eStmt->bind_param('ii', $prefillEventId, $siteId);
         $eStmt->execute();

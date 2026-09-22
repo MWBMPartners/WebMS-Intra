@@ -46,7 +46,9 @@ $eventID = (int) ($_POST['eventID'] ?? 0);
 $siteId = Site::id();
 
 if ($eventID > 0) {
-    $stmt = $mysqli->prepare('UPDATE tblEvents SET isDeleted = 1 WHERE eventID = ? AND siteID = ?');
+    // Imported events are read-only (#514 D5); this makes an imported event exactly as "not found" as a missing
+    // one: the update affects 0 rows instead of soft-deleting a row that only the source calendar owns.
+    $stmt = $mysqli->prepare('UPDATE tblEvents SET isDeleted = 1 WHERE eventID = ? AND siteID = ? AND externalFeedID IS NULL');
     if ($stmt !== false) {
         $stmt->bind_param('ii', $eventID, $siteId);
         $stmt->execute();

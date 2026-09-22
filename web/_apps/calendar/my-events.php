@@ -40,7 +40,9 @@ $stmt = $mysqli->prepare(
     . '       e.status, e.locationName, ec.grantedAt, '
     . '       (SELECT COUNT(*) FROM tblEventRSVPs WHERE eventID = e.eventID AND status = "confirmed") AS rsvpCount '
     . 'FROM tblEventCoordinators ec '
-    . 'JOIN tblEvents e ON e.eventID = ec.eventID '
+    // Imported events are read-only (#514 D5); a coordinator role on an imported event is unreachable
+    // (P3 stops any new one being granted), but an old row must not surface the event here either.
+    . 'JOIN tblEvents e ON e.eventID = ec.eventID AND e.externalFeedID IS NULL '
     . 'WHERE ec.userID = ? AND ec.revokedAt IS NULL '
     . '  AND e.siteID = ? AND e.isDeleted = 0 '
     . 'ORDER BY e.startDateTime ASC'

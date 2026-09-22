@@ -36,7 +36,8 @@ $siteId  = Site::id();
 
 $event = null;
 if ($eventId > 0) {
-    $stmt = $mysqli->prepare('SELECT eventID, eventName, eventSlug FROM tblEvents WHERE eventID = ? AND siteID = ? AND isDeleted = 0');
+    // Imported events are read-only (#514 D5); this makes an imported event exactly as "not found" as a missing one.
+    $stmt = $mysqli->prepare('SELECT eventID, eventName, eventSlug FROM tblEvents WHERE eventID = ? AND siteID = ? AND isDeleted = 0 AND externalFeedID IS NULL');
     if ($stmt !== false) {
         $stmt->bind_param('ii', $eventId, $siteId);
         $stmt->execute();

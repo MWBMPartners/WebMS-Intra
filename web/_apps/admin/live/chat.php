@@ -45,12 +45,19 @@ $queue = [];
 // `AS flaggedReason` is kept on purpose so the PHP further down
 // ($m['flaggedReason'], used to show the flag reason on a flagged message)
 // needs no change at all.
+// 👁️ EventVisibility (#514 D5, fix round 1: checker finding 2b). A chat message can carry an
+// eventID from before this fix, or from `livechat/api/send.php`, which (a pre-existing gap, not
+// #514's to fix here) stores whatever event number any visitor posts (it needs no sign-in, only a livestream session token, which the signed-out ping hands out for any event number). Excluding an
+// imported event from this JOIN keeps its name out of the moderation queue — the message itself,
+// and the moderation decision on it, are unaffected: it simply shows as "— no event —" instead
+// of naming an event the visibility rule might refuse this administrator (an old-flag-only
+// administrator counts as a plain member under the rule).
 $stmt = $mysqli->prepare(
     'SELECT m.messageID, m.eventID, m.displayName, m.body, m.status, '
     . '       m.flagReason AS flaggedReason, m.senderIP, m.createdAt, '
     . '       COALESCE(e.eventName, "— no event —") AS eventName '
     . 'FROM tblLiveChatMessages m '
-    . 'LEFT JOIN tblEvents e ON e.eventID = m.eventID '
+    . 'LEFT JOIN tblEvents e ON e.eventID = m.eventID AND e.externalFeedID IS NULL '
     . 'WHERE m.siteID = ? AND m.status IN ("pending", "flagged") '
     . 'ORDER BY m.messageID DESC LIMIT 200'
 );

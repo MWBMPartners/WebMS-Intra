@@ -193,7 +193,8 @@ if (isset($meta['categoryID']) === true && $meta['categoryID'] !== null && $meta
 $eventId = null;
 if (isset($meta['eventID']) === true && $meta['eventID'] !== null && $meta['eventID'] !== '') {
     $eventId = (int) $meta['eventID'];
-    $evCheck = $db->prepare('SELECT eventID FROM tblEvents WHERE eventID = ? AND siteID = ? AND isDeleted = 0 LIMIT 1');
+    // Imported events are read-only (#514 D5); this makes an imported event exactly as "not found" as a missing one.
+    $evCheck = $db->prepare('SELECT eventID FROM tblEvents WHERE eventID = ? AND siteID = ? AND isDeleted = 0 AND externalFeedID IS NULL LIMIT 1');
     if ($evCheck === false) {
         Logger::errorPlatform('MySQL', 'Error', 'API_DOC_CREATE_EVENT_PREP', $db->error, '');
         ApiResponse::error('Database error', 500);

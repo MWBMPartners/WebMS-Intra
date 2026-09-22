@@ -51,7 +51,8 @@ if ((string) ($settings['enabled'] ?? '0') !== '1') {
     $flash('Zoom integration not enabled.', 'danger', $eventId);
 }
 
-$stmt = $db->prepare('SELECT eventID, eventName, startDateTime, endDateTime, timezone FROM tblEvents WHERE eventID = ? AND siteID = ? LIMIT 1');
+// Imported events are read-only (#514 D5); this makes an imported event exactly as "not found" as a missing one.
+$stmt = $db->prepare('SELECT eventID, eventName, startDateTime, endDateTime, timezone FROM tblEvents WHERE eventID = ? AND siteID = ? AND externalFeedID IS NULL LIMIT 1');
 $event = null;
 if ($stmt !== false) {
     $stmt->bind_param('ii', $eventId, $siteId);

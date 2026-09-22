@@ -55,7 +55,8 @@ $stmt = $mysqli->prepare(
     . '       ON ep.eventID = e.eventID AND ep.userID = ? '
     . 'LEFT JOIN tblEventCoordinators ec '
     . '       ON ec.eventID = e.eventID AND ec.userID = ? AND ec.revokedAt IS NULL '
-    . 'WHERE e.siteID = ? AND e.isDeleted = 0 '
+    // Imported events are read-only (#514 D5); this makes an imported event exactly as "not found" as a missing one.
+    . 'WHERE e.siteID = ? AND e.isDeleted = 0 AND e.externalFeedID IS NULL '
     . '  AND e.startDateTime >= DATE_SUB(NOW(), INTERVAL 1 DAY) '
     . '  AND (ep.eventPersonID IS NOT NULL OR ec.coordinatorID IS NOT NULL) '
     . 'GROUP BY e.eventID '

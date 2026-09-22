@@ -48,7 +48,9 @@ $editEvent = null;
 $editPeople = [];
 
 if ($editId > 0) {
-    $stmt = $mysqli->prepare('SELECT * FROM tblEvents WHERE eventID = ? AND siteID = ? LIMIT 1');
+    // Imported events are read-only (#514 D5); this makes an imported event exactly as "not found" as a missing one,
+    // so the manage form can never be opened to edit one.
+    $stmt = $mysqli->prepare('SELECT * FROM tblEvents WHERE eventID = ? AND siteID = ? AND externalFeedID IS NULL LIMIT 1');
     if ($stmt !== false) {
         $stmt->bind_param('ii', $editId, $siteId);
         $stmt->execute();
@@ -105,8 +107,20 @@ if ($stmtType !== false) {
     $stmtType->close();
 }
 
+// 👁️ EventVisibility (#514 D5, fix round 1: checker finding 6 — a plan gap, not a slip in the
+// original build). Imported events are read-only, and so is any series that holds one
+// (calendar/manage/series.php enforces this on the series page itself) — but before this fix, this
+// drop-down still OFFERED an imported series to whoever is creating or editing an own event, and
+// manage/save.php below stored whatever seriesID was posted with no check at all. So an
+// administrator could put one of their own events inside a series the importer manages, silently
+// mixing the two. The same NOT EXISTS test the series page's own list uses is repeated here.
 $seriesList = [];
-$stmtSeries = $mysqli->prepare('SELECT seriesID, seriesName FROM tblEventSeries WHERE isActive = 1 AND siteID = ? ORDER BY seriesName');
+$stmtSeries = $mysqli->prepare(
+    'SELECT s.seriesID, s.seriesName FROM tblEventSeries s '
+    . 'WHERE s.isActive = 1 AND s.siteID = ? '
+    . '  AND NOT EXISTS (SELECT 1 FROM tblEvents xi WHERE xi.seriesID = s.seriesID AND xi.externalFeedID IS NOT NULL) '
+    . 'ORDER BY s.seriesName'
+);
 if ($stmtSeries !== false) {
     $stmtSeries->bind_param('i', $siteId);
     $stmtSeries->execute();
@@ -169,7 +183,10 @@ if ($editEvent === null) {
     $perPage = 25;
     $offset  = ($page - 1) * $perPage;
 
-    $conditions = ['e.isDeleted = 0', 'e.siteID = ?'];
+    // Imported events are read-only (#514 D5) and are managed at /admin/calendar/feeds instead;
+    // this keeps them off the manage list entirely, and off its count, so nobody can open a form
+    // that has nowhere to save.
+    $conditions = ['e.isDeleted = 0', 'e.siteID = ?', 'e.externalFeedID IS NULL'];
     $params = [$siteId];
     $types  = 'i';
 
@@ -201,6 +218,8 @@ if ($editEvent === null) {
     }
     $totalPages = max(1, (int) ceil($totalRows / $perPage));
 
+    // Imported events are read-only (#514 D5); $where already carries "e.externalFeedID IS NULL"
+    // from $conditions above, so this list never offers one to edit or delete.
     $sql = 'SELECT e.eventID, e.eventName, e.eventSlug, e.startDateTime, e.status, '
          . 'e.isPublic, e.isFeatured, c.categoryName, t.typeName, s.seriesName '
          . 'FROM tblEvents e '
@@ -274,6 +293,14 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         </button>
     </div>
 </div>
+
+<!-- 📅 #514 D5 pointer: this list only ever holds the organisation's own events (see the
+     externalFeedID IS NULL condition above) — an imported event is managed on its own
+     calendar's page instead, because nothing here can edit or delete one. -->
+<p class="text-body-secondary small mb-4">
+    Events imported from outside calendars are managed under
+    <a href="<?php echo htmlspecialchars(Site::url('admin/calendar/feeds'), ENT_QUOTES, 'UTF-8'); ?>">Outside calendars</a>.
+</p>
 
 <!-- ➕ Create event form (collapsible) -->
 <div class="collapse mb-4" id="createEventForm">

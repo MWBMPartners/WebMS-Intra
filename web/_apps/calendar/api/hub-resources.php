@@ -99,8 +99,9 @@ $canManageEvents = $apiKeyRow !== null
     : App::isAdmin();
 $canManageFlag   = $canManageEvents === true ? 1 : 0;
 
+// Imported events are read-only (#514 D5); this makes an imported event exactly as "not found" as a missing one.
 $eventStmt = $db->prepare(
-    'SELECT eventID FROM tblEvents WHERE eventID = ? AND siteID = ? AND isDeleted = 0 '
+    'SELECT eventID FROM tblEvents WHERE eventID = ? AND siteID = ? AND isDeleted = 0 AND externalFeedID IS NULL '
     . "AND (status IN ('published', 'cancelled', 'postponed') OR ? = 1) LIMIT 1"
 );
 if ($eventStmt === false) {

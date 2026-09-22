@@ -7577,7 +7577,9 @@ class AssetRegister
             'SELECT ea.*, e.eventName, e.eventSlug, e.startDateTime, e.endDateTime, '
             . '       u.fullName AS assignedByName '
             . 'FROM tblAssetEventAssignments ea '
-            . 'JOIN tblEvents e ON e.eventID = ea.eventID '
+            // Imported events are read-only (#514 D5); this JOIN carries its own marker so an
+            // assignment row that names an imported event still stops showing that event's detail.
+            . 'JOIN tblEvents e ON e.eventID = ea.eventID AND e.externalFeedID IS NULL '
             . 'LEFT JOIN tblUsers u ON u.userID = ea.assignedByID '
             . 'WHERE ea.assetID = ? AND ea.siteID = ? '
             . 'ORDER BY ea.createdAt DESC'
@@ -7685,9 +7687,10 @@ class AssetRegister
         if ($eventId <= 0) {
             return ['id' => 0, 'warnings' => ['An event is required.']];
         }
+        // Imported events are read-only (#514 D5); this makes an imported event exactly as "not found" as a missing one.
         $eStmt = $db->prepare(
             'SELECT eventID, eventName, startDateTime, endDateTime FROM tblEvents '
-            . 'WHERE eventID = ? AND siteID = ? AND isDeleted = 0 LIMIT 1'
+            . 'WHERE eventID = ? AND siteID = ? AND isDeleted = 0 AND externalFeedID IS NULL LIMIT 1'
         );
         if ($eStmt === false) {
             error_log('AssetRegister::assignToEvent() event lookup prepare failed: ' . $db->error);
@@ -7744,9 +7747,11 @@ class AssetRegister
         // migration 160's column comments and this method's own docblock.
         $windowStart = $assignedFrom ?? (string) $event['startDateTime'];
         $windowEnd   = $assignedUntil ?? (string) ($event['endDateTime'] ?? $event['startDateTime']);
+        // Imported events are read-only (#514 D5); this JOIN carries its own marker so an old
+        // assignment row that names an imported event is not weighed as an overlap warning.
         $overlapStmt = $db->prepare(
             'SELECT e.eventName FROM tblAssetEventAssignments ea '
-            . 'JOIN tblEvents e ON e.eventID = ea.eventID '
+            . 'JOIN tblEvents e ON e.eventID = ea.eventID AND e.externalFeedID IS NULL '
             . 'WHERE ea.assetID = ? AND ea.siteID = ? AND ea.eventID != ? '
             . 'AND COALESCE(ea.assignedFrom, e.startDateTime) <= ? '
             . 'AND COALESCE(ea.assignedUntil, e.endDateTime, e.startDateTime) >= ? '

@@ -33,7 +33,8 @@ if ($eventId <= 0 || (App::isAdmin() === false && Auth::isCoordinatorOf($eventId
 $siteId = Site::id();
 
 $event = null;
-$stmt = $mysqli->prepare('SELECT eventID, eventName FROM tblEvents WHERE eventID = ? AND siteID = ? AND isDeleted = 0');
+// Imported events are read-only (#514 D5); this makes an imported event exactly as "not found" as a missing one.
+$stmt = $mysqli->prepare('SELECT eventID, eventName FROM tblEvents WHERE eventID = ? AND siteID = ? AND isDeleted = 0 AND externalFeedID IS NULL');
 $stmt->bind_param('ii', $eventId, $siteId);
 $stmt->execute();
 $event = $stmt->get_result()->fetch_assoc() ?: null;

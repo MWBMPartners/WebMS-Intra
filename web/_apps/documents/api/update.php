@@ -108,7 +108,8 @@ if (array_key_exists('categoryID', $body) === true) {
 if (array_key_exists('eventID', $body) === true) {
     $eventId = ($body['eventID'] === null || $body['eventID'] === '') ? null : (int) $body['eventID'];
     if ($eventId !== null) {
-        $evCheck = $db->prepare('SELECT eventID FROM tblEvents WHERE eventID = ? AND siteID = ? AND isDeleted = 0 LIMIT 1');
+        // Imported events are read-only (#514 D5); this makes an imported event exactly as "not found" as a missing one.
+        $evCheck = $db->prepare('SELECT eventID FROM tblEvents WHERE eventID = ? AND siteID = ? AND isDeleted = 0 AND externalFeedID IS NULL LIMIT 1');
         if ($evCheck === false) {
             ApiResponse::error('Database error', 500);
         }

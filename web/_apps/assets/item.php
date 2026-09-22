@@ -499,9 +499,10 @@ $eventAssignments = AssetRegister::listEventAssignments($assetId);
 // autocomplete lib in this app), not a live search box.
 $eventCandidates = [];
 if ($privileged === true) {
+    // Imported events are read-only (#514 D5); an asset cannot be assigned to an event nobody here can edit.
     $evStmt = $db->prepare(
         'SELECT eventID, eventName, startDateTime FROM tblEvents '
-        . 'WHERE siteID = ? AND isDeleted = 0 AND startDateTime >= DATE_SUB(NOW(), INTERVAL 1 DAY) '
+        . 'WHERE siteID = ? AND isDeleted = 0 AND externalFeedID IS NULL AND startDateTime >= DATE_SUB(NOW(), INTERVAL 1 DAY) '
         . 'ORDER BY startDateTime ASC LIMIT 100'
     );
     if ($evStmt !== false) {

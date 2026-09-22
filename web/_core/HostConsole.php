@@ -180,8 +180,10 @@ class HostConsole
             return false;
         }
         $db = App::db();
+        // Imported events are read-only (#514 D5); this makes an imported event exactly as "not found" as a
+        // missing one, so the Host Console cockpit never opens on a calendar the portal cannot manage.
         $stmt = $db->prepare(
-            'SELECT eventID FROM tblEvents WHERE eventID = ? AND siteID = ? AND isDeleted = 0 LIMIT 1'
+            'SELECT eventID FROM tblEvents WHERE eventID = ? AND siteID = ? AND isDeleted = 0 AND externalFeedID IS NULL LIMIT 1'
         );
         if ($stmt === false) {
             return false;
