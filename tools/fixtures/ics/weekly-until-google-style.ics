@@ -1,0 +1,17 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//WebMS Intra//Test fixture//EN
+X-WEBMS-FIXTURE-NOTE:What this proves: Google writes UNTIL as exactly the last date's own start time, so
+X-WEBMS-FIXTURE-NOTE:UNTIL has to be INCLUSIVE. Four Tuesdays, 6 to 27 October 2026. Read as exclusive, the
+X-WEBMS-FIXTURE-NOTE:27th disappears - and that is the last date of every ended Google series. The clock goes
+X-WEBMS-FIXTURE-NOTE:back on 25 October, so 19:00 London is 18:00Z for the first three and 19:00Z for the last;
+X-WEBMS-FIXTURE-NOTE:UNTIL therefore only lines up if it is compared as a moment, not as text.
+BEGIN:VEVENT
+UID:until-inclusive-1@fixtures.webms.test
+DTSTAMP:20260901T090000Z
+DTSTART;TZID=Europe/London:20261006T190000
+DTEND;TZID=Europe/London:20261006T200000
+RRULE:FREQ=WEEKLY;BYDAY=TU;UNTIL=20261027T190000Z
+SUMMARY:Tuesday study
+END:VEVENT
+END:VCALENDAR

@@ -1,0 +1,14 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//WebMS Intra//Test fixture//EN
+X-WEBMS-FIXTURE-NOTE:What this proves: a download that stopped half way is
+X-WEBMS-FIXTURE-NOTE:reported as NOT complete. The importer must never treat
+X-WEBMS-FIXTURE-NOTE:such a file as the whole calendar, or it would delete
+X-WEBMS-FIXTURE-NOTE:every event that simply had not arrived yet. This file
+X-WEBMS-FIXTURE-NOTE:has no END:VEVENT and no END:VCALENDAR.
+BEGIN:VEVENT
+UID:truncated-1@fixtures.webms.test
+DTSTAMP:20260901T090000Z
+DTSTART:20261126T120000Z
+DTEND:20261126T130000Z
+SUMMARY:Cut off here

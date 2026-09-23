@@ -1,0 +1,17 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//WebMS Intra//Test fixture//EN
+X-WEBMS-FIXTURE-NOTE:What this proves: a skipped date written with a Windows zone name is
+X-WEBMS-FIXTURE-NOTE:removed. The series is in "Eastern Standard Time" on purpose: if that name
+X-WEBMS-FIXTURE-NOTE:were not recognised, the times would fall back to the calendar zone and the
+X-WEBMS-FIXTURE-NOTE:stored readings would be wrong, which the self-test also checks.
+BEGIN:VEVENT
+UID:exdate-win-1@fixtures.webms.test
+DTSTAMP:20260901T090000Z
+DTSTART;TZID="Eastern Standard Time":20261006T190000
+DTEND;TZID="Eastern Standard Time":20261006T200000
+RRULE:FREQ=WEEKLY;BYDAY=TU;COUNT=3
+EXDATE;TZID="Eastern Standard Time":20261013T190000
+SUMMARY:New York study
+END:VEVENT
+END:VCALENDAR

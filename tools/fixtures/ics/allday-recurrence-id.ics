@@ -1,0 +1,26 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//WebMS Intra//Test fixture//EN
+X-WEBMS-FIXTURE-NOTE:What this proves: a changed date of a WHOLE-DAY series is written by Google
+X-WEBMS-FIXTURE-NOTE:as RECURRENCE-ID;VALUE=DATE, with no time in it at all. It has to be matched
+X-WEBMS-FIXTURE-NOTE:against the whole-day slot it replaces (a plain date), not turned into a
+X-WEBMS-FIXTURE-NOTE:moment first. Read the wrong way it matches nothing, and the calendar shows
+X-WEBMS-FIXTURE-NOTE:both the old date and the new one. Three Mondays; the second is moved to the
+X-WEBMS-FIXTURE-NOTE:Tuesday, so 19 October must disappear and 20 October take its place.
+BEGIN:VEVENT
+UID:allday-override-1@fixtures.webms.test
+DTSTAMP:20260901T090000Z
+DTSTART;VALUE=DATE:20261012
+DTEND;VALUE=DATE:20261013
+RRULE:FREQ=WEEKLY;COUNT=3
+SUMMARY:Whole-day series
+END:VEVENT
+BEGIN:VEVENT
+UID:allday-override-1@fixtures.webms.test
+DTSTAMP:20260901T090000Z
+RECURRENCE-ID;VALUE=DATE:20261019
+DTSTART;VALUE=DATE:20261020
+DTEND;VALUE=DATE:20261021
+SUMMARY:Whole-day series (moved to the Tuesday)
+END:VEVENT
+END:VCALENDAR

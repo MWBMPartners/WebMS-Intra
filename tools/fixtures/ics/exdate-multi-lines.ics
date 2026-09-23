@@ -1,0 +1,16 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//WebMS Intra//Test fixture//EN
+X-WEBMS-FIXTURE-NOTE:What this proves: skipped dates written on more than one EXDATE line are
+X-WEBMS-FIXTURE-NOTE:all removed. Five Tuesdays, two skipped, three left.
+BEGIN:VEVENT
+UID:exdate-multi-1@fixtures.webms.test
+DTSTAMP:20260901T090000Z
+DTSTART;TZID=Europe/London:20260908T190000
+DTEND;TZID=Europe/London:20260908T200000
+RRULE:FREQ=WEEKLY;BYDAY=TU;COUNT=5
+EXDATE;TZID=Europe/London:20260915T190000
+EXDATE;TZID=Europe/London:20260922T190000
+SUMMARY:Tuesday study
+END:VEVENT
+END:VCALENDAR

@@ -1,0 +1,60 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//WebMS Intra//Test fixture//EN
+X-WEBMS-FIXTURE-NOTE:What this proves: three cases where a changed-date block
+X-WEBMS-FIXTURE-NOTE:does not line up with a date its own series produced.
+X-WEBMS-FIXTURE-NOTE:(1) The series is not in the file at all - some systems
+X-WEBMS-FIXTURE-NOTE:send only the changed date. It is kept on its own, with
+X-WEBMS-FIXTURE-NOTE:its own key, because it is a real event in the calendar.
+X-WEBMS-FIXTURE-NOTE:(2) The series IS in the file, but the changed date names
+X-WEBMS-FIXTURE-NOTE:a slot the rule never produced (here, a Wednesday in a
+X-WEBMS-FIXTURE-NOTE:Tuesday series). It is added rather than thrown away.
+X-WEBMS-FIXTURE-NOTE:(3) The series says that date was REMOVED (EXDATE) and a
+X-WEBMS-FIXTURE-NOTE:changed-date block for it is left over. The removal wins:
+X-WEBMS-FIXTURE-NOTE:deleting a date is a deliberate act by whoever keeps the
+X-WEBMS-FIXTURE-NOTE:calendar, so the date stays out.
+X-WEBMS-FIXTURE-NOTE:This file exists because the mutation run found that case
+X-WEBMS-FIXTURE-NOTE:(1) stopped the whole import with an error, and no fixture
+X-WEBMS-FIXTURE-NOTE:in the plan reached it.
+BEGIN:VEVENT
+UID:orphan-only-1@fixtures.webms.test
+DTSTAMP:20260901T090000Z
+RECURRENCE-ID;TZID=Europe/London:20261201T190000
+DTSTART;TZID=Europe/London:20261201T193000
+DTEND;TZID=Europe/London:20261201T203000
+SUMMARY:Orphan changed date
+END:VEVENT
+BEGIN:VEVENT
+UID:orphan-extra-1@fixtures.webms.test
+DTSTAMP:20260901T090000Z
+DTSTART;TZID=Europe/London:20261208T190000
+DTEND;TZID=Europe/London:20261208T200000
+RRULE:FREQ=WEEKLY;BYDAY=TU;COUNT=2
+SUMMARY:Tuesday group
+END:VEVENT
+BEGIN:VEVENT
+UID:orphan-extra-1@fixtures.webms.test
+DTSTAMP:20260901T090000Z
+RECURRENCE-ID;TZID=Europe/London:20261209T190000
+DTSTART;TZID=Europe/London:20261209T190000
+DTEND;TZID=Europe/London:20261209T200000
+SUMMARY:Tuesday group (extra Wednesday)
+END:VEVENT
+BEGIN:VEVENT
+UID:orphan-removed-1@fixtures.webms.test
+DTSTAMP:20260901T090000Z
+DTSTART;TZID=Europe/London:20261214T190000
+DTEND;TZID=Europe/London:20261214T200000
+RRULE:FREQ=WEEKLY;BYDAY=MO;COUNT=2
+EXDATE;TZID=Europe/London:20261221T190000
+SUMMARY:Monday group
+END:VEVENT
+BEGIN:VEVENT
+UID:orphan-removed-1@fixtures.webms.test
+DTSTAMP:20260901T090000Z
+RECURRENCE-ID;TZID=Europe/London:20261221T190000
+DTSTART;TZID=Europe/London:20261221T193000
+DTEND;TZID=Europe/London:20261221T203000
+SUMMARY:Monday group (should not appear)
+END:VEVENT
+END:VCALENDAR

@@ -1,0 +1,24 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//WebMS Intra//Test fixture//EN
+X-WEBMS-FIXTURE-NOTE:What this proves: INTERVAL is honoured. The first event is every SECOND Thursday, the
+X-WEBMS-FIXTURE-NOTE:second every THIRD month. If INTERVAL were ignored both would repeat far too often - a
+X-WEBMS-FIXTURE-NOTE:fortnightly rota would appear every week, which is the sort of mistake nobody reports
+X-WEBMS-FIXTURE-NOTE:because the extra dates look perfectly ordinary.
+BEGIN:VEVENT
+UID:interval-weekly-1@fixtures.webms.test
+DTSTAMP:20260901T090000Z
+DTSTART;TZID=Europe/London:20260903T180000
+DTEND;TZID=Europe/London:20260903T190000
+RRULE:FREQ=WEEKLY;INTERVAL=2;BYDAY=TH;COUNT=5
+SUMMARY:Fortnightly rota
+END:VEVENT
+BEGIN:VEVENT
+UID:interval-monthly-1@fixtures.webms.test
+DTSTAMP:20260901T090000Z
+DTSTART;TZID=Europe/London:20260910T120000
+DTEND;TZID=Europe/London:20260910T130000
+RRULE:FREQ=MONTHLY;INTERVAL=3;COUNT=4
+SUMMARY:Quarterly review
+END:VEVENT
+END:VCALENDAR

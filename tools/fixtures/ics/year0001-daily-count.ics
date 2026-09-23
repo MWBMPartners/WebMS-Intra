@@ -1,0 +1,17 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//WebMS Intra//Test fixture//EN
+X-WEBMS-FIXTURE-NOTE:What this proves: a series starting in the year 1 and asking for nearly a
+X-WEBMS-FIXTURE-NOTE:million dates is refused rather than worked out. It gives the first date
+X-WEBMS-FIXTURE-NOTE:only - which is far outside the window, so nothing at all is returned - and
+X-WEBMS-FIXTURE-NOTE:finishes at once. Worked out in full it would take hundreds of thousands of
+X-WEBMS-FIXTURE-NOTE:steps.
+BEGIN:VEVENT
+UID:year0001-1@fixtures.webms.test
+DTSTAMP:20260901T090000Z
+DTSTART:00010101T000000Z
+DTEND:00010101T010000Z
+RRULE:FREQ=DAILY;COUNT=999999
+SUMMARY:From the year one
+END:VEVENT
+END:VCALENDAR

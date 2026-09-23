@@ -1,0 +1,26 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//WebMS Intra//Test fixture//EN
+X-WEBMS-FIXTURE-NOTE:What this proves: a YEARLY rule that names no month still counts its days across the
+X-WEBMS-FIXTURE-NOTE:WHOLE year, as RFC 5545 section 3.3.10 says. "Every Sunday" means every Sunday of the
+X-WEBMS-FIXTURE-NOTE:year (52 of them in this window), not just the Sundays of the month the series began in;
+X-WEBMS-FIXTURE-NOTE:"the 1st" means the 1st of every month (12 of them), not just one. Both used to come back
+X-WEBMS-FIXTURE-NOTE:quietly short - 4 dates and 1 date - which is the worst kind of wrong, because a calendar
+X-WEBMS-FIXTURE-NOTE:with some of its dates missing looks exactly like a calendar with no dates missing.
+BEGIN:VEVENT
+UID:yearly-byday-1@fixtures.webms.test
+DTSTAMP:20260901T090000Z
+DTSTART;TZID=Europe/London:20260906T100000
+DTEND;TZID=Europe/London:20260906T110000
+RRULE:FREQ=YEARLY;BYDAY=SU;COUNT=60
+SUMMARY:Every Sunday of the year
+END:VEVENT
+BEGIN:VEVENT
+UID:yearly-bymonthday-1@fixtures.webms.test
+DTSTAMP:20260901T090000Z
+DTSTART;TZID=Europe/London:20260906T140000
+DTEND;TZID=Europe/London:20260906T150000
+RRULE:FREQ=YEARLY;BYMONTHDAY=1;COUNT=30
+SUMMARY:The first of every month
+END:VEVENT
+END:VCALENDAR

@@ -1,0 +1,19 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//WebMS Intra//Test fixture//EN
+X-WEBMS-FIXTURE-NOTE:What this proves: several skipped dates written on ONE line, separated by
+X-WEBMS-FIXTURE-NOTE:commas. Microsoft 365 writes its skipped dates that way; Google writes one
+X-WEBMS-FIXTURE-NOTE:EXDATE line each (exdate-multi-lines.ics covers that shape). A reader that
+X-WEBMS-FIXTURE-NOTE:does not split on the commas treats the whole line as one unreadable date,
+X-WEBMS-FIXTURE-NOTE:skips nothing, and quietly puts deleted dates back into a Microsoft calendar.
+X-WEBMS-FIXTURE-NOTE:Five Tuesdays with the second and fourth removed leaves three.
+BEGIN:VEVENT
+UID:exdate-one-line-1@fixtures.webms.test
+DTSTAMP:20260901T090000Z
+DTSTART;TZID=Europe/London:20261006T190000
+DTEND;TZID=Europe/London:20261006T200000
+RRULE:FREQ=WEEKLY;COUNT=5
+EXDATE;TZID=Europe/London:20261013T190000,20261027T190000
+SUMMARY:Tuesday meeting
+END:VEVENT
+END:VCALENDAR

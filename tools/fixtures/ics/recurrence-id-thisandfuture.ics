@@ -1,0 +1,24 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//WebMS Intra//Test fixture//EN
+X-WEBMS-FIXTURE-NOTE:What this proves: RANGE=THISANDFUTURE asks for "this date and every later
+X-WEBMS-FIXTURE-NOTE:one". This portal applies it to that one date only and records a warning,
+X-WEBMS-FIXTURE-NOTE:rather than rewriting dates the calendar never sent. The second date is
+X-WEBMS-FIXTURE-NOTE:renamed; the third and fourth keep the original title.
+BEGIN:VEVENT
+UID:recid-taf-1@fixtures.webms.test
+DTSTAMP:20260901T090000Z
+DTSTART;TZID=Europe/London:20261105T180000
+DTEND;TZID=Europe/London:20261105T190000
+RRULE:FREQ=WEEKLY;BYDAY=TH;COUNT=4
+SUMMARY:Thursday class
+END:VEVENT
+BEGIN:VEVENT
+UID:recid-taf-1@fixtures.webms.test
+DTSTAMP:20260901T090000Z
+RECURRENCE-ID;RANGE=THISANDFUTURE;TZID=Europe/London:20261112T180000
+DTSTART;TZID=Europe/London:20261112T183000
+DTEND;TZID=Europe/London:20261112T193000
+SUMMARY:Thursday class (new time)
+END:VEVENT
+END:VCALENDAR

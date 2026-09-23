@@ -1,0 +1,22 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//WebMS Intra//Test fixture//EN
+X-WEBMS-FIXTURE-NOTE:What this proves: RFC 5545 says a CLASS value nobody knows must be treated
+X-WEBMS-FIXTURE-NOTE:as the most private one. X-SECRET is not PUBLIC, so the event is private.
+BEGIN:VEVENT
+UID:class-unknown-1@fixtures.webms.test
+DTSTAMP:20260901T090000Z
+DTSTART;TZID=Europe/London:20261116T090000
+DTEND;TZID=Europe/London:20261116T100000
+CLASS:X-SECRET
+SUMMARY:Unknown class value
+END:VEVENT
+BEGIN:VEVENT
+UID:class-confidential-1@fixtures.webms.test
+DTSTAMP:20260901T090000Z
+DTSTART;TZID=Europe/London:20261116T110000
+DTEND;TZID=Europe/London:20261116T120000
+CLASS:CONFIDENTIAL
+SUMMARY:Confidential
+END:VEVENT
+END:VCALENDAR

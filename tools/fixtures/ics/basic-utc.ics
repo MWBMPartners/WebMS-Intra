@@ -1,0 +1,15 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//WebMS Intra//Test fixture//EN
+X-WEBMS-FIXTURE-NOTE:What this proves: a time written in UTC is stored in the organisation zone.
+X-WEBMS-FIXTURE-NOTE:DTSTART 18:00 UTC on 15 October 2026 is 19:00 in London, because British
+X-WEBMS-FIXTURE-NOTE:Summer Time is still in force that day. A one-off event has an empty
+X-WEBMS-FIXTURE-NOTE:recurrence key.
+BEGIN:VEVENT
+UID:basic-utc-1@fixtures.webms.test
+DTSTAMP:20260901T090000Z
+DTSTART:20261015T180000Z
+DTEND:20261015T190000Z
+SUMMARY:Basic UTC event
+END:VEVENT
+END:VCALENDAR

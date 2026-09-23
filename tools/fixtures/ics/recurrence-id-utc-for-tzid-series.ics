@@ -1,0 +1,24 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//WebMS Intra//Test fixture//EN
+X-WEBMS-FIXTURE-NOTE:What this proves: a changed date written in UTC still finds its slot in a
+X-WEBMS-FIXTURE-NOTE:series written in a named zone, because both are turned into the same key.
+X-WEBMS-FIXTURE-NOTE:The changed date REPLACES its slot: three dates, not four, and the middle
+X-WEBMS-FIXTURE-NOTE:one carries the new time and the new title.
+BEGIN:VEVENT
+UID:recid-utc-1@fixtures.webms.test
+DTSTAMP:20260901T090000Z
+DTSTART;TZID=Europe/London:20261006T190000
+DTEND;TZID=Europe/London:20261006T200000
+RRULE:FREQ=WEEKLY;BYDAY=TU;COUNT=3
+SUMMARY:Tuesday practice
+END:VEVENT
+BEGIN:VEVENT
+UID:recid-utc-1@fixtures.webms.test
+DTSTAMP:20260901T090000Z
+RECURRENCE-ID:20261013T180000Z
+DTSTART;TZID=Europe/London:20261013T200000
+DTEND;TZID=Europe/London:20261013T213000
+SUMMARY:Tuesday practice (moved)
+END:VEVENT
+END:VCALENDAR

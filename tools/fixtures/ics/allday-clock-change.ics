@@ -1,0 +1,139 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//WebMS Intra//Test fixture//EN
+X-WEBMS-FIXTURE-NOTE:What this proves: a whole day is not always 24 hours, so the length of a
+X-WEBMS-FIXTURE-NOTE:whole-day event and the day it ends on must both be worked out by the
+X-WEBMS-FIXTURE-NOTE:calendar, never by counting 86,400 seconds per day.
+X-WEBMS-FIXTURE-NOTE:
+X-WEBMS-FIXTURE-NOTE:THE DATES ARE THE WHOLE POINT. In London the clocks go BACK at 02:00 on
+X-WEBMS-FIXTURE-NOTE:Sunday 25 October 2026, which makes that day 25 hours long, and FORWARD at
+X-WEBMS-FIXTURE-NOTE:01:00 on Sunday 28 March 2027, which makes that day 23 hours long. Every
+X-WEBMS-FIXTURE-NOTE:other whole-day fixture here sits in December, June or mid-October, where
+X-WEBMS-FIXTURE-NOTE:no clock change happens and a reader that counted seconds would look
+X-WEBMS-FIXTURE-NOTE:perfectly right. Do not move these events to a quieter month: doing so
+X-WEBMS-FIXTURE-NOTE:would leave the checks passing and stop them proving anything at all.
+X-WEBMS-FIXTURE-NOTE:
+X-WEBMS-FIXTURE-NOTE:The two mistakes bite on different nights, which is why both are here.
+X-WEBMS-FIXTURE-NOTE:A LENGTH counted as seconds divided by 86,400 is short on the 23-hour
+X-WEBMS-FIXTURE-NOTE:night (47 real hours across 27-28 March reads as one day, not two). An
+X-WEBMS-FIXTURE-NOTE:END counted as the start plus N times 86,400 seconds lands an hour early
+X-WEBMS-FIXTURE-NOTE:on the 25-hour night, so a run STARTING on 25 October loses its last day.
+X-WEBMS-FIXTURE-NOTE:
+X-WEBMS-FIXTURE-NOTE:The last FOUR events are about the REPEAT ENGINE rather than the length.
+X-WEBMS-FIXTURE-NOTE:It walks from one date to the next, and a step of a day taken as 86,400
+X-WEBMS-FIXTURE-NOTE:seconds lands an hour short on the 25-hour night. For a whole-day event
+X-WEBMS-FIXTURE-NOTE:that puts the step back on the day it started from, so a date is lost.
+X-WEBMS-FIXTURE-NOTE:The daily one loses 27 October. The Saturday one uses WKST=SU (the week
+X-WEBMS-FIXTURE-NOTE:starts on Sunday), which American calendars are believed to do commonly
+X-WEBMS-FIXTURE-NOTE:(not measured here - no real export exists in this repository), because that is
+X-WEBMS-FIXTURE-NOTE:what puts the clock change INSIDE the week rather than at its far end - it
+X-WEBMS-FIXTURE-NOTE:loses Saturday 31 October and offers 8 November in its place.
+X-WEBMS-FIXTURE-NOTE:
+X-WEBMS-FIXTURE-NOTE:The FINAL PAIR is about the other end of that same engine, and about the
+X-WEBMS-FIXTURE-NOTE:MARCH night rather than the October one. Before a weekly rule looks for its
+X-WEBMS-FIXTURE-NOTE:days it steps back to the first day of the week the event starts in. From
+X-WEBMS-FIXTURE-NOTE:Saturday 3 April 2027 with WKST=SU that is six days back, onto Sunday 28
+X-WEBMS-FIXTURE-NOTE:March - the 23-hour day. Taken as six blocks of 86,400 seconds the step
+X-WEBMS-FIXTURE-NOTE:lands an hour EARLY, at eleven at night on Saturday the 27th, so the
+X-WEBMS-FIXTURE-NOTE:seven-day week the rule then searches begins a day early and, just as
+X-WEBMS-FIXTURE-NOTE:important, ENDS a day early - pushing that week's Saturday out of it.
+X-WEBMS-FIXTURE-NOTE:
+X-WEBMS-FIXTURE-NOTE:INTERVAL=2 is what makes that visible. The pushed-out Saturday is not
+X-WEBMS-FIXTURE-NOTE:picked up by the next week searched, because at INTERVAL=2 the next week
+X-WEBMS-FIXTURE-NOTE:searched starts a FORTNIGHT later - so every date after the first comes
+X-WEBMS-FIXTURE-NOTE:back a week early, on the off weeks. At INTERVAL=1 the pushed-out Saturday
+X-WEBMS-FIXTURE-NOTE:turns up in the very next week and the dates look right, which is why the
+X-WEBMS-FIXTURE-NOTE:weekly twin is here as well and is COUNTED - the start date is then offered
+X-WEBMS-FIXTURE-NOTE:twice, counts twice against COUNT, and the duplicate is quietly dropped, so
+X-WEBMS-FIXTURE-NOTE:a three-date series comes back with two. Do not change INTERVAL, WKST or
+X-WEBMS-FIXTURE-NOTE:the month of this pair, and do not merge the two into one event.
+BEGIN:VEVENT
+UID:allday-cc-spring-two@fixtures.webms.test
+DTSTAMP:20260901T090000Z
+DTSTART;VALUE=DATE:20270327
+DTEND;VALUE=DATE:20270329
+SUMMARY:Spring works, two days
+END:VEVENT
+BEGIN:VEVENT
+UID:allday-cc-spring-four@fixtures.webms.test
+DTSTAMP:20260901T090000Z
+DTSTART;VALUE=DATE:20270326
+DTEND;VALUE=DATE:20270330
+SUMMARY:Spring works, four days
+END:VEVENT
+BEGIN:VEVENT
+UID:allday-cc-spring-one@fixtures.webms.test
+DTSTAMP:20260901T090000Z
+DTSTART;VALUE=DATE:20270328
+DTEND;VALUE=DATE:20270329
+SUMMARY:The twenty-three-hour day on its own
+END:VEVENT
+BEGIN:VEVENT
+UID:allday-cc-autumn-two@fixtures.webms.test
+DTSTAMP:20260901T090000Z
+DTSTART;VALUE=DATE:20261025
+DTEND;VALUE=DATE:20261027
+SUMMARY:Half term, two days from the 25th
+END:VEVENT
+BEGIN:VEVENT
+UID:allday-cc-autumn-three@fixtures.webms.test
+DTSTAMP:20260901T090000Z
+DTSTART;VALUE=DATE:20261025
+DTEND;VALUE=DATE:20261028
+SUMMARY:Half term, three days from the 25th
+END:VEVENT
+BEGIN:VEVENT
+UID:allday-cc-autumn-one@fixtures.webms.test
+DTSTAMP:20260901T090000Z
+DTSTART;VALUE=DATE:20261025
+DTEND;VALUE=DATE:20261026
+SUMMARY:The twenty-five-hour day on its own
+END:VEVENT
+BEGIN:VEVENT
+UID:allday-cc-autumn-before@fixtures.webms.test
+DTSTAMP:20260901T090000Z
+DTSTART;VALUE=DATE:20261024
+DTEND;VALUE=DATE:20261026
+SUMMARY:Weekend across the night the clocks go back
+END:VEVENT
+BEGIN:VEVENT
+UID:allday-cc-weekly@fixtures.webms.test
+DTSTAMP:20260901T090000Z
+DTSTART;VALUE=DATE:20261025
+DTEND;VALUE=DATE:20261027
+RRULE:FREQ=WEEKLY;BYDAY=SU;COUNT=3
+SUMMARY:Weekly two-day break from the 25th
+END:VEVENT
+BEGIN:VEVENT
+UID:allday-cc-daily@fixtures.webms.test
+DTSTAMP:20260901T090000Z
+DTSTART;VALUE=DATE:20261024
+DTEND;VALUE=DATE:20261025
+RRULE:FREQ=DAILY;COUNT=4
+SUMMARY:Daily holiday club, four days from the 24th
+END:VEVENT
+BEGIN:VEVENT
+UID:allday-cc-saturday@fixtures.webms.test
+DTSTAMP:20260901T090000Z
+DTSTART;VALUE=DATE:20261025
+DTEND;VALUE=DATE:20261026
+RRULE:FREQ=WEEKLY;WKST=SU;BYDAY=SU,SA;COUNT=4
+SUMMARY:Saturday club, in a week that starts on Sunday
+END:VEVENT
+BEGIN:VEVENT
+UID:allday-cc-spring-fortnightly@fixtures.webms.test
+DTSTAMP:20260901T090000Z
+DTSTART;VALUE=DATE:20270403
+DTEND;VALUE=DATE:20270404
+RRULE:FREQ=WEEKLY;INTERVAL=2;WKST=SU;BYDAY=SA;COUNT=3
+SUMMARY:Fortnightly Saturday youth club, week starting Sunday
+END:VEVENT
+BEGIN:VEVENT
+UID:allday-cc-spring-weekly@fixtures.webms.test
+DTSTAMP:20260901T090000Z
+DTSTART;VALUE=DATE:20270403
+DTEND;VALUE=DATE:20270404
+RRULE:FREQ=WEEKLY;INTERVAL=1;WKST=SU;BYDAY=SA;COUNT=3
+SUMMARY:Weekly Saturday youth club, week starting Sunday
+END:VEVENT
+END:VCALENDAR

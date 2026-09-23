@@ -1,0 +1,36 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//WebMS Intra//Test fixture//EN
+X-WEBMS-FIXTURE-NOTE:What this proves: a weekly series in a zone whose clocks change on a
+X-WEBMS-FIXTURE-NOTE:different date from ours. Every date stays at 19:00 New York time. The
+X-WEBMS-FIXTURE-NOTE:United Kingdom changes its clocks on 25 October 2026 and the United States
+X-WEBMS-FIXTURE-NOTE:on 1 November 2026, so the London reading is 00:00, 23:00 and 00:00.
+X-WEBMS-FIXTURE-NOTE:
+X-WEBMS-FIXTURE-NOTE:The SECOND event proves something else, and its dates are chosen for it.
+X-WEBMS-FIXTURE-NOTE:UNTIL is a MOMENT IN TIME, not a reading on a clock (RFC 5545 §3.3.10),
+X-WEBMS-FIXTURE-NOTE:so it has to be compared as a moment. 19:00 in New York on Tuesday 3
+X-WEBMS-FIXTURE-NOTE:November 2026 is 00:00 on the 4th in UTC - the United States has already
+X-WEBMS-FIXTURE-NOTE:put its clocks back, so New York is five hours behind - and that is one
+X-WEBMS-FIXTURE-NOTE:second PAST this UNTIL. As moments the series stops with four dates. But
+X-WEBMS-FIXTURE-NOTE:written out as plain text, 20261103190000 sorts BEFORE 20261103235959, so
+X-WEBMS-FIXTURE-NOTE:a reader that compared the text would keep a fifth date the file excludes.
+X-WEBMS-FIXTURE-NOTE:Do not move these Tuesdays to a week where New York is still four hours
+X-WEBMS-FIXTURE-NOTE:behind: the difference between the two ways of comparing would vanish and
+X-WEBMS-FIXTURE-NOTE:the check would prove nothing.
+BEGIN:VEVENT
+UID:ny-weekly-1@fixtures.webms.test
+DTSTAMP:20260901T090000Z
+DTSTART;TZID=America/New_York:20261022T190000
+DTEND;TZID=America/New_York:20261022T200000
+RRULE:FREQ=WEEKLY;BYDAY=TH;COUNT=3
+SUMMARY:New York weekly
+END:VEVENT
+BEGIN:VEVENT
+UID:ny-until-1@fixtures.webms.test
+DTSTAMP:20260901T090000Z
+DTSTART;TZID=America/New_York:20261006T190000
+DTEND;TZID=America/New_York:20261006T200000
+RRULE:FREQ=WEEKLY;BYDAY=TU;UNTIL=20261103T235959Z
+SUMMARY:New York Tuesday, stopping at a moment
+END:VEVENT
+END:VCALENDAR

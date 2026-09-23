@@ -1,0 +1,12 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//WebMS Intra//Test fixture//EN
+X-WEBMS-FIXTURE-NOTE:What this proves: a whole day with no end given lasts exactly that day,
+X-WEBMS-FIXTURE-NOTE:from midnight to 23:59:59, and is never moved between zones.
+BEGIN:VEVENT
+UID:allday-single-1@fixtures.webms.test
+DTSTAMP:20260901T090000Z
+DTSTART;VALUE=DATE:20261225
+SUMMARY:Christmas Day
+END:VEVENT
+END:VCALENDAR

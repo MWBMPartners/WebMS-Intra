@@ -1,0 +1,13 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//WebMS Intra//Test fixture//EN
+X-WEBMS-FIXTURE-NOTE:What this proves: the zone name Mozilla Thunderbird writes, which puts its
+X-WEBMS-FIXTURE-NOTE:own prefix in front of the real name, is still recognised. No warning.
+BEGIN:VEVENT
+UID:mozilla-1@fixtures.webms.test
+DTSTAMP:20260901T090000Z
+DTSTART;TZID=/mozilla.org/20050126_1/Europe/London:20261118T180000
+DTEND;TZID=/mozilla.org/20050126_1/Europe/London:20261118T193000
+SUMMARY:Thunderbird event
+END:VEVENT
+END:VCALENDAR

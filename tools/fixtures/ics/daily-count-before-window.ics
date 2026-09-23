@@ -1,0 +1,19 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//WebMS Intra//Test fixture//EN
+X-WEBMS-FIXTURE-NOTE:What this proves: COUNT counts every date the rule produces, not just the
+X-WEBMS-FIXTURE-NOTE:ones inside the window the portal asked for. This series starts on 1 August
+X-WEBMS-FIXTURE-NOTE:2026, a month before the window, and asks for 40 daily dates - so it ends on
+X-WEBMS-FIXTURE-NOTE:9 September 2026 and only the last nine dates (1 to 9 September) are inside
+X-WEBMS-FIXTURE-NOTE:the window. A reader that counted only the dates it kept would carry on to
+X-WEBMS-FIXTURE-NOTE:10 October and show 31 dates that were never in the calendar. A series that
+X-WEBMS-FIXTURE-NOTE:began before the period being looked at is the ordinary case, not a rare one.
+BEGIN:VEVENT
+UID:count-before-window-1@fixtures.webms.test
+DTSTAMP:20260901T090000Z
+DTSTART;TZID=Europe/London:20260801T100000
+DTEND;TZID=Europe/London:20260801T110000
+RRULE:FREQ=DAILY;COUNT=40
+SUMMARY:Daily for forty days
+END:VEVENT
+END:VCALENDAR

@@ -1,0 +1,16 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//WebMS Intra//Test fixture//EN
+X-WEBMS-FIXTURE-NOTE:What this proves: a Monday/Wednesday/Friday series created on a WEDNESDAY must not gain
+X-WEBMS-FIXTURE-NOTE:a Monday it never had. The first week of a weekly rule is worked out as a whole week, so
+X-WEBMS-FIXTURE-NOTE:the Monday before the series began is offered and has to be thrown away. Seven dates,
+X-WEBMS-FIXTURE-NOTE:starting Wednesday 9 September 2026 - never Monday the 7th.
+BEGIN:VEVENT
+UID:midweek-start-1@fixtures.webms.test
+DTSTAMP:20260901T090000Z
+DTSTART;TZID=Europe/London:20260909T100000
+DTEND;TZID=Europe/London:20260909T110000
+RRULE:FREQ=WEEKLY;BYDAY=MO,WE,FR;COUNT=7
+SUMMARY:Midweek prayer
+END:VEVENT
+END:VCALENDAR

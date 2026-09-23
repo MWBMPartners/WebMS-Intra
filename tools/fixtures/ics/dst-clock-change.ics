@@ -1,0 +1,59 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//WebMS Intra//Fixtures//EN
+CALSCALE:GREGORIAN
+BEGIN:VEVENT
+UID:dst-oct-dtend@fixtures.webms.test
+DTSTART;TZID=Europe/London:20261024T230000
+DTEND;TZID=Europe/London:20261025T040000
+SUMMARY:Night shelter, clocks back
+END:VEVENT
+BEGIN:VEVENT
+UID:dst-mar-dtend@fixtures.webms.test
+DTSTART;TZID=Europe/London:20270327T230000
+DTEND;TZID=Europe/London:20270328T040000
+SUMMARY:Night shelter, clocks forward
+END:VEVENT
+BEGIN:VEVENT
+UID:dst-oct-utc@fixtures.webms.test
+DTSTART:20261024T220000Z
+DTEND:20261025T040000Z
+SUMMARY:Vigil written in UTC, clocks back
+END:VEVENT
+BEGIN:VEVENT
+UID:dst-mar-utc@fixtures.webms.test
+DTSTART:20270327T230000Z
+DTEND:20270328T030000Z
+SUMMARY:Vigil written in UTC, clocks forward
+END:VEVENT
+BEGIN:VEVENT
+UID:dst-oct-duration-exact@fixtures.webms.test
+DTSTART;TZID=Europe/London:20261024T230000
+DURATION:PT5H
+SUMMARY:Five hours exactly, clocks back
+END:VEVENT
+BEGIN:VEVENT
+UID:dst-mar-duration-exact@fixtures.webms.test
+DTSTART;TZID=Europe/London:20270327T230000
+DURATION:PT5H
+SUMMARY:Five hours exactly, clocks forward
+END:VEVENT
+BEGIN:VEVENT
+UID:dst-oct-duration-nominal@fixtures.webms.test
+DTSTART;TZID=Europe/London:20261024T230000
+DURATION:P1D
+SUMMARY:One whole day, clocks back
+END:VEVENT
+BEGIN:VEVENT
+UID:dst-mar-duration-nominal@fixtures.webms.test
+DTSTART;TZID=Europe/London:20270327T230000
+DURATION:P1D
+SUMMARY:One whole day, clocks forward
+END:VEVENT
+BEGIN:VEVENT
+UID:dst-ordinary-night@fixtures.webms.test
+DTSTART;TZID=Europe/London:20261017T230000
+DTEND;TZID=Europe/London:20261018T040000
+SUMMARY:An ordinary night, no clock change
+END:VEVENT
+END:VCALENDAR

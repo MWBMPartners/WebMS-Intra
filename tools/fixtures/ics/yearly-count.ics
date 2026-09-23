@@ -1,0 +1,20 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//WebMS Intra//Test fixture//EN
+X-WEBMS-FIXTURE-NOTE:What this proves: COUNT is read and obeyed. Three yearly dates from
+X-WEBMS-FIXTURE-NOTE:5 November 2024, so the last is 5 November 2026 and only that one falls
+X-WEBMS-FIXTURE-NOTE:inside the window this test uses.
+X-WEBMS-FIXTURE-NOTE:This note used to say the fourth date, 5 November 2027, did not appear
+X-WEBMS-FIXTURE-NOTE:'although it is inside the window'. That was untrue: the window ends on
+X-WEBMS-FIXTURE-NOTE:1 September 2027, so 5 November 2027 is outside it and would not have
+X-WEBMS-FIXTURE-NOTE:appeared whether COUNT was obeyed or not. The check that really does
+X-WEBMS-FIXTURE-NOTE:exercise COUNT stopping a series is daily-count-before-window.ics.
+BEGIN:VEVENT
+UID:yearly-count-1@fixtures.webms.test
+DTSTAMP:20260901T090000Z
+DTSTART;TZID=Europe/London:20241105T190000
+DTEND;TZID=Europe/London:20241105T203000
+RRULE:FREQ=YEARLY;COUNT=3
+SUMMARY:Annual meeting
+END:VEVENT
+END:VCALENDAR

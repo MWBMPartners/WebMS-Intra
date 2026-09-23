@@ -1,0 +1,19 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//WebMS Intra//Test fixture//EN
+X-WEBMS-FIXTURE-NOTE:What this proves: WKST - which day a week starts on - changes the answer, exactly as the
+X-WEBMS-FIXTURE-NOTE:worked example in RFC 5545 section 3.3.10 says. Every second week, on Sundays and
+X-WEBMS-FIXTURE-NOTE:Tuesdays, with the week starting on SUNDAY. Starting from Tuesday 8 September 2026 that
+X-WEBMS-FIXTURE-NOTE:gives 8, 20 and 22 September, then 4, 6 and 18 October. With the week starting on Monday
+X-WEBMS-FIXTURE-NOTE:instead (the default, and what a reader that ignores WKST would use) the same rule would
+X-WEBMS-FIXTURE-NOTE:give 8, 13, 22 and 27 September and 6 and 11 October - different dates, no error, and
+X-WEBMS-FIXTURE-NOTE:nothing on the page to suggest anything was wrong.
+BEGIN:VEVENT
+UID:wkst-sunday-1@fixtures.webms.test
+DTSTAMP:20260901T090000Z
+DTSTART;TZID=Europe/London:20260908T190000
+DTEND;TZID=Europe/London:20260908T200000
+RRULE:FREQ=WEEKLY;INTERVAL=2;BYDAY=SU,TU;WKST=SU;COUNT=6
+SUMMARY:Fortnightly pair
+END:VEVENT
+END:VCALENDAR

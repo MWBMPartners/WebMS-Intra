@@ -1,0 +1,16 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//WebMS Intra//Test fixture//EN
+X-WEBMS-FIXTURE-NOTE:What this proves: a whole-day event whose end is BEFORE its start covers its start day
+X-WEBMS-FIXTURE-NOTE:and nothing else. Only a broken calendar writes this, but the answer used to be three
+X-WEBMS-FIXTURE-NOTE:days - the 27th, 28th and 29th of December - because the gap between two days is always
+X-WEBMS-FIXTURE-NOTE:counted as a positive number. Two of those three days appear nowhere in the file, and a
+X-WEBMS-FIXTURE-NOTE:broken calendar is exactly the situation in which invented dates get believed.
+BEGIN:VEVENT
+UID:allday-backwards-1@fixtures.webms.test
+DTSTAMP:20260901T090000Z
+DTSTART;VALUE=DATE:20261227
+DTEND;VALUE=DATE:20261224
+SUMMARY:End before start
+END:VEVENT
+END:VCALENDAR

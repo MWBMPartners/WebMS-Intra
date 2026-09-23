@@ -1,0 +1,14 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//WebMS Intra//Test fixture//EN
+X-WEBMS-FIXTURE-NOTE:What this proves: RFC 5545 makes a whole-day end exclusive. 24 to 27
+X-WEBMS-FIXTURE-NOTE:December means the 24th, 25th and 26th, so the stored end is the 26th at
+X-WEBMS-FIXTURE-NOTE:23:59:59.
+BEGIN:VEVENT
+UID:allday-multi-1@fixtures.webms.test
+DTSTAMP:20260901T090000Z
+DTSTART;VALUE=DATE:20261224
+DTEND;VALUE=DATE:20261227
+SUMMARY:Christmas break
+END:VEVENT
+END:VCALENDAR

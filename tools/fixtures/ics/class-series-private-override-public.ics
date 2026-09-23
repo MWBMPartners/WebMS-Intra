@@ -1,0 +1,27 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//WebMS Intra//Test fixture//EN
+X-WEBMS-FIXTURE-NOTE:What this proves: a PRIVATE series keeps its changed dates private, even when
+X-WEBMS-FIXTURE-NOTE:the changed date itself says CLASS:PUBLIC. This is the direction that leaks if
+X-WEBMS-FIXTURE-NOTE:it is wrong: a private pastoral series with one date rearranged would show that
+X-WEBMS-FIXTURE-NOTE:date to everybody. The opposite direction - one date of a PUBLIC series marked
+X-WEBMS-FIXTURE-NOTE:private - is covered by class-override-only.ics. All three dates must be private.
+BEGIN:VEVENT
+UID:private-series-1@fixtures.webms.test
+DTSTAMP:20260901T090000Z
+DTSTART;TZID=Europe/London:20261103T190000
+DTEND;TZID=Europe/London:20261103T200000
+RRULE:FREQ=WEEKLY;COUNT=3
+CLASS:PRIVATE
+SUMMARY:Private series
+END:VEVENT
+BEGIN:VEVENT
+UID:private-series-1@fixtures.webms.test
+DTSTAMP:20260901T090000Z
+RECURRENCE-ID;TZID=Europe/London:20261110T190000
+DTSTART;TZID=Europe/London:20261110T200000
+DTEND;TZID=Europe/London:20261110T210000
+CLASS:PUBLIC
+SUMMARY:Private series (moved, and wrongly marked public)
+END:VEVENT
+END:VCALENDAR

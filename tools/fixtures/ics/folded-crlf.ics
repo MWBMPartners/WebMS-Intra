@@ -1,0 +1,17 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//WebMS Intra//Test fixture//EN
+X-WEBMS-FIXTURE-NOTE:What this proves: long values split across several lines are joined back
+X-WEBMS-FIXTURE-NOTE:together, including a split in the middle of a word and one that uses a tab
+X-WEBMS-FIXTURE-NOTE:instead of a space. This file uses carriage-return and line-feed endings,
+X-WEBMS-FIXTURE-NOTE:which is what RFC 5545 asks for.
+BEGIN:VEVENT
+UID:folded-1@fixtures.webms.test
+DTSTAMP:20260901T090000Z
+DTSTART;TZID=Europe/London:20261120T190000
+DTEND;TZID=Europe/London:20261120T203000
+SUMMARY:Harvest thanksgiving serv
+ ice and shared me
+	al
+END:VEVENT
+END:VCALENDAR

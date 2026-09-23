@@ -1,0 +1,15 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//WebMS Intra//Test fixture//EN
+X-WEBMS-FIXTURE-NOTE:What this proves: an ordinary (IANA) zone name is used as it stands, and
+X-WEBMS-FIXTURE-NOTE:no warning is recorded. 10 November 2026 is in Greenwich Mean Time, so
+X-WEBMS-FIXTURE-NOTE:the stored time is the same as the written one.
+BEGIN:VEVENT
+UID:tzid-london-1@fixtures.webms.test
+DTSTAMP:20260901T090000Z
+DTSTART;TZID=Europe/London:20261110T190000
+DTEND;TZID=Europe/London:20261110T203000
+SUMMARY:London evening
+LOCATION:Church hall
+END:VEVENT
+END:VCALENDAR

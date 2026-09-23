@@ -1,0 +1,22 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//WebMS Intra//Test fixture//EN
+X-WEBMS-FIXTURE-NOTE:What this proves: the Windows zone names Microsoft 365 writes are
+X-WEBMS-FIXTURE-NOTE:recognised, with no warning. "GMT Standard Time" is Europe/London and
+X-WEBMS-FIXTURE-NOTE:"Eastern Standard Time" is America/New_York. On 7 October 2026 New York is
+X-WEBMS-FIXTURE-NOTE:on daylight time, so 09:00 there is 14:00 in London.
+BEGIN:VEVENT
+UID:win-london-1@fixtures.webms.test
+DTSTAMP:20260901T090000Z
+DTSTART;TZID="GMT Standard Time":20261006T190000
+DTEND;TZID="GMT Standard Time":20261006T200000
+SUMMARY:Outlook London
+END:VEVENT
+BEGIN:VEVENT
+UID:win-newyork-1@fixtures.webms.test
+DTSTAMP:20260901T090000Z
+DTSTART;TZID="Eastern Standard Time":20261007T090000
+DTEND;TZID="Eastern Standard Time":20261007T100000
+SUMMARY:Outlook New York
+END:VEVENT
+END:VCALENDAR

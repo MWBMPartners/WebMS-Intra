@@ -1,0 +1,16 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//WebMS Intra//Test fixture//EN
+X-WEBMS-FIXTURE-NOTE:What this proves: a weekly series running for twenty years gives only the
+X-WEBMS-FIXTURE-NOTE:dates inside the window asked for - fifty-three of them - and is NOT
+X-WEBMS-FIXTURE-NOTE:treated as too big, because 53 is well under the limit of 400 dates for one
+X-WEBMS-FIXTURE-NOTE:series.
+BEGIN:VEVENT
+UID:huge-1@fixtures.webms.test
+DTSTAMP:20260901T090000Z
+DTSTART;TZID=Europe/London:20200107T190000
+DTEND;TZID=Europe/London:20200107T200000
+RRULE:FREQ=WEEKLY;BYDAY=TU;UNTIL=20400101T000000Z
+SUMMARY:Tuesday prayer
+END:VEVENT
+END:VCALENDAR

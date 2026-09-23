@@ -1,0 +1,16 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//WebMS Intra//Test fixture//EN
+X-WEBMS-FIXTURE-NOTE:What this proves: RDATE adds dates to a series that has no repeat rule at
+X-WEBMS-FIXTURE-NOTE:all, and a comma-separated list on one line counts as several dates. Three
+X-WEBMS-FIXTURE-NOTE:dates in all, and each one carries a recurrence key because it belongs to a
+X-WEBMS-FIXTURE-NOTE:series.
+BEGIN:VEVENT
+UID:rdate-1@fixtures.webms.test
+DTSTAMP:20260901T090000Z
+DTSTART;TZID=Europe/London:20261007T190000
+DTEND;TZID=Europe/London:20261007T200000
+RDATE;TZID=Europe/London:20261014T190000,20261021T190000
+SUMMARY:Added dates
+END:VEVENT
+END:VCALENDAR

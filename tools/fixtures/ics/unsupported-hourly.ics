@@ -1,0 +1,15 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//WebMS Intra//Test fixture//EN
+X-WEBMS-FIXTURE-NOTE:What this proves: a repeat rule this portal does not work out (every hour)
+X-WEBMS-FIXTURE-NOTE:gives the first date only, plus a warning. Reading it roughly would put
+X-WEBMS-FIXTURE-NOTE:events at the wrong times and nobody would notice.
+BEGIN:VEVENT
+UID:hourly-1@fixtures.webms.test
+DTSTAMP:20260901T090000Z
+DTSTART:20261124T120000Z
+DTEND:20261124T130000Z
+RRULE:FREQ=HOURLY;COUNT=5
+SUMMARY:Every hour
+END:VEVENT
+END:VCALENDAR

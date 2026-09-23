@@ -1,0 +1,25 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//WebMS Intra//Test fixture//EN
+X-WEBMS-FIXTURE-NOTE:What this proves: a CANCELLED series cancels its changed dates too, even when
+X-WEBMS-FIXTURE-NOTE:the changed date says STATUS:CONFIRMED. cancelled-series.ics has no changed
+X-WEBMS-FIXTURE-NOTE:date in it, so it cannot show this. All three dates must come back cancelled.
+BEGIN:VEVENT
+UID:cancelled-with-override-1@fixtures.webms.test
+DTSTAMP:20260901T090000Z
+DTSTART;TZID=Europe/London:20261201T190000
+DTEND;TZID=Europe/London:20261201T200000
+RRULE:FREQ=WEEKLY;COUNT=3
+STATUS:CANCELLED
+SUMMARY:Cancelled series with a changed date
+END:VEVENT
+BEGIN:VEVENT
+UID:cancelled-with-override-1@fixtures.webms.test
+DTSTAMP:20260901T090000Z
+RECURRENCE-ID;TZID=Europe/London:20261208T190000
+DTSTART;TZID=Europe/London:20261208T200000
+DTEND;TZID=Europe/London:20261208T210000
+STATUS:CONFIRMED
+SUMMARY:Cancelled series with a changed date (moved)
+END:VEVENT
+END:VCALENDAR

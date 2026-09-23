@@ -1,0 +1,15 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//WebMS Intra//Test fixture//EN
+X-WEBMS-FIXTURE-NOTE:What this proves: invisible direction-changing characters are removed from
+X-WEBMS-FIXTURE-NOTE:the title. U+202E reverses everything after it on screen, so a title can be
+X-WEBMS-FIXTURE-NOTE:made to read as something else entirely. A control character is removed too.
+BEGIN:VEVENT
+UID:direction-1@fixtures.webms.test
+DTSTAMP:20260901T090000Z
+DTSTART;TZID=Europe/London:20261119T190000
+DTEND;TZID=Europe/London:20261119T200000
+SUMMARY:Invoice‮gpj.exe
+LOCATION:Hall​A
+END:VEVENT
+END:VCALENDAR

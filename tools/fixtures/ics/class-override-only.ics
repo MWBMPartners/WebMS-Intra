@@ -1,0 +1,24 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//WebMS Intra//Test fixture//EN
+X-WEBMS-FIXTURE-NOTE:What this proves: one date of an otherwise public series can be marked
+X-WEBMS-FIXTURE-NOTE:private on its own, and only that date becomes private. The series itself
+X-WEBMS-FIXTURE-NOTE:has no CLASS line.
+BEGIN:VEVENT
+UID:class-override-1@fixtures.webms.test
+DTSTAMP:20260901T090000Z
+DTSTART;TZID=Europe/London:20261117T190000
+DTEND;TZID=Europe/London:20261117T200000
+RRULE:FREQ=WEEKLY;BYDAY=TU;COUNT=3
+SUMMARY:Open evening
+END:VEVENT
+BEGIN:VEVENT
+UID:class-override-1@fixtures.webms.test
+DTSTAMP:20260901T090000Z
+RECURRENCE-ID;TZID=Europe/London:20261124T190000
+DTSTART;TZID=Europe/London:20261124T190000
+DTEND;TZID=Europe/London:20261124T200000
+CLASS:PRIVATE
+SUMMARY:Open evening
+END:VEVENT
+END:VCALENDAR

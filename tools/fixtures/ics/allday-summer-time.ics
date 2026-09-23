@@ -1,0 +1,26 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//WebMS Intra//Test fixture//EN
+X-WEBMS-FIXTURE-NOTE:What this proves: a whole-day date must never be pushed through a time-zone conversion.
+X-WEBMS-FIXTURE-NOTE:These days are in JUNE, when London is on British Summer Time and one hour ahead of UTC.
+X-WEBMS-FIXTURE-NOTE:Midnight on 15 June in London is 23:00 on the 14th in UTC, so a whole day that has been
+X-WEBMS-FIXTURE-NOTE:converted comes out on the day BEFORE - for half the year only. Every other whole-day
+X-WEBMS-FIXTURE-NOTE:fixture here is in December, when London and UTC are the same and the mistake is
+X-WEBMS-FIXTURE-NOTE:invisible. The repeating event is here as well as the single one because the identifier
+X-WEBMS-FIXTURE-NOTE:a skipped or changed date is matched by is built from the date too.
+BEGIN:VEVENT
+UID:allday-bst-1@fixtures.webms.test
+DTSTAMP:20260901T090000Z
+DTSTART;VALUE=DATE:20270615
+DTEND;VALUE=DATE:20270616
+SUMMARY:Summer fete
+END:VEVENT
+BEGIN:VEVENT
+UID:allday-bst-series-1@fixtures.webms.test
+DTSTAMP:20260901T090000Z
+DTSTART;VALUE=DATE:20270607
+DTEND;VALUE=DATE:20270608
+RRULE:FREQ=WEEKLY;BYDAY=MO;COUNT=3
+SUMMARY:Summer holiday club
+END:VEVENT
+END:VCALENDAR

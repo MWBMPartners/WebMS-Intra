@@ -1,0 +1,21 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//WebMS Intra//Test fixture//EN
+X-WEBMS-FIXTURE-NOTE:What this proves: a length given as DURATION instead of an end time. The
+X-WEBMS-FIXTURE-NOTE:timed event lasts an hour and a half; the whole-day event lasts three days,
+X-WEBMS-FIXTURE-NOTE:so it ends on the third day at 23:59:59.
+BEGIN:VEVENT
+UID:duration-timed-1@fixtures.webms.test
+DTSTAMP:20260901T090000Z
+DTSTART;TZID=Europe/London:20261201T100000
+DURATION:PT1H30M
+SUMMARY:Timed with duration
+END:VEVENT
+BEGIN:VEVENT
+UID:duration-allday-1@fixtures.webms.test
+DTSTAMP:20260901T090000Z
+DTSTART;VALUE=DATE:20261205
+DURATION:P3D
+SUMMARY:Whole days with duration
+END:VEVENT
+END:VCALENDAR

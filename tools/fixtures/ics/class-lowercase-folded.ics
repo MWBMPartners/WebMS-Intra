@@ -1,0 +1,20 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//WebMS Intra//Test fixture//EN
+X-WEBMS-FIXTURE-NOTE:What this proves: a property name in small letters is still recognised, and
+X-WEBMS-FIXTURE-NOTE:a value split across two lines (a "fold") is joined back together before it
+X-WEBMS-FIXTURE-NOTE:is read. This file writes "private" as "pri" plus a folded "vate". A reader
+X-WEBMS-FIXTURE-NOTE:that did not unfold would see the value "pri", not match PUBLIC either, and
+X-WEBMS-FIXTURE-NOTE:happen to get the right answer for the wrong reason - so the self-test also
+X-WEBMS-FIXTURE-NOTE:checks the title, which is folded in the middle of a word.
+BEGIN:VEVENT
+UID:class-folded-1@fixtures.webms.test
+DTSTAMP:20260901T090000Z
+DTSTART;TZID=Europe/London:20261114T110000
+DTEND;TZID=Europe/London:20261114T120000
+class:pri
+ vate
+summary:Pastoral vis
+ it
+END:VEVENT
+END:VCALENDAR

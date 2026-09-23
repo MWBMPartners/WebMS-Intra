@@ -1,0 +1,15 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//WebMS Intra//Test fixture//EN
+X-WEBMS-FIXTURE-NOTE:What this proves: BYSETPOS picking from a whole month, "the last weekday of
+X-WEBMS-FIXTURE-NOTE:the month". It only means anything once the month's full list of weekdays
+X-WEBMS-FIXTURE-NOTE:exists, so it tests that the list is built before it is narrowed.
+BEGIN:VEVENT
+UID:monthly-setpos-1@fixtures.webms.test
+DTSTAMP:20260901T090000Z
+DTSTART;TZID=Europe/London:20260930T170000
+DTEND;TZID=Europe/London:20260930T180000
+RRULE:FREQ=MONTHLY;BYDAY=MO,TU,WE,TH,FR;BYSETPOS=-1
+SUMMARY:Month-end returns
+END:VEVENT
+END:VCALENDAR

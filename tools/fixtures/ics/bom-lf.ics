@@ -1,0 +1,15 @@
+﻿BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//WebMS Intra//Test fixture//EN
+X-WEBMS-FIXTURE-NOTE:What this proves: a file that begins with a byte-order mark and uses
+X-WEBMS-FIXTURE-NOTE:line-feed endings only is read normally. Left in place the mark becomes
+X-WEBMS-FIXTURE-NOTE:part of the first property name, so BEGIN is never recognised and the whole
+X-WEBMS-FIXTURE-NOTE:calendar reads as empty.
+BEGIN:VEVENT
+UID:bom-1@fixtures.webms.test
+DTSTAMP:20260901T090000Z
+DTSTART:20261121T150000Z
+DTEND:20261121T160000Z
+SUMMARY:Byte-order mark
+END:VEVENT
+END:VCALENDAR
