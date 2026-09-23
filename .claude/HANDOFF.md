@@ -9,6 +9,63 @@ proceeds, so the session can be picked up at any point).
 
 ## Read this first — where we are right now
 
+## LATEST — 23 September 2026, about 09:10. RESUME FROM HERE.
+
+**#514 P5: round 5 came back NOT CLEAN; the fifth fix round is running.** Still uncommitted, still the same five untracked entries,
+still matching `.claude-work/resume/p514-p5-built-20260923-fixes4/fingerprints.txt` (the checker verified all 54 at the start and
+again at the end, from the repository root, and edited nothing).
+
+**The memory work has held.** This is the first round that could not break it. The checker built a combined attack filling all three
+new budgets, pushing the reading step to its 64 MB stop and then handing the last event a 1.4 MB description: exit 0, peaking at
+92 MB of 128. It also proved the date arithmetic survived 475 changed lines — five calendars give **byte-identical** results through
+the round-3 reader and the current one — and that no new limit fires on anything real: a cathedral with 3,066 events and 9,660
+skipped dates, and a venue with 68,400 skipped dates, both come back with **no warnings at all**.
+
+**What stopped it being clean is not memory. Two things matter.**
+
+**1. The reader breaks a promise it makes to P6, and P6's own rule turns that into silent deletion.** When gathering stops for count
+or memory the reader already throws away its "reliable up to here" mark, with exactly the right reasoning in the comment. It does
+NOT do that when a date list is cut. The checker's file: one series caps at 400 dates leaving an end of 4 February 2027, another
+carries 4,500 added dates of which 500 fall in 2026. The answer says `capped = true` **and still reports 4 February 2027 as the
+honest end**, while those 500 dates — all before that point — are missing. The settled plan has P6 soft-delete anything not seen
+this run that starts at or before the effective end. **So the first refresh that crosses the limit deletes 500 real events.** The fix
+is the one line already written for the other two stops.
+
+**2. An event spanning a clock change ends an hour out — and this is pre-existing, from P5's first build, walked past by five
+rounds.** An overnight event from 23:00 to 04:00 on the October change night comes back ending at 05:00; the March twin comes back
+an hour early. No warning. The cause is that a length taken with `diff()` is applied by PHP as a wall-clock offset rather than an
+exact one. It only bites a one-off crossing the change hour — a vigil, a night shelter, a sleepover — but it is wrong twice a year
+for any customer who has one. **This is the same family as the project's standing note that wall-clock times must not be turned into
+timestamps**; here it is the reverse direction. The fix brief tells the builder to honour RFC 5545's distinction between nominal
+durations (days and weeks, where wall-clock addition is CORRECT) and exact ones, rather than flattening everything, and to say
+plainly in a comment what remains genuinely ambiguous between calendar programs.
+
+**Three smaller findings:** a warning that names the wrong allowance (it says one event listed too many when the truth is the whole
+calendar did, which sends an administrator to the wrong event) and a self-test check labelled as catching exactly that which does
+not; two load-bearing guards with no self-test at all, one of which would make a calendar come back uncapped and get its events
+deleted; and a warning raised about an event the answer never contains.
+
+**Also being built this round, from a recommendation rather than a fault:** when an event's skipped-date list is cut, import that
+series as its first date only. Today a cut list RESURRECTS dates the customer deleted — a daily series since 1985 with every weekend
+deleted gives 365 dates in 2026 instead of 261, bringing back 104 deleted weekends. `capped` stops P6 deleting; nothing stops it
+inserting. Refusing is what this class already does for a repeat rule it cannot honour, and it costs nothing real (the same series
+since 2010 comes back exactly right, no warning). The builder is told to say so and not build it if it disagrees.
+
+**TWO DECISIONS THE OWNER TOOK, 23 September 2026:**
+1. **`tools/ics-reader-selftest.php` WILL run in the automatic pull-request checks.** That is a `.github/` change, and it must be
+   made **after P5 is committed** — wiring a check to a file not yet in the repository would simply fail. **Do this immediately
+   after P5's commit.** Nothing else in `.github/` is to be touched, and the self-test's own comment still says "manual gate" until
+   then, deliberately.
+2. **The per-feed date ceiling becomes a setting each customer can change, default 2,000.** P5 makes it a parameter with a hard
+   upper bound and keeps the reader database-free; **P6 owns seeding the setting, reading it per site and passing it in.**
+
+**AFTER THE FIX ROUND: round 6 with Fable.** Keep going until a round finds nothing. When clean: my own standard checks, commit ONLY
+P5's five entries with a message saying plainly that Codex has NOT reviewed it, push, comment on #514, **then the `.github/` change
+for decision 1**, then P6 (`args: { part: "P6", tier: "opus" }`, migration 205).
+
+**Acceptance criterion 3 is still NOT PROVEN** — no real Google or Microsoft 365 exports exist here (owner decision, 21 September
+2026), and hand-built calendars prove nothing about a real export.
+
 ## LATEST — 23 September 2026, about 08:20. RESUME FROM HERE.
 
 **#514 P5: the fourth fix round is DONE; Fable's ROUND-5 CHECK IS RUNNING.** Still uncommitted, still the same five untracked
