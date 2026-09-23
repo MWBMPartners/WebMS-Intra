@@ -9,6 +9,53 @@ proceeds, so the session can be picked up at any point).
 
 ## Read this first — where we are right now
 
+## LATEST — 23 September 2026, about 12:30. RESUME FROM HERE.
+
+**#514 P5: the seventh fix round is DONE; Fable's ROUND-8 CHECK IS RUNNING.** Still uncommitted, five untracked entries, now
+**56 fingerprinted files** (a new fixture). Fingerprints: `p514-p5-built-20260923-fixes7/fingerprints.txt`. **Verified by me from
+the REPOSITORY ROOT: rc=0, 56 OK.** `php -l` clean on all four PHP files. **Self-test run by me: 318 passed, 0 failed, 2 skipped,
+rc=0, zero FAIL lines.** 52 fixtures. No stray processes.
+
+**The gap the owner's rule exposed is now guarded, and proved.** There is a new fixture whose events sit across BOTH London
+clock-change nights, and an `UNTIL` on the New York series falling at a moment when New York is five hours behind UTC. **Every
+expected answer was worked out by hand from plain date arithmetic FIRST, with the reader nowhere in sight**, then compared — 18
+dates and 7 dates, matching line for line. Round 7's three plants now each make the self-test fail.
+
+**THE BUILDER THEN WENT LOOKING FOR THE SAME GAP ELSEWHERE AND FOUND TWO MORE THE CHECKER HAD MISSED.** Both give wrong answers a
+customer would see:
+- **A four-day whole-day event repeated daily from 24 October came back as THREE dates** — 27 October simply gone, no warning.
+- **A Saturday whole-day series in a week that starts on Sunday lost Saturday 31 October** and offered 8 November instead. What
+  makes it show is `WKST=SU`, and **American calendars commonly set it** — so this is not an exotic shape.
+Both are now guarded. Ten faults planted one at a time; the table is in the report.
+
+**It also declined to add a check, and that is the right instinct.** A third uncaught plant could not be made to give a wrong
+answer on any of sixteen calendars, and there is a structural reason: that step only decides where a seven-day search window
+starts, the code inside matches by weekday rather than by position, and the window advances a whole week at a time. **A check that
+passes whatever the code does is worse than no check, because it looks like cover.** Round 8 is told to test that reasoning first —
+it is the one hole this round chose to leave.
+
+**One thing the builder caught in its own work, and it nearly produced a proof of nothing.** Its first whole-answer comparison used
+`json_encode()`, which refuses a structure containing the raw bytes of `uidHash` — so it wrote an EMPTY file for 74 of 75
+calendars, and two empty files compare equal. It reported "74 identical" and was worthless. Rewritten with `serialize()`, and a
+short or failed answer now counts as UNUSABLE rather than identical. **Both the broken reading and the fix are in the script's own
+comment**, which is the behaviour worth keeping.
+
+**FIX B and FIX C were comment and wording only.** The one change an administrator sees is a warning that used to say "Only its
+first date was imported" on a path that keeps other dates too. A whole-answer comparison over 75 calendars: 68 identical, 7
+different, the seven being exactly those raising that warning, with only the sentence moved.
+
+**AFTER THE FIX ROUND: keep going until a round finds nothing.** When clean: my own standard checks, commit ONLY P5's five entries
+with a message saying plainly Codex has NOT reviewed it, push, comment on #514, **then the `.github/` change** (self-test into the
+pull-request checks, explicit `-d memory_limit=256M` or more), then P6 (`args: { part: "P6", tier: "opus" }`, migration 205).
+
+**RECORD FOR P6** (unchanged): web-served cron address, so set its own time limit; validate an end date rather than trust one; read
+`capped` FIRST; a cut cancelled-date list means very few dates where a refresh saw hundreds, and that must never trigger tidying
+up; `MAX_EVENT_BLOCKS_PER_FILE` (6,000) does not follow the per-feed ceiling; P6 owns the ceiling setting; **and P6 must not reject
+or "repair" an event whose end sorts before its start on the October clock-change night.**
+
+**Acceptance criterion 3 is still NOT PROVEN** — no real Google or Microsoft 365 exports exist here (owner decision, 21 September
+2026). Every calendar across eight rounds is hand-written, and every report says so.
+
 ## LATEST — 23 September 2026, about 11:30. RESUME FROM HERE.
 
 **#514 P5: round 7 came back NOT CLEAN with three LOW findings; the seventh fix round is running.** Still uncommitted, still the
