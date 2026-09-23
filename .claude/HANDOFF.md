@@ -9,6 +9,58 @@ proceeds, so the session can be picked up at any point).
 
 ## Read this first — where we are right now
 
+## LATEST — 23 September 2026, about 17:10. RESUME FROM HERE.
+
+**#514 PART 6 IS BUILT; ITS INDEPENDENT CHECK IS RUNNING.** Eight uncommitted entries:
+`web/_sql/205_external_calendar_importer.sql` (new), `web/_sql/full_schema.sql`, `web/_core/FeedImporter.php` (new),
+`web/_core/FeedResolver.php` (new), `web/_core/personal-data-catalogue.php`, `web/_apps/cron/import-feeds.php` (rewritten),
+`web/_apps/admin/calendar/feeds.php`, `web/_apps/admin/calendar/feeds-save.php`. **Verified by me: exactly those eight, nothing
+staged, no stash, `php -l` rc=0 on all six PHP files, no stray process, no container, no credential-shaped file left in scratch.**
+Build report: `.claude-work/resume/p514-p6--build.md` (356 lines). Evidence and re-runnable scripts:
+`.claude-work/resume/p514-p6-built-20260923/`. Check brief: `.claude-work/briefs/514-p6-check.md`; report
+`.claude-work/resume/p514-p6--verify-r1.md`.
+
+**Parts 1-5 built a reader nothing called. P6 is what calls it**, so the five earlier parts stop being unreachable the moment this
+lands. A refresh now claims the calendar, downloads it, reads it, writes one row per date, works out who may see each, removes what
+the calendar no longer has, and records what happened. Pause, resume and delete all take the same row lock first.
+
+**THE WHOLE RISK IS THE REMOVAL**, and the builder went STRICTER than the plan: **a capped read with no end point removes NOTHING
+AT ALL**, where the plan bounded only part of it. Proved end to end — a cut added-date list turns 300 dates into 100 with no end
+point, the refresh records `partial` and removes **0 of 300** — **with a control proving the check can fail**: the same 100 dates
+in a readable calendar DO remove the other 200. The checker is told to attack it from both directions, because keeping what should
+go is as much a fault as deleting what should stay.
+
+**All thirteen proofs were run; twelve PASS, proof 13 SKIPPED** (no real export exists — acceptance criterion 3 stays NOT PROVEN).
+Runtime set 134 passed / 0 failed / 1 skipped; the legacy-migration proof 20 passed / 0 failed; the admin pages over real HTTP 33
+passed / 0 failed. The migration harness ran all four phases, `replayed=203 failed=0`. `e1d0a34` is named as required (5.4).
+
+**One fault found outside the brief, and it is an old one:** `feeds.php` has never read the message `feeds-save.php` leaves for it,
+so **since #327 no administrator has ever seen that message**. It matters far more now, because the refusal message and the first
+refresh's result are the only feedback there is. Found by driving the real page over real HTTP rather than by reading it.
+
+**THREE FAULTS THE BUILDER FOUND IN ITS OWN PROOFS — each time the check was wrong, not the code.** A clock-change fixture written
+as a LOCAL time on the night the clocks go back (that reading happens twice; PHP resolves it to the second one, so the end really
+was earlier and the reader was right to clamp); a proof that refreshed twice inside one second; and `shell_exec('… & echo $!')`
+blocking for a full 15 seconds because a backgrounded subshell keeps the parent's pipe open, so a lease check was reading the
+database long after the refresh had finished.
+
+**Eight choices where the plan left one** are listed in the report. Two for the checker to weigh: the event web address uses
+`bin2hex(uidHash)` rather than the plan's formula (the plan's would give two long UIDs the same address), and the per-feed ceiling
+setting is seeded EMPTY so the number 2,000 lives only in `IcsReader::MAX_EVENTS_PER_FEED`.
+
+**NOT PROVEN, stated plainly by the builder (8 items):** acceptance criterion 3; an https fetch against a real TLS server (the
+test server speaks plain HTTP); MariaDB; two refreshes inside one second cannot tell their stamps apart and so remove nothing (safe
+direction, unreachable in the portal); **`tblExternalFeedRuns`'s catalogue entry does nothing today** because `triggeredByID` is
+not in `GdprEraser::LINK_COLUMNS` — raised as a follow-up rather than fixed in a file it was not asked to touch; P7's four resolver
+steps are absent by design; the recheck pass is not built, with a note pointing P7 at it; Codex has reviewed none of it.
+
+**AFTER THE CHECK:** fix whatever it finds, re-check until a round is clean, then my own standard checks, commit P6 as ONE commit
+saying plainly Codex has NOT reviewed it, push, comment on #514, then P7.
+
+**THE QUEUE:** P7-P11; the `.github/` self-test change (approved, needs `-d memory_limit=256M`); #549; the follow-ups
+#534-#536, #539-#541, #543, #545-#548 (**#545 and #547 are live faults**); documentation and CI pass; **the Codex sweep of the
+whole branch, which the owner confirmed today waits for the whole #514 build**; then a pull request only when the owner says so.
+
 ## LATEST — 23 September 2026, about 15:30. RESUME FROM HERE.
 
 **#514 PART 5 IS COMMITTED AND PUSHED: `31bd64e`.** Nine rounds of independent checking; each of the first eight found something
