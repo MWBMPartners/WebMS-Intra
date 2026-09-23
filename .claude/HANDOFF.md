@@ -9,6 +9,58 @@ proceeds, so the session can be picked up at any point).
 
 ## Read this first — where we are right now
 
+## LATEST — 23 September 2026, about 07:10. RESUME FROM HERE.
+
+**#514 P5: Fable's ROUND-4 CHECK CAME BACK NOT CLEAN. The fourth fix round is running.** Still uncommitted, still the same five
+untracked entries, still matching `.claude-work/resume/p514-p5-built-20260923-fixes3/fingerprints.txt` (the checker verified all 54
+at the start and again at the end, and it edited nothing).
+
+**Round 3's rule held. The fault moved up a level.** Round 3 fixed "never turn text into an array before you know how many pieces
+it will make", and round 4 could not break any of those ten places. But the fix was per LINE, and lists that are correctly bounded
+PER EVENT are then kept for every event, with nothing bounding the sum. So the rule for this round is the companion to round 3's:
+
+> **A limit that bounds ONE of something must be matched by something that bounds the SUM of all of them.**
+
+A per-event limit of 4,000 means nothing on its own when 6,000 events are held at once.
+
+**Two files inside the fetcher's 5 MB limit still kill the process outright** — 99 events each carrying exactly the 4,000 added
+dates the per-event limit allows (3.57 MB), and 700 events each carrying exactly the 749 weekday entries the rule limit allows
+(2.86 MB) — and a third reaches 120 MB of 128 MB. Growth measured at about 1.55 MB per event for the first shape. The only thing
+bounding the sum is a memory check that runs once every hundred events with a margin of 25.6 MB, against growth of up to 155 MB per
+hundred events. **1,300 events survived and 700 died, because of where each file's size happened to fall relative to the sampling
+interval.** A guard whose outcome depends on that is not a guard.
+
+**A second finding of the same "counted in the wrong unit" shape: the deadline is counted in steps, not in time.** A repeat rule
+that stays inside every limit, in a 4 KB file, took **47.78 seconds to notice a 5-second budget**. Two loops never look at the clock
+at all — I confirmed by grep that the whole class checks the time in only three places. This matters because P6 runs the reader from
+a web-served cron address: an overrun ends in a different uncatchable fatal, "maximum execution time exceeded". In fairness, the
+settled plan itself says "check the deadline every 200 steps"; it is the plan's assumption that a step is cheap that fails.
+
+**Four low findings too:** an absurd `INTERVAL` escapes as the wrong kind of error; an event end of year 19,165,351,075 that MySQL
+cannot store, and a negative `COUNT` read as "no count"; four guards with no self-test (including the very memory check above);
+and a comment claiming CI runs the self-test when nothing does.
+
+**The good news, and it is the part that matters most.** The checker built its own ordinary calendars rather than trusting the
+rebuilt control — a 240 KB church export (339 dates) and a 107 KB school export (956 dates), both with the awkward real-world shapes
+— and both came back `complete = true`, `capped = false`, **no warnings at all**, with every date it hand-counted correct. **No new
+limit fires on either.** All 20 audit checks pass, `php -l` is clean, and the self-test reports 227 passed, 0 failed, 2 skipped.
+
+**The fix round running now** (`.claude-work/briefs/514-p5-fix4.md`, Opus, report `p514-p5--fixes4.md`) is told the deliverable is a
+SECOND audit table: for each per-event limit, what bounds the sum of it across every event. Six passing files is not the deliverable
+— three rounds have now produced six passing files and been found wanting. Where the brief asks for a measurement it says to put the
+number in the report, because two of round 4's findings exist only because a comment asserted something was cheap or covered without
+anyone having measured it.
+
+**AFTER IT REPORTS: round 5 with Fable.** Keep going until a round finds nothing — the owner's standing rule, and on this package it
+has earned its keep four times over. When a round is clean: my own standard checks, commit ONLY P5's five entries with a message
+saying plainly that Codex has NOT reviewed it, push, comment on #514, then P6 (`args: { part: "P6", tier: "opus" }`, migration 205).
+
+**RECORD FOR P6, do not act on it now:** the cron address is web-served, so P6 must set its own execution time limit rather than
+assume PHP's default 30 seconds, and must handle an event end this reader allows but a MySQL `DATETIME` column cannot store.
+
+**Acceptance criterion 3 is still NOT PROVEN** — there are no real Google or Microsoft 365 export files in this repository (owner
+decision, 21 September 2026), and the checker's own hand-built calendars do not change that.
+
 ## LATEST — 23 September 2026, about 06:00. RESUME FROM HERE.
 
 **#514 P5 (reading calendar files): round-3 FIXES ARE DONE; Fable's ROUND-4 CHECK IS RUNNING.** Still uncommitted, still the same
