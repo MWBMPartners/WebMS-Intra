@@ -9,6 +9,61 @@ proceeds, so the session can be picked up at any point).
 
 ## Read this first — where we are right now
 
+## LATEST — 23 September 2026, about 08:20. RESUME FROM HERE.
+
+**#514 P5: the fourth fix round is DONE; Fable's ROUND-5 CHECK IS RUNNING.** Still uncommitted, still the same five untracked
+entries. New fingerprints: `.claude-work/resume/p514-p5-built-20260923-fixes4/fingerprints.txt` — **I verified all 54 against the
+working tree myself** (`shasum -a 256 -c` from the REPOSITORY ROOT, rc=0; the paths inside are repository-relative, so running it
+from inside the durable copy folder fails and means nothing). `php -l` clean on all four files. Nothing staged, no leftover scratch.
+
+**What round 4's fixes did.** The rule for the round was the companion to round 3's: *a limit that bounds ONE of something must be
+matched by something that bounds the SUM of all of them.* Three file-wide budgets now sit above the per-event ones, each sized from
+MEASURED bytes per entry rather than a guess — added dates 30,000 pieces (388 bytes each), skipped dates 200,000 (52 bytes), rule
+values 40,000 (357 bytes). The memory watch now runs on **every** event in both loops, not every hundredth in one of them; the
+builder measured that check at 86 nanoseconds, so 6,000 of them cost half a millisecond. There was never anything to save.
+
+**The numbers that matter.** Both fatal files now finish: 99 events of added dates went from dead to 21.4 MB, 145 events from dead
+to 25.0 MB. The file carrying all three retained lists at once — the builder's own addition, and the strongest evidence the fault
+was real — went from **127.0 MB of 128 MB to 61.0 MB**. Several files now return MORE dates than before, because the old code ran
+out of memory part way through and handed back nothing.
+
+**The time budget is now counted in time.** Six clock checks where there were three, `microtime(true)` measured at 20 nanoseconds.
+The three slow rules come back at 1.002-1.05 times their budget instead of ten times it, and the two loops that never looked at the
+clock now do. Cost on an ordinary calendar: **+0.4 ms and +0.2 ms**, on a job the plan gives forty seconds per feed.
+
+**Also fixed:** an absurd `INTERVAL` now gives a warning instead of throwing the wrong kind of error; an event end is brought back
+to `9999-12-31 23:59:59` because that is where MySQL's date column stops; a `COUNT` of zero or less is refused instead of being read
+as "no count". Self-test 227 → **266 checks**, with thirteen guards planted one at a time — every plant failed it, the comment-only
+control passed.
+
+**Two faults the builder caught in its own work, both worth remembering.** One of its plants passed at first because the check
+asked only "did it give up?" and not "in time" — the guard was missing and it still gave up, five times over budget. And it read an
+exit code as `${pipestatus[1]}` after a command substitution containing a pipe, which in zsh is always 0, so an "all 47 files exit 0"
+claim had never actually been proven. **That is this project's own standing rule about pipes hiding exit codes, walked into by a
+careful agent.** Both were re-done properly.
+
+**ROUND 5 IS RUNNING** (Fable, brief `.claude-work/briefs/514-p5-check.md`, its "ROUND 5" section; report `p514-p5--verify-r5.md`).
+It is told that 483 changed lines in the reader is a reason to look harder, not evidence of thoroughness, and that two things are
+worth as much as a memory fault this time: a correctness regression hidden among those lines, and a new limit that bites a calendar
+a real customer could have. It is also asked to judge one thing the builder called acceptable — whether cutting a skipped-date list
+can bring back a date the customer deleted.
+
+**TWO DECISIONS FOR THE OWNER, raised now because P6 is next** (neither blocks P5, and round 5 continues meanwhile):
+1. **Should `tools/ics-reader-selftest.php` run in the automatic pull-request checks?** It is a 266-check gate taking about a
+   minute, and today it depends on somebody remembering to run it. It is a `.github/` change, which needs the owner's say-so.
+2. **Is a 2,000-date ceiling per feed right?** A plausible 2,500-event school timetable comes back `capped` for that reason alone —
+   nothing to do with the new limits — and a capped answer means the importer will not tidy up. A product decision, not a safety one.
+
+**WHEN A ROUND COMES BACK CLEAN:** my own standard checks, commit ONLY P5's five entries with a message saying plainly that Codex
+has NOT reviewed it, push, comment on #514, then P6 (`args: { part: "P6", tier: "opus" }`, migration 205).
+
+**RECORD FOR P6:** the cron address is web-served, so P6 must set its own execution time limit rather than assume PHP's 30-second
+default; it must still validate an end date rather than trust one, because a start can legitimately be as late as year 9999; and a
+merely-large legitimate calendar still comes back `capped` with `effectiveWindowEnd = null`.
+
+**Acceptance criterion 3 is still NOT PROVEN** — no real Google or Microsoft 365 export files exist here (owner decision,
+21 September 2026). The hand-built calendars both rounds used prove nothing about a real export, and both say so.
+
 ## LATEST — 23 September 2026, about 07:10. RESUME FROM HERE.
 
 **#514 P5: Fable's ROUND-4 CHECK CAME BACK NOT CLEAN. The fourth fix round is running.** Still uncommitted, still the same five
