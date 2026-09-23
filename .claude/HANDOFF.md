@@ -9,6 +9,58 @@ proceeds, so the session can be picked up at any point).
 
 ## Read this first — where we are right now
 
+## LATEST — 23 September 2026, about 13:15. RESUME FROM HERE.
+
+**#514 P5: round 8 came back NOT CLEAN with ONE low finding; the eighth fix round is running.** Still uncommitted, five untracked
+entries, 56 fingerprinted files, all verified by the checker from the repository root at the start and again at the end.
+
+**Round 8 could not fault the code**, and it earned that: its own whole-answer comparison over 86 calendars gives 79 identical, 7
+different and **0 unusable** — the seven being exactly those raising the reworded warning — **and it ran a control against a
+deliberately broken reader to prove the comparison CAN fail**, which is precisely the check the last round's `json_encode()`
+mistake was missing. It confirmed the new fixture's expected answers are typed by hand rather than taken from the reader, and
+derived all 18 all-day answers and all 7 New York answers itself. A token-level diff (comments and whitespace removed) of the
+round-6 and round-7 readers shows **exactly one change: the warning sentence.**
+
+**THE ONE FINDING IS THE HOLE THE LAST ROUND CHOSE TO LEAVE, AND THE ARGUMENT FOR LEAVING IT WAS WRONG.** Last round planted the
+weekly step-back done as 86,400 seconds, found the tests blind to it, could not make it give a wrong answer on sixteen calendars,
+and reasoned that a window starting a day early still holds each weekday once. **True of the days inside one window — but a window
+that starts a day early also ENDS a day early, so the last weekday falls into the NEXT window.** At `INTERVAL=1` that window is
+seven days on and the lost Saturday reappears in the same order, which is why all sixteen probes agreed. **At `INTERVAL=2` it is
+fourteen days on**, so the Saturday is gone and the Saturday of an OFF week is offered instead.
+
+**A fortnightly Saturday whole-day youth club starting 3 April 2027 should give 3 and 17 April, 1, 15 and 29 May. With the fault
+it gives 3, 10 and 24 April, 8 and 22 May — every date after the first on the wrong week.** A weekly one loses its last date
+entirely, because the start is counted twice against `COUNT` and the duplicate is quietly dropped later.
+
+**It is an ordinary calendar, not a hostile one.** Three controls pin the boundary: a Monday week start is unaffected, October is
+unaffected, a 10:00 start is unaffected. It bites only when the step back crosses the MARCH change, which from midnight lands the
+day before. **Google writes `WKST=SU` into every weekly rule for a Sunday-start user**, so a fortnightly whole-day event in the
+fortnight after the March change is exactly this shape.
+
+**The lesson worth keeping:** declining to write a check that would pass whatever the code does was the right instinct — but the
+reasoning behind it has to be tested as hard as a fix would be. Asking the next round to break that argument first is what found
+this.
+
+**The checker's evidence is kept** in `.claude-work/resume/p514-p5--verify-r8-evidence/` (24 files, git-ignored): eleven
+calendars, the zone-free oracle that derived the right answers without the reader, and the decisive answer pairs. The fix round
+does not have to rebuild any of it.
+
+**Three corrections to the record, no code involved:** the `UNTIL` comparison is at `:2444`, not `:2437` (a `throw`) — the round-7
+builder was right and the round-7 CHECK was wrong; there is ONE `setTimestamp()` plus one `getTimestamp()` subtraction, not two
+`setTimestamp()` calls; and the new fixture holds TEN events, not eight.
+
+**AFTER THE FIX ROUND: keep going until a round finds nothing.** When clean: my own standard checks, commit ONLY P5's five entries
+with a message saying plainly Codex has NOT reviewed it, push, comment on #514, **then the `.github/` change** (self-test into the
+pull-request checks, explicit `-d memory_limit=256M` or more), then P6 (`args: { part: "P6", tier: "opus" }`, migration 205).
+
+**RECORD FOR P6** (unchanged): web-served cron address, so set its own time limit; validate an end date rather than trust one; read
+`capped` FIRST; a cut cancelled-date list means very few dates where a refresh saw hundreds, and that must never trigger tidying
+up; `MAX_EVENT_BLOCKS_PER_FILE` (6,000) does not follow the per-feed ceiling; P6 owns the ceiling setting; and **P6 must not reject
+or "repair" an event whose end sorts before its start on the October clock-change night.**
+
+**Acceptance criterion 3 is still NOT PROVEN** — no real Google or Microsoft 365 exports exist here (owner decision, 21 September
+2026).
+
 ## LATEST — 23 September 2026, about 12:30. RESUME FROM HERE.
 
 **#514 P5: the seventh fix round is DONE; Fable's ROUND-8 CHECK IS RUNNING.** Still uncommitted, five untracked entries, now
