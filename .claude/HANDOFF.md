@@ -9,6 +9,54 @@ proceeds, so the session can be picked up at any point).
 
 ## Read this first — where we are right now
 
+## LATEST — 23 September 2026, about 18:00. RESUME FROM HERE.
+
+**#514 P6: the first independent check came back NOT CLEAN with four gaps, one HIGH. The fix round is running.** Still
+uncommitted, the same eight entries; the checker's eight fingerprints were byte-identical at the start and the end, and it edited
+nothing. Check report `.claude-work/resume/p514-p6--verify-r1.md` (255 lines); **its evidence is kept —
+`.claude-work/resume/p514-p6--verify-r1-evidence/`, 25 scripts, 42 calendars, 50 outputs — so the fix round re-runs findings
+rather than rebuilding them.** Fix brief `.claude-work/briefs/514-p6-fix.md`; report `.claude-work/resume/p514-p6--fixes.md`.
+
+**GAP 1 (HIGH) is the exact thing this part exists to get right.** When a download is incomplete, `removeMissing()` compares
+`startDateTime <= ?` against the reader's end point — and for a capped read that end point is **the start of the last date kept**.
+So a row not seen this run that starts exactly AT that moment cannot be told apart from one the limit cut off, and it is deleted.
+**Every whole-day event on the same date shares that moment** (`00:00:00`), as do any two events at the same clock time — three
+services at 10:00, four all-day term markers. Measured: an event still in the calendar was soft-deleted while the message stored
+beside it read "nothing was removed", and **it does not come back**, because the file counts as unchanged for 20 hours and is then
+cut at the same place again. **Reachable on the shipped default** by any calendar with more than 2,000 dates in the 13-month
+period. Fix: compare with `<` when the end point came from a capped read, or make the end point strictly before the first date not
+kept.
+
+**GAP 2 (MEDIUM) is one token, twice, and it disables the safety net.** Both the job and `logProblem()` pass `null` where
+`Logger::errorPlatformForSite()` wants a `string`. In `logProblem()` the resulting `TypeError` is swallowed, so **`tblErrors` stays
+empty although the message tells the administrator to look there**. In the job it is UNCAUGHT: one awkward calendar killed the run,
+printed no summary and **abandoned the remaining ten** — directly against the comment beside it saying one calendar must not stop
+the others.
+
+**GAP 3 (MEDIUM): two category words MySQL treats as equal fail a whole calendar, for ever.** The tag insert has no 1062 handling
+and `tblExternalEventTags` compares under `utf8mb4_general_ci`, where `'café' = 'cafe'`. One event with `CATEGORIES:Café,Cafe`
+gives **0 of 10 events imported**, a counted failure, a doubled wait — and the same on every refresh while that event exists. With
+gap 2 unfixed, nothing is logged to explain it.
+
+**GAP 4 (LOW):** the capped-run message says "nothing was removed" even when removal did run and the history row says so.
+
+**WHAT HELD, re-proven with the checker's own material rather than taken on trust:** 222 of its checks passed and the 7 failures
+are exactly these four gaps. Eleven failure shapes each leave ten events untouched; a cut added-date list removes 0 of 301 while
+the complete control removes 649; the legacy migration with fifteen hand-built rows orphaned nothing and kept every RSVP, and
+replaying 205 **after the importer had written its own rows** changed nothing; two jobs together fetch each file exactly once; a
+`kill -9` mid-lock changes nothing; the job leaks no name, host, path or `://` across eleven failure shapes with calendars
+deliberately named to leak; the refresh window is right on both clock-change days in four zones including one that changes at
+midnight; an administrator of another organisation holding the old portal-wide flag is refused everything. It also planted seven
+faults of its own and six fired six different checks.
+
+**RECORDED, NOT ACTED ON:** a permanently-capped calendar with no end point never sheds rows out of the back of the period; a
+ceiling change waits for the file to change or 20 hours; a pause during a download counts as a failure; a hand-made series whose
+address starts `imp-` and is hand-linked is deleted by `deleteFeed()`; and `check_event_visibility.py` cannot fire on a file that
+already contains `EventVisibility::` — now worth knowing because both admin pages do.
+
+**AFTER THE FIX ROUND: check again, and keep going until a round is clean.** Then my own standard checks, ONE commit for P6 saying
+plainly Codex has NOT reviewed it, push, comment on #514, then P7.
+
 ## LATEST — 23 September 2026, about 17:10. RESUME FROM HERE.
 
 **#514 PART 6 IS BUILT; ITS INDEPENDENT CHECK IS RUNNING.** Eight uncommitted entries:
