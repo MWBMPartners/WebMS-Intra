@@ -9,6 +9,56 @@ proceeds, so the session can be picked up at any point).
 
 ## Read this first — where we are right now
 
+## LATEST — 23 September 2026, about 06:00. RESUME FROM HERE.
+
+**#514 P5 (reading calendar files): round-3 FIXES ARE DONE; Fable's ROUND-4 CHECK IS RUNNING.** Still uncommitted, still the same
+five untracked entries. The working tree matches `.claude-work/resume/p514-p5-built-20260923-fixes3/fingerprints.txt` (54 files,
+verified by me), nothing staged, nothing stashed, no leftover scratch, no stray servers or containers.
+
+**What the third fix round did, and why it is different from rounds 1 and 2.** The brief told it to stop fixing shapes and fix the
+CLASS of fault. It did. The rule is now in the class header and in one shared helper, `IcsReader::tooManyPieces()`, which counts
+separators with `substr_count()` — a count that builds nothing — before any split happens:
+
+> **Never turn text that came out of the file into an array before you know how many pieces it will make.**
+
+It published an audit table of EVERY place the reader turns untrusted text into a list: ten newly bounded, ten already bounded or
+not arrays at all. That table, not six passing files, is what shows the class is covered. New counted limits: settings on one
+property line (64), category pieces (200), repeat-rule parts (32), time-zone name length (200) and parts (16), and warnings (100,
+with exact repeats dropped as they arrive).
+
+**It found three more of the same class while auditing** — which is the strongest evidence the audit was real. A seventh fatal (the
+same semicolon line INSIDE an event, where round 3 had only measured it outside one), and two shapes that exited 0 but at **114 MB
+and 116 MB of the 128 MB PHP usually allows**, in a process doing nothing else: a flood of warnings, and a million real short
+categories. A real importer starts with a database connection, settings and a brand layer already in memory, so those two are over
+the line in practice even though a bare test process survives them.
+
+**Numbers.** All seven fatal shapes now exit 0 at 17-29 MB with a warning and the right flag. The two 114/116 MB shapes now finish
+at 17 MB. All 47 hostile files exit 0; none of the earlier 24 regressed. The self-test went **184 → 227 checks passed, 0 failed,
+2 skipped**, and nine bounds were removed one at a time in a sandbox copy — every plant made it fail, the comment-only control
+passed. `php -l` clean on all four files (I re-ran it myself: rc=0 ×4).
+
+**Two faults it found in its own test machinery, worth knowing because they would have hidden real faults:** a child process that
+never loaded `WindowsTimeZones`, so a missing class read exactly like the fatal being tested for; and line-limit checks that passed
+in-process for the wrong reason (the memory guard fired first, not the line limit).
+
+**ROUND 4 IS RUNNING NOW** — Fable, background agent, brief `.claude-work/briefs/514-p5-check.md` (its new "ROUND 4" section says
+what changed and where to attack), report `.claude-work/resume/p514-p5--verify-r4.md`. It is asked to attack the audit table for
+something it missed, to check whether any NEW limit fires on a calendar a real customer might have, and to build its own ordinary
+calendar rather than trusting the rebuilt control.
+
+**Why this many rounds is right, not excessive.** P6 runs this reader in a scheduled job across every customer's calendars. A file
+that kills the process ends the whole run for everyone, and no code can catch it. The feeds are untrusted by definition. Three
+rounds have each found what the round before missed, so the owner's standing rule applies exactly as written: **keep going until a
+round finds nothing.**
+
+**WHEN ROUND 4 COMES BACK CLEAN:** run the standard checks myself (php -l ×4, all 20 audit checks, `check_static_calls.php`, every
+`tools/*selftest*.php`, `generate-windows-timezones.php --check`), commit ONLY P5's five entries with a message saying plainly that
+Codex has NOT reviewed it, push, comment on #514, then start P6 (`args: { part: "P6", tier: "opus" }`, migration 205).
+**If it comes back NOT CLEAN:** another fix round, same pattern.
+
+**Acceptance criterion 3 is still NOT PROVEN** and every place that says so must keep saying so: there are no real Google or
+Microsoft 365 export files in this repository (owner decision, 21 September 2026). The self-test prints two SKIPPED lines for it.
+
 ## LATEST — 23 September 2026, about 04:35. RESUME FROM HERE.
 
 **#514 P5, round 3 (Fable): NOT CLEAN — six more uncatchable fatals, all one over-long line, all under the fetcher's 5 MB.** A THIRD
