@@ -9,6 +9,50 @@ proceeds, so the session can be picked up at any point).
 
 ## Read this first — where we are right now
 
+## LATEST — 23 September 2026, about 11:30. RESUME FROM HERE.
+
+**#514 P5: round 7 came back NOT CLEAN with three LOW findings; the seventh fix round is running.** Still uncommitted, still the
+five untracked entries, still matching `p514-p5-built-20260923-fixes6/fingerprints.txt` (the checker verified all 55 from the
+repository root at the start and again at the end, and edited nothing).
+
+**Round 7 was the first work judged against the owner's new time-zone rule, and the CODE passed everywhere it could be measured.**
+Not a token check: weekly series across mismatched change dates (New York into London), both change nights in both directions in
+London AND in Sydney — where the short night falls in October, not March — Lord Howe Island's thirty-minute shift, `UNTIL` in three
+forms, five zone forms of a cancellation line, a series whose time falls into the March hour that does not exist, and the October
+hour that happens twice. Every answer matched what the checker derived by hand from Unix timestamps. It also compared the **whole
+answer**, every field rather than just dates and flags, across 76 calendars through both readers: all 51 fixtures identical.
+
+**THE FINDING THAT MATTERS, and it vindicates the rule the owner set this morning.** The checker planted three faults — the two the
+rule names as "a day is 86,400 seconds", and the one it names as "a moment compared as a clock reading" — and **the 309-check
+self-test stayed completely green for all three**, while each gave a visibly wrong answer on a real calendar: a two-day all-day
+event in late March became one day; a two-day event starting 25 October lost its second day; a weekly New York series returned five
+dates where four is right. **The cause is precisely the trap the rule warns about** — every all-day fixture sits in December, June
+or mid-October, so not one spans a clock change, and every end-date fixture used a series whose offset from UTC happened to be zero
+at the boundary, so text and moment agreed. The code is right; nothing guards it.
+
+**The other two findings are sentences that are not true.** The list of ways a cancelled date can still slip past a cut list misses
+a third route (a CHANGED date — measured), and the unsupported-rule warning still says "Only its first date was imported" when that
+path keeps added and changed dates — **the exact untruth round 6 corrected on this path's twin**, plus six comments repeating it.
+An administrator reads that warning through P6, so it is worth more than a comment.
+
+**Both findings from this round that belong to the whole portal are now on #549** as a comment: that existing tests will often catch
+nothing for exactly this reason, so checking the code is only half of each app's check; and that **one hour a year cannot be written
+down** — an event from 01:30 BST to 01:15 GMT is 45 real minutes but reads as an end before its start, so nothing may "repair" it.
+
+**AFTER THE FIX ROUND: round 8.** Keep going until a round finds nothing. When clean: my own standard checks, commit ONLY P5's five
+entries with a message saying plainly Codex has NOT reviewed it, push, comment on #514, **then the `.github/` change** (self-test
+into the pull-request checks, with an explicit `-d memory_limit=256M` or more), then P6 (`args: { part: "P6", tier: "opus" }`,
+migration 205).
+
+**RECORD FOR P6** (unchanged, plus one new): web-served cron address, so set its own time limit; validate an end date rather than
+trust one; read `capped` FIRST; a series whose cancelled-date list was cut contributes very few dates where a previous refresh saw
+hundreds, and that must never trigger tidying up; `MAX_EVENT_BLOCKS_PER_FILE` (6,000) does NOT follow the per-feed ceiling; P6 owns
+seeding and reading the ceiling setting. **NEW: P6 must not reject or "repair" an event whose end sorts before its start on the
+October clock-change night** — the instants are right and wall-clock text cannot express that hour.
+
+**Acceptance criterion 3 is still NOT PROVEN** — no real Google or Microsoft 365 exports exist here (owner decision, 21 September
+2026). Every calendar across seven rounds is hand-written, and every report says so.
+
 ## LATEST — 23 September 2026, about 10:45. RESUME FROM HERE.
 
 **#514 P5: the sixth fix round is DONE; Fable's ROUND-7 CHECK IS RUNNING.** Still uncommitted, still the five untracked entries.
