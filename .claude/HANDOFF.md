@@ -9,6 +9,53 @@ proceeds, so the session can be picked up at any point).
 
 ## Read this first — where we are right now
 
+## LATEST — 23 September 2026, about 10:45. RESUME FROM HERE.
+
+**#514 P5: the sixth fix round is DONE; Fable's ROUND-7 CHECK IS RUNNING.** Still uncommitted, still the five untracked entries.
+New fingerprints: `.claude-work/resume/p514-p5-built-20260923-fixes6/fingerprints.txt` (55 files). **Verified by me from the
+REPOSITORY ROOT: rc=0, 55 OK.** `php -l` clean on all four PHP files. **Self-test run by me: 309 passed, 0 failed, 2 skipped,
+rc=0, zero FAIL lines.** No stray processes. Only `IcsReader.php` (+117/−56) and `ics-reader-selftest.php` (+240/−7) changed.
+
+**The ironic fault is fixed and proved the right way.** The refused branch no longer hands the first date back unchecked; it falls
+into the same loop the unsupported-rule branch uses. All three wrong answers are right, and each is proved by **comparing it against
+that other path** rather than against a list typed in by hand — which is the proof that matches the claim, because the claim was
+always "these two behave alike". The cancelled first date now gives 0 dates (was 1); the moved first date gives 14:00 and is no
+longer falsely marked a duplicate (was 09:00, marked duplicate); added dates give 3 (was 1).
+
+**The second builder found a gap the first had left, by planting rather than by reasoning.** The tie code is written out TWICE —
+once for cancelled dates, once for added dates — and the new check only reached the added-date copy. Planting the fault on the
+cancelled-date copy left the whole self-test green. It wrote the matching check. **Eleven plants now, one control, ten caught; the
+eleventh is deliberately uncaught** — a redundant line whose own comment says it is belt-and-braces, and which could only be caught
+by a two-fault test. Recorded as uncovered BY DESIGN rather than quietly left.
+
+**The hand-over between the two builders was not silent**, which is the part that matters under the owner's rules: the report
+carries a table of who did what, the second builder verified what it was handed before using it (53 of 55 fingerprints matching,
+exactly the two expected files differing), and it re-ran the first builder's plant set from scratch rather than reusing results it
+had not seen produced. Self-test 300 → **309**.
+
+**Also this round, comment only, no behaviour:** the owner's decision of 23 September on overnight repeating events is now recorded
+in BOTH places that used to call it a judgement, so nobody reopens it.
+
+**ROUND 7 IS RUNNING** (Fable, brief `.claude-work/briefs/514-p5-check.md`, "ROUND 7" section; report `p514-p5--verify-r7.md`).
+**It is the first work judged against the owner's new standing rule on time zones** — it is told to judge the reader against the
+rule as written, not only against the fault already found: a length taken from `diff()` used anywhere else, anything adding 86,400
+seconds for a day, any place a time on a clock becomes a moment in history. The portal-wide sweep is **#549** and stays queued.
+It is also told plainly not to manufacture a finding to avoid a clean verdict — if a round genuinely finds nothing, say PASS and
+say what earned it.
+
+**WHEN A ROUND COMES BACK CLEAN:** my own standard checks, commit ONLY P5's five entries with a message saying plainly Codex has
+NOT reviewed it, push, comment on #514, **then the `.github/` change** wiring the self-test into the pull-request checks with an
+explicit **`-d memory_limit=256M` or more** (headroom at PHP's usual 128 MB is only 8-16 MB), then P6 (`args: { part: "P6",
+tier: "opus" }`, migration 205).
+
+**RECORD FOR P6** (unchanged): web-served cron address, so set its own time limit; validate an end date rather than trust one; read
+`capped` FIRST; a series whose cancelled-date list was cut contributes very few dates where a previous refresh saw hundreds, and
+that combination must never trigger tidying up; `MAX_EVENT_BLOCKS_PER_FILE` (6,000) does NOT follow the per-feed ceiling; P6 owns
+seeding and reading the ceiling setting.
+
+**Acceptance criterion 3 is still NOT PROVEN** — no real Google or Microsoft 365 exports exist here (owner decision, 21 September
+2026). Every calendar used across seven rounds is hand-written, and every report says so.
+
 ## STANDING RULE ADDED 23 September 2026 — times and time zones
 
 **The owner set a new standing rule today:** every time the portal stores, works out, compares or shows must respect the time zone
