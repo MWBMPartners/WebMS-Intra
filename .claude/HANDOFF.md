@@ -9,6 +9,27 @@ proceeds, so the session can be picked up at any point).
 
 ## Read this first — where we are right now
 
+## OWNER DECISION — 23 September 2026, about 19:50: part 6's proofs get committed
+
+**The owner decided: commit part 6's proofs as a self-test that REFUSES without a throwaway database**, following
+`tools/event-visibility-selftest.php`'s precedent (it prints "REFUSED — set SELFTEST_DB_NAME … Nothing was checked." and exits 1).
+
+**Why it was asked.** Part 5 ships `tools/ics-reader-selftest.php`, which anyone can run with nothing but PHP. Part 6's proofs need
+a database and a web server, so they cannot be that simple — and they currently live ONLY in a scratch script inside the
+git-ignored `.claude-work/` folder. **They guard the code that decides what gets DELETED from a customer's calendar**, and nothing
+would re-run them once this branch merges.
+
+**What this means for the work:**
+- **Part 6 becomes NINE entries, not eight** — a new `tools/feed-importer-selftest.php` (or similarly named), committed with the
+  rest of P6 in the same single commit.
+- **Do NOT disturb the round-2 check that is running** on the current eight. Build the self-test after it reports, in the same
+  round as any fixes it finds, and then check the lot together.
+- The harness it needs already exists in `.claude-work/resume/p514-p6-built-20260923-fixes/` — 165 runtime checks, the fixture
+  generator, and the two rig faults already solved (`PHP_CLI_SERVER_WORKERS=6`, and the missing `rdate-first100.ics` fixture
+  **without which the set's most important control cannot run**).
+- It must refuse loudly rather than skip quietly, and **a skipped check must never read as a pass** — the same wording P5's
+  self-test uses.
+
 ## LATEST — 23 September 2026, about 19:40. RESUME FROM HERE.
 
 **#514 P6: all four gaps are fixed; the ROUND-2 CHECK IS RUNNING.** Still uncommitted, the same eight entries. **Only TWO files
