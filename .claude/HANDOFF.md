@@ -9,6 +9,64 @@ proceeds, so the session can be picked up at any point).
 
 ## Read this first — where we are right now
 
+## LATEST — 23 September 2026, about 09:30. RESUME FROM HERE.
+
+**#514 P5: round 6 came back NOT CLEAN with two LOW findings; the sixth fix round is part-done and a second builder is finishing
+it.** Still uncommitted, still the five untracked entries. `IcsReader.php` and `ics-reader-selftest.php` now differ from the
+round-5 fingerprints; the other 53 files are untouched. **I ran the self-test myself just now: 308 passed, 0 failed, 2 skipped,
+rc=0, zero FAIL lines**, and `php -l` is clean on both changed files. The tree is sound, not half-edited.
+
+**Round 6 could not fault round 5's work, and re-proved all of it with its own files.** The end point is dropped on a cut list and
+kept on an ordinary capped answer; the warning names the right allowance in all four shapes including a genuine tie; **thirteen
+clock-change cases it derived independently by arithmetic on Unix timestamps are all right**, and every `DURATION` answer is
+byte-identical between the round-4 reader and this one, so that branch really was left alone; the ceiling reproduces exactly
+(10,000 dates, 52.0 MB, 0.22 s); 53 of 54 calendars unchanged; and the self-test's pass/fail set is **identical at 128 MB and
+1,024 MB**, so no check passes because of memory left behind by an earlier one.
+
+**Finding 1 is ironic and was worth the round on its own.** Round 5 added a path refusing a series whose list of cancelled dates
+was too long to read, precisely so those cancelled dates could not come back. The header and comment said that series gets "the
+same treatment" an unsupported repeat rule gets. **It did not.** It returned the first date directly instead of running it through
+the same loop, so it handed back a first date the calendar itself cancels, dropped a changed first date in favour of the original
+and called it a duplicate, and lost added dates. The fix built to stop resurrection resurrected the first one.
+
+**That is now fixed and proved:** the branch falls into the same loop, and every "cut" answer matches its unsupported-rule control
+— 0 dates where it used to give the cancelled one, the changed 14:00 version instead of the original 09:00 marked duplicate, and
+3 added dates instead of 1. Finding 2 was a missing check for the tie case. Self-test 300 → **308**.
+
+**The first builder stalled on the 10-minute watchdog** after finishing the code and the checks, while starting the planting stage.
+A second builder is finishing: the planted-fault table, the standard checks, the durable copy and the report. **No work was lost**
+— its progress file recorded every step, which is exactly what those files are for.
+
+**AN OWNER DECISION, 23 September 2026.** For a repeating overnight event with an explicit end time, the reader follows RFC 5545 —
+the same exact length on every instance, so a weekly 23:00-04:00 night shelter ends at **03:00** on the night the clocks go back,
+where the customer's own calendar program most likely shows 04:00. **The owner was asked and chose the standard.** The behaviour is
+unchanged; the header is being reworded so it reads as a settled decision rather than a builder's judgement.
+**I had told the owner this touched an ordinary weekly church service. It does not** — round 6 corrected me. A 18:00-20:00 service
+never spans the 01:00-02:00 change hour, so it is unaffected. Only overnight series crossing that hour are, one instance a year.
+
+**Round 6 also settled a disagreement in the BUILDER's favour**: `add(new DateInterval('PT5H'))` gives 03:00, not 04:00 — the
+round-5 checker's own worked example was wrong, and it said so plainly in its report. The finding it supported still stands, because
+the fix was derived from measured behaviour rather than from that example.
+
+**WHEN A ROUND COMES BACK CLEAN:** my own standard checks, commit ONLY P5's five entries with a message saying plainly Codex has
+NOT reviewed it, push, comment on #514, **then the `.github/` change** putting the self-test into the pull-request checks, then P6
+(`args: { part: "P6", tier: "opus" }`, migration 205).
+
+**THE `.github/` CHANGE MUST SET AN EXPLICIT MEMORY LIMIT — `-d memory_limit=256M` or more.** Measured by round 6: the self-test's
+result is identical at 128 MB and 1,024 MB, but at 112 MB one check fails and at 104 MB eight do. **The headroom at PHP's usual
+128 MB is only 8-16 MB**, so the first future check that holds 10 MB would turn others red for reasons nothing to do with the
+reader. It takes 10.3 seconds, needs PHP only, and exits 0 or 1.
+
+**RECORD FOR P6** (all current): the cron address is web-served, so set its own time limit; validate an end date rather than trust
+one; read `capped` FIRST, because a capped read with no end point covers nothing reliably; a series whose cancelled-date list was
+cut contributes one date where a previous refresh saw hundreds, and that combination must never trigger tidying up; and
+`MAX_EVENT_BLOCKS_PER_FILE` (6,000) does NOT follow the new per-feed ceiling. Also: a cathedral keeping a daily office with every
+weekend deleted one by one since about 1990 would reach the cut and import as its first date only — the warning names it, and round
+6 accepted that rather than raising the limit.
+
+**Acceptance criterion 3 is still NOT PROVEN** — no real Google or Microsoft 365 exports exist here (owner decision, 21 September
+2026). Every calendar used across six rounds is hand-written, and every report says so.
+
 ## LATEST — 23 September 2026, about 10:15. RESUME FROM HERE.
 
 **#514 P5: the fifth fix round is DONE; Fable's ROUND-6 CHECK IS RUNNING.** Still uncommitted, now **five untracked entries holding
