@@ -9,6 +9,61 @@ proceeds, so the session can be picked up at any point).
 
 ## Read this first — where we are right now
 
+## LATEST — 23 September 2026, about 20:30. RESUME FROM HERE.
+
+**#514 P6: round 2 came back NOT CLEAN with one HIGH and one LOW. The fix round is running, and one of its fixes REOPENS PART 5,
+which is already committed.** Check report `.claude-work/resume/p514-p6--verify-r2.md`; evidence kept in
+`p514-p6--verify-r2-evidence/` (10 scripts, 13 calendars, 42 outputs). Fix brief `.claude-work/briefs/514-p6-fix2.md`; report
+`.claude-work/resume/p514-p6--fixes2.md`.
+
+**Round 2 confirmed all four earlier fixes are real and proved in both directions**, and tested the builder's three judgement calls
+rather than accepting them — all three stand. Its own suite re-run unchanged is 199 passed / 2 failed, and the two failures are the
+assertions it had written to document the old behaviour.
+
+**THE HIGH FINDING IS IN `web/_core/IcsReader.php` — part 5, committed as `31bd64e` after NINE rounds of checking.** The previous
+fix round could not have found it by fixing the importer, because the importer does as it is told; it is the number it is told that
+is wrong.
+
+**The reason matters more than the line.** `occurrencesForMaster()` walks a series in ORIGINAL date order and stops at the 400-date
+limit, but records the start AFTER a changed date has moved it. **When a changed date moves an occurrence, the set the reader kept
+is no longer a run from the beginning** — it kept something in August while dropping April. **So there is NO truthful "everything
+before this moment was seen" point at all**, and any value reported is a guess the importer then deletes on.
+
+Four measured shapes, worst first: the 400th kept date moved later (3 April → 1 August 2027) had **all 20 dates the limit dropped,
+still present in the file, soft-deleted**; the first dropped date moved earlier was neither kept nor recorded as an orphan and was
+deleted; both sources together still picked the wrong point; and on the October clock-change night the 01:15 row went. Seven
+controls all pass, including one proving the check can fail. **The per-calendar slice is immune** — it sorts the same text it
+compares.
+
+**THE FIX: when a series was cut, the WHOLE read reports no end point.** Not just that source — `min()` would otherwise fall back
+to the slice's point, which is later than the dropped dates and deletes them just the same. **The checker's other suggestion
+(report the ORIGINAL start) does not fix shape 2**, because a dropped date moved EARLIER than that start is still before the point;
+it would need a second change to code that has had nine rounds. **Cost, to be stated in the code:** a calendar holding one
+repeating event with more than 400 dates in the period never sheds removed events through that refresh — the same trade already
+proven for a read with no end point, and the safe direction.
+
+**Reachability, honestly:** one UID needs more than 400 dates in the period, which only an `RDATE` list can do (a daily rule gives
+at most 396), plus a changed date at the cut. Uncommon — and the consequence is the exact one this part exists to prevent.
+
+**A case goes into `tools/ics-reader-selftest.php`**, part 5's committed self-test, because a fault in committed code with no check
+is how this got here.
+
+**ALSO IN THIS ROUND:** one word — "up to" becomes "before", because on a capped read the comparison is `<` and an event starting
+AT that moment was not checked. And **the owner's decision: part 6's proofs become a committed self-test** that refuses loudly
+without a throwaway database and a test server, on `event-visibility-selftest.php`'s model, including the fixture the old set never
+generated. **Part 6 becomes NINE entries.** The round-2 checker gave its own view unprompted and agrees, for three reasons worth
+keeping: the highest-risk fault found in P6 can only be shown with a database and a server, so a plain self-test could never have
+caught it; the scratch set has been rebuilt by hand three times and each time lost something that cost real time; and a durable
+copy in `.claude-work/` is invisible to the pull-request checks and to the Codex sweep.
+
+**TWO RIG FACTS, now confirmed twice:** give the test server `PHP_CLI_SERVER_WORKERS=6` or it wedges for an hour after a proof
+kills a download — **and those workers outlive a killed parent carrying only `server.php` on their command line, so kill them by
+PORT.** The `rdate-first100.ics` control was REAL before, not absent: the original run shows it passing and the rebuild shows it
+failing on a 404, so the first builder had a hand-made file whose recipe never reached the generator.
+
+**AFTER THE FIX ROUND: check again, and keep going until a round is clean.** Then my own standard checks, ONE commit for P6 saying
+plainly Codex has NOT reviewed it, push, comment on #514, then P7.
+
 ## OWNER DECISION — 23 September 2026, about 19:50: part 6's proofs get committed
 
 **The owner decided: commit part 6's proofs as a self-test that REFUSES without a throwaway database**, following
