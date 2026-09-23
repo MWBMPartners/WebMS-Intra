@@ -9,6 +9,76 @@ proceeds, so the session can be picked up at any point).
 
 ## Read this first — where we are right now
 
+## LATEST — 23 September 2026, about 10:15. RESUME FROM HERE.
+
+**#514 P5: the fifth fix round is DONE; Fable's ROUND-6 CHECK IS RUNNING.** Still uncommitted, now **five untracked entries holding
+55 fingerprinted files** (one new fixture). New fingerprints: `.claude-work/resume/p514-p5-built-20260923-fixes5/fingerprints.txt` —
+**I verified all 55 myself from the REPOSITORY ROOT** (rc=0; the paths inside are repository-relative, so running it from inside the
+folder fails and means nothing). `php -l` clean on all four PHP files. Nothing staged, no stash.
+
+**Three of the five entries changed:** `IcsReader.php` 3,809 → 4,242 lines (485 changed lines, of which **99 are code** — the rest
+comment), the self-test 3,126 → 3,731 lines (**266 → 300 checks**), and one new fixture for the clock-change cases.
+
+**The broken promise is fixed.** A cut date list now throws away the "reliable up to here" mark, as the other two stops already did.
+The checker's file went from reporting 4 February 2027 as the honest end — while 500 real events before that date were missing — to
+reporting nothing. **The control matters as much as the fix:** an ordinary capped answer with no cut list still reports its end point
+exactly as before, so the fix did not simply stop reporting one.
+
+**The clock-change fault turned out to be one branch, not two.** The builder measured PHP before changing anything and found that
+`add()` on a hand-built interval ALREADY does what RFC 5545 asks — days and weeks by the clock, hours and minutes by the second. So
+the `DURATION` branch was right all along and is untouched; only the branch handling an explicit end time changed. Nine cases were
+proved against a separate hand-worked script rather than against the reader, and all nine matched. An overnight event on the October
+change night now ends at 04:00 where it used to say 05:00.
+
+**One judgement inside that fix is worth the owner knowing about, because it affects a normal church service.** For a REPEATING
+event stated with an explicit end time, RFC 5545 §3.8.5.3 says every instance keeps the same exact length — so a weekly 23:00-04:00
+service ends at **03:00** on the night the clocks go back. Google and some others keep the wall-clock 04:00 instead. The builder
+chose the standard, wrote the choice into the class header and put a check on it so it cannot drift silently. **If the owner prefers
+the wall-clock reading, it is a one-line change and one check.** The fault that was actually measured — a one-off event — is
+unaffected either way.
+
+**The recommendation was built.** A series whose skipped-date list was cut is now imported as its first date only, instead of
+resurrecting deleted dates. On the 1985 file that is ZERO dates over the self-test's window, because the series' own first date sits
+outside it — the same answer an unsupported repeat rule gives. The control is the important half: the same series since 2010 comes
+back with 261 weekday dates, every weekend still removed, **no warning at all**, byte-identical before and after.
+
+**The per-feed ceiling is now a parameter**, default 2,000, hard upper bound **10,000** — and that bound is MEASURED, not chosen: one
+gathered date costs 912 bytes, and a calendar that really reaches 10,000 peaks at 52 MB and 0.22 s, against 14 MB and 0.04 s at the
+default. An out-of-range value is refused with a warning naming the number, not quietly clamped. **The reader still reads no settings
+and opens no connection** — that is what lets it be self-tested at all — so P6 seeds the setting, reads it per site and passes it in.
+
+**Nothing changed that should not have: 63 calendars read through the round-4 reader and this one, 58 byte-identical.** The five that
+differ are the five this round is about, and nothing else moved inside any of them. An ordinary calendar's time is unchanged — the
+spread between repeated runs of the SAME build is larger than the difference between builds, so the honest answer is "no measurable
+change" rather than a number.
+
+**Two faults the builder found in its own work, both by measuring rather than reasoning.** One of its planted faults PASSED at first
+because the reorder fix had no check behind it — the second round running in which planting, not thinking, found the gap. And its
+first version of a new check left 102 MB allocated, so every later check silently read an EMPTY calendar and one passed for the
+wrong reason; the reader stops quietly when memory runs short, which is exactly what made it look like a pass.
+
+**A stray process from round 3 was found and killed.** A polling loop started at 01:06 had been spinning for nearly seven hours,
+waiting for a file its own agent's clean-up had deleted. Harmless, but it would never have ended. Recorded in Claude's memory as
+"orphaned waiters outlive their agent" — the companion to the existing note that a session's own waiters die with it.
+
+**AFTER ROUND 6: keep going until a round finds nothing.** When clean: my own standard checks, commit ONLY P5's five entries with a
+message saying plainly Codex has NOT reviewed it, push, comment on #514, **then the `.github/` change** putting the self-test into
+the pull-request checks (owner's decision, 23 September), then P6 (`args: { part: "P6", tier: "opus" }`, migration 205).
+
+**WHAT THE `.github/` CHANGE WILL NEED, measured by the builder so nobody guesses:** `php tools/ics-reader-selftest.php`, run from
+anywhere; **10.3 seconds**, not the minute I previously wrote; PHP only — no database, no network, no Composer; peaks at 69.5 MB but
+starts child processes with their own limits up to 256 MB, so the runner must allow that; exit 0 when every check passed, 1 when any
+failed; a skipped check does not fail the run.
+
+**RECORD FOR P6** (all still current): the cron address is web-served, so set its own time limit; validate an end date rather than
+trust one; a capped read with no end point covers nothing reliably, and P6 must read `capped` FIRST; **new** — a series whose
+skipped-date list was cut contributes ONE date where a previous refresh saw hundreds, together with `capped = true`, and that
+combination must never trigger tidying up; and `MAX_EVENT_BLOCKS_PER_FILE` (6,000) does NOT follow the new ceiling, so a file with
+more event blocks than that still comes back incomplete.
+
+**Acceptance criterion 3 is still NOT PROVEN** — no real Google or Microsoft 365 exports exist here (owner decision, 21 September
+2026). Every calendar used in five rounds of checking is hand-written, and every report says so.
+
 ## LATEST — 23 September 2026, about 09:10. RESUME FROM HERE.
 
 **#514 P5: round 5 came back NOT CLEAN; the fifth fix round is running.** Still uncommitted, still the same five untracked entries,
