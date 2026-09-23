@@ -9,6 +9,53 @@ proceeds, so the session can be picked up at any point).
 
 ## Read this first — where we are right now
 
+## LATEST — 23 September 2026, about 14:15. RESUME FROM HERE.
+
+**#514 P5: the eighth fix round is DONE; Fable's ROUND-9 CHECK IS RUNNING.** Still uncommitted, five untracked entries, 56
+fingerprinted files. **Verified by me from the REPOSITORY ROOT: rc=0, 56 OK.** `php -l` clean. **Self-test run by me: 320 passed,
+0 failed, 2 skipped, rc=0.**
+
+**Not one line of CODE changed this round.** The fortnightly fault is guarded by two events and two checks; `IcsReader.php` gained
+21 lines of comment and nothing else. **All six planted faults are now caught** — before this round the step-back one was invisible.
+The new checks' expected answers were derived by the builder's own zone-free script with the reader nowhere in sight, and matched
+the checker's independent oracle.
+
+**The record is corrected rather than rewritten**, which is the part worth keeping: `p514-p5--fixes7.md` carries a correction block
+under its title and six markers beside each place the wrong claim appears, with the originals untouched. **The builder also flagged
+that THIS FILE still repeated the disproved claim and said it had no remit to fix it. It was right, and I have now marked that
+paragraph** (search for "CORRECTED 23 September 2026"). A handoff that quietly carries a disproved claim forward is worse than one
+that never mentioned it.
+
+**The lesson from the round, in one line:** the instinct to refuse a check that would pass whatever the code does was right; the
+mistake was stopping at "I could not make it fail" and writing that up as "it cannot fail". Sixteen calendars that agree are
+evidence about those sixteen calendars.
+
+**A NEW SHELL TRAP, found by the builder in its own work and now in Claude's memory.** Its first checks script printed `rc=$?`
+inside a string that also ran `$(basename …)`. **The command substitution runs first and resets `$?`**, so every exit code it
+printed belonged to `basename`. It reported one audit script failing that was fine, and `event-visibility-selftest.php` PASSING
+when that script had plainly printed "REFUSED — nothing was checked". Same family as never reading an exit code after a pipe, and
+it looks exactly like a pass. **A quick sanity check that catches it: the visibility self-test must always fail on this machine,
+so any all-green batch containing it is proof the script is wrong.**
+
+**ROUND 9 IS RUNNING** (Fable, brief's "ROUND 9" section, report `p514-p5--verify-r9.md`). It is told to attack the two new checks
+hardest — do they fail for the RIGHT reason, or could they pass with the code broken in a nearby way? — and to test the builder's
+argument that the one remaining unguarded line is harmless, **the same shape of argument it cracked last round**. It is also asked
+to verify what was NOT re-proved this round: the builder skipped the 86-calendar comparison, the FIX B calendars and the
+memory-limit sweeps by REASONING that the code is byte-identical apart from comment. If that is true the reasoning holds; if not,
+everything resting on it is unproved.
+
+**WHEN A ROUND COMES BACK CLEAN:** my own standard checks, commit ONLY P5's five entries with a message saying plainly Codex has
+NOT reviewed it, push, comment on #514, **then the `.github/` change** (self-test into the pull-request checks, explicit
+`-d memory_limit=256M` or more), then P6 (`args: { part: "P6", tier: "opus" }`, migration 205).
+
+**RECORD FOR P6** (unchanged): web-served cron address, so set its own time limit; validate an end date rather than trust one; read
+`capped` FIRST; a cut cancelled-date list means very few dates where a refresh saw hundreds, and that must never trigger tidying
+up; `MAX_EVENT_BLOCKS_PER_FILE` (6,000) does not follow the per-feed ceiling; P6 owns the ceiling setting; and **P6 must not reject
+or "repair" an event whose end sorts before its start on the October clock-change night.**
+
+**Acceptance criterion 3 is still NOT PROVEN** — no real Google or Microsoft 365 exports exist here (owner decision, 21 September
+2026). Every calendar across nine rounds is hand-written.
+
 ## LATEST — 23 September 2026, about 13:15. RESUME FROM HERE.
 
 **#514 P5: round 8 came back NOT CLEAN with ONE low finding; the eighth fix round is running.** Still uncommitted, five untracked
@@ -79,6 +126,8 @@ customer would see:
 - **A Saturday whole-day series in a week that starts on Sunday lost Saturday 31 October** and offered 8 November instead. What
   makes it show is `WKST=SU`, and **American calendars commonly set it** — so this is not an exotic shape.
 Both are now guarded. Ten faults planted one at a time; the table is in the report.
+
+**[CORRECTED 23 September 2026, by the round-8 check — the paragraph below is WRONG and is left only so the correction makes sense. The argument did NOT hold: a week that starts a day early also ENDS a day early, so at `INTERVAL=2` the lost weekday falls into a window fourteen days on and a fortnightly Saturday series lands on the off weeks. It is now guarded by two checks. See the newest LATEST block at the top of this file.]**
 
 **It also declined to add a check, and that is the right instinct.** A third uncaught plant could not be made to give a wrong
 answer on any of sixteen calendars, and there is a structural reason: that step only decides where a seven-day search window
