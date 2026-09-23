@@ -9,6 +9,49 @@ proceeds, so the session can be picked up at any point).
 
 ## Read this first — where we are right now
 
+## LATEST — 23 September 2026, about 15:30. RESUME FROM HERE.
+
+**#514 PART 5 IS COMMITTED AND PUSHED: `31bd64e`.** Nine rounds of independent checking; each of the first eight found something
+the one before missed, and the ninth found nothing. The working tree is clean — `git status` shows nothing outstanding. #514 has a
+comment recording what landed, what is not proven and what P6 must do.
+
+**PART 6 IS BEING BUILT NOW** (Opus, background agent, brief `.claude-work/briefs/514-p6-build.md`, report
+`.claude-work/resume/p514-p6--build.md`). Its specification is the plan's P6 section, `p514--plan-r2.md` lines 1388-1611, with
+thirteen proofs. **Migration 205 — I verified 204 is the highest that exists.**
+
+**TWO OWNER DECISIONS, 23 September 2026 (asked when the queue reached them):**
+1. **Codex waits for the whole #514 build, as arranged.** Codex was probed and IS answering (`codex-cli 0.154.0`, model
+   `gpt-6-astra`, run with `< /dev/null`). The owner was offered a sweep now and chose to keep the arrangement: **one
+   comprehensive review of the whole branch after #514 is built.** So nothing since 20 September has had a second system's eyes —
+   #515, #516, #517, #538, #542, #544 and #514 P1-P5 — and every one of those commits says so in its message.
+2. **Next is #514 part 6, then keep going through the queue.** The `.github/` change wiring the calendar self-test into the
+   pull-request checks is still approved and still queued — **not cancelled, just not first.**
+
+**WHY P6 MATTERS MORE THAN ITS SIZE SUGGESTS.** P5 built a calendar reader that nothing calls. **P6 is what calls it**, so until
+P6 lands, five parts of work are unreachable — the "shipped but unreachable" shape this project keeps hitting. And P6 is the part
+that decides what gets DELETED: a refresh that misreads an incomplete download as a complete one removes real events, and nobody
+finds out until somebody misses a service.
+
+**WHAT P5 RECORDED FOR P6** (all measured across nine rounds, all in the build brief in full): the cron address is web-served so
+P6 must set its own time limit; read `capped` FIRST; a cut cancelled-date list gives very few dates where a refresh saw hundreds
+and must never trigger tidying up; `MAX_EVENT_BLOCKS_PER_FILE` does not follow the per-feed ceiling; P6 owns the ceiling setting
+(default 2,000, seeded from the reader's own constant, passed as a parameter — the reader stays database-free); an end may
+legitimately sort BEFORE its start on the October clock-change night and must not be "repaired"; an end may be as late as
+year 9999.
+
+**TWO COMMENT CORRECTIONS WERE MADE AFTER ROUND 9 REPORTED CLEAN**, from that round's own observations, and the commit message
+says so: a sentence claiming four changes would blind a pair of checks when one of them does not, and a claim about what Google
+writes stated as measured fact when nothing here measured it. Comment only; the standard checks were re-run on the final bytes
+(39 green, the one refusal by design, self-test 320 passed 0 failed).
+
+**THE QUEUE AFTER P6:** P7-P11; the `.github/` self-test change (needs `-d memory_limit=256M` — headroom at 128 MB is only
+8-16 MB); #549 (times and time zones across the whole portal); the follow-ups #534-#536, #539-#541, #543, #545-#548 — of which
+**#545 (anyone can approve their own expense claim and then be paid) and #547 (the volunteering page crashes for everyone) are
+live faults, not polish**; the documentation and CI pass; then the Codex sweep; then a pull request **only when the owner says so**.
+
+**Acceptance criterion 3 remains NOT PROVEN** — no real Google or Microsoft 365 exports exist here (owner decision, 21 September
+2026). P6's proof 13 prints SKIPPED for the same reason.
+
 ## LATEST — 23 September 2026, about 14:15. RESUME FROM HERE.
 
 **#514 P5: the eighth fix round is DONE; Fable's ROUND-9 CHECK IS RUNNING.** Still uncommitted, five untracked entries, 56
