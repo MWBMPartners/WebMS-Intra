@@ -286,9 +286,9 @@ unintended consequence. That is what the second reviewer is for.
 
 ## Deep analysis: sequential, one run at a time (STANDING RULE)
 
-Deep analysis and deep planning use **sequential agents, never parallel** — and
-this applies **on Opus too**, not just on Fable. Confirmed by the owner on
-10 September 2026.
+Deep analysis and deep planning use **sequential agents, never parallel**,
+whichever model is doing the thinking. Confirmed by the owner on
+10 September 2026, and unchanged by the move to Opus on 23 September 2026.
 
 Two parts, and the second is the one that gets missed:
 
@@ -311,10 +311,26 @@ Stopping a run to keep the order is cheap: relaunch with `resumeFromRunId` and
 the script path, and every agent that already finished returns its cached answer
 immediately.
 
-**Always try Fable first**, on every deep run, even if it failed last time. Fall
-back to Opus only when Fable is unavailable, and put the fallback in the script
-rather than deciding by hand. Implementation stays on Sonnet or Haiku — or Opus
-when the work is genuinely complex.
+**Deep analysis and deep planning run on Opus**, one agent at a time, in
+sequence. Implementation stays on Sonnet or Haiku, whichever fits — or Opus when
+the work is genuinely complex. **Verification is never done by a weaker model
+than the build.**
+
+**This changed on 23 September 2026.** Planning used to go to Fable, falling
+back to Opus. The owner's reason: the newest Opus is cheaper than Fable and at
+least as good at this, so there is nothing left to fall back from. Written down
+because an older note will name Fable as the planner, and somebody reading it
+should know it was replaced deliberately rather than forgotten.
+
+**The rule is about the tier, not the name.** "The strongest reasoning
+available, one agent at a time" is the instruction; which model fills that tier
+will change again. Do not read a model name here as permanent.
+
+**Think hardest at the start.** The owner's word for it is "ultrathink" — typed
+in a live message it raises how much thinking happens before anything is built.
+A plan that is right saves every token a wrong plan would have spent on rework.
+**Use the planning and orchestration features the tool provides** — in Claude
+Code, workflows and agents — where they fit. The owner has opted in to them.
 
 ## When one system runs out: handing over, and handing back (STANDING RULE, all projects)
 
@@ -569,6 +585,37 @@ property a `description` — the schema is the documentation as well as the
 validator, which is exactly why the descriptions matter. Wire the validation
 into a check so it actually runs; a schema nothing executes is a document, not a
 check.
+
+## The documentation sweep is a standing task (STANDING RULE)
+
+After each real body of work, and before its pull request is opened, update the
+documentation thoroughly. Not a skim — every one of these:
+
+- **Every `.md` file in the repository** that the work touched or made untrue:
+  `README.md`, `CHANGELOG.md`, `FEATURES.md` (the living feature inventory —
+  check it first, it is the one people read), `DEV_NOTES.md`, and any others.
+- **The in-app help and guides** under `web/_apps/help/` — these are what an end
+  user reads, so they matter more than the developer notes, not less.
+- **The memory and context files for every assistant that works on this
+  project**: `.claude/` (including this file and the handoff) and its
+  `.OpenAI/` mirror. Both, in the same sitting, or they drift apart.
+- **The API description.** This project offers a REST API, so `_core/api-spec.json`
+  and anything serving it must describe what the code actually does.
+
+**Swagger UI is already here and already suits shared hosting.**
+`web/public_html/api-docs/index.php` serves a browsable view of the API
+description, loading the Swagger UI files from a content delivery network and
+falling back to a copy in `/assets/vendor/swagger-ui/` when there is no internet.
+**It needs no Docker and no command line**, which is the condition this project
+builds everything to. So do not add a second viewer — keep this one correct.
+
+## Order and bundle the work sensibly (STANDING RULE)
+
+The order of tasks in a brief is a suggestion, not a sequence to follow blindly.
+Reorder and combine where that is more efficient — one documentation pass after
+three related fixes, one review round over two small changes — **as long as
+nothing is dropped and the progress table shows what was bundled**. Efficiency
+that hides work is not efficiency.
 
 ## Code Style (MUST FOLLOW)
 
@@ -1293,13 +1340,19 @@ is the one place that lists them together.
   at any moment if a session stops. Update it before anything long starts, after each
   step, and the moment something important is learned.
 - **Deep analysis and deep planning:** sequential agents, never parallel, one analysis
-  run at a time. Try Fable first on every step; if Fable is unavailable, Opus stands in
-  for that step only, and the next step tries Fable again.
+  run at a time, **on Opus** (changed 23 September 2026 — it used to be Fable; see the
+  deep-analysis rule above for why). Think hardest at the start; use workflows and agents
+  where they fit.
 - **Building:** Sonnet or Haiku, whichever fits; Opus only when the build is genuinely
   complex. Use tokens efficiently without ever trading away correctness (GIRFT: Get It
   Right First Time).
 - **Plugins:** the dev-team plugins may be used for any of this, including suggesting
   fixes and features and routing reviews to a different AI system.
+- **Documentation sweep after each real body of work**, before its pull request: every
+  `.md` file, the in-app help, `.claude/`, `.OpenAI/`, and the API description. Swagger UI
+  is already in place and already suits shared hosting — keep it correct, do not replace it.
+- **Reorder and bundle tasks** where it is more efficient, as long as nothing is dropped and
+  the progress table shows what was bundled.
 - **Cross-system review until clean:** every change is reviewed by a different AI system
   from the one that built it (today: built by Claude Code, reviewed by Codex, and the
   reverse). Findings are fixed and the change is reviewed again, round after round,

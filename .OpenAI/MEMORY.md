@@ -485,3 +485,37 @@ calendar reader follows RFC 5545 §3.8.5.3 (every instance keeps the same exact
 length) by the owner's decision of 23 September 2026, rather than matching what
 Google shows; the choice is written beside the code and guarded by a check so
 nobody reverses it quietly.
+
+**The model that does the deep thinking changed on 23 September 2026.** Deep
+analysis and deep planning on this project now run on **Opus**, one agent at a
+time, in sequence — never several at once. It used to be Fable, falling back to
+Opus. The owner's reason: the newest Opus is cheaper than Fable and at least as
+good at this, so there is nothing left to fall back from. Older notes in this
+repository name Fable as the planner; that was replaced deliberately, not
+forgotten. **The rule is about the tier, not the name** — "the strongest
+reasoning available, one agent at a time" is the instruction, and whichever
+model fills that tier will change again. Implementation stays on Sonnet or
+Haiku, whichever fits, and steps up to Opus only when the build is genuinely
+complex. **Verification is never done by a weaker model than the build.**
+
+**One package is in flight at a time, and checking counts.** Nothing new starts
+— not even planning the next package — while a finished one is being
+independently checked. The idle time is deliberate: the next plan would be read
+against a working tree still holding uncommitted changes that may shift under
+it, and the checker verifies exactly which files changed, so anything else
+editing the tree muddies that test.
+
+**After every finished piece of work, six steps, none optional:** commit and
+push to the single working branch that will later target `alpha`; update each
+related GitHub issue individually; update the Claude memory and `.claude/`;
+update this `.OpenAI/` mirror in the same sitting so the two cannot drift;
+update `.claude/HANDOFF.md`; show the progress table.
+
+**The documentation sweep is a standing task**, done after each real body of
+work and before any pull request: every `.md` file, the in-app help under
+`web/_apps/help/`, `.claude/`, `.OpenAI/`, and the API description. **Swagger UI
+is already in this project** at `web/public_html/api-docs/index.php`, serving a
+browsable view of the API description and falling back to a local copy under
+`/assets/vendor/swagger-ui/` when there is no internet. **It needs no Docker and
+no command line**, which is the condition everything here is built to — so keep
+it correct rather than adding a second viewer.

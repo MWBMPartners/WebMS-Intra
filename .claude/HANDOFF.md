@@ -9,6 +9,215 @@ proceeds, so the session can be picked up at any point).
 
 ## Read this first — where we are right now
 
+# ============================================================================
+# START HERE — written 23 September 2026, about 21:00, for a COMPLETELY FRESH
+# SESSION with no chat history. Everything needed to carry on is in this one
+# block. Everything below it is history, kept because it explains WHY.
+# ============================================================================
+
+## 0. Before you restart the session — read this first
+
+**Background agents die with the session.** If a checker or builder is running, restarting kills it and may leave the working
+tree half-edited. **Check before restarting:**
+
+```
+ps -eo pid,lstart,command | grep -a 'p514' | grep -a -v grep
+```
+
+Nothing listed = safe to restart. **As of 21:00 on 23 September 2026 nothing is running and the tree is in a complete,
+consistent state**, so restarting now is safe.
+
+## 1. Where the work is, exactly
+
+**Branch: `claude/alpha-wip`.** It will target `alpha` through ONE pull request later, **only when the owner says so.**
+Last commit at the time of writing: the handoff commit made alongside this block.
+
+**#514 (importing outside calendars) is the current job — 11 parts.** Parts 1 to 5 are committed. **Part 6 is built, fixed
+twice, and NOT yet committed.**
+
+**THE WORKING TREE HOLDS PART 6, UNCOMMITTED — 11 entries.** Four are new, seven are changes to files already committed:
+
+| Entry | New? | What |
+|---|---|---|
+| `web/_sql/205_external_calendar_importer.sql` | NEW | The database change for part 6 |
+| `web/_core/FeedImporter.php` | NEW | Does the refreshing |
+| `web/_core/FeedResolver.php` | NEW | Works out who may see each event |
+| `tools/feed-importer-selftest.php` | NEW | Part 6's own test (owner's decision today) |
+| `web/_sql/full_schema.sql` | changed | The twin of migration 205 |
+| `web/_apps/cron/import-feeds.php` | changed | The scheduled job, rewritten |
+| `web/_apps/admin/calendar/feeds.php` | changed | Admin page |
+| `web/_apps/admin/calendar/feeds-save.php` | changed | Admin save handler |
+| `web/_core/personal-data-catalogue.php` | changed | So "delete my data" covers the new tables |
+| **`web/_core/IcsReader.php`** | changed | **PART 5's file, reopened** — see section 3 |
+| **`tools/ics-reader-selftest.php`** | changed | **PART 5's test, reopened** — a case for that fix |
+
+**Verified by me at 20:55 on 23 September**, not taken from any report: exactly those 11 entries, nothing staged, no stash,
+`php -l` rc=0 on all nine PHP files, **`tools/ics-reader-selftest.php` gives 332 passed / 0 failed / 2 skipped** (it was 320
+before part 6's fixes added cases), and **`tools/feed-importer-selftest.php` refuses with exit 1** saying "Nothing was checked."
+when it is not given a scratch folder — which is exactly what it should do.
+
+## 2. What to do next, in order
+
+1. **Run an independent check of part 6, ROUND 3** — a fresh agent that did NOT build it. The brief is
+   `.claude-work/briefs/514-p6-check.md`; add a "ROUND 3" section saying what changed. Report goes to
+   `.claude-work/resume/p514-p6--verify-r3.md`. **The round-2 fix report is `.claude-work/resume/p514-p6--fixes2.md`** (582 lines,
+   read and verified by me — see the correction block appended at its end).
+
+   **What round 2's fixes did, so the round-3 brief can say it:** the reader no longer reports any "everything before here" point
+   when a repeating event was cut short (section 3 below); one word an administrator reads changed from "up to" to "before",
+   because the comparison really is strictly before; and part 6's proofs became `tools/feed-importer-selftest.php`.
+   **Everything is proved in both directions**: the new part-5 checks give 332 passed against the fixed reader and **326 passed /
+   6 failed against the committed one**, printing the exact wrong moments; the new part-6 test gives **104 passed against the
+   fixed code and 96 passed / 8 failed against the pre-fix code**, printing the real deletions. The builder also re-ran the
+   checker's own thirteen calendars and two attack scripts unchanged, and all four of its fault checks now pass.
+
+   **Three things worth carrying into the round-3 brief as places to attack:** two committed assertions in part 5's self-test had
+   to CHANGE (one now asserts the opposite of what it did; one control was MOVED onto the only source that still reports a point
+   rather than deleted — check it still guards what it was for); the builder deleted the now-dead plumbing as well as its wrong
+   use, which is more than the brief asked; and one check in the new test can SKIP for a calendar reason (about two weeks each
+   October there is no clocks-back night inside the period with room either side).
+2. **Keep going until a check round finds nothing.** That is the owner's rule and it has earned its keep: part 5 took nine
+   rounds, and each of the first eight found something the one before had missed.
+3. **When a round is clean:** run the standard checks yourself (section 6), then **ONE commit for all of part 6**, push,
+   and comment on #514. **The commit message must say plainly that Codex has NOT reviewed it** — silence must never imply a
+   review happened.
+4. **Then part 7** — the plan's P7 section is `.claude-work/resume/p514--plan-r2.md` lines 1612-1791. Migration 206.
+5. **Then the rest of the queue** (section 5).
+
+## 3. The one thing in part 6 that is unusual, and must not be lost
+
+**Part 6's fixes reopened part 5, which was already committed** (`31bd64e`, after nine rounds of checking). This was right, and
+here is why, because it will look odd to anyone who finds it later:
+
+The reader reports a point meaning "everything before this moment was seen", and the importer deletes events on the strength of
+it. When a long repeating event is cut at its 400-date limit AND a changed date has moved one of those occurrences, **the dates
+the reader kept are no longer a run from the beginning** — it can keep one in August while dropping several in April. **So no
+truthful "everything before here" point exists at all.** In the worst of four measured cases, twenty dates still present in the
+calendar file were deleted.
+
+**The fix: when a series was cut, the WHOLE read reports no point at all.** Not just that source — otherwise the code falls back
+to the other source's point, which is later than the dropped dates and deletes them just the same. The importer already knows to
+remove nothing when it is told nothing.
+
+**What it costs, and this is written into the code:** a calendar holding one repeating event with more than 400 dates in the
+13-month period never tidies away events that have genuinely gone. That is the safe direction — showing a cancelled event is a
+smaller harm than hiding one that is going ahead.
+
+## 4. Standing rules — WHAT CHANGED TODAY
+
+**The rules live in `.claude/CLAUDE.md` (this project) and `~/.claude/CLAUDE.md` (every project on this machine). Read both.**
+`~/.codex/AGENTS.md` is a link to the global one, so Codex reads the same file and they cannot drift.
+
+**Changed 23 September 2026:**
+
+1. **Deep analysis and deep planning now run on OPUS**, one agent at a time, in sequence. It used to be Fable with an Opus
+   fallback. The owner's reason: the newest Opus is cheaper than Fable and at least as good at this, so there is nothing left to
+   fall back from. **Older notes name Fable — that was replaced deliberately, not forgotten.** The rule is about the TIER, not
+   the name. Implementation stays on Sonnet or Haiku; Opus when the build is genuinely complex. **Verification is never done by
+   a weaker model than the build.**
+2. **"Ultrathink" and workflows** are written in as part of the same rule: think hardest at the start, and use the tool's
+   planning and orchestration features where they fit.
+3. **The documentation sweep is now a project-level standing rule too** — every `.md` file, the in-app help under
+   `web/_apps/help/`, `.claude/`, `.OpenAI/`, and the API description. **Swagger UI already exists** at
+   `web/public_html/api-docs/index.php`, works without Docker or a command line, and falls back to a local copy when there is no
+   internet. Keep it correct; do not add a second viewer.
+4. **Reorder and bundle tasks** where that is more efficient, as long as nothing is dropped and the progress table shows what
+   was bundled.
+5. **Times must respect their time zone and both clock-change nights** (set earlier today). Portal-wide sweep is **#549**.
+
+**Unchanged and still in force:** plain English everywhere; keep this handoff current as the work happens; one package in flight
+at a time (checking counts — the idle time is deliberate); after each task commit and push, update each GitHub issue
+individually, update `.claude/`, update `.OpenAI/`, update this file, show the progress table; every change reviewed by a
+DIFFERENT system until a round finds nothing; hand over between AI services when one runs out but never let a review change hands
+silently; no stacked pull requests; nothing hard-coded, because this is a product.
+
+## 5. The queue
+
+| # | Task | Issue | Status |
+|---|---|---|---|
+| 1 | #514 parts 1-5 | #514 | Done — `31bd64e` and earlier |
+| 2 | **#514 part 6** | #514 | **Built, fixed twice, UNCOMMITTED. Needs check round 3.** |
+| 3 | #514 parts 7-11 | #514 | Queued. P7 = plan lines 1612-1791, migration 206 |
+| 4 | Both self-tests into the pull-request checks | — | Queued, approved. **Needs `-d memory_limit=256M` or more** |
+| 5 | Anyone can approve their own expense claim and then be paid | **#545** | Queued — **high, live fault** |
+| 6 | The "my volunteering" page crashes for everyone | **#547** | Queued — **high, live fault** |
+| 7 | Any signed-in person can read another organisation's internal event | **#534** | Queued — high |
+| 8 | "Delete my data" silently skips four tables | **#535** | Queued — high |
+| 9 | Times and clock changes across the portal | **#549** | Queued — high, opened today |
+| 10 | #536, #539, #540, #543, #546, #548 | — | Queued — medium |
+| 11 | #541 | — | Queued — low |
+| 12 | Documentation sweep | — | Queued |
+| 13 | **Codex review of the whole branch** | — | Queued — see section 7 |
+| 14 | Pull request | — | **Blocked on the owner. Do not open one.** |
+
+## 6. The standard checks, and how to run them without fooling yourself
+
+```
+php -l on every changed PHP file
+every tools/audit-checks/check_*.py        (20 of them, --strict where accepted)
+php tools/audit-checks/check_static_calls.php
+every tools/*selftest*.php                 (this includes tools/static-calls-selftest.php)
+php tools/generate-windows-timezones.php --check
+the end-to-end migration harness, when the database has changed
+```
+
+**All THREE static-call files exist — a builder reported on 23 September that `check_static_calls.php` does not, and it was
+wrong** (its runner used a path without `audit-checks/` in it). Verified: `tools/audit-checks/check_static_calls.php` is 86,781
+bytes and passes; `tools/audit-checks/check_static_calls.py --strict` passes; `tools/static-calls-selftest.php` passes.
+
+**A mistyped path fails LOUDLY, which is the safe direction** — measured: `php` on a file that does not exist gives exit code 1
+and prints "Could not open input file". So the builder's runner did report a genuine failure; it simply read the cause wrongly.
+(I first wrote in this handoff that `php` returns 0 for a missing file. That was wrong and is corrected here rather than quietly
+removed, because an unverified claim about a check is exactly the thing this project keeps getting caught by.)
+
+**Read every exit code directly — never after a pipe, and never inside a string that also runs another command.** Both traps
+produced whole runs of meaningless all-green numbers on this branch this week.
+
+**The sanity check that catches a broken runner:** `tools/event-visibility-selftest.php` REFUSES with exit 1 on this machine
+because there is no database. **Any all-green run that includes it proves the runner is wrong.**
+
+## 7. Codex — the exact position
+
+**Codex has reviewed NOTHING since 20 September 2026.** That covers #515, #516, #517, #538, #542, #544 and all of #514 parts 1-6.
+**Every commit since then says so in its own message** — silence must never imply a review happened.
+
+**It is available.** Probed today: `codex-cli 0.154.0`, model `gpt-6-astra`. **Run it with stdin closed or it waits for typing:**
+
+```
+codex exec --skip-git-repo-check "<what to review>" < /dev/null
+```
+
+**The owner's arrangement, reconfirmed today when offered the alternative: ONE comprehensive review of the whole branch after
+the #514 build is finished.** They were told a sweep could run immediately and chose to keep the arrangement.
+
+**AN OPEN QUESTION FOR THE OWNER.** They mentioned "the 00:08 codex review". It is not clear whether that means (a) Codex usage
+resets at 00:08 and the sweep starts then, or (b) something already scheduled. **There is no scheduled job on this machine** —
+nothing would fire by itself. If the sweep is to run at 00:08, it must be started by hand, and the branch should be committed
+first so the review covers a settled state.
+
+## 8. Where everything lives
+
+- **The plan for #514:** `.claude-work/resume/p514--plan-r2.md`. Section 1 = shared definitions. P6 = lines 1388-1611.
+  P7 = 1612-1791.
+- **Briefs handed to agents:** `.claude-work/briefs/`.
+- **Every report, and the evidence to re-run it:** `.claude-work/resume/`. Part 6 alone has the build report, two check reports,
+  two fix reports and four evidence folders. **This folder is git-ignored but on disk** — it does not survive a machine wipe, so
+  anything that matters belongs in this handoff.
+- **A running log of every agent run:** `.claude-work/resume/RUNS.md`.
+
+## 9. Traps that have cost real time on this branch
+
+- **A polling loop with no deadline** spun for seven hours after its own agent deleted the file it was waiting for. Give every
+  loop a time limit as well as a condition.
+- **The test calendar server wedges for an hour** after a proof kills a download, unless given `PHP_CLI_SERVER_WORKERS=6` — and
+  those workers outlive a killed parent carrying only `server.php` on their command line, **so kill them by PORT, not by name.**
+- **An agent is stopped after 10 minutes with no output.** Run anything long detached and print a line each time you look.
+- **A test written in a month with no clock change proves nothing about clock changes.** That is how a real fault survived five
+  rounds of checking.
+- **`json_encode()` refuses a structure containing raw bytes**, writes an empty file, and two empty files compare equal — a
+  comparison that reported "74 of 75 identical" and was worthless.
+- **Never `git add -A`** while an agent is running; it sweeps up half-finished edits.
+
 ## LATEST — 23 September 2026, about 20:30. RESUME FROM HERE.
 
 **#514 P6: round 2 came back NOT CLEAN with one HIGH and one LOW. The fix round is running, and one of its fixes REOPENS PART 5,
