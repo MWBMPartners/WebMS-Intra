@@ -486,6 +486,66 @@ Before committing, check: `grep -rn millrdsdacambridge web .github tools` should
 labelled examples. Known offender to remove: the live health-check address in `.github/workflows/deploy.yml`.
 Tracked in #500.
 
+## Times always respect the time zone, including clock changes (STANDING RULE)
+
+**Set by the owner on 23 September 2026.** Every time this portal stores, works
+out, compares or shows must respect the time zone it belongs to, and must stay
+correct across the two nights a year when the clocks change.
+
+This is not a nicety. The portal is a diary: services, lessons, rotas, room
+bookings, reminders and livestreams. An hour wrong is a congregation arriving to
+a locked building, a volunteer missing a shift, or a reminder that goes out after
+the event it was reminding people about.
+
+**Where the time zone comes from.** A site has one (`tblSites.timezone`, default
+`UTC`), and an event may have its own (`tblEvents.eventTimezone`, default
+`Europe/London`). Neither may be assumed: a customer in another country, or a
+church running an online service for a different region, is the ordinary case,
+not the exotic one. **Never hard-code a zone**, for the same reason no web
+address is hard-coded — this is a product, not one customer's installation.
+
+**The three mistakes this project has actually made**, all found by checking
+rather than by anything failing:
+
+1. **Turning a wall-clock time into a moment.** A venue's booking said "every
+   Tuesday, 19:00 to 21:00". Comparing those as moments broke on the clock-change
+   weekend. Fixed in #435; recorded in the note that wall-clock times compare as
+   text. The general rule: a time written on a form is a time on a clock, not a
+   point in history, until something gives it a date AND a zone.
+2. **Using a length taken from `diff()`.** PHP applies an interval that came out
+   of `DateTimeImmutable::diff()` as a wall-clock offset, and an interval you
+   built yourself as an exact one — the same numbers, two different answers.
+   An overnight event read from a calendar file ended an hour late in October and
+   an hour early in March. Found on 23 September 2026 in the calendar reader, and
+   five rounds of checking walked past it first, because it is correctness rather
+   than a crash.
+3. **Assuming a day is 24 hours.** It is 23 or 25 on those two nights. Anything
+   that adds 86,400 seconds to get "tomorrow", or divides a span by 86,400 to
+   count days, is wrong twice a year.
+
+**What to do instead**
+
+- Store a moment in UTC; store a wall-clock time as text with the zone beside it.
+  Keep the two kinds apart, and say in the column comment which one it is.
+- Add days, weeks and months with `DateTimeImmutable::modify()` or an interval
+  you construct, so they follow the clock. Add hours, minutes and seconds as
+  seconds, so they stay exact. **RFC 5545 §3.3.6 calls these "nominal" and
+  "exact" durations, and the distinction is the whole point** — "the same time
+  next Tuesday" and "in exactly five hours" are different requests.
+- Convert to the display zone as late as possible, and only once.
+- **Test both change nights, in both directions**, and test them in a zone that
+  actually changes. A test written in December passes in London whatever the code
+  does, because London is on UTC that month — which is exactly how mistake 2
+  hid for so long.
+
+**When something cannot be right, say so rather than guessing.** A repeating
+event that spans the change hour is genuinely ambiguous between calendar
+programs. The calendar reader follows RFC 5545 §3.8.5.3 — every instance keeps
+the same exact length — **because the owner chose the standard on 23 September
+2026** when the alternative was matching whatever Google happens to show. Where a
+judgement like that is made, write it beside the code and put a check on it, so
+nobody quietly reverses it later.
+
 ## Comment everything, in every language (STANDING RULE, all projects)
 
 Detailed comments in HTML, PHP, CSS, JavaScript, XML, JSON and SQL. Specifically:

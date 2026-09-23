@@ -9,6 +9,27 @@ proceeds, so the session can be picked up at any point).
 
 ## Read this first — where we are right now
 
+## STANDING RULE ADDED 23 September 2026 — times and time zones
+
+**The owner set a new standing rule today:** every time the portal stores, works out, compares or shows must respect the time zone
+it belongs to, and must stay right across the two nights a year when the clocks change. It is written up in `.claude/CLAUDE.md`
+(section "Times always respect the time zone, including clock changes") and mirrored into `.OpenAI/MEMORY.md` and Claude's memory.
+
+**What prompted it:** the calendar reader was found ending an overnight event an hour late in October and an hour early in March.
+
+**The sweep of the rest of the portal is #549** — every place that stores, compares, adds to or displays a time, with a verdict for
+each, including the ones already right. **It is queued behind #514, not started**, because one package is in flight at a time.
+
+The three mistakes already made here, so nobody has to rediscover them:
+1. Treating a time on a clock as a moment in history — the venue booking fault, #435.
+2. Using a length taken from `DateTimeImmutable::diff()`. **PHP applies a diff-produced interval as a WALL-CLOCK offset and a
+   hand-built one as an EXACT offset — the same numbers, two different answers.** This is the one that hid from five rounds of
+   checking.
+3. Assuming a day is 24 hours. It is 23 or 25 on those nights.
+
+**And the reason any of them survived so long:** a test written in December passes in London whatever the code does, because London
+is on UTC that month. **Both change nights, both directions, in a zone that actually changes** — otherwise the test proves nothing.
+
 ## LATEST — 23 September 2026, about 09:30. RESUME FROM HERE.
 
 **#514 P5: round 6 came back NOT CLEAN with two LOW findings; the sixth fix round is part-done and a second builder is finishing

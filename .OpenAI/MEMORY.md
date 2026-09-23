@@ -458,3 +458,30 @@ are tied by composite keys to the person's membership of that organisation,
 so a cross-organisation row cannot be stored. Known open trap: #542, the
 Expense Approver role is tested before the department, so a required
 approver without the role can block a claim for ever.
+
+**Times must always respect their time zone, including the two nights a year
+when the clocks change (owner's standing rule, 23 September 2026).** The portal
+is a diary — services, lessons, rotas, room bookings, reminders, livestreams — so
+an hour wrong is a congregation at a locked building or a reminder sent after the
+event. A site has a zone (`tblSites.timezone`, default `UTC`) and an event may
+have its own (`tblEvents.eventTimezone`), so neither may be assumed and no zone
+may be hard-coded. Three mistakes this codebase has actually made, all found by
+checking rather than by anything failing. First, treating a wall-clock time as a
+moment: a venue booking of "every Tuesday 19:00 to 21:00" broke on the
+clock-change weekend (#435). Second, using a length taken from
+`DateTimeImmutable::diff()`: PHP applies a diff-produced interval as a
+wall-clock offset and a hand-built one as an exact offset — the same numbers,
+two different answers — which made an overnight calendar event end 05:00 instead
+of 04:00, and five rounds of independent checking walked past it because it is
+correctness rather than a crash. Third, assuming a day is 24 hours; it is 23 or
+25 on those nights. Add days, weeks and months with `modify()` or a constructed
+interval so they follow the clock; add hours, minutes and seconds as seconds so
+they stay exact — RFC 5545 §3.3.6 calls these nominal and exact durations.
+**Test both change nights in both directions, in a zone that actually changes**:
+a test written in December passes in London whatever the code does, because
+London is on UTC then, and that is exactly how the second fault hid. Where the
+answer is genuinely ambiguous — a repeating event spanning the change hour — the
+calendar reader follows RFC 5545 §3.8.5.3 (every instance keeps the same exact
+length) by the owner's decision of 23 September 2026, rather than matching what
+Google shows; the choice is written beside the code and guarded by a check so
+nobody reverses it quietly.
