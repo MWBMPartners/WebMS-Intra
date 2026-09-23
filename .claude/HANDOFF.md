@@ -9,6 +9,53 @@ proceeds, so the session can be picked up at any point).
 
 ## Read this first — where we are right now
 
+## LATEST — 23 September 2026, about 19:40. RESUME FROM HERE.
+
+**#514 P6: all four gaps are fixed; the ROUND-2 CHECK IS RUNNING.** Still uncommitted, the same eight entries. **Only TWO files
+changed in the fix round** — `FeedImporter.php` (`09e70b45…`) and `cron/import-feeds.php` (`8ea72515…`); the other six are
+byte-identical to what the checker measured. **Verified by me:** those two and no others, `php -l` rc=0 on all six PHP files,
+nothing staged, no stash, no leftover process, container or scratch folder. Fix report
+`.claude-work/resume/p514-p6--fixes.md` (518 lines); new checks and outputs in `p514-p6-built-20260923-fixes/`.
+
+**Numbers:** the runtime proof set went 134 → **165 passed, 0 failed, 1 skipped** (31 new checks). The checker's own attack suite,
+re-run unchanged, is 174 passed / 2 failed — and both "failures" are assertions it had written to DOCUMENT the old behaviour, which
+the fixes deliberately changed. All 20 audit checks rc=0, 13 self-tests rc=0 with the visibility one refusing as designed, harness
+rc=0 `replayed=203 failed=0`.
+
+**Every fix is proved in BOTH directions** — a check that fails if the fault returns, and a check that fails if the fix has
+switched off something that should still happen. That second half is what was missing from several earlier rounds on P5.
+
+**FIX A: it chose `<` over changing the reader, and its second reason is the one to remember.** The end point has TWO sources. The
+per-calendar slice does know the first date it dropped — but **a single repeating event that ran past its own limit reports only
+the last date it KEPT**, and never records the first one it did not. So changing the reader would have fixed only half the fault.
+**The cost, stated plainly:** an event genuinely taken out of the calendar whose start is exactly the cut-off now survives until a
+complete read — possibly never, on a permanently-over-the-limit calendar. Safe direction (showing a cancelled event beats hiding
+one that is going ahead), and no longer silent, because FIX D makes the message say up to which moment removal was checked.
+
+**FIX B was two tokens, not one, and the builder said so loudly.** It also wrapped the job's own logging call in a `try`, because
+that catch exists for the database giving way — and the logger writes to the same database, so an unguarded write would abandon
+the remaining calendars all over again, which is the very fault being fixed.
+
+**FIX C rejected `INSERT IGNORE`** — it would forgive every error on that statement, not just a duplicate — and proved the point
+with a shrunken column (MySQL 1406 still fails loudly). It then audited every INSERT in P6's files against every UNIQUE key on
+text and published the table. `tblExternalCategoryMap` has the same shape; **nothing in P6 writes it, and P8 will be the first
+thing that does — it needs the same care.**
+
+**FIX D's wording changed once mid-work because the first version was subtly untrue**: "nothing later was removed" is false, since
+a leftover row with no identity is removed whatever its date.
+
+**TWO RIG FAULTS WORTH KEEPING** (both cost an hour): the single-process test server wedges for 62 minutes after a proof
+deliberately kills a download unless given `PHP_CLI_SERVER_WORKERS=6`; and the original proof set needs a fixture its own
+`mkfixtures.php` never creates (`rdate-first100.ics`) — **without it that set's most important control cannot run at all.**
+
+**A DECISION FOR THE OWNER, being put now:** P6's proofs live ONLY in a scratch script in the git-ignored durable folder, unlike
+P5 which ships `tools/ics-reader-selftest.php`. P6's need a database and a web server, so they cannot be a plain self-test — but
+`tools/event-visibility-selftest.php` is precedent for one that REFUSES without a throwaway database. The round-2 checker is asked
+for its view alongside.
+
+**AFTER THE CHECK:** fix anything found, re-check until clean, then my own standard checks, ONE commit for P6 saying plainly Codex
+has NOT reviewed it, push, comment on #514, then P7.
+
 ## LATEST — 23 September 2026, about 18:00. RESUME FROM HERE.
 
 **#514 P6: the first independent check came back NOT CLEAN with four gaps, one HIGH. The fix round is running.** Still
