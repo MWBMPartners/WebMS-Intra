@@ -634,6 +634,29 @@ three related fixes, one review round over two small changes — **as long as
 nothing is dropped and the progress table shows what was bundled**. Efficiency
 that hides work is not efficiency.
 
+## Set a watchdog whenever you wait for something to finish (STANDING RULE, this repo AND every repo on the device)
+
+**Set by the owner on 24 September 2026**, for this repository specifically AND for every project on the owner's machine
+(`~/.claude/CLAUDE.md`, "Set a watchdog whenever you wait for something to finish"). The owner asked for both so that it works
+here on ANY machine — **this repository commits its own copy of the script: `tools/watchdog.sh`** — and on every other project on
+the owner's Mac through `~/.claude/bin/watchdog.sh`. The two copies' logic is kept identical.
+
+**Why.** A session only acts when something wakes it. On 23 September 2026 a background agent finished, its "finished" notice was
+lost, and the queue sat idle until the owner asked "are we stuck?". The owner's instruction since: "continue autonomously, don't
+wait for me to nudge or give the ok."
+
+**The rule.** Whenever you start something that finishes later without you — a background agent, a long test run, the migration
+harness, a review, a deploy — start a watchdog beside it as its own background command, usually:
+
+```bash
+tools/watchdog.sh quiet .claude-work/resume/<that agent's report>.md 900 14400
+```
+
+Other modes: `exists <file>`, `contains <file> <text>`, `pid <pid>`. Every mode has a hard deadline (four hours by default).
+When it fires, **look** — it cannot tell "finished" from "stalled" — then act, or start it again if the work is still going.
+**When a step finishes, start the next in the same turn.** Proved on macOS and on Linux; the proofs and the reasons for each line
+are in the script's own header.
+
 ## Throwaway databases and containers are removed, data included (STANDING RULE)
 
 **Set by the owner on 24 September 2026**, and written into the machine-wide rules
@@ -1398,8 +1421,8 @@ is the one place that lists them together.
   4. update the OpenAI/Codex memory and context in `.OpenAI/`;
   5. update the handoff document.
 - **Never wait for a nudge (owner, 24 September 2026):** "continue autonomously, don't wait for me to nudge or give the ok."
-  When a step finishes, start the next in the same turn. Give every background agent a report watchdog (see the handoff,
-  section 9), so a lost "finished" notice can never leave the queue idle.
+  When a step finishes, start the next in the same turn. Start `tools/watchdog.sh` beside anything you wait on (standing rule
+  above), so a lost "finished" notice can never leave the queue idle.
 - **Autonomy:** work through the whole queue without stopping. Stop only for a decision
   or approval that genuinely needs the owner, say simply what is needed and why, and
   raise such questions at the START, not one by one as they come up. Carry on with

@@ -559,3 +559,17 @@ blind to the very deletion fault it guards. Every date is now worked out from to
 a first check refuses the run if any date falls outside the kept window, and it was
 run as if it were ten different dates. Ask of every check: can it pass on broken
 code, or fail on correct code, on ANY date?
+
+**Set a watchdog whenever you wait for something to finish (owner's standing rule,
+24 September 2026 — this repository AND every project on the owner's machine).**
+A session only acts when something wakes it; once a background agent's
+"finished" notice was lost and the work sat idle until the owner asked "are we
+stuck?". So beside anything that finishes later — an agent, a long test run, a
+review, a deploy — start `tools/watchdog.sh` as a background command (usually
+`tools/watchdog.sh quiet <report file> 900 14400`). It is committed here so it
+works on any machine; the owner's Mac also has `~/.claude/bin/watchdog.sh` for
+every other project, with identical logic. Modes: quiet, exists, contains, pid;
+every one has a hard deadline. It cannot tell "finished" from "stalled", so when
+it fires, look. And when a step finishes, start the next without waiting to be
+asked. In a tool with no background commands, never end a turn on "I'll wait"
+with nothing that will bring you back.
