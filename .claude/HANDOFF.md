@@ -99,7 +99,15 @@ nothing uncommitted. Nothing is running, and nothing is left in Docker (`g2ml-my
 
 ## 2. What to do next, in order
 
-1. **FIX ROUND 1 IS DONE; CHECK ROUND 2 IS RUNNING** (Opus; "ROUND 2" section of `.claude-work/briefs/514-p7-check.md`;
+1. **CHECK ROUND 2 = NOT CLEAN (tests only, no leak); FIX ROUND 2 IS RUNNING** (Sonnet; brief
+   `.claude-work/briefs/514-p7-fix2.md`; report `p514-p7--fixes2.md`; watchdog on it). **Then check round 3 (Opus).** Round 2
+   (`p514-p7--verify-r2.md`): the duplicate change held against every route, and the preview matched the real save in 576
+   cases. Findings: MEDIUM — test e cannot see half of the line it guards, because test rule and choice numbers never collide,
+   while on a real installation they will; LOW — duplicate tests cover only a LEVEL widening; the preview change has no test; a
+   no-identity row's exclusion from the sibling decision has no test. Also: `externalDuplicate`'s comment differs between a
+   fresh install and an upgrade — being brought into line in migration 206 (205 left alone). **`check_schema_seed_parity.py` can
+   PASS while a seed is missing** (`--` inside a quoted comment) — added to **#543**.
+   *(History:)* FIX ROUND 1 WAS DONE; CHECK ROUND 2 RAN (Opus; "ROUND 2" section of `.claude-work/briefs/514-p7-check.md`;
    report `p514-p7--verify-r2.md`; watchdog on it). Fix round 1 (`p514-p7--fixes1.md`): ten new proofs, all CAUGHT by the
    checker's own harness; duplicates now honour narrowing choices/rules and ignore only widening ones (plus `previewRule()` kept in
    step — a flagged deviation); a row with no identity no longer crashes. Resolver test 168 → 198. Verified by me:
