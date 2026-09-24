@@ -99,7 +99,16 @@ nothing uncommitted. Nothing is running, and nothing is left in Docker (`g2ml-my
 
 ## 2. What to do next, in order
 
-1. **PART 7 IS BUILT; INDEPENDENT CHECK ROUND 1 IS RUNNING** (Opus; brief `.claude-work/briefs/514-p7-check.md`; report
+1. **CHECK ROUND 1 = NOT CLEAN; FIX ROUND 1 IS RUNNING** (Sonnet; brief `.claude-work/briefs/514-p7-fix1.md`; report
+   `p514-p7--fixes1.md`; watchdog on it). **Then check round 2 (Opus).** Round 1 (`p514-p7--verify-r1.md`, evidence
+   `p514-p7--verify-r1-evidence/`) found **no leak in the built code** and passed the API-key change through the real portal (a
+   key got exactly the signed-out visitor's set minus opted-out events). Findings: (1) MEDIUM — nine privacy conditions in
+   `FeedResolver.php` have no committed proof: each broken, all tests still pass, and each broken version publishes something
+   unapproved; (2) MEDIUM — a duplicate date ignored NARROWING choices and rules, so a hidden date went public. **Decided by me,
+   not asked:** duplicate handling was a planner's detail, not an owner answer (checked), so by the owner's principle that
+   narrowing must win, a duplicate now honours a narrowing choice or rule and ignores only a widening one; (3) LOW — a row with
+   no identity crashed the resolve; (4) LOW — memory grows on an old calendar: **#551** opened.
+   *(History:)* PART 7 WAS BUILT; INDEPENDENT CHECK ROUND 1 RAN (Opus; brief `.claude-work/briefs/514-p7-check.md`; report
    `.claude-work/resume/p514-p7--verify-r1.md`; watchdog `tools/watchdog.sh quiet` on that report). **Build result:** 15
    uncommitted entries (migration 206 new, `tools/feed-resolver-selftest.php` new); every proof E1-E30 passed with its
    keep-working control; 50 planted faults all caught; resolver test 168 passed on the real clock and six simulated dates;
