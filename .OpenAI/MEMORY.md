@@ -526,8 +526,11 @@ signed-out visitor would, plus a new per-calendar "don't show via API" box that
 works like "show on our website" in reverse — unticked by default, so keys
 receive a calendar's events unless someone ticks it. This replaces the owner's
 17 September answer, which parts 1 and 2 of #514 were built to, so committed
-code changes; it is being built into parts 7 and 8. It widens what existing
-installations send to websites on upgrade, so the upgrade notes must say so.
+code changes; it is being built into parts 7 and 8. (Correction, same day: it does NOT widen what
+customers receive. Released versions already send keys every imported event in
+full detail; the stricter behaviour exists only on the unreleased branch. On
+upgrade, customers keep their calendars' events through keys, and private-marked
+events stop.)
 *Codex review moved:* one review of the whole branch at the END of the whole
 queue, moving to the very end again if tasks are added. Run it with
 `-c model="gpt-6-astra"` and stdin closed, or it refuses with a message naming

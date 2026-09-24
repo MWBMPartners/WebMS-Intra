@@ -17,8 +17,13 @@ block that contradicts them is out of date.**
 **1. API keys — CHANGED, and it reverses committed code.** An API key now sees an imported event **exactly as a signed-out
 visitor would**, plus a new per-calendar **"don't show via API"** box — the "show on our website" box in reverse. Unticked (the
 default) = keys receive the calendar's events. **This replaces the owner's 17 September answer**, which parts 1 and 2 were built
-to; the owner confirmed today's answer stands after being shown the two side by side. **It widens what existing installations send
-to websites on upgrade** — today keys receive essentially no imported events — so the upgrade notes and in-app help must say so.
+to; the owner confirmed today's answer stands after being shown the two side by side. **CORRECTED the same afternoon:** this note first said it
+WIDENS what existing installations send on upgrade. **That was wrong** — checked against `origin/alpha`, where an API key's event
+list (`events/api/list.php`) filters only by organisation, not-deleted and published, and `EventVisibility` does not exist at all.
+**Released versions already send keys EVERY imported event in full detail.** The "keys receive almost nothing" behaviour exists only
+on this unreleased branch. So on upgrade customers keep receiving their calendars' events through keys, and **private-marked events
+stop** — a narrowing. The owner was told the wrong direction and told the correction; the decision stands. The upgrade notes must
+say what actually changes.
 **Built into P7 and P8**, beside the website box it mirrors. Full detail at the top of `.claude-work/resume/p514--plan-r2.md`.
 
 **2. Five design questions were re-asked by mistake and answered exactly as on 17 September** — private events hidden until
@@ -36,6 +41,9 @@ owner chose it knowing Codex's allowance is small.
 
 **4. Both calendar self-tests go into the pull-request checks, with a throwaway MySQL database.** GitHub starts the database
 beside the check and removes it when the job ends, so nothing accumulates anywhere. Still to build — it is task 4 in the queue.
+
+**4b. One package at a time — REAFFIRMED on 24 September.** Offered a separate git worktree so the live faults (#545, #547) could
+be fixed in parallel without touching #514's files, the owner chose to keep strictly one at a time. **Do not offer it again.**
 
 **5. Throwaway containers are removed WITH their data — now a standing rule, machine-wide and in this project.** Checking after
 the owner asked found **415 left-behind database volumes taking 101 GB**, plus 8 stopped test containers from this project going
