@@ -47,7 +47,8 @@
  *
  * WHAT THIS PAGE PRINTS, AND WHAT IT MUST NEVER PRINT
  * ---------------------------------------------------
- * One line per calendar, naming it by NUMBER only, then a summary line.
+ * One line for the recheck pass (counts only), then one line per calendar,
+ * naming it by NUMBER only, then a summary line.
  * Never a calendar's name and never its address. Two reasons. Whatever a
  * scheduled task prints usually ends up in an e-mail to whoever set it up,
  * and in the hosting company's own logs. And some of these addresses are
@@ -117,16 +118,35 @@ if ($result !== false) {
     $result->free();
 }
 
-// NOTE FOR PART P7 (#514 plan, section 1.8, "The job's recheck pass"). Once
-// per-date choices and rules exist, this job must ALSO re-work-out who may
-// see the events of any calendar holding a live row whose `importRecheckAt`
-// has passed — that is what lets a choice with an end date start applying,
-// and stop applying, on the right day. It is deliberately NOT built here:
-// nothing in part P6 ever writes a moment into `importRecheckAt`, so the
-// pass could not be tested, and a piece of code that has never once run is
-// not cover — it only looks like cover. Until then the failure is still
-// closed rather than open, because the visibility rule itself refuses an
-// event whose stored answer has run out (part P1).
+// -----------------------------------------------------------------------------
+// ⏳ The recheck pass (#514 part P7) — BEFORE any refresh
+// -----------------------------------------------------------------------------
+// A per-date choice or a rule can apply only between two dates. The first
+// start or end still ahead is written onto each event it could affect
+// (`importRecheckAt`); past that moment only administrators see the event
+// until its answer is worked out again. This pass works those answers out
+// again, so a window opens and closes on the right day.
+//
+// WHY IT RUNS FIRST: a calendar whose download then fails never reaches the
+// part that works answers out (a failed refresh changes nothing, on purpose),
+// so a window that should open or close today would otherwise wait for the
+// next SUCCESSFUL download — hours, or days for a calendar whose server is
+// down.
+//
+// WHY AT MOST HALF THE BUDGET: on a night when many windows end at midnight
+// this pass could otherwise use up the time the refreshes need. Anything it
+// does not reach stays administrators-only (closed, never open) and is picked
+// up by the next run, a few minutes later.
+//
+// ONE line of output, and deliberately neither ": ok" nor ": failed" in it —
+// the per-calendar lines below use those words, and whatever counts them
+// (the part-6 self-test does) must not count this line as a calendar. It
+// names no calendar, for the reason in this file's header.
+$recheck = FeedImporter::recheckDue($mysqli, $jobStart + FeedImporter::JOB_BUDGET_SECONDS / 2);
+echo 'recheck: due=' . $recheck['due']
+    . ' reworked=' . $recheck['reworked']
+    . ' problems=' . $recheck['problems']
+    . ' notStarted=' . $recheck['notStarted'] . "\n";
 
 // -----------------------------------------------------------------------------
 // 🔁 Refresh each one, while there is time

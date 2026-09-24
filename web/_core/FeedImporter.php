@@ -566,7 +566,13 @@ final class FeedImporter
             'rowsUpdated'      => $counts['updated'],
             'rowsRemoved'      => $rowsRemoved,
             'rowsSkipped'      => $counts['skipped'],
-            'awaitingApproval' => $resolved['newPending'],
+            // How many dates of this calendar are waiting for an administrator
+            // AFTER this run worked the answers out — every one, not only the
+            // new ones (#514 plan A6). A run that changed nothing, or failed,
+            // works nothing out and writes 0 (`recordUnchanged()`,
+            // `recordFailure()`), so a page showing "waiting" must count the
+            // approval rows themselves rather than read the last run.
+            'awaitingApproval' => $resolved['pendingTotal'],
             'triggeredBy'      => $trigger,
             'triggeredByID'    => $byUserId,
         ]);
@@ -745,6 +751,147 @@ final class FeedImporter
     }
 
     // =========================================================================
+    // ⏰ recheckDue() — the scheduled job's recheck pass (#514 part P7)
+    // =========================================================================
+
+    /**
+     * Work out again who may see the events of every switched-on calendar
+     * that holds a live event whose stored answer has RUN OUT
+     * (`importRecheckAt` has passed).
+     *
+     * WHY THIS EXISTS. A choice or a rule can apply between two dates. Its
+     * start and end are written onto each event it could affect, as
+     * `importRecheckAt`; past that moment the visibility rule stops trusting
+     * the stored answer and only administrators see the event (closed, never
+     * open). This pass is what works the answer out again, so a window opens
+     * and closes on the right day — even for a calendar whose download then
+     * fails, because a failed refresh never reaches the resolver.
+     *
+     * HOW. One statement finds the calendars (`recheckQueue()`, the oldest
+     * expired answer first). Each is then worked out in its OWN transaction,
+     * holding the calendar's own lock, exactly as a refresh does, with the
+     * database's clock (`FeedResolver::databaseNowUtc()`). A calendar that
+     * has gone, or was switched off meanwhile, is skipped: its events are
+     * hidden from everyone anyway, and resuming it makes it due for a
+     * refresh straight away.
+     *
+     * NEVER throws — the same promise as `refresh()`, for the same reason: a
+     * scheduled job that stopped on the first awkward calendar would silently
+     * stop the others. A calendar that fails is rolled back, logged as the
+     * RECHECK's own problem (`FeedRecheckFailed`, "Re-checking who may see
+     * calendar #N"), counted, and the pass carries on.
+     *
+     * WHAT IT CANNOT DO: it stops STARTING calendars at `$deadline`. Any left
+     * are counted as not started; their answers stay expired, so their events
+     * stay administrators-only until the next run a few minutes later. That
+     * is the closed direction, and it is why the job gives this pass at most
+     * half of its time: a night when many windows end at midnight must not
+     * use up the time the refreshes need.
+     *
+     * @param \mysqli $db       The connection.
+     * @param float   $deadline A `microtime(true)` moment after which no
+     *                          further calendar is started.
+     *
+     * @return array{due:int, reworked:int, problems:int, notStarted:int, newPending:int}
+     */
+    public static function recheckDue(\mysqli $db, float $deadline): array
+    {
+        $counts = ['due' => 0, 'reworked' => 0, 'problems' => 0, 'notStarted' => 0, 'newPending' => 0];
+
+        try {
+            $queue = self::recheckQueue($db);
+        } catch (\Throwable $problem) {
+            // Not even the list could be read. Nothing was changed, and the
+            // expired answers stay expired, which is the closed direction.
+            $counts['problems']++;
+            try {
+                Logger::errorPlatformForSite(
+                    null,
+                    'FeedImport',
+                    'Error',
+                    'FeedRecheckFailed',
+                    'Re-checking who may see imported events could not start: ' . get_class($problem)
+                    . ' at ' . basename($problem->getFile()) . ':' . $problem->getLine() . '.',
+                    $problem->getFile() . ':' . $problem->getLine()
+                );
+            } catch (\Throwable $ignored) {
+                // Recording the problem is not worth causing another one.
+            }
+
+            return $counts;
+        }
+
+        $counts['due'] = count($queue);
+        foreach ($queue as $position => $item) {
+            if (microtime(true) >= $deadline) {
+                $counts['notStarted'] = count($queue) - $position;
+                break;
+            }
+            $feedId = (int) $item['feedID'];
+            $siteId = (int) $item['siteID'];
+            try {
+                $db->begin_transaction();
+                $locked = self::lockFeed($db, $feedId);
+                if ($locked === null || (int) $locked['isActive'] !== 1) {
+                    $db->rollback();
+                    continue;
+                }
+                $resolved = FeedResolver::resolveFeed($db, $feedId, FeedResolver::databaseNowUtc($db));
+                $db->commit();
+                $counts['reworked']++;
+                $counts['newPending'] += (int) $resolved['newPending'];
+            } catch (\Throwable $problem) {
+                self::rollBackQuietly($db);
+                $counts['problems']++;
+                self::logProblem($siteId, $feedId, $problem, 'FeedRecheckFailed', 'Re-checking who may see');
+            }
+        }
+
+        return $counts;
+    }
+
+    /**
+     * The calendars whose stored answers have run out, the one whose answer
+     * ran out FIRST at the top.
+     *
+     * Oldest expired first, not by calendar number (challenge finding 13):
+     * with the half-budget cap, numbering order could hold back the same
+     * high-numbered calendars run after run. The calendar must still exist,
+     * belong to the event's own organisation and be switched on — the same
+     * three things the visibility rule tests — so the pass never works on a
+     * row the rule would refuse anyway. `idx_event_import_recheck` (migration
+     * 204) serves the search. A statement of its own so the self-test can
+     * check its order.
+     *
+     * @return list<array{feedID:int, siteID:int, oldestExpired:string}>
+     */
+    private static function recheckQueue(\mysqli $db): array
+    {
+        $queue  = [];
+        $result = $db->query(
+            'SELECT e.externalFeedID AS feedID, f.siteID, MIN(e.importRecheckAt) AS oldestExpired '
+            . 'FROM tblEvents e '
+            . 'JOIN tblExternalFeeds f ON f.feedID = e.externalFeedID AND f.siteID = e.siteID AND f.isActive = 1 '
+            . 'WHERE e.isDeleted = 0 AND e.importRecheckAt IS NOT NULL AND e.importRecheckAt <= UTC_TIMESTAMP() '
+            . 'GROUP BY e.externalFeedID, f.siteID '
+            . 'ORDER BY oldestExpired, e.externalFeedID'
+        );
+        if ($result === false || $result === true) {
+            throw new \RuntimeException('FeedImporter: the recheck list could not be read.');
+        }
+        while (($row = $result->fetch_assoc()) !== null) {
+            $queue[] = [
+                'feedID'        => (int) $row['feedID'],
+                'siteID'        => (int) $row['siteID'],
+                'oldestExpired' => (string) $row['oldestExpired'],
+            ];
+        }
+        $result->free();
+
+        return $queue;
+    }
+
+    // =========================================================================
     // 🧱 Claiming, timing and settings
     // =========================================================================
 
@@ -886,11 +1033,19 @@ final class FeedImporter
     /**
      * The zone this calendar's times are stored in, and read in.
      *
-     * The calendar's own zone when an administrator has set one — a partner
-     * diary kept in another country is easier to read in that country's own
-     * time — and otherwise the organisation's. A name the system does not
-     * recognise falls back to UTC rather than throwing: a mistyped zone must
-     * not stop a calendar importing at all.
+     *   1. The calendar's own zone, when an administrator has set one AND the
+     *      system recognises it — a partner diary kept in another country is
+     *      easier to read in that country's own time.
+     *   2. UTC, when one is set but NOT recognised. A mistyped zone must not
+     *      stop a calendar importing at all — and it must not quietly move
+     *      the calendar's events into the organisation's zone either, which
+     *      would shift where every one of them lands; so the plain,
+     *      predictable answer, exactly as before part P7.
+     *   3. The organisation's own zone when the calendar has none, through
+     *      `FeedResolver::organisationZone()` (#514 part P7) — the SAME
+     *      helper date windows are counted in, so the zone events are stored
+     *      in and the zone windows are counted in can never be two different
+     *      ideas.
      *
      * @param array<string,mixed> $feed
      */
@@ -900,10 +1055,7 @@ final class FeedImporter
 
         $named = trim((string) ($feed['timezone'] ?? ''));
         if ($named === '') {
-            $named = trim((string) (App::settingForSite('site.timezone', (int) $feed['siteID']) ?? ''));
-        }
-        if ($named === '') {
-            return new DateTimeZone('UTC');
+            return FeedResolver::organisationZone((int) $feed['siteID']);
         }
         try {
             return new DateTimeZone($named);
@@ -1015,9 +1167,15 @@ final class FeedImporter
             . 'eventSlug, eventName, description, startDateTime, endDateTime, timezone, eventTimezone, '
             . 'isAllDay, locationName, externalUrl, status, externalPrivate, externalDuplicate, '
             . 'externalLastSeenAt, externalUid, seriesID, isPublic, isDeleted, importLevel, '
-            . 'importDetail, registrationEnabled) '
-            . "VALUES (?, ?, UNHEX(?), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 'hidden', 'basic', 0)"
+            . 'importDetail, importApiOptOut, registrationEnabled) '
+            . "VALUES (?, ?, UNHEX(?), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 'hidden', 'basic', 1, 0)"
         );
+        // 🔒 A brand-new row is written NARROW — hidden, title-only, and not
+        //    for API keys (`importApiOptOut = 1`, #514 part P7) — and
+        //    `FeedResolver` writes the real answer before this transaction
+        //    commits. Named explicitly rather than left to the column
+        //    defaults (which are the same), so the narrow start does not
+        //    depend on a default somebody might one day change.
         $clearTags = $db->prepare('DELETE FROM tblExternalEventTags WHERE eventID = ?');
         $addTag    = $db->prepare('INSERT INTO tblExternalEventTags (eventID, tag) VALUES (?, ?)');
 
@@ -2000,16 +2158,26 @@ final class FeedImporter
      * `errorPlatform('PHP', …, $file . ':' . $line)` call). The title carries
      * just the file name; the detail carries the folder as well, which is
      * what tells two files of the same name apart.
+     *
+     * `$code` and `$doing` (added by #514 part P7) let the recheck pass log
+     * as itself — `FeedRecheckFailed`, "Re-checking who may see calendar #N"
+     * — instead of reporting a recheck as a failed refresh. Their defaults
+     * are exactly what every other caller has always written.
      */
-    private static function logProblem(int $siteId, int $feedId, \Throwable $problem): void
-    {
+    private static function logProblem(
+        int $siteId,
+        int $feedId,
+        \Throwable $problem,
+        string $code = 'FeedRefreshFailed',
+        string $doing = 'Refreshing'
+    ): void {
         try {
             Logger::errorPlatformForSite(
                 $siteId,
                 'FeedImport',
                 'Error',
-                'FeedRefreshFailed',
-                'Refreshing calendar #' . $feedId . ' ended with ' . get_class($problem)
+                $code,
+                $doing . ' calendar #' . $feedId . ' ended with ' . get_class($problem)
                 . ' at ' . basename($problem->getFile()) . ':' . $problem->getLine() . '.',
                 $problem->getFile() . ':' . $problem->getLine()
             );

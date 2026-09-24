@@ -40,9 +40,11 @@
  * faults was planted, one at a time, in a scratch copy of
  * web/_core/EventVisibility.php, and each made this test fail (exit 1).
  * That proves these nine faults, as planted, are caught. It cannot promise
- * that every other way of getting the rule wrong is caught too. E44 and
- * E45 cover API keys (owner answer 3: full detail only when the calendar
- * itself is Public).
+ * that every other way of getting the rule wrong is caught too. E44-E48
+ * and calendar F5 cover API keys: exactly what a signed-out visitor sees,
+ * minus anything opted out of the API (owner, 24 September 2026; until then
+ * a key needed the website box and got full detail only on a Public
+ * calendar — owner answer 3 of 17 September, replaced).
  *
  * SAFETY
  * ------
@@ -215,6 +217,7 @@ const F3 = 900203; // A, active, groups, list {G1, G2, V15, V16}
 const F4 = 900204; // A, switched off, public
 const FB = 900205; // B, active, members
 const FB2 = 900206; // B, active, public (extra: only E31, an event of A, points at it)
+const F5 = 900207;  // A, active, public, "Don't show via API" ticked (#514 part P7: only E48 points at it)
 
 const G1 = 900401; // small group of A, active
 const G2 = 900402; // small group of A, switched off
@@ -234,6 +237,7 @@ $events = [
     'E30' => 900330, 'E31' => 900331, 'E32' => 900332, 'E33' => 900333, 'E35' => 900335,
     'E36' => 900336, 'E37' => 900337, 'E38' => 900338, 'E40' => 900340, 'E41' => 900341,
     'E42' => 900342, 'E43' => 900343, 'E44' => 900344, 'E45' => 900345,
+    'E46' => 900346, 'E47' => 900347, 'E48' => 900348,
 ];
 const PLAN_LAST_EVENT = 900329;
 $eventName = array_flip($events);
@@ -349,15 +353,17 @@ try {
         ]
     );
 
-    // Calendars: [feedID, organisation, isActive, audienceLevel]
-    $calendars = [[F1, ORG_A, 1, 'public'], [F2, ORG_A, 1, 'members'], [F3, ORG_A, 1, 'groups'], [F4, ORG_A, 0, 'public'],
-        [FB, ORG_B, 1, 'members'], [FB2, ORG_B, 1, 'public']];
-    foreach ($calendars as [$feed, $org, $active, $level]) {
+    // Calendars: [feedID, organisation, isActive, audienceLevel, apiOptOut]
+    // `apiOptOut` is named on every row (#514 part P7): 0, "send to API keys",
+    // everywhere except F5, whose box is ticked.
+    $calendars = [[F1, ORG_A, 1, 'public', 0], [F2, ORG_A, 1, 'members', 0], [F3, ORG_A, 1, 'groups', 0], [F4, ORG_A, 0, 'public', 0],
+        [FB, ORG_B, 1, 'members', 0], [FB2, ORG_B, 1, 'public', 0], [F5, ORG_A, 1, 'public', 1]];
+    foreach ($calendars as [$feed, $org, $active, $level, $feedApi]) {
         run(
             $db,
-            'INSERT INTO tblExternalFeeds (feedID, siteID, name, url, isActive, audienceLevel) VALUES (?, ?, ?, ?, ?, ?)',
-            'iissis',
-            [$feed, $org, 'Selftest calendar ' . $feed, 'https://example.invalid/' . $feed . '.ics', $active, $level]
+            'INSERT INTO tblExternalFeeds (feedID, siteID, name, url, isActive, audienceLevel, apiOptOut) VALUES (?, ?, ?, ?, ?, ?, ?)',
+            'iissisi',
+            [$feed, $org, 'Selftest calendar ' . $feed, 'https://example.invalid/' . $feed . '.ics', $active, $level, $feedApi]
         );
     }
 
@@ -393,7 +399,7 @@ try {
     $eventRows = [
         ['E1',  ORG_A, null,   1, 'hidden',  'basic', 0, null,     null,       null,       0, 0],
         ['E2',  ORG_A, null,   0, 'hidden',  'basic', 0, null,     null,       null,       0, 0],
-        ['E3',  ORG_A, F1,     1, 'public',  'full',  0, 'feed',   F1,         'calendar', 0, 0],
+        ['E3',  ORG_A, F1,     0, 'public',  'full',  0, 'feed',   F1,         'calendar', 0, 0],  // isPublic 0: what the importer writes (B5 vii)
         ['E4',  ORG_A, F2,     1, 'members', 'full',  0, 'feed',   F2,         'calendar', 0, 0],
         ['E5',  ORG_A, F3,     1, 'groups',  'full',  0, 'feed',   F3,         'calendar', 0, 0],
         ['E6',  ORG_A, F2,     1, 'public',  'basic', 0, 'rule',   900600,     'rule',     0, 0],
@@ -421,22 +427,31 @@ try {
         ['E43', ORG_B, FB,     1, 'public',  'basic', 0, 'rule',   900613,     'rule',     0, 0],  // B, public at basic, members calendar
         ['E44', ORG_A, F2,     1, 'public',  'full',  1, 'choice', 900504,     'date',     0, 0],  // key corner: Members calendar, public + website, full
         ['E45', ORG_A, F1,     1, 'public',  'full',  1, 'choice', 900505,     'date',     0, 0],  // E44's twin on a Public calendar
+        // #514 part P7: the "Don't show via API" answer (see $apiOptOut below)
+        ['E46', ORG_A, F1,     0, 'public',  'full',  0, 'feed',   F1,         'calendar', 0, 0],  // public, full, opted out of the API
+        ['E47', ORG_A, F1,     0, 'public',  'full',  1, 'feed',   F1,         'calendar', 0, 0],  // public + website ticked, opted out of the API
+        ['E48', ORG_A, F5,     0, 'public',  'full',  0, 'feed',   F5,         'calendar', 0, 0],  // stored answer 0, but its calendar's box is ticked
     ];
+    // `importApiOptOut` is named on EVERY fixture event, 0 unless listed here.
+    // The column defaults to 1 (the resolver's narrow default, migration 206),
+    // so leaving it out would opt every event out of the API and every key
+    // check below would fail for the wrong reason.
+    $apiOptOut = ['E46' => 1, 'E47' => 1];
     foreach ($eventRows as [$name, $org, $feed, $isPublic, $level, $detail, $website, $audType, $audId, $source, $private, $recheck]) {
         $id = $events[$name];
         run(
             $db,
             'INSERT INTO tblEvents (eventID, siteID, externalFeedID, externalUid, eventName, eventSlug, description, locationName,'
-            . ' startDateTime, endDateTime, status, isPublic, importLevel, importDetail, importWebsite, importAudienceType,'
+            . ' startDateTime, endDateTime, status, isPublic, importLevel, importDetail, importWebsite, importApiOptOut, importAudienceType,'
             . ' importAudienceID, importSource, externalPrivate, importRecheckAt)'
-            . " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'published', ?, ?, ?, ?, ?, ?, ?, ?,"
+            . " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'published', ?, ?, ?, ?, ?, ?, ?, ?, ?,"
             . ' CASE ? WHEN -1 THEN UTC_TIMESTAMP() - INTERVAL 1 HOUR WHEN 1 THEN UTC_TIMESTAMP() + INTERVAL 1 HOUR ELSE NULL END)',
-            'iiisssssssissisisii',
+            'iiisssssssissiisisii',
             [
                 $id, $org, $feed, $feed === null ? null : 'selftest-' . strtolower($name) . '@p514.invalid',
                 'Selftest ' . $name, 'selftest-p514-' . strtolower($name),
                 'Fixture description ' . $name, 'Fixture location ' . $name, $start, $end,
-                $isPublic, $level, $detail, $website, $audType, $audId, $source, $private, $recheck,
+                $isPublic, $level, $detail, $website, $apiOptOut[$name] ?? 0, $audType, $audId, $source, $private, $recheck,
             ]
         );
     }
@@ -582,8 +597,9 @@ try {
         in_array('E32', $website, true) === true && in_array('E40', $website, true) === false && in_array('E41', $website, true) === false,
         'got ' . setText($website));
     $keySet = $visible(EventVisibility::MODE_KEY, 0, ORG_A, true);
-    check('key: receives E44 and E45 (public + website); not E41 (members level)',
-        in_array('E44', $keySet, true) === true && in_array('E45', $keySet, true) === true && in_array('E41', $keySet, true) === false,
+    check('key: receives E44, E45, E37 and E38 (public; the website box no longer matters to keys); not E41 (members level)',
+        in_array('E44', $keySet, true) === true && in_array('E45', $keySet, true) === true && in_array('E41', $keySet, true) === false
+        && in_array('E37', $keySet, true) === true && in_array('E38', $keySet, true) === true,
         'got ' . setText($keySet));
 
     // -------------------------------------------------------------------------
@@ -633,7 +649,11 @@ try {
     // -------------------------------------------------------------------------
     echo "\n=== the other modes, counting organisation A's events only ===\n";
     $got = $visible(EventVisibility::MODE_KEY, 0, ORG_A);
-    check('key: {E1,E2,E12}', $got === ['E1', 'E2', 'E12'], 'got ' . setText($got));
+    // The signed-out visitor's set {E1,E3,E6,E12,E13} plus E2, the
+    // organisation's OWN members-only event (keys are not restricted on the
+    // organisation's own events, #127 / #511). E3, E6 and E13 are public
+    // imported events WITHOUT the website box (owner, 24 September 2026).
+    check('key: {E1,E2,E3,E6,E12,E13}', $got === ['E1', 'E2', 'E3', 'E6', 'E12', 'E13'], 'got ' . setText($got));
     $got = $visible(EventVisibility::MODE_WEBSITE, 0, ORG_A);
     check('website: {E1,E12}', $got === ['E1', 'E12'], 'got ' . setText($got));
     $got = $visible(EventVisibility::MODE_INVITE, 0, ORG_A);
@@ -668,9 +688,9 @@ try {
     check('extra, token mode: E38 for V6 (site administrator of A) is 0 — no administrator powers', $got === 0, "got {$got}");
 
     // -------------------------------------------------------------------------
-    echo "\n=== key mode: full detail only when the calendar itself is Public (owner answer 3) ===\n";
+    echo "\n=== key mode: exactly the detail a signed-out visitor gets (owner, 24 September 2026) ===\n";
     foreach ([
-        ['E44', 0, 'Members calendar, public + website, marked full detail'],
+        ['E44', 1, 'Members calendar, public + website, marked full detail'],
         ['E45', 1, 'the same event on a Public calendar'],
         ['E12', 1, 'Public calendar, full detail'],
         ['E6', 0, 'Members calendar, basic detail'],
@@ -678,17 +698,95 @@ try {
         ['E36', 1, 'private-marked, chosen at full detail, on a Public calendar'],
         ['E31', 0, 'an event of A on organisation B\'s Public calendar'],
         ['E1', 1, 'the organisation\'s own event'],
+        ['E3', 1, 'Public calendar, full detail, website box clear'],
+        ['E37', 0, 'public at basic detail, on a Selected-groups calendar'],
+        ['E38', 0, 'private-marked, public at basic detail'],
+        ['E43', 0, 'organisation B, basic detail, Members calendar'],
+        ['E46', 0, 'opted out of the API'],
     ] as [$e, $want, $what]) {
         $got = $canSeeFull(EventVisibility::MODE_KEY, 0, $events[$e]);
         check("key: {$e} ({$what}) is {$want}", $got === $want, "got {$got}");
     }
     $wider = [];
+    $widerAnon = [];
     foreach ($events as $name => $id) {
         if ($canSeeFull(EventVisibility::MODE_KEY, 0, $id) > $canSeeFull(EventVisibility::MODE_SESSION, 0, $id)) {
             $wider[] = $name;
         }
+        if ($canSeeFull(EventVisibility::MODE_KEY, 0, $id) > $canSeeFull(EventVisibility::MODE_ANONYMOUS, 0, $id)) {
+            $widerAnon[] = $name;
+        }
     }
     check('key: never full detail where a signed-out visitor gets title, date and time only (all ' . count($events) . ' events)', $wider === [], 'wider on ' . setText($wider));
+    check('key: never full detail where anonymous mode gives title, date and time only (all ' . count($events) . ' events)', $widerAnon === [], 'wider on ' . setText($widerAnon));
+
+    // -------------------------------------------------------------------------
+    echo "\n=== API keys see exactly the signed-out visitor's imported events, minus the opted-out ones (#514 part P7, plan B4/B5) ===\n";
+    /** The imported events (with the extra cases) a mode returns, for one organisation. */
+    $importedIn = static function (string $mode, int $site) use ($visible, $db): array {
+        $out = [];
+        foreach ($visible($mode, 0, $site, true) as $name) {
+            $row = run($db, 'SELECT externalFeedID FROM tblEvents WHERE eventID = ?', 'i', [$GLOBALS['events'][$name]]);
+            if ($row !== [] && $row[0]['externalFeedID'] !== null) {
+                $out[] = $name;
+            }
+        }
+
+        return $out;
+    };
+    foreach ([ORG_A => 'A', ORG_B => 'B'] as $site => $label) {
+        $keyRows  = $importedIn(EventVisibility::MODE_KEY, $site);
+        $anonRows = $importedIn(EventVisibility::MODE_ANONYMOUS, $site);
+        check("(i) organisation {$label}: every imported event a key receives, a signed-out visitor sees too", array_diff($keyRows, $anonRows) === [],
+            'key only: ' . setText(array_values(array_diff($keyRows, $anonRows))));
+        check("(ii) organisation {$label}: the key's imported events are exactly the visitor's minus E46, E47 and E48 (the opted-out ones)",
+            array_values($keyRows) === array_values(array_diff($anonRows, ['E46', 'E47', 'E48'])),
+            'key ' . setText($keyRows) . ' anonymous ' . setText($anonRows));
+        $unequal = [];
+        foreach ($keyRows as $name) {
+            if ($canSeeFull(EventVisibility::MODE_KEY, 0, $events[$name]) !== $canSeeFull(EventVisibility::MODE_ANONYMOUS, 0, $events[$name])) {
+                $unequal[] = $name;
+            }
+        }
+        check("organisation {$label}: on every imported event a key receives, its detail EQUALS the visitor's (plan B4, measured)", $unequal === [], 'differs on ' . setText($unequal));
+    }
+    $anonA = $visible(EventVisibility::MODE_ANONYMOUS, 0, ORG_A, true);
+    $keyA  = $visible(EventVisibility::MODE_KEY, 0, ORG_A, true);
+    $webA  = $visible(EventVisibility::MODE_WEBSITE, 0, ORG_A, true);
+    check('(iii) E46 (public, full, opted out of the API): a signed-out visitor yes, a key no',
+        in_array('E46', $anonA, true) === true && in_array('E46', $keyA, true) === false);
+    check('(iv) E47 (public, website ticked, opted out of the API): website mode yes — the API box leaves the website alone — a key no',
+        in_array('E47', $webA, true) === true && in_array('E47', $keyA, true) === false);
+    check('(v) E48 (stored answer 0, but its calendar F5 is "Don\'t show via API"): a signed-out visitor yes, a key no (the calendar is tested live)',
+        in_array('E48', $anonA, true) === true && in_array('E48', $keyA, true) === false);
+    $kw = EventVisibility::where('e', EventVisibility::MODE_KEY, 0, $today);
+    $kf = EventVisibility::fullDetailSelect('e', EventVisibility::MODE_KEY, 0, $today);
+    check('(vi) key mode binds nothing, in the WHERE or the detail answer (so both API handlers\' comments stay true)',
+        $kw['types'] === '' && $kf['types'] === '' && $kw['params'] === [] && $kf['params'] === []);
+
+    // (vii) isPublic says what it MEANS for an imported event (challenge
+    // finding 4). E3's stored isPublic is 0 in this fixture — what the
+    // importer writes — and the rule never reads isPublic on an imported row.
+    $isPublicOf = static function (string $mode, int $viewerId, string $event) use ($db, $today, $events): int {
+        $p = EventVisibility::isPublicSelect('e', $mode);
+        $w = EventVisibility::where('e', $mode, $viewerId, $today);
+        $rows = run($db, 'SELECT ' . $p['sql'] . ' FROM tblEvents e WHERE e.eventID = ?' . $w['sql'], $p['types'] . 'i' . $w['types'],
+            array_merge($p['params'], [$events[$event]], $w['params']));
+
+        return (int) ($rows[0]['isPublic'] ?? -1);
+    };
+    check('(vii) isPublic in key mode: E3 (imported, stored 0) → 1; E1 (own, public) → 1; E2 (own, members-only) → 0, passed through',
+        $isPublicOf(EventVisibility::MODE_KEY, 0, 'E3') === 1 && $isPublicOf(EventVisibility::MODE_KEY, 0, 'E1') === 1
+        && $isPublicOf(EventVisibility::MODE_KEY, 0, 'E2') === 0,
+        'E3=' . $isPublicOf(EventVisibility::MODE_KEY, 0, 'E3') . ' E1=' . $isPublicOf(EventVisibility::MODE_KEY, 0, 'E1') . ' E2=' . $isPublicOf(EventVisibility::MODE_KEY, 0, 'E2'));
+    check('(vii) isPublic in session mode: for V1, E3 → 1 and E4 (members level) → 0; for V6, E9 (stale stored answer) → 0',
+        $isPublicOf(EventVisibility::MODE_SESSION, $viewers['V1'], 'E3') === 1 && $isPublicOf(EventVisibility::MODE_SESSION, $viewers['V1'], 'E4') === 0
+        && $isPublicOf(EventVisibility::MODE_SESSION, $viewers['V6'], 'E9') === 0);
+    $pk = EventVisibility::isPublicSelect('e', EventVisibility::MODE_KEY);
+    $ps = EventVisibility::isPublicSelect('e', EventVisibility::MODE_SESSION);
+    check('(vii) isPublicSelect() binds nothing in any mode, and its text depends only on the mode',
+        $pk['types'] === '' && $ps['types'] === '' && $pk['params'] === [] && $ps['params'] === []
+        && $ps['sql'] === EventVisibility::isPublicSelect('e', EventVisibility::MODE_ANONYMOUS)['sql'] && $pk['sql'] !== $ps['sql']);
 
     // -------------------------------------------------------------------------
     echo "\n=== every mode prepares against the real schema, and its text never depends on the viewer or the event ===\n";

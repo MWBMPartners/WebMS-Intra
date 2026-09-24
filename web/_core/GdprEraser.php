@@ -138,6 +138,27 @@ class GdprEraser
             // above.
             ['table' => 'tblExternalAudienceMembers', 'userCol' => 'userID', 'action' => 'delete'],
             ['table' => 'tblExternalAudienceMembers', 'userCol' => 'createdByID', 'action' => 'anonymise', 'nullCols' => [], 'reason' => 'the entry stays (it is about the person named on it, or about a group); who added it is detached'],
+            // #514 part P7 — choices, rules and approval rows for outside
+            // calendars. Each is the organisation's setting or decision, so
+            // the row stays and only the person's number is detached.
+            //
+            // TWO entries each for the choice and rule tables, one per
+            // column, on purpose: the route this class derives from the
+            // written catalogue matches rows on ONE column and empties a
+            // second column only on those rows (`processEntry()`), so a choice
+            // somebody else created and this person last changed would keep
+            // their number. Each entry here empties its own column wherever
+            // it names this person.
+            //
+            // The approvals entry is not optional: `decidedByID` is not one of
+            // the names the derived route recognises (LINK_COLUMNS), so
+            // without this line the table would be skipped altogether — the
+            // `triggeredByID` trap part P6 found (#535).
+            ['table' => 'tblExternalEventChoices',   'userCol' => 'createdByID', 'action' => 'anonymise', 'nullCols' => [], 'reason' => 'the choice is the organisation\'s setting and stays; who made it is detached'],
+            ['table' => 'tblExternalEventChoices',   'userCol' => 'updatedByID', 'action' => 'anonymise', 'nullCols' => [], 'reason' => 'the choice is the organisation\'s setting and stays; who last changed it is detached'],
+            ['table' => 'tblExternalFeedRules',      'userCol' => 'createdByID', 'action' => 'anonymise', 'nullCols' => [], 'reason' => 'the rule is the organisation\'s setting and stays; who made it is detached'],
+            ['table' => 'tblExternalFeedRules',      'userCol' => 'updatedByID', 'action' => 'anonymise', 'nullCols' => [], 'reason' => 'the rule is the organisation\'s setting and stays; who last changed it is detached'],
+            ['table' => 'tblExternalEventApprovals', 'userCol' => 'decidedByID', 'action' => 'anonymise', 'nullCols' => [], 'reason' => 'the decision is the organisation\'s history and stays; who approved or declined is detached'],
             ['table' => 'tblUserSmsPreference','userCol' => 'userID', 'action' => 'delete'],
             ['table' => 'tblNewsletterSubscription','userCol' => 'userID', 'action' => 'delete'],
             ['table' => 'tblPaymentMethod',    'userCol' => 'userID', 'action' => 'delete'],

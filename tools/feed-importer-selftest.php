@@ -157,6 +157,18 @@
  *      importer deleted real events on the strength of it. Four shapes.
  *   K. The scheduled job: it survives a calendar that throws, prints its
  *      summary, and never prints a calendar's name or address.
+ *   L. Part 7 of #514, the proofs that need a REAL refresh or the real job
+ *      (#514 part P7 plan, E17-E20 and E30): a failed refresh changes no
+ *      choice, rule or approval; a removed event's waiting row is withdrawn
+ *      (by ANY caller that works answers out); the history row records every
+ *      date still waiting; the job's recheck pass works out answers that have
+ *      run out, oldest first, and logs a failure as its own. Part L runs on
+ *      the REAL clock only, by design: a real refresh needs the database
+ *      clock to MOVE (see `fi_refresh()`), and `SET timestamp` freezes it.
+ *      Every moment part L writes comes from ONE reading of the database's
+ *      clock (`fl_dbNowUtc()`). The resolver's own proofs, which need no
+ *      moving clock, are in `tools/feed-resolver-selftest.php`.
+ *   M. (Not proven: a real Google or Microsoft 365 export — see below.)
  *
  * WHAT THIS CANNOT PROVE
  *   - **It has never seen a real Google or Microsoft 365 calendar.** There are
@@ -694,6 +706,12 @@ function fi_writeCalendars(string $dir): array
     $put('ten.ics', fi_wrap($ten));
     $put('nine.ics', fi_wrap($nine));
     $put('ten-renamed.ics', str_replace("SUMMARY:Event number 1\r\n", "SUMMARY:Event number one, renamed\r\n", fi_wrap($ten)));
+    // Part L (E19): the SAME ten events, but a different file — one extra
+    // calendar-level line that changes no event. A different file is read
+    // again in full (the "nothing has changed" shortcut compares the whole
+    // file), so the answers are worked out again with nothing new to wait for.
+    $put('ten-comment.ics', str_replace("PRODID:-//WebMS Intra//P6 self-test//EN\r\n",
+        "PRODID:-//WebMS Intra//P6 self-test//EN\r\nX-WR-CALDESC:A comment that changes no event\r\n", fi_wrap($ten)));
 
     // --- broken files a refresh has to survive ------------------------------
     $put('truncated-no-end.ics', "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//WebMS Intra//P6 self-test//EN\r\n"
@@ -1521,6 +1539,9 @@ function fi_reset(): void
         'tblExternalFeedRuns', 'tblExternalEventTags', 'tblExternalCategoryMap',
         'tblExternalAudienceMembers', 'tblEventRSVPs', 'tblEvents', 'tblEventSeries',
         'tblExternalFeeds', 'tblEventCategories', 'tblUserSites', 'tblUsers', 'tblSites',
+        // #514 part P7's four tables, emptied with the rest so no choice, rule
+        // or approval row is left pointing at a calendar that has gone.
+        'tblExternalEventApprovals', 'tblExternalRuleConditions', 'tblExternalFeedRules', 'tblExternalEventChoices',
     ] as $table) {
         $mysqli->query('TRUNCATE TABLE ' . $table);
     }
@@ -1747,6 +1768,104 @@ function fi_runJob(string $token = 'p6-selftest-token'): string
         . "\$run();\n");
 
     return (string) shell_exec(escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg($runner) . ' ' . escapeshellarg($token) . ' 2>&1');
+}
+
+
+// =============================================================================
+// 🛠️ Part L's helpers (#514 part P7)
+// =============================================================================
+
+/**
+ * "Now" for part L: ONE reading of the DATABASE's clock, remembered. Part L
+ * runs on the real clock only (see the header), and every moment it writes
+ * is an offset from this — never from PHP's clock and never from
+ * `fi_today()`, which counts days, not moments.
+ */
+function fl_dbNowUtc(): DateTimeImmutable
+{
+    static $now = null;
+    if ($now === null) {
+        $now = new DateTimeImmutable((string) fi_one('SELECT UTC_TIMESTAMP() AS t')['t'], new DateTimeZone('UTC'));
+    }
+
+    return $now;
+}
+
+/**
+ * Work out one calendar's answers the way every caller must (plan C10): a
+ * transaction, the calendar's lock, the database's clock, commit. Used after
+ * an administrator's decision, as part P8's handler will.
+ */
+function fl_resolve(int $feedId): array
+{
+    global $mysqli;
+    $mysqli->begin_transaction();
+    try {
+        fi_q('SELECT feedID FROM tblExternalFeeds WHERE feedID = ? FOR UPDATE', 'i', [$feedId]);
+        $result = Portal\Core\FeedResolver::resolveFeed($mysqli, $feedId, Portal\Core\FeedResolver::databaseNowUtc($mysqli));
+        $mysqli->commit();
+
+        return $result;
+    } catch (Throwable $e) {
+        $mysqli->rollback();
+        throw $e;
+    }
+}
+
+/** Approve or decline one waiting row the way part P8's handler will. */
+function fl_decide(int $approvalId, string $decision): bool
+{
+    global $mysqli;
+    $row = fi_one('SELECT requestHash, contentHash FROM tblExternalEventApprovals WHERE approvalID = ?', 'i', [$approvalId]);
+
+    return Portal\Core\FeedResolver::decideApproval($mysqli, $approvalId, SITE_A, $decision, VIEWER_6, 'part L',
+        (string) $row['requestHash'], (string) $row['contentHash']);
+}
+
+/** Add a rule with one condition to a calendar. */
+function fl_rule(int $feedId, string $level, string $field, string $type, string $value): int
+{
+    fi_q('INSERT INTO tblExternalFeedRules (siteID, feedID, name, isActive, audienceLevel, detailLevel, createdAt) '
+        . "VALUES (?, ?, 'Part L rule', 1, ?, 'basic', UTC_TIMESTAMP())", 'iis', [SITE_A, $feedId, $level]);
+    $ruleId = (int) fi_one('SELECT MAX(ruleID) AS id FROM tblExternalFeedRules WHERE feedID = ?', 'i', [$feedId])['id'];
+    fi_q('INSERT INTO tblExternalRuleConditions (ruleID, isException, matchField, matchType, matchValue) VALUES (?, 0, ?, ?, ?)',
+        'isss', [$ruleId, $field, $type, $value]);
+
+    return $ruleId;
+}
+
+/** One live event of a calendar, by its name. */
+function fl_event(int $feedId, string $name): ?array
+{
+    return fi_one('SELECT eventID, importLevel, importSource, importRecheckAt, isDeleted FROM tblEvents WHERE externalFeedID = ? AND eventName = ?',
+        'is', [$feedId, $name]);
+}
+
+/** The approval rows of one event, oldest first. */
+function fl_appr(int $eventId): array
+{
+    return fi_q('SELECT approvalID, status, reason FROM tblExternalEventApprovals WHERE eventID = ? ORDER BY approvalID', 'i', [$eventId]);
+}
+
+/**
+ * A fingerprint of every column of every row of the six #514 tables that
+ * belong to one calendar: its events' `import*` columns, its approval rows,
+ * choices, rules, rule conditions and "who may see it" lists.
+ */
+function fl_fingerprint(int $feedId): string
+{
+    $parts = [
+        fi_q('SELECT eventID, importLevel, importDetail, importWebsite, importApiOptOut, importAudienceType, importAudienceID, '
+            . 'importSource, importSourceID, importRecheckAt, categoryID FROM tblEvents WHERE externalFeedID = ? ORDER BY eventID', 'i', [$feedId]),
+        fi_q('SELECT * FROM tblExternalEventApprovals WHERE feedID = ? ORDER BY approvalID', 'i', [$feedId]),
+        fi_q('SELECT choiceID, scope, HEX(externalUidHash) AS h, externalRecurrenceKey, audienceLevel, detailLevel, websiteOptIn, apiOptOut, '
+            . 'fromDate, toDate, overridesPrivateMark, createdAt, updatedAt FROM tblExternalEventChoices WHERE feedID = ? ORDER BY choiceID', 'i', [$feedId]),
+        fi_q('SELECT * FROM tblExternalFeedRules WHERE feedID = ? ORDER BY ruleID', 'i', [$feedId]),
+        fi_q('SELECT c.* FROM tblExternalRuleConditions c JOIN tblExternalFeedRules r ON r.ruleID = c.ruleID WHERE r.feedID = ? ORDER BY c.conditionID', 'i', [$feedId]),
+        fi_q('SELECT * FROM tblExternalAudienceMembers WHERE feedID = ? ORDER BY audienceMemberID', 'i', [$feedId]),
+    ];
+
+    return hash('sha256', json_encode($parts, JSON_THROW_ON_ERROR));
 }
 
 // =============================================================================
@@ -2668,7 +2787,179 @@ try {
     $mysqli->query('DELETE FROM tblErrors');
 
     // -------------------------------------------------------------------------
-    fi_heading('L. A real Google or Microsoft 365 export');
+    fi_heading('L. Part 7: choices, rules and approvals through a REAL refresh and the REAL job (real clock only)');
+    // -------------------------------------------------------------------------
+    echo 'part L runs on the real clock; its one reading of the database clock: ' . fl_dbNowUtc()->format('Y-m-d H:i:s') . " UTC\n";
+
+    // E17 — a failed refresh changes nothing: rules, a choice, a waiting row
+    // and an approved row present, then the download answers 500.
+    fi_reset();
+    $feed = fi_addFeed('Part L, failure', fi_url('/f/ten.ics'));
+    $mysqli->query("UPDATE tblExternalFeeds SET audienceLevel = 'members' WHERE feedID = " . $feed);
+    $waitRule = fl_rule($feed, 'public', 'title', 'equals', 'Event number 1');
+    fl_rule($feed, 'public', 'title', 'equals', 'Event number 3');
+    fi_q('INSERT INTO tblExternalEventChoices (siteID, feedID, scope, externalUidHash, externalRecurrenceKey, audienceLevel, detailLevel, '
+        . "createdByID, createdAt) VALUES (?, ?, 'series', UNHEX(SHA2('ev5@p6.test', 256)), '', 'hidden', 'basic', ?, UTC_TIMESTAMP())",
+        'iii', [SITE_A, $feed, VIEWER_6]);
+    fi_refresh($feed);
+    $three = fl_event($feed, 'Event number 3');
+    fl_decide((int) fl_appr((int) $three['eventID'])[0]['approvalID'], 'approved');
+    fl_resolve($feed);
+    $setUp = fl_event($feed, 'Event number 1')['importSource'] === 'waiting' && fl_event($feed, 'Event number 3')['importLevel'] === 'public'
+        && fl_event($feed, 'Event number 5')['importLevel'] === 'hidden';
+    fi_ok('E17 set-up: a waiting row (Event number 1), an approved one (Event number 3) and a choice (Event number 5) are in place', $setUp,
+        json_encode([fl_event($feed, 'Event number 1'), fl_event($feed, 'Event number 3'), fl_event($feed, 'Event number 5')]));
+    // An administrator edits a rule, and nothing has worked the answers out
+    // since. A failed refresh must NOT be the thing that does: it knows
+    // nothing about the calendar, so it touches nothing (acceptance 13).
+    fi_q("UPDATE tblExternalFeedRules SET audienceLevel = 'hidden' WHERE ruleID = ?", 'i', [$waitRule]);
+    $before = fl_fingerprint($feed);
+    $r = fi_refresh($feed, fi_url('/status/500'));
+    fi_ok('E17 — a refresh whose download answers 500 fails, and changes NOTHING in the six #514 tables of that calendar (the edited rule is not applied by it)',
+        $r['outcome'] === 'failed' && fl_fingerprint($feed) === $before && fl_event($feed, 'Event number 1')['importSource'] === 'waiting', json_encode($r));
+    $r = fi_refresh($feed, fi_url('/f/ten.ics'), true);
+    fi_ok('E17 KEEP-WORKING: a later good download DOES work the answers out — the rule edited meanwhile takes effect (Event number 1 hidden, source rule)',
+        $r['outcome'] === 'ok' && fl_event($feed, 'Event number 1')['importLevel'] === 'hidden' && fl_event($feed, 'Event number 1')['importSource'] === 'rule',
+        json_encode(fl_event($feed, 'Event number 1')));
+
+    // E18 — a removed event's waiting row is withdrawn; when it comes back
+    // it is worked out again.
+    fi_reset();
+    $feed = fi_addFeed('Part L, removal', fi_url('/f/ten.ics'));
+    $mysqli->query("UPDATE tblExternalFeeds SET audienceLevel = 'members' WHERE feedID = " . $feed);
+    fl_rule($feed, 'public', 'title', 'equals', 'Event number 4');
+    fi_refresh($feed);
+    $four = (int) fl_event($feed, 'Event number 4')['eventID'];
+    fi_ok('E18 set-up: Event number 4 is waiting', (fl_appr($four)[0]['status'] ?? '') === 'pending', json_encode(fl_appr($four)));
+    fi_refresh($feed, fi_url('/f/nine.ics'), true);
+    fi_ok('E18 — after the download without it, its waiting row is withdrawn',
+        (int) fi_one('SELECT isDeleted FROM tblEvents WHERE eventID = ?', 'i', [$four])['isDeleted'] === 1
+        && array_column(fl_appr($four), 'status') === ['withdrawn'], json_encode(fl_appr($four)));
+    fi_refresh($feed, fi_url('/f/ten.ics'), true);
+    fi_ok('E18 — when it comes back it is worked out again: a new waiting row, new_match',
+        array_column(fl_appr($four), 'status') === ['withdrawn', 'pending'] && fl_appr($four)[1]['reason'] === 'new_match', json_encode(fl_appr($four)));
+    fl_decide((int) fl_appr($four)[1]['approvalID'], 'approved');
+    fl_resolve($feed);
+    fi_refresh($feed, fi_url('/f/nine.ics'), true);
+    fi_ok('E18 KEEP-WORKING: an APPROVED row of a removed date stays approved (it still counts as a decision on its repeating event)',
+        array_column(fl_appr($four), 'status') === ['withdrawn', 'approved'], json_encode(fl_appr($four)));
+    fi_refresh($feed, fi_url('/f/ten.ics'), true);
+    fi_ok('E18 — ...and when that date comes back, its approval applies again (public, no new waiting row)',
+        fl_event($feed, 'Event number 4')['importLevel'] === 'public' && count(fl_appr($four)) === 2, json_encode(fl_appr($four)));
+    // A waiting row left behind on an event removed some OTHER way (a
+    // removal before part 7, or a hand edit) is withdrawn by whichever
+    // caller works the answers out next — here the job's recheck pass, not
+    // the importer's own removal step.
+    fi_q("UPDATE tblExternalFeedRules SET audienceLevel = 'public', detailLevel = 'full' WHERE feedID = ?", 'i', [$feed]);
+    fl_resolve($feed);
+    $pendingNow = array_values(array_filter(fl_appr($four), static fn (array $a): bool => $a['status'] === 'pending'));
+    fi_q('UPDATE tblEvents SET isDeleted = 1 WHERE eventID = ?', 'i', [$four]);
+    $expired = fl_dbNowUtc()->modify('-1 hour')->format('Y-m-d H:i:s');
+    fi_q('UPDATE tblEvents SET importRecheckAt = ? WHERE externalFeedID = ? AND eventName = ?', 'sis', [$expired, $feed, 'Event number 1']);
+    FeedImporter::recheckDue($mysqli, microtime(true) + 20);
+    fi_ok('E18 — a waiting row of an event removed some other way is withdrawn by the next caller that works answers out (here the recheck pass)',
+        count($pendingNow) === 1 && fi_one('SELECT status FROM tblExternalEventApprovals WHERE approvalID = ?', 'i', [(int) $pendingNow[0]['approvalID']])['status'] === 'withdrawn',
+        json_encode(fl_appr($four)));
+
+    // E19 — the run row records how many are waiting, not only the new ones.
+    fi_reset();
+    $feed = fi_addFeed('Part L, waiting count', fi_url('/f/ten.ics'));
+    $mysqli->query("UPDATE tblExternalFeeds SET audienceLevel = 'members' WHERE feedID = " . $feed);
+    foreach (['Event number 1', 'Event number 2', 'Event number 3'] as $title) {
+        fl_rule($feed, 'public', 'title', 'equals', $title);
+    }
+    $r1 = fi_refresh($feed);
+    $run1 = fi_lastRun($feed);
+    fi_ok('E19 KEEP-WORKING: the first run — three dates waiting: awaitingApproval 3, and refresh() says 3 are new',
+        (int) $run1['awaitingApproval'] === 3 && $r1['newPending'] === 3, json_encode([$r1, $run1['awaitingApproval']]));
+    $r2 = fi_refresh($feed, fi_url('/f/ten-comment.ics'));
+    $run2 = fi_lastRun($feed);
+    fi_ok('E19 — a changed file with no change to any event: the run row still says 3 waiting, and refresh() says 0 are new',
+        $r2['outcome'] === 'ok' && (int) $run2['awaitingApproval'] === 3 && $r2['newPending'] === 0 && (int) $run2['runID'] !== (int) $run1['runID'],
+        json_encode([$r2, $run2['awaitingApproval']]));
+
+    // E20 — the job's recheck pass.
+    fi_reset();
+    $mysqli->query("DELETE FROM tblSettings WHERE settingKey = 'feeds.cron_token'");
+    $mysqli->query('INSERT INTO tblSettings (siteID, settingKey, settingValue, defaultValue, isSensitive) '
+        . "VALUES (NULL, 'feeds.cron_token', 'p6-selftest-token', '', 0)");
+    $due = fi_addFeed('A calendar whose name must never be printed, rechecked', fi_url('/f/ten.ics'));
+    $paused = fi_addFeed('A paused calendar whose name must never be printed', fi_url('/f/ten.ics'));
+    fi_refresh($due);
+    fi_refresh($paused);
+    $expired = fl_dbNowUtc()->modify('-1 hour')->format('Y-m-d H:i:s');
+    $tomorrow = fl_dbNowUtc()->modify('+1 day')->format('Y-m-d H:i:s');
+    fi_q("UPDATE tblEvents SET importRecheckAt = ? WHERE externalFeedID IN (?, ?) AND eventName = 'Event number 2'", 'sii', [$expired, $due, $paused]);
+    fi_q('UPDATE tblExternalFeeds SET nextFetchAt = ? WHERE feedID IN (?, ?)', 'sii', [$tomorrow, $due, $paused]);
+    fi_q('UPDATE tblExternalFeeds SET isActive = 0 WHERE feedID = ?', 'i', [$paused]);
+    fi_ok('E20 set-up: the expired row is shown to administrators only', in_array('Event number 2', fi_grid(VIEWER_1), true) === false, implode(' | ', fi_grid(VIEWER_1)));
+    $jobOut = fi_runJob();
+    $lines  = explode("\n", trim($jobOut));
+    fi_ok('E20 — the job prints ONE recheck line, first, with the counts: due=1 reworked=1 problems=0 notStarted=0 (the paused calendar is not counted)',
+        ($lines[0] ?? '') === 'recheck: due=1 reworked=1 problems=0 notStarted=0' && substr_count($jobOut, 'recheck:') === 1, trim($jobOut));
+    fi_ok('E20 — the expired row\'s answer is worked out again, and a member sees it again',
+        fl_event($due, 'Event number 2')['importRecheckAt'] === null && in_array('Event number 2', fi_grid(VIEWER_1), true) === true,
+        json_encode(fl_event($due, 'Event number 2')));
+    fi_ok('E20 KEEP-WORKING: the paused calendar\'s expired row is NOT reworked (its answer stays expired)',
+        fl_event($paused, 'Event number 2')['importRecheckAt'] === $expired, json_encode(fl_event($paused, 'Event number 2')));
+    fi_ok('E20 — the output names no calendar and holds no address; the recheck line holds neither ": ok" nor ": failed"',
+        str_contains($jobOut, 'must never be printed') === false && str_contains($jobOut, '://') === false
+        && str_contains($lines[0] ?? '', ': ok') === false && str_contains($lines[0] ?? '', ': failed') === false, trim($jobOut));
+
+    // E30 — the recheck pass's order, and its own log line.
+    fi_reset();
+    $mysqli->query('DELETE FROM tblErrors');
+    $low  = fi_addFeed('A lower-numbered calendar', fi_url('/f/ten.ics'));
+    $high = fi_addFeed('A higher-numbered calendar', fi_url('/f/ten.ics'));
+    fi_refresh($low);
+    fi_refresh($high);
+    fi_q("UPDATE tblEvents SET importRecheckAt = ? WHERE externalFeedID = ? AND eventName = 'Event number 2'",
+        'si', [fl_dbNowUtc()->modify('-1 hour')->format('Y-m-d H:i:s'), $low]);
+    fi_q("UPDATE tblEvents SET importRecheckAt = ? WHERE externalFeedID = ? AND eventName = 'Event number 2'",
+        'si', [fl_dbNowUtc()->modify('-2 hours')->format('Y-m-d H:i:s'), $high]);
+    $queue = (new ReflectionMethod(FeedImporter::class, 'recheckQueue'))->invoke(null, $mysqli);
+    fi_ok('E30 — the recheck list puts the calendar whose answer ran out FIRST at the top, whatever its number (the higher-numbered one here)',
+        array_column($queue, 'feedID') === [$high, $low], json_encode($queue));
+    // A fault forced into ONE calendar's rework only. Renaming a table (the
+    // way part I1 forces a refresh fault) would break BOTH calendars' rework
+    // inside the one call, so a trigger that refuses an update to the higher
+    // calendar's events is used instead; it is dropped straight afterwards.
+    $mysqli->query('DROP TRIGGER IF EXISTS trg_p7_selftest_fault');
+    $mysqli->query('CREATE TRIGGER trg_p7_selftest_fault BEFORE UPDATE ON tblEvents FOR EACH ROW BEGIN '
+        . 'IF NEW.externalFeedID = ' . (int) $high . " THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'planted by the part 7 self-test'; END IF; END");
+    try {
+        $counts = FeedImporter::recheckDue($mysqli, microtime(true) + 20);
+    } finally {
+        $mysqli->query('DROP TRIGGER IF EXISTS trg_p7_selftest_fault');
+    }
+    $logged = fi_q("SELECT errorCode, errorTitle, errorDetail FROM tblErrors WHERE errorCode IN ('FeedRecheckFailed', 'FeedRefreshFailed')");
+    fi_ok('E30 — one calendar failing does not stop the other: problems=1, reworked=1',
+        $counts['problems'] === 1 && $counts['reworked'] === 1 && $counts['due'] === 2, json_encode($counts));
+    fi_ok('E30 — the failure is logged as the RECHECK\'s own: code FeedRecheckFailed, "Re-checking who may see calendar #' . $high . '", with the file and line',
+        count($logged) === 1 && $logged[0]['errorCode'] === 'FeedRecheckFailed'
+        && str_starts_with((string) $logged[0]['errorTitle'], 'Re-checking who may see calendar #' . $high . ' ')
+        && preg_match('/\.php:\d+$/', (string) $logged[0]['errorDetail']) === 1, json_encode($logged));
+    fi_ok('E30 — ...and names no calendar and holds no address',
+        count($logged) === 1 && str_contains(json_encode($logged), 'calendar.test') === false && str_contains(json_encode($logged), 'higher-numbered') === false,
+        json_encode($logged));
+    // KEEP-WORKING: the two new parameters default to exactly what every
+    // other caller always wrote, so a failed REFRESH is still logged as one
+    // (the part I1 fault, forced again here).
+    $mysqli->query('DELETE FROM tblErrors');
+    $mysqli->query('RENAME TABLE tblExternalEventTags TO tblExternalEventTagsHidden');
+    try {
+        $r = fi_refresh($low, null, true);
+    } finally {
+        $mysqli->query('RENAME TABLE tblExternalEventTagsHidden TO tblExternalEventTags');
+    }
+    $refreshLog = fi_q("SELECT errorCode, errorTitle FROM tblErrors WHERE errorCode IN ('FeedRecheckFailed', 'FeedRefreshFailed')");
+    fi_ok('E30 KEEP-WORKING: a failed REFRESH is still logged as FeedRefreshFailed, "Refreshing calendar #' . $low . '" (the defaults are unchanged)',
+        $r['outcome'] === 'failed' && count($refreshLog) === 1 && $refreshLog[0]['errorCode'] === 'FeedRefreshFailed'
+        && str_starts_with((string) $refreshLog[0]['errorTitle'], 'Refreshing calendar #' . $low . ' '), json_encode($refreshLog));
+    $mysqli->query('DELETE FROM tblErrors');
+
+    // -------------------------------------------------------------------------
+    fi_heading('M. A real Google or Microsoft 365 export');
     // -------------------------------------------------------------------------
     fi_skipped(
         'the importer against a genuine Google or Microsoft 365 export',
@@ -2695,6 +2986,9 @@ try {
         'tblExternalFeedRuns', 'tblExternalEventTags', 'tblExternalCategoryMap',
         'tblExternalAudienceMembers', 'tblEventRSVPs', 'tblEvents', 'tblEventSeries',
         'tblExternalFeeds', 'tblEventCategories', 'tblUserSites', 'tblUsers', 'tblSites',
+        // #514 part P7's four tables, emptied with the rest so no choice, rule
+        // or approval row is left pointing at a calendar that has gone.
+        'tblExternalEventApprovals', 'tblExternalRuleConditions', 'tblExternalFeedRules', 'tblExternalEventChoices',
     ] as $table) {
         $mysqli->query('TRUNCATE TABLE ' . $table);
     }

@@ -771,6 +771,59 @@ return [
                     . ' goes',
         'columns'  => ['createdByID', 'updatedByID'],
     ],
+    'tblExternalEventApprovals' => [
+        'decision' => 'unlink',
+        // #514 part P7. One row per date of an outside calendar's event that
+        // waited for, or had, an administrator's agreement to be shown more
+        // widely. The only thing about a person is `decidedByID` — who
+        // approved or declined — which is history of the ORGANISATION's
+        // decision: the name goes, the decision stays.
+        //
+        // The snapshot columns hold the outside calendar's own text (a title,
+        // maybe a location), not tied to any account; that is the calendar's
+        // content, like the event row itself. `requestedAudienceSummary` holds
+        // counts only, never names, on purpose (migration 206's header), so
+        // erasure is never defeated by a name hidden inside a label.
+        //
+        // `decidedByID` is NOT one of the names `GdprEraser` recognises by
+        // itself (`GdprEraser::LINK_COLUMNS`) — the same trap part P6 fell into
+        // with `triggeredByID` (#535). So `GdprEraser::catalogue()` carries a
+        // hand-written entry for this table; without it the table would be
+        // skipped. `check_personal_data_coverage.py` now knows the name too.
+        'reason'   => 'Records which administrator approved or declined showing an'
+                    . ' outside calendar\'s event more widely. The decision is the'
+                    . ' organisation\'s and stays; the name goes',
+        'columns'  => ['decidedByID'],
+    ],
+    'tblExternalEventChoices' => [
+        'decision' => 'unlink',
+        // #514 part P7. An administrator's choice of who sees one date, or
+        // every date, of an outside calendar's event. The setting belongs to
+        // the organisation; who made or last changed it goes.
+        //
+        // WHAT ERASURE CANNOT FIND: `note` is the administrator's own free
+        // text and may name somebody. Nothing ties a note to the account it
+        // mentions, so a request to be forgotten cannot find it — the same as
+        // every other administrator note in the portal.
+        'reason'   => 'Only records who created or last changed this. Deleting the'
+                    . ' row would destroy the organisation\'s own work because a'
+                    . ' departed volunteer typed it in. The content stays; the name'
+                    . ' goes. The free-text note may name somebody and is not tied'
+                    . ' to an account, so erasure cannot find it',
+        'columns'  => ['createdByID', 'updatedByID'],
+    ],
+    'tblExternalFeedRules' => [
+        'decision' => 'unlink',
+        // #514 part P7. An administrator's rule for which events of an
+        // outside calendar are shown to whom. The setting belongs to the
+        // organisation; who made or last changed it goes. (Its conditions,
+        // `tblExternalRuleConditions`, name no person and need no entry.)
+        'reason'   => 'Only records who created or last changed this. Deleting the'
+                    . ' row would destroy the organisation\'s own work because a'
+                    . ' departed volunteer typed it in. The content stays; the name'
+                    . ' goes',
+        'columns'  => ['createdByID', 'updatedByID'],
+    ],
     'tblExternalFeeds' => [
         'decision' => 'unlink',
         // #514 part P6 added `updatedByID`, so this entry now names both. Two

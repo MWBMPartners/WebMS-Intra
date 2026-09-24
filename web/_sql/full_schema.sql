@@ -1070,6 +1070,13 @@ CREATE TABLE IF NOT EXISTS `tblEvents` (
     `importLevel`        ENUM('public','members','groups','hidden') NOT NULL DEFAULT 'hidden' COMMENT 'Imported events only: who may see it, as worked out by FeedResolver. Ignored when externalFeedID IS NULL.',
     `importDetail`       ENUM('full','basic') NOT NULL DEFAULT 'basic' COMMENT 'Imported events only: detail for viewers outside the calendar''s own audience.',
     `importWebsite`      TINYINT(1) NOT NULL DEFAULT 0 COMMENT 'Imported events only: 1 = may go to the organisation''s public website feeds (D4).',
+    -- 🔑 Added by migration 206 (#514, part P7): may an API key receive this
+    -- copied-in event? It defaults to 1 (no) on purpose, like the other
+    -- stored answers above: a writer that forgets it hides the event from API
+    -- keys rather than sending it. FeedResolver writes the real answer. A
+    -- fresh install has no imported rows, so migration 206's one-time
+    -- backfill (0 on every existing imported row) has nothing to do here.
+    `importApiOptOut`    TINYINT(1) NOT NULL DEFAULT 1 COMMENT 'Imported events only: 1 = API keys never receive it. Written only by FeedResolver: 1 when the calendar or ANY choice or rule that applies to the event opts out. Default 1 so a writer that forgets it fails closed; ignored when externalFeedID IS NULL.',
     `importAudienceType` ENUM('feed','choice','rule') DEFAULT NULL COMMENT 'Owner of the audience list used at the groups level.',
     `importAudienceID`   INT DEFAULT NULL COMMENT 'feedID, choiceID or ruleID matching importAudienceType. No foreign key: it points at one of three tables.',
     `importSource`       ENUM('calendar','date','series','rule','waiting','private','conflict','duplicate') DEFAULT NULL COMMENT 'Why importLevel is what it is; shown to administrators.',
@@ -1091,7 +1098,7 @@ CREATE TABLE IF NOT EXISTS `tblEvents` (
     `externalRecurrenceKey` VARCHAR(20)  NOT NULL DEFAULT '' COMMENT 'Empty for a one-off; the occurrence''s original start as a UTC instant (YmdTHisZ) or all-day date (Ymd)',
     `externalLastSeenAt`    DATETIME     DEFAULT NULL COMMENT 'UTC moment of the last complete download that contained it',
     `externalUrl`           VARCHAR(500) DEFAULT NULL COMMENT 'The link the outside calendar gave for this event',
-    `externalDuplicate`     TINYINT(1)   NOT NULL DEFAULT 0 COMMENT '1 = the last download held this identity twice; choices and rules are ignored for it',
+    `externalDuplicate`     TINYINT(1)   NOT NULL DEFAULT 0 COMMENT '1 = the last download held this identity twice; a narrowing choice or rule still applies to it, a widening one is ignored and never gets an approval row (round-1 check FIX B, 24 September 2026; the column was first added by migration 205; this description was corrected by migration 206; see FeedResolver.php plan() step 6)',
 
     -- 🏛️ Per-event venue/room links (#436 — added by migration 179).
     -- Optional, NULL = no link (every pre-#436 event). The FKs
@@ -6054,6 +6061,11 @@ CREATE TABLE IF NOT EXISTS `tblExternalFeeds` (
     -- writes 'public' until the calendar pages let an administrator choose.
     `audienceLevel`   ENUM('public','members','groups') NOT NULL DEFAULT 'members' COMMENT 'The calendar''s own setting (D7).',
     `websiteOptIn`    TINYINT(1)   NOT NULL DEFAULT 0 COMMENT 'D4: also show on the public website; only meaningful at public.',
+    -- 🔑 "Don't show via API" (#514 part P7, migration 206; owner decision of
+    -- 24 September 2026). Unticked by default: API keys then receive exactly
+    -- what a signed-out visitor sees. Ticked, API keys receive none of this
+    -- calendar's events. It can only narrow, so any one source ticking it wins.
+    `apiOptOut`       TINYINT(1)   NOT NULL DEFAULT 0 COMMENT '1 = API keys never receive this calendar''s events ("don''t show via API"). 0 (the default, owner 24 September 2026) = keys receive exactly what a signed-out visitor sees. Any source opting out wins.',
     -- ⏰ When to refresh, who is refreshing, and what happened last time
     -- (#514 — added by migration 205). Every DATETIME in this block is a UTC
     -- MOMENT compared with UTC_TIMESTAMP(), never an event time, so the
@@ -6193,6 +6205,132 @@ CREATE TABLE IF NOT EXISTS `tblExternalFeedRuns` (
     CONSTRAINT `fk_extrun_user` FOREIGN KEY (`triggeredByID`) REFERENCES `tblUsers`(`userID`)         ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
 COMMENT='One row per refresh attempt of an outside calendar (#514). Only the newest fifty of each calendar are kept.';
+
+-- ── from 206_external_calendar_choices_rules_approvals.sql (#514, part P7) ──
+-- The choices, rules and approval rows for events copied in from an outside
+-- calendar. Written out here word for word as in migration 206, so a fresh
+-- install and an upgraded database end with the same four tables. Read that
+-- migration's header before changing anything here, in particular:
+--   * COLLATE utf8mb4_general_ci is written out on every table on purpose
+--     (load-bearing: a hosting panel's database defaults to a different
+--     collation, and the visibility rule then fails with ERROR 1267);
+--   * every moment column is UTC and has NO CURRENT_TIMESTAMP default,
+--     because nothing sets the session's time zone, so CURRENT_TIMESTAMP
+--     would be the server's local time, and "the newest decision wins"
+--     compares these columns;
+--   * `snapStart` and `snapEnd` are times on a clock in `snapTimezone`, not
+--     UTC moments;
+--   * `requestedAudienceSummary` holds counts, never names, so "delete my
+--     data" is never defeated by a name hidden inside a label.
+-- tblEvents is created far above this point, so the approval table's foreign
+-- key to it can sit inline (unlike the venue keys tblEvents itself could not
+-- carry).
+
+CREATE TABLE IF NOT EXISTS `tblExternalEventChoices` (
+    `choiceID`              INT NOT NULL AUTO_INCREMENT COMMENT 'The choice''s own number.',
+    `siteID`                INT NOT NULL COMMENT 'The organisation; always the calendar''s own (checked when saved and when read).',
+    `feedID`                INT NOT NULL COMMENT 'The calendar the event comes from.',
+    `scope`                 ENUM('date','series') NOT NULL COMMENT 'date = this one date; series = every date of the repeating event.',
+    `externalUidHash`       BINARY(32) NOT NULL COMMENT 'The event''s identity (SHA-256 of its UID), never an eventID: a choice must survive the row being removed and brought back.',
+    `externalRecurrenceKey` VARCHAR(20) NOT NULL DEFAULT '' COMMENT 'Which date, for scope=date. Always empty for scope=series; a series row with a key is ignored.',
+    `audienceLevel`         ENUM('public','members','groups','hidden') NOT NULL COMMENT 'Who may see it while the choice applies.',
+    `detailLevel`           ENUM('basic','full') NOT NULL DEFAULT 'basic' COMMENT 'basic = title, date and time only, for people outside the calendar''s own audience.',
+    `websiteOptIn`          TINYINT(1) NOT NULL DEFAULT 0 COMMENT '1 = also on the public website feeds; only meaningful at public.',
+    `apiOptOut`             TINYINT(1) NOT NULL DEFAULT 0 COMMENT '1 = API keys never receive the dates this choice covers, whatever the calendar says. It can only narrow: a 0 here never overrides a 1 on the calendar or a rule.',
+    `fromDate`              DATE NULL COMMENT 'First day it applies, on the organisation''s clock. A calendar date, not a moment; empty = no start.',
+    `toDate`                DATE NULL COMMENT 'Last day it applies, inclusive, on the organisation''s clock; empty = no end.',
+    `overridesPrivateMark`  TINYINT(1) NOT NULL DEFAULT 0 COMMENT '1 = an administrator ticked the warning and chose to show an event the outside calendar marked private.',
+    `note`                  VARCHAR(255) NULL COMMENT 'The administrator''s own note. Free text: may name somebody; see the personal-data catalogue.',
+    `createdByID`           INT NULL COMMENT 'Who made the choice; emptied, never cascaded, if that account is removed.',
+    `createdAt`             DATETIME NOT NULL COMMENT 'UTC moment; always written by the writer (UTC_TIMESTAMP()). No default on purpose: see the header.',
+    `updatedByID`           INT NULL COMMENT 'Who last changed it; emptied, never cascaded, if that account is removed.',
+    `updatedAt`             DATETIME NULL COMMENT 'UTC moment of the last change.',
+    PRIMARY KEY (`choiceID`),
+    UNIQUE KEY `uq_extchoice_identity` (`feedID`,`scope`,`externalUidHash`,`externalRecurrenceKey`),
+    KEY `idx_extchoice_site` (`siteID`),
+    CONSTRAINT `fk_extchoice_feed`    FOREIGN KEY (`feedID`)      REFERENCES `tblExternalFeeds`(`feedID`) ON DELETE CASCADE,
+    CONSTRAINT `fk_extchoice_creator` FOREIGN KEY (`createdByID`) REFERENCES `tblUsers`(`userID`)         ON DELETE SET NULL,
+    CONSTRAINT `fk_extchoice_updater` FOREIGN KEY (`updatedByID`) REFERENCES `tblUsers`(`userID`)         ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+COMMENT='An administrator''s choice of who sees one date, or every date, of an event copied in from an outside calendar (#514).';
+
+CREATE TABLE IF NOT EXISTS `tblExternalFeedRules` (
+    `ruleID`        INT NOT NULL AUTO_INCREMENT COMMENT 'The rule''s own number.',
+    `siteID`        INT NOT NULL COMMENT 'The organisation; always the calendar''s own (checked when saved and when read).',
+    `feedID`        INT NOT NULL COMMENT 'The calendar whose events the rule looks at.',
+    `name`          VARCHAR(120) NOT NULL COMMENT 'The administrator''s own label.',
+    `isActive`      TINYINT(1) NOT NULL DEFAULT 1 COMMENT '0 = switched off: the rule does nothing at all, the API box included.',
+    `audienceLevel` ENUM('public','members','groups','hidden') NOT NULL COMMENT 'Who may see a matching event. Several matching rules combine to the narrowest.',
+    `detailLevel`   ENUM('basic','full') NOT NULL DEFAULT 'basic' COMMENT 'basic = title, date and time only; basic wins if any matching rule says so.',
+    `websiteOptIn`  TINYINT(1) NOT NULL DEFAULT 0 COMMENT '1 = also on the public website feeds. Counts only if EVERY matching rule ticks it.',
+    `apiOptOut`     TINYINT(1) NOT NULL DEFAULT 0 COMMENT '1 = API keys never receive the events this rule matches, whatever the calendar says. It can only narrow: a 0 here never overrides a 1 on the calendar, a choice or another rule.',
+    `fromDate`      DATE NULL COMMENT 'First day it applies, on the organisation''s clock. A calendar date, not a moment; empty = no start.',
+    `toDate`        DATE NULL COMMENT 'Last day it applies, inclusive, on the organisation''s clock; empty = no end.',
+    `createdByID`   INT NULL COMMENT 'Who made the rule; emptied, never cascaded, if that account is removed.',
+    `createdAt`     DATETIME NOT NULL COMMENT 'UTC moment; always written by the writer (UTC_TIMESTAMP()). No default on purpose: see the header.',
+    `updatedByID`   INT NULL COMMENT 'Who last changed it; emptied, never cascaded, if that account is removed.',
+    `updatedAt`     DATETIME NULL COMMENT 'UTC moment of the last change.',
+    PRIMARY KEY (`ruleID`),
+    KEY `idx_extrule_feed_active` (`feedID`,`isActive`),
+    KEY `idx_extrule_site` (`siteID`),
+    CONSTRAINT `fk_extrule_feed`    FOREIGN KEY (`feedID`)      REFERENCES `tblExternalFeeds`(`feedID`) ON DELETE CASCADE,
+    CONSTRAINT `fk_extrule_creator` FOREIGN KEY (`createdByID`) REFERENCES `tblUsers`(`userID`)         ON DELETE SET NULL,
+    CONSTRAINT `fk_extrule_updater` FOREIGN KEY (`updatedByID`) REFERENCES `tblUsers`(`userID`)         ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+COMMENT='An administrator''s rule: who sees every event of one outside calendar that matches a description (#514).';
+
+CREATE TABLE IF NOT EXISTS `tblExternalRuleConditions` (
+    `conditionID` INT NOT NULL AUTO_INCREMENT COMMENT 'The condition''s own number.',
+    `ruleID`      INT NOT NULL COMMENT 'The rule this condition belongs to.',
+    `isException` TINYINT(1) NOT NULL DEFAULT 0 COMMENT '1 = an event matching this is left OUT of the rule.',
+    `matchField`  ENUM('category','title','location') NOT NULL COMMENT 'category = one of the event''s own category words; location = locationName.',
+    `matchType`   ENUM('equals','contains','word') NOT NULL COMMENT 'Category conditions always compare whole words (equals), whatever this says.',
+    `matchValue`  VARCHAR(255) NOT NULL COMMENT 'Compared after lower-casing, removing invisible formatting characters and squeezing spaces.',
+    PRIMARY KEY (`conditionID`),
+    KEY `idx_extcond_rule` (`ruleID`),
+    CONSTRAINT `fk_extcond_rule` FOREIGN KEY (`ruleID`) REFERENCES `tblExternalFeedRules`(`ruleID`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+COMMENT='The conditions an outside-calendar rule tests (#514). Owned by the rule, deleted with it.';
+
+CREATE TABLE IF NOT EXISTS `tblExternalEventApprovals` (
+    `approvalID`   INT NOT NULL AUTO_INCREMENT COMMENT 'The approval row''s own number.',
+    `siteID`       INT NOT NULL COMMENT 'The organisation; always the calendar''s own.',
+    `feedID`       INT NOT NULL COMMENT 'The calendar the event comes from.',
+    `eventID`      INT NOT NULL COMMENT 'The date waiting for, or having had, a decision.',
+    `origin`       ENUM('rule','choice') NOT NULL COMMENT 'What asked for the widening.',
+    `originID`     INT NOT NULL COMMENT 'ruleID or choiceID. No foreign key: it points at one of two tables, and the row is kept as history after the rule or choice is deleted.',
+    `requestHash`  CHAR(64) NOT NULL COMMENT 'Fingerprint of WHAT was asked for (origin, level, detail, website box, list). A change makes a new request.',
+    `contentHash`  CHAR(64) NOT NULL COMMENT 'Fingerprint of what viewers would SEE, dates and times left out on purpose (D14).',
+    `status`       ENUM('pending','approved','declined','superseded','withdrawn') NOT NULL COMMENT 'pending = waiting; superseded = replaced by a newer request or content; withdrawn = nothing asks for it any more.',
+    `reason`       ENUM('new_match','content_changed','address_changed','choice','series_match') NOT NULL COMMENT 'Why the row exists. series_match = it followed a decision on another date of the same repeating event with the same request and content.',
+    `requestedLevel`   ENUM('public','members','groups','hidden') NOT NULL COMMENT 'The level asked for.',
+    `requestedDetail`  ENUM('basic','full') NOT NULL COMMENT 'The detail asked for.',
+    `requestedWebsite` TINYINT(1) NOT NULL COMMENT '1 = the website box was asked for too.',
+    `requestedAudienceSummary` VARCHAR(255) NOT NULL COMMENT 'Counts only, never names (see the table note).',
+    `snapTitle`    VARCHAR(255) NOT NULL COMMENT 'The event''s title when the request was last looked at.',
+    `snapStart`    DATETIME NOT NULL COMMENT 'Wall-clock time copied from startDateTime, in snapTimezone. NOT a UTC moment.',
+    `snapEnd`      DATETIME NULL COMMENT 'Wall-clock time copied from endDateTime, in snapTimezone. NOT a UTC moment.',
+    `snapTimezone` VARCHAR(64) NOT NULL COMMENT 'The zone snapStart and snapEnd are written in (the event''s timezone).',
+    `snapIsAllDay` TINYINT(1) NOT NULL DEFAULT 0 COMMENT '1 = a whole-day event.',
+    `snapCategoryID`  INT NULL COMMENT 'The portal category the event had.',
+    `snapDescription` TEXT NULL COMMENT 'Filled only when requestedDetail = full.',
+    `snapLocation` VARCHAR(255) NULL COMMENT 'Filled only when requestedDetail = full.',
+    `snapUrl`      VARCHAR(500) NULL COMMENT 'Filled only when requestedDetail = full.',
+    `decidedByID`  INT NULL COMMENT 'Who approved or declined; emptied, never cascaded, if that account is removed.',
+    `decidedAt`    DATETIME NULL COMMENT 'UTC moment; the newest decision on a repeating event is the one later dates follow.',
+    `decisionNote` VARCHAR(500) NULL COMMENT 'The decider''s own note, or the portal''s explanation (for example which date this followed).',
+    `createdAt`    DATETIME NOT NULL COMMENT 'UTC moment; always written by the writer. No default on purpose: see the header.',
+    `updatedAt`    DATETIME NULL COMMENT 'UTC moment of the last change.',
+    PRIMARY KEY (`approvalID`),
+    KEY `idx_extappr_site_status` (`siteID`,`status`),
+    KEY `idx_extappr_event_status` (`eventID`,`status`),
+    KEY `idx_extappr_feed_status` (`feedID`,`status`),
+    KEY `idx_extappr_request` (`feedID`,`requestHash`,`contentHash`,`status`),
+    CONSTRAINT `fk_extappr_feed`    FOREIGN KEY (`feedID`)      REFERENCES `tblExternalFeeds`(`feedID`) ON DELETE CASCADE,
+    CONSTRAINT `fk_extappr_event`   FOREIGN KEY (`eventID`)     REFERENCES `tblEvents`(`eventID`)       ON DELETE CASCADE,
+    CONSTRAINT `fk_extappr_decider` FOREIGN KEY (`decidedByID`) REFERENCES `tblUsers`(`userID`)         ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+COMMENT='One date of an outside-calendar event waiting for, or having had, an administrator''s agreement to be shown more widely (#514).';
 
 -- ── from 130_anonymous_attendance.sql, `userAgent` removed by
 --    201_drop_checkin_browser_description.sql (#530) — it was written on
@@ -9435,4 +9573,17 @@ INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue
 ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
 
 INSERT INTO `tblMigrations` (`filename`) VALUES ('205_external_calendar_importer.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- ── from 206_external_calendar_choices_rules_approvals.sql (#514, part P7) ───
+-- The CREATE TABLE statements above (tblEvents, tblExternalFeeds, and the four
+-- new tables written out after tblExternalFeedRuns) already carry every column,
+-- key and constraint this migration adds, so a fresh install never needs its
+-- guarded ALTER TABLE statements. Its one backfill — setting
+-- `importApiOptOut = 0` on every copied-in event that existed before the
+-- column did — is DELIBERATELY NOT repeated: a database built fresh from this
+-- file has no calendars and no copied-in events yet, so there is nothing to
+-- carry over. The same reasoning the 199, 202, 203, 204 and 205 blocks above
+-- give. No settings and no routes: part P8's pages bring those (migration 207).
+INSERT INTO `tblMigrations` (`filename`) VALUES ('206_external_calendar_choices_rules_approvals.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;

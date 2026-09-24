@@ -104,6 +104,11 @@ PERSONAL_COLUMNS = re.compile(
     r"|userID|memberID|donorID|submitterID|recipientUserID|createdByID|updatedByID"
     r"|reviewedByID|assignedToID|approverID|leaderID|uploadedByUserID|convertedUserID"
     r"|targetUserID|startedByID"
+    # Added by #514 part P7: who approved or declined an outside calendar's
+    # event (tblExternalEventApprovals). Named here so that removing that
+    # table's catalogue entry later fails this check instead of passing
+    # silently. (`triggeredByID` is #535's, and deliberately left to it.)
+    r"|decidedByID"
     r")$",
     re.IGNORECASE,
 )

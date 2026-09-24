@@ -66,6 +66,21 @@
  * the database exactly the same statements (the #503 lesson: a difference
  * in work is itself a way to tell them apart).
  *
+ * API KEYS ("key" mode) — the owner's decision of 24 September 2026. A key
+ * is treated as a member of the public, never as a member of the
+ * organisation. For an event COPIED IN from an outside calendar it gets
+ * exactly what a signed-out visitor gets, in the same detail — unless the
+ * calendar, or a choice or rule covering the event, has "Don't show via
+ * API" ticked (the calendar's box is tested live; the rest arrive through
+ * the stored `importApiOptOut`). The "Also show on the public website" box
+ * no longer matters to keys: it controls only the countdown widget and the
+ * sitemap ("website" mode). The organisation's OWN events are a different
+ * matter and are unchanged: a key receives every published one, members-only
+ * ones included, as before #514 (tracked in #127 and #511). Until
+ * 24 September 2026 a key received an imported event only when it was
+ * public AND ticked for the website, with full detail only on a Public
+ * calendar (owner answer 3 of 17 September); the owner replaced that.
+ *
  * HOW THE NUMBER OF PLACEHOLDERS IS KEPT RIGHT
  * -------------------------------------------
  * Every piece of SQL is built through `add()`, which refuses (with a
@@ -381,6 +396,63 @@ final class EventVisibility
     }
 
     /**
+     * What `isPublic` MEANS for each row, to SELECT in place of the raw
+     * column wherever an event's `isPublic` is handed out (the events API).
+     * Returned as `CASE … END AS <name>` with no leading comma, like
+     * `fullDetailSelect()`.
+     *
+     * WHY THE RAW COLUMN WILL NOT DO (#514 part P7, challenge finding 4). On
+     * the portal's own events `isPublic` is the event's own setting, and it
+     * passes through unchanged in every mode. On an event COPIED IN from an
+     * outside calendar the column means nothing: the importer writes 0 on
+     * every row (who may see it is `importLevel`), while the old #327 job
+     * wrote 1. Handing the raw column out would turn every imported event's
+     * `isPublic` from 1 to 0 on the first refresh after an upgrade, and a
+     * website filtering on `isPublic = 1` — a natural filter, because a key
+     * also receives the organisation's own members-only events, which carry
+     * 0 — would silently lose every imported event. So, for an imported row:
+     *   - "key" mode: always 1. Every imported row a key receives is one a
+     *     signed-out visitor can see (plan B4), so 1 is the truth;
+     *   - every other mode: 1 exactly when a signed-out visitor could see it
+     *     NOW — public, and its stored answer not run out. The live calendar
+     *     test is not repeated, because every imported row any mode returns
+     *     has already passed it in the WHERE.
+     *
+     * Rejected: keeping the stored value and telling integrators not to
+     * filter on it. Every existing integration's `isPublic` would change on
+     * upgrade — the surprise the owner asked to avoid.
+     *
+     * It binds nothing in any mode, and its text depends on the mode alone,
+     * so a refused event and a missing one still cost the same statements
+     * (the #503 rule).
+     *
+     * @param string $alias The caller's short name for tblEvents.
+     * @param string $mode  One of the MODE_* constants.
+     * @param string $as    The column name to give it.
+     *
+     * @return array{sql: string, types: string, params: list<int|string>}
+     *
+     * @throws \InvalidArgumentException For an unknown mode, a bad alias or a bad name.
+     */
+    public static function isPublicSelect(string $alias, string $mode, string $as = 'isPublic'): array
+    {
+        self::modeSpec($mode);
+        $e  = self::checkAlias($alias);
+        $as = self::checkAs($as);
+
+        if ($mode === self::MODE_KEY) {
+            return self::seq(['CASE WHEN ', $e, '.externalFeedID IS NULL THEN ', $e, '.isPublic ELSE 1 END AS ', $as]);
+        }
+
+        return self::seq([
+            'CASE WHEN ', $e, '.externalFeedID IS NULL THEN ', $e, '.isPublic',
+            ' WHEN ', $e, ".importLevel = 'public' AND (", $e, '.importRecheckAt IS NULL OR ', $e,
+            '.importRecheckAt > UTC_TIMESTAMP()) THEN 1',
+            ' ELSE 0 END AS ', $as,
+        ]);
+    }
+
+    /**
      * Empty every detail column a "title, date and time only" viewer may
      * not see, and say whether that happened.
      *
@@ -491,10 +563,25 @@ final class EventVisibility
         //    importRecheckAt is a moment in UTC, not an event time.
         $fresh = $e . '.importRecheckAt IS NULL OR ' . $e . '.importRecheckAt > UTC_TIMESTAMP()';
 
-        if (in_array($mode, [self::MODE_WEBSITE, self::MODE_KEY], true) === true) {
-            // 🌐 The public website and API keys: only events marked public
-            //    AND ticked for the website (owner decision D4; owner answer 3).
+        if ($mode === self::MODE_WEBSITE) {
+            // 🌐 The public website (countdown widget, sitemap): only events
+            //    marked public AND ticked for the website (owner decision D4).
+            //    The "Don't show via API" box plays no part here: it is about
+            //    API keys only, so an event can be on the website and not in
+            //    the API, or the other way round.
             $level = self::seq(['( (', $fresh, ') AND ', $e, ".importLevel = 'public' AND ", $e, '.importWebsite = 1 )']);
+        } elseif ($mode === self::MODE_KEY) {
+            // 🔑 API keys (owner, 24 September 2026): exactly the signed-out
+            //    visitor's imported events — public, stored answer still fresh
+            //    — minus anything opted out of the API. The visitor's branch
+            //    below also lets a MEMBER see members and groups events; a key
+            //    is never a member, so those branches are left out rather than
+            //    bound with the viewer 0 (they could never be true, and would
+            //    turn this no-values mode into one that binds seven). The
+            //    website box is NOT tested: it now controls the website only.
+            //    `importApiOptOut` carries the choices' and rules' boxes; the
+            //    calendar's own box is ALSO tested live, below.
+            $level = self::seq(['( (', $fresh, ') AND ', $e, ".importLevel = 'public' AND ", $e, '.importApiOptOut = 0 )']);
         } elseif ($mode === self::MODE_BULK_MEMBERS) {
             // 📰 The newsletter goes to active members: public and members
             //    events only, never selected groups or hidden.
@@ -517,9 +604,19 @@ final class EventVisibility
         //    belongs to the same organisation, and is switched on. Tested
         //    live, so pausing a calendar hides all its events at once, and a
         //    calendar row that no longer exists hides them from everybody.
+        //
+        //    In key mode the calendar's "Don't show via API" box is tested
+        //    here too, live, as well as through the stored answer — belt and
+        //    braces, the same reasoning as pausing: ticking the box stops keys
+        //    in the very next statement, even for a row whose stored answer
+        //    was written before it was ticked, and even if some later writer
+        //    changes the box without working the answers out again. The two
+        //    are ANDed, so the answer is the narrower. The text still depends
+        //    only on the mode (the #503 rule).
+        $apiTest = ($mode === self::MODE_KEY) ? ' AND xf.apiOptOut = 0' : '';
         $imported = self::seq([
             '( ', $e, '.externalFeedID IS NOT NULL',
-            ' AND EXISTS (SELECT 1 FROM tblExternalFeeds xf WHERE xf.feedID = ', $e, '.externalFeedID AND xf.siteID = ', $e, '.siteID AND xf.isActive = 1)',
+            ' AND EXISTS (SELECT 1 FROM tblExternalFeeds xf WHERE xf.feedID = ', $e, '.externalFeedID AND xf.siteID = ', $e, '.siteID AND xf.isActive = 1', $apiTest, ')',
             ' AND ', $level, ' )',
         ]);
 
@@ -530,7 +627,8 @@ final class EventVisibility
      * canSeeFull (#514 plan, section 1.3). A private-marked event skips the
      * calendar-audience shortcut: only an administrator, or a choice that
      * set full detail on purpose, shows it in full (section 1.6). API keys
-     * have their own, narrower answer (owner answer 3; see inside).
+     * get the signed-out visitor's answer, written out so it binds nothing
+     * (owner, 24 September 2026; see inside).
      *
      * @param string                                                $e      Checked alias.
      * @param string                                                $mode   Checked mode.
@@ -543,48 +641,47 @@ final class EventVisibility
     private static function buildFullDetail(string $e, string $mode, array $viewer, string $today, string $as): array
     {
         if ($mode === self::MODE_KEY) {
-            // 🔑 API keys follow the owner's answer 3 (17 September 2026) word
-            //    for word: a key receives an imported event only when it is
-            //    Public with its website box ticked (that half is in
-            //    buildWhere), "at 'title, date and time only' UNLESS THE
-            //    CALENDAR ITSELF IS PUBLIC". So a key gets full detail for an
-            //    imported event only when the event's own calendar, in the
-            //    event's own organisation, is set to Public. Otherwise it gets
-            //    title, date and time only.
+            // 🔑 API keys: EXACTLY the detail a signed-out visitor gets (the
+            //    owner's decision of 24 September 2026), never more.
             //
-            //    The #514 plan's section 1.3 formula read that answer wrongly:
-            //    it gave key mode the general CASE below, whose line
-            //    "importDetail = 'full' THEN 1" handed a key full detail for an
-            //    event marked full detail on a Members or Selected-groups
-            //    calendar. P1's independent check showed it on MySQL on
-            //    21 September 2026 (a Members calendar, a Public + website event
-            //    marked full detail: canSeeFull came back 1). Nothing used it
-            //    yet; parts P2 (the API rows) and P7 build on this corrected
-            //    rule.
+            //    Lines 4 to 7 below are the general CASE further down, as it
+            //    works out for a signed-out visitor: the administrator line is
+            //    "(0 = 1)" in that mode, and the members and groups branches
+            //    need MEMBER(nobody), which no real row satisfies — so only
+            //    the "public" branch is kept. Written out rather than calling
+            //    the general CASE with the viewer 0, because that would bind
+            //    six values here for branches that can never be true for a
+            //    key, and this mode binds none (both API handlers rely on
+            //    that only in comments).
             //
-            //    On a Public calendar the answer below is exactly what a
-            //    signed-out visitor gets from the general rule, never more. The
-            //    one place that matters is a private-marked event (plan section
-            //    1.6, owner answer 1): it shows in full only when an
-            //    administrator's choice set full detail on purpose. A reading
-            //    of "the calendar is Public, so full detail" on its own was
-            //    considered and rejected, because for a private-marked event
-            //    at basic detail it would give a key MORE than a visitor to
-            //    the organisation's own website gets.
+            //    Lines 2 and 3 can only ever answer 0, and keep this answer
+            //    safe ON ITS OWN for a row the WHERE would refuse anyway: an
+            //    event opted out of the API (line 2, new on 24 September), and
+            //    an event whose calendar belongs to another organisation (line
+            //    3, `xd.siteID = <event>.siteID`, from part P1's check). For
+            //    any row, then, a key's answer is never above a visitor's; on
+            //    every row a key actually RECEIVES, it is equal (plan B4).
             //
-            //    `xd.siteID = <event>.siteID`: another organisation's Public
-            //    calendar never counts. The WHERE already refuses an event
-            //    whose calendar belongs elsewhere; this keeps the detail answer
-            //    safe on its own too. Key mode binds nothing here (its viewer
-            //    is always nobody and its administrator branches are off).
+            //    WHAT THIS REPLACED, so nobody puts it back: until
+            //    24 September 2026 a key needed the website box ticked (in the
+            //    WHERE) and got full detail only on a PUBLIC calendar (owner
+            //    answer 3 of 17 September). The owner replaced that with
+            //    "exactly what a signed-out visitor sees", plus the "Don't show
+            //    via API" box. Part P1's own correction still stands inside
+            //    the new rule: a private-marked event at basic detail on a
+            //    Public calendar stays title-only (line 5), because a visitor
+            //    to the organisation's own website gets no more.
             return self::seq([
                 'CASE',
                 ' WHEN ', $e, '.externalFeedID IS NULL THEN 1',
+                ' WHEN ', $e, '.importApiOptOut = 1 THEN 0',
                 ' WHEN NOT EXISTS (SELECT 1 FROM tblExternalFeeds xd WHERE xd.feedID = ', $e, '.externalFeedID',
-                ' AND xd.siteID = ', $e, ".siteID AND xd.audienceLevel = 'public') THEN 0",
+                ' AND xd.siteID = ', $e, '.siteID) THEN 0',
                 ' WHEN ', $e, ".importDetail = 'full' THEN 1",
                 ' WHEN ', $e, '.externalPrivate = 1 THEN 0',
-                ' ELSE 1 END AS ', $as,
+                ' WHEN EXISTS (SELECT 1 FROM tblExternalFeeds xd WHERE xd.feedID = ', $e, '.externalFeedID',
+                ' AND xd.siteID = ', $e, ".siteID AND xd.audienceLevel = 'public') THEN 1",
+                ' ELSE 0 END AS ', $as,
             ]);
         }
 

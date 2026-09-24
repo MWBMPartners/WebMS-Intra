@@ -74,9 +74,12 @@ if ($eventId <= 0 && $slug === '') {
 //        an active member of (or administer), imported events by their own
 //        level;
 //      - a key ("key" mode) sees the organisation's OWN events exactly as
-//        before (#127 and #511 track that separately), and an imported event
-//        only when it is public AND ticked for the public website, with full
-//        details only when its calendar itself is public (owner answer 3).
+//        before (#127 and #511 track that separately), and an event imported
+//        from an outside calendar exactly when a signed-out visitor could see
+//        it, in the same detail — unless its calendar, or a choice or rule
+//        covering it, is set "Don't show via API" (owner, 24 September 2026;
+//        this replaced "public AND ticked for the website, full details only
+//        on a Public calendar", owner answer 3 of 17 September).
 //    A refused event comes back as no row — the same "Event not found" as a
 //    missing one, for the same statements.
 //
@@ -160,6 +163,12 @@ $viewerId   = $ruleMode === EventVisibility::MODE_SESSION ? EventVisibility::ses
 $today      = date('Y-m-d');
 $visibility = EventVisibility::where('e', $ruleMode, $viewerId, $today);
 $fullDetail = EventVisibility::fullDetailSelect('e', $ruleMode, $viewerId, $today, 'canSeeFull');
+// `isPublic` says what it MEANS (EventVisibility::isPublicSelect(), #514 part
+// P7): for an imported event, 1 when a signed-out visitor could see it — so
+// always 1 for a key — instead of the stored column, which the importer
+// writes as 0 on every imported row. The organisation's own events pass
+// through unchanged. It binds nothing, in the same place as the old column.
+$isPublic   = EventVisibility::isPublicSelect('e', $ruleMode);
 
 // 📋 ONE lookup for both ways in (id or slug). Until #514 part P2 there were
 //    two statements, one per key, each selecting `e.*`.
@@ -172,9 +181,9 @@ $fullDetail = EventVisibility::fullDetailSelect('e', $ruleMode, $viewerId, $toda
 //    `(e.externalFeedID IS NOT NULL) AS imported` gives the yes/no the reply
 //    needs without selecting the calendar number itself.
 //
-//    The two `%s` marks are filled by sprintf(): the canSeeFull expression
-//    (SQL built by EventVisibility itself) and the key column, taken from the
-//    fixed pair below — never from anything the caller sent. Why sprintf()
+//    The three `%s` marks are filled by sprintf(): the isPublic and
+//    canSeeFull expressions (SQL built by EventVisibility itself) and the key
+//    column, taken from the fixed pair below — never from anything the caller sent. Why sprintf()
 //    and not joining with `.`: tools/audit-checks/check_sql_columns.py does
 //    not recognise a statement at all when PHP code sits between SELECT and
 //    FROM, so joining would hide this whole column list from it (measured
@@ -184,8 +193,9 @@ $fullDetail = EventVisibility::fullDetailSelect('e', $ruleMode, $viewerId, $toda
 //    The statement text depends only on whether an id or a slug was asked for
 //    and on the caller's mode — never on the event — so a refused event and a
 //    missing one still send the same statement. The rule's fragment goes
-//    after the literal conditions (the draft rule included); canSeeFull's
-//    values are bound first because the SELECT list comes before the WHERE.
+//    after the literal conditions (the draft rule included); isPublic's and
+//    canSeeFull's values (isPublic's are always none) are bound first, in
+//    that order, because the SELECT list comes before the WHERE.
 [$keyColumn, $keyType, $keyValue] = $eventId > 0
     ? ['e.eventID', 'i', $eventId]
     : ['e.eventSlug', 's', $slug];
@@ -195,7 +205,7 @@ $stmt = $db->prepare(sprintf(
     . 'e.startDateTime, e.endDateTime, e.timezone, e.eventTimezone, e.isAllDay, '
     . 'e.locationName, e.locationAddress, e.locationWebURL, e.locationGeoLat, e.locationGeoLng, e.locationW3W, '
     . 'e.locationPhone, e.locationEmail, e.hostOrgName, e.partnerOrgs, e.heroImage, e.posterImage, e.profileImage, '
-    . 'e.status, e.isPublic, e.isFeatured, e.isDeleted, e.deletedAt, e.capacity, '
+    . 'e.status, %s, e.isFeatured, e.isDeleted, e.deletedAt, e.capacity, '
     . 'e.createdByID, e.updatedByID, e.createdAt, e.updatedAt, '
     . 'e.submissionStatus, e.submittedByID, e.submitterName, e.submitterEmail, e.submittedAt, '
     . 'e.moderatedByID, e.moderatedAt, e.moderationNote, e.cancelReason, e.statusChangedByID, e.statusChangedAt, '
@@ -209,13 +219,14 @@ $stmt = $db->prepare(sprintf(
     . 'LEFT JOIN tblEventSeries s ON s.seriesID = e.seriesID '
     . 'WHERE %s = ? AND e.siteID = ? AND e.isDeleted = 0 '
     . "AND (e.status IN ('published', 'cancelled', 'postponed') OR ? = 1)",
+    $isPublic['sql'],
     $fullDetail['sql'],
     $keyColumn
 ) . $visibility['sql'] . ' LIMIT 1');
 if ($stmt !== false) {
     $stmt->bind_param(
-        $fullDetail['types'] . $keyType . 'ii' . $visibility['types'],
-        ...array_merge($fullDetail['params'], [$keyValue, $siteId, $canManageFlag], $visibility['params'])
+        $isPublic['types'] . $fullDetail['types'] . $keyType . 'ii' . $visibility['types'],
+        ...array_merge($isPublic['params'], $fullDetail['params'], [$keyValue, $siteId, $canManageFlag], $visibility['params'])
     );
     $stmt->execute();
     $event = $stmt->get_result()->fetch_assoc();

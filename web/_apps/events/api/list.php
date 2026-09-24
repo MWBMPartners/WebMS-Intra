@@ -13,14 +13,21 @@
  *     they are an active member of (or administer), and imported events by
  *     their own level;
  *   - an API key ("key" mode) sees the organisation's OWN events exactly as
- *     before (#127 and #511 track that separately), and an imported event
- *     only when it is public AND ticked for the public website, with full
- *     details only when its calendar itself is public (owner answer 3 of
- *     17 September 2026).
+ *     before (#127 and #511 track that separately), and an event imported
+ *     from an outside calendar exactly when a signed-out visitor could see
+ *     it, in the same detail — unless its calendar, or a choice or rule
+ *     covering it, is set "Don't show via API" (the owner's decision of
+ *     24 September 2026, which replaced "public AND ticked for the website,
+ *     full details only on a Public calendar", owner answer 3 of
+ *     17 September). The website box no longer matters to keys.
  * Each event says whether it was `imported` and whether its details are
  * limited (`detailsLimited`: true means only title, date and time were
  * sent — description and location fields are null). No `external*` or
- * `import*` column is ever returned.
+ * `import*` column is ever returned. `isPublic` says what it MEANS rather
+ * than what is stored (EventVisibility::isPublicSelect()): for an imported
+ * event it is 1 when a signed-out visitor could see it, so always 1 in a
+ * reply to a key; for the organisation's own events it is the event's own
+ * setting, unchanged.
  *
  * @package   Portal\API
  * @author    MWBM Partners Ltd (t/a MWservices)
@@ -53,13 +60,15 @@ $offset = ($page - 1) * $limit;
 //    events/api/detail.php uses: a key is not a person, and a browser that is
 //    signed in must never lend its session's view to a key sent from it.
 //    Otherwise it is "session" mode with the signed-in person as the viewer.
-//    In key mode neither fragment binds any value (the statements below
-//    always bind at least the organisation, so bind_param() is never empty).
+//    In key mode no fragment binds any value (the statements below always
+//    bind at least the organisation, so bind_param() is never empty); the
+//    isPublic expression binds nothing in any mode.
 $ruleMode   = ApiAuth::bearerKeyRow() !== null ? EventVisibility::MODE_KEY : EventVisibility::MODE_SESSION;
 $viewerId   = $ruleMode === EventVisibility::MODE_SESSION ? EventVisibility::sessionViewerId() : 0;
 $today      = date('Y-m-d');
 $visibility = EventVisibility::where('e', $ruleMode, $viewerId, $today);
 $fullDetail = EventVisibility::fullDetailSelect('e', $ruleMode, $viewerId, $today, 'canSeeFull');
+$isPublic   = EventVisibility::isPublicSelect('e', $ruleMode);
 
 // 📊 Count total — the same rule as the fetch, so the page count never
 //    includes events this caller may not see. The fragment is appended after
@@ -85,27 +94,32 @@ $events = [];
 //    canSeeFull and externalFeedID are selected beside each row (the values
 //    of canSeeFull bound first: the SELECT list comes before the WHERE), then
 //    used and removed below — neither is part of the reply.
-//    The canSeeFull expression goes in through sprintf()'s `%s`, not by
-//    joining it in with `.`: tools/audit-checks/check_sql_columns.py does not
+//    The isPublic and canSeeFull expressions go in through sprintf()'s `%s`,
+//    not by joining them in with `.`: tools/audit-checks/check_sql_columns.py does not
 //    recognise a statement at all when PHP code sits between SELECT and FROM,
 //    which would hide this statement's own column names from it (measured
 //    while building #514 part P2). The text sprintf() puts in is SQL built by
 //    EventVisibility itself, never anything a caller sent.
+//    isPublic stays in the SAME position in the list (#514 part P7), so the
+//    reply's fields keep their order; its (empty) types and values are
+//    bound at its position, BEFORE canSeeFull's, so a later change to it
+//    cannot silently misalign the rest.
 $stmt = $db->prepare(sprintf(
     'SELECT e.eventID, e.eventName, e.eventSlug, e.startDateTime, e.endDateTime, '
-    . 'e.timezone, e.isAllDay, e.locationName, e.status, e.isPublic, e.isFeatured, '
+    . 'e.timezone, e.isAllDay, e.locationName, e.status, %s, e.isFeatured, '
     . 'e.locationAddress, e.locationGeoLat, e.locationGeoLng, e.locationW3W, '
     . 'c.categoryName, t.typeName, e.externalFeedID, %s '
     . 'FROM tblEvents e '
     . 'LEFT JOIN tblEventCategories c ON c.categoryID = e.categoryID '
     . 'LEFT JOIN tblEventTypes t ON t.typeID = e.typeID '
     . 'WHERE e.siteID = ? AND e.isDeleted = 0 AND e.status = \'published\'',
+    $isPublic['sql'],
     $fullDetail['sql']
 ) . $visibility['sql'] . ' ORDER BY e.startDateTime DESC LIMIT ? OFFSET ?');
 if ($stmt !== false) {
     $stmt->bind_param(
-        $fullDetail['types'] . 'i' . $visibility['types'] . 'ii',
-        ...array_merge($fullDetail['params'], [$siteId], $visibility['params'], [$limit, $offset])
+        $isPublic['types'] . $fullDetail['types'] . 'i' . $visibility['types'] . 'ii',
+        ...array_merge($isPublic['params'], $fullDetail['params'], [$siteId], $visibility['params'], [$limit, $offset])
     );
     $stmt->execute();
     $result = $stmt->get_result();

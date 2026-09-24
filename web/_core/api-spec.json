@@ -225,6 +225,7 @@
           },
           "isPublic": {
             "type": "integer",
+            "description": "1 when a signed-out visitor could see this event. For your organisation's own events it is the event's own setting. For an event imported from an outside calendar it is worked out from who may see it, so it is always 1 in a reply to an API key.",
             "enum": [
               0,
               1
@@ -1162,7 +1163,7 @@
           "Legacy Alias"
         ],
         "summary": "List published events for the current site",
-        "description": "**Who sees which events (#514):** a signed-in session sees what the calendar would show that person — public events, members-only events of an organisation they are an active member of (or administer), and events imported from outside calendars by their own level. An API key sees the organisation's own events as before, and an imported event only when it is public AND ticked for the organisation's website; a key gets full details of an imported event only when its calendar itself is public. Details are limited where `detailsLimited` is true (only title, date and time are sent). An event the caller may not see is simply absent from the list and from the counts.",
+        "description": "**Who sees which events (#514):** a signed-in session sees what the calendar would show that person — public events, members-only events of an organisation they are an active member of (or administer), and events imported from outside calendars by their own level. An API key sees the organisation's own published events as before, and an event imported from an outside calendar exactly when a signed-out visitor could see it, in the same detail — unless its calendar, or a choice or rule covering it, is set 'Don't show via API'. Details are limited where `detailsLimited` is true (only title, date and time are sent). An event the caller may not see is simply absent from the list and from the counts.",
         "parameters": [
           {
             "name": "page",
@@ -1218,7 +1219,7 @@
           "Legacy Alias"
         ],
         "summary": "Fetch a single event by ID or slug",
-        "description": "**Who sees which events (#514):** a signed-in session sees what the calendar would show that person — public events, members-only events of an organisation they are an active member of (or administer), and events imported from outside calendars by their own level. An API key sees the organisation's own events as before, and an imported event only when it is public AND ticked for the organisation's website; a key gets full details of an imported event only when its calendar itself is public. Details are limited where `detailsLimited` is true (only title, date and time are sent). An event the caller may not see is simply absent: the reply is the same 404 \"Event not found\" as for an id or slug that matches nothing.",
+        "description": "**Who sees which events (#514):** a signed-in session sees what the calendar would show that person — public events, members-only events of an organisation they are an active member of (or administer), and events imported from outside calendars by their own level. An API key sees the organisation's own published events as before, and an event imported from an outside calendar exactly when a signed-out visitor could see it, in the same detail — unless its calendar, or a choice or rule covering it, is set 'Don't show via API'. Details are limited where `detailsLimited` is true (only title, date and time are sent). An event the caller may not see is simply absent: the reply is the same 404 \"Event not found\" as for an id or slug that matches nothing.",
         "parameters": [
           {
             "name": "id",
@@ -2603,7 +2604,7 @@
           "Events"
         ],
         "summary": "List published events for the current site (v1)",
-        "description": "Requires scope `events:read` (bearer) or an authenticated session. **Legacy alias:** `GET /api/events/list`. **Who sees which events (#514):** a signed-in session sees what the calendar would show that person — public events, members-only events of an organisation they are an active member of (or administer), and events imported from outside calendars by their own level. An API key sees the organisation's own events as before, and an imported event only when it is public AND ticked for the organisation's website; a key gets full details of an imported event only when its calendar itself is public. Details are limited where `detailsLimited` is true (only title, date and time are sent). An event the caller may not see is simply absent from the list and from the counts.",
+        "description": "Requires scope `events:read` (bearer) or an authenticated session. **Legacy alias:** `GET /api/events/list`. **Who sees which events (#514):** a signed-in session sees what the calendar would show that person — public events, members-only events of an organisation they are an active member of (or administer), and events imported from outside calendars by their own level. An API key sees the organisation's own published events as before, and an event imported from an outside calendar exactly when a signed-out visitor could see it, in the same detail — unless its calendar, or a choice or rule covering it, is set 'Don't show via API'. Details are limited where `detailsLimited` is true (only title, date and time are sent). An event the caller may not see is simply absent from the list and from the counts.",
         "security": [
           {
             "bearerAuth": []
@@ -2818,7 +2819,7 @@
           "Events"
         ],
         "summary": "Fetch a single event by id (v1) — the only v1 resource with a detail route",
-        "description": "Requires scope `events:read` (bearer) or an authenticated session. **Legacy alias:** `GET /api/events/detail?id={id}`. **Who sees which events (#514):** a signed-in session sees what the calendar would show that person — public events, members-only events of an organisation they are an active member of (or administer), and events imported from outside calendars by their own level. An API key sees the organisation's own events as before, and an imported event only when it is public AND ticked for the organisation's website; a key gets full details of an imported event only when its calendar itself is public. Details are limited where `detailsLimited` is true (only title, date and time are sent). An event the caller may not see is simply absent: the reply is the same 404 as for an id that matches nothing.",
+        "description": "Requires scope `events:read` (bearer) or an authenticated session. **Legacy alias:** `GET /api/events/detail?id={id}`. **Who sees which events (#514):** a signed-in session sees what the calendar would show that person — public events, members-only events of an organisation they are an active member of (or administer), and events imported from outside calendars by their own level. An API key sees the organisation's own published events as before, and an event imported from an outside calendar exactly when a signed-out visitor could see it, in the same detail — unless its calendar, or a choice or rule covering it, is set 'Don't show via API'. Details are limited where `detailsLimited` is true (only title, date and time are sent). An event the caller may not see is simply absent: the reply is the same 404 as for an id that matches nothing.",
         "security": [
           {
             "bearerAuth": []
