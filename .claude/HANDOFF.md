@@ -99,7 +99,16 @@ nothing uncommitted. Nothing is running, and nothing is left in Docker (`g2ml-my
 
 ## 2. What to do next, in order
 
-1. **PART 7 IS BEING BUILT** (24 September, from 16:35; Opus builder; brief `.claude-work/briefs/514-p7-build.md`; report
+1. **PART 7 IS BUILT; INDEPENDENT CHECK ROUND 1 IS RUNNING** (Opus; brief `.claude-work/briefs/514-p7-check.md`; report
+   `.claude-work/resume/p514-p7--verify-r1.md`; watchdog `tools/watchdog.sh quiet` on that report). **Build result:** 15
+   uncommitted entries (migration 206 new, `tools/feed-resolver-selftest.php` new); every proof E1-E30 passed with its
+   keep-working control; 50 planted faults all caught; resolver test 168 passed on the real clock and six simulated dates;
+   visibility test 150, importer test 135; harness all four phases twice; nothing left in Docker. Verified by me: fingerprints
+   match the build report, `php -l` clean on all changed PHP files, `api-spec.json` valid. Build report
+   `p514-p7--build.md` (8 departures, 13 choices — round 1 judges them); evidence `p514-p7-built-20260924/`. **Trap it
+   found:** PHP's built-in web server keeps its code cache on even when the command line has it off — run it with
+   `-d opcache.enable=0` when planting faults, or you test the previous fault.
+   *(History:)* PART 7 WAS BUILT (Opus builder; brief `.claude-work/briefs/514-p7-build.md`; report
    `.claude-work/resume/p514-p7--build.md`). **The plan is SETTLED** — `p514-p7--plan.md` (~1,280 lines), with a "SETTLED
    24 September 2026" section at its top listing how each of the challenge's 14 findings was resolved; every proof E1-E30 has
    controls in both directions. Two reasoned departures from the challenge are recorded there (unreadable text hides an event
