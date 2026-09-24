@@ -99,7 +99,15 @@ nothing uncommitted. Nothing is running, and nothing is left in Docker (`g2ml-my
 
 ## 2. What to do next, in order
 
-1. **CHECK ROUND 2 = NOT CLEAN (tests only, no leak); FIX ROUND 2 IS RUNNING** (Sonnet; brief
+1. **FIX ROUND 2 IS DONE; NARROW CHECK ROUND 3 IS RUNNING** (Opus; "ROUND 3 (NARROW)" section of
+   `.claude-work/briefs/514-p7-check.md`; report `p514-p7--verify-r3.md`; watchdog on it). Fix round 2 (`p514-p7--fixes2.md`):
+   all four listed faults now CAUGHT for the stated reason, no regression in either earlier fault suite; resolver test 198 → 208;
+   migration 206 re-states `tblEvents.externalDuplicate`'s comment only when it differs (MySQL 8.0.36 accepted it as INSTANT —
+   no table rebuild). Verified by me: resolver test `cf24e5ee…`, 206 `011c4101…`, `full_schema.sql` `8060af18…`, `FeedResolver.php`
+   unchanged at `c3ce89e4…`; `php -l`, parity and MariaDB-only-DDL checks clean; no `--` in the new comment; nothing in Docker.
+   **If round 3 is clean: my own standard checks on the final bytes, then commit part 7 (ONE commit, saying Codex has not
+   reviewed it), push, comment on #514, then plan part 8 (build on Sonnet).**
+   *(History:)* CHECK ROUND 2 = NOT CLEAN (tests only, no leak); FIX ROUND 2 RAN (Sonnet; brief
    `.claude-work/briefs/514-p7-fix2.md`; report `p514-p7--fixes2.md`; watchdog on it). **Then check round 3 (Opus).** Round 2
    (`p514-p7--verify-r2.md`): the duplicate change held against every route, and the preview matched the real save in 576
    cases. Findings: MEDIUM — test e cannot see half of the line it guards, because test rule and choice numbers never collide,
