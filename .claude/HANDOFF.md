@@ -117,10 +117,17 @@ builder runs**; before that it was clean.
 
 ## 2. What to do next, in order
 
-1. **#552 — FIX ROUND 4 DONE (wording + the `ASC` pattern); NARROW CHECK ROUND 5 RUNNING (Opus; "ROUND 5 (NARROW)" section of
-   `.claude-work/briefs/552-check.md`; report `.claude-work/resume/p552--verify-r5.md`; watchdog on it). It judges the diff against
-   `.claude-work/resume/p552-r4-snapshot/`. Now: DEV_NOTES `5d1344c2…`, 202 `24a92ebe…`, 203 `9ee0e0a0…`, full_schema `dcc136c7…`,
-   script `e7174cd7…` (verified by me; 202's statements identical to round 1; check clean).
+1. **#552 — CHECK ROUND 5 = NOT CLEAN (wording/messages/one pattern); FIX ROUND 5 RUNNING (Sonnet; brief
+   `.claude-work/briefs/552-fix5.md`; report `.claude-work/resume/p552--fixes5.md`; watchdog on it); snapshot of the files before
+   it: `.claude-work/resume/p552-r5-snapshot/`. Then narrow check round 6 (Opus) against that snapshot.**
+   **Round 5 corrected MY reasoning (important for the workflow package):** I had said the approved 8.4 run of the end-to-end
+   migration test would catch every shape the text check misses. **It does not.** Every phase of `tools/e2e-migrations/run.sh`
+   starts from TODAY's `full_schema.sql` (phase 4's "stale" database is also built from today's files), so it never upgrades a
+   database built by an older release — the only situation these faults appear in. Round 5 proved T9 and T10 pass the harness's way
+   on 8.4.11 and fail a real upgrade from alpha with 6125. **So today nothing automated tests an upgrade from an older release.**
+   Proposed to the owner (25 Sep): add an "upgrade from the last release" phase — needs the release's install script in CI, either
+   by fetching the base branch (a workflow change) or a saved copy refreshed each release. Round 4's scoping rule ("the 8.4 test is
+   the real guard") rested on the wrong belief; the text check's documented limits stand, but the docs must not promise a net.
    If clean: my own checks on the final bytes, ONE commit saying Codex has not reviewed it, send it to GitHub, update #552,
    then the approved WORKFLOW PACKAGE (queue task 4), then plan #514 part 8.**
    Round 4 (`p552--verify-r4.md`): round 3's MEDIUM closed (32 recorded shapes match all 96 versions of the install script and a
