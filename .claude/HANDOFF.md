@@ -102,9 +102,17 @@ builder runs**; before that it was clean.
 
 ## 2. What to do next, in order
 
-1. **#552 — BUILT (Sonnet; report `.claude-work/resume/p552--build.md`); INDEPENDENT CHECK ROUND 1 RUNNING (Opus; brief
-   `.claude-work/briefs/552-check.md`; report `.claude-work/resume/p552--verify-r1.md`; watchdog on it). Then fix/re-check
-   until clean, then ONE commit saying Codex has not reviewed it, push, update #552.**
+1. **#552 — CHECK ROUND 1 = NOT CLEAN; FIX ROUND 1 RUNNING (Sonnet; brief `.claude-work/briefs/552-fix1.md`; report
+   `.claude-work/resume/p552--fixes1.md`; watchdog on it). Then check round 2 (Opus), until clean, then ONE commit saying Codex
+   has not reviewed it, push, update #552.**
+   Round 1 (`p552--verify-r1.md`, evidence `p552--verify-r1-evidence/`): **the database fix is right** — proved on MySQL 8.4.11,
+   8.0.36 and MariaDB 11.4.13 (fresh install, upgrade from alpha, recovery after a failed run at six stopping points, old-then-new
+   with unchanged checksums, links still refuse cross-organisation rows). Findings: MEDIUM — the new check pooled keys from the
+   install script and the migrations, so it PASSED a half-finished fix (only one of the two places fixed); MEDIUM — it prints no
+   `•`, so the pull-request comment would never show its findings; LOW — several untrue comments (fresh install does NOT stop in
+   202, the upgrade does; "has shipped"; "199-206" should be 188-206; docstring claims); LOW — databases that ran the OLD 202/203
+   in full keep plain indexes (the Migrator never re-runs a recorded migration). **Decided by me: document that, no migration 207**
+   — only unreleased development/test databases can be in that state, it fails loudly, and 207 belongs to part 8.
    Build result: five paths uncommitted — `full_schema.sql` `961822d9…`, `202` `3e6de3ce…`, `203` `ba94e743…`, `DEV_NOTES.md`
    `6d884028…`, new `tools/audit-checks/check_fk_references_unique_key.py` `4b987c09…` (verified by me). Builder proved: check
    finds exactly the 3 on HEAD's script (489 links read), 0 after; 8.4.11 fresh install and upgrade from alpha succeed; partial-run
