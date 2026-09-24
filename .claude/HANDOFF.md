@@ -99,7 +99,14 @@ nothing uncommitted. Nothing is running, and nothing is left in Docker (`g2ml-my
 
 ## 2. What to do next, in order
 
-1. **THE CHALLENGE IS DONE; THE PLAN IS BEING SETTLED** (the original Opus planner, resumed with its context, is folding in the
+1. **PART 7 IS BEING BUILT** (24 September, from 16:35; Opus builder; brief `.claude-work/briefs/514-p7-build.md`; report
+   `.claude-work/resume/p514-p7--build.md`). **The plan is SETTLED** — `p514-p7--plan.md` (~1,280 lines), with a "SETTLED
+   24 September 2026" section at its top listing how each of the challenge's 14 findings was resolved; every proof E1-E30 has
+   controls in both directions. Two reasoned departures from the challenge are recorded there (unreadable text hides an event
+   only when the calendar has a text-comparing rule; one malformed rule still "matches nothing" rather than hiding the whole
+   calendar). **Next: independent check round 1, on Opus, by an agent that did not build it.** If the build report is missing
+   or half-written when you pick this up, the builder died with its session — resume from its progress lines.
+   *(History:)* THE CHALLENGE WAS DONE; THE PLAN WAS SETTLED (the original Opus planner, resumed with its context, is folding in the
    findings IN PLACE in `p514-p7--plan.md`, with a "SETTLED 24 September 2026" section at its top). **Challenge verdict
    (`p514-p7--challenge.md`): fit to build once 1 HIGH + 4 MEDIUM are made; 9 LOW; no new owner question.** It could NOT make an
    API key receive more than a signed-out visitor, and proved the one-time migration update safe to replay. HIGH: `SET
