@@ -119,6 +119,10 @@ builder runs**; before that it was clean.
    more shapes, corrected comments. Verified by me: no SQL statement moved (comment-stripped diff vs HEAD = only the #552 changes).
    **Trap hit again:** the dev-team guard hook refuses any single shell command whose text holds both the release-branch word and
    the word for sending to GitHub, including inside a heredoc brief. Write briefs with the file tool; keep that step separate.
+   **Trap found (24 Sep, 22:00):** restarting `tools/watchdog.sh quiet <file> 900` on a report that is ALREADY quiet fires at
+   once — it measures the file's age, not time since the restart. When restarting on a quiet file, raise the limit (e.g. 1800).
+   The fix-round-2 builder went 15 minutes without logging while genuinely working (an 8.4 container up, fresh scratch files);
+   it was sent a reminder to log.
    *(History:)* CHECK ROUND 1 = NOT CLEAN; FIX ROUND 1 RAN (Sonnet; brief `.claude-work/briefs/552-fix1.md`).
    Round 1 (`p552--verify-r1.md`, evidence `p552--verify-r1-evidence/`): **the database fix is right** — proved on MySQL 8.4.11,
    8.0.36 and MariaDB 11.4.13 (fresh install, upgrade from alpha, recovery after a failed run at six stopping points, old-then-new
