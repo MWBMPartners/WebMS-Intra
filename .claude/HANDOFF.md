@@ -102,9 +102,17 @@ builder runs**; before that it was clean.
 
 ## 2. What to do next, in order
 
-1. **#552 — CHECK ROUND 1 = NOT CLEAN; FIX ROUND 1 RUNNING (Sonnet; brief `.claude-work/briefs/552-fix1.md`; report
-   `.claude-work/resume/p552--fixes1.md`; watchdog on it). Then check round 2 (Opus), until clean, then ONE commit saying Codex
-   has not reviewed it, push, update #552.**
+1. **#552 — FIX ROUND 1 DONE; CHECK ROUND 2 (NARROW) RUNNING (Opus; "ROUND 2 (NARROW)" section of
+   `.claude-work/briefs/552-check.md`; report `.claude-work/resume/p552--verify-r2.md`; watchdog on it). If clean: my own checks
+   on the final bytes, ONE commit saying Codex has not reviewed it, push, update #552, then plan #514 part 8.**
+   Fix round 1 (`p552--fixes1.md`): the check now models a fresh install and an upgrade separately (rule 1: install script's
+   links against its own keys; rule 2: migrations walked in order; rule 3: the two must agree on each index's uniqueness), prints
+   `•` on findings only, reads unnamed links / no-backtick names / lower case / CREATE UNIQUE INDEX / prefix keys; all comments
+   corrected; no migration 207 (documented). Fingerprints: DEV_NOTES `efe17e64…`, 202 `8e9eb175…`, 203 `258739f8…`,
+   full_schema `dcc136c7…`, script `9a816cd9…`. **Verified by me: no SQL statement moved** — with comment lines stripped, HEAD vs
+   now differs only in the three UNIQUE KEY lines and the three guards. The eight `--`-in-COMMENT lines in `full_schema.sql` the
+   fixer flagged are old (alpha has them) and already on #543.
+   *(History:)* CHECK ROUND 1 = NOT CLEAN; FIX ROUND 1 RAN (Sonnet; brief `.claude-work/briefs/552-fix1.md`).
    Round 1 (`p552--verify-r1.md`, evidence `p552--verify-r1-evidence/`): **the database fix is right** — proved on MySQL 8.4.11,
    8.0.36 and MariaDB 11.4.13 (fresh install, upgrade from alpha, recovery after a failed run at six stopping points, old-then-new
    with unchanged checksums, links still refuse cross-organisation rows). Findings: MEDIUM — the new check pooled keys from the
