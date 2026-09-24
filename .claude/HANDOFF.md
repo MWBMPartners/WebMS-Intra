@@ -256,6 +256,15 @@ first so the review covers a settled state.
   anything that matters belongs in this handoff.
 - **A running log of every agent run:** `.claude-work/resume/RUNS.md`.
 
+## 8b. Which model builds (owner challenged it, 24 September 2026)
+
+The owner asked why part 7 was being built on Opus when the rule is Sonnet or Haiku for building. **The rule allows Opus only when
+the build is genuinely complex** — and part 7 had been labelled Opus in the September plan, a label that was followed without being
+re-weighed once the plan was settled into 1,280 detailed lines. It was let finish (it was ~50 minutes in, on its last proofs).
+**From now on:** parts 8-11 build on **Sonnet** (the plan says so for all four); fix rounds on Sonnet unless they are a large
+rewrite; checking stays on **Opus** (never weaker than the build). **Whenever Opus is chosen for a build, say why BEFORE launching
+it**, so it is a visible choice the owner can overrule.
+
 ## 9. Traps that have cost real time on this branch
 
 - **A lost "finished" notice leaves the queue idle — and the owner has asked never to need a nudge (24 September).** Start a
