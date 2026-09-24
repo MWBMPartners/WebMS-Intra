@@ -102,9 +102,16 @@ builder runs**; before that it was clean.
 
 ## 2. What to do next, in order
 
-1. **#552 — IN PROGRESS: build running (Sonnet; brief `.claude-work/briefs/552-build.md`; report
-   `.claude-work/resume/p552--build.md`; watchdog on it). Then an Opus check that did not build it, round after round until
-   clean, then ONE commit saying Codex has not reviewed it, push, update #552.**
+1. **#552 — BUILT (Sonnet; report `.claude-work/resume/p552--build.md`); INDEPENDENT CHECK ROUND 1 RUNNING (Opus; brief
+   `.claude-work/briefs/552-check.md`; report `.claude-work/resume/p552--verify-r1.md`; watchdog on it). Then fix/re-check
+   until clean, then ONE commit saying Codex has not reviewed it, push, update #552.**
+   Build result: five paths uncommitted — `full_schema.sql` `961822d9…`, `202` `3e6de3ce…`, `203` `ba94e743…`, `DEV_NOTES.md`
+   `6d884028…`, new `tools/audit-checks/check_fk_references_unique_key.py` `4b987c09…` (verified by me). Builder proved: check
+   finds exactly the 3 on HEAD's script (489 links read), 0 after; 8.4.11 fresh install and upgrade from alpha succeed; partial-run
+   recovery; 8.0.36 replay no-op, link-already-present case with unchanged checksums; harness exit 0; 21 audit checks exit 0.
+   **Correction:** released alpha's last migration is **187**, not 198 (the build brief said 198) — 188-206 are all unreleased.
+   **Two comment errors I spotted, handed to the checker:** 202's A6b comment says the migration "has shipped" (it has not); the
+   header says a fresh 8.4 install fails "inside 202" (it fails in `full_schema.sql` first; the upgrade stops in 202).
    **What:** MySQL 8.4 with default settings (`restrict_fk_on_non_standard_key` = ON) refuses three links this branch added —
    `fk_user_role_role_site` (migration 202), `fk_user_group_group_site` and `fk_user_dept_dept_site` (203) — because each points at
    an ordinary index, not a unique one (ERROR 6125). A fresh install AND an upgrade both stop. Found by part 7's round 3 checker;
