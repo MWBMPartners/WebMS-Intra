@@ -97,7 +97,22 @@ when it is not given a scratch folder — which is exactly what it should do.
 
 ## 2. What to do next, in order
 
-1. **CHECK ROUND 4 IS RUNNING** (24 September, about 10:10, Opus; the "ROUND 4" section of `.claude-work/briefs/514-p6-check.md`;
+1. **ROUND 4 CAME BACK NOT CLEAN — one HIGH, in the test. FIX ROUND 4 IS RUNNING** (24 September, about 10:45, Opus, because
+   it is a large rewrite; brief `.claude-work/briefs/514-p6-fix4.md`; report `.claude-work/resume/p514-p6--fixes4.md`).
+   **Then check round 5.** Round 4's report: `p514-p6--verify-r4.md`; evidence `p514-p6--verify-r4-evidence/`, **including a
+   proved way to run the whole test as if it were any date** (it edits a scratch copy of `FeedImporter.php:376`, the one line in
+   the portal that reads today's date) — reuse it for every later round.
+
+   **The finding: sections A to I of `tools/feed-importer-selftest.php` are pinned to October 2026 and March 2027**, while the
+   portal keeps a window of 30 days back to 12 months ahead of the REAL today. **From 1 November 2026 the test fails on correct
+   code every run, permanently** (58 passed / 51 failed by 1 December), **and on 1 December round 1's deletion fault gives a list
+   of failures identical, line for line, to correct code's** — so the one fault this test exists for goes invisible, and nothing
+   else guards it. Part J (already anchored to today) and the round-3 fix held up in every season the checker tried. The fix
+   anchors every date and expected value to today, finds section G's clock-change nights from PHP's data, and adds a check that
+   refuses loudly if any written date falls outside the kept window. **This is urgent in a literal sense: it must land before
+   1 November 2026.**
+
+   *(Earlier:)* Check round 4 ran from about 10:10 on Opus (the "ROUND 4" section of `.claude-work/briefs/514-p6-check.md`;
    report `.claude-work/resume/p514-p6--verify-r4.md`). **Fix round 3 is DONE** (`p514-p6--fixes3.md`, evidence in
    `p514-p6-built-20260924-fixes3/`): only `tools/feed-importer-selftest.php` changed (`6b08a692…`); verified by me that the
    other ten entries match round 3's fingerprints, `php -l` clean, `ics-reader-selftest.php` 332/0/2, and nothing left in Docker.
