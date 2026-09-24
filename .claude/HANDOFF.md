@@ -97,9 +97,23 @@ when it is not given a scratch folder — which is exactly what it should do.
 
 ## 2. What to do next, in order
 
-1. **ROUND 4 CAME BACK NOT CLEAN — one HIGH, in the test. FIX ROUND 4 IS RUNNING** (24 September, about 10:45, Opus, because
-   it is a large rewrite; brief `.claude-work/briefs/514-p6-fix4.md`; report `.claude-work/resume/p514-p6--fixes4.md`).
-   **Then check round 5.** Round 4's report: `p514-p6--verify-r4.md`; evidence `p514-p6--verify-r4-evidence/`, **including a
+1. **FIX ROUND 4 IS DONE; A SMALL FOLLOW-ON FIX (D5) IS RUNNING; THEN CHECK ROUND 5 covers both.**
+   - **Fix round 4 (done, Opus):** `tools/feed-importer-selftest.php` is now `52f048b3…` (2,436 lines); the other ten part-6
+     files are unchanged (verified by me). Every date in sections A-I is now an offset from one reading of today (`fi_today()`,
+     the same expression the portal uses); section G finds the real clock-change nights from PHP's data and refuses if either is
+     not a real change; a new **check 0** refuses the whole run if any written date falls outside the kept period. **Proved
+     across seven simulated dates from today to June 2027: 0 failures on the fixed code, 8 on the pre-fix code, and round 1's
+     deletion fault caught on EVERY date.** Report `p514-p6--fixes4.md`, evidence `p514-p6-built-20260924-fixes4/`.
+     **One deviation the next checker must examine:** J4 now falls back to section G's night on the ~20 days a year its own helper
+     finds none, so it sometimes runs on a night up to about ten days in the past.
+   - **Fix 4b (running, Sonnet; brief `.claude-work/briefs/514-p6-fix4b.md`; report `p514-p6--fixes4b.md`):** check D5 passed
+     only if two refreshes happened to start in the same second of the database clock — **it failed at random in 2 of 48 runs**
+     under load. Being fixed now, before round 5, so one check covers both changes, and because this test is about to go into the
+     pull-request checks, where a randomly-failing check gets ignored.
+   - **Then check round 5**: add a "ROUND 5" section to `.claude-work/briefs/514-p6-check.md`; Opus; report
+     `p514-p6--verify-r5.md`. Reuse round 4's any-date simulation.
+
+   *(Round 4's finding, for context:)* Round 4's report: `p514-p6--verify-r4.md`; evidence `p514-p6--verify-r4-evidence/`, **including a
    proved way to run the whole test as if it were any date** (it edits a scratch copy of `FeedImporter.php:376`, the one line in
    the portal that reads today's date) — reuse it for every later round.
 
