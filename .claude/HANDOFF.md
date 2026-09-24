@@ -66,163 +66,42 @@ ps -eo pid,lstart,command | grep -a 'p514' | grep -a -v grep
 Nothing listed = safe to restart. **As of 21:00 on 23 September 2026 nothing is running and the tree is in a complete,
 consistent state**, so restarting now is safe.
 
-## 1. Where the work is, exactly
+## 1. Where the work is, exactly (updated 24 September 2026, about 15:55)
 
 **Branch: `claude/alpha-wip`.** It will target `alpha` through ONE pull request later, **only when the owner says so.**
-Last commit at the time of writing: the handoff commit made alongside this block.
 
-**#514 (importing outside calendars) is the current job — 11 parts.** Parts 1 to 5 are committed. **Part 6 is built, fixed
-twice, and NOT yet committed.**
+**#514 (importing outside calendars) is the current job — 11 parts. Parts 1 to 6 are COMMITTED.** Part 6 landed as **`c8c490b`**
+after seven rounds of independent checking (the last two narrow and clean). **The working tree is clean** — nothing staged,
+nothing uncommitted. Nothing is running, and nothing is left in Docker (`g2ml-mysql` and `wrapper-v2` belong to other projects).
 
-**THE WORKING TREE HOLDS PART 6, UNCOMMITTED — 11 entries.** Four are new, seven are changes to files already committed:
-
-| Entry | New? | What |
-|---|---|---|
-| `web/_sql/205_external_calendar_importer.sql` | NEW | The database change for part 6 |
-| `web/_core/FeedImporter.php` | NEW | Does the refreshing |
-| `web/_core/FeedResolver.php` | NEW | Works out who may see each event |
-| `tools/feed-importer-selftest.php` | NEW | Part 6's own test (owner's decision today) |
-| `web/_sql/full_schema.sql` | changed | The twin of migration 205 |
-| `web/_apps/cron/import-feeds.php` | changed | The scheduled job, rewritten |
-| `web/_apps/admin/calendar/feeds.php` | changed | Admin page |
-| `web/_apps/admin/calendar/feeds-save.php` | changed | Admin save handler |
-| `web/_core/personal-data-catalogue.php` | changed | So "delete my data" covers the new tables |
-| **`web/_core/IcsReader.php`** | changed | **PART 5's file, reopened** — see section 3 |
-| **`tools/ics-reader-selftest.php`** | changed | **PART 5's test, reopened** — a case for that fix |
-
-**Verified by me at 20:55 on 23 September**, not taken from any report: exactly those 11 entries, nothing staged, no stash,
-`php -l` rc=0 on all nine PHP files, **`tools/ics-reader-selftest.php` gives 332 passed / 0 failed / 2 skipped** (it was 320
-before part 6's fixes added cases), and **`tools/feed-importer-selftest.php` refuses with exit 1** saying "Nothing was checked."
-when it is not given a scratch folder — which is exactly what it should do.
+**What part 6 left behind for later parts, all recorded on #514:**
+- Part 6 reopened part 5: `web/_core/IcsReader.php` now reports NO "reliable up to here" point when a repeating event was cut at
+  its 400-date limit (see section 3). Its committed test changed with it.
+- Part 6's proofs are committed as `tools/feed-importer-selftest.php` (114 checks; refuses without a throwaway database AND a test
+  calendar server). **Every date in it is worked out from today** — it had been written with fixed dates and would have failed on
+  correct code from 1 November 2026. A proved way to run the whole test "as if it were" any date is in
+  `.claude-work/resume/p514-p6--verify-r4-evidence/` (it edits a scratch copy of `FeedImporter.php:376`, the one line in the
+  portal that reads today's date). **Reuse it for any later part that touches refreshing.**
+- Follow-ups opened or updated: **#550** (two small gaps in that test's first check — low); **#535** gained the part-6 privacy gap
+  (`tblExternalFeedRuns.triggeredByID` is not in `GdprEraser::LINK_COLUMNS`).
+- **Full history of part 6's seven rounds:** `.claude-work/resume/RUNS.md`, and the reports `p514-p6--verify-r1.md` to `-r7.md`
+  and `p514-p6--fixes*.md`, all in `.claude-work/resume/`.
 
 ## 2. What to do next, in order
 
-1. **NARROW CHECK ROUND 7 IS RUNNING** (24 September, about 15:15, Opus; "ROUND 7 (NARROW)" section of
-   `.claude-work/briefs/514-p6-check.md`; report `p514-p6--verify-r7.md`) — judging only fix 6. **Fix 6 is DONE**: test now
-   `6b776d44…` (2,710 lines); `server.php` finds its folder with `__DIR__`; `TZID=` matched in any case; one honest comment line.
-   Proved from a folder with eight digits in its name: 114/0/1. Other ten entries unchanged (verified by me); nothing in Docker.
-   **If round 7 is clean: commit part 6 (step 3 below).**
-
-   *(Earlier:)* ROUND 6 = PASS with one LOW, caused by fix 5. FIX 6 RAN (24 September, about 14:40, Sonnet; brief
-   `.claude-work/briefs/514-p6-fix6.md`; report `p514-p6--fixes6.md`), **then a narrow round 7.** Round 6
-   (`p514-p6--verify-r6.md`, evidence `p514-p6--verify-r6-evidence/`) proved check 0's line-joining matches the portal's reader
-   character for character and missed none of 600,000 planted dates; ten-year scan 0 refusals. **The LOW:** the test writes its
-   own folder path into `server.php`, which check 0 reads, so a folder name with eight digits in a row (this project's own naming
-   style, e.g. `p514-p6-built-20260924-fixes5`) makes the whole run REFUSE on correct code. Fix: `server.php` finds its folder with
-   `__DIR__`. **Bundled with two pre-existing small items** round 6 noted: check 0 read `TZID=` in capitals only (the portal reads
-   any case), and the comment should say check 0 reads `server.php` as source, not as what it serves.
-
-   *(Earlier:)* NARROW CHECK ROUND 6 RAN (24 September, about 14:05, Opus; "ROUND 6 (NARROW)" section of
-   `.claude-work/briefs/514-p6-check.md`; report `p514-p6--verify-r6.md`) — judging only fix 5. **Fix 5 is DONE**: test now
-   `b2bf386b…` (2,665 lines), other ten entries unchanged (verified by me), nothing left in Docker. It unfolds lines first, refuses
-   any date written as a period, counts every date in each file against what was judged, and keys the "outside on purpose" list
-   by file — the last needed a one-line change to the `$rdate` closure outside the named function, which the builder flagged.
-   **If round 6 is clean: commit part 6 (step 3 below).**
-
-   *(Earlier:)* ROUND 5 = PASS, with one LOW that I chose to fix before committing (fix 5; brief
-   `.claude-work/briefs/514-p6-fix5.md`; report `p514-p6--fixes5.md`).
-   Round 5 (`p514-p6--verify-r5.md`, evidence `p514-p6--verify-r5-evidence/`) ran 70 full test runs across ten simulated dates
-   and found **no date on which the test passes on broken code or fails on correct code**; the J4 borrowed night holds (always a
-   real clocks-back night, never closer than 17 days to the edge of the kept period, fails on the pre-fix code every time); the D5
-   clock pin covers every clock read on that path and cannot leak; every section-D check still fails on the fault it names.
-   **The LOW:** check 0 misses three shapes the committed writer never produces — a folded line broken before a comma, a date
-   written as a period with a slash, and a date equal to one of D4's deliberately-old filler values in a different file (its
-   "outside on purpose" list is keyed by date alone). **Why fix it rather than leave it:** check 0 exists to guard FUTURE edits by
-   other people, which is exactly when such shapes appear, and the test is about to run on every pull request. It also adds the
-   checker's recommended belt — count every date in each file and refuse if the count differs from what was judged — so the NEXT
-   unforeseen shape fails loudly too.
-
-   *(Earlier:)* **CHECK ROUND 5 RAN** (24 September, about 12:40, Opus; "ROUND 5" section of `.claude-work/briefs/514-p6-check.md`;
-   report `.claude-work/resume/p514-p6--verify-r5.md`). It covers fix 4 AND fix 4b. **Fix 4b is DONE:** D5 now pins the session
-   clock with `SET timestamp` inside `try/finally`, with a control on two different seconds; **50 runs three at a time, 0 failures**.
-   Test file now `62385341…` (2,536 lines); the other ten part-6 entries unchanged (verified by me); nothing left in Docker.
-   **If round 5 is clean: commit part 6 (step 3 below).**
-
-   *(Earlier, for context:)* **FIX ROUND 4 WAS DONE; A SMALL FOLLOW-ON FIX (D5) RAN; THEN CHECK ROUND 5 covers both.**
-   - **Fix round 4 (done, Opus):** `tools/feed-importer-selftest.php` is now `52f048b3…` (2,436 lines); the other ten part-6
-     files are unchanged (verified by me). Every date in sections A-I is now an offset from one reading of today (`fi_today()`,
-     the same expression the portal uses); section G finds the real clock-change nights from PHP's data and refuses if either is
-     not a real change; a new **check 0** refuses the whole run if any written date falls outside the kept period. **Proved
-     across seven simulated dates from today to June 2027: 0 failures on the fixed code, 8 on the pre-fix code, and round 1's
-     deletion fault caught on EVERY date.** Report `p514-p6--fixes4.md`, evidence `p514-p6-built-20260924-fixes4/`.
-     **One deviation the next checker must examine:** J4 now falls back to section G's night on the ~20 days a year its own helper
-     finds none, so it sometimes runs on a night up to about ten days in the past.
-   - **Fix 4b (running, Sonnet; brief `.claude-work/briefs/514-p6-fix4b.md`; report `p514-p6--fixes4b.md`):** check D5 passed
-     only if two refreshes happened to start in the same second of the database clock — **it failed at random in 2 of 48 runs**
-     under load. Being fixed now, before round 5, so one check covers both changes, and because this test is about to go into the
-     pull-request checks, where a randomly-failing check gets ignored.
-   - **Then check round 5**: add a "ROUND 5" section to `.claude-work/briefs/514-p6-check.md`; Opus; report
-     `p514-p6--verify-r5.md`. Reuse round 4's any-date simulation.
-
-   *(Round 4's finding, for context:)* Round 4's report: `p514-p6--verify-r4.md`; evidence `p514-p6--verify-r4-evidence/`, **including a
-   proved way to run the whole test as if it were any date** (it edits a scratch copy of `FeedImporter.php:376`, the one line in
-   the portal that reads today's date) — reuse it for every later round.
-
-   **The finding: sections A to I of `tools/feed-importer-selftest.php` are pinned to October 2026 and March 2027**, while the
-   portal keeps a window of 30 days back to 12 months ahead of the REAL today. **From 1 November 2026 the test fails on correct
-   code every run, permanently** (58 passed / 51 failed by 1 December), **and on 1 December round 1's deletion fault gives a list
-   of failures identical, line for line, to correct code's** — so the one fault this test exists for goes invisible, and nothing
-   else guards it. Part J (already anchored to today) and the round-3 fix held up in every season the checker tried. The fix
-   anchors every date and expected value to today, finds section G's clock-change nights from PHP's data, and adds a check that
-   refuses loudly if any written date falls outside the kept window. **This is urgent in a literal sense: it must land before
-   1 November 2026.**
-
-   *(Earlier:)* Check round 4 ran from about 10:10 on Opus (the "ROUND 4" section of `.claude-work/briefs/514-p6-check.md`;
-   report `.claude-work/resume/p514-p6--verify-r4.md`). **Fix round 3 is DONE** (`p514-p6--fixes3.md`, evidence in
-   `p514-p6-built-20260924-fixes3/`): only `tools/feed-importer-selftest.php` changed (`6b08a692…`); verified by me that the
-   other ten entries match round 3's fingerprints, `php -l` clean, `ics-reader-selftest.php` 332/0/2, and nothing left in Docker.
-   The helper now skips PHP's range-start entry and needs summer time before a change; the promised SKIP turned out to be
-   reachable (12-19 days a year, proved by five new J0 checks); J4 refuses loudly unless handed a real clocks-back moment; a
-   six-year scan of the committed function found 0 of 2,190 days wrong. **One deviation, stated by the builder:** it proved the
-   winter case by forcing the helper's answer, not by simulating the whole rig in winter, because `FeedImporter::windowFor()`
-   reads the real clock. Round 4 is asked to judge that. **If round 4 is clean: commit part 6 (see step 3).**
-
-   *(Round 3's finding, for context:)* Round 3's report: `p514-p6--verify-r3.md`, evidence in
-   `p514-p6--verify-r3-evidence/`.
-
-   **Round 3 confirmed everything the portal code does:** FIX A is right and narrow; the MOVED control still guards against
-   "never report anything" (the checker broke the reader three ways — two caught by that control AND an older one, I5, that
-   nobody had mentioned); the per-calendar slice is honest on both clock-change nights and in a zone that changes at midnight;
-   and the new test caught three faults the checker planted in the importer itself (2, 13 and 52 failures).
-
-   **The finding:** `fi_nextClocksBack()` misreads PHP. `getTransitions()`'s first entry has its timestamp EQUAL to the range
-   start (verified by me on PHP 8.5.10), so in winter — when that entry is marked standard time — the helper returns an ordinary
-   day. **For 154 days a year, check J4 then prints PASS against the faulty pre-fix code**, and its promised SKIP never runs.
-   `web/_core/Ical.php:151-152` already does this correctly (skip entry 0). **Nothing runs the test automatically**, which is why
-   it sat unnoticed — the strongest argument yet for queue task 4.
-
-   **If the fix round is no longer running when you pick this up**, read `p514-p6--fixes3.md`; if it is missing or half-written,
-   the agent died with its session — re-run it from the same brief. Then run check round 4: add a "ROUND 4" section to
-   `.claude-work/briefs/514-p6-check.md` and check on Opus (verification is never done by a weaker model than the build).
-
-   *(History, for context only.)* Round 3 was run on Opus from about 08:25 and was told to attack hardest the two unusual things
-   in that round: the two committed assertions in
-   part 5's self-test that had to CHANGE — one now asserts the opposite of what it did, and a control that existed to stop this
-   fix becoming "never report anything" was MOVED rather than deleted, so it must still guard that; and whether the new committed
-   test earns its place (the claim is 104 checks passing against the fixed code and 96 passing with 8 failures against the code
-   before the fix). **The round-2 fix report is `.claude-work/resume/p514-p6--fixes2.md`** (582 lines,
-   read and verified by me — see the correction block appended at its end).
-
-   **What round 2's fixes did, so the round-3 brief can say it:** the reader no longer reports any "everything before here" point
-   when a repeating event was cut short (section 3 below); one word an administrator reads changed from "up to" to "before",
-   because the comparison really is strictly before; and part 6's proofs became `tools/feed-importer-selftest.php`.
-   **Everything is proved in both directions**: the new part-5 checks give 332 passed against the fixed reader and **326 passed /
-   6 failed against the committed one**, printing the exact wrong moments; the new part-6 test gives **104 passed against the
-   fixed code and 96 passed / 8 failed against the pre-fix code**, printing the real deletions. The builder also re-ran the
-   checker's own thirteen calendars and two attack scripts unchanged, and all four of its fault checks now pass.
-
-   **Three things worth carrying into the round-3 brief as places to attack:** two committed assertions in part 5's self-test had
-   to CHANGE (one now asserts the opposite of what it did; one control was MOVED onto the only source that still reports a point
-   rather than deleted — check it still guards what it was for); the builder deleted the now-dead plumbing as well as its wrong
-   use, which is more than the brief asked; and one check in the new test can SKIP for a calendar reason (about two weeks each
-   October there is no clocks-back night inside the period with room either side).
-2. **Keep going until a check round finds nothing.** That is the owner's rule and it has earned its keep: part 5 took nine
-   rounds, and each of the first eight found something the one before had missed.
-3. **When a round is clean:** run the standard checks yourself (section 6), then **ONE commit for all of part 6**, push,
-   and comment on #514. **The commit message must say plainly that Codex has NOT reviewed it** — silence must never imply a
-   review happened.
-4. **Then part 7** — the plan's P7 section is `.claude-work/resume/p514--plan-r2.md` lines 1612-1791. Migration 206.
-5. **Then the rest of the queue** (section 5).
+1. **Plan part 7 with Opus before building it.** The plan's P7 section is `.claude-work/resume/p514--plan-r2.md` lines
+   **1645-1824** (it moved: a decisions block was added at the top of the file). **It must now also carry the owner's API-key
+   decision of 24 September** (top of the plan file, and the "DECISIONS TAKEN 24 SEPTEMBER" block above): keys see imported events
+   exactly as a signed-out visitor does, plus a per-calendar "don't show via API" box, unticked by default, combined so that ANY
+   source opting out wins. That reverses committed code in parts 1 and 2 (`EventVisibility.php` key mode around lines 494-497 and
+   545 onward, and `tools/event-visibility-selftest.php`'s key-mode checks), and the checkbox itself belongs to part 8. **The plan
+   must also be re-read against what parts 1 to 6 actually built**, which has moved on from the plan's text in several places.
+   Deep planning is sequential: one Opus planner, then an Opus challenger that reads the planner's output. Use background agents
+   with progress files, not the workflow tool (its agents are killed after three minutes without output).
+2. **Migration 206** — verified free on 24 September; read it again at build time.
+3. **Build part 7**, then check it with an agent that did not build it, round after round until one is clean, then commit — ONE
+   commit, saying plainly Codex has not reviewed it.
+4. **Then parts 8 to 11**, then the rest of the queue (section 5).
 
 ## 3. The one thing in part 6 that is unusual, and must not be lost
 
@@ -276,8 +155,8 @@ silently; no stacked pull requests; nothing hard-coded, because this is a produc
 | # | Task | Issue | Status |
 |---|---|---|---|
 | 1 | #514 parts 1-5 | #514 | Done — `31bd64e` and earlier |
-| 2 | **#514 part 6** | #514 | **Built, fixed twice, UNCOMMITTED. Needs check round 3.** |
-| 3 | #514 parts 7-11 | #514 | Queued. P7 = plan lines 1612-1791, migration 206. **P7 and P8 now also carry the API-key change (owner, 24 Sept)** |
+| 2 | #514 part 6 | #514 | **Done — `c8c490b`** (7 check rounds) |
+| 3 | #514 parts 7-11 | #514 | **Next: plan P7 with Opus** (plan lines 1645-1824), migration 206. **P7 and P8 now also carry the API-key change (owner, 24 Sept)** |
 | 4 | Both self-tests into the pull-request checks | — | Queued, approved. **Needs `-d memory_limit=256M` or more** |
 | 5 | Anyone can approve their own expense claim and then be paid | **#545** | Queued — **high, live fault** |
 | 6 | The "my volunteering" page crashes for everyone | **#547** | Queued — **high, live fault** |

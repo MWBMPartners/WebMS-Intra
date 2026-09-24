@@ -542,3 +542,17 @@ project's, or a named volume without asking.
 *Before asking the owner a design question, look for an answer already given* —
 the #514 plan had its answers at the very top, and "built as recommended"
 further down meant the recommendation was built, not that it was unanswered.
+
+**#514 part 6 is committed (`c8c490b`, 24 September 2026)** after seven rounds of
+independent checking. It reopened part 5's reader: a repeating event cut at its
+400-date limit now makes the whole read report no "reliable up to here" point,
+because once a changed date moves an occurrence, no honest point exists — and the
+importer deletes nothing when told nothing. Its proofs are committed as
+`tools/feed-importer-selftest.php`, which refuses without a throwaway database and
+a test calendar server. **Lesson worth carrying into any test here:** that test was
+first written with fixed dates while the portal keeps a window that moves with the
+real clock, so it would have failed on correct code from 1 November 2026 and gone
+blind to the very deletion fault it guards. Every date is now worked out from today,
+a first check refuses the run if any date falls outside the kept window, and it was
+run as if it were ten different dates. Ask of every check: can it pass on broken
+code, or fail on correct code, on ANY date?
