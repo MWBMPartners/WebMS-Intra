@@ -99,8 +99,11 @@ nothing uncommitted. Nothing is running, and nothing is left in Docker (`g2ml-my
 
 ## 2. What to do next, in order
 
-1. **PLANNING IS RUNNING** (24 September, about 16:05; Opus planner; brief `.claude-work/briefs/514-p7-plan.md`; output
-   `.claude-work/resume/p514-p7--plan.md`). **Next: an Opus challenger reads that plan and the code, then the plan is settled.**
+1. **THE PLAN IS WRITTEN; THE CHALLENGE IS RUNNING.** Plan: `.claude-work/resume/p514-p7--plan.md` (~1,070 lines, Opus;
+   no new owner questions). Challenger (Opus): brief `.claude-work/briefs/514-p7-challenge.md`, output
+   `.claude-work/resume/p514-p7--challenge.md`. **Next: settle the plan by folding in the challenger's findings, then build.**
+   *(History: the planner ran first.)* **PLANNING RAN** (Opus planner; brief `.claude-work/briefs/514-p7-plan.md`; output
+   `.claude-work/resume/p514-p7--plan.md`).
    If the output file is missing or half-written when you pick this up, the planner died with its session — re-run it.
    Plan part 7 with Opus before building it. The plan's P7 section is `.claude-work/resume/p514--plan-r2.md` lines
    **1645-1824** (it moved: a decisions block was added at the top of the file). **It must now also carry the owner's API-key
