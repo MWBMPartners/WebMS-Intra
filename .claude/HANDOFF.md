@@ -117,9 +117,17 @@ builder runs**; before that it was clean.
 
 ## 2. What to do next, in order
 
-1. **#552 — FIX ROUND 2 DONE; CHECK ROUND 3 (NARROW) RUNNING (Opus; "ROUND 3 (NARROW)" section of
-   `.claude-work/briefs/552-check.md`; report `.claude-work/resume/p552--verify-r3.md`; watchdog on it). If clean: my own checks
-   on the final bytes, ONE commit saying Codex has not reviewed it, send it to GitHub, update #552, then plan #514 part 8.**
+1. **#552 — CHECK ROUND 3 = NOT CLEAN (the check script and wording only); FIX ROUND 3 RUNNING, TIGHT SCOPE (Sonnet; brief
+   `.claude-work/briefs/552-fix3.md`; report `.claude-work/resume/p552--fixes3.md`; watchdog on it). Then a narrow check round 4
+   (Opus). If clean: my own checks on the final bytes, ONE commit saying Codex has not reviewed it, send it to GitHub, update #552,
+   then the approved WORKFLOW PACKAGE (queue task 4), then plan #514 part 8.**
+   Round 3 (`p552--verify-r3.md`): database change still right; round-2 findings closed except one: the fixed list names WHICH
+   older keys exist but still reads each key's SHAPE from `full_schema.sql` (T8: a listed key made unique in the install script
+   only passes; 8.4 upgrade fails 6125). **Decided by me: this is the last modelling change.** Each round has found another shape
+   a text check misses; the real guard is the 8.4 end-to-end test the owner approved tonight. Fix round 3 records each listed
+   key's shape, corrects wording, and WRITES DOWN what the text check cannot see (edited released migrations, left-over keys,
+   databases installed from older install scripts), with no further modelling. If round 4 finds more shapes of the same kind,
+   record them in the "cannot see" list rather than modelling them.
    Fix round 2 (`p552--fixes2.md`): the check now uses a FIXED, reasoned starting list (32 keys: 30 on tables no migration ever
    creates, 2 `tblTrustedDevices` keys that 047 creates under other names); a new rule 1b models the installer's replay of every
    migration; name-only re-declarations are no longer trusted; prefix keys and unquoted ALTER TABLE read correctly; wiring note;
