@@ -97,13 +97,28 @@ when it is not given a scratch folder — which is exactly what it should do.
 
 ## 2. What to do next, in order
 
-1. **ROUND 3 IS RUNNING** (started 24 September 2026, about 08:25, on Opus — the tier the rules now name for checking, since
-   verification is never done by a weaker model than the build). Brief: the "ROUND 3" section of
-   `.claude-work/briefs/514-p6-check.md`. Report: `.claude-work/resume/p514-p6--verify-r3.md`.
-   **If it is no longer running when you pick this up**, read that report; if the report is missing or half-written, the agent
-   died with its session and the round must be run again from the same brief.
+1. **ROUND 3 CAME BACK NOT CLEAN — one MEDIUM, in the new committed test, not in the portal code. FIX ROUND 3 IS RUNNING**
+   (24 September, about 09:30, Sonnet builder; brief `.claude-work/briefs/514-p6-fix3.md`; report
+   `.claude-work/resume/p514-p6--fixes3.md`). **Then check round 4.** Round 3's report: `p514-p6--verify-r3.md`, evidence in
+   `p514-p6--verify-r3-evidence/`.
 
-   **What it is told to attack hardest**, because these are the two unusual things in this round: the two committed assertions in
+   **Round 3 confirmed everything the portal code does:** FIX A is right and narrow; the MOVED control still guards against
+   "never report anything" (the checker broke the reader three ways — two caught by that control AND an older one, I5, that
+   nobody had mentioned); the per-calendar slice is honest on both clock-change nights and in a zone that changes at midnight;
+   and the new test caught three faults the checker planted in the importer itself (2, 13 and 52 failures).
+
+   **The finding:** `fi_nextClocksBack()` misreads PHP. `getTransitions()`'s first entry has its timestamp EQUAL to the range
+   start (verified by me on PHP 8.5.10), so in winter — when that entry is marked standard time — the helper returns an ordinary
+   day. **For 154 days a year, check J4 then prints PASS against the faulty pre-fix code**, and its promised SKIP never runs.
+   `web/_core/Ical.php:151-152` already does this correctly (skip entry 0). **Nothing runs the test automatically**, which is why
+   it sat unnoticed — the strongest argument yet for queue task 4.
+
+   **If the fix round is no longer running when you pick this up**, read `p514-p6--fixes3.md`; if it is missing or half-written,
+   the agent died with its session — re-run it from the same brief. Then run check round 4: add a "ROUND 4" section to
+   `.claude-work/briefs/514-p6-check.md` and check on Opus (verification is never done by a weaker model than the build).
+
+   *(History, for context only.)* Round 3 was run on Opus from about 08:25 and was told to attack hardest the two unusual things
+   in that round: the two committed assertions in
    part 5's self-test that had to CHANGE — one now asserts the opposite of what it did, and a control that existed to stop this
    fix becoming "never report anything" was MOVED rather than deleted, so it must still guard that; and whether the new committed
    test earns its place (the claim is 104 checks passing against the fixed code and 96 passing with 8 failures against the code
