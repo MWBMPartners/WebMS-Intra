@@ -97,9 +97,17 @@ when it is not given a scratch folder — which is exactly what it should do.
 
 ## 2. What to do next, in order
 
-1. **ROUND 3 CAME BACK NOT CLEAN — one MEDIUM, in the new committed test, not in the portal code. FIX ROUND 3 IS RUNNING**
-   (24 September, about 09:30, Sonnet builder; brief `.claude-work/briefs/514-p6-fix3.md`; report
-   `.claude-work/resume/p514-p6--fixes3.md`). **Then check round 4.** Round 3's report: `p514-p6--verify-r3.md`, evidence in
+1. **CHECK ROUND 4 IS RUNNING** (24 September, about 10:10, Opus; the "ROUND 4" section of `.claude-work/briefs/514-p6-check.md`;
+   report `.claude-work/resume/p514-p6--verify-r4.md`). **Fix round 3 is DONE** (`p514-p6--fixes3.md`, evidence in
+   `p514-p6-built-20260924-fixes3/`): only `tools/feed-importer-selftest.php` changed (`6b08a692…`); verified by me that the
+   other ten entries match round 3's fingerprints, `php -l` clean, `ics-reader-selftest.php` 332/0/2, and nothing left in Docker.
+   The helper now skips PHP's range-start entry and needs summer time before a change; the promised SKIP turned out to be
+   reachable (12-19 days a year, proved by five new J0 checks); J4 refuses loudly unless handed a real clocks-back moment; a
+   six-year scan of the committed function found 0 of 2,190 days wrong. **One deviation, stated by the builder:** it proved the
+   winter case by forcing the helper's answer, not by simulating the whole rig in winter, because `FeedImporter::windowFor()`
+   reads the real clock. Round 4 is asked to judge that. **If round 4 is clean: commit part 6 (see step 3).**
+
+   *(Round 3's finding, for context:)* Round 3's report: `p514-p6--verify-r3.md`, evidence in
    `p514-p6--verify-r3-evidence/`.
 
    **Round 3 confirmed everything the portal code does:** FIX A is right and narrow; the MOVED control still guards against
