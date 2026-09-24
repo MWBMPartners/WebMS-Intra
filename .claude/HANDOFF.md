@@ -9,6 +9,45 @@ proceeds, so the session can be picked up at any point).
 
 ## Read this first — where we are right now
 
+## DECISIONS TAKEN 24 SEPTEMBER 2026, about 09:00 — read before building anything
+
+The owner asked for every pending decision to be raised up front. These are the answers. **Everything below the START HERE
+block that contradicts them is out of date.**
+
+**1. API keys — CHANGED, and it reverses committed code.** An API key now sees an imported event **exactly as a signed-out
+visitor would**, plus a new per-calendar **"don't show via API"** box — the "show on our website" box in reverse. Unticked (the
+default) = keys receive the calendar's events. **This replaces the owner's 17 September answer**, which parts 1 and 2 were built
+to; the owner confirmed today's answer stands after being shown the two side by side. **It widens what existing installations send
+to websites on upgrade** — today keys receive essentially no imported events — so the upgrade notes and in-app help must say so.
+**Built into P7 and P8**, beside the website box it mirrors. Full detail at the top of `.claude-work/resume/p514--plan-r2.md`.
+
+**2. Five design questions were re-asked by mistake and answered exactly as on 17 September** — private events hidden until
+chosen; a changed event goes back for approval; later dates of a repeating event follow an approved one when nothing differs; an
+organisation with no site administrator of its own has its approval notices sent to every global administrator; at "title, date
+and time only" the category shows and the RSVP counts do not. **Nothing changes for any of them.** They were re-asked because the
+plan's "built as recommended" notes were read as unconfirmed; the answers were at the top of the same file. Saved to memory as a
+lesson: read the settled answers before asking.
+
+**3. Codex reviews the whole branch at the END OF THE WHOLE QUEUE** — not after #514. It moves to the very end again if tasks are
+added. Run it with `-c model="gpt-6-astra"` and stdin closed, e.g. `codex review --uncommitted -c model="gpt-6-astra" < /dev/null`,
+or it refuses with a message naming `gpt-6-sol` — which is the model name, not a lack of credit. **The cost, said plainly:** this
+makes the stretch of work Codex has not seen as long as it can be, against the machine-wide rule's advice to review frequently. The
+owner chose it knowing Codex's allowance is small.
+
+**4. Both calendar self-tests go into the pull-request checks, with a throwaway MySQL database.** GitHub starts the database
+beside the check and removes it when the job ends, so nothing accumulates anywhere. Still to build — it is task 4 in the queue.
+
+**5. Throwaway containers are removed WITH their data — now a standing rule, machine-wide and in this project.** Checking after
+the owner asked found **415 left-behind database volumes taking 101 GB**, plus 8 stopped test containers from this project going
+back to 10 September. Every agent had reported its clean-up as done; they removed containers and never their data. **Cleared the
+same day with the owner's approval: 101.1 GB reclaimed, 425 volumes down to 2.** Kept: round 3's running checker, and
+`g2ml-mysql` and `wrapper-v2`, which belong to other projects. **Every brief that lets an agent start a container must now say:
+`docker run --rm` or `docker rm -v`, name it after its work, and report `docker ps -a` and the count of left-behind volumes.**
+
+**6. Using agents rather than the workflow tool** — stated rather than asked. The rules say to use "workflows and agents" where
+they fit. Background agents with a progress file are used because this project recorded that workflow agents are killed after
+three minutes without output and the whole run fails; that workaround saved two builders on 23 September.
+
 # ============================================================================
 # START HERE — written 23 September 2026, about 21:00, for a COMPLETELY FRESH
 # SESSION with no chat history. Everything needed to carry on is in this one
@@ -145,7 +184,7 @@ silently; no stacked pull requests; nothing hard-coded, because this is a produc
 |---|---|---|---|
 | 1 | #514 parts 1-5 | #514 | Done — `31bd64e` and earlier |
 | 2 | **#514 part 6** | #514 | **Built, fixed twice, UNCOMMITTED. Needs check round 3.** |
-| 3 | #514 parts 7-11 | #514 | Queued. P7 = plan lines 1612-1791, migration 206 |
+| 3 | #514 parts 7-11 | #514 | Queued. P7 = plan lines 1612-1791, migration 206. **P7 and P8 now also carry the API-key change (owner, 24 Sept)** |
 | 4 | Both self-tests into the pull-request checks | — | Queued, approved. **Needs `-d memory_limit=256M` or more** |
 | 5 | Anyone can approve their own expense claim and then be paid | **#545** | Queued — **high, live fault** |
 | 6 | The "my volunteering" page crashes for everyone | **#547** | Queued — **high, live fault** |
@@ -155,7 +194,7 @@ silently; no stacked pull requests; nothing hard-coded, because this is a produc
 | 10 | #536, #539, #540, #543, #546, #548 | — | Queued — medium |
 | 11 | #541 | — | Queued — low |
 | 12 | Documentation sweep | — | Queued |
-| 13 | **Codex review of the whole branch** | — | Queued — see section 7 |
+| 13 | **Codex review of the whole branch** | — | Queued — **at the END of the whole queue** (owner, 24 Sept) |
 | 14 | Pull request | — | **Blocked on the owner. Do not open one.** |
 
 ## 6. The standard checks, and how to run them without fooling yourself

@@ -240,10 +240,27 @@ codex exec --skip-git-repo-check "<what you want reviewed>"
   specific things: is it correct, is it safe, would anything here fail on
   MySQL 8.0, would anything here break on shared hosting with no command line.
 
-**TEMPORARY ARRANGEMENT, set by the owner on 20 September 2026 — read this
-before scheduling any review.** Reviews are NOT being run package by package at
-the moment. One comprehensive Codex review of the whole branch happens **after
-the #514 build**. It covers both the work Codex never saw while it was out of
+**TEMPORARY ARRANGEMENT, set by the owner on 20 September 2026 and MOVED on
+24 September 2026 — read this before scheduling any review.** Reviews are NOT
+being run package by package at the moment. One comprehensive Codex review of the
+whole branch happens **at the END OF THE WHOLE QUEUE** — after #514, the follow-up
+issues, #549 and the documentation sweep. **If more tasks are added to the queue,
+the review moves to the very end again.** (It used to be "after the #514 build";
+the owner moved it on 24 September when asked whether to review sooner.)
+
+**Run Codex with the model named**, or it refuses: every command needs
+`-c model="gpt-6-astra"`, and stdin closed so it does not wait for typing — for
+example `codex review --uncommitted -c model="gpt-6-astra" < /dev/null`. A refusal
+naming `gpt-6-sol` is that, not a lack of credit; a credit refusal names a reset
+time. Its allowance is roughly one large review per reset.
+
+**The cost of this, said plainly so nobody mistakes it for an oversight.** The
+machine-wide rule says catch-up reviews should happen frequently rather than once
+at the end, because the longer a stretch of unreviewed work runs, the harder it is
+to unpick anything found wrong. Moving the review to the end makes that stretch as
+long as it can be. The owner chose it knowing Codex's allowance is small; the
+Claude-side independent check of every package, and the plain statement in every
+commit message that Codex has not seen it, are what carry the work until then. It covers both the work Codex never saw while it was out of
 usage from 13 to 20 September (some of which the owner committed to GitHub so it
 could not be lost) and everything built since. **No pull request is raised until
 that review is done** and every finding is either fixed and re-reviewed clean, or
@@ -616,6 +633,22 @@ Reorder and combine where that is more efficient — one documentation pass afte
 three related fixes, one review round over two small changes — **as long as
 nothing is dropped and the progress table shows what was bundled**. Efficiency
 that hides work is not efficiency.
+
+## Throwaway databases and containers are removed, data included (STANDING RULE)
+
+**Set by the owner on 24 September 2026**, and written into the machine-wide rules
+as well because it is about this machine, not only this project. Every agent here
+starts MySQL containers to test against. **Removing a container with a plain
+`docker rm` leaves its data behind** in a separate volume — and on 24 September
+this machine held **415 of them, taking 101 GB**, one from almost every check
+round over three weeks. Every agent had reported its clean-up as done.
+
+- Start test containers with `docker run --rm`, or remove them with `docker rm -v`.
+- Name each after its work (`p514p6chk-mysql`), so it can be identified later.
+- After tearing down, **report both counts**: `docker ps -a` and
+  `docker volume ls -q -f dangling=true | wc -l`. Anything but zero is not clean.
+- Never remove another project's container, a running one, or a NAMED volume
+  without asking. `g2ml-mysql` and `wrapper-v2` belong to other projects.
 
 ## Code Style (MUST FOLLOW)
 

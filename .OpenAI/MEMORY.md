@@ -519,3 +519,26 @@ browsable view of the API description and falling back to a local copy under
 `/assets/vendor/swagger-ui/` when there is no internet. **It needs no Docker and
 no command line**, which is the condition everything here is built to — so keep
 it correct rather than adding a second viewer.
+
+**Decisions of 24 September 2026, for whichever assistant picks this up.**
+*API keys changed:* an API key now sees an imported calendar event exactly as a
+signed-out visitor would, plus a new per-calendar "don't show via API" box that
+works like "show on our website" in reverse — unticked by default, so keys
+receive a calendar's events unless someone ticks it. This replaces the owner's
+17 September answer, which parts 1 and 2 of #514 were built to, so committed
+code changes; it is being built into parts 7 and 8. It widens what existing
+installations send to websites on upgrade, so the upgrade notes must say so.
+*Codex review moved:* one review of the whole branch at the END of the whole
+queue, moving to the very end again if tasks are added. Run it with
+`-c model="gpt-6-astra"` and stdin closed, or it refuses with a message naming
+`gpt-6-sol` — which is a model-name problem, not a lack of credit.
+*Throwaway containers:* a MySQL test container keeps its database in a separate
+volume that a plain `docker rm` leaves behind. On 24 September this machine held
+415 of them, 101 GB, from three weeks of check rounds, and every agent had
+reported its clean-up as done. Remove with `docker rm -v` or start with
+`docker run --rm`, name each after its work, and report both `docker ps -a` and
+the count of left-behind volumes. Never remove a running container, another
+project's, or a named volume without asking.
+*Before asking the owner a design question, look for an answer already given* —
+the #514 plan had its answers at the very top, and "built as recommended"
+further down meant the recommendation was built, not that it was unanswered.
