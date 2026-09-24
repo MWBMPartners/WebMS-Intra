@@ -97,8 +97,15 @@ when it is not given a scratch folder — which is exactly what it should do.
 
 ## 2. What to do next, in order
 
-1. **ROUND 5 = PASS, with one LOW that I chose to fix before committing. FIX 5 IS RUNNING** (24 September, about 13:30, Sonnet;
-   brief `.claude-work/briefs/514-p6-fix5.md`; report `p514-p6--fixes5.md`). **Then a NARROW check round 6** on check 0 only.
+1. **NARROW CHECK ROUND 6 IS RUNNING** (24 September, about 14:05, Opus; "ROUND 6 (NARROW)" section of
+   `.claude-work/briefs/514-p6-check.md`; report `p514-p6--verify-r6.md`) — judging only fix 5. **Fix 5 is DONE**: test now
+   `b2bf386b…` (2,665 lines), other ten entries unchanged (verified by me), nothing left in Docker. It unfolds lines first, refuses
+   any date written as a period, counts every date in each file against what was judged, and keys the "outside on purpose" list
+   by file — the last needed a one-line change to the `$rdate` closure outside the named function, which the builder flagged.
+   **If round 6 is clean: commit part 6 (step 3 below).**
+
+   *(Earlier:)* ROUND 5 = PASS, with one LOW that I chose to fix before committing (fix 5; brief
+   `.claude-work/briefs/514-p6-fix5.md`; report `p514-p6--fixes5.md`).
    Round 5 (`p514-p6--verify-r5.md`, evidence `p514-p6--verify-r5-evidence/`) ran 70 full test runs across ten simulated dates
    and found **no date on which the test passes on broken code or fails on correct code**; the J4 borrowed night holds (always a
    real clocks-back night, never closer than 17 days to the edge of the kept period, fails on the pre-fix code every time); the D5
