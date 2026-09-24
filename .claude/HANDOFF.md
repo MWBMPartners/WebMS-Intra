@@ -289,6 +289,8 @@ it**, so it is a visible choice the owner can overrule.
   watchdog beside anything you wait on: **`tools/watchdog.sh quiet <report file> 900 14400`** (committed, so it exists on any
   machine; `~/.claude/bin/watchdog.sh` is the owner's machine-wide copy). It wakes the session when the report has been quiet for
   15 minutes, never appears within 20, or at a 4-hour cap. It is a standing rule in `.claude/CLAUDE.md` and `~/.claude/CLAUDE.md`.
+  **Every brief must tell the agent to CREATE its report file in its first minute** — the watchdog only sees that file, and on
+  24 September a working agent that had not started it looked exactly like a dead one after 20 minutes.
   **And when a step finishes, start the next in the same turn** — never end on "next I will…" when nothing is needed from the owner.
 - **The dev-team guard hook blocks any single shell command that contains both the release-branch name and the word for
   sending to the remote** — even inside a commit message or a note. Nothing runs. Keep those in separate commands.
