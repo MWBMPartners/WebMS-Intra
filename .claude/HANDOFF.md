@@ -58,9 +58,17 @@ when it is not given a scratch folder — which is exactly what it should do.
 
 ## 2. What to do next, in order
 
-1. **Run an independent check of part 6, ROUND 3** — a fresh agent that did NOT build it. The brief is
-   `.claude-work/briefs/514-p6-check.md`; add a "ROUND 3" section saying what changed. Report goes to
-   `.claude-work/resume/p514-p6--verify-r3.md`. **The round-2 fix report is `.claude-work/resume/p514-p6--fixes2.md`** (582 lines,
+1. **ROUND 3 IS RUNNING** (started 24 September 2026, about 08:25, on Opus — the tier the rules now name for checking, since
+   verification is never done by a weaker model than the build). Brief: the "ROUND 3" section of
+   `.claude-work/briefs/514-p6-check.md`. Report: `.claude-work/resume/p514-p6--verify-r3.md`.
+   **If it is no longer running when you pick this up**, read that report; if the report is missing or half-written, the agent
+   died with its session and the round must be run again from the same brief.
+
+   **What it is told to attack hardest**, because these are the two unusual things in this round: the two committed assertions in
+   part 5's self-test that had to CHANGE — one now asserts the opposite of what it did, and a control that existed to stop this
+   fix becoming "never report anything" was MOVED rather than deleted, so it must still guard that; and whether the new committed
+   test earns its place (the claim is 104 checks passing against the fixed code and 96 passing with 8 failures against the code
+   before the fix). **The round-2 fix report is `.claude-work/resume/p514-p6--fixes2.md`** (582 lines,
    read and verified by me — see the correction block appended at its end).
 
    **What round 2's fixes did, so the round-3 brief can say it:** the reader no longer reports any "everything before here" point
