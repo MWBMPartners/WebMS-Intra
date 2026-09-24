@@ -66,7 +66,9 @@ ps -eo pid,lstart,command | grep -a 'p514' | grep -a -v grep
 Nothing listed = safe to restart. **As of 21:00 on 23 September 2026 nothing is running and the tree is in a complete,
 consistent state**, so restarting now is safe.
 
-## 1. Where the work is, exactly (updated 24 September 2026, about 15:55)
+**A note on times in today's (24 September) entries:** the clock times written beside them — "about 09:30" to "about 16:05" — were estimates and run roughly two hours ahead of the real clock (it was 13:54 when this was noticed). The ORDER of events is right; do not read durations from them. Real times are in each agent's own progress lines and in `git log`.
+
+## 1. Where the work is, exactly (updated 24 September 2026, early afternoon)
 
 **Branch: `claude/alpha-wip`.** It will target `alpha` through ONE pull request later, **only when the owner says so.**
 
