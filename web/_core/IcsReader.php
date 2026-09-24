@@ -258,6 +258,26 @@
  *   refuses the rule. Everything else in the period comes from the repeat
  *   rule, and the rule is not run at all.
  *
+ * WHAT A NINTH ROUND OF CHECKING CHANGED: A CUT SERIES NOW REPORTS NO END POINT
+ * ----------------------------------------------------------------------------
+ * A repeating event that runs past `MAX_OCCURRENCES_PER_SERIES` used to report
+ * the last date it managed to keep as `effectiveWindowEnd`. **That is not a
+ * moment before which everything was seen, and a portal deleted real events
+ * because it believed it was.** The reason is short: the loop walks the dates
+ * the repeat pattern produces, in their ORIGINAL order, but a `RECURRENCE-ID`
+ * block MOVES a date — so the set the event keeps can hold a date in August
+ * while the date it dropped sits in April. Measured, twice over, by two
+ * rounds of independent checking: a 420-date series whose 400th date was moved
+ * from 3 April 2027 to 1 August 2027 had every one of the twenty dates the
+ * limit dropped marked as removed, and all twenty were still in the calendar.
+ *
+ * So **any read in which a series was cut short now reports no end point at
+ * all**, which this class already defines as "covers nothing reliably". Not
+ * just that one event: the end point is the EARLIEST of its sources, so a
+ * calendar cut in both places would otherwise fall back to the other one,
+ * which sits later still. What it costs is written out beside the code
+ * (`expand()`, the note on `$anySeriesCapped`).
+ *
  * HOW LONG AN EVENT LASTS, AND THE TWO NIGHTS A YEAR IT MATTERS
  * -------------------------------------------------------------
  * RFC 5545 §3.3.6 separates an EXACT length (hours, minutes, seconds — a fixed
@@ -2363,7 +2383,12 @@ final class IcsReader
      *
      * @param  array<string,mixed> $rule       From `parseRule()`.
      * @param  list<string>        $warnings   Added to in place.
-     * @return array{starts:list<DateTimeImmutable>, capped:bool, lastStart:?DateTimeImmutable}
+     * @return array{starts:list<DateTimeImmutable>, capped:bool}
+     *
+     * It used to return a `lastStart` too. Its only reader was
+     * `occurrencesForMaster()`, which passed it on as an end point, and that
+     * whole idea was removed on 23 September 2026 — see the note beside
+     * `$anySeriesCapped` at the end of `expand()`.
      */
     private static function generateStarts(
         array $rule,
@@ -2569,9 +2594,8 @@ final class IcsReader
         }
 
         return [
-            'starts'    => $result,
-            'capped'    => $capped,
-            'lastStart' => $result === [] ? null : $result[count($result) - 1],
+            'starts' => $result,
+            'capped' => $capped,
         ];
     }
 
@@ -2986,20 +3010,29 @@ final class IcsReader
      * `warnings` holds only what this step found. `parse()`'s own warnings are
      * separate, so the caller must join the two lists if it wants both.
      *
-     * `effectiveWindowEnd` is the honest end of what was read: when a limit
-     * stopped the work early, it is the last date that was kept, and the
-     * caller must not treat dates after it as "not in the calendar" (an
-     * importer that deleted everything missing after that point would delete
-     * real events).
+     * `effectiveWindowEnd` is the honest end of what was read: when the
+     * per-calendar slice stopped the work early, it is the last date that was
+     * kept, and the caller must not treat dates after it as "not in the
+     * calendar" (an importer that deleted everything missing after that point
+     * would delete real events). Every OTHER way of stopping early reports no
+     * end point at all — see the paragraph below.
      *
-     * What it CANNOT tell the caller: when a limit stopped a series before it
-     * produced any date inside the window at all, there is no "last date kept"
-     * to report, so `effectiveWindowEnd` stays null while `capped` is true.
-     * A caller must therefore look at `capped` FIRST and treat a capped read
-     * with no end as covering nothing reliably. The same is now true whenever
-     * a skipped-date or added-date list was cut short — see the note beside
-     * `$anyDateListCut` further down, which is a fault a fifth round of
-     * independent checking found.
+     * What it CANNOT tell the caller: `effectiveWindowEnd` is null whenever
+     * this class cannot stand behind such a point, and `capped` is true at the
+     * same time. A caller must therefore look at `capped` FIRST and treat a
+     * capped read with no end as covering nothing reliably. That happens when
+     * a file-wide budget stopped the gathering, when memory ran short, when a
+     * skipped-date or added-date list was cut short (a fifth round of
+     * independent checking), and — since a ninth round — whenever ANY
+     * repeating event was cut short by the limit on how many dates one event
+     * may contribute. The notes beside `$anySeriesCapped` at the end of this
+     * method say why that last one cannot be reported honestly and what
+     * leaving it out costs.
+     *
+     * So in practice there is now exactly ONE thing that still produces an end
+     * point on a capped read: the per-calendar slice, which keeps the first
+     * `$feedLimit` dates after sorting. It is honest because it sorts by the
+     * very wall-clock reading the caller then compares against.
      */
     public static function expand(
         array $parsed,
@@ -3246,12 +3279,14 @@ final class IcsReader
                 foreach ($seriesResult['occurrences'] as $occurrence) {
                     $collected[] = $occurrence;
                 }
+                // A series that was cut short contributes NO end point, and
+                // further down it throws away the end point for the whole
+                // read. The reason is under `$anySeriesCapped` at the bottom
+                // of this method; in one line, the dates this event kept are
+                // not the earliest ones it had, so there is no moment before
+                // which everything was seen.
                 if ($seriesResult['capped'] === true) {
                     $anySeriesCapped = true;
-                    if ($seriesResult['lastStart'] !== null
-                        && ($earliestCutOff === null || $seriesResult['lastStart'] < $earliestCutOff)) {
-                        $earliestCutOff = $seriesResult['lastStart'];
-                    }
                 }
             }
 
@@ -3370,7 +3405,10 @@ final class IcsReader
             }
         }
 
-        if ($gatheredTooMany === true || $stoppedForMemory === true || $anyDateListCut === true) {
+        if ($gatheredTooMany === true
+            || $stoppedForMemory === true
+            || $anyDateListCut === true
+            || $anySeriesCapped === true) {
             // Whichever end point the steps above worked out, it is thrown
             // away here. The first two stops happen while the dates are still
             // in the order the FILE listed them, not in date order, so an
@@ -3388,6 +3426,64 @@ final class IcsReader
             // independent checking measured it: 500 real dates in 2026,
             // dropped by a cut list, under an end point of February 2027. See
             // the note beside `$anyDateListCut` at the top of this method.
+            //
+            // ── THE FOURTH, `$anySeriesCapped`, ADDED 23 SEPTEMBER 2026 ──
+            // A repeating event that ran past the number of dates one event
+            // may contribute (MAX_OCCURRENCES_PER_SERIES) USED TO REPORT THE
+            // LAST DATE IT KEPT as an end point, and that was wrong in a way
+            // that deleted real events from a customer's portal. Two rounds of
+            // independent checking measured it; four shapes of calendar, one
+            // fix.
+            //
+            // WHY IT WAS WRONG. `occurrencesForMaster()` walks a series'
+            // dates in the order the repeat pattern produces them — the
+            // ORIGINAL dates — and stops when it has kept enough. But a
+            // `RECURRENCE-ID` block MOVES a date. So the set of dates the
+            // event kept is not "the earliest ones": it can hold something in
+            // August while the date it dropped sits in April. Once that is
+            // true there is NO moment with "everything before this was seen"
+            // behind it, so any value reported is a guess — and the importer
+            // deletes stored events on the strength of it. Measured: a series
+            // of 420 dates whose 400th was moved from 3 April 2027 to
+            // 1 August 2027 reported 1 August, and the refresh soft-deleted
+            // all twenty dates the limit had dropped, every one of them still
+            // in the calendar. Also measured on the October clock-change
+            // night, where the last date kept is 01:30 BST and the first one
+            // dropped is 01:15 GMT — a later moment but an earlier reading on
+            // a clock, and the importer compares clock readings.
+            //
+            // WHY THE WHOLE READ AND NOT JUST THAT EVENT. The end point is the
+            // EARLIEST of the sources, so a calendar where a series was cut
+            // AND the per-calendar slice was cut would simply fall back to the
+            // slice's point — which sits later than the dates the series
+            // dropped, and deletes them just the same. Measured too.
+            //
+            // WHY NOT "report the ORIGINAL start of the last date kept"
+            // instead, which looks like a smaller change. It does not cover
+            // the case where the FIRST date the limit dropped is the one an
+            // override moved earlier: that date is then before any honest end
+            // point, is neither kept nor reported as a changed date on its
+            // own, and is deleted anyway. Fixing that as well needs a second
+            // change in the loop below. Two changes to keep a tidy-up that
+            // only ever helps a calendar already over its limit, against one
+            // change that cannot be wrong.
+            //
+            // WHAT THIS COSTS, said plainly. A calendar holding a single
+            // repeating event with more than MAX_OCCURRENCES_PER_SERIES dates
+            // inside the period never sheds events through that refresh: an
+            // event genuinely taken out of it stays visible until a refresh
+            // that reads the whole period, which on a permanently-over-the-
+            // limit calendar may be never. That is the same trade already
+            // made for the three stops above, and it is the safe direction —
+            // showing an event that has been cancelled is a smaller harm than
+            // hiding one that is going ahead.
+            //
+            // WHAT STILL REPORTS AN END POINT, so this is not "always report
+            // nothing": a read cut only by the per-calendar slice (the
+            // `count($unique) > $feedLimit` step just above). That source is
+            // honest because it sorts by exactly the wall-clock reading it is
+            // then compared against, so every date it dropped really does sit
+            // at or after the last one it kept.
             $earliestCutOff = null;
         }
 
@@ -3958,7 +4054,19 @@ final class IcsReader
      * @param  list<array<string,mixed>> $overrideList     Changed-date blocks for this same UID.
      * @param  list<string>              $warnings         Added to in place.
      * @param  array<string,bool>        $usedOverrideKeys Which changed dates were used; added to in place.
-     * @return array{occurrences:list<array<string,mixed>>, capped:bool, lastStart:?DateTimeImmutable}
+     * @return array{occurrences:list<array<string,mixed>>, capped:bool}
+     *
+     * THIS USED TO HAND BACK A `lastStart` AS WELL — the last date it managed
+     * to keep — and `expand()` used it as "everything before this moment was
+     * read". It was removed on 23 September 2026 because that claim is not
+     * true when a `RECURRENCE-ID` block has moved a date: this loop walks the
+     * ORIGINAL dates in order, but the date it keeps is the MOVED one, so the
+     * set it ends up with is not the earliest dates the event had. Two rounds
+     * of independent checking measured an importer deleting twenty events
+     * that were still in the customer's calendar on the strength of it. The
+     * value is gone rather than merely unused, so that nobody wires it back
+     * in: see the long note beside `$anySeriesCapped` at the end of
+     * `expand()` for the whole story and what the safe answer costs.
      */
     private static function occurrencesForMaster(
         array $master,
@@ -3996,12 +4104,10 @@ final class IcsReader
                     ? [self::buildOccurrence($master, $master['start'], '', $orgZone, $master, false, $warnings)]
                     : [],
                 'capped'      => $capped,
-                'lastStart'   => null,
             ];
         }
 
-        $lastStart = null;
-        $starts    = [];
+        $starts = [];
 
         // A SERIES whose skipped-date list was cut short has its REPEAT RULE
         // thrown away. What is left is the dates the calendar states one by
@@ -4129,9 +4235,6 @@ final class IcsReader
             // Kept, not replaced: the skipped/added-date lists may already
             // have been cut short before the repeat rule was even looked at.
             $capped    = ($capped === true || $generated['capped'] === true);
-            $lastStart = $generated['lastStart'] === null
-                ? null
-                : $generated['lastStart']->setTimezone($orgZone);
         } else {
             // Either there is no repeat rule (dates added one by one with
             // RDATE), or the rule uses something this class does not work out.
@@ -4145,8 +4248,6 @@ final class IcsReader
         $starts = self::mergeCandidates($starts, []);
 
         $occurrences = [];
-        /** @var DateTimeImmutable|null $lastKept The last date actually kept, for the cut-off report below. */
-        $lastKept = null;
         foreach ($starts as $originalStart) {
             // This loop had no deadline check at all, and it is not a cheap
             // one: `findOverride()` below walks the whole list of changed
@@ -4209,16 +4310,21 @@ final class IcsReader
                     'A repeating event has more dates in this period than the portal imports ('
                     . self::MAX_OCCURRENCES_PER_SERIES . '), so the later ones were left out.'
                 );
-                // `$starts` is in date order, so the last date kept is the
-                // honest point at which this event stopped being read.
-                $lastStart = $lastKept === null ? $lastStart : $lastKept->setTimezone($orgZone);
+                // THERE USED TO BE A LINE HERE recording the last date kept,
+                // so that `expand()` could report "everything before this
+                // moment was read". It was wrong, and it deleted real events.
+                // `$starts` is in order, but the dates KEPT are the ones a
+                // `RECURRENCE-ID` block may have MOVED, so the set kept is
+                // not the earliest dates this event had — it can hold August
+                // while dropping April. The whole read now reports no end
+                // point when a series is cut; see the note beside
+                // `$anySeriesCapped` at the end of `expand()`.
                 break;
             }
-            $lastKept      = $actualStart;
             $occurrences[] = self::buildOccurrence($source, $actualStart, $key, $orgZone, $master, true, $warnings);
         }
 
-        return ['occurrences' => $occurrences, 'capped' => $capped, 'lastStart' => $lastStart];
+        return ['occurrences' => $occurrences, 'capped' => $capped];
     }
 
     /**

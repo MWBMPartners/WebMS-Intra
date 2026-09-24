@@ -128,6 +128,21 @@
  *      through the ordinary checks (a SIXTH round found that last part was
  *      claimed and not done). I32 — a warning is only ever raised about a date
  *      the answer actually contains.
+ *
+ *      Part I33 is what a NINTH round found, and it is the same promise I27
+ *      is about. A repeating event cut short by the 400-dates-per-event limit
+ *      used to report the last date it kept as "everything before this moment
+ *      was read", and that is not true: a changed date MOVES an occurrence, so
+ *      the dates it kept are not the earliest ones it had, and on the night
+ *      the clocks go back the order of moments and the order of clock readings
+ *      disagree even without one. Four shapes are checked — the last date kept
+ *      moved later, the first date dropped moved earlier, both limits reached
+ *      at once, and the clock-change night — with three controls: the ordinary
+ *      cut still gives the earliest 400 dates; it still reports no end point
+ *      (the deliberate cost, written down so nobody reads it as an accident);
+ *      and the same calendar read over a period it does not overflow is
+ *      untouched. The guard against over-correcting to "never report an end
+ *      point" is I27's control, which gets one from the per-calendar slice.
  *   J. Attachments: counted, and no attachment data anywhere in the answer.
  *   K. Other things a real calendar file does, checked with calendars written
  *      inside this script rather than kept as files: a VTIMEZONE block and an
@@ -1488,9 +1503,14 @@ st_check(
     'got ' . count($expandedDaily['occurrences'])
 );
 st_check('I4 and is reported as cut short', $expandedDaily['capped'] === true);
+// THIS CHECK USED TO ASSERT THE OPPOSITE and was changed on 23 September 2026.
+// It said "the end of what was read is the last date kept, so the importer
+// knows not to delete beyond it". A ninth round of checking measured that
+// value deleting real events, so it is gone. See I33 below, which is where the
+// whole story and the deliberate cost are written down.
 st_check(
-    'I4 and the end of what was read is the last date kept, so the importer knows not to delete beyond it',
-    $expandedDaily['effectiveWindowEnd'] === ($expandedDaily['occurrences'][count($expandedDaily['occurrences']) - 1]['start'] ?? null),
+    'I4 and reports NO "read reliably up to here" point, because a cut series has none (see I33)',
+    $expandedDaily['effectiveWindowEnd'] === null,
     var_export($expandedDaily['effectiveWindowEnd'], true)
 );
 
@@ -2973,22 +2993,42 @@ st_check(
     count($cutEnd['occurrences']) === IcsReader::MAX_OCCURRENCES_PER_SERIES,
     'got ' . count($cutEnd['occurrences']) . ' date(s)'
 );
-// I27 control: an ordinary capped answer with NO cut list anywhere still
-// reports its end point, exactly as it did before. Without this control the
-// fix could be "always report nothing", which would stop the importer ever
-// tidying anything away — and the check above would still pass.
-$plainCap = $cutEndRead(
-    "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:plaincap@fixtures.webms.test\r\n"
-    . "DTSTART;TZID=Europe/London:20250101T090000\r\nDTEND;TZID=Europe/London:20250101T100000\r\n"
-    . "SUMMARY:Daily since 2025\r\nRRULE:FREQ=DAILY\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
-);
+// I27 control: a capped answer that still DOES report its end point, so this
+// fix cannot be "always report nothing" — which would stop the importer ever
+// tidying anything away, and the check above would still pass.
+//
+// THIS CONTROL WAS REWRITTEN ON 23 SEPTEMBER 2026 and the reason matters. It
+// used to use a daily series cut short by the 400-dates-per-event limit, and
+// assert an end point of 4 February 2027. A ninth round of checking showed
+// that value is not trustworthy at all (see I33), so a cut series now reports
+// nothing and this control had to move to the one source that IS trustworthy:
+// the per-calendar slice, which keeps the first `MAX_EVENTS_PER_FEED` dates
+// AFTER sorting them by exactly the reading the importer compares against.
+// The control is still doing its job — it still fails if somebody makes the
+// answer "never report an end point".
+$plainCapIcs = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\n";
+$plainCapDay = new DateTimeImmutable('2026-01-02 09:00:00', $orgZone);
+for ($i = 0; $i < IcsReader::MAX_EVENTS_PER_FEED + 50; $i++) {
+    $moment       = $plainCapDay->modify('+' . $i . ' hours');
+    $plainCapIcs .= "BEGIN:VEVENT\r\nUID:plaincap-" . $i . "@fixtures.webms.test\r\n"
+        . 'DTSTART;TZID=Europe/London:' . $moment->format('Ymd\THis') . "\r\n"
+        . 'DTEND;TZID=Europe/London:' . $moment->modify('+30 minutes')->format('Ymd\THis') . "\r\n"
+        . 'SUMMARY:One-off ' . $i . "\r\nEND:VEVENT\r\n";
+}
+$plainCapIcs .= "END:VCALENDAR\r\n";
+// Worked out with plain date arithmetic rather than by asking the reader, so a
+// reader that got its own sums wrong cannot agree with itself.
+$plainCapExpected = $plainCapDay->modify('+' . (IcsReader::MAX_EVENTS_PER_FEED - 1) . ' hours')
+    ->format('Y-m-d H:i:s');
+$plainCap = $cutEndRead($plainCapIcs);
 st_check(
-    'I27 control: a capped answer with no cut list still reports the point it was read reliably up to',
-    $plainCap['capped'] === true && $plainCap['effectiveWindowEnd'] === '2027-02-04 09:00:00',
+    'I27 control: a capped answer with no cut list and no cut SERIES still reports the point it was '
+    . 'read reliably up to (' . $plainCapExpected . ')',
+    $plainCap['capped'] === true && $plainCap['effectiveWindowEnd'] === $plainCapExpected,
     'capped=' . var_export($plainCap['capped'], true)
     . ' effectiveWindowEnd=' . var_export($plainCap['effectiveWindowEnd'], true)
 );
-unset($cutEndIcs, $cutEndList, $cutEndDay, $cutEndRead, $cutEnd, $plainCap);
+unset($cutEndIcs, $cutEndList, $cutEndDay, $cutEndRead, $cutEnd, $plainCap, $plainCapIcs, $plainCapDay, $plainCapExpected);
 
 // I28: the exact-boundary path, where a file-wide budget is used up PRECISELY
 // at an event boundary and the next event's list is not read at all.
@@ -3648,6 +3688,253 @@ st_check(
     count($r['expand']['occurrences']) === 1
     && st_has_warning($r['expand']['warnings'], 'further ahead than dates can be stored') === true,
     'got ' . count($r['expand']['occurrences']) . ' date(s): ' . implode(' | ', $r['expand']['warnings'])
+);
+
+// -----------------------------------------------------------------------------
+// I33 — WHAT A NINTH ROUND OF INDEPENDENT CHECKING FOUND: A CUT SERIES HAS NO
+//       HONEST "EVERYTHING BEFORE THIS MOMENT WAS SEEN" POINT
+// -----------------------------------------------------------------------------
+//
+// WHY THIS BLOCK EXISTS. `effectiveWindowEnd` is the one number the importer
+// uses to decide what to mark as removed: it takes every stored date before
+// that moment which the download did not contain. A repeating event that ran
+// past the 400-dates-per-event limit used to report the last date it managed
+// to keep, and that number is not trustworthy, for two separate reasons:
+//
+//   1. A CHANGED DATE MOVES AN OCCURRENCE. The loop walks the dates the repeat
+//      pattern produces, in their original order, but what it KEEPS is the
+//      moved date. So the set it ends up with is not "the earliest 400": it
+//      can hold a date in December while the date it dropped sits in November.
+//   2. ON THE NIGHT THE CLOCKS GO BACK, the order of moments and the order of
+//      clock readings disagree. 01:30 British Summer Time happens BEFORE
+//      01:15 Greenwich Mean Time, but reads as later on a clock — and the
+//      importer compares clock readings, because that is what it stores.
+//      This one needs no changed date at all.
+//
+// Either way the honest answer is that there is no such moment, so the whole
+// read now reports none. Measured before the fix: twenty events still in a
+// customer's calendar marked as removed in one refresh.
+//
+// WHAT THAT COSTS, and it is a real cost: a calendar holding one repeating
+// event with more than 400 dates inside the period never sheds events through
+// that refresh. An event genuinely taken out of it stays visible until a
+// refresh that reads the whole period, which on such a calendar may be never.
+// It is the safe direction — showing an event that has been cancelled is a
+// smaller harm than hiding one that is going ahead — and it is the same trade
+// already made for the three other ways of stopping early.
+//
+// THE GUARD AGAINST OVER-CORRECTING is the I27 control above: a calendar cut
+// only by the per-calendar slice still reports its end point, so this fix
+// cannot become "never report anything".
+
+// A reader with a window wide enough to hold well over 400 daily dates. The
+// fixed window the rest of this script uses is one year, which cannot show a
+// 400-date cut at all.
+$i33Read = static function (string $body, ?int $feedLimit = null, string $from = '2026-09-01', string $to = '2028-01-01') use ($orgZone): array {
+    return IcsReader::expand(
+        IcsReader::parse($body, microtime(true) + 60.0),
+        $orgZone,
+        $orgZone,
+        new DateTimeImmutable($from . ' 00:00:00', $orgZone),
+        new DateTimeImmutable($to . ' 00:00:00', $orgZone),
+        microtime(true) + 60.0,
+        $feedLimit
+    );
+};
+// One identifier carrying 420 dates stated one by one. A repeat rule cannot
+// reach 400 dates in the period the importer keeps (a daily rule gives at most
+// 396), so a list of added dates is the shape that really reaches this limit.
+$i33Series = static function (string $overrideBlock = '', string $extraEvents = ''): string {
+    $body  = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:i33-series@fixtures.webms.test\r\n"
+        . "DTSTART:20261001T070000Z\r\nDTEND:20261001T080000Z\r\nSUMMARY:Four hundred and twenty dates\r\n";
+    $first = new DateTimeImmutable('2026-10-01 07:00:00', new DateTimeZone('UTC'));
+    $added = [];
+    for ($i = 1; $i < 420; $i++) {
+        $added[] = $first->modify('+' . $i . ' days')->format('Ymd\THis\Z');
+    }
+    $body .= 'RDATE:' . implode(',', $added) . "\r\nEND:VEVENT\r\n" . $overrideBlock . $extraEvents . "END:VCALENDAR\r\n";
+
+    return $body;
+};
+$i33Starts = static function (array $expanded): array {
+    return array_column($expanded['occurrences'], 'start');
+};
+
+// I33a: the 400th date kept is MOVED LATER by a changed-date block, so the old
+// end point landed after twenty dates the limit had dropped — and every one of
+// those twenty was still in the calendar.
+$i33a = $i33Read($i33Series(
+    "BEGIN:VEVENT\r\nUID:i33-series@fixtures.webms.test\r\nRECURRENCE-ID:20271104T070000Z\r\n"
+    . "DTSTART:20271231T090000Z\r\nDTEND:20271231T100000Z\r\nSUMMARY:Moved to New Year's Eve\r\nEND:VEVENT\r\n"
+));
+$i33aStarts = $i33Starts($i33a);
+st_check(
+    'I33a a 420-date series is cut to ' . IcsReader::MAX_OCCURRENCES_PER_SERIES . ' dates and reported as cut short',
+    count($i33a['occurrences']) === IcsReader::MAX_OCCURRENCES_PER_SERIES && $i33a['capped'] === true,
+    'got ' . count($i33a['occurrences']) . ' date(s), capped=' . var_export($i33a['capped'], true)
+);
+st_check(
+    'I33a and the dates it kept really are NOT the earliest ones: 31 December 2027 is in the answer while '
+    . '5 November 2027 is missing',
+    in_array('2027-12-31 09:00:00', $i33aStarts, true) === true
+    && in_array('2027-11-05 07:00:00', $i33aStarts, true) === false,
+    'last kept: ' . (string) ($i33aStarts[count($i33aStarts) - 1] ?? '(none)')
+);
+st_check(
+    'I33a so it reports NO "read reliably up to here" point — it used to report 2027-12-31 09:00:00, '
+    . 'and an importer that believed it deleted twenty events that were still in the calendar',
+    $i33a['effectiveWindowEnd'] === null,
+    var_export($i33a['effectiveWindowEnd'], true)
+);
+
+// I33b: the FIRST date the limit dropped is the one a changed-date block moved
+// EARLIER. This is the shape that rules out the smaller-looking fix ("report
+// the ORIGINAL start of the last date kept"): the moved date is neither kept
+// nor handed back on its own, so it sits before any honest end point and would
+// still be deleted. The loop finds its changed-date block, marks the block as
+// used, and only THEN notices it is over the limit and stops.
+$i33b = $i33Read($i33Series(
+    "BEGIN:VEVENT\r\nUID:i33-series@fixtures.webms.test\r\nRECURRENCE-ID:20271105T070000Z\r\n"
+    . "DTSTART:20260915T120000Z\r\nDTEND:20260915T130000Z\r\nSUMMARY:Moved a year earlier\r\nEND:VEVENT\r\n"
+));
+$i33bStarts = $i33Starts($i33b);
+st_check(
+    'I33b a date the limit dropped, moved earlier by a changed-date block, is in NEITHER list: '
+    . 'not kept, and not handed back on its own',
+    $i33b['capped'] === true
+    && count($i33b['occurrences']) === IcsReader::MAX_OCCURRENCES_PER_SERIES
+    && in_array('2026-09-15 13:00:00', $i33bStarts, true) === false,
+    'got ' . count($i33b['occurrences']) . ' date(s); first is ' . (string) ($i33bStarts[0] ?? '(none)')
+);
+st_check(
+    'I33b so it too reports NO end point — it used to report 2027-11-04 07:00:00, which is a year AFTER '
+    . 'the missing date',
+    $i33b['effectiveWindowEnd'] === null,
+    var_export($i33b['effectiveWindowEnd'], true)
+);
+
+// I33c: both limits at once, with the per-calendar slice cutting LATER than the
+// series did. The end point is the EARLIEST of its sources, so without this the
+// read would simply fall back to the slice's point — which is later still, and
+// deletes the same twenty dates.
+$i33cExtra = '';
+for ($i = 1; $i <= 10; $i++) {
+    $i33cExtra .= "BEGIN:VEVENT\r\nUID:i33-late-" . $i . "@fixtures.webms.test\r\n"
+        . 'DTSTART:2027120' . ($i % 10) . "T100000Z\r\nDTEND:2027120" . ($i % 10) . "T110000Z\r\n"
+        . 'SUMMARY:Late one-off ' . $i . "\r\nEND:VEVENT\r\n";
+}
+$i33c = $i33Read(
+    $i33Series(
+        "BEGIN:VEVENT\r\nUID:i33-series@fixtures.webms.test\r\nRECURRENCE-ID:20271104T070000Z\r\n"
+        . "DTSTART:20271231T090000Z\r\nDTEND:20271231T100000Z\r\nSUMMARY:Moved to New Year's Eve\r\nEND:VEVENT\r\n",
+        $i33cExtra
+    ),
+    405
+);
+st_check(
+    'I33c with BOTH limits reached — the series cut at 400 and the whole calendar sliced at 405 — the answer '
+    . 'is 405 dates and is reported as cut short',
+    count($i33c['occurrences']) === 405 && $i33c['capped'] === true,
+    'got ' . count($i33c['occurrences']) . ' date(s), capped=' . var_export($i33c['capped'], true)
+);
+st_check(
+    'I33c and it reports NO end point: the cut series throws the point away for the WHOLE read, so it cannot '
+    . 'fall back to the slice\'s later point',
+    $i33c['effectiveWindowEnd'] === null,
+    var_export($i33c['effectiveWindowEnd'], true)
+);
+
+// I33d: the night the clocks go back, with NO changed date anywhere. 25 October
+// 2026, 02:00 British Summer Time becomes 01:00 Greenwich Mean Time. The 400th
+// date kept is 00:30 UTC, which reads as 01:30 on a clock in London; the first
+// date dropped is 01:15 UTC, which reads as 01:15 — a LATER moment but an
+// EARLIER clock reading, and clock readings are what the importer compares.
+$i33dFirst = new DateTimeImmutable('2025-09-21 10:00:00', new DateTimeZone('UTC'));
+$i33dDates = [];
+for ($i = 1; $i < 399; $i++) {
+    $i33dDates[] = $i33dFirst->modify('+' . $i . ' days')->format('Ymd\THis\Z');
+}
+$i33dDates[] = '20261025T003000Z';   // 400th by moment — 01:30 British Summer Time
+$i33dDates[] = '20261025T011500Z';   // 401st by moment — 01:15 Greenwich Mean Time
+foreach (['20261026T100000Z', '20261027T100000Z', '20261028T100000Z', '20261029T100000Z'] as $tail) {
+    $i33dDates[] = $tail;
+}
+$i33d = $i33Read(
+    "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:i33-dst@fixtures.webms.test\r\n"
+    . "DTSTART:20250921T100000Z\r\nDTEND:20250921T110000Z\r\nSUMMARY:Across the clock change\r\n"
+    . 'RDATE:' . implode(',', $i33dDates) . "\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n",
+    null,
+    '2025-09-01'
+);
+$i33dStarts = $i33Starts($i33d);
+st_check(
+    'I33d on the night the clocks go back, the last date kept reads 01:30 and the first date dropped reads '
+    . '01:15 — so the kept dates are not even in clock order',
+    $i33d['capped'] === true
+    && count($i33d['occurrences']) === IcsReader::MAX_OCCURRENCES_PER_SERIES
+    && in_array('2026-10-25 01:30:00', $i33dStarts, true) === true
+    && in_array('2026-10-25 01:15:00', $i33dStarts, true) === false,
+    'got ' . count($i33d['occurrences']) . ' date(s), capped=' . var_export($i33d['capped'], true)
+);
+st_check(
+    'I33d and it reports NO end point — it used to report 2026-10-25 01:30:00, which would have deleted the '
+    . '01:15 event with no changed date involved at all',
+    $i33d['effectiveWindowEnd'] === null,
+    var_export($i33d['effectiveWindowEnd'], true)
+);
+
+// I33 CONTROL 1: the fix must not have broken the expansion itself. The same
+// 420-date series with no changed date anywhere still gives the EARLIEST 400
+// dates, in order, and says so.
+$i33plain      = $i33Read($i33Series());
+$i33plainStarts = $i33Starts($i33plain);
+st_check(
+    'I33 control: the same series with no changed date gives the earliest 400 dates, first 2026-10-01 and '
+    . 'last 2027-11-04, and warns that the later ones were left out',
+    count($i33plain['occurrences']) === IcsReader::MAX_OCCURRENCES_PER_SERIES
+    && ($i33plainStarts[0] ?? '') === '2026-10-01 08:00:00'
+    && ($i33plainStarts[IcsReader::MAX_OCCURRENCES_PER_SERIES - 1] ?? '') === '2027-11-04 07:00:00'
+    && st_has_warning($i33plain['warnings'], 'more dates in this period than the portal imports') === true,
+    'first=' . (string) ($i33plainStarts[0] ?? '(none)')
+    . ' last=' . (string) ($i33plainStarts[count($i33plainStarts) - 1] ?? '(none)')
+);
+// I33 CONTROL 2: and the cost is real and deliberate — even in that plainest
+// case, where the last date kept IS the earliest 400th, no end point is
+// reported. Written as its own check so that nobody reads the cost as an
+// accident. The guard against this becoming "never report anything" is the
+// I27 control above, which still gets a point from the per-calendar slice.
+st_check(
+    'I33 control: and reports no end point even so — the deliberate cost, which is that such a calendar '
+    . 'sheds no removed events until a refresh reads the whole period',
+    $i33plain['effectiveWindowEnd'] === null,
+    var_export($i33plain['effectiveWindowEnd'], true)
+);
+// I33 CONTROL 3: a read of the SAME calendar over a window small enough that
+// nothing is cut is untouched — complete, not capped, and the moved date is
+// shown at its new time. Without this the fix could be "always say capped".
+$i33small = $i33Read(
+    $i33Series(
+        "BEGIN:VEVENT\r\nUID:i33-series@fixtures.webms.test\r\nRECURRENCE-ID:20261105T070000Z\r\n"
+        . "DTSTART:20261106T150000Z\r\nDTEND:20261106T160000Z\r\nSUMMARY:Moved to the next afternoon\r\nEND:VEVENT\r\n"
+    ),
+    null,
+    '2026-10-01',
+    '2026-11-10'
+);
+$i33smallStarts = $i33Starts($i33small);
+st_check(
+    'I33 control: the same calendar read over a period it does not overflow is complete, not cut short, '
+    . 'and shows the moved date at its new time',
+    $i33small['capped'] === false
+    && $i33small['effectiveWindowEnd'] === null
+    && in_array('2026-11-06 15:00:00', $i33smallStarts, true) === true
+    && in_array('2026-11-05 07:00:00', $i33smallStarts, true) === false,
+    'capped=' . var_export($i33small['capped'], true) . ' dates=' . count($i33smallStarts)
+);
+
+unset(
+    $i33Read, $i33Series, $i33Starts, $i33a, $i33aStarts, $i33b, $i33bStarts, $i33c, $i33cExtra,
+    $i33d, $i33dFirst, $i33dDates, $i33dStarts, $i33plain, $i33plainStarts, $i33small, $i33smallStarts
 );
 
 unset($bydayValues, $manyRules, $manyEventsWithList, $r, $child);

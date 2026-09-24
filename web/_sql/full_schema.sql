@@ -1077,6 +1077,22 @@ CREATE TABLE IF NOT EXISTS `tblEvents` (
     `importRecheckAt`    DATETIME DEFAULT NULL COMMENT 'UTC moment after which the stored answer is not trusted; only administrators see the event until it is worked out again.',
     `externalPrivate`    TINYINT(1) NOT NULL DEFAULT 0 COMMENT '1 = the outside calendar marked it private or confidential (any CLASS other than PUBLIC).',
 
+    -- 🆔 How the importer recognises a copied-in event (#514 — added by
+    -- migration 205). `externalUidHash` is the SHA-256 of the EXACT bytes of
+    -- the UID the outside calendar gave the event, stored as raw bytes
+    -- rather than text on purpose: this table compares text ignoring capital
+    -- letters, so `ABC@example.com` and `abc@example.com` — two different
+    -- events under RFC 5545 — would otherwise be treated as one and
+    -- overwrite each other on every refresh. Migration 205's header explains
+    -- in full. `externalRecurrenceKey` says WHICH date of a repeating event
+    -- this row is; it is an identifier and never an event time.
+    -- `externalLastSeenAt` is a UTC moment, not an event time.
+    `externalUidHash`       BINARY(32)   DEFAULT NULL COMMENT 'SHA-256 of the exact UID bytes; binary so capital letters never collide',
+    `externalRecurrenceKey` VARCHAR(20)  NOT NULL DEFAULT '' COMMENT 'Empty for a one-off; the occurrence''s original start as a UTC instant (YmdTHisZ) or all-day date (Ymd)',
+    `externalLastSeenAt`    DATETIME     DEFAULT NULL COMMENT 'UTC moment of the last complete download that contained it',
+    `externalUrl`           VARCHAR(500) DEFAULT NULL COMMENT 'The link the outside calendar gave for this event',
+    `externalDuplicate`     TINYINT(1)   NOT NULL DEFAULT 0 COMMENT '1 = the last download held this identity twice; choices and rules are ignored for it',
+
     -- 🏛️ Per-event venue/room links (#436 — added by migration 179).
     -- Optional, NULL = no link (every pre-#436 event). The FKs
     -- (fk_event_venue -> tblVenues, fk_event_room -> tblVenueRooms) are
@@ -1098,7 +1114,21 @@ CREATE TABLE IF NOT EXISTS `tblEvents` (
     KEY `idx_event_start`    (`startDateTime`),
     KEY `idx_event_status`   (`status`),
     KEY `idx_event_submission` (`submissionStatus`, `submittedAt`),
-    KEY `idx_event_external` (`externalFeedID`, `externalUid`),
+    -- 🔐 The identity of a copied-in event, and it is UNIQUE (#514 — added
+    -- by migration 205): two rows can never claim to be the same date of the
+    -- same event of the same calendar, so a fault in the importer becomes a
+    -- caught error instead of a quietly duplicated event. Rows with an empty
+    -- identity are exempt, because MySQL treats NULLs in a unique key as all
+    -- different — which is what lets the old #327 rows sit here until the
+    -- importer's first complete refresh removes them.
+    --
+    -- The #327 key `idx_event_external (externalFeedID, externalUid)` is
+    -- DELIBERATELY not here: migration 205 drops it, so leaving it in this
+    -- file would make a fresh install and the end of the migration chain
+    -- disagree. Migration 129 still adds it, and migration 205 still drops
+    -- it, on a full installer replay; see migration 205, step C1.
+    UNIQUE KEY `uq_event_external_identity` (`externalFeedID`, `externalUidHash`, `externalRecurrenceKey`),
+    KEY `idx_event_external_seen` (`externalFeedID`, `externalLastSeenAt`),
     KEY `idx_event_import` (`externalFeedID`, `importLevel`),
     KEY `idx_event_import_recheck` (`importRecheckAt`),
     KEY `idx_event_deleted`  (`isDeleted`),
@@ -6011,22 +6041,54 @@ CREATE TABLE IF NOT EXISTS `tblExternalFeeds` (
     `name`            VARCHAR(120) NOT NULL,
     `url`             VARCHAR(2000) NOT NULL,
     `fetchEveryMins`  INT          NOT NULL DEFAULT 360 COMMENT 'How often to refetch (default 6h)',
+    -- Placed here, and not further down with the rest of the #514 block, so
+    -- that a fresh install ends with the columns in the SAME ORDER a database
+    -- upgraded through migration 205 does (that migration adds it `AFTER
+    -- fetchEveryMins`). Order does not change behaviour, but two paths that
+    -- produce two different orders make every later comparison of the two
+    -- harder than it needs to be.
+    `timezone`            VARCHAR(64)  DEFAULT NULL COMMENT 'Zone for times with no zone; empty = the organisation''s',
     `categoryID`      INT          DEFAULT NULL COMMENT 'Auto-assign imported events to this category',
     -- 👁️ The calendar's own setting (#514 — added by migration 204). The
     -- default is the narrow one on purpose; the "add a calendar" form
     -- writes 'public' until the calendar pages let an administrator choose.
     `audienceLevel`   ENUM('public','members','groups') NOT NULL DEFAULT 'members' COMMENT 'The calendar''s own setting (D7).',
     `websiteOptIn`    TINYINT(1)   NOT NULL DEFAULT 0 COMMENT 'D4: also show on the public website; only meaningful at public.',
+    -- ⏰ When to refresh, who is refreshing, and what happened last time
+    -- (#514 — added by migration 205). Every DATETIME in this block is a UTC
+    -- MOMENT compared with UTC_TIMESTAMP(), never an event time, so the
+    -- portal's wall-clock rule for event times does not apply to any of them.
+    -- `refreshLeaseUntil` has an END rather than being a plain "busy" flag
+    -- because a flag set by a request that is then killed stays set for ever
+    -- and the calendar never refreshes again; an end means the worst case is
+    -- a ten-minute wait. `lastFetchMessage` NEVER contains the address: some
+    -- of these addresses are secret links that let anybody holding one read
+    -- the whole diary, and a message is shown on a page and copied into
+    -- support e-mails. (`timezone` belongs to this block too; it is written
+    -- higher up, beside `fetchEveryMins`, to keep the column order the same
+    -- as an upgraded database's.)
     `isActive`        TINYINT(1)   NOT NULL DEFAULT 1,
     `lastFetchedAt`   DATETIME     DEFAULT NULL,
+    `nextFetchAt`         DATETIME     DEFAULT NULL COMMENT 'UTC moment the next scheduled refresh is due',
+    `refreshLeaseUntil`   DATETIME     DEFAULT NULL COMMENT 'UTC; a refresh in progress owns the calendar until then',
+    `consecutiveFailures` INT          NOT NULL DEFAULT 0 COMMENT 'Refreshes that have failed in a row; each one doubles the wait before the next try',
+    `lastFetchOk`         TINYINT(1)   DEFAULT NULL COMMENT '1 = the last refresh worked, 0 = it did not, empty = never tried',
     `lastFetchStatus` VARCHAR(255) DEFAULT NULL,
+    `lastFetchMessage`    VARCHAR(500) DEFAULT NULL COMMENT 'Plain English, never the address',
+    `lastContentHash`     CHAR(64)     DEFAULT NULL COMMENT 'SHA-256 of the file downloaded last time',
+    `lastCompleteAt`      DATETIME     DEFAULT NULL COMMENT 'UTC moment of the last download that was read and written away without failing; a capped download counts, because this only bounds how long the "nothing has changed" shortcut is trusted',
+    `lastRunCapped`       TINYINT(1)   NOT NULL DEFAULT 0 COMMENT '1 = the last download held more dates than the portal takes from one calendar',
     `lastImportCount` INT          NOT NULL DEFAULT 0,
     `createdByID`     INT          DEFAULT NULL,
+    `updatedByID`         INT          DEFAULT NULL COMMENT 'Who last changed this calendar''s settings; emptied, never cascaded, if that account is removed',
     `createdAt`       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updatedAt`           DATETIME     DEFAULT NULL COMMENT 'When the settings were last changed',
     PRIMARY KEY (`feedID`),
     KEY `idx_feed_site_active` (`siteID`, `isActive`),
+    KEY `idx_feed_due` (`isActive`, `nextFetchAt`),
     CONSTRAINT `fk_feed_site`    FOREIGN KEY (`siteID`)     REFERENCES `tblSites`(`siteID`) ON DELETE CASCADE,
-    CONSTRAINT `fk_feed_creator` FOREIGN KEY (`createdByID`) REFERENCES `tblUsers`(`userID`) ON DELETE SET NULL
+    CONSTRAINT `fk_feed_creator` FOREIGN KEY (`createdByID`) REFERENCES `tblUsers`(`userID`) ON DELETE SET NULL,
+    CONSTRAINT `fk_feed_updater` FOREIGN KEY (`updatedByID`) REFERENCES `tblUsers`(`userID`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 -- ── from 204_external_calendar_visibility.sql (#514) ─────────────────────────
@@ -6059,6 +6121,78 @@ CREATE TABLE IF NOT EXISTS `tblExternalAudienceMembers` (
     CONSTRAINT `fk_extaud_creator` FOREIGN KEY (`createdByID`) REFERENCES `tblUsers`(`userID`)         ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
 COMMENT='Who may see a groups-level outside calendar, single-date choice or rule (#514). Membership is tested live in the visibility rule.';
+
+-- ── from 205_external_calendar_importer.sql (#514, part P6) ──────────────────
+-- The importer's own three tables. COLLATE utf8mb4_general_ci is written out
+-- on each of them on purpose and must stay: on a database created through a
+-- hosting panel (default utf8mb4_0900_ai_ci) a table without it would make a
+-- query that compares one of its text columns with a tblEvents column fail
+-- outright with "ERROR 1267 Illegal mix of collations". Migration 204's
+-- header explains that in full; migration 205 repeats the warning.
+
+-- 🏷️ The category words an outside calendar puts on an event. Stored in
+-- lower case because the portal matches them without regard to capital
+-- letters, and storing one spelling means the match cannot depend on how the
+-- calendar happened to write it. Replaced wholesale on every refresh.
+CREATE TABLE IF NOT EXISTS `tblExternalEventTags` (
+    `tagID`   INT NOT NULL AUTO_INCREMENT,
+    `eventID` INT NOT NULL COMMENT 'The copied-in event this word was on.',
+    `tag`     VARCHAR(100) NOT NULL COMMENT 'One category word from the outside calendar, in lower case.',
+    PRIMARY KEY (`tagID`),
+    UNIQUE KEY `uq_exttag_event_tag` (`eventID`,`tag`),
+    CONSTRAINT `fk_exttag_event` FOREIGN KEY (`eventID`) REFERENCES `tblEvents`(`eventID`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+COMMENT='Category words an outside calendar puts on an event (#514). Replaced wholesale on every refresh.';
+
+-- 🗺️ The map from one of those words to one of the portal's own event
+-- categories. An empty categoryID means "known about, and deliberately
+-- mapped to nothing", which an administrator page needs to be able to tell
+-- apart from "never seen".
+CREATE TABLE IF NOT EXISTS `tblExternalCategoryMap` (
+    `mapID`             INT NOT NULL AUTO_INCREMENT,
+    `siteID`            INT NOT NULL COMMENT 'The organisation the map belongs to.',
+    `feedID`            INT NOT NULL COMMENT 'The calendar the map belongs to.',
+    `externalCategory`  VARCHAR(100) NOT NULL COMMENT 'The word as it comes from the outside calendar.',
+    `categoryID`        INT DEFAULT NULL COMMENT 'The portal category it maps to; empty = deliberately unmapped.',
+    PRIMARY KEY (`mapID`),
+    UNIQUE KEY `uq_extcatmap_feed_word` (`feedID`,`externalCategory`),
+    KEY `idx_extcatmap_site` (`siteID`),
+    KEY `idx_extcatmap_category` (`categoryID`),
+    CONSTRAINT `fk_extcatmap_feed`     FOREIGN KEY (`feedID`)     REFERENCES `tblExternalFeeds`(`feedID`)     ON DELETE CASCADE,
+    CONSTRAINT `fk_extcatmap_category` FOREIGN KEY (`categoryID`) REFERENCES `tblEventCategories`(`categoryID`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+COMMENT='Maps an outside calendar''s own category words to the portal''s event categories (#514).';
+
+-- 📜 One row per refresh attempt, kept for the newest fifty of each
+-- calendar. This is how an administrator finds out that a calendar has
+-- quietly been failing for a fortnight; before it, the only record was a
+-- single "last status" line that the next attempt overwrote. startedAt and
+-- finishedAt are UTC moments, not event times. message is plain English and
+-- never contains the address.
+CREATE TABLE IF NOT EXISTS `tblExternalFeedRuns` (
+    `runID`            INT NOT NULL AUTO_INCREMENT,
+    `feedID`           INT NOT NULL,
+    `siteID`           INT NOT NULL COMMENT 'Copied from the calendar so a run can be found without a join.',
+    `startedAt`        DATETIME NOT NULL COMMENT 'UTC moment the attempt began.',
+    `finishedAt`       DATETIME NULL COMMENT 'UTC moment the attempt ended; empty if it never did.',
+    `outcome`          ENUM('ok','unchanged','failed','partial') NOT NULL,
+    `httpStatus`       INT NULL COMMENT 'What the other server answered, when it answered at all.',
+    `message`          VARCHAR(500) NULL COMMENT 'Plain English, never the address.',
+    `bytes`            INT NOT NULL DEFAULT 0,
+    `eventsSeen`       INT NOT NULL DEFAULT 0,
+    `rowsAdded`        INT NOT NULL DEFAULT 0,
+    `rowsUpdated`      INT NOT NULL DEFAULT 0,
+    `rowsRemoved`      INT NOT NULL DEFAULT 0,
+    `rowsSkipped`      INT NOT NULL DEFAULT 0,
+    `awaitingApproval` INT NOT NULL DEFAULT 0 COMMENT 'Events left waiting for an administrator to agree to them (part P7).',
+    `triggeredBy`      ENUM('schedule','manual') NOT NULL,
+    `triggeredByID`    INT NULL COMMENT 'Who pressed Refresh; empty for the scheduled job.',
+    PRIMARY KEY (`runID`),
+    KEY `idx_extrun_feed_started` (`feedID`,`startedAt`),
+    CONSTRAINT `fk_extrun_feed` FOREIGN KEY (`feedID`)        REFERENCES `tblExternalFeeds`(`feedID`) ON DELETE CASCADE,
+    CONSTRAINT `fk_extrun_user` FOREIGN KEY (`triggeredByID`) REFERENCES `tblUsers`(`userID`)         ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+COMMENT='One row per refresh attempt of an outside calendar (#514). Only the newest fifty of each calendar are kept.';
 
 -- ── from 130_anonymous_attendance.sql, `userAgent` removed by
 --    201_drop_checkin_browser_description.sql (#530) — it was written on
@@ -9277,4 +9411,28 @@ ON DUPLICATE KEY UPDATE `filename` = `filename`;
 -- copied-in events yet, so there is nothing to carry over — the same
 -- reasoning the 199, 202 and 203 blocks above give. Only the self-record.
 INSERT INTO `tblMigrations` (`filename`) VALUES ('204_external_calendar_visibility.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- ── from 205_external_calendar_importer.sql (#514, part P6) ──────────────────
+-- The CREATE TABLE statements above (tblEvents, tblExternalFeeds, and the
+-- three new tblExternal* tables) already carry every column, key and
+-- constraint this migration adds, so a fresh install never needs its guarded
+-- ALTER TABLE statements. Its one backfill — bringing the rows the old #327
+-- job left behind forward to the new identity — is DELIBERATELY NOT repeated:
+-- a database built fresh from this file has no calendars and no copied-in
+-- events yet, so there is nothing to carry over. The same reasoning the 199,
+-- 202, 203 and 204 blocks above give.
+--
+-- One setting, repeated here word for word because every database change has
+-- to reach BOTH the installer and the upgrade path. It is EMPTY on purpose,
+-- and empty means "the portal's own number" — which lives in exactly one
+-- place, `IcsReader::MAX_EVENTS_PER_FEED` (2,000 as this is written). Writing
+-- 2,000 here as well would put the same number in two files that nothing
+-- keeps in step. Migration 205, section F, explains in full, including what
+-- raising it costs in memory and time.
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'feeds.maxEventsPerFeed', '', '', 0)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('205_external_calendar_importer.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;

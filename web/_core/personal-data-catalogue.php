@@ -773,11 +773,40 @@ return [
     ],
     'tblExternalFeeds' => [
         'decision' => 'unlink',
+        // #514 part P6 added `updatedByID`, so this entry now names both. Two
+        // columns, one decision: a subscription to an outside calendar is the
+        // organisation's, not the volunteer's who typed the address in.
         'reason'   => 'Only records who created or last changed this. Deleting the'
                     . ' row would destroy the organisation\'s own work because a'
                     . ' departed volunteer typed it in. The content stays; the name'
                     . ' goes',
-        'columns'  => ['createdByID'],
+        'columns'  => ['createdByID', 'updatedByID'],
+    ],
+    'tblExternalFeedRuns' => [
+        'decision' => 'unlink',
+        // #514 part P6. One row per attempt to refresh an outside calendar.
+        // It is a record of what the PORTAL did — what it downloaded, how
+        // many events it wrote, what went wrong — and the only thing about a
+        // person on it is `triggeredByID`, which says who pressed the Refresh
+        // button. So the history stays and the name goes.
+        //
+        // WHAT THIS ENTRY DOES NOT DO TODAY, stated plainly rather than left
+        // to be discovered. `GdprEraser` works out how to reach a table from
+        // its own list of column names that mean "a person"
+        // (`GdprEraser::LINK_COLUMNS`), and `triggeredByID` is not on that
+        // list — no other table in the portal uses that name. So the erasure
+        // routine currently SKIPS this table rather than emptying the column.
+        // The information involved is one account number on an internal job
+        // log, the column is already emptied outright if the account is ever
+        // really deleted (`fk_extrun_user … ON DELETE SET NULL`), and the row
+        // holds nothing else about anybody. Adding the name to
+        // `LINK_COLUMNS` is a one-word change in a file part P6 was not asked
+        // to touch, so it is written down here and raised as a follow-up
+        // rather than done quietly.
+        'reason'   => 'A record of what the portal did when it refreshed an outside'
+                    . ' calendar. The only thing about a person is who pressed'
+                    . ' Refresh, so the record stays and the name goes',
+        'columns'  => ['triggeredByID'],
     ],
     'tblForms' => [
         'decision' => 'unlink',
