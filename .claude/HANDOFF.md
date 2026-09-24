@@ -97,7 +97,20 @@ when it is not given a scratch folder — which is exactly what it should do.
 
 ## 2. What to do next, in order
 
-1. **CHECK ROUND 5 IS RUNNING** (24 September, about 12:40, Opus; "ROUND 5" section of `.claude-work/briefs/514-p6-check.md`;
+1. **ROUND 5 = PASS, with one LOW that I chose to fix before committing. FIX 5 IS RUNNING** (24 September, about 13:30, Sonnet;
+   brief `.claude-work/briefs/514-p6-fix5.md`; report `p514-p6--fixes5.md`). **Then a NARROW check round 6** on check 0 only.
+   Round 5 (`p514-p6--verify-r5.md`, evidence `p514-p6--verify-r5-evidence/`) ran 70 full test runs across ten simulated dates
+   and found **no date on which the test passes on broken code or fails on correct code**; the J4 borrowed night holds (always a
+   real clocks-back night, never closer than 17 days to the edge of the kept period, fails on the pre-fix code every time); the D5
+   clock pin covers every clock read on that path and cannot leak; every section-D check still fails on the fault it names.
+   **The LOW:** check 0 misses three shapes the committed writer never produces — a folded line broken before a comma, a date
+   written as a period with a slash, and a date equal to one of D4's deliberately-old filler values in a different file (its
+   "outside on purpose" list is keyed by date alone). **Why fix it rather than leave it:** check 0 exists to guard FUTURE edits by
+   other people, which is exactly when such shapes appear, and the test is about to run on every pull request. It also adds the
+   checker's recommended belt — count every date in each file and refuse if the count differs from what was judged — so the NEXT
+   unforeseen shape fails loudly too.
+
+   *(Earlier:)* **CHECK ROUND 5 RAN** (24 September, about 12:40, Opus; "ROUND 5" section of `.claude-work/briefs/514-p6-check.md`;
    report `.claude-work/resume/p514-p6--verify-r5.md`). It covers fix 4 AND fix 4b. **Fix 4b is DONE:** D5 now pins the session
    clock with `SET timestamp` inside `try/finally`, with a control on two different seconds; **50 runs three at a time, 0 failures**.
    Test file now `62385341…` (2,536 lines); the other ten part-6 entries unchanged (verified by me); nothing left in Docker.
