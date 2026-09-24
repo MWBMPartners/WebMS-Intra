@@ -97,7 +97,13 @@ when it is not given a scratch folder — which is exactly what it should do.
 
 ## 2. What to do next, in order
 
-1. **FIX ROUND 4 IS DONE; A SMALL FOLLOW-ON FIX (D5) IS RUNNING; THEN CHECK ROUND 5 covers both.**
+1. **CHECK ROUND 5 IS RUNNING** (24 September, about 12:40, Opus; "ROUND 5" section of `.claude-work/briefs/514-p6-check.md`;
+   report `.claude-work/resume/p514-p6--verify-r5.md`). It covers fix 4 AND fix 4b. **Fix 4b is DONE:** D5 now pins the session
+   clock with `SET timestamp` inside `try/finally`, with a control on two different seconds; **50 runs three at a time, 0 failures**.
+   Test file now `62385341…` (2,536 lines); the other ten part-6 entries unchanged (verified by me); nothing left in Docker.
+   **If round 5 is clean: commit part 6 (step 3 below).**
+
+   *(Earlier, for context:)* **FIX ROUND 4 WAS DONE; A SMALL FOLLOW-ON FIX (D5) RAN; THEN CHECK ROUND 5 covers both.**
    - **Fix round 4 (done, Opus):** `tools/feed-importer-selftest.php` is now `52f048b3…` (2,436 lines); the other ten part-6
      files are unchanged (verified by me). Every date in sections A-I is now an offset from one reading of today (`fi_today()`,
      the same expression the portal uses); section G finds the real clock-change nights from PHP's data and refuses if either is
