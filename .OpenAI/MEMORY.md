@@ -560,6 +560,26 @@ a first check refuses the run if any date falls outside the kept window, and it 
 run as if it were ten different dates. Ask of every check: can it pass on broken
 code, or fail on correct code, on ANY date?
 
+**#514 part 7 is committed (`12c234f`, 24 September 2026)** after a plan challenge
+and three rounds of independent checking. For each imported date the portal now
+decides who may see it from the calendar's setting, the administrator's rules and
+per-date or per-series choices; a date whose audience would grow waits for an
+administrator's approval. API keys receive an imported event exactly as a
+signed-out visitor would, never more, and a "don't show via API" box on a
+calendar, choice or rule keeps events away from keys altogether (the owner's
+decision of 24 September). Proofs: `tools/feed-resolver-selftest.php` (208 checks).
+**These self-tests need the schema loaded into their `selftest_` database first**
+(`full_schema.sql`); their headers do not yet say so.
+
+**MySQL 8.4 refuses a link between tables that points at a non-unique index**
+(`restrict_fk_on_non_standard_key`, on by default; ERROR 6125). MySQL 8.0 allows
+it, so the 8.0-only migration harness cannot see it. Three links this branch added
+in migrations 202 and 203 did exactly that — tracked and being fixed as #552, with
+a new audit check. **Lesson:** the checker that found it called it "not new"
+because an older copy of the script had it too; that older copy was still this
+branch. Judge "new or old" against the released branch (`origin/alpha`), never
+against the previous part.
+
 **Set a watchdog whenever you wait for something to finish (owner's standing rule,
 24 September 2026 — this repository AND every project on the owner's machine).**
 A session only acts when something wakes it; once a background agent's
