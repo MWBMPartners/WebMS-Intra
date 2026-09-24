@@ -117,9 +117,10 @@ builder runs**; before that it was clean.
 
 ## 2. What to do next, in order
 
-1. **#552 — CHECK ROUND 4 = NOT CLEAN, LOW ONLY (no high or medium); FIX ROUND 4 RUNNING (Sonnet; brief
-   `.claude-work/briefs/552-fix4.md`; report `.claude-work/resume/p552--fixes4.md`; watchdog on it); files as they were before it
-   are snapshotted in `.claude-work/resume/p552-r4-snapshot/`. Then a narrow check round 5 (Opus) comparing against that snapshot.
+1. **#552 — FIX ROUND 4 DONE (wording + the `ASC` pattern); NARROW CHECK ROUND 5 RUNNING (Opus; "ROUND 5 (NARROW)" section of
+   `.claude-work/briefs/552-check.md`; report `.claude-work/resume/p552--verify-r5.md`; watchdog on it). It judges the diff against
+   `.claude-work/resume/p552-r4-snapshot/`. Now: DEV_NOTES `5d1344c2…`, 202 `24a92ebe…`, 203 `9ee0e0a0…`, full_schema `dcc136c7…`,
+   script `e7174cd7…` (verified by me; 202's statements identical to round 1; check clean).
    If clean: my own checks on the final bytes, ONE commit saying Codex has not reviewed it, send it to GitHub, update #552,
    then the approved WORKFLOW PACKAGE (queue task 4), then plan #514 part 8.**
    Round 4 (`p552--verify-r4.md`): round 3's MEDIUM closed (32 recorded shapes match all 96 versions of the install script and a
