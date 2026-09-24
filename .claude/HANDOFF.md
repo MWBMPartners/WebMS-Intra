@@ -258,6 +258,27 @@ first so the review covers a settled state.
 
 ## 9. Traps that have cost real time on this branch
 
+- **A lost "finished" notice leaves the queue idle — and the owner has asked never to need a nudge (24 September).** Every
+  background agent gets a WATCHDOG started straight after it, as a background command:
+  `/private/tmp/claude-501/watch-report.sh <that agent's report file> 900 14400`. It wakes the session when the report has been
+  quiet for 15 minutes, if it never appears within 20, or at a 4-hour cap. `/private/tmp` is not durable, so if the script is
+  missing, recreate it from this:
+  ```zsh
+  #!/bin/zsh
+  F="$1"; IDLE="${2:-900}"; CAP="${3:-14400}"; START=$(date +%s)
+  while true; do
+    NOW=$(date +%s)
+    if [ $((NOW - START)) -ge "$CAP" ]; then echo "WATCHDOG: hard deadline"; exit 0; fi
+    if [ -f "$F" ]; then AGE=$((NOW - $(stat -f %m "$F")))
+      if [ "$AGE" -ge "$IDLE" ]; then echo "WATCHDOG: $F quiet ${AGE}s"; exit 0; fi
+    elif [ $((NOW - START)) -ge 1200 ]; then echo "WATCHDOG: $F never appeared"; exit 0; fi
+    sleep 60
+  done
+  ```
+  **And when a step finishes, start the next in the same turn** — never end on "next I will…" when nothing is needed from the owner.
+- **The dev-team guard hook blocks any single shell command that contains both the release-branch name and the word for
+  sending to the remote** — even inside a commit message or a note. Nothing runs. Keep those in separate commands.
+
 - **A polling loop with no deadline** spun for seven hours after its own agent deleted the file it was waiting for. Give every
   loop a time limit as well as a condition.
 - **The test calendar server wedges for an hour** after a proof kills a download, unless given `PHP_CLI_SERVER_WORKERS=6` — and

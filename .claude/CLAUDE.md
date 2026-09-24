@@ -1397,6 +1397,9 @@ is the one place that lists them together.
   3. update the Claude memory and the context in `.claude/`;
   4. update the OpenAI/Codex memory and context in `.OpenAI/`;
   5. update the handoff document.
+- **Never wait for a nudge (owner, 24 September 2026):** "continue autonomously, don't wait for me to nudge or give the ok."
+  When a step finishes, start the next in the same turn. Give every background agent a report watchdog (see the handoff,
+  section 9), so a lost "finished" notice can never leave the queue idle.
 - **Autonomy:** work through the whole queue without stopping. Stop only for a decision
   or approval that genuinely needs the owner, say simply what is needed and why, and
   raise such questions at the START, not one by one as they come up. Carry on with
