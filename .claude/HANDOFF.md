@@ -99,7 +99,14 @@ nothing uncommitted. Nothing is running, and nothing is left in Docker (`g2ml-my
 
 ## 2. What to do next, in order
 
-1. **CHECK ROUND 1 = NOT CLEAN; FIX ROUND 1 IS RUNNING** (Sonnet; brief `.claude-work/briefs/514-p7-fix1.md`; report
+1. **FIX ROUND 1 IS DONE; CHECK ROUND 2 IS RUNNING** (Opus; "ROUND 2" section of `.claude-work/briefs/514-p7-check.md`;
+   report `p514-p7--verify-r2.md`; watchdog on it). Fix round 1 (`p514-p7--fixes1.md`): ten new proofs, all CAUGHT by the
+   checker's own harness; duplicates now honour narrowing choices/rules and ignore only widening ones (plus `previewRule()` kept in
+   step — a flagged deviation); a row with no identity no longer crashes. Resolver test 168 → 198. Verified by me:
+   `FeedResolver.php` `c3ce89e4…`, resolver test `a26f5abe…`, `full_schema.sql` `93fdd9ce…`; `php -l` and the parity check clean;
+   nothing in Docker. **Trap it found:** `check_schema_seed_parity.py` strips `--` comments before understanding quotes, so a
+   `--` inside a quoted SQL comment desynchronises the whole check (real MySQL is fine) — avoid `--` in column comments.
+   *(History:)* CHECK ROUND 1 = NOT CLEAN; FIX ROUND 1 RAN (Sonnet; brief `.claude-work/briefs/514-p7-fix1.md`; report
    `p514-p7--fixes1.md`; watchdog on it). **Then check round 2 (Opus).** Round 1 (`p514-p7--verify-r1.md`, evidence
    `p514-p7--verify-r1-evidence/`) found **no leak in the built code** and passed the API-key change through the real portal (a
    key got exactly the signed-out visitor's set minus opted-out events). Findings: (1) MEDIUM — nine privacy conditions in
