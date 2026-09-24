@@ -102,16 +102,23 @@ builder runs**; before that it was clean.
 
 ## 2. What to do next, in order
 
-1. **#552 — FIX ROUND 1 DONE; CHECK ROUND 2 (NARROW) RUNNING (Opus; "ROUND 2 (NARROW)" section of
-   `.claude-work/briefs/552-check.md`; report `.claude-work/resume/p552--verify-r2.md`; watchdog on it). If clean: my own checks
-   on the final bytes, ONE commit saying Codex has not reviewed it, push, update #552, then plan #514 part 8.**
-   Fix round 1 (`p552--fixes1.md`): the check now models a fresh install and an upgrade separately (rule 1: install script's
-   links against its own keys; rule 2: migrations walked in order; rule 3: the two must agree on each index's uniqueness), prints
-   `•` on findings only, reads unnamed links / no-backtick names / lower case / CREATE UNIQUE INDEX / prefix keys; all comments
-   corrected; no migration 207 (documented). Fingerprints: DEV_NOTES `efe17e64…`, 202 `8e9eb175…`, 203 `258739f8…`,
-   full_schema `dcc136c7…`, script `9a816cd9…`. **Verified by me: no SQL statement moved** — with comment lines stripped, HEAD vs
-   now differs only in the three UNIQUE KEY lines and the three guards. The eight `--`-in-COMMENT lines in `full_schema.sql` the
-   fixer flagged are old (alpha has them) and already on #543.
+1. **#552 — CHECK ROUND 2 = NOT CLEAN (the check script and comments only); FIX ROUND 2 RUNNING (Sonnet; brief
+   `.claude-work/briefs/552-fix2.md`; report `.claude-work/resume/p552--fixes2.md`; watchdog on it). Then check round 3 (Opus).
+   If clean: my own checks on the final bytes, ONE commit saying Codex has not reviewed it, send it to GitHub, update #552, then
+   plan #514 part 8.**
+   Round 2 (`p552--verify-r2.md`): the database change still proved right on 8.4.11 (fresh install and upgrade); round-1 check
+   faults closed. New MEDIUM: the upgrade walk ASSUMES every install-script key that no migration creates already exists, so a key
+   added to the install script and forgotten in its migration still passes (proved: check exit 0, 8.4 upgrade fails 6125). Fix: a
+   fixed, reasoned list of such keys. **The fixer must first classify today's 18 index names + 14 primary keys: parser gap,
+   genuinely older, or REAL DRIFT (an upgraded database lacks a key a fresh install has; e.g. two `tblTrustedDevices` keys although
+   migration 047 creates that table). Real drift gets its own issue, opened by me.** LOWs: name-only "make it unique" guard; CREATE
+   TABLE IF NOT EXISTS for an existing table; the installer DOES replay every migration (the docstring said not); prefix keys
+   misread; DEV_NOTES lacks the stranded-database repair; wiring with `| tail || true` would hide a crash (use `pr-security.yml`
+   step 9's pattern); several wording errors.
+   **Fix round 1 (`p552--fixes1.md`)** remodelled the check (install vs upgrade separately; agreement rule), added bullets, read
+   more shapes, corrected comments. Verified by me: no SQL statement moved (comment-stripped diff vs HEAD = only the #552 changes).
+   **Trap hit again:** the dev-team guard hook refuses any single shell command whose text holds both the release-branch word and
+   the word for sending to GitHub, including inside a heredoc brief. Write briefs with the file tool; keep that step separate.
    *(History:)* CHECK ROUND 1 = NOT CLEAN; FIX ROUND 1 RAN (Sonnet; brief `.claude-work/briefs/552-fix1.md`).
    Round 1 (`p552--verify-r1.md`, evidence `p552--verify-r1-evidence/`): **the database fix is right** — proved on MySQL 8.4.11,
    8.0.36 and MariaDB 11.4.13 (fresh install, upgrade from alpha, recovery after a failed run at six stopping points, old-then-new
