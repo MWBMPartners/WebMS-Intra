@@ -97,7 +97,16 @@ when it is not given a scratch folder — which is exactly what it should do.
 
 ## 2. What to do next, in order
 
-1. **NARROW CHECK ROUND 6 IS RUNNING** (24 September, about 14:05, Opus; "ROUND 6 (NARROW)" section of
+1. **ROUND 6 = PASS with one LOW, caused by fix 5. FIX 6 IS RUNNING** (24 September, about 14:40, Sonnet; brief
+   `.claude-work/briefs/514-p6-fix6.md`; report `p514-p6--fixes6.md`), **then a narrow round 7.** Round 6
+   (`p514-p6--verify-r6.md`, evidence `p514-p6--verify-r6-evidence/`) proved check 0's line-joining matches the portal's reader
+   character for character and missed none of 600,000 planted dates; ten-year scan 0 refusals. **The LOW:** the test writes its
+   own folder path into `server.php`, which check 0 reads, so a folder name with eight digits in a row (this project's own naming
+   style, e.g. `p514-p6-built-20260924-fixes5`) makes the whole run REFUSE on correct code. Fix: `server.php` finds its folder with
+   `__DIR__`. **Bundled with two pre-existing small items** round 6 noted: check 0 read `TZID=` in capitals only (the portal reads
+   any case), and the comment should say check 0 reads `server.php` as source, not as what it serves.
+
+   *(Earlier:)* NARROW CHECK ROUND 6 RAN (24 September, about 14:05, Opus; "ROUND 6 (NARROW)" section of
    `.claude-work/briefs/514-p6-check.md`; report `p514-p6--verify-r6.md`) — judging only fix 5. **Fix 5 is DONE**: test now
    `b2bf386b…` (2,665 lines), other ten entries unchanged (verified by me), nothing left in Docker. It unfolds lines first, refuses
    any date written as a period, counts every date in each file against what was judged, and keys the "outside on purpose" list
