@@ -117,9 +117,11 @@ builder runs**; before that it was clean.
 
 ## 2. What to do next, in order
 
-1. **#552 — CHECK ROUND 3 = NOT CLEAN (the check script and wording only); FIX ROUND 3 RUNNING, TIGHT SCOPE (Sonnet; brief
-   `.claude-work/briefs/552-fix3.md`; report `.claude-work/resume/p552--fixes3.md`; watchdog on it). Then a narrow check round 4
-   (Opus). If clean: my own checks on the final bytes, ONE commit saying Codex has not reviewed it, send it to GitHub, update #552,
+1. **#552 — FIX ROUND 3 DONE; NARROW CHECK ROUND 4 RUNNING (Opus; "ROUND 4 (NARROW)" section of
+   `.claude-work/briefs/552-check.md`; report `.claude-work/resume/p552--verify-r4.md`; watchdog on it). Fix round 3
+   (`p552--fixes3.md`): fingerprints DEV_NOTES `b84d3478…`, 202 `f238961a…`, 203 `9ee0e0a0…`, full_schema `dcc136c7…`, script
+   `64b2dc7c…`; verified by me: statements identical to round 1, check clean. Round 4 treats new uncaught text shapes as NOTES
+   unless the docs over-claim. If clean: my own checks on the final bytes, ONE commit saying Codex has not reviewed it, send it to GitHub, update #552,
    then the approved WORKFLOW PACKAGE (queue task 4), then plan #514 part 8.**
    Round 3 (`p552--verify-r3.md`): database change still right; round-2 findings closed except one: the fixed list names WHICH
    older keys exist but still reads each key's SHAPE from `full_schema.sql` (T8: a listed key made unique in the install script
