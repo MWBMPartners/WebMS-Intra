@@ -97,7 +97,13 @@ when it is not given a scratch folder — which is exactly what it should do.
 
 ## 2. What to do next, in order
 
-1. **ROUND 6 = PASS with one LOW, caused by fix 5. FIX 6 IS RUNNING** (24 September, about 14:40, Sonnet; brief
+1. **NARROW CHECK ROUND 7 IS RUNNING** (24 September, about 15:15, Opus; "ROUND 7 (NARROW)" section of
+   `.claude-work/briefs/514-p6-check.md`; report `p514-p6--verify-r7.md`) — judging only fix 6. **Fix 6 is DONE**: test now
+   `6b776d44…` (2,710 lines); `server.php` finds its folder with `__DIR__`; `TZID=` matched in any case; one honest comment line.
+   Proved from a folder with eight digits in its name: 114/0/1. Other ten entries unchanged (verified by me); nothing in Docker.
+   **If round 7 is clean: commit part 6 (step 3 below).**
+
+   *(Earlier:)* ROUND 6 = PASS with one LOW, caused by fix 5. FIX 6 RAN (24 September, about 14:40, Sonnet; brief
    `.claude-work/briefs/514-p6-fix6.md`; report `p514-p6--fixes6.md`), **then a narrow round 7.** Round 6
    (`p514-p6--verify-r6.md`, evidence `p514-p6--verify-r6-evidence/`) proved check 0's line-joining matches the portal's reader
    character for character and missed none of 600,000 planted dates; ten-year scan 0 refusals. **The LOW:** the test writes its
