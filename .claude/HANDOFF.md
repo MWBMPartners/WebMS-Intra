@@ -9,6 +9,21 @@ proceeds, so the session can be picked up at any point).
 
 ## Read this first — where we are right now
 
+## OWNER DECISIONS, 24 SEPTEMBER 2026, late evening — two workflow-file changes APPROVED
+
+1. **Run `tools/audit-checks/check_fk_references_unique_key.py` on every pull request** — owner: "if it is feasible to check the
+   run on each PR then yes". It is feasible: it only reads text and takes seconds, like the other twenty. Wire it into
+   `.github/workflows/pr-security.yml` with **step 9's pattern** (keep the exit code, do not trim lines), so a crash or a missing
+   file can never look clean.
+2. **The end-to-end migration test runs on MySQL 8.4 as well as 8.0.36** — owner: "end-to-end migration test should also run on
+   mysql 8.4". Both versions, not a swap: 8.0.36 stays until #475 decides otherwise. The image is set in
+   `tools/e2e-migrations/docker-compose.yml`; the workflow is `.github/workflows/e2e-migrations.yml`. Prove the harness passes on
+   8.4 locally before wiring it in.
+
+**When:** straight after #552 is committed — NOT while #552's check is running (nothing may change the tree under a checker). Built
+as ONE workflow package together with queue task 4 (the three calendar self-tests into the pull-request checks, approved earlier),
+so the workflow files change once. Change only what was approved; never add `continue-on-error` unasked.
+
 ## DECISIONS TAKEN 24 SEPTEMBER 2026, about 09:00 — read before building anything
 
 The owner asked for every pending decision to be raised up front. These are the answers. **Everything below the START HERE
@@ -229,7 +244,7 @@ silently; no stacked pull requests; nothing hard-coded, because this is a produc
 | 3a | MySQL 8.4 refuses three new links (migrations 202/203) | **#552** | **In progress — build (Sonnet), then Opus check** |
 | 3b | #514 parts 8-11 | #514 | Queued — plan P8 on Opus, build on Sonnet; migration 207 |
 | 3c | Migration 019 removed the category slug key under the wrong name | **#553** | Queued — medium; a small guarded migration (number decided at build time) |
-| 4 | The three calendar self-tests into the pull-request checks | — | Queued, approved. **Needs `-d memory_limit=512M`, and the schema loaded into the `selftest_` database first** (I used `full_schema.sql` then migration 206; the tests' own headers do not say so) |
+| 4 | ONE workflow package: the three calendar self-tests into the pull-request checks + the #552 check in `pr-security.yml` + the migration harness on MySQL 8.4 too | — | Queued, ALL APPROVED (8.4 and the #552 check: owner, 24 Sept late evening). Straight after #552. **Needs `-d memory_limit=512M`, and the schema loaded into the `selftest_` database first** (I used `full_schema.sql` then migration 206; the tests' own headers do not say so) |
 | 5 | Anyone can approve their own expense claim and then be paid | **#545** | Queued — **high, live fault** |
 | 6 | The "my volunteering" page crashes for everyone | **#547** | Queued — **high, live fault** |
 | 7 | Any signed-in person can read another organisation's internal event | **#534** | Queued — high |
