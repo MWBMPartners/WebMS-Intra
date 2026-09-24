@@ -99,7 +99,16 @@ nothing uncommitted. Nothing is running, and nothing is left in Docker (`g2ml-my
 
 ## 2. What to do next, in order
 
-1. **THE PLAN IS WRITTEN; THE CHALLENGE IS RUNNING.** Plan: `.claude-work/resume/p514-p7--plan.md` (~1,070 lines, Opus;
+1. **THE CHALLENGE IS DONE; THE PLAN IS BEING SETTLED** (the original Opus planner, resumed with its context, is folding in the
+   findings IN PLACE in `p514-p7--plan.md`, with a "SETTLED 24 September 2026" section at its top). **Challenge verdict
+   (`p514-p7--challenge.md`): fit to build once 1 HIGH + 4 MEDIUM are made; 9 LOW; no new owner question.** It could NOT make an
+   API key receive more than a signed-out visitor, and proved the one-time migration update safe to replay. HIGH: `SET
+   timestamp` FREEZES the database clock rather than moving it, so simulated dates run only on the new resolver test and part L
+   runs on the real clock. **Decision taken by the commissioning session and told to the owner:** re-saving a choice may
+   overturn another administrator's decline, but only INFORMED — the choice page shows each date's waiting/declined state (read
+   as within owner answer 2); the stricter explicit-tick version was offered to the owner, not chosen. `isPublic` for imported
+   rows will be reported by meaning (1 for every row a key receives). **Next: build part 7 on Opus.**
+   *(History:)* THE PLAN WAS WRITTEN; THE CHALLENGE RAN. Plan: `.claude-work/resume/p514-p7--plan.md` (~1,070 lines, Opus;
    no new owner questions). Challenger (Opus): brief `.claude-work/briefs/514-p7-challenge.md`, output
    `.claude-work/resume/p514-p7--challenge.md`. **Next: settle the plan by folding in the challenger's findings, then build.**
    *(History: the planner ran first.)* **PLANNING RAN** (Opus planner; brief `.claude-work/briefs/514-p7-plan.md`; output
