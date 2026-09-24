@@ -102,10 +102,18 @@ builder runs**; before that it was clean.
 
 ## 2. What to do next, in order
 
-1. **#552 — CHECK ROUND 2 = NOT CLEAN (the check script and comments only); FIX ROUND 2 RUNNING (Sonnet; brief
-   `.claude-work/briefs/552-fix2.md`; report `.claude-work/resume/p552--fixes2.md`; watchdog on it). Then check round 3 (Opus).
-   If clean: my own checks on the final bytes, ONE commit saying Codex has not reviewed it, send it to GitHub, update #552, then
-   plan #514 part 8.**
+1. **#552 — FIX ROUND 2 DONE; CHECK ROUND 3 (NARROW) RUNNING (Opus; "ROUND 3 (NARROW)" section of
+   `.claude-work/briefs/552-check.md`; report `.claude-work/resume/p552--verify-r3.md`; watchdog on it). If clean: my own checks
+   on the final bytes, ONE commit saying Codex has not reviewed it, send it to GitHub, update #552, then plan #514 part 8.**
+   Fix round 2 (`p552--fixes2.md`): the check now uses a FIXED, reasoned starting list (32 keys: 30 on tables no migration ever
+   creates, 2 `tblTrustedDevices` keys that 047 creates under other names); a new rule 1b models the installer's replay of every
+   migration; name-only re-declarations are no longer trusted; prefix keys and unquoted ALTER TABLE read correctly; wiring note;
+   wording fixed. Fingerprints: DEV_NOTES `88e9359f…`, 202 `11cf0284…`, 203 `6ba96c64…`, full_schema `dcc136c7…` (unchanged), script
+   `dd9c8d60…`. **Verified by me: statements identical to fix round 1** (comment-stripped). **Found along the way, opened as #553
+   (medium, released since v1.0.0):** migration 019 removes the category slug key under the wrong name (`uq_cat_slug`; 008 made it
+   `uq_category_slug`), so on older databases a second organisation cannot reuse a category name. The fixer called it harmless (it
+   only thought about links); it is not. Needs a small guarded migration — queued, NOT part of #552. Also on #553: the
+   `tblTrustedDevices` key names differ between 047 and `full_schema.sql` (harmless today).
    Round 2 (`p552--verify-r2.md`): the database change still proved right on 8.4.11 (fresh install and upgrade); round-1 check
    faults closed. New MEDIUM: the upgrade walk ASSUMES every install-script key that no migration creates already exists, so a key
    added to the install script and forgotten in its migration still passes (proved: check exit 0, 8.4 upgrade fails 6125). Fix: a
@@ -220,6 +228,7 @@ silently; no stacked pull requests; nothing hard-coded, because this is a produc
 | 3 | #514 part 7 | #514 | **Done — `12c234f`** (plan challenge + 3 check rounds; Codex not yet) |
 | 3a | MySQL 8.4 refuses three new links (migrations 202/203) | **#552** | **In progress — build (Sonnet), then Opus check** |
 | 3b | #514 parts 8-11 | #514 | Queued — plan P8 on Opus, build on Sonnet; migration 207 |
+| 3c | Migration 019 removed the category slug key under the wrong name | **#553** | Queued — medium; a small guarded migration (number decided at build time) |
 | 4 | The three calendar self-tests into the pull-request checks | — | Queued, approved. **Needs `-d memory_limit=512M`, and the schema loaded into the `selftest_` database first** (I used `full_schema.sql` then migration 206; the tests' own headers do not say so) |
 | 5 | Anyone can approve their own expense claim and then be paid | **#545** | Queued — **high, live fault** |
 | 6 | The "my volunteering" page crashes for everyone | **#547** | Queued — **high, live fault** |
