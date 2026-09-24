@@ -117,12 +117,16 @@ builder runs**; before that it was clean.
 
 ## 2. What to do next, in order
 
-1. **#552 — FIX ROUND 3 DONE; NARROW CHECK ROUND 4 RUNNING (Opus; "ROUND 4 (NARROW)" section of
-   `.claude-work/briefs/552-check.md`; report `.claude-work/resume/p552--verify-r4.md`; watchdog on it). Fix round 3
-   (`p552--fixes3.md`): fingerprints DEV_NOTES `b84d3478…`, 202 `f238961a…`, 203 `9ee0e0a0…`, full_schema `dcc136c7…`, script
-   `64b2dc7c…`; verified by me: statements identical to round 1, check clean. Round 4 treats new uncaught text shapes as NOTES
-   unless the docs over-claim. If clean: my own checks on the final bytes, ONE commit saying Codex has not reviewed it, send it to GitHub, update #552,
+1. **#552 — CHECK ROUND 4 = NOT CLEAN, LOW ONLY (no high or medium); FIX ROUND 4 RUNNING (Sonnet; brief
+   `.claude-work/briefs/552-fix4.md`; report `.claude-work/resume/p552--fixes4.md`; watchdog on it); files as they were before it
+   are snapshotted in `.claude-work/resume/p552-r4-snapshot/`. Then a narrow check round 5 (Opus) comparing against that snapshot.
+   If clean: my own checks on the final bytes, ONE commit saying Codex has not reviewed it, send it to GitHub, update #552,
    then the approved WORKFLOW PACKAGE (queue task 4), then plan #514 part 8.**
+   Round 4 (`p552--verify-r4.md`): round 3's MEDIUM closed (32 recorded shapes match all 96 versions of the install script and a
+   real 8.4.11 upgraded database). LOWs: an untrue claim that no released install script ever had `uq_category_slug` (FALSE: install
+   scripts dated 18 Feb to 8 Mar 2026 had no category table, so those databases got it from 008 — verified by me in git, added to
+   #553); a false alarm on `a ASC` in a key; prefix length claimed compared but not; "by hand" overstated; DEV_NOTES implies the 8.4
+   test runs already; pointers the wrong way; nits.
    Round 3 (`p552--verify-r3.md`): database change still right; round-2 findings closed except one: the fixed list names WHICH
    older keys exist but still reads each key's SHAPE from `full_schema.sql` (T8: a listed key made unique in the install script
    only passes; 8.4 upgrade fails 6125). **Decided by me: this is the last modelling change.** Each round has found another shape
