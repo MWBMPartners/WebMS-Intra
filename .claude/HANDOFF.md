@@ -76,13 +76,16 @@ consistent state**, so restarting now is safe.
 
 **A note on times in today's (24 September) entries:** the clock times written beside them — "about 09:30" to "about 16:05" — were estimates and run roughly two hours ahead of the real clock (it was 13:54 when this was noticed). The ORDER of events is right; do not read durations from them. Real times are in each agent's own progress lines and in `git log`.
 
-## 1. Where the work is, exactly (updated 24 September 2026, early afternoon)
+## 1. Where the work is, exactly (updated 24 September 2026, evening)
 
 **Branch: `claude/alpha-wip`.** It will target `alpha` through ONE pull request later, **only when the owner says so.**
 
-**#514 (importing outside calendars) is the current job — 11 parts. Parts 1 to 6 are COMMITTED.** Part 6 landed as **`c8c490b`**
-after seven rounds of independent checking (the last two narrow and clean). **The working tree is clean** — nothing staged,
-nothing uncommitted. Nothing is running, and nothing is left in Docker (`g2ml-mysql` and `wrapper-v2` belong to other projects).
+**#514 (importing outside calendars) — 11 parts. Parts 1 to 7 are COMMITTED.** Part 7 landed as **`12c234f`** after a plan
+challenge and three rounds of independent checking (round 3 narrow and clean), plus one optional test strengthening round 3
+offered, which I added and proved myself afterwards (fault V17 caught; 208/208 on correct code). Part 6 is `c8c490b`.
+
+**Inserted before part 8: #552** (opened 24 September) — see section 2. **The working tree holds only #552's build once its
+builder runs**; before that it was clean.
 
 **What part 6 left behind for later parts, all recorded on #514:**
 - Part 6 reopened part 5: `web/_core/IcsReader.php` now reports NO "reliable up to here" point when a repeating event was cut at
@@ -99,82 +102,33 @@ nothing uncommitted. Nothing is running, and nothing is left in Docker (`g2ml-my
 
 ## 2. What to do next, in order
 
-1. **FIX ROUND 2 IS DONE; NARROW CHECK ROUND 3 IS RUNNING** (Opus; "ROUND 3 (NARROW)" section of
-   `.claude-work/briefs/514-p7-check.md`; report `p514-p7--verify-r3.md`; watchdog on it). Fix round 2 (`p514-p7--fixes2.md`):
-   all four listed faults now CAUGHT for the stated reason, no regression in either earlier fault suite; resolver test 198 → 208;
-   migration 206 re-states `tblEvents.externalDuplicate`'s comment only when it differs (MySQL 8.0.36 accepted it as INSTANT —
-   no table rebuild). Verified by me: resolver test `cf24e5ee…`, 206 `011c4101…`, `full_schema.sql` `8060af18…`, `FeedResolver.php`
-   unchanged at `c3ce89e4…`; `php -l`, parity and MariaDB-only-DDL checks clean; no `--` in the new comment; nothing in Docker.
-   **If round 3 is clean: my own standard checks on the final bytes, then commit part 7 (ONE commit, saying Codex has not
-   reviewed it), push, comment on #514, then plan part 8 (build on Sonnet).**
-   *(History:)* CHECK ROUND 2 = NOT CLEAN (tests only, no leak); FIX ROUND 2 RAN (Sonnet; brief
-   `.claude-work/briefs/514-p7-fix2.md`; report `p514-p7--fixes2.md`; watchdog on it). **Then check round 3 (Opus).** Round 2
-   (`p514-p7--verify-r2.md`): the duplicate change held against every route, and the preview matched the real save in 576
-   cases. Findings: MEDIUM — test e cannot see half of the line it guards, because test rule and choice numbers never collide,
-   while on a real installation they will; LOW — duplicate tests cover only a LEVEL widening; the preview change has no test; a
-   no-identity row's exclusion from the sibling decision has no test. Also: `externalDuplicate`'s comment differs between a
-   fresh install and an upgrade — being brought into line in migration 206 (205 left alone). **`check_schema_seed_parity.py` can
-   PASS while a seed is missing** (`--` inside a quoted comment) — added to **#543**.
-   *(History:)* FIX ROUND 1 WAS DONE; CHECK ROUND 2 RAN (Opus; "ROUND 2" section of `.claude-work/briefs/514-p7-check.md`;
-   report `p514-p7--verify-r2.md`; watchdog on it). Fix round 1 (`p514-p7--fixes1.md`): ten new proofs, all CAUGHT by the
-   checker's own harness; duplicates now honour narrowing choices/rules and ignore only widening ones (plus `previewRule()` kept in
-   step — a flagged deviation); a row with no identity no longer crashes. Resolver test 168 → 198. Verified by me:
-   `FeedResolver.php` `c3ce89e4…`, resolver test `a26f5abe…`, `full_schema.sql` `93fdd9ce…`; `php -l` and the parity check clean;
-   nothing in Docker. **Trap it found:** `check_schema_seed_parity.py` strips `--` comments before understanding quotes, so a
-   `--` inside a quoted SQL comment desynchronises the whole check (real MySQL is fine) — avoid `--` in column comments.
-   *(History:)* CHECK ROUND 1 = NOT CLEAN; FIX ROUND 1 RAN (Sonnet; brief `.claude-work/briefs/514-p7-fix1.md`; report
-   `p514-p7--fixes1.md`; watchdog on it). **Then check round 2 (Opus).** Round 1 (`p514-p7--verify-r1.md`, evidence
-   `p514-p7--verify-r1-evidence/`) found **no leak in the built code** and passed the API-key change through the real portal (a
-   key got exactly the signed-out visitor's set minus opted-out events). Findings: (1) MEDIUM — nine privacy conditions in
-   `FeedResolver.php` have no committed proof: each broken, all tests still pass, and each broken version publishes something
-   unapproved; (2) MEDIUM — a duplicate date ignored NARROWING choices and rules, so a hidden date went public. **Decided by me,
-   not asked:** duplicate handling was a planner's detail, not an owner answer (checked), so by the owner's principle that
-   narrowing must win, a duplicate now honours a narrowing choice or rule and ignores only a widening one; (3) LOW — a row with
-   no identity crashed the resolve; (4) LOW — memory grows on an old calendar: **#551** opened.
-   *(History:)* PART 7 WAS BUILT; INDEPENDENT CHECK ROUND 1 RAN (Opus; brief `.claude-work/briefs/514-p7-check.md`; report
-   `.claude-work/resume/p514-p7--verify-r1.md`; watchdog `tools/watchdog.sh quiet` on that report). **Build result:** 15
-   uncommitted entries (migration 206 new, `tools/feed-resolver-selftest.php` new); every proof E1-E30 passed with its
-   keep-working control; 50 planted faults all caught; resolver test 168 passed on the real clock and six simulated dates;
-   visibility test 150, importer test 135; harness all four phases twice; nothing left in Docker. Verified by me: fingerprints
-   match the build report, `php -l` clean on all changed PHP files, `api-spec.json` valid. Build report
-   `p514-p7--build.md` (8 departures, 13 choices — round 1 judges them); evidence `p514-p7-built-20260924/`. **Trap it
-   found:** PHP's built-in web server keeps its code cache on even when the command line has it off — run it with
-   `-d opcache.enable=0` when planting faults, or you test the previous fault.
-   *(History:)* PART 7 WAS BUILT (Opus builder; brief `.claude-work/briefs/514-p7-build.md`; report
-   `.claude-work/resume/p514-p7--build.md`). **The plan is SETTLED** — `p514-p7--plan.md` (~1,280 lines), with a "SETTLED
-   24 September 2026" section at its top listing how each of the challenge's 14 findings was resolved; every proof E1-E30 has
-   controls in both directions. Two reasoned departures from the challenge are recorded there (unreadable text hides an event
-   only when the calendar has a text-comparing rule; one malformed rule still "matches nothing" rather than hiding the whole
-   calendar). **Next: independent check round 1, on Opus, by an agent that did not build it.** If the build report is missing
-   or half-written when you pick this up, the builder died with its session — resume from its progress lines.
-   *(History:)* THE CHALLENGE WAS DONE; THE PLAN WAS SETTLED (the original Opus planner, resumed with its context, is folding in the
-   findings IN PLACE in `p514-p7--plan.md`, with a "SETTLED 24 September 2026" section at its top). **Challenge verdict
-   (`p514-p7--challenge.md`): fit to build once 1 HIGH + 4 MEDIUM are made; 9 LOW; no new owner question.** It could NOT make an
-   API key receive more than a signed-out visitor, and proved the one-time migration update safe to replay. HIGH: `SET
-   timestamp` FREEZES the database clock rather than moving it, so simulated dates run only on the new resolver test and part L
-   runs on the real clock. **Decision taken by the commissioning session and told to the owner:** re-saving a choice may
-   overturn another administrator's decline, but only INFORMED — the choice page shows each date's waiting/declined state (read
-   as within owner answer 2); the stricter explicit-tick version was offered to the owner, not chosen. `isPublic` for imported
-   rows will be reported by meaning (1 for every row a key receives). **Next: build part 7 on Opus.**
-   *(History:)* THE PLAN WAS WRITTEN; THE CHALLENGE RAN. Plan: `.claude-work/resume/p514-p7--plan.md` (~1,070 lines, Opus;
-   no new owner questions). Challenger (Opus): brief `.claude-work/briefs/514-p7-challenge.md`, output
-   `.claude-work/resume/p514-p7--challenge.md`. **Next: settle the plan by folding in the challenger's findings, then build.**
-   *(History: the planner ran first.)* **PLANNING RAN** (Opus planner; brief `.claude-work/briefs/514-p7-plan.md`; output
-   `.claude-work/resume/p514-p7--plan.md`).
-   If the output file is missing or half-written when you pick this up, the planner died with its session — re-run it.
-   Plan part 7 with Opus before building it. The plan's P7 section is `.claude-work/resume/p514--plan-r2.md` lines
-   **1645-1824** (it moved: a decisions block was added at the top of the file). **It must now also carry the owner's API-key
-   decision of 24 September** (top of the plan file, and the "DECISIONS TAKEN 24 SEPTEMBER" block above): keys see imported events
-   exactly as a signed-out visitor does, plus a per-calendar "don't show via API" box, unticked by default, combined so that ANY
-   source opting out wins. That reverses committed code in parts 1 and 2 (`EventVisibility.php` key mode around lines 494-497 and
-   545 onward, and `tools/event-visibility-selftest.php`'s key-mode checks), and the checkbox itself belongs to part 8. **The plan
-   must also be re-read against what parts 1 to 6 actually built**, which has moved on from the plan's text in several places.
-   Deep planning is sequential: one Opus planner, then an Opus challenger that reads the planner's output. Use background agents
-   with progress files, not the workflow tool (its agents are killed after three minutes without output).
-2. **Migration 206** — verified free on 24 September; read it again at build time.
-3. **Build part 7**, then check it with an agent that did not build it, round after round until one is clean, then commit — ONE
-   commit, saying plainly Codex has not reviewed it.
-4. **Then parts 8 to 11**, then the rest of the queue (section 5).
+1. **#552 — IN PROGRESS: build running (Sonnet; brief `.claude-work/briefs/552-build.md`; report
+   `.claude-work/resume/p552--build.md`; watchdog on it). Then an Opus check that did not build it, round after round until
+   clean, then ONE commit saying Codex has not reviewed it, push, update #552.**
+   **What:** MySQL 8.4 with default settings (`restrict_fk_on_non_standard_key` = ON) refuses three links this branch added —
+   `fk_user_role_role_site` (migration 202), `fk_user_group_group_site` and `fk_user_dept_dept_site` (203) — because each points at
+   an ordinary index, not a unique one (ERROR 6125). A fresh install AND an upgrade both stop. Found by part 7's round 3 checker;
+   **it had called this "not new", which was wrong: 202/203 exist only on this branch** (checked: not on `origin/alpha`; a scan of
+   alpha's install script found no such link; this branch's has exactly three of 489).
+   **Why before part 8 (my ordering call):** it breaks installation outright on 8.4, DreamHost's version is unconfirmed (#475), and
+   the fix has to change migrations 202/203 IN PLACE — a later migration cannot help because the upgrade stops inside 202 first —
+   which is safest before more is built on top. It is small.
+   **The fix (planned by me, Opus):** make `idx_roles_id_site`, `idx_groups_id_site`, `idx_depts_id_site` UNIQUE in
+   `full_schema.sql` and in 202/203 (cannot fail on data: each starts with its table's primary key). Migration guard handles three
+   cases: absent → add unique; unique → nothing; present but not unique → drop and re-add unique in ONE statement. No migration 207
+   (part 8 keeps it). A new audit check `tools/audit-checks/check_fk_references_unique_key.py`, proved to catch the three.
+   **Deliberately not done:** a database that fully ran the OLD 202/203 on 8.0 keeps the old ordinary index (the Migrator never
+   re-runs a recorded migration). Only a developer's or test database can be in that state — this branch was never deployed.
+   **Asked the owner (24 September, evening), not blocking:** may the new check be added to `.github/workflows/pr-security.yml`
+   (a workflow-file change needs their yes)? Recommended yes, together with task 4's already-approved workflow change.
+2. **Then plan part 8** (Opus planner, then Opus challenger, sequential; plan `.claude-work/resume/p514--plan-r2.md` from line
+   **1825**, plus section **C10** of `.claude-work/resume/p514-p7--plan.md`, which gathers everything part 7 left for part 8:
+   the "don't show via API" box, the choice page showing each date's waiting/declined state, the upgrade notice, the live
+   "awaiting approval" count). **Build on Sonnet.** Migration **207** — read the folder again at build time.
+3. **Then parts 9 to 11**, then the rest of the queue (section 5).
+
+**Part 7's full history** (plan → challenge → settle → build → check rounds 1-3 → fix rounds 1-2) is in
+`.claude-work/resume/RUNS.md` and the `p514-p7--*.md` reports. The traps it found are in section 9.
 
 ## 3. The one thing in part 6 that is unusual, and must not be lost
 
@@ -229,8 +183,10 @@ silently; no stacked pull requests; nothing hard-coded, because this is a produc
 |---|---|---|---|
 | 1 | #514 parts 1-5 | #514 | Done — `31bd64e` and earlier |
 | 2 | #514 part 6 | #514 | **Done — `c8c490b`** (7 check rounds) |
-| 3 | #514 parts 7-11 | #514 | **Next: plan P7 with Opus** (plan lines 1645-1824), migration 206. **P7 and P8 now also carry the API-key change (owner, 24 Sept)** |
-| 4 | Both self-tests into the pull-request checks | — | Queued, approved. **Needs `-d memory_limit=256M` or more** |
+| 3 | #514 part 7 | #514 | **Done — `12c234f`** (plan challenge + 3 check rounds; Codex not yet) |
+| 3a | MySQL 8.4 refuses three new links (migrations 202/203) | **#552** | **In progress — build (Sonnet), then Opus check** |
+| 3b | #514 parts 8-11 | #514 | Queued — plan P8 on Opus, build on Sonnet; migration 207 |
+| 4 | The three calendar self-tests into the pull-request checks | — | Queued, approved. **Needs `-d memory_limit=512M`, and the schema loaded into the `selftest_` database first** (I used `full_schema.sql` then migration 206; the tests' own headers do not say so) |
 | 5 | Anyone can approve their own expense claim and then be paid | **#545** | Queued — **high, live fault** |
 | 6 | The "my volunteering" page crashes for everyone | **#547** | Queued — **high, live fault** |
 | 7 | Any signed-in person can read another organisation's internal event | **#534** | Queued — high |
@@ -289,8 +245,8 @@ first so the review covers a settled state.
 
 ## 8. Where everything lives
 
-- **The plan for #514:** `.claude-work/resume/p514--plan-r2.md`. Section 1 = shared definitions. P6 = lines 1388-1611.
-  P7 = 1612-1791.
+- **The plan for #514:** `.claude-work/resume/p514--plan-r2.md`. Section 1 = shared definitions. P7 = lines 1645-1824;
+  **P8 starts at line 1825.** Part 7's settled plan is `p514-p7--plan.md`; its section C10 is the hand-over to part 8.
 - **Briefs handed to agents:** `.claude-work/briefs/`.
 - **Every report, and the evidence to re-run it:** `.claude-work/resume/`. Part 6 alone has the build report, two check reports,
   two fix reports and four evidence folders. **This folder is git-ignored but on disk** — it does not survive a machine wipe, so
@@ -328,6 +284,13 @@ it**, so it is a visible choice the owner can overrule.
 - **`json_encode()` refuses a structure containing raw bytes**, writes an empty file, and two empty files compare equal — a
   comparison that reported "74 of 75 identical" and was worthless.
 - **Never `git add -A`** while an agent is running; it sweeps up half-finished edits.
+- **The automated database test runs only MySQL 8.0.36, so it cannot see MySQL 8.4's stricter rule for links between tables**
+  (a link must point at a primary or unique key; ERROR 6125 otherwise). Three links this branch added broke it (#552). Use
+  `tools/audit-checks/check_fk_references_unique_key.py` once #552 lands, and prove anything schema-shaped on 8.4 too.
+- **A checker's "this is not new" needs checking against the released branch, not against the previous part.** Part 7's
+  round 3 said the 8.4 failure was old because the pre-part-6 script had it; it came from migration 202, on this branch only.
+- **The calendar self-tests need the schema loaded into their `selftest_` database first** — `full_schema.sql` (I also replayed
+  migration 206). Without it the resolver test stops at once with "Unknown database". Their headers do not say so yet.
 
 ## LATEST — 23 September 2026, about 20:30. RESUME FROM HERE.
 
