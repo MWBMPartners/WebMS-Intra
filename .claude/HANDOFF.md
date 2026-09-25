@@ -165,6 +165,10 @@ builder runs**; before that it was clean.
    more shapes, corrected comments. Verified by me: no SQL statement moved (comment-stripped diff vs HEAD = only the #552 changes).
    **Trap hit again:** the dev-team guard hook refuses any single shell command whose text holds both the release-branch word and
    the word for sending to GitHub, including inside a heredoc brief. Write briefs with the file tool; keep that step separate.
+   **Trap found (25 Sep, 01:15):** a watchdog here ended with exit code 144 (killed from outside) while its check was healthy.
+   Other projects' sessions on this Mac run `~/.claude/bin/watchdog.sh` too; one stopping its own with a broad pattern (e.g.
+   `pkill -f watchdog.sh`) kills ours as well. **Stop a watchdog by its own task id or process number, never by a pattern**, and
+   when one ends unexpectedly, look at the report and restart it.
    **Trap found (24 Sep, 22:00):** restarting `tools/watchdog.sh quiet <file> 900` on a report that is ALREADY quiet fires at
    once — it measures the file's age, not time since the restart. When restarting on a quiet file, raise the limit (e.g. 1800).
    The fix-round-2 builder went 15 minutes without logging while genuinely working (an 8.4 container up, fresh scratch files);
