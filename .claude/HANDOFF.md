@@ -117,13 +117,15 @@ builder runs**; before that it was clean.
 
 ## 2. What to do next, in order
 
-1. **#552 — CHECK ROUND 9 = NOT CLEAN (1 LOW, factual: see the uq_category_slug line below); corrected by me; NARROW CHECK
-   ROUND 10 RUNNING (Opus, independent; "ROUND 10 (NARROW)" section of `.claude-work/briefs/552-check.md`; report
-   `.claude-work/resume/p552--verify-r10.md`; watchdog on it), judging the diff against `.claude-work/resume/p552-r9-snapshot/`.
-   Now: DEV_NOTES `01fc287b…`, script `551261df…`; code proved unchanged (ast); SQL unchanged; 21 checks + static exit 0.
-   **Round 9 also found #555 (opened, medium):** migration 124 places `registrationEnabled` AFTER `capacityCount`, a column no
-   migration adds (only `full_schema.sql`, since 25 June 2026, commit 83b0ae7) — upgrades of databases installed before then stop
-   at 124 with ERROR 1054. Fix: change 124 in place to add `capacityCount` first if missing.
+1. **#552 — DONE: committed `61a73a3`, pushed, #552 commented (stays open until the merge).** Ten independent check rounds, the
+   last (round 10) clean; the database change was right from round 1. My own final checks: 21 audit checks + static calls exit 0,
+   the new check clean, the end-to-end migration test all four phases passed on the final files. Codex has not reviewed it.
+   **NOW: the approved WORKFLOW PACKAGE (queue task 4) — PLANNING RUNNING (Opus planner; brief
+   `.claude-work/briefs/wf-package-plan.md`; plan `.claude-work/resume/wf-package--plan.md`; watchdog on it).** Items: the three
+   calendar self-tests on every pull request with a throwaway MySQL; `check_fk_references_unique_key.py` in `pr-security.yml`
+   (step 9's pattern); the end-to-end migration test on MySQL 8.4 as well as 8.0.36; plus an OPTIONAL, not-yet-approved
+   "upgrade from the last release" phase (planned, not built, until the owner says yes). Then build on Sonnet, check on Opus.
+   Then plan #514 part 8.
    **Settled facts (rounds 5-8; word claims modestly — every absolute "X catches it" has drawn a counterexample):** the 8.4
    end-to-end test builds every database from today's install script, so it can only catch faults visible on such a database — a
    link needing `uq_category_slug` only when that link also exists on such a database. It cannot catch: an edited released
@@ -273,7 +275,7 @@ silently; no stacked pull requests; nothing hard-coded, because this is a produc
 | 1 | #514 parts 1-5 | #514 | Done — `31bd64e` and earlier |
 | 2 | #514 part 6 | #514 | **Done — `c8c490b`** (7 check rounds) |
 | 3 | #514 part 7 | #514 | **Done — `12c234f`** (plan challenge + 3 check rounds; Codex not yet) |
-| 3a | MySQL 8.4 refuses three new links (migrations 202/203) | **#552** | **In progress — build (Sonnet), then Opus check** |
+| 3a | MySQL 8.4 refuses three new links (migrations 202/203) | **#552** | **Done — `61a73a3`** (10 check rounds, last clean; Codex not yet) |
 | 3b | #514 parts 8-11 | #514 | Queued — plan P8 on Opus, build on Sonnet; migration 207 |
 | 3c | Migration 019 removed the category slug key under the wrong name | **#553** | Queued — medium; a small guarded migration (number decided at build time) |
 | 3d | Fresh installs lack the attendance-session → event link `fk_att_sess_event` | **#554** | Queued — low; a small guarded migration (clean dangling `eventID`s first) |
