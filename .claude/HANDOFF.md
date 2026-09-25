@@ -124,25 +124,13 @@ builder runs**; before that it was clean.
    finding → #559). On GitHub: "Lint Workflows" passed; the migration test started by hand (run 36100634959) PASSED on BOTH
    MySQL 8.0.36 and 8.4.11 — each confirmed its server version, all four phases, 204 migrations, 0 failures. #475, #514 and #552
    commented. The calendar workflow and check 23 can only run once a pull request exists.
-   **NOW: #557 (high) — BUILT (Sonnet; report `.claude-work/resume/p557--build.md`; the list differs by exactly the seven names +
-   header date, verified by me). CHECK ROUND 1 = NOT CLEAN, LOW ONLY (fix proved correct again; event times unchanged across
-   both clock-change nights; nothing stores the old names). FIX ROUND 1 DONE (Sonnet; verified by me: list unchanged, generator
-   `--check` rc 0, reader 333/0/2). CHECK ROUND 2 = NOT CLEAN: MEDIUM caused by MY guard — it compared offset histories in
-   PHP's data, so on a server without the old names it refused with a false "different zone" message (and could turn L5 red on
-   correct code). FIX ROUND 2 DONE (Sonnet). CHECK ROUND 3 = NOT CLEAN, 3 LOW (generator messages/comments) → fixed by ME: the
-   guard is now `windowsTimeZonesRenameVerdict()` ('same'/'different'/'unknown', separate true refusals), the advisory note fires on
-   any post-1970 difference. ROUND 4 (NARROW) RUNNING (Opus; "ROUND 4" section of `.claude-work/briefs/557-check.md`; report
-   `.claude-work/resume/p557--verify-r4.md`; against `.claude-work/resume/p557-r3-snapshot/`; watchdog on it). Generator now
-   `8047279c35fc8601`; other four files unchanged since round 3 (CHANGELOG `0739ed07…`, reader `f918d3e7…`, list `6a560f09…`).** Decided: the guard uses ICU's own identity
-   (`getCanonicalID()` equal for both names — checked: renames match, Oslo/Berlin differ); the PHP history comparison runs only
-   where PHP can load BOTH names. **Lesson: a guard that reads the machine's zone data reintroduces the machine-dependence #557
-   removes.** Main fix: L6
-   must not go red on correct code under an older ICU (fail only on a DIFFERENT name; skip zones the ICU does not know); L5
-   skipped where `getIanaID()` is missing; NEW generator guard (my addition): refuse a conversion that changes a zone's offset
-   history, not just its spelling; wording fixes (ICU did not 'retire' the old names; the loss was not silent). The builder found a related gap — an old zone name written in a
-   calendar file's OWN zone line still loses its zone on such servers (warning, wrong time): opened **#560 (medium)**. Planned by me: the generator converts ICU's answers with `IntlTimeZone::getIanaID()` (refusing if it cannot),
-   the list is regenerated (only the seven values should change), L4 names failing zones, a new check keeps old names out; proof on
-   Ubuntu 24.04 + PHP 8.4 WITHOUT `tzdata-legacy`. Then an Opus check, commit, then plan #514 part 8.
+   **#557 (high) — DONE: `3bbf406`, pushed, #557 commented (stays open until merged).** Four check rounds, the last clean. The
+   generator converts ICU answers with `getIanaID()` and refuses when ICU's identity (`getCanonicalID()`) does not confirm a rename;
+   the list holds current names (7 changed, times identical); new check L6. Carried to **#560**: fail-closed on an unexpected
+   verdict, and three wording nits in the generator.
+   **NOW: #514 PART 8 — PLANNING RUNNING (Opus planner; brief `.claude-work/briefs/514-p8-plan.md`; plan
+   `.claude-work/resume/p514-p8--plan.md`; watchdog on it).** Sources: plan lines 1826-1990 of `p514--plan-r2.md`; part 7's hand-over
+   C10 in `p514-p7--plan.md`; the 24 Sept decisions. Then an Opus challenger, then a Sonnet build (chunked if big). Migration 207.
    Plan facts: the self-tests need only `full_schema.sql` (206 is already folded in); `lsof` is absent on GitHub's runners (stop the
    calendar server by parent process); **MySQL 8.4 refuses to start with `--default-authentication-plugin` in
    `tools/e2e-migrations/docker-compose.yml:20`** (already the default on 8.0, so it is removed); with that gone, all four phases
@@ -307,7 +295,7 @@ silently; no stacked pull requests; nothing hard-coded, because this is a produc
 | 3c | Migration 019 removed the category slug key under the wrong name | **#553** | Queued — medium; a small guarded migration (number decided at build time) |
 | 3d | Fresh installs lack the attendance-session → event link `fk_att_sess_event` | **#554** | Queued — low; a small guarded migration (clean dangling `eventID`s first) |
 | 3e | Migration 124 places a column after `capacityCount`, which no migration adds | **#555** | Queued — medium; change 124 in place (add the column first if missing) |
-| 3f | Seven Windows zones map to old zone names some servers reject (`Asia/Calcutta` …) | **#557** | Queued — HIGH; fix BEFORE the pull request (the reader self-test's L4 fails until then) |
+| 3f | Seven Windows zones map to old zone names some servers reject (`Asia/Calcutta` …) | **#557** | **Done — `3bbf406`** (4 check rounds, last clean; Codex not yet) |
 | 3g | Security checks skip SQL checks on SQL-only pull requests | **#556** | Queued — medium; needs the owner's yes (workflow edit) |
 | 3h | Reader self-test I22b often never reaches the loop it guards | **#558** | Queued — medium |
 | 3i | Migration test's documents describe an old phase 4 | **#559** | Queued — low; documentation sweep |
