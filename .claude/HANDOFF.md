@@ -173,9 +173,16 @@ builder runs**; before that it was clean.
    'only when too low' unproven, **untrue save message** ("N events changed who can see them" counts events that merely started
    waiting — confirmed: the resolver's `changed` = stored answer rewritten), a wrong D21 comment, two 'untestable' race branches
    that ARE testable (`probes/races.php`), a docblock overclaim in `decide()`.
-   **NOW: FIX ROUND 2 RUNNING** (same Opus builder, resumed — it knows the self-test; brief `.claude-work/briefs/514-p8-1-fix2.md`;
-   report `.claude-work/resume/p514-p8-1--fix2.md`; round-2 version snapshotted to `.claude-work/resume/p514-p8-1-r2-snapshot/`;
-   watchdog on it). Then check round 3 by a NEW Opus agent. Then an Opus check; when accepted, snapshot the chunk's files into
+   **FIX ROUND 2 DONE** (same Opus builder; report `.claude-work/resume/p514-p8-1--fix2.md`): 279 checks; 90 of 90 planted faults
+   caught; passes UTC ×2, Auckland, New York; the test's database session runs at +13:00 so a `NOW()` slip fails; save messages now
+   count REAL changes in who can see an event (a before/after snapshot inside the lock, via a new read-only `$afterResolve` hook on
+   `inFeedLock()`, 4 statements per save); **wording change from plan C10 item 4: "are now shown" → "are now approved"** (a choice
+   whose first day is ahead is approved but not yet shown); `decide()`'s "followed" read moved inside each calendar's transaction;
+   the self-test can start itself as a lock-holding second process (`--hold-lock`, refuses numbers outside 910000-919999).
+   Fingerprints: FeedAdmin `580d1737…`, feed-admin-selftest `f29991fb…`; ExternalAudience `c026a282…`, check_event_visibility
+   `3484049d…`, FeedResolver `ea23ff1e…` unchanged.
+   **NOW: CHECK ROUND 3 RUNNING** (NEW Opus agent; brief `.claude-work/briefs/514-p8-1-check.md` ROUND 3; report
+   `.claude-work/resume/p514-p8-1--verify-r3.md`; round-2 version in `.claude-work/resume/p514-p8-1-r2-snapshot/`; watchdog on it). Then an Opus check; when accepted, snapshot the chunk's files into
    `.claude-work/resume/p514-p8-snapshot-1/` (nothing staged), then P8-2 … P8-4, then ONE commit for part 8. Plan: a service
    self-test `tools/feed-admin-selftest.php` (part D service checks + part W pages via PHP's built-in server). Four chunks.
    **Decided by me: the owner's 21 Sept rule "#514: one commit per part" stands** — four chunks, each checked, ONE commit and ONE
