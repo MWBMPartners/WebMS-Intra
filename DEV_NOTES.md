@@ -1612,6 +1612,122 @@ production-proven under `mysqli::multi_query` in `web/_sql/037_site_favicon.sql`
 - Escape single quotes inside the literal by doubling (`''`), as in COMMENT clauses.
 - Use `SELECT 1` as the no-op branch.
 
+**A foreign key must point at a PRIMARY key or a UNIQUE key on exactly its own
+columns, in the same order — not just any index.** MySQL 8.0 let a foreign key
+point at an ordinary (non-unique) index; MySQL 8.4 does not. It turns on a rule
+of its own, `restrict_fk_on_non_standard_key`, and refuses with ERROR 6125
+otherwise. This was found on 24 September 2026 (#552): three composite foreign
+keys added on a working branch each pointed at an ordinary `KEY` instead of a
+`UNIQUE KEY`. Both ways a database can come into being were affected, but not
+at the same point in the process. A FRESH INSTALL on MySQL 8.4 failed
+IMMEDIATELY, inside `full_schema.sql` itself — this codebase folds every
+migration's DDL back into that file too (see "`full_schema.sql` fold pattern"
+below), so the same bad foreign key sat there directly, and the installer
+never even reached the migration that introduced it. An UPGRADE never runs
+`full_schema.sql` at all — it replays the numbered migrations in order against
+whatever a real database already has — so it fails instead at the first
+migration that adds one of the three bad links, and the Migrator stops there.
+That upgrade path is the one that actually matters going forward: a fresh
+install today already uses the fixed `full_schema.sql`, but an existing
+customer's database can still reach the same three migrations directly. The
+fix was to make those three indexes unique, which cannot fail on any existing
+data because their leading column is already each table's own PRIMARY KEY. The
+"End-to-end migration test (#248)" section below explains that this
+repository's automated database test runs only against `mysql:8.0.36`, so it
+cannot see this on its own — MySQL 8.0 is happy either way. The check that
+catches it instead is
+`tools/audit-checks/check_fk_references_unique_key.py`. It reads every
+foreign key in `full_schema.sql` and the numbered migrations as text, and
+checks each one four ways: against `full_schema.sql`'s own keys; against
+what a fresh install's own replay of every migration would hold at that
+exact point; against what a real upgrade, replayed in strict order, would
+hold; and it checks that the two paths agree with each other.
+
+The upgrade check starts from a fixed list of 32 keys. Thirty belong to
+the 14 original tables, which predate the numbered migrations. The other
+two are `tblTrustedDevices` keys that migration 047 creates under
+different names; they are listed as known drift (#553). Each entry
+records its columns, whether it is UNIQUE, and, for a named key, whether
+it is a prefix key. The prefix length is recorded but not compared: a
+prefix key can never be what a foreign key points at. Every run compares
+the list with `full_schema.sql`, so a change to a listed key made only in
+`full_schema.sql` is reported. The entries were produced by the check's
+own parser. On 24 September 2026 they were confirmed by an independent
+reading against all 93 commits that touch `full_schema.sql` (92 distinct
+contents, across the paths `sql/`, `web/sql/` and `web/_sql/`), and
+against a real MySQL 8.4.11 database upgraded from alpha.
+
+The check cannot see everything. Three kinds of fault escape it. The
+first is an edited, already-released migration. The second is a key
+`full_schema.sql` declares UNIQUE that a name-only guard creates plain on
+older databases; the check's own replay already holds a left-over key of
+that name, which hides it. The third is a key that differs between
+databases installed at different times. The last one already happens for
+real. `tblEventCategories` was not in the install script from its first
+version (commit 8136a3b, 18 February 2026) until commit 53bcf81 (8 March
+2026), which added it with the two-column key `uq_cat_slug_site`.
+Migration 008 (7 March 2026) creates the table with a one-column key,
+`uq_category_slug`. Migration 019 tries to remove it under the wrong name,
+so it never goes (#553). A database installed from an install script
+older than commit 53bcf81 can have `uq_category_slug`: it does when
+migration 008 created its `tblEventCategories`. (The install scripts from
+commit 1016ccb, 7 March 2026, until 53bcf81 mark 008 as already run
+without creating its tables, so a database installed from one of those
+has no `tblEventCategories` until someone repairs it by hand.) A database
+installed from commit 53bcf81 onwards does not have it. The check's
+upgrade rule assumes every upgraded database has it. Its fresh-install
+rules catch a link that relies on it only when that link also exists on a
+fresh install. Such a link written only inside a migration's own
+`CREATE TABLE IF NOT EXISTS`, for a table the install script already
+declares, escapes both. Migration 009's `fk_att_sess_event` is a real
+link that exists only that way (#554); it is harmless for this check,
+because it points at a primary key. The script's own "WHAT THIS CANNOT
+SEE" section gives the full list.
+
+The owner approved running the end-to-end migration test (see
+"End-to-end migration test" below) on MySQL 8.4 as well as 8.0.36, on
+24 September 2026. That run is not in place yet; the section below still
+covers 8.0.36 only. `tools/e2e-migrations/run.sh` builds every database
+from today's `full_schema.sql`: phase 1 loads it, phases 2 and 3 carry on
+from phase 1's database, and phase 4 reloads it. So once it runs on 8.4,
+it will catch a fault that shows up on a database built from today's
+files. One example is a link that relies on `uq_category_slug`, when the
+link also exists on a database built from today's files. It will not
+catch a fault that shows up only on a database built by an older release.
+That covers an edited, already-released migration; a guarded branch that
+runs only on an older database; a key that today's install script has but
+older installs lack; and a link written only inside a migration's
+re-declared `CREATE TABLE IF NOT EXISTS`. Proved on MySQL 8.4.11: an
+edited released migration and a hidden name-only guard gave 0 errors the
+test's way, and a real upgrade from alpha failed both with ERROR 6125.
+So today nothing automated tests an upgrade from an older release. An "upgrade from the previous release"
+phase would test one older starting point, the last release, not every
+older install. It is proposed, awaiting the owner's decision. It is not
+planned and not under way.
+
+**Nothing runs `check_fk_references_unique_key.py` automatically yet**
+either. Wiring it into the pull-request checks (alongside the other
+scripts in `tools/audit-checks/`) is approved — the owner agreed to this
+on 24 September 2026 — but it is not wired in yet, so for now it must be
+run by hand:
+`python3 tools/audit-checks/check_fk_references_unique_key.py --strict`.
+
+**A database that ran an OLD (pre-#552) copy of migration 202 or 203 to
+completion is never repaired by upgrading.** This can only happen on MySQL 8.0
+or on MariaDB, because neither ever enforced the new MySQL 8.4 rule, so
+nothing stopped the old file finishing — including if somebody re-ran an
+old copy by hand, which lands in the same state as completion, not a
+separate cause. It cannot happen on a real, deployed database: migrations
+188-206 have never left this branch, and deploys come only from the three
+release branches, `main`, `beta` and `alpha` (a manual run of `deploy.yml`
+could target another branch, but every one of the 111 runs on record has
+used one of those three). Such a database keeps its plain, non-unique
+index: the Migrator never re-runs a migration it has already recorded as
+done, so simply pulling in the fixed files does not touch it. A dump made
+from one will not load into MySQL 8.4 (ERROR 6125), even with foreign-key
+checks turned off. To repair it, run the fixed migration 202 and/or 203 by
+hand (both are safe to re-run), or reinstall.
+
 ### Templates
 
 **ADD COLUMN** — guard on `information_schema.COLUMNS`:
@@ -5911,7 +6027,10 @@ departments carry the five flags expense approval depends on.
   organisation's group and department memberships.
 - **The index trap:** InnoDB needs the columns a composite foreign key POINTS AT to lead an index.
   `idx_groups_id_site` and `idx_depts_id_site` exist for exactly that; without them adding the key
-  fails with `ERROR 1822 Missing index for constraint` (proven while planning).
+  fails with `ERROR 1822 Missing index for constraint` (proven while planning). **Since 24 September
+  2026 (#552), both must also be UNIQUE, not merely present** — MySQL 8.4 refuses to create a foreign
+  key unless it points at a PRIMARY or UNIQUE key on exactly those columns; see the "Portable DDL
+  convention" section above for the full story.
 - `tblDepts.isActive` stays nullable: a NULL from a hand edit already means "off" everywhere.
   `Departments::setActive()` compares `COALESCE(isActive, 0) <> ?`, because a plain `<>` against
   NULL matches nothing and such a department could never be retired or reinstated.

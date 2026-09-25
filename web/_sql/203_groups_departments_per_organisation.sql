@@ -128,6 +128,35 @@
 -- replays every numbered migration after `full_schema.sql`, so this matters.
 --
 -- @link https://github.com/MWBMPartners/WebMS-Intra/issues/517
+--
+-- -----------------------------------------------------------------------------
+-- CHANGED IN PLACE, 24 September 2026 (#552) — idx_groups_id_site and
+-- idx_depts_id_site
+-- -----------------------------------------------------------------------------
+-- Both of these used to be added as an ordinary (non-unique) KEY. MySQL 8.4
+-- refuses to create a foreign key unless it points at a PRIMARY or UNIQUE
+-- key on exactly its own columns, and this same migration's own B8 and D8
+-- steps add composite foreign keys pointing at exactly these two indexes.
+-- This codebase's house convention folds every migration's DDL back into
+-- `full_schema.sql` too (see DEV_NOTES.md → "`full_schema.sql` fold
+-- pattern"), so both bad foreign keys also sat directly inside
+-- `full_schema.sql` — it is a FRESH INSTALL on MySQL 8.4 that failed FIRST,
+-- straight away, inside `full_schema.sql` itself, before this migration
+-- ever ran at all. It is the UPGRADE path that fails inside THIS migration:
+-- an upgrade never runs `full_schema.sql` — it replays the numbered
+-- migrations in order against whatever a real database already has — so on
+-- an 8.4 upgrade the failure happens here, at B8 (the groups link) — never
+-- at D8, which this file's own statement order never reaches on a failed
+-- run; see the comment beside C, below, for why. The Migrator then stops:
+-- nothing after it in the queue can ever run. This is changed IN PLACE, not
+-- fixed by a later migration, because migrations 188-206 have never been
+-- released (there is no earlier copy of this file for a real customer to
+-- have already run) and because a later migration would be too late anyway
+-- for the UPGRADE path: it stops at the first failing migration, so a fix
+-- sitting in 207 or later would never be reached. Both blocks now handle
+-- every state a database on which THIS MIGRATION ACTUALLY RUNS can be in —
+-- see the comments beside A7b and C, below, for the detail, and for the one
+-- state neither block can repair.
 -- =============================================================================
 
 
@@ -280,8 +309,52 @@ PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 SET @c := (SELECT COUNT(*) FROM information_schema.STATISTICS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='tblGroups' AND INDEX_NAME='idx_groups_site');
 SET @sql := IF(@c=0, 'ALTER TABLE `tblGroups` ADD KEY `idx_groups_site` (`siteID`)', 'SELECT 1');
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
-SET @c := (SELECT COUNT(*) FROM information_schema.STATISTICS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='tblGroups' AND INDEX_NAME='idx_groups_id_site');
-SET @sql := IF(@c=0, 'ALTER TABLE `tblGroups` ADD KEY `idx_groups_id_site` (`groupID`,`siteID`)', 'SELECT 1');
+-- 🔒 A7b idx_groups_id_site must be UNIQUE, not merely present, since
+--    24 September 2026 (#552) — see this file's header for why it is
+--    changed in place. An EARLIER COPY of this migration existed on this
+--    unreleased branch before #552 was found — deploys come only from the
+--    three release branches, `main`, `beta` and `alpha` (a manual run of
+--    `deploy.yml` could target another branch, but every one of the 111
+--    runs on record has used one of those three), so no released or
+--    deployed database has ever run the earlier copy. A database on which
+--    this migration ACTUALLY RUNS (this attempt or an earlier one) can be
+--    in any of three states here. (1) Index missing -> create it UNIQUE.
+--    (2) Already unique -> nothing to do. This is what a fresh install
+--    sees, because full_schema.sql already made it unique — this branch
+--    trusts the NAME `idx_groups_id_site` alone; if an index of that name
+--    were ever made unique by hand on the WRONG columns, this guard would
+--    still do nothing, and B8 further below would then fail loudly with
+--    ERROR 6125 rather than silently accepting it. (3) Exists but
+--    ordinary -> replace it with a UNIQUE key of the same name in ONE
+--    statement. State 3 is only possible from an EARLIER, pre-#552 copy of
+--    this file — it could have got as far as creating this index (here, in
+--    A7) on an 8.4 run and then failed at the foreign key in B8 (A8, B6
+--    and B7 come between this block and B8, so it is not the very next
+--    statement, but it is still the FIRST place an 8.4 run of the old file
+--    can fail); or it could have run all the way to COMPLETION, whether on
+--    MySQL 8.0 or MariaDB (neither ever enforced the new MySQL 8.4 rule)
+--    or by somebody re-running it by hand — a hand re-run lands in the
+--    same state as completion, not a third, separate cause. Cannot fail on
+--    data already in the table: `groupID` is this table's own PRIMARY KEY,
+--    so no two rows can ever share one.
+--    WHAT THIS CANNOT DO: repair a database on which an earlier, pre-#552
+--    copy of this migration already ran to COMPLETION with the old,
+--    non-unique index (the completion branch of state 3, above, not the
+--    8.4-partial-failure branch, which this fixed copy's own re-run does
+--    repair) — the Migrator never re-runs a migration it has already
+--    recorded as done. That state can only arise on an unreleased
+--    development or test database — see DEV_NOTES.md, #552; the repair is
+--    to run this fixed migration by hand (it is safe to re-run), or
+--    reinstall.
+SET @c := (SELECT COUNT(*) FROM information_schema.STATISTICS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='tblGroups' AND INDEX_NAME='idx_groups_id_site' AND SEQ_IN_INDEX=1);
+SET @nonUnique := (SELECT NON_UNIQUE FROM information_schema.STATISTICS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='tblGroups' AND INDEX_NAME='idx_groups_id_site' AND SEQ_IN_INDEX=1);
+SET @sql := IF(@c=0,
+    'ALTER TABLE `tblGroups` ADD UNIQUE KEY `idx_groups_id_site` (`groupID`,`siteID`)',
+    IF(@nonUnique=0,
+        'SELECT 1',
+        'ALTER TABLE `tblGroups` DROP INDEX `idx_groups_id_site`, ADD UNIQUE KEY `idx_groups_id_site` (`groupID`,`siteID`)'
+    )
+);
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 -- 🔗 A8 Every group belongs to a real organisation; removing an
 --    organisation removes its groups (and, through B8, their memberships).
@@ -344,8 +417,51 @@ PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 -- `tblDepts` already has `siteID` and `isActive`. InnoDB needs
 -- (deptID, siteID) to lead an index before D8's `fk_user_dept_dept_site`
 -- can point at it (proven: without it, "ERROR 1822 Missing index").
-SET @c := (SELECT COUNT(*) FROM information_schema.STATISTICS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='tblDepts' AND INDEX_NAME='idx_depts_id_site');
-SET @sql := IF(@c=0, 'ALTER TABLE `tblDepts` ADD KEY `idx_depts_id_site` (`deptID`,`siteID`)', 'SELECT 1');
+-- 🔒 It must be UNIQUE, not merely present, since 24 September 2026
+--    (#552) — see this file's header for why it is changed in place. An
+--    EARLIER COPY of this migration existed on this unreleased branch
+--    before #552 was found — deploys come only from the three release
+--    branches, `main`, `beta` and `alpha` (a manual run of `deploy.yml`
+--    could target another branch, but every one of the 111 runs on record
+--    has used one of those three), so no released or deployed database has
+--    ever run the earlier copy. A database on which this migration
+--    ACTUALLY RUNS (this attempt or an earlier one) can be in any of three
+--    states here. (1) Index missing -> create it UNIQUE. (2) Already
+--    unique -> nothing to do. This is what a fresh install sees, because
+--    full_schema.sql already made it unique — this branch trusts the NAME
+--    `idx_depts_id_site` alone; if an index of that name were ever made
+--    unique by hand on the WRONG columns, this guard would still do
+--    nothing, and D8 below would then fail loudly with ERROR 6125 rather
+--    than silently accepting it. (3) Exists but ordinary -> replace it
+--    with a UNIQUE key of the same name in ONE statement. Unlike A7b
+--    above, state 3 here is NEVER possible from an 8.4 run stopping
+--    partway through THIS block: an 8.4 run of the old file always fails
+--    earlier than this, at B8's foreign key on tblUserGroups, before this
+--    block is ever reached, so `idx_depts_id_site` would not exist at all
+--    after such a failure — that is state 1, not state 3. State 3 here can
+--    only be reached from an EARLIER, pre-#552 copy of this file running
+--    all the way to COMPLETION, whether on MySQL 8.0 or MariaDB (neither
+--    ever enforced the new MySQL 8.4 rule) or by somebody re-running it by
+--    hand — a hand re-run lands in the same state as completion, not a
+--    separate cause. Cannot fail on data already in the table: `deptID` is
+--    this table's own PRIMARY KEY, so no two rows can ever share one.
+--    WHAT THIS CANNOT DO: repair a database on which an earlier, pre-#552
+--    copy of this migration already ran to COMPLETION with the old,
+--    non-unique index (state 3, above — this one has no 8.4-partial-
+--    failure branch to distinguish it from, unlike A7b's) — the Migrator
+--    never re-runs a migration it has already recorded as done. That state
+--    can only arise on an unreleased development or test database — see
+--    DEV_NOTES.md, #552; the repair is to run this fixed migration by hand
+--    (it is safe to re-run), or reinstall.
+SET @c := (SELECT COUNT(*) FROM information_schema.STATISTICS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='tblDepts' AND INDEX_NAME='idx_depts_id_site' AND SEQ_IN_INDEX=1);
+SET @nonUnique := (SELECT NON_UNIQUE FROM information_schema.STATISTICS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='tblDepts' AND INDEX_NAME='idx_depts_id_site' AND SEQ_IN_INDEX=1);
+SET @sql := IF(@c=0,
+    'ALTER TABLE `tblDepts` ADD UNIQUE KEY `idx_depts_id_site` (`deptID`,`siteID`)',
+    IF(@nonUnique=0,
+        'SELECT 1',
+        'ALTER TABLE `tblDepts` DROP INDEX `idx_depts_id_site`, ADD UNIQUE KEY `idx_depts_id_site` (`deptID`,`siteID`)'
+    )
+);
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
 

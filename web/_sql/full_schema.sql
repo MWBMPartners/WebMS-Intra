@@ -150,7 +150,24 @@ CREATE TABLE IF NOT EXISTS `tblRoles` (
                   COMMENT '1 = one of the fourteen roles every organisation starts with; can be renamed but never deleted',
     PRIMARY KEY (`roleID`),
     UNIQUE KEY `uq_roles_site_key` (`siteID`,`roleKey`),
-    KEY `idx_roles_id_site` (`roleID`,`siteID`),
+    -- 🔒 idx_roles_id_site is a UNIQUE key, not an ordinary one, since
+    -- 24 September 2026 (#552). MySQL 8.4 turns on a rule of its own
+    -- (called restrict_fk_on_non_standard_key) that refuses to create a
+    -- foreign key unless it points at the referenced table's PRIMARY KEY
+    -- or a UNIQUE KEY covering exactly the columns it points at, in the
+    -- same order. tblUserRoles.fk_user_role_role_site points at
+    -- (roleID, siteID), so on MySQL 8.4 this index has to be unique or
+    -- that link cannot be created at all (it fails with ERROR 6125).
+    -- Making it unique cannot break any real data: roleID is already this
+    -- table's own PRIMARY KEY, so no two rows can ever share one anyway —
+    -- adding siteID after it changes nothing about which (roleID, siteID)
+    -- pairs already exist, it only adds a rule the data already obeys.
+    -- Before 24 September 2026 this was an ordinary (non-unique) KEY,
+    -- which MySQL 8.0 accepts but 8.4 refuses. The same reasoning, word
+    -- for word, is why tblGroups.idx_groups_id_site and
+    -- tblDepts.idx_depts_id_site below are UNIQUE keys too — see their
+    -- shorter comments, which point back here rather than repeat this.
+    UNIQUE KEY `idx_roles_id_site` (`roleID`,`siteID`),
     CONSTRAINT `fk_roles_site` FOREIGN KEY (`siteID`) REFERENCES `tblSites`(`siteID`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
@@ -175,9 +192,13 @@ CREATE TABLE IF NOT EXISTS `tblRoles` (
 -- `siteID` has no default on purpose: nothing in any migration or seed
 -- inserts a group, and every write in the code (Portal\Core\UserGroups and
 -- the "awaiting placement" page) sets it explicitly. `idx_groups_id_site`
--- is required, not optional: the composite foreign key
--- `fk_user_group_group_site` on tblUserGroups points at (groupID, siteID),
--- and InnoDB needs those columns to lead an index.
+-- is required, not optional, and — since 24 September 2026 (#552) — must be
+-- UNIQUE, not merely present: the composite foreign key
+-- `fk_user_group_group_site` on tblUserGroups points at (groupID, siteID);
+-- InnoDB needs those columns to lead an index at all, and MySQL 8.4 refuses
+-- to create the foreign key unless that index is also a PRIMARY or UNIQUE
+-- key on exactly those columns (see the comment on the index itself,
+-- below, and on tblRoles.idx_roles_id_site above, for the full story).
 CREATE TABLE IF NOT EXISTS `tblGroups` (
     `groupID`         INT          NOT NULL AUTO_INCREMENT,
     `siteID`          INT          NOT NULL COMMENT 'The organisation this group belongs to (#517)',
@@ -189,7 +210,12 @@ CREATE TABLE IF NOT EXISTS `tblGroups` (
     `dateLastUpdated` TIMESTAMP    NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (`groupID`),
     KEY `idx_groups_site` (`siteID`),
-    KEY `idx_groups_id_site` (`groupID`,`siteID`),
+    -- 🔒 UNIQUE since 24 September 2026 (#552), because MySQL 8.4 refuses a
+    -- foreign key that does not point at a PRIMARY or UNIQUE key on exactly
+    -- its own columns (fk_user_group_group_site on tblUserGroups points
+    -- here). Cannot fail on real data: groupID is already this table's
+    -- PRIMARY KEY. Full reasoning is on tblRoles.idx_roles_id_site above.
+    UNIQUE KEY `idx_groups_id_site` (`groupID`,`siteID`),
     CONSTRAINT `fk_groups_site` FOREIGN KEY (`siteID`)
         REFERENCES `tblSites` (`siteID`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
@@ -209,7 +235,12 @@ CREATE TABLE IF NOT EXISTS `tblDepts` (
     -- #517: the composite foreign key `fk_user_dept_dept_site` on
     -- tblUserDepts points at (deptID, siteID), and InnoDB needs those
     -- columns to lead an index (without it: ERROR 1822 Missing index).
-    KEY `idx_depts_id_site` (`deptID`,`siteID`),
+    -- 🔒 UNIQUE since 24 September 2026 (#552), because MySQL 8.4 refuses a
+    -- foreign key that does not point at a PRIMARY or UNIQUE key on exactly
+    -- its own columns. Cannot fail on real data: deptID is already this
+    -- table's PRIMARY KEY. Full reasoning is on tblRoles.idx_roles_id_site
+    -- above, near the top of this file.
+    UNIQUE KEY `idx_depts_id_site` (`deptID`,`siteID`),
     CONSTRAINT `fk_depts_site` FOREIGN KEY (`siteID`)
         REFERENCES `tblSites` (`siteID`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;

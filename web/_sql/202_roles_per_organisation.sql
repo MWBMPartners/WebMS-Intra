@@ -100,6 +100,32 @@
 -- rows for organisations 2 and up get new numbers.
 --
 -- @link https://github.com/MWBMPartners/WebMS-Intra/issues/516
+--
+-- -----------------------------------------------------------------------------
+-- CHANGED IN PLACE, 24 September 2026 (#552) — idx_roles_id_site
+-- -----------------------------------------------------------------------------
+-- Step A6 below used to add `idx_roles_id_site` as an ordinary (non-unique)
+-- KEY. MySQL 8.4 refuses to create a foreign key unless it points at a
+-- PRIMARY or UNIQUE key on exactly its own columns, and B8's
+-- `fk_user_role_role_site` points at this very index. This codebase's house
+-- convention folds every migration's DDL back into `full_schema.sql` too
+-- (see DEV_NOTES.md → "`full_schema.sql` fold pattern"), so the
+-- SAME bad foreign key also sat directly inside
+-- `full_schema.sql` — it is a FRESH INSTALL on MySQL 8.4 that failed FIRST,
+-- straight away, inside `full_schema.sql` itself, before this migration
+-- ever ran at all. It is the UPGRADE path that fails inside THIS migration:
+-- an upgrade never runs `full_schema.sql` — it replays the numbered
+-- migrations in order against whatever a real database already has — so on
+-- an 8.4 upgrade the failure happens here, at B8, and the Migrator stops:
+-- nothing after it in the queue can ever run. This is changed IN PLACE, not
+-- fixed by a later migration, because migrations 188-206 have never been
+-- released (there is no earlier copy of this file for a real customer to
+-- have already run) and because a later migration would be too late anyway
+-- for the UPGRADE path: it stops at the first failing migration, so a fix
+-- sitting in 207 or later would never be reached. A6b below now handles
+-- every state a database on which THIS MIGRATION ACTUALLY RUNS can be in —
+-- see that block's own comment for the detail, and for the one state it
+-- cannot repair.
 -- =============================================================================
 
 
@@ -164,8 +190,64 @@ PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 SET @c := (SELECT COUNT(*) FROM information_schema.STATISTICS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='tblRoles' AND INDEX_NAME='roleKey');
 SET @sql := IF(@c>0, 'ALTER TABLE `tblRoles` DROP INDEX `roleKey`', 'SELECT 1');
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
-SET @c := (SELECT COUNT(*) FROM information_schema.STATISTICS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='tblRoles' AND INDEX_NAME='idx_roles_id_site');
-SET @sql := IF(@c=0, 'ALTER TABLE `tblRoles` ADD KEY `idx_roles_id_site` (`roleID`,`siteID`)', 'SELECT 1');
+-- 🔒 A6b idx_roles_id_site must be UNIQUE, not merely present, since
+--    24 September 2026 (#552). MySQL 8.4 refuses to create a foreign key
+--    unless it points at a PRIMARY or UNIQUE key covering exactly the
+--    columns it names, and B8 below adds fk_user_role_role_site pointing
+--    at exactly this index (roleID, siteID) — on 8.4 that fails with
+--    ERROR 6125 unless the index is unique. An EARLIER COPY of this
+--    migration existed on this unreleased branch before #552 was found —
+--    deploys come only from the three release branches, `main`, `beta` and
+--    `alpha` (a manual run of `deploy.yml` could target another branch, but
+--    every one of the 111 runs on record has used one of those three), so
+--    no released or deployed database has ever run the earlier copy — a
+--    database on which this migration ACTUALLY RUNS (this attempt or an
+--    earlier one) can be in any of three states at the moment this block
+--    executes, and it handles all three:
+--      1. the index does not exist yet -> create it UNIQUE straight away.
+--      2. it exists and is already unique -> nothing to do. This is what
+--         a fresh install sees, because full_schema.sql now creates it
+--         unique and every migration is replayed on top of that. (This
+--         branch trusts the NAME `idx_roles_id_site` alone — if an index
+--         of that name were ever made unique by hand on the WRONG columns,
+--         this guard would still do nothing, and B8 below would then fail
+--         loudly with ERROR 6125 rather than silently accepting it.)
+--      3. it exists but is an ordinary (non-unique) key -> only possible
+--         from an EARLIER, pre-#552 copy of this migration. THIS (fixed)
+--         copy's own A6b, right below this comment, never creates the
+--         index in any shape but unique — so it cannot be THIS copy that
+--         left it non-unique. The earlier copy could have run to COMPLETION on
+--         MySQL 8.0 or on MariaDB (neither ever enforced the new MySQL 8.4
+--         rule, so nothing there stopped it finishing with a plain index).
+--         Or it could have reached this same point and then failed later,
+--         at its own B8, with this fixed file only now running afterwards.
+--         A hand re-run of that earlier copy lands in the exact same
+--         state — it is not a third, separate cause. Whichever of these it
+--         is, replace the index with a UNIQUE key of the same name in ONE
+--         statement, so the table is never left with no index at all for
+--         that instant. This cannot fail on data already sitting in the
+--         table: `roleID` is this table's own PRIMARY KEY, so no two rows
+--         can ever share one, and adding `siteID` after it changes nothing
+--         about which pairs already exist.
+--    WHAT THIS CANNOT DO: repair a database on which an earlier, pre-#552
+--    copy of this migration already ran to COMPLETION with the old,
+--    non-unique index — whether that copy ran on MySQL 8.0 or MariaDB
+--    (neither ever enforced the new rule) or was re-run by hand; either way
+--    it is the same end state. The Migrator never re-runs a migration it
+--    has already recorded as done, so this block would never execute again
+--    on such a database, and the index would stay non-unique. That state can
+--    only arise on an unreleased development or test database — see
+--    DEV_NOTES.md, #552; the repair is to run this fixed migration by
+--    hand (it is safe to re-run), or reinstall.
+SET @c := (SELECT COUNT(*) FROM information_schema.STATISTICS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='tblRoles' AND INDEX_NAME='idx_roles_id_site' AND SEQ_IN_INDEX=1);
+SET @nonUnique := (SELECT NON_UNIQUE FROM information_schema.STATISTICS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='tblRoles' AND INDEX_NAME='idx_roles_id_site' AND SEQ_IN_INDEX=1);
+SET @sql := IF(@c=0,
+    'ALTER TABLE `tblRoles` ADD UNIQUE KEY `idx_roles_id_site` (`roleID`,`siteID`)',
+    IF(@nonUnique=0,
+        'SELECT 1',
+        'ALTER TABLE `tblRoles` DROP INDEX `idx_roles_id_site`, ADD UNIQUE KEY `idx_roles_id_site` (`roleID`,`siteID`)'
+    )
+);
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
 -- 🔗 A7/A8 Every role belongs to a real organisation; deleting an

@@ -580,6 +580,23 @@ because an older copy of the script had it too; that older copy was still this
 branch. Judge "new or old" against the released branch (`origin/alpha`), never
 against the previous part.
 
+**#552 is fixed (25 September 2026):** the three indexes are unique in
+`full_schema.sql` and in migrations 202/203 (changed in place — never
+released, and an upgrade stops at the first failing migration, so a later
+migration could not help). New check:
+`tools/audit-checks/check_fk_references_unique_key.py` (968 links, judges a
+fresh install and an upgrade separately; its docstring lists what a text
+check cannot see). **The end-to-end migration test builds every phase from
+TODAY's install script, so nothing automated tests an upgrade from an older
+release** — that is how three older faults hid: #553 (migration 019 drops
+the category key under the wrong name), #554 (fresh installs lack
+`fk_att_sess_event`), #555 (migration 124 places a column after
+`capacityCount`, which no migration adds). To find that kind of fault by
+hand: install from an old commit's `full_schema.sql`, then run every
+unmarked migration in order. **Word claims about what a check catches
+conditionally** ("catches it when …"): every absolute claim drew a
+counterexample over ten check rounds.
+
 **Set a watchdog whenever you wait for something to finish (owner's standing rule,
 24 September 2026 — this repository AND every project on the owner's machine).**
 A session only acts when something wakes it; once a background agent's
