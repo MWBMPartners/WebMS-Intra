@@ -122,7 +122,9 @@ builder runs**; before that it was clean.
    the new check clean, the end-to-end migration test all four phases passed on the final files. Codex has not reviewed it.
    **NOW: the approved WORKFLOW PACKAGE (queue task 4) — PLANNED (`.claude-work/resume/wf-package--plan.md`, evidence
    `wf-package--plan-evidence/`); BUILD RUNNING (Sonnet; brief `.claude-work/briefs/wf-package-build.md`; report
-   `.claude-work/resume/wf-package--build.md`; watchdog on it).** Then an Opus check, my checks, ONE commit, then on GitHub:
+   `.claude-work/resume/wf-package--build.md`) — BUILT (13 files; verified by me: fingerprints, no `continue-on-error` added,
+   actionlint clean, checks 9-22 untouched). INDEPENDENT CHECK ROUND 1 RUNNING (Opus; brief `.claude-work/briefs/wf-package-check.md`;
+   report `.claude-work/resume/wf-package--verify-r1.md`; watchdog on it).** Then my checks, ONE commit, then on GitHub:
    `gh workflow run "E2E Migrations" --ref claude/alpha-wip` and watch it (the calendar self-test workflow and the pr-security
    change can only run once a pull request exists — say so in the commit). Then plan #514 part 8.
    Plan facts: the self-tests need only `full_schema.sql` (206 is already folded in); `lsof` is absent on GitHub's runners (stop the
