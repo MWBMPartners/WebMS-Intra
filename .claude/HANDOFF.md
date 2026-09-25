@@ -9,6 +9,13 @@ proceeds, so the session can be picked up at any point).
 
 ## Read this first — where we are right now
 
+## OWNER DECISION, 25 SEPTEMBER 2026, about 16:00 — `tools/watchdog.sh` shortcut fix APPROVED (recorded by a CueRCode session)
+The owner approved the fix for the watchdog "always fires on a shortcut" fault: add `-L` to both `stat` calls in `mtime()` so
+the script reads the real file's age, not the shortcut's. Apply it to **both copies together** — this repo's `tools/watchdog.sh`
+and the device-wide `~/.claude/bin/watchdog.sh` on the owner's Mac — and keep them identical. Details, exact change and checks:
+**#564**. Not done yet: the CueRCode cloud session can't reach the Mac, so a session on the Mac should do it. Until then, point
+`quiet` at the real file (`ls -la` the `.output` shortcut to see where it leads).
+
 ## OWNER DECISIONS, 24 SEPTEMBER 2026, late evening — two workflow-file changes APPROVED
 
 1. **Run `tools/audit-checks/check_fk_references_unique_key.py` on every pull request** — owner: "if it is feasible to check the
