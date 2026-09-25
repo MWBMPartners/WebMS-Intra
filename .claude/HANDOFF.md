@@ -142,12 +142,22 @@ builder runs**; before that it was clean.
    round 4 clean). Doc sweep: #508 has no CHANGELOG entry of its own.
    **NOW: PART 8 CHUNK P8-1 (service layer: `FeedAdmin`, `ExternalAudience`, three `FeedResolver` methods made public, the self-test's
    part D checks D1-D32; no pages, no migration) — BUILT (Sonnet; 121 assertions pass twice; 8 planted faults caught; resolver 208
-   and visibility 150 still pass). CHECK ROUND 1 RUNNING (Opus; brief `.claude-work/briefs/514-p8-1-check.md`; report
-   `.claude-work/resume/p514-p8-1--verify-r1.md`; watchdog on it).** Fingerprints: FeedAdmin `0fb7422c…`, ExternalAudience
-   `f2ea1a21…`, FeedResolver `ea23ff1e…` (only 3 private→public + docblocks — verified by me), check_event_visibility `4ce3ce1f…`,
-   feed-admin-selftest `576a25b4…`. Builder's structural finding: a Selected-groups request can never leave a date waiting (groups <
-   members < public), so several plan scenarios were rebuilt; D24 hand-inserts such a row. The builder's report times before ~12:17
-   were estimates, not real. Then an Opus check; when accepted, snapshot the chunk's files into
+   and visibility 150 still pass). **CHECK ROUND 1: NOT CLEAN** (`.claude-work/resume/p514-p8-1--verify-r1.md`; evidence +
+   the checker's 28 fault scripts saved in `.claude-work/resume/p514-p8-1--verify-r1-evidence/scripts/`). Service code found sound on
+   organisation separation today, BUT: H1 the self-test does not prove it (reads/writes with their organisation or actor check removed
+   still pass 121/121; D20 has a hard-wired `pa_ok(..., true)`; `pa_finish()` only needs 32); M1 `deleteRule()` locks before looking
+   the calendar up (B waits on A's lock — tells 'exists' from 'missing'); M3 approval notes over 500 chars cut, not refused; M4 the
+   address is re-checked on every save, blocking unrelated saves; M5 stale content + exact wording untested; M6 `pendingApprovals()`
+   runs statements per row (~1,000 for 200 rows); 12 LOWs. **CORRECTION: the first build's 'structural finding' was FALSE** — a
+   Selected-groups request CAN wait, through real writes: (a) calendar at Selected groups [SG1] + a choice for [SG1 + another];
+   (b) a private-marked event (starts `hidden`) + a Selected-groups choice. The plan was right; P8-3/P8-4 briefs must not repeat the
+   false claim. **Decided by me:** P8-1 fix round 1 on OPUS (not Sonnet — the Sonnet build shipped an always-pass check and a false
+   resolver claim; the fix is mostly security proof); part 10 list kinds are REMOVED on save and said openly (a hidden widening at
+   part 10 otherwise); bulk decide need not be all-or-nothing across calendars but must report a partial result honestly.
+   **P8-2 brief must add:** a text search refusing pages that call `ExternalAudience::save()/remove()` or part 7's
+   `decideApproval()/withdrawForOrigin()/onAddressChanged()` directly (checker LOW 10).
+   **NOW: FIX ROUND 1 RUNNING** (Opus; brief `.claude-work/briefs/514-p8-1-fix1.md`; report `.claude-work/resume/p514-p8-1--fix1.md`;
+   snapshot of the checked version in `.claude-work/resume/p514-p8-1-r1-snapshot/`; watchdog on it). Then check round 2. Then an Opus check; when accepted, snapshot the chunk's files into
    `.claude-work/resume/p514-p8-snapshot-1/` (nothing staged), then P8-2 … P8-4, then ONE commit for part 8. Plan: a service
    self-test `tools/feed-admin-selftest.php` (part D service checks + part W pages via PHP's built-in server). Four chunks.
    **Decided by me: the owner's 21 Sept rule "#514: one commit per part" stands** — four chunks, each checked, ONE commit and ONE
