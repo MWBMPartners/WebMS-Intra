@@ -84,6 +84,11 @@
  * Exit:   0 when every check passed; 1 otherwise — including every refusal,
  *         because a test that did not run has proved nothing.
  *
+ * The database this is given must already hold the portal's tables: load
+ * web/_sql/full_schema.sql into it first (nothing else is needed — measured
+ * 25 September 2026). .github/workflows/calendar-selftests.yml does exactly
+ * that and runs this test on every pull request.
+ *
  * @package   Portal\Tools
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2026-present MWBM Partners Ltd (t/a MWservices)

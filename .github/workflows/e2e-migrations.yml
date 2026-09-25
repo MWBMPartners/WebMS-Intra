@@ -7,8 +7,11 @@
 # PURPOSE
 # -------
 # Runs tools/e2e-migrations/run.sh — the end-to-end migration test harness
-# (#248) — against a real, disposable MySQL 8.0.36 container (production's
-# confirmed engine and minimum-supported version). The harness now mirrors
+# (#248) — against a real, disposable MySQL container, TWICE, as two jobs
+# side by side: MySQL 8.0.36 and MySQL 8.4.11 (owner's decision, 24
+# September 2026, because MySQL 8.4 refuses some links between tables that
+# MySQL 8.0 allows — #552). Which MySQL 8 line production itself runs is
+# not confirmed — that is #475. The harness now mirrors
 # the real installer flow: (1) load web/_sql/full_schema.sql fresh, (2)
 # replay every numbered migration over that DB ignoring tblMigrations —
 # exactly like web/_install/index.php:399-466 — asserting it's a clean
@@ -57,9 +60,20 @@ concurrency:
 
 jobs:
   e2e:
-    name: Run migration harness
+    # One job per MySQL version, side by side. fail-fast is off so that a
+    # failure on one version never cancels the other: both answers are
+    # wanted. Neither job name is a required check (checked 25 September
+    # 2026 with tools/audit-required-checks.py), so the names can change.
+    name: Run migration harness (MySQL ${{ matrix.mysql }})
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        # Exact versions only: run.sh refuses to run when the server
+        # reports anything else. Bump these by hand; Dependabot does not
+        # watch image tags here.
+        mysql: ['8.0.36', '8.4.11']
 
     steps:
       - name: Checkout
@@ -67,5 +81,7 @@ jobs:
 
       # ubuntu-latest ships Docker + the docker compose plugin pre-installed,
       # so no separate setup step is needed before running the harness.
-      - name: Run E2E migration harness (all four phases)
+      - name: Run E2E migration harness (all four phases) on MySQL ${{ matrix.mysql }}
+        env:
+          E2E_MYSQL_VERSION: ${{ matrix.mysql }}
         run: bash tools/e2e-migrations/run.sh

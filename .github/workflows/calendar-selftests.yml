@@ -1,0 +1,194 @@
+# =============================================================================
+# WebMS-Intra — Calendar self-tests
+#
+# Copyright (c) 2026 MWBM Partners Ltd. All rights reserved.
+# Proprietary. Unauthorised copying, modification or distribution prohibited.
+#
+# PURPOSE
+# -------
+# Runs the self-tests that guard importing outside calendars (#514) on every
+# pull request, so they no longer depend on somebody remembering to run them
+# by hand (owner's decisions of 23 and 24 September 2026).
+#
+#   tools/ics-reader-selftest.php        reads calendar files; needs PHP only
+#   tools/event-visibility-selftest.php  who may see an event; needs a database
+#   tools/feed-resolver-selftest.php     choices, rules and approvals; database
+#   tools/feed-importer-selftest.php     the importer, which decides what is
+#                                        DELETED; a database AND a test
+#                                        calendar server on this machine
+#
+# THE THROWAWAY DATABASE
+# ----------------------
+# GitHub starts ONE MySQL 8.0.36 container beside the job (the `services:`
+# block) and removes it when the job ends. Its data lives only in memory
+# (`--tmpfs`), and the machine itself is thrown away after the job, so
+# nothing is kept anywhere. Three of the four tests below need a database —
+# the calendar reader self-test (tools/ics-reader-selftest.php) needs none,
+# just PHP — and each of those three gets a DATABASE of its own inside that
+# one container, because the importer test empties the tables it uses.
+# Each is built from web/_sql/full_schema.sql alone: measured on
+# 25 September 2026, all three pass on that, with no migration replayed on
+# top.
+#
+# The databases use MySQL's own default collation (utf8mb4_0900_ai_ci), which
+# is what a hosting control panel gives a customer. That is on purpose: the
+# visibility test's collation check can only catch a table that lost BOTH
+# its character set and its collation on a database like that (see that
+# test's header, "THE COLLATION CHECK").
+#
+# WHY EVERY TEST RUNS EVEN WHEN AN EARLIER ONE FAILED
+# ---------------------------------------------------
+# Each test step runs while the job has not been cancelled and its database
+# was built, so one failure cannot hide another test's result. A failing
+# test still turns this job red: nothing here uses continue-on-error.
+#
+# THE CALENDAR SERVER
+# -------------------
+# The importer test needs PHP's built-in web server with six workers
+# (PHP_CLI_SERVER_WORKERS=6): some checks cut a download off half way, and a
+# single worker would sit holding that dead connection and answer nothing
+# else. The workers outlive a stopped parent, so the step stops the workers
+# first (by their parent's process number) and then the parent. The test's
+# own header says to stop it by port with lsof, which is not installed on
+# GitHub's Ubuntu machines.
+#
+# WHAT THIS CANNOT PROVE
+# ----------------------
+# MySQL 8.4 and MariaDB (this job uses 8.0.36 only), and real Google or
+# Microsoft 365 calendars — see each test's own "WHAT THIS CANNOT PROVE".
+# =============================================================================
+
+name: Calendar Self-Tests
+
+on:
+  pull_request:
+    branches: [main, beta, alpha]
+  # Lets the check be started by hand from the Actions page. GitHub only
+  # offers this once the file is on the default branch.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: calendar-selftests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  selftests:
+    name: Calendar self-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    # 🗄️ The throwaway database. The password is not a secret: this
+    # database exists only inside this one job, like the end-to-end
+    # test's own (tools/e2e-migrations/docker-compose.yml).
+    services:
+      mysql:
+        image: mysql:8.0.36
+        env:
+          MYSQL_ROOT_PASSWORD: selftest-root
+        ports:
+          - 33306:3306
+        # The health check asks over TCP on purpose. While the image is
+        # setting itself up it runs a temporary server that accepts no
+        # network connections, so a TCP answer means the real server is up.
+        options: >-
+          --tmpfs /var/lib/mysql
+          --health-cmd="mysqladmin ping -h 127.0.0.1 --protocol=TCP -uroot -pselftest-root"
+          --health-interval=2s
+          --health-timeout=5s
+          --health-retries=60
+
+    env:
+      SELFTEST_DB_HOST: 127.0.0.1
+      SELFTEST_DB_PORT: '33306'
+      SELFTEST_DB_USER: root
+      SELFTEST_DB_PASS: selftest-root
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+
+      - name: Setup PHP 8.4
+        id: php
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: mysqli, openssl, sodium, curl, mbstring
+          coverage: none
+
+      # 🧱 One database per test, each from full_schema.sql. The first loop
+      #    waits for a SIGNED-IN query, not just a ping (the same reason as
+      #    wait_for_mysql() in tools/e2e-migrations/run.sh).
+      - name: Build three throwaway databases from full_schema.sql
+        id: databases
+        env:
+          MYSQL_CID: ${{ job.services.mysql.id }}
+        run: |
+          for i in $(seq 1 90); do
+            if docker exec -e MYSQL_PWD="$SELFTEST_DB_PASS" "$MYSQL_CID" mysql -uroot -h 127.0.0.1 --protocol=TCP -e 'SELECT 1' >/dev/null 2>&1; then
+              break
+            fi
+            if [ "$i" -eq 90 ]; then
+              echo "::error::MySQL did not accept a signed-in query within 90 seconds"
+              docker logs "$MYSQL_CID" 2>&1 | tail -30
+              exit 1
+            fi
+            sleep 1
+          done
+          docker exec -e MYSQL_PWD="$SELFTEST_DB_PASS" "$MYSQL_CID" mysql -uroot -h 127.0.0.1 --protocol=TCP -e 'SELECT VERSION(), @@collation_server'
+          for db in selftest_visibility selftest_resolver selftest_importer; do
+            docker exec -e MYSQL_PWD="$SELFTEST_DB_PASS" "$MYSQL_CID" mysql -uroot -h 127.0.0.1 --protocol=TCP -e "CREATE DATABASE ${db}"
+            docker exec -i -e MYSQL_PWD="$SELFTEST_DB_PASS" "$MYSQL_CID" mysql -uroot -h 127.0.0.1 --protocol=TCP "${db}" < web/_sql/full_schema.sql > /dev/null
+            echo "built ${db}"
+          done
+
+      - name: Calendar reader self-test (PHP only)
+        if: ${{ !cancelled() && steps.php.outcome == 'success' }}
+        run: php -d memory_limit=512M tools/ics-reader-selftest.php
+
+      - name: Event visibility self-test
+        if: ${{ !cancelled() && steps.databases.outcome == 'success' }}
+        env:
+          SELFTEST_DB_NAME: selftest_visibility
+        run: php -d memory_limit=512M tools/event-visibility-selftest.php
+
+      - name: Feed resolver self-test
+        if: ${{ !cancelled() && steps.databases.outcome == 'success' }}
+        env:
+          SELFTEST_DB_NAME: selftest_resolver
+        run: php -d memory_limit=512M tools/feed-resolver-selftest.php
+
+      # 📡 The importer test writes its own calendar files, then needs them
+      #    served on this machine. The server is stopped on the way out
+      #    whether the test passed or failed (the EXIT trap), and the step
+      #    still ends with the test's own exit code.
+      - name: Feed importer self-test (with its test calendar server)
+        if: ${{ !cancelled() && steps.databases.outcome == 'success' }}
+        env:
+          SELFTEST_DB_NAME: selftest_importer
+          SELFTEST_FEED_DIR: ${{ runner.temp }}/selftest-calendars
+          SELFTEST_FEED_PORT: '9055'
+        run: |
+          mkdir -p "$SELFTEST_FEED_DIR"
+          php tools/feed-importer-selftest.php --write-calendars
+          PHP_CLI_SERVER_WORKERS=6 php -S "127.0.0.1:${SELFTEST_FEED_PORT}" "${SELFTEST_FEED_DIR}/server.php" > "${SELFTEST_FEED_DIR}.server.log" 2>&1 &
+          SERVER_PID=$!
+          stop_server() {
+            pkill -P "$SERVER_PID" || true
+            kill "$SERVER_PID" 2>/dev/null || true
+          }
+          trap stop_server EXIT
+          for i in $(seq 1 40); do
+            if php -r 'exit(@fsockopen("127.0.0.1", (int) getenv("SELFTEST_FEED_PORT")) ? 0 : 1);'; then
+              break
+            fi
+            if [ "$i" -eq 40 ]; then
+              echo "::error::the test calendar server did not start"
+              cat "${SELFTEST_FEED_DIR}.server.log"
+              exit 1
+            fi
+            sleep 0.25
+          done
+          php -d memory_limit=512M tools/feed-importer-selftest.php

@@ -74,6 +74,10 @@
  *        SELFTEST_DB_PASS=secret SELFTEST_FEED_DIR=/tmp/p6cal \
  *        SELFTEST_FEED_PORT=9055 php tools/feed-importer-selftest.php
  *
+ * `.github/workflows/calendar-selftests.yml` does steps 1 to 3 above on every
+ * pull request, stopping the server by its parent's process number instead of
+ * by port, because `lsof` is not installed on GitHub's Ubuntu machines.
+ *
  * The settings it reads, and nothing else — it never reads or writes anything
  * under `web/_auth_keys`, and it never loads `bootstrap.php`:
  *

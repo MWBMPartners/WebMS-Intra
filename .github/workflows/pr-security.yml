@@ -55,6 +55,16 @@
 #                                                       checker finding 3 — corrected here so
 #                                                       this header never overstates what the
 #                                                       step below actually does).
+#  23. Links that point at an ordinary index         — a foreign key whose target is not a
+#                                                       primary or unique key; MySQL 8.4
+#                                                       refuses it (ERROR 6125, #552). Runs
+#                                                       as its OWN step (see below), so it is
+#                                                       never skipped by the early exit that
+#                                                       skips checks 9-22 above on a pull
+#                                                       request with no changed PHP file.
+#                                                       Reported in the PR comment only; a
+#                                                       crash or a missing file gets its own
+#                                                       section there, never silence.
 #
 # These are HEURISTICS — false positives are expected. Review the findings,
 # don't blindly fail the merge.
@@ -96,6 +106,17 @@
 # runs whether or not it carries the rule or the refusal. This check flags
 # any line that reads tblEvents with neither nearby, so a future page that
 # forgets the rule is caught before it merges rather than found by a leak.
+# Check 23 (#552) runs as its OWN step, not inside the heuristic scan
+# above, so it is never skipped by that step's early exit — checks 9-22
+# above ARE skipped whenever a pull request changes no PHP file under
+# web/, a real gap tracked as #556 and not fixed here. MySQL 8.4, as it is
+# set up out of the box, refuses a link between tables (a foreign key)
+# whose target is an ordinary index rather than a primary or unique key,
+# while MySQL 8.0 allows it. Three such links reached this project
+# unnoticed and would have stopped both a fresh install and an upgrade on
+# 8.4 (#552). The script reads the SQL as text, so it needs no database
+# and takes about a second — cheap enough to run on every pull request,
+# including one that changes only a migration file and no PHP.
 # The scripts live in tools/audit-checks/ and are runnable locally.
 # =============================================================================
 
@@ -488,28 +509,142 @@ jobs:
           fi
 
       # =====================================================================
+      # 23) Links between tables that point at something other than a real
+      #     key (#552). Deliberately its OWN step, not folded into the
+      #     "Heuristic anti-pattern scan" step above: that step exits
+      #     early — skipping checks 9-22 — on a pull request that changes
+      #     no PHP file under web/ (see its "if [[ -z "$CHANGED" ]]"
+      #     block). A bad link between tables is most often introduced by
+      #     a migration with no PHP change at all, so putting this check
+      #     behind that same early exit would skip it on exactly the pull
+      #     requests it matters most for (the owner approved "every pull
+      #     request" for this one specifically). This step never looks at
+      #     which files changed.
+      #
+      #     Wired the same way as check 9 above, and for the same reason:
+      #     the exit code is kept and none of the output is thrown away.
+      #     Without --strict (not passed here) the script exits 0 with or
+      #     without findings, so any other exit code means it did not
+      #     finish: 1 is a crash (a Python traceback), 2 is its own
+      #     refusal when full_schema.sql or a migration file is missing,
+      #     cannot be read, or holds a byte that is not valid UTF-8.
+      #     Neither of those prints a bullet, so checking for a bullet
+      #     alone would report both as a clean run. grep -a for the same
+      #     reason as check 20 above.
+      # =====================================================================
+      # No continue-on-error here: it is not needed. The script below starts
+      # with `set +e` and never ends with an explicit non-zero `exit`, so
+      # this step always finishes with a success status on its own —
+      # proved by running it against a crashing copy of the script and a
+      # missing-schema tree, both under GitHub's own default shell
+      # (`bash -eo pipefail`), and both still ending the step at exit 0.
+      #
+      # `if: ${{ !cancelled() }}` — added in fix round 1 of the workflow
+      # package (25 September 2026). Without it this step used GitHub's
+      # default condition, `success()`, so a failure in an EARLIER step (the
+      # PHP lint hard gate above, the checkout step, or the gitleaks SARIF
+      # upload) skipped this one too — the exact thing the comment above
+      # says this check must never do ("putting this check behind that same
+      # early exit would skip it on exactly the pull requests it matters
+      # most for"). Proved by simulation: with the PHP lint step made to
+      # fail, this step was skipped, its `hits` output was never set, and
+      # the job summary line below then showed an EMPTY count next to the
+      # words "never skipped" — a skip that looked exactly like a clean
+      # run. `!cancelled()` runs this step whatever happened earlier, and
+      # only skips it if the whole workflow run itself was cancelled.
+      - name: Foreign-key target check (#552, check 23 — runs on every PR, even if an earlier step failed)
+        id: check23
+        if: ${{ !cancelled() }}
+        run: |
+          set +e
+          REPORT=/tmp/security-report-check23.md
+          : > "$REPORT"
+          HITS=0
+
+          FK_TARGETS=$(python3 tools/audit-checks/check_fk_references_unique_key.py 2>&1)
+          FK_RC=$?
+          if [[ "$FK_RC" -ne 0 ]]; then
+            {
+              echo "### check_fk_references_unique_key.py did not finish (exit code $FK_RC): its findings, if any, are unknown"
+              echo
+              echo '```'
+              echo "${FK_TARGETS:-(the script printed nothing at all)}"
+              echo '```'
+              echo
+            } >> "$REPORT"
+            HITS=1
+          elif echo "$FK_TARGETS" | grep -a -q '•'; then
+            {
+              echo "### Links between tables that point at an ordinary index instead of a primary or unique key (MySQL 8.4 refuses them: ERROR 6125)"
+              echo
+              echo '```'
+              echo "$FK_TARGETS"
+              echo '```'
+              echo
+            } >> "$REPORT"
+            HITS=1
+          fi
+
+          echo "hits=$HITS" >> "$GITHUB_OUTPUT"
+          echo "check 23 finding sections: $HITS"
+          if [[ -s "$REPORT" ]]; then
+            cat "$REPORT"
+          fi
+
+      # =====================================================================
       # Post a single summary comment back to the PR
+      #
+      # Runs whenever there is anything to say: either the heuristic step
+      # (checks 9-22) actually ran (it skips itself, and so skips this
+      # comment too, on a pull request with no changed PHP file — that gap
+      # is #556, unchanged here), OR check 23 above found something —
+      # check 23 runs on every PR, even after an earlier step failed (see
+      # its own `if:` above), so it can have a finding even when the
+      # heuristic step skipped itself entirely.
+      #
+      # `steps.check23.outputs.hits == '1'`, not `!= '0'` — tightened in fix
+      # round 1 of the workflow package (25 September 2026). Check 23's own
+      # step (above) only ever writes the literal string `0` or `1` to this
+      # output — see its `HITS=0` / `HITS=1` — so `== '1'` is the exact test
+      # for "check 23 found something". `!= '0'` reads as "found something"
+      # but is really "found something OR check 23 did not set an output at
+      # all" (an output that was never set is not `'0'` either), which is
+      # exactly what "the step was skipped" looks like — for example on a
+      # cancelled run. `== '1'` gives the right answer whether GitHub reads
+      # a never-set output as empty or as null, so "never ran" can never be
+      # misread as "has findings".
       # =====================================================================
       - name: Post findings to PR
-        if: always() && steps.heuristics.outputs.no_changes != 'true'
+        if: always() && (steps.heuristics.outputs.no_changes != 'true' || steps.check23.outputs.hits == '1')
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           REPO: ${{ github.repository }}
-          HITS: ${{ steps.heuristics.outputs.hits }}
+          HEURISTIC_HITS: ${{ steps.heuristics.outputs.hits }}
+          CHECK23_HITS: ${{ steps.check23.outputs.hits }}
         run: |
           REPORT=/tmp/security-report.md
+          REPORT23=/tmp/security-report-check23.md
           COMMENT=/tmp/comment.md
+
+          # Total findings = the heuristic step's count (0 if it skipped
+          # itself) plus check 23's own count (it always ran).
+          HITS=$(( ${HEURISTIC_HITS:-0} + ${CHECK23_HITS:-0} ))
 
           {
             echo "## PR Security Checks"
             echo
-            if [[ "${HITS:-0}" == "0" ]]; then
+            if [[ "$HITS" == "0" ]]; then
               echo "✅ No heuristic findings on the files changed in this PR."
             else
               echo "⚠️ **${HITS} category(ies) of findings** — these are heuristics, please review each:"
               echo
-              cat "$REPORT"
+              if [[ -s "$REPORT" ]]; then
+                cat "$REPORT"
+              fi
+              if [[ -s "$REPORT23" ]]; then
+                cat "$REPORT23"
+              fi
             fi
             echo
             echo "<sub>Generated by \`.github/workflows/pr-security.yml\`. These checks are non-blocking on the merge gate; PHP lint and the account-change guard are the hard gates. False positives are expected — confirm before acting.</sub>"
@@ -546,8 +681,9 @@ jobs:
             echo "- Account-change guard: ${{ steps.account_guard.outcome }} (hard gate)"
             echo "- gitleaks: see step output / artifact"
             if [[ "${{ steps.heuristics.outputs.no_changes }}" == "true" ]]; then
-              echo "- Heuristic scans: no PHP files changed in web/ — skipped"
+              echo "- Heuristic scans (checks 9-22): no PHP files changed in web/ — skipped"
             else
-              echo "- Heuristic scans: ${{ steps.heuristics.outputs.hits }} finding category(ies)"
+              echo "- Heuristic scans (checks 9-22): ${{ steps.heuristics.outputs.hits }} finding category(ies)"
             fi
+            echo "- Foreign-key target check (#552, check 23): ${{ steps.check23.outputs.hits }} finding section(s) — runs on every pull request, even when an earlier step failed (blank only if the run was cancelled)"
           } >> "$GITHUB_STEP_SUMMARY"

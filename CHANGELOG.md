@@ -2,6 +2,53 @@
 
 
 ## [Unreleased] (alpha)
+- ci: three pull-request checks changed. (1) The calendar self-tests (#514)
+  — the reader self-test approved by the owner on 23 September 2026, the
+  three database-backed ones on 24 September — now run on every pull
+  request to alpha, beta or main, in a new workflow
+  (`calendar-selftests.yml`). Three of its four self-tests (event
+  visibility, feed resolver, feed importer) each get their own throwaway
+  MySQL 8.0.36 database, in a container GitHub builds beside the job and
+  deletes, data included, when the job ends; the fourth, the calendar
+  reader self-test, needs no database at all — just PHP. **The reader
+  self-test's own "L4" check fails on a machine whose PHP lacks seven old
+  Windows time-zone names** such as `Asia/Katmandu`. A machine built to
+  match GitHub's runner is one; whether GitHub's runner itself is has not
+  been verified. That is a real product gap, not a fault in this change,
+  tracked as issue #557 (high priority) and to be fixed BEFORE this
+  branch's pull request is opened, so this new check is not red from its
+  very first run. (2) The #552 foreign-key check
+  (`check_fk_references_unique_key.py`) — approved by the owner on
+  24 September 2026 — now runs in the pull-request security checks as its
+  own step, check 23, wired so a crash or a missing schema file is
+  reported rather than looking clean, and so it keeps running even when an
+  earlier step in the same job failed. Unlike checks 9-22, it also runs on
+  every pull request, including one that changes only a migration file and
+  no PHP (a gap in those other checks, tracked separately as #556, is not
+  fixed here). (3) The end-to-end migration test — approved by the owner
+  on 24 September 2026 — now runs on MySQL 8.4.11 as well as 8.0.36, as two
+  jobs side by side; its test database no longer passes a server option
+  MySQL 8.4 refuses (already the default on 8.0.36), and the harness
+  itself refuses to run if the server it is given is not the exact version
+  it asked for. **None of these three has yet run for real on GitHub.**
+  (1) and (2) run on a pull request ((1) can also be started by hand once
+  its file reaches the default branch), and this branch has not been
+  opened as one. (3) runs on a pull request or when alpha, beta or main is
+  updated, in both cases only when certain files change, and can be
+  started by hand; none of that has happened yet. (2) and (3) were proved locally, including full runs of the
+  migration harness against real MySQL 8.0.36 and 8.4.11 containers. (1)
+  was also proved on this Mac, but the L4 fault above was found only once
+  it was proved again on a Linux machine built to match GitHub's own
+  runner (Ubuntu 24.04, the same PHP 8.4 packages GitHub's `setup-php`
+  step installs).
+- test(calendar): the calendar reader self-test's check I22b now times only
+  the reader's `expand()` step, not reading the file as well. It had failed on
+  correct code on a busy machine (0.703 s against its 0.7 s limit). The
+  limit is unchanged. A known gap remains, found at the same time: at its
+  short budget, I22b often stops in an earlier loop and never reaches the
+  walk through a series' dates, so it can pass with that walk's own
+  deadline check removed. That is issue #558; until it is fixed, that
+  deadline check must not be removed.
 - fix(expenses): an expense claim can no longer get stuck for ever because a
   department's lead or required approver lacks the Expense Approver role
   (#542). Before this, the decision handler (`expenses/approve/save.php`) and

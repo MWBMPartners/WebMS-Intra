@@ -297,9 +297,9 @@ gaps, all fixed here:
   happened to appear earlier in the same file). `ALTER_TABLE_RE` now accepts
   a table name with or without backticks.
 * The printed findings still lacked the one thing that actually reaches a
-  pull-request comment when this check is wired into `pr-security.yml` in
-  future: see "HOW TO WIRE THIS INTO pr-security.yml" below for the shape
-  that keeps a genuine finding from being read as a clean run.
+  pull-request comment now that this check is wired into `pr-security.yml`:
+  see "HOW THIS IS WIRED INTO pr-security.yml" below for the shape that
+  keeps a genuine finding from being read as a clean run.
 * Several comments here, in `DEV_NOTES.md` and in migrations 202/203 said
   things that were not quite true — fixed throughout, each in its own place
   rather than only listed here.
@@ -357,7 +357,7 @@ while a real improvement, was not the whole fix:
 * A non-UTF-8 byte in the schema file or a migration file used to reach
   Python's own default handler — a raw traceback and exit code 1, with no
   file name in the first line, and (worse) indistinguishable from a clean
-  run by the exact `pr-security.yml` pattern "HOW TO WIRE THIS INTO
+  run by the exact `pr-security.yml` pattern "HOW THIS IS WIRED INTO
   pr-security.yml" below already warns about. It now gives the same kind
   of clear, file-naming message a missing file gives, and exits 2.
 
@@ -400,25 +400,50 @@ needs an index covering the WHOLE column; a prefix index only ever covers part
 of the value stored in it, so it can never be what a foreign key points at,
 unique or not.
 
-HOW TO WIRE THIS INTO pr-security.yml
+HOW THIS IS WIRED INTO pr-security.yml
 ----------------------------------------
-This script is not yet wired into the pull-request checks. Wiring it in is
-approved — the owner agreed on 24 September 2026 (see `.claude/HANDOFF.md`)
-— it is simply not done yet. When it is, `pr-security.yml`'s
-OWN step-9 comment (~lines 304-322, next to the checks already wired in)
-records a trap worth repeating here rather than rediscovering: a step shaped
-like `OUTPUT=$(python3 thischeck.py 2>&1 | tail -n +N || true)` followed by
-`echo "$OUTPUT" | grep -q '•'` shows NOTHING — not even a warning — for two
-very different failures: the script CRASHING (a Python traceback, exit 1) and
-the schema file being missing (this script's own exit 2, see "EXIT CODES"
-below). Both of those look EXACTLY like a clean run, because `|| true` throws
-the real exit code away and neither a traceback nor this script's own "file
-not found" message contains a `•`. The fix `pr-security.yml` already uses
+Since 25 September 2026 (owner's approval of 24 September 2026) this script
+runs as its OWN step in `pr-security.yml`, named "Foreign-key target check
+(#552, check 23 — runs on every PR, even if an earlier step failed)", wired
+the way check 9 is — see check 9's comment for the trap this avoids: a step
+shaped like `OUTPUT=$(python3
+thischeck.py 2>&1 | tail -n +N || true)` followed by `echo "$OUTPUT" |
+grep -q '•'` shows NOTHING — not even a warning — for two very different
+failures: the script CRASHING (a Python traceback, exit 1) and the schema
+file being missing (this script's own exit 2, see "EXIT CODES" below). Both
+of those look EXACTLY like a clean run, because `|| true` throws the real
+exit code away and neither a traceback nor this script's own "file not
+found" message contains a `•`. The fix `pr-security.yml` already uses
 elsewhere is to keep the exit code AND not throw any of the output away: run
 the check, capture its exit code directly (no `|| true`), and show the
 step as failed (or at least add its own visible section) whenever that exit
 code is anything other than the "clean, or findings without --strict" 0 —
 never rely on `grep -q '•'` alone to decide whether something is wrong.
+
+Unlike checks 9-22, which live inside `pr-security.yml`'s "Heuristic
+anti-pattern scan" step and are skipped whenever a pull request changes no
+PHP file under web/ (a gap tracked as #556, not fixed here), this check's
+own step never looks at which files changed — it runs on every pull
+request, including one that changes only a migration file and no PHP,
+which is exactly where a bad link between tables is most often introduced.
+
+FIX ROUND 1 (25 September 2026). This step used to rely on GitHub's default
+condition, `success()`, which meant an EARLIER step failing — the PHP lint
+hard gate, the checkout step, or the gitleaks SARIF upload — skipped this
+one too, on the exact pull requests where a real finding would matter most:
+the "skipped on exactly the pull requests it matters most for" mistake
+described above, just reached a different way. Proved by simulation: with
+the PHP lint step made to fail, this step never ran, its `hits` output was
+never set, and the job summary then showed an EMPTY count next to the
+words "never skipped" — a skip that read exactly like a clean run. Fixed
+with `if: ${{ !cancelled() }}` on the step, so it now runs whatever
+happened earlier, and is skipped only if the whole workflow run itself is
+cancelled. The "Post findings to PR" step's own condition was tightened at
+the same time, from `steps.check23.outputs.hits != '0'` to `== '1'` — the
+exact test for what this step actually writes (always the literal string
+`0` or `1` — `HITS=0` / `HITS=1` in that step of `pr-security.yml`), so an
+output that was never set
+can never again be misread as "has findings".
 
 WHAT THIS CANNOT SEE
 ---------------------
@@ -1684,7 +1709,7 @@ def main(argv: list[str]) -> int:
         # stderr and exit code 1, with no file name anywhere in the first
         # line a reader would see, and — worse — indistinguishable from a
         # clean run by the very `pr-security.yml` pattern this script's own
-        # "HOW TO WIRE THIS INTO pr-security.yml" section warns about (a
+        # "HOW THIS IS WIRED INTO pr-security.yml" section warns about (a
         # crash looks exactly like "no bullet points", which that section
         # already flags as a trap for a MISSING file; a non-UTF-8 byte is
         # the same trap, reached a different way). A missing file already

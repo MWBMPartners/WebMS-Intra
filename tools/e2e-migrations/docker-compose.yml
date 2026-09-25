@@ -1,11 +1,21 @@
 # End-to-end migration test harness — see tools/e2e-migrations/run.sh
-# Spins up a disposable MySQL 8.0.36 instance matching the production
-# server's confirmed version. MySQL does not support MariaDB's
-# `IF [NOT] EXISTS` DDL extensions — migrations use the information_schema
-# guard idiom instead (see DEV_NOTES.md → "Portable DDL convention").
+# Spins up a disposable MySQL instance. Which version comes from the
+# E2E_MYSQL_VERSION environment variable, which run.sh always sets before
+# calling docker compose: 8.0.36 if nothing else says otherwise, because
+# that is the version this harness has always used. The pull-request check
+# runs it twice, side by side — on 8.0.36 and on 8.4.11 (owner's decision,
+# 24 September 2026), because MySQL 8.4 refuses some links between tables
+# that MySQL 8.0 allows (#552). Which MySQL 8 line production itself runs
+# is not confirmed — that is #475. Always give an EXACT version here, never
+# a moving tag such as "8.4": run.sh checks the server's own reported
+# version against this one and refuses to carry on if they differ, so a
+# moving tag would make that check meaningless. MySQL does not support
+# MariaDB's `IF [NOT] EXISTS` DDL extensions — migrations use the
+# information_schema guard idiom instead (see DEV_NOTES.md → "Portable DDL
+# convention").
 services:
   mysql:
-    image: mysql:8.0.36
+    image: mysql:${E2E_MYSQL_VERSION:-8.0.36}
     container_name: portal-e2e-mysql
     environment:
       MYSQL_ROOT_PASSWORD: e2e-root
@@ -14,10 +24,16 @@ services:
       MYSQL_PASSWORD: e2e-portal
     ports:
       - "33069:3306"  # uncommon host port so we don't clash with local mysql
+    # The --default-authentication-plugin flag used to be set here. MySQL
+    # 8.4 removed that server option and refuses to start when it is given
+    # one it does not recognise ("unknown variable
+    # 'default-authentication-plugin=caching_sha2_password'", then
+    # "Aborting" — measured against mysql:8.4.11 on 25 September 2026).
+    # Dropping it changes nothing on 8.0.36: caching_sha2_password is
+    # already that version's default password method.
     command: >
       --character-set-server=utf8mb4
       --collation-server=utf8mb4_general_ci
-      --default-authentication-plugin=caching_sha2_password
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-pe2e-root"]
       interval: 2s

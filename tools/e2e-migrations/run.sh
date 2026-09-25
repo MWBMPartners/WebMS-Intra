@@ -2,7 +2,8 @@
 # -----------------------------------------------------------------------------
 # End-to-end migration test (#248, restructured per SQL portability fix spec §5)
 # -----------------------------------------------------------------------------
-# Spins up a disposable MySQL 8.0.36 container and exercises web/_sql/ the
+# Spins up a disposable MySQL container (8.0.36 unless E2E_MYSQL_VERSION
+# says otherwise) and exercises web/_sql/ the
 # same way the real installer does: full_schema.sql first, THEN every
 # numbered migration replayed on top of it, ignoring tblMigrations
 # (web/_install/index.php:360-466) — not the historical "apply the
@@ -39,14 +40,22 @@
 #   0 — all phases pass (the warnings noted above do not affect this).
 #   non-zero — first hard-failing phase.
 #
-# Requires: docker + bash 4+. Tested under DreamHost-equivalent MySQL
-# 8.0.36 (the version pinned in docker-compose.yml — production is
-# confirmed MySQL 8; see docker-compose.yml's header comment).
+# Requires: docker + bash 4+. Which MySQL it runs against comes from the
+# E2E_MYSQL_VERSION environment variable — an EXACT version such as 8.0.36
+# or 8.4.11, defaulting to 8.0.36 (the version this harness has always
+# used; docker-compose.yml reads the same variable with the same default,
+# and the two are kept in step). The pull-request check runs both 8.0.36
+# and 8.4.11, side by side (owner's decision, 24 September 2026). Which
+# MySQL 8 line production itself runs is not confirmed — see #475.
 #
 # Usage:
-#   tools/e2e-migrations/run.sh                # run all four phases
+#   tools/e2e-migrations/run.sh                # run all four phases on MySQL 8.0.36
+#   E2E_MYSQL_VERSION=8.4.11 tools/e2e-migrations/run.sh   # the same, on MySQL 8.4.11
 #   tools/e2e-migrations/run.sh --skip-stale   # skip the phase-4 catch-up simulation
 #   tools/e2e-migrations/run.sh --keep         # leave the container up afterwards
+#
+# Run one version at a time on one machine: both use the same container
+# name (portal-e2e-mysql) and the same host port (33069).
 # -----------------------------------------------------------------------------
 
 set -euo pipefail
@@ -61,6 +70,12 @@ DB_PORT="33069"
 DB_USER="root"
 DB_PASS="e2e-root"
 DB_NAME="portal_e2e"
+
+# Which MySQL to test against — an EXACT version, because the check below
+# compares it with what the server reports. 8.0.36 is the default because
+# it is what this harness has always used. docker-compose.yml reads the
+# same variable and carries the same default: keep the two in step.
+export E2E_MYSQL_VERSION="${E2E_MYSQL_VERSION:-8.0.36}"
 
 KEEP=0
 SKIP_STALE=0
@@ -247,9 +262,22 @@ replay_all_migrations() {
 # Start
 # -----------------------------------------------------------------------------
 
-echo "→ Bringing up MySQL 8.0.36"
+echo "→ Bringing up MySQL ${E2E_MYSQL_VERSION}"
 docker compose -f "${COMPOSE_FILE}" up -d --remove-orphans
 wait_for_mysql
+
+# Refuse to carry on unless the server is the version that was asked for.
+# Without this, a variable that never reached docker compose would run
+# 8.0.36 under an "8.4" label and pass while testing nothing new. That is
+# not imagined: a planning trial on 25 September 2026 printed "Bringing up
+# MySQL 8.0.36" while the container really ran 8.4.11, because this line
+# used to be fixed text.
+ACTUAL_MYSQL_VERSION=$(mysql_q "SELECT VERSION();")
+if [[ "${ACTUAL_MYSQL_VERSION}" != "${E2E_MYSQL_VERSION}" ]]; then
+    echo "✗ asked for MySQL ${E2E_MYSQL_VERSION}, but the server reports '${ACTUAL_MYSQL_VERSION}' — refusing to test the wrong version" >&2
+    exit 1
+fi
+echo "  server version confirmed: ${ACTUAL_MYSQL_VERSION}"
 
 # -----------------------------------------------------------------------------
 # Phase 1: full_schema fresh-install
@@ -259,7 +287,7 @@ echo "═════ Phase 1: full_schema fresh-install ═════"
 echo "  Wiping DB and loading full_schema.sql …"
 reset_db
 if ! mysql_file "${SQL_DIR}/full_schema.sql"; then
-    echo "✗ full_schema.sql FAILED to load against MySQL 8.0.36 — see error above" >&2
+    echo "✗ full_schema.sql FAILED to load against MySQL ${E2E_MYSQL_VERSION} — see error above" >&2
     exit 1
 fi
 echo "  ✓ full_schema.sql loaded without error"

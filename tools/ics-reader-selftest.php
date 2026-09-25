@@ -182,8 +182,11 @@
  *     that is checked — but "this rule would have been read correctly" is not
  *     something any finite set of files can show.
  *   - Part L's comparison of the whole Windows list needs the `intl`
- *     extension. Without it that one check prints SKIPPED, and a list that has
- *     drifted from ICU would NOT be caught here.
+ *     extension, AND a machine whose ICU version is the exact one the list
+ *     was generated from (named in `WindowsTimeZones.php`'s own header
+ *     comment). Without `intl`, or on a different ICU version, that one check
+ *     prints SKIPPED, and a list that has drifted from ICU would NOT be
+ *     caught here.
  *
  * @package   Portal\Tools
  * @author    MWBM Partners Ltd (t/a MWservices)
@@ -414,9 +417,20 @@ function st_in_child(
         . '$parsed = ["events" => [], "complete" => null, "warnings" => []];' . "\n"
         . '$expanded = ["occurrences" => [], "capped" => null, "warnings" => []];' . "\n"
         . '$thrown = "";' . "\n"
+        // When `expand()` began, so a check can time `expand()` on its own.
+        // That is ALL of `expand()`, including its first loop, not only the
+        // walk through a series' dates. `secs` below also includes reading
+        // the file, which
+        // has its own, much longer budget; on a busy machine that reading time
+        // alone can use up a tight margin (25 September 2026: I22b measured
+        // 0.703 s against a 0.7 s limit with seven copies running at once).
+        // Printed as `expandtime`, not `…secs`, so the `secs=` pattern other
+        // checks look for can never match it by mistake.
+        . '$expandStarted = null;' . "\n"
         . 'try {' . "\n"
         . '$parsed = Portal\Core\IcsReader::parse((string) file_get_contents($argv[1]), microtime(true) + '
         . var_export($parseBudget, true) . ');' . "\n"
+        . '$expandStarted = microtime(true);' . "\n"
         . '$expanded = Portal\Core\IcsReader::expand($parsed, $zone, $zone,'
         . ' new DateTimeImmutable("2026-09-01 00:00:00", $zone),'
         . ' new DateTimeImmutable(' . var_export($windowEnd, true) . ', $zone), microtime(true) + '
@@ -433,6 +447,7 @@ function st_in_child(
         . ' " capped=", var_export($expanded["capped"], true),'
         . ' " thrown=", ($thrown === "" ? "none" : $thrown),'
         . ' " secs=", sprintf("%.3f", microtime(true) - $started),'
+        . ' " expandtime=", ($expandStarted === null ? "none" : sprintf("%.3f", microtime(true) - $expandStarted)),'
         . ' " warnings=", count($expanded["warnings"]) + count($parsed["warnings"]),'
         // The warnings themselves, so a check can look at what the child was
         // told rather than only at how many things it said. Bounded by
@@ -1666,16 +1681,15 @@ unset($blockIcs, $blockParsed);
 // printing FAIL — so the run still fails by its exit code, but the checks after
 // this one would not be reached and the reason would be much harder to see.
 //
-// WHERE THAT EXIT CODE IS ACTUALLY READ, said plainly because this comment used
-// to claim something that was not true. It said "the exit code is what CI reads,
-// so a regression is never missed". Nothing in `.github/` runs this script: the
-// automatic checks on a pull request run the Python scripts in
-// `tools/audit-checks/`, the database migration harness and the deploy. This
-// self-test is a MANUAL gate — it is run by hand before a commit, along with
-// `php -l` and those audit checks, and its exit code is read there. Wiring it
-// into the automatic checks would be a sensible thing to do and is worth
-// suggesting to the owner, but changing a workflow file needs the owner's
-// agreement, so it is not done here.
+// WHERE THAT EXIT CODE IS ACTUALLY READ, said plainly because this comment once
+// claimed "the exit code is what CI reads, so a regression is never missed" when
+// nothing in `.github/` ran this script — it was a manual gate, run by hand
+// before a commit. Since 25 September 2026,
+// `.github/workflows/calendar-selftests.yml` runs it on every pull request to
+// alpha, beta or main (owner's decision of 23 September 2026), and a non-zero
+// exit turns that check red. It is still worth running by hand before a
+// commit, because a pull request is the last moment to find out, not the
+// first.
 $manySeriesIcs = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\n";
 for ($i = 0; $i < 500; $i++) {
     $manySeriesIcs .= "BEGIN:VEVENT\r\nUID:endless-" . $i . "@fixtures.webms.test\r\n"
@@ -2678,25 +2692,45 @@ for ($i = 0; $i < 5000; $i++) {
 }
 $scanIcs .= "END:VCALENDAR\r\n";
 // The measurement that matters here is the TIME, not whether an exception came
-// back at all. With this loop's check removed, the work still ends with "time
-// budget" — the changed-date loop below it does have a check — but only after
-// the whole scan has finished: measured at 0.97 seconds on a budget of 0.20,
-// nearly five times over, against 0.24 seconds when the check is in place. So
-// the check below asserts both, and a version that notices late fails it.
+// back at all. When this was written, removing this loop's check made the
+// work finish only after the whole scan: 0.97 seconds on a budget of 0.20,
+// against 0.24 seconds with the check.
+//
+// KNOWN GAP (found 25 September 2026, issue #558). At this 0.2-second
+// budget, the FIRST loop of expand() (reading the events, which I22c guards)
+// can use up the whole budget before this walk starts, depending on how
+// fast the machine is. When it does, this check never reaches the walk it is
+// named for, and it passes even with the walk's own deadline check removed.
+// When the walk IS reached, removing that check makes it run seconds late
+// (2.5 to 15.5 seconds measured on 25 September 2026, depending on the
+// budget and on how busy the machine was) and this check fails. So do NOT remove the
+// deadline check in IcsReader::occurrencesForMaster() because this check
+// still passes without it. #558 is to make this check reach the walk on
+// any machine.
 $child = st_in_child($scanIcs, '128M', '2027-09-01 00:00:00', 60.0, 0.2);
 st_check(
     'I22b walking a long list of changed dates gives up when its time is up, instead of finishing late',
     str_contains($child['text'], 'time budget') === true,
     substr($child['text'], 0, 300)
 );
+// Only `expand()` is timed here (`expandtime`), not reading the file as
+// well. That includes expand()'s first loop, so a pass here does NOT prove
+// the walk through a series' dates stopped on time (see the KNOWN GAP note
+// above). Reading has its own 60-second budget and is not what this check is
+// about; counting it made the check fail on a busy machine for a reason
+// unrelated to the fault it guards (0.703 s against 0.7 s on 25 September
+// 2026, seven copies running at once). The limit is unchanged. A walk that
+// ignores every deadline took 3.7 to 6.9 seconds when measured the same day,
+// and fails it; see the KNOWN GAP note above for what this check does NOT
+// reliably cover.
 $seconds = 0.0;
-if (preg_match('/secs=([\d.]+)/', $child['text'], $m) === 1) {
+if (preg_match('/expandtime=([\d.]+)/', $child['text'], $m) === 1) {
     $seconds = (float) $m[1];
 }
 st_check(
     'I22b and it gives up DURING the scan, not after finishing the whole of it',
     $seconds > 0.0 && $seconds < 0.7,
-    'took ' . $seconds . ' s on a 0.2 s budget: ' . substr($child['text'], 0, 200)
+    'expand() took ' . $seconds . ' s on a 0.2 s budget: ' . substr($child['text'], 0, 200)
 );
 unset($scanIcs, $dates, $seconds, $m);
 
@@ -4407,20 +4441,70 @@ foreach (WindowsTimeZones::MAP as $windowsName => $ianaName) {
 }
 st_check('L4 every name in the list is one this PHP understands', $everyValueIsAZone === true);
 
-// L5 runs the generator's own --check. It needs the intl extension; without it
-// nothing can be compared, so it prints SKIPPED and the list is NOT checked
-// against ICU on this machine.
+// L5 runs the generator's own --check, but ONLY when this machine's ICU is
+// the SAME version the committed list was generated from. `--check` proves
+// "the list still matches THIS machine's ICU" — and that only means "the
+// list is still correct" when the two ICU versions are one and the same. A
+// different ICU version can legitimately disagree with the committed list
+// for reasons that are not a fault here at all (a country changed its rules,
+// or ICU renamed the default zone for a Windows name) — see
+// generate-windows-timezones.php's own "WHAT THIS SCRIPT CANNOT DO". Running
+// `--check` against a DIFFERENT ICU version and reporting FAIL would be
+// dishonest: it would read as "the list is wrong" when the truth is "this
+// machine cannot judge that list at all".
+//
+// FOUND round 1 of the workflow-package independent check (25 September
+// 2026): this check used to run --check on ANY machine with the intl
+// extension, whatever ICU version it carried. GitHub's own runner has
+// ICU 74.2, not the 78.3 the committed list was generated from, so this
+// check FAILED there on entirely correct code — exactly the dishonest
+// result described above. Fixed by reading the ICU version the list was
+// generated from out of `WindowsTimeZones.php`'s own header comment ("Generated
+// on ... from ICU version X.Y"), rather than writing "78.3" a second time in
+// this file where it could quietly drift out of step with the real header,
+// and comparing it with `INTL_ICU_VERSION` (the version this machine's intl
+// extension actually has). A mismatch is SKIPPED, with both versions named,
+// never a silent pass and never an unfair FAIL. It needs the intl extension
+// at all; without it nothing can be compared, so it prints SKIPPED and the
+// list is NOT checked against ICU on this machine either.
 if (extension_loaded('intl') === true) {
-    $generator = __DIR__ . DIRECTORY_SEPARATOR . 'generate-windows-timezones.php';
-    $command   = escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg($generator) . ' --check 2>&1';
-    $output    = [];
-    $status    = 1;
-    exec($command, $output, $status);
-    st_check(
-        'L5 the committed list still matches what this machine\'s ICU would generate',
-        $status === 0,
-        implode("\n        ", $output)
-    );
+    $windowsTimeZonesFile   = __DIR__ . DIRECTORY_SEPARATOR . '..' . DIRECTORY_SEPARATOR . 'web'
+        . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEPARATOR . 'WindowsTimeZones.php';
+    $windowsTimeZonesHeader = (string) file_get_contents($windowsTimeZonesFile);
+    $recordedIcuVersion     = null;
+    if (preg_match('/Generated on .+ from ICU version ([0-9]+(?:\.[0-9]+)*)/', $windowsTimeZonesHeader, $icuMatch) === 1) {
+        $recordedIcuVersion = $icuMatch[1];
+    }
+
+    if ($recordedIcuVersion === null) {
+        // The header no longer says what ICU version the list was generated
+        // from. That is a fault in the generated file's own header, not in
+        // this machine's ICU, so it is reported as a real failure rather
+        // than skipped — a missing version number must never look like "the
+        // versions matched".
+        st_check(
+            'L5 the committed list still matches what this machine\'s ICU would generate',
+            false,
+            'could not find "Generated on ... from ICU version X.Y" in ' . $windowsTimeZonesFile . '\'s header comment'
+        );
+    } elseif ($recordedIcuVersion !== INTL_ICU_VERSION) {
+        st_skip(
+            'L5 the committed list against this machine\'s ICU',
+            'the list was generated from ICU ' . $recordedIcuVersion . ', this machine has ICU '
+                . INTL_ICU_VERSION . ' — comparing different ICU versions would not be a fair test'
+        );
+    } else {
+        $generator = __DIR__ . DIRECTORY_SEPARATOR . 'generate-windows-timezones.php';
+        $command   = escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg($generator) . ' --check 2>&1';
+        $output    = [];
+        $status    = 1;
+        exec($command, $output, $status);
+        st_check(
+            'L5 the committed list still matches what this machine\'s ICU would generate',
+            $status === 0,
+            implode("\n        ", $output)
+        );
+    }
 } else {
     st_skip('L5 the committed list against this machine\'s ICU', 'the intl extension is not installed here, so there is nothing to compare with');
 }

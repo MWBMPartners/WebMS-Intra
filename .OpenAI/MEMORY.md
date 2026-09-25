@@ -597,6 +597,19 @@ unmarked migration in order. **Word claims about what a check catches
 conditionally** ("catches it when …"): every absolute claim drew a
 counterexample over ten check rounds.
 
+**Pull-request checks added 25 September 2026 (not yet run on GitHub):**
+`.github/workflows/calendar-selftests.yml` runs the four calendar
+self-tests (three against a throwaway MySQL 8.0.36 built from
+`full_schema.sql`); `pr-security.yml` runs the #552 check as its own step,
+check 23, which is not skipped by the heuristic step's early exit (that exit
+still skips checks 9-22 on SQL-only pull requests — #556); the end-to-end
+migration test runs on MySQL 8.0.36 AND 8.4.11. Known gaps: the reader
+self-test's L4 fails on a machine without the old zone names until #557 is
+fixed (must be before the pull request); its L5 is SKIPPED when the
+machine's ICU differs from the list's; its I22b often never reaches the
+walk it guards (#558) — so do not remove the deadline check in
+`IcsReader::occurrencesForMaster()` because every test still passes.
+
 **Set a watchdog whenever you wait for something to finish (owner's standing rule,
 24 September 2026 — this repository AND every project on the owner's machine).**
 A session only acts when something wakes it; once a background agent's

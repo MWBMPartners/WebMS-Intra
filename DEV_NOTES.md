@@ -210,7 +210,7 @@ let you run the portal, because that also needs a web server, a MySQL 8.0
 database, and the credentials in `_auth_keys/` which are never committed. To
 exercise the database migrations, use the end-to-end harness described under
 **End-to-end migration test (#248)** further down this document — it runs in
-CI against a real MySQL 8.0 instance.
+CI against real MySQL 8.0.36 and 8.4.11 databases, as two jobs side by side.
 
 ---
 
@@ -316,9 +316,45 @@ SFTP_BASE_PATH/
   merges on `beta` and `main` don't need a bridge — the `push:` event from
   a human-attributed merge fires normally.
 - `pr-security.yml` — runs on every PR against alpha/beta/main. PHP lint
-  (hard gate), gitleaks secrets scan, heuristic anti-pattern scan.
+  (hard gate), gitleaks secrets scan, heuristic anti-pattern scan (checks
+  9-22), and — as its own step, so it is never skipped by the heuristic
+  scan's early exit — the foreign-key target check (#552, check 23).
+- `calendar-selftests.yml` — runs on every PR against alpha/beta/main. Runs
+  the four calendar self-tests (#514) that used to depend on somebody
+  remembering to run them by hand. Three of the four (event visibility,
+  feed resolver, feed importer) each get their own throwaway database,
+  built from `full_schema.sql` in a MySQL 8.0.36 container GitHub starts
+  beside the job and removes, data included, when the job ends; the
+  fourth, the calendar reader self-test, needs no database at all.
+- `e2e-migrations.yml` — the end-to-end migration test harness (#248). Runs
+  on PRs and on pushes to alpha/beta/main, in both cases only when
+  `web/_sql/`, the harness folder or the workflow itself changes, plus
+  manual runs. Runs the
+  harness's four phases twice, as two jobs side by side, on MySQL 8.0.36
+  and MySQL 8.4.11.
 - `repo-config-audit.yml` — weekly + on PRs touching `.github/workflows/`.
   Detects orphaned required-status-check rules (see gotchas section).
+
+**Three of the descriptions above have not yet been observed for real on
+GitHub.** `calendar-selftests.yml`, `pr-security.yml`'s check 23, and
+`e2e-migrations.yml`'s MySQL 8.4.11 job were all added on the
+`claude/alpha-wip` branch, which has not yet been opened as a pull request.
+The first two run on a pull request (the calendar self-tests can also be
+started by hand, once that file reaches the default branch). The migration
+test runs on a pull request or when alpha, beta or main is updated — in
+both cases only when certain files change — and can be started by hand;
+none of that has happened yet. The present tense above
+describes what each is BUILT to do, not something already seen on GitHub's
+own machines. What was proved instead is local, and some parts, such as how
+GitHub starts and removes the database container, can only be proved on
+GitHub. The local proofs ran on this Mac, in throwaway MySQL 8.0.36 and
+8.4.11 containers, and on a Linux machine built to match GitHub's runner
+(Ubuntu 24.04, the same PHP 8.4 packages GitHub's `setup-php` step
+installs). That last proof found a real fault. On a machine whose PHP lacks
+seven old Windows time-zone names, the calendar reader self-test's own
+"L4" check fails. Whether GitHub's runner lacks them is not verified. The
+fault is tracked as issue #557 (high priority), to be fixed before this
+branch's pull request is opened.
 
 ### Day-to-Day Workflow
 
@@ -1631,11 +1667,13 @@ That upgrade path is the one that actually matters going forward: a fresh
 install today already uses the fixed `full_schema.sql`, but an existing
 customer's database can still reach the same three migrations directly. The
 fix was to make those three indexes unique, which cannot fail on any existing
-data because their leading column is already each table's own PRIMARY KEY. The
-"End-to-end migration test (#248)" section below explains that this
-repository's automated database test runs only against `mysql:8.0.36`, so it
-cannot see this on its own — MySQL 8.0 is happy either way. The check that
-catches it instead is
+data because their leading column is already each table's own PRIMARY KEY.
+Until 25 September 2026 the automated database test ran only against
+`mysql:8.0.36`, which accepts these links, so it could not see this. It is
+now built to run on MySQL 8.4 as well (see the paragraph on it below; not
+yet run on GitHub). That catches the fault on a database built from today's
+files, but not on an older customer database taking the upgrade route. The
+check that catches it as text is
 `tools/audit-checks/check_fk_references_unique_key.py`. It reads every
 foreign key in `full_schema.sql` and the numbered migrations as text, and
 checks each one four ways: against `full_schema.sql`'s own keys; against
@@ -1686,11 +1724,17 @@ SEE" section gives the full list.
 
 The owner approved running the end-to-end migration test (see
 "End-to-end migration test" below) on MySQL 8.4 as well as 8.0.36, on
-24 September 2026. That run is not in place yet; the section below still
-covers 8.0.36 only. `tools/e2e-migrations/run.sh` builds every database
-from today's `full_schema.sql`: phase 1 loads it, phases 2 and 3 carry on
-from phase 1's database, and phase 4 reloads it. So once it runs on 8.4,
-it will catch a fault that shows up on a database built from today's
+24 September 2026. It is BUILT to run on both, as two jobs side by side
+(`.github/workflows/e2e-migrations.yml`'s matrix), since 25 September
+2026 — but that workflow change has not yet run for real on GitHub. It
+runs on a pull request or when alpha, beta or main is updated — in both
+cases only when certain files change — or when started by hand; none of
+those has happened yet. What has run is the harness itself, by hand, against real MySQL
+8.0.36 and 8.4.11 containers on this Mac. By hand:
+`E2E_MYSQL_VERSION=8.4.11 tools/e2e-migrations/run.sh`. `tools/e2e-migrations/run.sh`
+builds every database from today's `full_schema.sql`: phase 1 loads it,
+phases 2 and 3 carry on from phase 1's database, and phase 4 reloads it.
+So on 8.4 it catches a fault that shows up on a database built from today's
 files. One example is a link that relies on `uq_category_slug`, when the
 link also exists on a database built from today's files. It will not
 catch a fault that shows up only on a database built by an older release.
@@ -1705,11 +1749,20 @@ phase would test one older starting point, the last release, not every
 older install. It is proposed, awaiting the owner's decision. It is not
 planned and not under way.
 
-**Nothing runs `check_fk_references_unique_key.py` automatically yet**
-either. Wiring it into the pull-request checks (alongside the other
-scripts in `tools/audit-checks/`) is approved — the owner agreed to this
-on 24 September 2026 — but it is not wired in yet, so for now it must be
-run by hand:
+**`check_fk_references_unique_key.py` is BUILT to run on every pull
+request** since 25 September 2026 — the owner agreed to this on
+24 September 2026 — but, like the paragraph above, that workflow change has
+not yet run for real on GitHub: it only runs on a pull request, and this
+branch has not yet been opened as one. Once it has, it runs as its own
+step in `pr-security.yml` (check 23), reporting into the pull request
+comment; it is not a hard gate. A crash or a missing schema file gets its
+own visible section there rather than being read as a clean run. Unlike
+checks 9-22, which live inside `pr-security.yml`'s heuristic-scan step and
+are skipped whenever a pull request changes no PHP file under `web/` (a
+gap tracked as #556), this check's own step never looks at which files
+changed and keeps running even when an earlier step in the job failed — it
+runs on every pull request, including one that only touches SQL. To run it
+by hand:
 `python3 tools/audit-checks/check_fk_references_unique_key.py --strict`.
 
 **A database that ran an OLD (pre-#552) copy of migration 202 or 203 to
@@ -2789,8 +2842,8 @@ See issue #107 for the full rationale and mitigation list.
 
 ## End-to-end migration test (#248)
 
-Before each release, run every migration through a real MySQL 8.0.36
-container to catch what the static `check_sql_columns.py` and `check_migration_idempotency.py` audits miss:
+Before each release, run every migration through real MySQL 8.0.36 and
+8.4.11 containers to catch what the static `check_sql_columns.py` and `check_migration_idempotency.py` audits miss:
 
 - Statement order — a later migration assuming a table a previous one
   forgot to create.
