@@ -603,9 +603,13 @@ self-tests (three against a throwaway MySQL 8.0.36 built from
 `full_schema.sql`); `pr-security.yml` runs the #552 check as its own step,
 check 23, which is not skipped by the heuristic step's early exit (that exit
 still skips checks 9-22 on SQL-only pull requests — #556); the end-to-end
-migration test runs on MySQL 8.0.36 AND 8.4.11. Known gaps: the reader
-self-test's L4 fails on a machine without the old zone names until #557 is
-fixed (must be before the pull request); its L5 is SKIPPED when the
+migration test runs on MySQL 8.0.36 AND 8.4.11 (passed on GitHub, run
+36100634959). #557 is fixed: the Windows-zone list now holds CURRENT zone
+names (`Asia/Kolkata`, not `Asia/Calcutta`), so L4 passes on Ubuntu 24.04
+without `tzdata-legacy`; a new check L6 keeps old names out; the generator
+refuses a rename ICU does not confirm as the same zone (`getCanonicalID()`).
+Old names written directly in a calendar's own zone line are still a gap:
+#560. Known gaps: the reader self-test's L5 is SKIPPED when the
 machine's ICU differs from the list's; its I22b often never reaches the
 walk it guards (#558) — so do not remove the deadline check in
 `IcsReader::occurrencesForMaster()` because every test still passes.

@@ -352,9 +352,15 @@ GitHub. The local proofs ran on this Mac, in throwaway MySQL 8.0.36 and
 (Ubuntu 24.04, the same PHP 8.4 packages GitHub's `setup-php` step
 installs). That last proof found a real fault. On a machine whose PHP lacks
 seven old Windows time-zone names, the calendar reader self-test's own
-"L4" check fails. Whether GitHub's runner lacks them is not verified. The
-fault is tracked as issue #557 (high priority), to be fixed before this
-branch's pull request is opened.
+"L4" check used to fail. Whether GitHub's runner lacks them was never
+verified, because it did not need to be: the fault was in the portal's own
+committed data, not in any one machine. It is tracked as issue #557 (high
+priority) and is now fixed: `tools/generate-windows-timezones.php` converts
+every zone it writes to its CURRENT spelling and refuses rather than fall
+back to an old one, the committed list was regenerated, and a new self-test
+check ("L6" in `tools/ics-reader-selftest.php`) stops an old spelling
+creeping back in unnoticed. See the CHANGELOG's `fix(calendar):` entry for
+issue #557.
 
 ### Day-to-Day Workflow
 

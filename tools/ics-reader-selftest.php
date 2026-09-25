@@ -162,7 +162,10 @@
  *      only the bad bytes are lost — and the Latin-1 case this still cannot do
  *      anything with is checked too, so the limit is recorded, not assumed).
  *   L. The Windows zone list: the names Microsoft writes come out as ordinary
- *      names, and the committed list still matches this machine.
+ *      names, the committed list still matches this machine (L5, where this
+ *      machine's ICU version allows a fair comparison), and every value this
+ *      machine's ICU can recognise is still the CURRENT spelling of its zone,
+ *      not an old one (L6, #557).
  *   M. Real exports from Google and Microsoft 365 — SKIPPED, see below.
  *   N. Housekeeping: every fixture file is used by a check, and no PHP warning
  *      was raised.
@@ -181,12 +184,29 @@
  *     reader does not support is meant to give one date and a warning, and
  *     that is checked — but "this rule would have been read correctly" is not
  *     something any finite set of files can show.
- *   - Part L's comparison of the whole Windows list needs the `intl`
- *     extension, AND a machine whose ICU version is the exact one the list
- *     was generated from (named in `WindowsTimeZones.php`'s own header
- *     comment). Without `intl`, or on a different ICU version, that one check
- *     prints SKIPPED, and a list that has drifted from ICU would NOT be
- *     caught here.
+ *   - Part L's L5 check (the whole list matches what this machine's ICU
+ *     would generate) needs the `intl` extension, `IntlTimeZone::getIanaID()`
+ *     (PHP 8.4 or newer built with ICU 74 or newer — the generator's
+ *     `--check` needs it too, see #557), AND a machine whose ICU version is
+ *     the exact one the list was generated from (named in
+ *     `WindowsTimeZones.php`'s own header comment). Missing any of those
+ *     three, L5 prints SKIPPED, and a list that has drifted from ICU would
+ *     NOT be caught by L5 on that machine.
+ *   - Part L's L6 check (#557 — every value is the CURRENT spelling, not an
+ *     old one) needs `IntlTimeZone::getIanaID()` too; without it, L6 is
+ *     SKIPPED. On a machine whose own PHP still accepts the OLD spellings
+ *     (this Mac is one such machine — its `date` extension was built with
+ *     its OWN bundled zone data, not the operating system's; `php -i` shows
+ *     `Timezone Database => internal`, and that internal copy still carries
+ *     the old spellings), an old spelling that crept back into the list
+ *     would then be caught by NEITHER L4
+ *     (which only asks whether PHP accepts the name, and this Mac does) NOR
+ *     L6 (skipped) — only a machine with `getIanaID()`, or a server built
+ *     without the optional `tzdata-legacy` package, would catch it. L6 also
+ *     cannot judge a value that is NEWER than this machine's own ICU
+ *     tables know (ICU gives no answer for it at all); that value is
+ *     reported as unchecked in its own SKIPPED line, named, rather than
+ *     counted as a pass.
  *
  * @package   Portal\Tools
  * @author    MWBM Partners Ltd (t/a MWservices)
@@ -4467,7 +4487,29 @@ st_check('L4 every name in the list is one this PHP understands', $everyValueIsA
 // never a silent pass and never an unfair FAIL. It needs the intl extension
 // at all; without it nothing can be compared, so it prints SKIPPED and the
 // list is NOT checked against ICU on this machine either.
-if (extension_loaded('intl') === true) {
+if (extension_loaded('intl') === true && method_exists('IntlTimeZone', 'getIanaID') === false) {
+    // #557 round 1 (LOW-2): the generator's `--check` now applies the same
+    // #557 rename (`IntlTimeZone::getIanaID()`) in BOTH modes — see
+    // generate-windows-timezones.php's own pre-loop refusal. On a machine
+    // without that method (PHP 8.3 or older) the generator refuses outright
+    // rather than running `--check` at all, so calling it here would come
+    // back FAIL every time, even when the committed list is perfectly
+    // correct — purely because THIS machine cannot run the comparison, not
+    // because the list is wrong. That is the exact same dishonest shape the
+    // ICU-version-mismatch branch below exists to avoid, so it gets the
+    // same answer: SKIPPED, with the reason named, checked BEFORE the ICU
+    // version comparison so a version match can never mask it.
+    //
+    // FOUND round 1 of #557's independent check (25 September 2026):
+    // simulated on Ubuntu 24.04 / PHP 8.3.33 / ICU 74.2, with the recorded
+    // ICU version forced to match this machine's (so the version-match
+    // branch below would otherwise have run) — this used to FAIL, printing
+    // the generator's own refusal message as if it were a real mismatch.
+    st_skip(
+        'L5 the committed list against this machine\'s ICU',
+        'the generator needs IntlTimeZone::getIanaID() (needs PHP 8.4 or newer built with ICU 74 or newer) to run --check at all, and this machine\'s PHP does not have it'
+    );
+} elseif (extension_loaded('intl') === true) {
     $windowsTimeZonesFile   = __DIR__ . DIRECTORY_SEPARATOR . '..' . DIRECTORY_SEPARATOR . 'web'
         . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEPARATOR . 'WindowsTimeZones.php';
     $windowsTimeZonesHeader = (string) file_get_contents($windowsTimeZonesFile);
@@ -4507,6 +4549,98 @@ if (extension_loaded('intl') === true) {
     }
 } else {
     st_skip('L5 the committed list against this machine\'s ICU', 'the intl extension is not installed here, so there is nothing to compare with');
+}
+
+// L6: #557 — every value in the list must be the CURRENT spelling of its
+// zone, not merely a name this machine's PHP happens to still accept.
+// L4 above could NOT have caught issue #557 on its own: `new
+// DateTimeZone('Asia/Calcutta')` succeeds perfectly well on a machine
+// whose own PHP was built with a zone database that still carries the old
+// names (this Mac is one — its `date` extension uses its OWN bundled copy,
+// not the operating system's; `php -i` shows `Timezone Database =>
+// internal`), so L4 passed the whole time the committed list held all
+// seven old spellings — the fault only showed up on a server built
+// without the optional `tzdata-legacy` package. This check asks ICU the
+// same question the generator itself now asks before writing anything:
+// `IntlTimeZone::getIanaID($value) === $value`. It needs the intl
+// extension with `getIanaID()` (needs PHP 8.4 or newer built with ICU 74
+// or newer); without it there is nothing to ask, so this is SKIPPED,
+// never PASSED — a machine
+// that cannot check a thing must never be reported as having checked it
+// and found it fine. This stops an old name creeping back in if the
+// generator is ever run without the #557 conversion, or the committed
+// file is ever hand-edited despite the warning in its own header.
+if (extension_loaded('intl') === true && method_exists('IntlTimeZone', 'getIanaID') === true) {
+    // #557 round 1 (LOW-1): a value ICU gives NO answer for at all is not
+    // the same thing as a value ICU says is OLD. `getIanaID()` returning
+    // false/empty means this machine's ICU has never heard of the zone —
+    // which happens when the committed list already holds a name NEWER
+    // than this machine's own ICU tables know, exactly as much a
+    // "this machine cannot judge it" case as the ICU-version mismatch L5
+    // exists to handle above. FAILING L6 for that would be dishonest in
+    // the same way: it would read as "the list is wrong" when the truth
+    // is "this machine cannot check THIS ONE value". So those values are
+    // set aside as UNCHECKED and reported in their own SKIPPED line,
+    // never folded into a pass and never treated as a fail. L6 only FAILS
+    // when ICU gives a DIFFERENT, non-empty name — a real, checkable
+    // disagreement.
+    //
+    // FOUND round 1 of #557's independent check (25 September 2026):
+    // simulated by planting `Magallanes Standard Time => America/Coyhaique`
+    // (a real zone, added to IANA after some ICU builds) into a scratch
+    // copy of the list and running on Ubuntu 24.04 / PHP 8.4.26 / ICU
+    // 74.2, whose SYSTEM zone data (tzdata) accepts the zone (so L4
+    // passed) even though its OWN ICU tables have no `getIanaID()` answer
+    // for it at all — this used to FAIL L6 on entirely correct code.
+    // getIanaID() is an ICU lookup table, not a tzdata one, so it is ICU's
+    // version, not the exact tzdata release, that decides this.
+    $staleNames  = [];
+    $uncheckable = [];
+    foreach (WindowsTimeZones::MAP as $windowsName => $ianaName) {
+        $currentName = IntlTimeZone::getIanaID($ianaName);
+        if (is_string($currentName) === false || $currentName === '') {
+            $uncheckable[] = $windowsName . ' => ' . $ianaName;
+            continue;
+        }
+        if ($currentName !== $ianaName) {
+            $staleNames[] = $windowsName . ' => ' . $ianaName . ' is not current; ICU\'s current name is ' . $currentName;
+        }
+    }
+    foreach ($staleNames as $staleLine) {
+        echo '        ' . $staleLine . "\n";
+    }
+    // #557 round 2 (LOW-3): when ICU could not answer for a SINGLE value in
+    // the whole list, nothing was actually checked — $staleNames stays
+    // empty not because every value is confirmed current, but because the
+    // loop above never had anything it could compare. Reporting that as
+    // PASS would say "checked and found fine" about a run that checked
+    // nothing at all, exactly the dishonest shape this whole check exists
+    // to avoid elsewhere (see the ICU-version-mismatch note on L5, above).
+    // So this one case is reported as SKIPPED, with every value named,
+    // instead of the usual PASS/FAIL plus a separate "some left unchecked"
+    // line.
+    $totalMapValues = count(WindowsTimeZones::MAP);
+    if ($uncheckable !== [] && count($uncheckable) === $totalMapValues) {
+        st_skip(
+            'L6 every value in the list is the CURRENT name ICU would give it today (#557)',
+            'this machine\'s ICU (version ' . INTL_ICU_VERSION . ') could not answer for any of the '
+                . $totalMapValues . ' values in the list, so nothing was actually checked: '
+                . implode(', ', $uncheckable)
+        );
+    } else {
+        st_check('L6 every value in the list is the CURRENT name ICU would give it today (#557)', $staleNames === []);
+        if ($uncheckable !== []) {
+            st_skip(
+                'L6 ' . count($uncheckable) . ' value(s) this machine\'s ICU (version ' . INTL_ICU_VERSION . ') could not check at all',
+                'ICU gave no answer, so left unchecked rather than counted as a pass or a fail: ' . implode(', ', $uncheckable)
+            );
+        }
+    }
+} else {
+    st_skip(
+        'L6 every value in the list is the CURRENT name ICU would give it today (#557)',
+        'needs the intl extension with IntlTimeZone::getIanaID() (needs PHP 8.4 or newer built with ICU 74 or newer), which this machine does not have'
+    );
 }
 
 // =============================================================================

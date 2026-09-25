@@ -11,13 +11,13 @@
   MySQL 8.0.36 database, in a container GitHub builds beside the job and
   deletes, data included, when the job ends; the fourth, the calendar
   reader self-test, needs no database at all — just PHP. **The reader
-  self-test's own "L4" check fails on a machine whose PHP lacks seven old
-  Windows time-zone names** such as `Asia/Katmandu`. A machine built to
-  match GitHub's runner is one; whether GitHub's runner itself is has not
-  been verified. That is a real product gap, not a fault in this change,
-  tracked as issue #557 (high priority) and to be fixed BEFORE this
-  branch's pull request is opened, so this new check is not red from its
-  very first run. (2) The #552 foreign-key check
+  self-test's own "L4" check used to fail on a machine whose PHP lacks
+  seven old Windows time-zone names** such as `Asia/Katmandu`. A machine
+  built to match GitHub's runner is one; whether GitHub's runner itself is
+  has not been verified. That was a real product gap, not a fault in this
+  change, tracked as issue #557 (high priority) and now fixed (see the
+  separate entry below), so this new check is not red from its very first
+  run. (2) The #552 foreign-key check
   (`check_fk_references_unique_key.py`) — approved by the owner on
   24 September 2026 — now runs in the pull-request security checks as its
   own step, check 23, wired so a crash or a missing schema file is
@@ -41,6 +41,47 @@
   it was proved again on a Linux machine built to match GitHub's own
   runner (Ubuntu 24.04, the same PHP 8.4 packages GitHub's `setup-php`
   step installs).
+- fix(calendar): the Windows time-zone list (`web/_core/WindowsTimeZones.php`)
+  now gives the CURRENT spelling of every zone, not an old one (#557). Seven
+  of the 139 Windows zone names — covering India, Nepal, Myanmar, Ukraine
+  ("FLE Standard Time"), Argentina, Greenland and the old "US Eastern" zone
+  — used to map to spellings that are old by IANA's standard, the one that
+  actually decides what a zone is called (`Asia/Calcutta`, `Asia/Katmandu`,
+  `Asia/Rangoon`, `Europe/Kiev`, `America/Buenos_Aires`, `America/Godthab`,
+  `America/Indianapolis`). ICU has NOT retired these spellings —
+  ICU's own preferred name for "Kolkata" is still `Asia/Calcutta` — it is
+  the IANA database, the one ICU is built from, that moved on; ICU's
+  `getIanaID()` method is what reports IANA's current name specifically.
+  Those old spellings still work on a machine whose system time-zone data
+  keeps every historical name, but a server built without the optional
+  `tzdata-legacy` package — Ubuntu 24.04's own packages, among others — does
+  not carry them, so `new DateTimeZone('Asia/Calcutta')` throws there. That
+  is NOT silent — the calendar reader records a warning when a zone name
+  does not resolve — but the event's TIME still comes out wrong: it falls
+  back to the calendar's own zone instead of the zone it actually names.
+  Proved: a 19:00 "India Standard Time" event, read on such a server, came
+  out as 19:00 in the calendar's own (London) zone, not 13:30 there, which
+  is what 19:00 in India actually is — exactly the fault the reader
+  self-test's "L4" check above was found to catch on such a machine.
+  `tools/generate-windows-timezones.php` now converts every answer to its
+  current name with `IntlTimeZone::getIanaID()` (ICU's own answer to "what
+  is the CURRENT (IANA) name for this zone"), and refuses outright — never
+  a silent fallback to the old name — if that method is missing, gives no
+  answer, gives a name this machine's own PHP will not accept, or (checked
+  against ICU's own canonical identity) turns out to be a genuinely
+  different zone rather than a pure rename. The committed list was
+  regenerated; only those seven values changed. A new
+  self-test check, "L6", was added: it asks the same question of every
+  value already in the list, so an old spelling can never creep back in
+  unnoticed, whether from a hand-edit (against the file's own warning) or a
+  generator run on a machine too old to know better; it is SKIPPED, never
+  PASSED, on a machine without the needed intl support. Proved on a
+  throwaway Ubuntu 24.04 + PHP 8.4.26 + ICU 74.2 container matching
+  GitHub's runner, without `tzdata-legacy` installed: the reader self-test
+  now exits 0, with its skips named (it used to fail at "L4" on the OLD
+  list); a deliberately planted old
+  spelling was confirmed to still fail both "L4" and the new "L6",
+  each naming the exact zone.
 - test(calendar): the calendar reader self-test's check I22b now times only
   the reader's `expand()` step, not reading the file as well. It had failed on
   correct code on a busy machine (0.703 s against its 0.7 s limit). The

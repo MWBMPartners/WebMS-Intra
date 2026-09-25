@@ -55,6 +55,36 @@
  * difference). It is meant to be run by hand, or by a person reviewing a
  * change, when ICU has been updated.
  *
+ * WHY EVERY ANSWER IS ALSO PASSED THROUGH getIanaID() (issue #557)
+ * -----------------------------------------------------------------
+ * `getIDForWindowsID()` above is ICU's PREFERRED name for a Windows zone,
+ * and for seven zones that preferred name is an OLD spelling. That is NOT
+ * because ICU has moved on from it — ICU's OWN preferred name for
+ * "Kolkata" is still `Asia/Calcutta` (`IntlTimeZone::getCanonicalID()`
+ * says so, checked round 1 of #557's independent review, 25 September
+ * 2026). It is the IANA time-zone database — the one ICU is built from —
+ * that has moved on, and `IntlTimeZone::getIanaID()` is the method that
+ * reports IANA's CURRENT name rather than ICU's own preferred one. The
+ * seven affected: `Asia/Calcutta`, `Asia/Katmandu`, `Asia/Rangoon`,
+ * `Europe/Kiev`, `America/Buenos_Aires`, `America/Godthab` and
+ * `America/Indianapolis`. System zone data built without the optional
+ * `tzdata-legacy` package (Ubuntu 24.04's own `tzdata` package is one such
+ * build) does not carry those old names, so `new
+ * DateTimeZone('Asia/Calcutta')` throws there even though the zone itself
+ * is perfectly ordinary — it is only the SPELLING that is out of date.
+ * Writing the old spelling into the committed list would NOT lose the
+ * event's time zone silently — `Portal\Core\IcsReader` records a warning
+ * when a zone name does not resolve — but the event's TIME would still
+ * come out wrong: the reader falls back to the calendar's own zone
+ * instead of the zone the event actually names. A 19:00 "India Standard
+ * Time" event, read on a server without `tzdata-legacy`, would come out
+ * as 19:00 in the calendar's own zone, not 13:30 there, which is what
+ * 19:00 in India actually is. So every zone `getIDForWindowsID()` returns
+ * is passed straight on to `IntlTimeZone::getIanaID()`, ICU's own answer
+ * to "what is the CURRENT (IANA) name for this zone" — never a
+ * hand-written substitution table, which would need updating by hand
+ * every time a country changes its rules.
+ *
  * WHAT THIS SCRIPT CANNOT DO
  * --------------------------
  * - It cannot run without the `intl` extension. Without it there is nothing
@@ -66,6 +96,17 @@
  *   give a different answer (countries change their rules). When `--check`
  *   reports differences, read them: they are usually a real-world change,
  *   not a fault.
+ * - `IntlTimeZone::getIanaID()` needs PHP 8.4 or newer built with ICU 74 or
+ *   newer. This script relies on the GENERATING machine's ICU being new
+ *   enough to know the current name for every zone it is asked about;
+ *   without that it refuses outright rather than fall back to an old
+ *   spelling — checked once, near the top of this script, before the loop
+ *   that builds the list even starts (moved there in round 1 of #557's own
+ *   independent check, so the refusal never names one zone in particular
+ *   as if only that zone were affected). The version actually used to
+ *   generate the committed file is recorded in that file's own header,
+ *   because that is the fact that matters, not whatever machine happens to
+ *   run this comment next.
  * - It knows nothing about calendars. Reading a calendar file is
  *   `Portal\Core\IcsReader`; this script only builds a lookup list.
  *
@@ -92,6 +133,178 @@ if (extension_loaded('intl') !== true || class_exists('IntlTimeZone') !== true) 
     fwrite(STDERR, "This script needs the PHP 'intl' extension, which is not installed here.\n");
     fwrite(STDERR, "Nothing was generated and nothing was checked. Run it on a machine with intl.\n");
     exit(1);
+}
+
+// Used in every refusal message below, so the wording always says what this
+// run actually is: `--check` only READS the committed list and compares, the
+// plain run WRITES it.
+$verb = $checkOnly === true ? 'check' : 'generate';
+
+// -----------------------------------------------------------------------------
+// 🛑 #557 round 1 (LOW-5): getIanaID() is a MACHINE capability, not a
+// per-zone one — checked ONCE, here, before any Windows name is looked at.
+// -----------------------------------------------------------------------------
+// This used to be checked inside the per-Windows-name loop below, the first
+// time a rename was attempted, and the refusal named THAT zone as if it in
+// particular had an old spelling — "'{$windowsName}' ... could only be
+// written using ICU's old spelling". That was misleading: the zone the loop
+// happens to reach first might have no old spelling at all. The truth is
+// simpler and applies to every zone equally: without this method, THIS
+// MACHINE cannot tell a current spelling from an old one for ANY of them,
+// so there is no point starting the loop at all.
+if (method_exists('IntlTimeZone', 'getIanaID') === false) {
+    fwrite(STDERR, "Refusing to {$verb} the list: this machine's intl extension has no\n");
+    fwrite(STDERR, "IntlTimeZone::getIanaID() method (it needs PHP 8.4 or newer built with ICU\n");
+    fwrite(STDERR, "74 or newer).\n");
+    fwrite(STDERR, "Without it, this machine cannot confirm the CURRENT spelling of any\n");
+    fwrite(STDERR, "Windows zone — some of ICU's preferred names are old spellings (#557),\n");
+    fwrite(STDERR, "and this machine has no way to tell which. Run it on a newer machine\n");
+    fwrite(STDERR, "instead.\n");
+    exit(1);
+}
+
+/**
+ * #557: answers 'same' when ICU's OWN identity check says two zone names
+ * are the SAME zone — a pure rename — 'different' when ICU says they are two
+ * different zones, and 'unknown' when ICU does not recognise one of them. `IntlTimeZone::getCanonicalID()` is
+ * ICU's single, authoritative answer to "which zone does this name belong
+ * to", and it is what this guard trusts: two names that canonicalise to the
+ * SAME answer are the same zone, by ICU's own definition; two that
+ * canonicalise to DIFFERENT answers are different zones, and the caller
+ * refuses. Checked by hand on ICU 78.3 by the commissioning session for
+ * round 2 of this fix's own independent check, 25 September 2026:
+ * `America/Buenos_Aires` and `America/Argentina/Buenos_Aires` both
+ * canonicalise to `America/Buenos_Aires`; `Asia/Calcutta` and
+ * `Asia/Kolkata` both canonicalise to `Asia/Calcutta`; `Europe/Oslo` and
+ * `Europe/Berlin` canonicalise to themselves — two different zones, even
+ * though (see below) they have shared an identical offset history since
+ * 1970.
+ *
+ * THIS USED TO ASK THIS MACHINE'S OWN PHP INSTEAD — comparing every
+ * UTC-offset transition `DateTimeZone::getTransitions()` reports between
+ * 1970 and 2100 — and treated "this machine's PHP cannot even load the old
+ * name" the same as "these are different zones". Round 2 of this fix's own
+ * independent check found that was wrong: on a server built without the
+ * optional `tzdata-legacy` package (Ubuntu 24.04's own `tzdata` package is
+ * one), PHP cannot load ANY of the seven #557 old spellings, so the old
+ * guard refused every one of them — including the pure rename
+ * `America/Buenos_Aires` -> `America/Argentina/Buenos_Aires` — with a
+ * message that said "genuinely different zone" about a machine that had
+ * done nothing wrong. Reproduced on Ubuntu 24.04 / PHP 8.4.26 / ICU 74.2
+ * without `tzdata-legacy`.
+ *
+ * The offset-history comparison is kept below, but only as an EXTRA check,
+ * run when this machine's PHP can load BOTH names — it can no longer be
+ * the thing that decides accept or refuse. A rename ICU's own identity
+ * check has already accepted is never refused because of it; a name this
+ * machine's PHP cannot load is simply left uncompared by this second pass,
+ * with a one-line note, rather than read as "different zone" the way it
+ * used to be.
+ *
+ * WHAT THIS CANNOT SEE: `getCanonicalID()` reports ICU's OWN idea of which
+ * zone a name belongs to. That is close to IANA's, but not identical: ICU
+ * keeps some zones separate that IANA's main data now merges (for example
+ * `Europe/Oslo` and `Europe/Berlin`), and it treats a renamed zone as one
+ * zone. IANA's own rule for merging two zones is the same civil-time
+ * history from 1970 onward, so two names that differ only before 1970 can
+ * be treated as one zone, and this guard accepts that; it cannot, and does
+ * not try to, second-guess it. It also cannot see
+ * a real-world rule change that has not reached THIS machine's ICU tables
+ * yet — either way it can only report what this machine's ICU currently
+ * believes.
+ */
+function windowsTimeZonesRenameVerdict(string $oldName, string $newName): string
+{
+    // Three possible answers, so the caller can say exactly what happened:
+    //   'same'      — ICU says both names belong to one zone (a pure rename);
+    //   'different' — ICU says they belong to two different zones;
+    //   'unknown'   — ICU does not recognise one of the names at all.
+    // Both 'different' and 'unknown' make the caller refuse. They are kept
+    // apart only so the refusal message never claims ICU said "different"
+    // when what it really said was "I do not know this name".
+    $oldCanonical = IntlTimeZone::getCanonicalID($oldName);
+    $newCanonical = IntlTimeZone::getCanonicalID($newName);
+    if (is_string($oldCanonical) === false || is_string($newCanonical) === false
+        || $oldCanonical === '' || $newCanonical === ''
+    ) {
+        return 'unknown';
+    }
+    if ($oldCanonical !== $newCanonical) {
+        // ICU's own identity check says these are different zones. This is
+        // the ONLY thing that can refuse a rename ICU recognises; nothing
+        // below this point can override it.
+        return 'different';
+    }
+
+    // ---- Extra check only, from here on: it can never REFUSE something
+    // the identity check above has already accepted. Kept for the added
+    // confidence of a second, independent comparison — this machine's own
+    // PHP zone data, transition by transition — but a name this machine's
+    // PHP cannot load is common and expected (see the file header) and
+    // must never, on its own, be read as "different zone".
+    try {
+        $oldZone = new DateTimeZone($oldName);
+        $newZone = new DateTimeZone($newName);
+    } catch (Exception $e) {
+        fwrite(STDERR, "Note: this machine's PHP could not load '{$oldName}' to run the extra\n");
+        fwrite(STDERR, "offset-history check on it; ICU's own identity check above already\n");
+        fwrite(STDERR, "confirms it is the same zone as '{$newName}'.\n");
+        return 'same';
+    }
+
+    // 1970 to 2100 comfortably covers every date this portal's calendars
+    // are ever likely to hold. A genuinely fixed-offset zone such as
+    // `Etc/GMT+5` never observes daylight saving and still returns one
+    // transition at the start of the range, so the comparison below works
+    // for it without a special case. A three-letter ABBREVIATION such as
+    // `CET` is a different case again: PHP treats it as an alias with no
+    // transition data of its own, so `getTransitions()` returns `false` for
+    // it — handled below as "could not compare", never as a mismatch. (No
+    // Windows default resolves to an abbreviation like this, and `CET`
+    // itself observes daylight saving in ICU's own tables — it is not a
+    // fixed-offset zone at all — so this is a defensive case, not one this
+    // script expects to hit.)
+    $begin = (new DateTimeImmutable('1970-01-01T00:00:00Z'))->getTimestamp();
+    $end   = (new DateTimeImmutable('2100-01-01T00:00:00Z'))->getTimestamp();
+
+    $oldTransitions = $oldZone->getTransitions($begin, $end);
+    $newTransitions = $newZone->getTransitions($begin, $end);
+
+    if ($oldTransitions === false || $newTransitions === false) {
+        fwrite(STDERR, "Note: this machine's PHP has no clock-change list for '{$oldName}' or\n");
+        fwrite(STDERR, "'{$newName}', so the extra offset-history check could not run; ICU's own\n");
+        fwrite(STDERR, "identity check above already confirms they are the same zone.\n");
+        return 'same';
+    }
+
+    // Any difference between 1970 and 2100 — a different NUMBER of clock
+    // changes, or one change at a different moment or offset — means PHP's
+    // own data disagrees with ICU about two names ICU calls one zone, in
+    // years the portal really uses. (A difference only BEFORE 1970 cannot
+    // show here: this comparison starts in 1970.) That deserves a person's
+    // look, so it is always reported. It still does not refuse: ICU's
+    // identity check above is what this guard trusts.
+    $disagrees = count($oldTransitions) !== count($newTransitions);
+    if ($disagrees === false) {
+        foreach ($oldTransitions as $index => $oldTransition) {
+            $newTransition = $newTransitions[$index];
+            if ($oldTransition['ts'] !== $newTransition['ts']
+                || $oldTransition['offset'] !== $newTransition['offset']
+                || $oldTransition['isdst'] !== $newTransition['isdst']
+            ) {
+                $disagrees = true;
+                break;
+            }
+        }
+    }
+    if ($disagrees === true) {
+        fwrite(STDERR, "Note: PHP's own zone data gives '{$oldName}' and '{$newName}' different\n");
+        fwrite(STDERR, "clock changes between 1970 and 2100, although ICU calls them one zone.\n");
+        fwrite(STDERR, "The rename was accepted (ICU's identity check decides), but a person\n");
+        fwrite(STDERR, "should look at this before the list is committed.\n");
+    }
+
+    return 'same';
 }
 
 // -----------------------------------------------------------------------------
@@ -134,7 +347,108 @@ foreach (array_keys($windowsNames) as $windowsName) {
         $problems[] = $windowsName;
         continue;
     }
-    $map[$windowsName] = $ianaId;
+
+    // -------------------------------------------------------------------
+    // 🕰️ #557: turn ICU's answer into the CURRENT spelling of that zone.
+    // -------------------------------------------------------------------
+    // `getIDForWindowsID()` above is ICU's "preferred" name for a Windows
+    // zone, and for seven zones that preferred name is an OLD spelling —
+    // `Asia/Calcutta` for "India Standard Time", `Asia/Katmandu`,
+    // `Asia/Rangoon`, `Europe/Kiev`, `America/Buenos_Aires`,
+    // `America/Godthab`, `America/Indianapolis`. ICU's OWN preferred name
+    // for each of these has NOT changed — `IntlTimeZone::getCanonicalID()`
+    // still answers `Asia/Calcutta`, not `Asia/Kolkata`. It is the IANA
+    // time-zone database that has moved on, to `Asia/Kolkata`,
+    // `Asia/Kathmandu`, `Asia/Yangon`, `Europe/Kyiv`,
+    // `America/Argentina/Buenos_Aires`, `America/Nuuk` and
+    // `America/Indiana/Indianapolis` — and `getIanaID()` is the method
+    // that reports IANA's current name. The old spellings still work on a
+    // FULL set of system zone data, but a server built from the trimmed
+    // set most Linux distributions ship by default (Ubuntu 24.04's `tzdata`
+    // package is one) rejects them: only the OPTIONAL `tzdata-legacy`
+    // package carries the old names. Writing the old spelling into this
+    // list would NOT fail silently — the reader records a warning when a
+    // zone name does not resolve — but it would still give the WRONG
+    // time: an imported Microsoft 365 calendar in one of these seven
+    // zones would fall back to the calendar's own zone on any such server,
+    // which is not the zone the event was actually written in.
+    //
+    // `IntlTimeZone::getIanaID()` is ICU's own answer to "what is the
+    // current name for this zone", so it is asked here, on the SAME
+    // machine, straight after `getIDForWindowsID()` — never a hand-written
+    // substitution table, which would need updating by hand every time a
+    // country changes its mind. It needs PHP 8.4 or newer built with ICU
+    // 74 or newer. This script relies on the GENERATING machine's ICU
+    // being new enough to know the current names; the exact ICU version
+    // that produced the committed list is recorded in that file's own
+    // header (see `$icuVersion` below), because it is the file that
+    // matters, not this comment.
+    //
+    // Case 1 — this machine's intl extension too old to have the method —
+    // is checked ONCE, for the whole run, before this loop even starts
+    // (see `$verb` and the refusal above); by the time execution reaches
+    // here it cannot happen. Three more things can still go wrong, each
+    // for an INDIVIDUAL zone, and each one REFUSES rather than guesses,
+    // because writing the old name back in as a fallback is exactly the
+    // fault #557 is about:
+    //   2. ICU has the method but does not recognise the zone ICU's own
+    //      previous answer gave (would mean an ICU internal inconsistency;
+    //      not expected, but not assumed away either).
+    //   3. ICU accepts the current name but THIS machine's PHP does not
+    //      (system zone data can, in principle, lag ICU's own tables) —
+    //      checked with a real `new DateTimeZone()`, not merely trusted.
+    //   4. ICU's answer is not merely a different SPELLING of the same
+    //      zone but a genuinely DIFFERENT one — checked below with
+    //      `windowsTimeZonesRenameVerdict()`. Not expected today (checked
+    //      by hand across the whole ICU rename set, not only these 139),
+    //      but a future ICU release could still do it.
+    $currentId = IntlTimeZone::getIanaID($ianaId);
+    if (is_string($currentId) === false || $currentId === '') {
+        fwrite(STDERR, "Refusing to {$verb} the list: IntlTimeZone::getIanaID('{$ianaId}') did not\n");
+        fwrite(STDERR, "return a name for the Windows zone '{$windowsName}'. That zone name came\n");
+        fwrite(STDERR, "from ICU's own getIDForWindowsID() a moment ago, so this is unexpected and\n");
+        fwrite(STDERR, "needs looking at by hand rather than being written as-is.\n");
+        exit(1);
+    }
+    // ICU can name a zone this machine's own system zone data does not
+    // carry (a newer ICU tables release, older OS tzdata). Confirm PHP
+    // itself, not just ICU, accepts the current name before it is written,
+    // so the list this generator produces is never ahead of the machine
+    // that produced it.
+    try {
+        new DateTimeZone($currentId);
+    } catch (Exception $dtzException) {
+        fwrite(STDERR, "Refusing to {$verb} the list: this machine's PHP does not accept\n");
+        fwrite(STDERR, "'{$currentId}', the current name IntlTimeZone::getIanaID() gave for the\n");
+        fwrite(STDERR, "Windows zone '{$windowsName}': " . $dtzException->getMessage() . "\n");
+        exit(1);
+    }
+
+    // Case 4 (see the numbered list above): a rename must be a PURE one —
+    // the same zone under a new name, not a different zone entirely. Only
+    // worth asking when the names actually differ; when ICU's answer is
+    // already current (`$currentId === $ianaId`, true for every one of
+    // today's 139 Windows defaults except the seven #557 renames) there is
+    // nothing to compare.
+    $verdict = $currentId === $ianaId ? 'same' : windowsTimeZonesRenameVerdict($ianaId, $currentId);
+    if ($verdict === 'different') {
+        fwrite(STDERR, "Refusing to {$verb} the list: the Windows zone '{$windowsName}' would map\n");
+        fwrite(STDERR, "to '{$currentId}' instead of ICU's own answer '{$ianaId}', and ICU's own\n");
+        fwrite(STDERR, "identity check (IntlTimeZone::getCanonicalID()) says the two are NOT the\n");
+        fwrite(STDERR, "same zone. That is not a pure rename — it is a genuinely different zone —\n");
+        fwrite(STDERR, "so this needs a person to decide, not this script.\n");
+        exit(1);
+    }
+    if ($verdict === 'unknown') {
+        fwrite(STDERR, "Refusing to {$verb} the list: the Windows zone '{$windowsName}' would map\n");
+        fwrite(STDERR, "to '{$currentId}' instead of ICU's own answer '{$ianaId}', but this\n");
+        fwrite(STDERR, "machine's ICU does not recognise one of those two names\n");
+        fwrite(STDERR, "(IntlTimeZone::getCanonicalID() gave no answer), so it cannot confirm\n");
+        fwrite(STDERR, "they are the same zone. Run this script on a machine with a newer ICU.\n");
+        exit(1);
+    }
+
+    $map[$windowsName] = $currentId;
 }
 
 // Sorted by the Windows name so that two runs of this script produce the same

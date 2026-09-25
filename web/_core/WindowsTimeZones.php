@@ -8,7 +8,7 @@
  * It is written by `tools/generate-windows-timezones.php`; run that script
  * again to rebuild it, and `--check` to see whether it is still current.
  *
- * Generated on 22 September 2026 from ICU version 78.3
+ * Generated on 25 September 2026 from ICU version 78.3
  * (139 Windows names).
  *
  * WHY IT EXISTS
@@ -67,7 +67,7 @@ final class WindowsTimeZones
         'Arab Standard Time' => 'Asia/Riyadh',
         'Arabian Standard Time' => 'Asia/Dubai',
         'Arabic Standard Time' => 'Asia/Baghdad',
-        'Argentina Standard Time' => 'America/Buenos_Aires',
+        'Argentina Standard Time' => 'America/Argentina/Buenos_Aires',
         'Astrakhan Standard Time' => 'Europe/Astrakhan',
         'Atlantic Standard Time' => 'America/Halifax',
         'Aus Central W. Standard Time' => 'Australia/Eucla',
@@ -102,16 +102,16 @@ final class WindowsTimeZones
         'Eastern Standard Time (Mexico)' => 'America/Cancun',
         'Egypt Standard Time' => 'Africa/Cairo',
         'Ekaterinburg Standard Time' => 'Asia/Yekaterinburg',
-        'FLE Standard Time' => 'Europe/Kiev',
+        'FLE Standard Time' => 'Europe/Kyiv',
         'Fiji Standard Time' => 'Pacific/Fiji',
         'GMT Standard Time' => 'Europe/London',
         'GTB Standard Time' => 'Europe/Bucharest',
         'Georgian Standard Time' => 'Asia/Tbilisi',
-        'Greenland Standard Time' => 'America/Godthab',
+        'Greenland Standard Time' => 'America/Nuuk',
         'Greenwich Standard Time' => 'Atlantic/Reykjavik',
         'Haiti Standard Time' => 'America/Port-au-Prince',
         'Hawaiian Standard Time' => 'Pacific/Honolulu',
-        'India Standard Time' => 'Asia/Calcutta',
+        'India Standard Time' => 'Asia/Kolkata',
         'Iran Standard Time' => 'Asia/Tehran',
         'Israel Standard Time' => 'Asia/Jerusalem',
         'Jordan Standard Time' => 'Asia/Amman',
@@ -129,10 +129,10 @@ final class WindowsTimeZones
         'Morocco Standard Time' => 'Africa/Casablanca',
         'Mountain Standard Time' => 'America/Denver',
         'Mountain Standard Time (Mexico)' => 'America/Mazatlan',
-        'Myanmar Standard Time' => 'Asia/Rangoon',
+        'Myanmar Standard Time' => 'Asia/Yangon',
         'N. Central Asia Standard Time' => 'Asia/Novosibirsk',
         'Namibia Standard Time' => 'Africa/Windhoek',
-        'Nepal Standard Time' => 'Asia/Katmandu',
+        'Nepal Standard Time' => 'Asia/Kathmandu',
         'New Zealand Standard Time' => 'Pacific/Auckland',
         'Newfoundland Standard Time' => 'America/St_Johns',
         'Norfolk Standard Time' => 'Pacific/Norfolk',
@@ -175,7 +175,7 @@ final class WindowsTimeZones
         'Transbaikal Standard Time' => 'Asia/Chita',
         'Turkey Standard Time' => 'Europe/Istanbul',
         'Turks And Caicos Standard Time' => 'America/Grand_Turk',
-        'US Eastern Standard Time' => 'America/Indianapolis',
+        'US Eastern Standard Time' => 'America/Indiana/Indianapolis',
         'US Mountain Standard Time' => 'America/Phoenix',
         'UTC' => 'Etc/UTC',
         'UTC+12' => 'Etc/GMT-12',
