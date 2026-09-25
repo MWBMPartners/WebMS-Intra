@@ -128,11 +128,15 @@ builder runs**; before that it was clean.
    generator converts ICU answers with `getIanaID()` and refuses when ICU's identity (`getCanonicalID()`) does not confirm a rename;
    the list holds current names (7 changed, times identical); new check L6. Carried to **#560**: fail-closed on an unexpected
    verdict, and three wording nits in the generator.
-   **NOW: #514 PART 8 — PLANNED (`.claude-work/resume/p514-p8--plan.md`, ~1,060 lines); CHALLENGE RUNNING (Opus; brief
-   `.claude-work/briefs/514-p8-challenge.md`; report `.claude-work/resume/p514-p8--challenge.md`; watchdog on it).** Plan: a service
-   class `Portal\Core\FeedAdmin` (+ `ExternalAudience`) through which every read/write goes (transaction → lock calendar by number
-   AND organisation → work → part 7 method → `resolveFeed()` with `databaseNowUtc()` → commit); thin pages; 7 new addresses under
-   `admin/calendar/feeds/…` + `help/calendar-imports`; an Approvals inbox section; upgrade/API notices; routes-only migration; new
+   **NOW: #514 PART 8 — PLANNED; CHALLENGED (`.claude-work/resume/p514-p8--challenge.md`: 2 HIGH, 7 MEDIUM, 17 LOW; fit to build
+   once HIGH/MEDIUM made; no cross-organisation hole found); BEING SETTLED IN PLACE by the original planner (resumed; "SETTLED 25
+   September 2026" section at the top of `p514-p8--plan.md`; watchdog on it).** My decisions for the settle: H1 → its own issue
+   **#561 (high, LIVE on main/alpha: the Upgrade page's results table reads `file`/`message`, the Migrator returns
+   `filename`/`error`, so every upgrade ends on an error page)**, fixed as its own package BEFORE the part 8 build; H2 safe deletion
+   of part W's scratch folder; ONE commit + ONE migration 207, per-chunk checks against saved snapshot copies (no git staging); the
+   importer's `NOW()` → `UTC_TIMESTAMP()` is in scope; refuse imported series on series-edit with "Series not found.".
+   **Order from here: settle → fix #561 (Sonnet build, Opus check, commit) → build P8-1 … P8-4 (Sonnet), each checked (Opus) →
+   one commit.** Plan: a service
    self-test `tools/feed-admin-selftest.php` (part D service checks + part W pages via PHP's built-in server). Four chunks.
    **Decided by me: the owner's 21 Sept rule "#514: one commit per part" stands** — four chunks, each checked, ONE commit and ONE
    migration 207 for part 8. **Owner asked (not blocking):** add `feed-admin-selftest.php` to `calendar-selftests.yml`? Plan found:
@@ -307,6 +311,7 @@ silently; no stacked pull requests; nothing hard-coded, because this is a produc
 | 3h | Reader self-test I22b often never reaches the loop it guards | **#558** | Queued — medium |
 | 3i | Migration test's documents describe an old phase 4 | **#559** | Queued — low; documentation sweep |
 | 3j | A calendar's own zone line with an old zone name gets the wrong time on some servers | **#560** | Queued — medium |
+| 3k | Every upgrade ends on an error page (results table reads wrong keys) — LIVE | **#561** | Queued — HIGH; next, before the part 8 build |
 | 4 | ONE workflow package: the three calendar self-tests into the pull-request checks + the #552 check in `pr-security.yml` + the migration harness on MySQL 8.4 too | — | Queued, ALL APPROVED (8.4 and the #552 check: owner, 24 Sept late evening). Straight after #552. **Needs `-d memory_limit=512M`, and the schema loaded into the `selftest_` database first** (I used `full_schema.sql` then migration 206; the tests' own headers do not say so) |
 | 5 | Anyone can approve their own expense claim and then be paid | **#545** | Queued — **high, live fault** |
 | 6 | The "my volunteering" page crashes for everyone | **#547** | Queued — **high, live fault** |
