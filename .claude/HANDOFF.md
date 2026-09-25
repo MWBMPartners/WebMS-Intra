@@ -117,19 +117,17 @@ builder runs**; before that it was clean.
 
 ## 2. What to do next, in order
 
-1. **#552 — CHECK ROUND 6 = NOT CLEAN (3 LOW, wording only); I MADE THE WORDING FIXES MYSELF (three Sonnet wording rounds had each
-   added new small inaccuracies); NARROW CHECK ROUND 7 RUNNING (Opus, independent of the edits; "ROUND 7 (NARROW)" section of
-   `.claude-work/briefs/552-check.md`; report `.claude-work/resume/p552--verify-r7.md`; watchdog on it), judging the diff against
-   `.claude-work/resume/p552-r6-snapshot/`. Now: DEV_NOTES `f480247e…`, script `d1e16224…`; SQL unchanged; 21 checks + static
-   calls exit 0.**
-   **Round 5 corrected MY reasoning (important for the workflow package):** I had said the approved 8.4 run of the end-to-end
-   migration test would catch every shape the text check misses. **It does not.** Every phase of `tools/e2e-migrations/run.sh`
-   starts from TODAY's `full_schema.sql` (phase 4's "stale" database is also built from today's files), so it never upgrades a
-   database built by an older release — the only situation these faults appear in. Round 5 proved T9 and T10 pass the harness's way
-   on 8.4.11 and fail a real upgrade from alpha with 6125. **So today nothing automated tests an upgrade from an older release.**
-   Proposed to the owner (25 Sep): add an "upgrade from the last release" phase — needs the release's install script in CI, either
-   by fetching the base branch (a workflow change) or a saved copy refreshed each release. Round 4's scoping rule ("the 8.4 test is
-   the real guard") rested on the wrong belief; the text check's documented limits stand, but the docs must not promise a net.
+1. **#552 — CHECK ROUND 7 = NOT CLEAN (LOW only, in MY wording: I had written that the 8.4 end-to-end test will not catch a link
+   relying on `uq_category_slug`; it will, because today's install script lacks that key too). Corrected by me; NARROW CHECK
+   ROUND 8 RUNNING (Opus, independent; "ROUND 8 (NARROW)" section of `.claude-work/briefs/552-check.md`; report
+   `.claude-work/resume/p552--verify-r8.md`; watchdog on it), judging the diff against `.claude-work/resume/p552-r7-snapshot/`.
+   Now: DEV_NOTES `519a32da…`, script `95069eb7…`; code proved unchanged apart from comments (ast); SQL unchanged; 21 checks +
+   static calls exit 0.**
+   **Settled facts to keep (checked across rounds 5-7):** the 8.4 end-to-end test builds every database from today's install
+   script, so it WILL catch faults visible on such a database (e.g. a link needing `uq_category_slug`; a `CREATE TABLE` without
+   `IF NOT EXISTS`) and will NOT catch faults visible only on older-release databases (an edited released migration; a guarded
+   branch that only runs on older databases; a key today's install script has but older installs lack). Nothing automated tests
+   an upgrade from an older release; an upgrade-from-last-release phase is PROPOSED to the owner.
    If clean: my own checks on the final bytes, ONE commit saying Codex has not reviewed it, send it to GitHub, update #552,
    then the approved WORKFLOW PACKAGE (queue task 4), then plan #514 part 8.**
    Round 4 (`p552--verify-r4.md`): round 3's MEDIUM closed (32 recorded shapes match all 96 versions of the install script and a
