@@ -117,10 +117,11 @@ builder runs**; before that it was clean.
 
 ## 2. What to do next, in order
 
-1. **#552 — FIX ROUND 5 DONE; NARROW CHECK ROUND 6 RUNNING (Opus; "ROUND 6 (NARROW)" section of
-   `.claude-work/briefs/552-check.md`; report `.claude-work/resume/p552--verify-r6.md`; watchdog on it), judging the diff against
-   `.claude-work/resume/p552-r5-snapshot/`. Now: DEV_NOTES `18adaad2…`, script `5bb11264…`; 202/203/full_schema unchanged
-   (verified by me; check clean).**
+1. **#552 — CHECK ROUND 6 = NOT CLEAN (3 LOW, wording only); I MADE THE WORDING FIXES MYSELF (three Sonnet wording rounds had each
+   added new small inaccuracies); NARROW CHECK ROUND 7 RUNNING (Opus, independent of the edits; "ROUND 7 (NARROW)" section of
+   `.claude-work/briefs/552-check.md`; report `.claude-work/resume/p552--verify-r7.md`; watchdog on it), judging the diff against
+   `.claude-work/resume/p552-r6-snapshot/`. Now: DEV_NOTES `f480247e…`, script `d1e16224…`; SQL unchanged; 21 checks + static
+   calls exit 0.**
    **Round 5 corrected MY reasoning (important for the workflow package):** I had said the approved 8.4 run of the end-to-end
    migration test would catch every shape the text check misses. **It does not.** Every phase of `tools/e2e-migrations/run.sh`
    starts from TODAY's `full_schema.sql` (phase 4's "stale" database is also built from today's files), so it never upgrades a
