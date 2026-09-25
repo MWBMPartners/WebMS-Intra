@@ -136,8 +136,9 @@ builder runs**; before that it was clean.
    `filename`/`error`, so every upgrade ends on an error page)**, fixed as its own package BEFORE the part 8 build; H2 safe deletion
    of part W's scratch folder; ONE commit + ONE migration 207, per-chunk checks against saved snapshot copies (no git staging); the
    importer's `NOW()` → `UTC_TIMESTAMP()` is in scope; refuse imported series on series-edit with "Series not found.".
-   **Order from here: #561 NOW — BUILD RUNNING (Sonnet; brief `.claude-work/briefs/561-build.md`; report
-   `.claude-work/resume/p561--build.md`; watchdog on it); then Opus check, commit; then build P8-1 … P8-4 (Sonnet), each checked
+   **Order from here: #561 NOW — BUILT (Sonnet); CHECK ROUND 1 = code correct (proved end to end on the real page), wording only
+   (the old page broke off part-way, it did not show a 'blank error page') → reworded by me; CHECK ROUND 2 (NARROW) RUNNING (Opus;
+   report `.claude-work/resume/p561--verify-r2.md`; watchdog on it); then commit; then build P8-1 … P8-4 (Sonnet), each checked
    (Opus) against a snapshot of the previous chunk → one commit.** The Admin → Migrations page already reads the right keys. Plan: a service
    self-test `tools/feed-admin-selftest.php` (part D service checks + part W pages via PHP's built-in server). Four chunks.
    **Decided by me: the owner's 21 Sept rule "#514: one commit per part" stands** — four chunks, each checked, ONE commit and ONE
@@ -313,7 +314,8 @@ silently; no stacked pull requests; nothing hard-coded, because this is a produc
 | 3h | Reader self-test I22b often never reaches the loop it guards | **#558** | Queued — medium |
 | 3i | Migration test's documents describe an old phase 4 | **#559** | Queued — low; documentation sweep |
 | 3j | A calendar's own zone line with an old zone name gets the wrong time on some servers | **#560** | Queued — medium |
-| 3k | Every upgrade ends on an error page (results table reads wrong keys) — LIVE | **#561** | Queued — HIGH; next, before the part 8 build |
+| 3k | Every upgrade ends on an error page (results table reads wrong keys) — LIVE | **#561** | In review — round 2 (wording) |
+| 3l | Upgrade page: two unprotected steps, the #533 card's sentence, a stale comment | **#562** | Queued — low |
 | 4 | ONE workflow package: the three calendar self-tests into the pull-request checks + the #552 check in `pr-security.yml` + the migration harness on MySQL 8.4 too | — | Queued, ALL APPROVED (8.4 and the #552 check: owner, 24 Sept late evening). Straight after #552. **Needs `-d memory_limit=512M`, and the schema loaded into the `selftest_` database first** (I used `full_schema.sql` then migration 206; the tests' own headers do not say so) |
 | 5 | Anyone can approve their own expense claim and then be paid | **#545** | Queued — **high, live fault** |
 | 6 | The "my volunteering" page crashes for everyone | **#547** | Queued — **high, live fault** |
