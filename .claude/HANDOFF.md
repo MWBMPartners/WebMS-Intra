@@ -117,18 +117,23 @@ builder runs**; before that it was clean.
 
 ## 2. What to do next, in order
 
-1. **#552 — CHECK ROUND 8 = NOT CLEAN (LOW only, wording); corrected by me; NARROW CHECK ROUND 9 RUNNING (Opus, independent;
-   "ROUND 9 (NARROW)" section of `.claude-work/briefs/552-check.md`; report `.claude-work/resume/p552--verify-r9.md`; watchdog on
-   it), judging the diff against `.claude-work/resume/p552-r8-snapshot/`. Now: DEV_NOTES `bc005b95…`, script `4576759f…`; code
-   proved unchanged apart from comments (ast); SQL unchanged; 21 checks + static calls exit 0.**
+1. **#552 — CHECK ROUND 9 = NOT CLEAN (1 LOW, factual: see the uq_category_slug line below); corrected by me; NARROW CHECK
+   ROUND 10 RUNNING (Opus, independent; "ROUND 10 (NARROW)" section of `.claude-work/briefs/552-check.md`; report
+   `.claude-work/resume/p552--verify-r10.md`; watchdog on it), judging the diff against `.claude-work/resume/p552-r9-snapshot/`.
+   Now: DEV_NOTES `01fc287b…`, script `551261df…`; code proved unchanged (ast); SQL unchanged; 21 checks + static exit 0.
+   **Round 9 also found #555 (opened, medium):** migration 124 places `registrationEnabled` AFTER `capacityCount`, a column no
+   migration adds (only `full_schema.sql`, since 25 June 2026, commit 83b0ae7) — upgrades of databases installed before then stop
+   at 124 with ERROR 1054. Fix: change 124 in place to add `capacityCount` first if missing.
    **Settled facts (rounds 5-8; word claims modestly — every absolute "X catches it" has drawn a counterexample):** the 8.4
    end-to-end test builds every database from today's install script, so it can only catch faults visible on such a database — a
    link needing `uq_category_slug` only when that link also exists on such a database. It cannot catch: an edited released
    migration; a guarded branch that only runs on older databases; a key today's install script has but older installs lack; a
    link written ONLY inside a migration's re-declared `CREATE TABLE` (that block does nothing on a fresh install — real example
    `fk_att_sess_event`, opened as **#554**, low: fresh installs lack that link). Nothing automated tests an upgrade from an older
-   release; an upgrade-from-last-release phase is PROPOSED to the owner. `uq_category_slug`: databases installed from an install
-   script OLDER than commit 53bcf81 (8 March 2026, 14:37 UTC) have it; from 53bcf81 onwards they do not.
+   release; an upgrade-from-last-release phase is PROPOSED to the owner. `uq_category_slug`: a database installed from an install
+   script OLDER than commit 53bcf81 (8 March 2026, 14:37 UTC) CAN have it — it does when migration 008 created its category table;
+   the install scripts from 1016ccb (7 March 17:05 UTC) until 53bcf81 mark 008 as run without creating its tables, so those
+   databases have no category table until repaired by hand. From 53bcf81 onwards, never.
    If clean: my own checks on the final bytes, ONE commit saying Codex has not reviewed it, send it to GitHub, update #552,
    then the approved WORKFLOW PACKAGE (queue task 4), then plan #514 part 8.**
    Round 4 (`p552--verify-r4.md`): round 3's MEDIUM closed (32 recorded shapes match all 96 versions of the install script and a
@@ -272,6 +277,7 @@ silently; no stacked pull requests; nothing hard-coded, because this is a produc
 | 3b | #514 parts 8-11 | #514 | Queued — plan P8 on Opus, build on Sonnet; migration 207 |
 | 3c | Migration 019 removed the category slug key under the wrong name | **#553** | Queued — medium; a small guarded migration (number decided at build time) |
 | 3d | Fresh installs lack the attendance-session → event link `fk_att_sess_event` | **#554** | Queued — low; a small guarded migration (clean dangling `eventID`s first) |
+| 3e | Migration 124 places a column after `capacityCount`, which no migration adds | **#555** | Queued — medium; change 124 in place (add the column first if missing) |
 | 4 | ONE workflow package: the three calendar self-tests into the pull-request checks + the #552 check in `pr-security.yml` + the migration harness on MySQL 8.4 too | — | Queued, ALL APPROVED (8.4 and the #552 check: owner, 24 Sept late evening). Straight after #552. **Needs `-d memory_limit=512M`, and the schema loaded into the `selftest_` database first** (I used `full_schema.sql` then migration 206; the tests' own headers do not say so) |
 | 5 | Anyone can approve their own expense claim and then be paid | **#545** | Queued — **high, live fault** |
 | 6 | The "my volunteering" page crashes for everyone | **#547** | Queued — **high, live fault** |
