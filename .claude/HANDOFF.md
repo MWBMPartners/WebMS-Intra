@@ -130,13 +130,15 @@ builder runs**; before that it was clean.
    verdict, and three wording nits in the generator.
    **NOW: #514 PART 8 — PLANNED; CHALLENGED (`.claude-work/resume/p514-p8--challenge.md`: 2 HIGH, 7 MEDIUM, 17 LOW; fit to build
    once HIGH/MEDIUM made; no cross-organisation hole found); BEING SETTLED IN PLACE by the original planner (resumed; "SETTLED 25
-   September 2026" section at the top of `p514-p8--plan.md`; watchdog on it).** My decisions for the settle: H1 → its own issue
+   September 2026" section at the top of `p514-p8--plan.md`) — SETTLED (~1,385 lines; all 26 findings resolved and mapped to a chunk
+   and a proof in §12.2).** My decisions for the settle: H1 → its own issue
    **#561 (high, LIVE on main/alpha: the Upgrade page's results table reads `file`/`message`, the Migrator returns
    `filename`/`error`, so every upgrade ends on an error page)**, fixed as its own package BEFORE the part 8 build; H2 safe deletion
    of part W's scratch folder; ONE commit + ONE migration 207, per-chunk checks against saved snapshot copies (no git staging); the
    importer's `NOW()` → `UTC_TIMESTAMP()` is in scope; refuse imported series on series-edit with "Series not found.".
-   **Order from here: settle → fix #561 (Sonnet build, Opus check, commit) → build P8-1 … P8-4 (Sonnet), each checked (Opus) →
-   one commit.** Plan: a service
+   **Order from here: #561 NOW — BUILD RUNNING (Sonnet; brief `.claude-work/briefs/561-build.md`; report
+   `.claude-work/resume/p561--build.md`; watchdog on it); then Opus check, commit; then build P8-1 … P8-4 (Sonnet), each checked
+   (Opus) against a snapshot of the previous chunk → one commit.** The Admin → Migrations page already reads the right keys. Plan: a service
    self-test `tools/feed-admin-selftest.php` (part D service checks + part W pages via PHP's built-in server). Four chunks.
    **Decided by me: the owner's 21 Sept rule "#514: one commit per part" stands** — four chunks, each checked, ONE commit and ONE
    migration 207 for part 8. **Owner asked (not blocking):** add `feed-admin-selftest.php` to `calendar-selftests.yml`? Plan found:
