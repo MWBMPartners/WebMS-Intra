@@ -124,14 +124,15 @@ builder runs**; before that it was clean.
    `wf-package--plan-evidence/`); BUILD RUNNING (Sonnet; brief `.claude-work/briefs/wf-package-build.md`; report
    `.claude-work/resume/wf-package--build.md`) — BUILT (13 files; verified by me: fingerprints, no `continue-on-error` added,
    actionlint clean, checks 9-22 untouched). CHECK ROUND 1 = NOT CLEAN → fix round 1 (Sonnet). CHECK ROUND 2 = NOT CLEAN (LOW
-   wording) → fixed by ME, plus an I22b timing fix. CHECK ROUND 3 (NARROW) RUNNING (Opus; "ROUND 3" section of
-   `.claude-work/briefs/wf-package-check.md`; report `.claude-work/resume/wf-package--verify-r3.md`; against
-   `.claude-work/resume/wf-r2-snapshot/`; watchdog on it).**
-   **I22b (reader test):** it timed reading the file as well as the date walk, and failed on correct code at 0.703 s with seven
-   copies running. Now it times `expand()` alone (`expandtime=`), same 0.7 s limit. **Its stated fault no longer exists:** removing
-   that one loop's deadline check changes nothing now (other checks stop the walk at ~0.21 s), so it guards the walk as a whole —
-   `expand()` ignoring its deadline takes 8.976 s and fails. Measuring script: `.claude-work/resume/wf-measure-i22.php`. Do NOT run
-   the whole reader test on an "ignore every deadline" plant: I22a's endless repeat rule then never finishes.
+   wording) → fixed by ME, plus an I22b timing fix. CHECK ROUND 3 = NOT CLEAN (MEDIUM: MY I22b comment was WRONG) → comments
+   corrected by me. CHECK ROUND 4 (NARROW) RUNNING (Opus; "ROUND 4" section of `.claude-work/briefs/wf-package-check.md`; report
+   `.claude-work/resume/wf-package--verify-r4.md`; against `.claude-work/resume/wf-r3-snapshot/`; watchdog on it).**
+   **I22b (reader test):** it timed reading the file as well as the date walk and failed on correct code at 0.703 s with seven
+   copies running; now it times `expand()` alone (`expandtime=`), same 0.7 s limit — that part is right. **But I wrote that its
+   stated fault no longer exists; round 3 proved that WRONG:** at 0.2 s, expand()'s FIRST loop (reading events, guarded by I22c)
+   usually uses the whole budget, so I22b never reaches the walk; when it does, removing the walk's check makes it run 12-15 s late.
+   Opened **#558** (medium) to make I22b reach the walk on any machine; the comments now state the gap and warn not to remove the
+   walk's deadline check. Do NOT run the whole reader test on an "ignore every deadline" plant: I22a's endless rule never finishes.
    **Round 1's HIGH (rebuilt GitHub's Ubuntu 24.04 + PHP 8.4 + ICU 74.2 in a container):** the reader self-test fails on correct
    code there. L5 compares the committed Windows-zone list with the MACHINE's ICU (list made from ICU 78.3; 74.2 disagrees on one
    zone) — decided: L5 is SKIPPED when the ICU version differs, never a pass. L4 fails because seven mappings use OLD zone names
@@ -306,6 +307,7 @@ silently; no stacked pull requests; nothing hard-coded, because this is a produc
 | 3e | Migration 124 places a column after `capacityCount`, which no migration adds | **#555** | Queued — medium; change 124 in place (add the column first if missing) |
 | 3f | Seven Windows zones map to old zone names some servers reject (`Asia/Calcutta` …) | **#557** | Queued — HIGH; fix BEFORE the pull request (the reader self-test's L4 fails until then) |
 | 3g | Security checks skip SQL checks on SQL-only pull requests | **#556** | Queued — medium; needs the owner's yes (workflow edit) |
+| 3h | Reader self-test I22b often never reaches the loop it guards | **#558** | Queued — medium |
 | 4 | ONE workflow package: the three calendar self-tests into the pull-request checks + the #552 check in `pr-security.yml` + the migration harness on MySQL 8.4 too | — | Queued, ALL APPROVED (8.4 and the #552 check: owner, 24 Sept late evening). Straight after #552. **Needs `-d memory_limit=512M`, and the schema loaded into the `selftest_` database first** (I used `full_schema.sql` then migration 206; the tests' own headers do not say so) |
 | 5 | Anyone can approve their own expense claim and then be paid | **#545** | Queued — **high, live fault** |
 | 6 | The "my volunteering" page crashes for everyone | **#547** | Queued — **high, live fault** |
