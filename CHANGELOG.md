@@ -2,6 +2,29 @@
 
 
 ## [Unreleased] (alpha)
+- fix(admin): the Upgrade page (`web/_install/upgrade.php`) no longer
+  breaks off part-way after running migrations (#561). After running the
+  pending migrations, the page tried to draw a results table by reading
+  each result's `file` and `message` — but
+  `Portal\Core\Migrator::runOne()`/`runAll()` (`web/_core/Migrator.php`)
+  have always returned each row under the keys `filename`, `success` and
+  `error`. So `htmlspecialchars()` was handed `null` for the file column,
+  and because this file turns on PHP's strict type checking, that is a
+  crash (a `TypeError`), not a blank cell. Every upgrade that ran
+  anything broke off part-way, even though the migrations themselves had
+  genuinely run. The administrator saw the top of the Upgrade page, then
+  "Something Went Wrong" where the results should have been, and nothing
+  below it. The pending and executed counts near the top were the only
+  signs of how it had gone. The Details column would have shown nothing
+  anyway, since a `message` key was never set either. As of 25 September
+  2026 the main and alpha branches still read the same two wrong keys,
+  but there the Upgrade page stops even earlier, on every visit, at its
+  breadcrumb trail (#508, fixed alongside this one), so the fault further
+  down could not be reached. Releasing this fix to main without #508's
+  would not restore the Upgrade page there. The companion migrations
+  page under Admin (`web/_apps/admin/migrations/index.php`) already read
+  the correct keys, so only the Upgrade page had the fault. Fixed by
+  reading `filename` and `error` instead.
 - ci: three pull-request checks changed. (1) The calendar self-tests (#514)
   — the reader self-test approved by the owner on 23 September 2026, the
   three database-backed ones on 24 September — now run on every pull

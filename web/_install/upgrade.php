@@ -247,8 +247,29 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                             </thead>
                             <tbody>
                                 <?php foreach ($results as $r): ?>
+                                    <?php
+                                    // 🐛 #561: Portal\Core\Migrator::runOne()/runAll() return each row
+                                    //    with the keys "filename", "success" and "error" — never "file"
+                                    //    or "message". This used to read $r['file'] / $r['message'],
+                                    //    which do not exist, so htmlspecialchars() was handed null for
+                                    //    the file column and PHP's strict_types=1 threw a TypeError on
+                                    //    the first row of every upgrade that ran anything. The page had
+                                    //    already drawn its top part, so the administrator saw that, then
+                                    //    the portal's "Something Went Wrong" page inside the results
+                                    //    table, and nothing below it: no result rows, no #533 card, no
+                                    //    history. The Details column would have shown nothing anyway,
+                                    //    since 'message' was never set. As of 25 September 2026 the
+                                    //    main and alpha branches still read the same two wrong keys,
+                                    //    but there the page never gets this far: it stops earlier, at
+                                    //    the breadcrumb trail (#508, fixed alongside this on
+                                    //    claude/alpha-wip). The two fixes have to be released together:
+                                    //    without #508's the page still dies at the trail, and #508's
+                                    //    alone would only move the crash down to this table. See web/_core/Migrator.php ~215-372;
+                                    //    web/_apps/admin/migrations/index.php already read the correct
+                                    //    keys, so only this page had the fault.
+                                    ?>
                                     <tr>
-                                        <td><code><?php echo htmlspecialchars($r['file'], ENT_QUOTES, 'UTF-8'); ?></code></td>
+                                        <td><code><?php echo htmlspecialchars($r['filename'], ENT_QUOTES, 'UTF-8'); ?></code></td>
                                         <td>
                                             <?php if ($r['success'] === true): ?>
                                                 <span class="badge bg-success">OK</span>
@@ -256,7 +277,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                                 <span class="badge bg-danger">Failed</span>
                                             <?php endif; ?>
                                         </td>
-                                        <td class="text-muted small"><?php echo htmlspecialchars($r['message'] ?? '', ENT_QUOTES, 'UTF-8'); ?></td>
+                                        <td class="text-muted small"><?php echo htmlspecialchars($r['error'] ?? '', ENT_QUOTES, 'UTF-8'); ?></td>
                                     </tr>
                                 <?php endforeach; ?>
                             </tbody>
