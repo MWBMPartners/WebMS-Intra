@@ -132,13 +132,16 @@ builder runs**; before that it was clean.
    once HIGH/MEDIUM made; no cross-organisation hole found); BEING SETTLED IN PLACE by the original planner (resumed; "SETTLED 25
    September 2026" section at the top of `p514-p8--plan.md`) — SETTLED (~1,385 lines; all 26 findings resolved and mapped to a chunk
    and a proof in §12.2).** My decisions for the settle: H1 → its own issue
-   **#561 (high, LIVE on main/alpha: the Upgrade page's results table reads `file`/`message`, the Migrator returns
-   `filename`/`error`, so every upgrade ends on an error page)**, fixed as its own package BEFORE the part 8 build; H2 safe deletion
+   **#561 (high: the Upgrade page's results table reads `file`/`message`, the Migrator returns `filename`/`error`, so on
+   THIS branch every upgrade broke off part-way. CORRECTION found by #561's second check: on main/alpha the page dies EARLIER, on
+   every visit, at the breadcrumb trail — #508, fixed only on this branch (`bd1ef12`). Releasing #561 alone to main would not
+   restore the Upgrade page; it needs #508's fix too)**, fixed as its own package BEFORE the part 8 build; H2 safe deletion
    of part W's scratch folder; ONE commit + ONE migration 207, per-chunk checks against saved snapshot copies (no git staging); the
    importer's `NOW()` → `UTC_TIMESTAMP()` is in scope; refuse imported series on series-edit with "Series not found.".
    **Order from here: #561 NOW — BUILT (Sonnet); CHECK ROUND 1 = code correct (proved end to end on the real page), wording only
-   (the old page broke off part-way, it did not show a 'blank error page') → reworded by me; CHECK ROUND 2 (NARROW) RUNNING (Opus;
-   report `.claude-work/resume/p561--verify-r2.md`; watchdog on it); then commit; then build P8-1 … P8-4 (Sonnet), each checked
+   (the old page broke off part-way, it did not show a 'blank error page') → reworded by me; ROUND 2 = NOT CLEAN (the 'main and
+   alpha' claim, see above) → reworded by me; CHECK ROUND 3 (NARROW) RUNNING (Opus; report `.claude-work/resume/p561--verify-r3.md`;
+   watchdog on it); then commit; then build P8-1 … P8-4 (Sonnet), each checked
    (Opus) against a snapshot of the previous chunk → one commit.** The Admin → Migrations page already reads the right keys. Plan: a service
    self-test `tools/feed-admin-selftest.php` (part D service checks + part W pages via PHP's built-in server). Four chunks.
    **Decided by me: the owner's 21 Sept rule "#514: one commit per part" stands** — four chunks, each checked, ONE commit and ONE
