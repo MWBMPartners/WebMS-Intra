@@ -138,12 +138,12 @@ builder runs**; before that it was clean.
    restore the Upgrade page; it needs #508's fix too)**, fixed as its own package BEFORE the part 8 build; H2 safe deletion
    of part W's scratch folder; ONE commit + ONE migration 207, per-chunk checks against saved snapshot copies (no git staging); the
    importer's `NOW()` → `UTC_TIMESTAMP()` is in scope; refuse imported series on series-edit with "Series not found.".
-   **Order from here: #561 NOW — BUILT (Sonnet); CHECK ROUND 1 = code correct (proved end to end on the real page), wording only
-   (the old page broke off part-way, it did not show a 'blank error page') → reworded by me; ROUND 2 = NOT CLEAN (the 'main and
-   alpha' claim, see above) → reworded by me; ROUND 3 = NOT CLEAN (present-tense 'main and alpha' sentences become false on merge)
-   → dated by me ('As of 25 September 2026 …'); CHECK ROUND 4 (NARROW) RUNNING (Opus; report `.claude-work/resume/p561--verify-r4.md`;
-   watchdog on it); then commit; then build P8-1 … P8-4 (Sonnet), each checked
-   (Opus) against a snapshot of the previous chunk → one commit.** The Admin → Migrations page already reads the right keys. Plan: a service
+   **#561 DONE: `32a64d1`, pushed, #561 commented** (4 check rounds; code proved in round 1, rounds 1-3 corrected the wording;
+   round 4 clean). Doc sweep: #508 has no CHANGELOG entry of its own.
+   **NOW: PART 8 CHUNK P8-1 (service layer: `FeedAdmin`, `ExternalAudience`, three `FeedResolver` methods made public, the self-test's
+   part D checks D1-D32; no pages, no migration) — BUILD RUNNING (Sonnet; brief `.claude-work/briefs/514-p8-1-build.md`; report
+   `.claude-work/resume/p514-p8-1--build.md`; watchdog on it).** Then an Opus check; when accepted, snapshot the chunk's files into
+   `.claude-work/resume/p514-p8-snapshot-1/` (nothing staged), then P8-2 … P8-4, then ONE commit for part 8. Plan: a service
    self-test `tools/feed-admin-selftest.php` (part D service checks + part W pages via PHP's built-in server). Four chunks.
    **Decided by me: the owner's 21 Sept rule "#514: one commit per part" stands** — four chunks, each checked, ONE commit and ONE
    migration 207 for part 8. **Owner asked (not blocking):** add `feed-admin-selftest.php` to `calendar-selftests.yml`? Plan found:
@@ -318,7 +318,7 @@ silently; no stacked pull requests; nothing hard-coded, because this is a produc
 | 3h | Reader self-test I22b often never reaches the loop it guards | **#558** | Queued — medium |
 | 3i | Migration test's documents describe an old phase 4 | **#559** | Queued — low; documentation sweep |
 | 3j | A calendar's own zone line with an old zone name gets the wrong time on some servers | **#560** | Queued — medium |
-| 3k | Upgrade results table reads the wrong keys (on main/alpha the page dies earlier, #508) | **#561** | In review — round 4 (wording) |
+| 3k | Upgrade results table reads the wrong keys (on main/alpha the page dies earlier, #508) | **#561** | **Done — `32a64d1`** (4 check rounds; Codex not yet) |
 | 3l | Upgrade page: two unprotected steps, the #533 card's sentence, a stale comment | **#562** | Queued — low |
 | 4 | ONE workflow package: the three calendar self-tests into the pull-request checks + the #552 check in `pr-security.yml` + the migration harness on MySQL 8.4 too | — | Queued, ALL APPROVED (8.4 and the #552 check: owner, 24 Sept late evening). Straight after #552. **Needs `-d memory_limit=512M`, and the schema loaded into the `selftest_` database first** (I used `full_schema.sql` then migration 206; the tests' own headers do not say so) |
 | 5 | Anyone can approve their own expense claim and then be paid | **#545** | Queued — **high, live fault** |
