@@ -165,8 +165,17 @@ builder runs**; before that it was clean.
    option that way; (2) bare `@set_time_limit()` crashes on PHP 8 hosts that switch it off — six committed places — **opened as
    #563**, queued after part 8; (3) the plan's L5 reasoning is only partly right: `removeChoice()`/`deleteRule()` are what catch a
    missing lock; (4) save messages count "now waiting" as "changed who can see them" — P8-3 wording must allow for it.
-   **NOW: CHECK ROUND 2 RUNNING** (Opus, fresh agent; brief `.claude-work/briefs/514-p8-1-check.md` ROUND 2; report
-   `.claude-work/resume/p514-p8-1--verify-r2.md`; watchdog on it). Then an Opus check; when accepted, snapshot the chunk's files into
+   **CHECK ROUND 2: NOT CLEAN** (`.claude-work/resume/p514-p8-1--verify-r2.md`): code sound — no cross-organisation path, every
+   actor/organisation fault caught, `currentMany()` output byte-identical to the old `current()`, the address comparison cannot smuggle
+   an unchecked address. Gaps: 10 of the checker's 22 new faults not caught — M1 nothing notices if `currentMany()` stops telling a
+   choice from a rule with the same number (separate counters, so a real risk); LOW: posted-back B group/role, 3-calendar partial bulk
+   decision, `events()` category names, the database session zone never moved off UTC (a `NOW()` slip would pass), time-limit
+   'only when too low' unproven, **untrue save message** ("N events changed who can see them" counts events that merely started
+   waiting — confirmed: the resolver's `changed` = stored answer rewritten), a wrong D21 comment, two 'untestable' race branches
+   that ARE testable (`probes/races.php`), a docblock overclaim in `decide()`.
+   **NOW: FIX ROUND 2 RUNNING** (same Opus builder, resumed — it knows the self-test; brief `.claude-work/briefs/514-p8-1-fix2.md`;
+   report `.claude-work/resume/p514-p8-1--fix2.md`; round-2 version snapshotted to `.claude-work/resume/p514-p8-1-r2-snapshot/`;
+   watchdog on it). Then check round 3 by a NEW Opus agent. Then an Opus check; when accepted, snapshot the chunk's files into
    `.claude-work/resume/p514-p8-snapshot-1/` (nothing staged), then P8-2 … P8-4, then ONE commit for part 8. Plan: a service
    self-test `tools/feed-admin-selftest.php` (part D service checks + part W pages via PHP's built-in server). Four chunks.
    **Decided by me: the owner's 21 Sept rule "#514: one commit per part" stands** — four chunks, each checked, ONE commit and ONE
