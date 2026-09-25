@@ -120,12 +120,14 @@ builder runs**; before that it was clean.
 1. **#552 — DONE: committed `61a73a3`, pushed, #552 commented (stays open until the merge).** Ten independent check rounds, the
    last (round 10) clean; the database change was right from round 1. My own final checks: 21 audit checks + static calls exit 0,
    the new check clean, the end-to-end migration test all four phases passed on the final files. Codex has not reviewed it.
-   **The approved WORKFLOW PACKAGE (queue task 4) — COMMITTED `18f94eb`, pushed.** Six independent check rounds (round 6 clean
-   for this package; its one older finding became #559). "Lint Workflows" passed on GitHub for `18f94eb`. **IN PROGRESS: the
-   migration test started by hand on GitHub** (`gh workflow run "E2E Migrations" --ref claude/alpha-wip` → run 36100634959;
-   BOTH jobs appeared, MySQL 8.0.36 and 8.4.11, so GitHub used the branch's copy of the workflow); watched by
-   `gh run watch` into `.claude-work/resume/wf-github-run.log`, watchdog on it. The calendar workflow and check 23 can only run
-   once a pull request exists. **NEXT: #557 (high, before the pull request)**, then plan #514 part 8.
+   **The approved WORKFLOW PACKAGE (queue task 4) — DONE: `18f94eb`, pushed.** Six check rounds (round 6 clean for it; older
+   finding → #559). On GitHub: "Lint Workflows" passed; the migration test started by hand (run 36100634959) PASSED on BOTH
+   MySQL 8.0.36 and 8.4.11 — each confirmed its server version, all four phases, 204 migrations, 0 failures. #475, #514 and #552
+   commented. The calendar workflow and check 23 can only run once a pull request exists.
+   **NOW: #557 (high) — BUILD RUNNING (Sonnet; brief `.claude-work/briefs/557-build.md`; report `.claude-work/resume/p557--build.md`;
+   watchdog on it).** Planned by me: the generator converts ICU's answers with `IntlTimeZone::getIanaID()` (refusing if it cannot),
+   the list is regenerated (only the seven values should change), L4 names failing zones, a new check keeps old names out; proof on
+   Ubuntu 24.04 + PHP 8.4 WITHOUT `tzdata-legacy`. Then an Opus check, commit, then plan #514 part 8.
    Plan facts: the self-tests need only `full_schema.sql` (206 is already folded in); `lsof` is absent on GitHub's runners (stop the
    calendar server by parent process); **MySQL 8.4 refuses to start with `--default-authentication-plugin` in
    `tools/e2e-migrations/docker-compose.yml:20`** (already the default on 8.0, so it is removed); with that gone, all four phases
