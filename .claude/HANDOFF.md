@@ -124,8 +124,10 @@ builder runs**; before that it was clean.
    finding → #559). On GitHub: "Lint Workflows" passed; the migration test started by hand (run 36100634959) PASSED on BOTH
    MySQL 8.0.36 and 8.4.11 — each confirmed its server version, all four phases, 204 migrations, 0 failures. #475, #514 and #552
    commented. The calendar workflow and check 23 can only run once a pull request exists.
-   **NOW: #557 (high) — BUILD RUNNING (Sonnet; brief `.claude-work/briefs/557-build.md`; report `.claude-work/resume/p557--build.md`;
-   watchdog on it).** Planned by me: the generator converts ICU's answers with `IntlTimeZone::getIanaID()` (refusing if it cannot),
+   **NOW: #557 (high) — BUILT (Sonnet; report `.claude-work/resume/p557--build.md`; the list differs by exactly the seven names +
+   header date, verified by me). INDEPENDENT CHECK ROUND 1 RUNNING (Opus; brief `.claude-work/briefs/557-check.md`; report
+   `.claude-work/resume/p557--verify-r1.md`; watchdog on it).** The builder found a related gap — an old zone name written in a
+   calendar file's OWN zone line still loses its zone on such servers (warning, wrong time): opened **#560 (medium)**. Planned by me: the generator converts ICU's answers with `IntlTimeZone::getIanaID()` (refusing if it cannot),
    the list is regenerated (only the seven values should change), L4 names failing zones, a new check keeps old names out; proof on
    Ubuntu 24.04 + PHP 8.4 WITHOUT `tzdata-legacy`. Then an Opus check, commit, then plan #514 part 8.
    Plan facts: the self-tests need only `full_schema.sql` (206 is already folded in); `lsof` is absent on GitHub's runners (stop the
@@ -295,6 +297,8 @@ silently; no stacked pull requests; nothing hard-coded, because this is a produc
 | 3f | Seven Windows zones map to old zone names some servers reject (`Asia/Calcutta` …) | **#557** | Queued — HIGH; fix BEFORE the pull request (the reader self-test's L4 fails until then) |
 | 3g | Security checks skip SQL checks on SQL-only pull requests | **#556** | Queued — medium; needs the owner's yes (workflow edit) |
 | 3h | Reader self-test I22b often never reaches the loop it guards | **#558** | Queued — medium |
+| 3i | Migration test's documents describe an old phase 4 | **#559** | Queued — low; documentation sweep |
+| 3j | A calendar's own zone line with an old zone name gets the wrong time on some servers | **#560** | Queued — medium |
 | 4 | ONE workflow package: the three calendar self-tests into the pull-request checks + the #552 check in `pr-security.yml` + the migration harness on MySQL 8.4 too | — | Queued, ALL APPROVED (8.4 and the #552 check: owner, 24 Sept late evening). Straight after #552. **Needs `-d memory_limit=512M`, and the schema loaded into the `selftest_` database first** (I used `full_schema.sql` then migration 206; the tests' own headers do not say so) |
 | 5 | Anyone can approve their own expense claim and then be paid | **#545** | Queued — **high, live fault** |
 | 6 | The "my volunteering" page crashes for everyone | **#547** | Queued — **high, live fault** |
