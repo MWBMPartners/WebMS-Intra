@@ -120,29 +120,12 @@ builder runs**; before that it was clean.
 1. **#552 — DONE: committed `61a73a3`, pushed, #552 commented (stays open until the merge).** Ten independent check rounds, the
    last (round 10) clean; the database change was right from round 1. My own final checks: 21 audit checks + static calls exit 0,
    the new check clean, the end-to-end migration test all four phases passed on the final files. Codex has not reviewed it.
-   **NOW: the approved WORKFLOW PACKAGE (queue task 4) — PLANNED (`.claude-work/resume/wf-package--plan.md`, evidence
-   `wf-package--plan-evidence/`); BUILD RUNNING (Sonnet; brief `.claude-work/briefs/wf-package-build.md`; report
-   `.claude-work/resume/wf-package--build.md`) — BUILT (13 files; verified by me: fingerprints, no `continue-on-error` added,
-   actionlint clean, checks 9-22 untouched). CHECK ROUND 1 = NOT CLEAN → fix round 1 (Sonnet). CHECK ROUND 2 = NOT CLEAN (LOW
-   wording) → fixed by ME, plus an I22b timing fix. CHECK ROUND 3 = NOT CLEAN (MEDIUM: MY I22b comment was WRONG) → comments
-   corrected by me. CHECK ROUNDS 4 and 5 = NOT CLEAN (LOW wording only) → fixed by me. CHECK ROUND 6 (NARROW) RUNNING (Opus;
-   "ROUND 6" section of `.claude-work/briefs/wf-package-check.md`; report `.claude-work/resume/wf-package--verify-r6.md`; against
-   `.claude-work/resume/wf-r5-snapshot/`; watchdog on it). Fingerprints now: DEV_NOTES `af4e2b120a2da583`, CHANGELOG
-   `3c3aa1c38fe8d7d8`, e2e README `1cf52956b114c523`; reader test `29f853fff8436d25`; workflows/Python check unchanged since round 3.**
-   **I22b (reader test):** it timed reading the file as well as the date walk and failed on correct code at 0.703 s with seven
-   copies running; now it times `expand()` alone (`expandtime=`), same 0.7 s limit — that part is right. **But I wrote that its
-   stated fault no longer exists; round 3 proved that WRONG:** at 0.2 s, expand()'s FIRST loop (reading events, guarded by I22c)
-   usually uses the whole budget, so I22b never reaches the walk; when it does, removing the walk's check makes it run 12-15 s late.
-   Opened **#558** (medium) to make I22b reach the walk on any machine; the comments now state the gap and warn not to remove the
-   walk's deadline check. Do NOT run the whole reader test on an "ignore every deadline" plant: I22a's endless rule never finishes.
-   **Round 1's HIGH (rebuilt GitHub's Ubuntu 24.04 + PHP 8.4 + ICU 74.2 in a container):** the reader self-test fails on correct
-   code there. L5 compares the committed Windows-zone list with the MACHINE's ICU (list made from ICU 78.3; 74.2 disagrees on one
-   zone) — decided: L5 is SKIPPED when the ICU version differs, never a pass. L4 fails because seven mappings use OLD zone names
-   (`Asia/Calcutta` …) that Ubuntu 24.04's PHP rejects without `tzdata-legacy` — a REAL product fault: opened **#557 (high)**,
-   to be fixed BEFORE the pull request; L4 is left truthful and nothing installs `tzdata-legacy`. Also: docs must say what has not
-   run on GitHub; check 23 gets `if: ${{ !cancelled() }}`. Then my checks, ONE commit, then on GitHub:
-   `gh workflow run "E2E Migrations" --ref claude/alpha-wip` and watch it (the calendar self-test workflow and the pr-security
-   change can only run once a pull request exists — say so in the commit). Then plan #514 part 8.
+   **The approved WORKFLOW PACKAGE (queue task 4) — COMMITTED `18f94eb`, pushed.** Six independent check rounds (round 6 clean
+   for this package; its one older finding became #559). "Lint Workflows" passed on GitHub for `18f94eb`. **IN PROGRESS: the
+   migration test started by hand on GitHub** (`gh workflow run "E2E Migrations" --ref claude/alpha-wip` → run 36100634959;
+   BOTH jobs appeared, MySQL 8.0.36 and 8.4.11, so GitHub used the branch's copy of the workflow); watched by
+   `gh run watch` into `.claude-work/resume/wf-github-run.log`, watchdog on it. The calendar workflow and check 23 can only run
+   once a pull request exists. **NEXT: #557 (high, before the pull request)**, then plan #514 part 8.
    Plan facts: the self-tests need only `full_schema.sql` (206 is already folded in); `lsof` is absent on GitHub's runners (stop the
    calendar server by parent process); **MySQL 8.4 refuses to start with `--default-authentication-plugin` in
    `tools/e2e-migrations/docker-compose.yml:20`** (already the default on 8.0, so it is removed); with that gone, all four phases
