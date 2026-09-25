@@ -125,9 +125,10 @@ builder runs**; before that it was clean.
    `.claude-work/resume/wf-package--build.md`) — BUILT (13 files; verified by me: fingerprints, no `continue-on-error` added,
    actionlint clean, checks 9-22 untouched). CHECK ROUND 1 = NOT CLEAN → fix round 1 (Sonnet). CHECK ROUND 2 = NOT CLEAN (LOW
    wording) → fixed by ME, plus an I22b timing fix. CHECK ROUND 3 = NOT CLEAN (MEDIUM: MY I22b comment was WRONG) → comments
-   corrected by me. CHECK ROUND 4 = NOT CLEAN (3 LOW wording) → fixed by me. CHECK ROUND 5 (NARROW) RUNNING (Opus; "ROUND 5"
-   section of `.claude-work/briefs/wf-package-check.md`; report `.claude-work/resume/wf-package--verify-r5.md`; against
-   `.claude-work/resume/wf-r4-snapshot/`; watchdog on it).**
+   corrected by me. CHECK ROUNDS 4 and 5 = NOT CLEAN (LOW wording only) → fixed by me. CHECK ROUND 6 (NARROW) RUNNING (Opus;
+   "ROUND 6" section of `.claude-work/briefs/wf-package-check.md`; report `.claude-work/resume/wf-package--verify-r6.md`; against
+   `.claude-work/resume/wf-r5-snapshot/`; watchdog on it). Fingerprints now: DEV_NOTES `af4e2b120a2da583`, CHANGELOG
+   `3c3aa1c38fe8d7d8`, e2e README `1cf52956b114c523`; reader test `29f853fff8436d25`; workflows/Python check unchanged since round 3.**
    **I22b (reader test):** it timed reading the file as well as the date walk and failed on correct code at 0.703 s with seven
    copies running; now it times `expand()` alone (`expandtime=`), same 0.7 s limit — that part is right. **But I wrote that its
    stated fault no longer exists; round 3 proved that WRONG:** at 0.2 s, expand()'s FIRST loop (reading events, guarded by I22c)
