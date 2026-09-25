@@ -123,9 +123,10 @@ builder runs**; before that it was clean.
    **NOW: the approved WORKFLOW PACKAGE (queue task 4) — PLANNED (`.claude-work/resume/wf-package--plan.md`, evidence
    `wf-package--plan-evidence/`); BUILD RUNNING (Sonnet; brief `.claude-work/briefs/wf-package-build.md`; report
    `.claude-work/resume/wf-package--build.md`) — BUILT (13 files; verified by me: fingerprints, no `continue-on-error` added,
-   actionlint clean, checks 9-22 untouched). CHECK ROUND 1 = NOT CLEAN; FIX ROUND 1 RUNNING (Sonnet; brief
-   `.claude-work/briefs/wf-package-fix1.md`; report `.claude-work/resume/wf-package--fixes1.md`; snapshot
-   `.claude-work/resume/wf-r1-snapshot/`; watchdog on it). Then check round 2 (Opus, narrow).**
+   actionlint clean, checks 9-22 untouched). CHECK ROUND 1 = NOT CLEAN; FIX ROUND 1 DONE (Sonnet; report
+   `.claude-work/resume/wf-package--fixes1.md`; six files changed, verified by me). CHECK ROUND 2 (NARROW) RUNNING (Opus; "ROUND 2"
+   section of `.claude-work/briefs/wf-package-check.md`; report `.claude-work/resume/wf-package--verify-r2.md`; against
+   `.claude-work/resume/wf-r1-snapshot/`; watchdog on it).**
    **Round 1's HIGH (rebuilt GitHub's Ubuntu 24.04 + PHP 8.4 + ICU 74.2 in a container):** the reader self-test fails on correct
    code there. L5 compares the committed Windows-zone list with the MACHINE's ICU (list made from ICU 78.3; 74.2 disagrees on one
    zone) — decided: L5 is SKIPPED when the ICU version differs, never a pass. L4 fails because seven mappings use OLD zone names
