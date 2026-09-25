@@ -127,8 +127,13 @@ builder runs**; before that it was clean.
    **NOW: #557 (high) — BUILT (Sonnet; report `.claude-work/resume/p557--build.md`; the list differs by exactly the seven names +
    header date, verified by me). CHECK ROUND 1 = NOT CLEAN, LOW ONLY (fix proved correct again; event times unchanged across
    both clock-change nights; nothing stores the old names). FIX ROUND 1 DONE (Sonnet; verified by me: list unchanged, generator
-   `--check` rc 0, reader 333/0/2). CHECK ROUND 2 (NARROW) RUNNING (Opus; "ROUND 2" section of `.claude-work/briefs/557-check.md`;
-   report `.claude-work/resume/p557--verify-r2.md`; against `.claude-work/resume/p557-r1-snapshot/`; watchdog on it).** Main fix: L6
+   `--check` rc 0, reader 333/0/2). CHECK ROUND 2 = NOT CLEAN: MEDIUM caused by MY guard — it compared offset histories in
+   PHP's data, so on a server without the old names it refused with a false "different zone" message (and could turn L5 red on
+   correct code). FIX ROUND 2 RUNNING (Sonnet; brief `.claude-work/briefs/557-fix2.md`; report `.claude-work/resume/p557--fixes2.md`;
+   snapshot `.claude-work/resume/p557-r2-snapshot/`; watchdog on it).** Decided: the guard uses ICU's own identity
+   (`getCanonicalID()` equal for both names — checked: renames match, Oslo/Berlin differ); the PHP history comparison runs only
+   where PHP can load BOTH names. **Lesson: a guard that reads the machine's zone data reintroduces the machine-dependence #557
+   removes.** Main fix: L6
    must not go red on correct code under an older ICU (fail only on a DIFFERENT name; skip zones the ICU does not know); L5
    skipped where `getIanaID()` is missing; NEW generator guard (my addition): refuse a conversion that changes a zone's offset
    history, not just its spelling; wording fixes (ICU did not 'retire' the old names; the loss was not silent). The builder found a related gap — an old zone name written in a
