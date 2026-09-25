@@ -120,12 +120,21 @@ builder runs**; before that it was clean.
 1. **#552 — DONE: committed `61a73a3`, pushed, #552 commented (stays open until the merge).** Ten independent check rounds, the
    last (round 10) clean; the database change was right from round 1. My own final checks: 21 audit checks + static calls exit 0,
    the new check clean, the end-to-end migration test all four phases passed on the final files. Codex has not reviewed it.
-   **NOW: the approved WORKFLOW PACKAGE (queue task 4) — PLANNING RUNNING (Opus planner; brief
-   `.claude-work/briefs/wf-package-plan.md`; plan `.claude-work/resume/wf-package--plan.md`; watchdog on it).** Items: the three
-   calendar self-tests on every pull request with a throwaway MySQL; `check_fk_references_unique_key.py` in `pr-security.yml`
-   (step 9's pattern); the end-to-end migration test on MySQL 8.4 as well as 8.0.36; plus an OPTIONAL, not-yet-approved
-   "upgrade from the last release" phase (planned, not built, until the owner says yes). Then build on Sonnet, check on Opus.
-   Then plan #514 part 8.
+   **NOW: the approved WORKFLOW PACKAGE (queue task 4) — PLANNED (`.claude-work/resume/wf-package--plan.md`, evidence
+   `wf-package--plan-evidence/`); BUILD RUNNING (Sonnet; brief `.claude-work/briefs/wf-package-build.md`; report
+   `.claude-work/resume/wf-package--build.md`; watchdog on it).** Then an Opus check, my checks, ONE commit, then on GitHub:
+   `gh workflow run "E2E Migrations" --ref claude/alpha-wip` and watch it (the calendar self-test workflow and the pr-security
+   change can only run once a pull request exists — say so in the commit). Then plan #514 part 8.
+   Plan facts: the self-tests need only `full_schema.sql` (206 is already folded in); `lsof` is absent on GitHub's runners (stop the
+   calendar server by parent process); **MySQL 8.4 refuses to start with `--default-authentication-plugin` in
+   `tools/e2e-migrations/docker-compose.yml:20`** (already the default on 8.0, so it is removed); with that gone, all four phases
+   pass on 8.4.11 with the same counts; only "Static security checks" is a required check; the repository is public.
+   **Decided by me:** (1) include `tools/ics-reader-selftest.php` — the owner approved it on 23 Sep ("immediately after P5's
+   commit") and it was never done; (2) check 23 runs OUTSIDE the heuristic step's early exit, because that exit skips every
+   pull request that changes no PHP file — the approval was "every pull request". **The early exit also skips checks 9-22 (four
+   of them SQL checks) on SQL-only pull requests: opened as #556 (medium); changing it needs the owner's yes.** Section 8 (the
+   upgrade-from-release phase) is designed but NOT built: a probe from main on 8.4.11 installed and upgraded with 0 failures and
+   matched a fresh install on every link (497 each).
    **Settled facts (rounds 5-8; word claims modestly — every absolute "X catches it" has drawn a counterexample):** the 8.4
    end-to-end test builds every database from today's install script, so it can only catch faults visible on such a database — a
    link needing `uq_category_slug` only when that link also exists on such a database. It cannot catch: an edited released
