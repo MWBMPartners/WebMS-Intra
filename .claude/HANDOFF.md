@@ -123,10 +123,15 @@ builder runs**; before that it was clean.
    **NOW: the approved WORKFLOW PACKAGE (queue task 4) — PLANNED (`.claude-work/resume/wf-package--plan.md`, evidence
    `wf-package--plan-evidence/`); BUILD RUNNING (Sonnet; brief `.claude-work/briefs/wf-package-build.md`; report
    `.claude-work/resume/wf-package--build.md`) — BUILT (13 files; verified by me: fingerprints, no `continue-on-error` added,
-   actionlint clean, checks 9-22 untouched). CHECK ROUND 1 = NOT CLEAN; FIX ROUND 1 DONE (Sonnet; report
-   `.claude-work/resume/wf-package--fixes1.md`; six files changed, verified by me). CHECK ROUND 2 (NARROW) RUNNING (Opus; "ROUND 2"
-   section of `.claude-work/briefs/wf-package-check.md`; report `.claude-work/resume/wf-package--verify-r2.md`; against
-   `.claude-work/resume/wf-r1-snapshot/`; watchdog on it).**
+   actionlint clean, checks 9-22 untouched). CHECK ROUND 1 = NOT CLEAN → fix round 1 (Sonnet). CHECK ROUND 2 = NOT CLEAN (LOW
+   wording) → fixed by ME, plus an I22b timing fix. CHECK ROUND 3 (NARROW) RUNNING (Opus; "ROUND 3" section of
+   `.claude-work/briefs/wf-package-check.md`; report `.claude-work/resume/wf-package--verify-r3.md`; against
+   `.claude-work/resume/wf-r2-snapshot/`; watchdog on it).**
+   **I22b (reader test):** it timed reading the file as well as the date walk, and failed on correct code at 0.703 s with seven
+   copies running. Now it times `expand()` alone (`expandtime=`), same 0.7 s limit. **Its stated fault no longer exists:** removing
+   that one loop's deadline check changes nothing now (other checks stop the walk at ~0.21 s), so it guards the walk as a whole —
+   `expand()` ignoring its deadline takes 8.976 s and fails. Measuring script: `.claude-work/resume/wf-measure-i22.php`. Do NOT run
+   the whole reader test on an "ignore every deadline" plant: I22a's endless repeat rule then never finishes.
    **Round 1's HIGH (rebuilt GitHub's Ubuntu 24.04 + PHP 8.4 + ICU 74.2 in a container):** the reader self-test fails on correct
    code there. L5 compares the committed Windows-zone list with the MACHINE's ICU (list made from ICU 78.3; 74.2 disagrees on one
    zone) — decided: L5 is SKIPPED when the ICU version differs, never a pass. L4 fails because seven mappings use OLD zone names
