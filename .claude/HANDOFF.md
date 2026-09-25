@@ -128,9 +128,16 @@ builder runs**; before that it was clean.
    generator converts ICU answers with `getIanaID()` and refuses when ICU's identity (`getCanonicalID()`) does not confirm a rename;
    the list holds current names (7 changed, times identical); new check L6. Carried to **#560**: fail-closed on an unexpected
    verdict, and three wording nits in the generator.
-   **NOW: #514 PART 8 — PLANNING RUNNING (Opus planner; brief `.claude-work/briefs/514-p8-plan.md`; plan
-   `.claude-work/resume/p514-p8--plan.md`; watchdog on it).** Sources: plan lines 1826-1990 of `p514--plan-r2.md`; part 7's hand-over
-   C10 in `p514-p7--plan.md`; the 24 Sept decisions. Then an Opus challenger, then a Sonnet build (chunked if big). Migration 207.
+   **NOW: #514 PART 8 — PLANNED (`.claude-work/resume/p514-p8--plan.md`, ~1,060 lines); CHALLENGE RUNNING (Opus; brief
+   `.claude-work/briefs/514-p8-challenge.md`; report `.claude-work/resume/p514-p8--challenge.md`; watchdog on it).** Plan: a service
+   class `Portal\Core\FeedAdmin` (+ `ExternalAudience`) through which every read/write goes (transaction → lock calendar by number
+   AND organisation → work → part 7 method → `resolveFeed()` with `databaseNowUtc()` → commit); thin pages; 7 new addresses under
+   `admin/calendar/feeds/…` + `help/calendar-imports`; an Approvals inbox section; upgrade/API notices; routes-only migration; new
+   self-test `tools/feed-admin-selftest.php` (part D service checks + part W pages via PHP's built-in server). Four chunks.
+   **Decided by me: the owner's 21 Sept rule "#514: one commit per part" stands** — four chunks, each checked, ONE commit and ONE
+   migration 207 for part 8. **Owner asked (not blocking):** add `feed-admin-selftest.php` to `calendar-selftests.yml`? Plan found:
+   saving a new calendar address could take ~20 h to act (importer skips an unchanged file), `feeds.php:120` shows UTC as local
+   time, bare `403` refusals — part 8 fixes these.
    Plan facts: the self-tests need only `full_schema.sql` (206 is already folded in); `lsof` is absent on GitHub's runners (stop the
    calendar server by parent process); **MySQL 8.4 refuses to start with `--default-authentication-plugin` in
    `tools/e2e-migrations/docker-compose.yml:20`** (already the default on 8.0, so it is removed); with that gone, all four phases
