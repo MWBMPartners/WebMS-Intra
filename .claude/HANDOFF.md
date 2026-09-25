@@ -117,17 +117,18 @@ builder runs**; before that it was clean.
 
 ## 2. What to do next, in order
 
-1. **#552 — CHECK ROUND 7 = NOT CLEAN (LOW only, in MY wording: I had written that the 8.4 end-to-end test will not catch a link
-   relying on `uq_category_slug`; it will, because today's install script lacks that key too). Corrected by me; NARROW CHECK
-   ROUND 8 RUNNING (Opus, independent; "ROUND 8 (NARROW)" section of `.claude-work/briefs/552-check.md`; report
-   `.claude-work/resume/p552--verify-r8.md`; watchdog on it), judging the diff against `.claude-work/resume/p552-r7-snapshot/`.
-   Now: DEV_NOTES `519a32da…`, script `95069eb7…`; code proved unchanged apart from comments (ast); SQL unchanged; 21 checks +
-   static calls exit 0.**
-   **Settled facts to keep (checked across rounds 5-7):** the 8.4 end-to-end test builds every database from today's install
-   script, so it WILL catch faults visible on such a database (e.g. a link needing `uq_category_slug`; a `CREATE TABLE` without
-   `IF NOT EXISTS`) and will NOT catch faults visible only on older-release databases (an edited released migration; a guarded
-   branch that only runs on older databases; a key today's install script has but older installs lack). Nothing automated tests
-   an upgrade from an older release; an upgrade-from-last-release phase is PROPOSED to the owner.
+1. **#552 — CHECK ROUND 8 = NOT CLEAN (LOW only, wording); corrected by me; NARROW CHECK ROUND 9 RUNNING (Opus, independent;
+   "ROUND 9 (NARROW)" section of `.claude-work/briefs/552-check.md`; report `.claude-work/resume/p552--verify-r9.md`; watchdog on
+   it), judging the diff against `.claude-work/resume/p552-r8-snapshot/`. Now: DEV_NOTES `bc005b95…`, script `4576759f…`; code
+   proved unchanged apart from comments (ast); SQL unchanged; 21 checks + static calls exit 0.**
+   **Settled facts (rounds 5-8; word claims modestly — every absolute "X catches it" has drawn a counterexample):** the 8.4
+   end-to-end test builds every database from today's install script, so it can only catch faults visible on such a database — a
+   link needing `uq_category_slug` only when that link also exists on such a database. It cannot catch: an edited released
+   migration; a guarded branch that only runs on older databases; a key today's install script has but older installs lack; a
+   link written ONLY inside a migration's re-declared `CREATE TABLE` (that block does nothing on a fresh install — real example
+   `fk_att_sess_event`, opened as **#554**, low: fresh installs lack that link). Nothing automated tests an upgrade from an older
+   release; an upgrade-from-last-release phase is PROPOSED to the owner. `uq_category_slug`: databases installed from an install
+   script OLDER than commit 53bcf81 (8 March 2026, 14:37 UTC) have it; from 53bcf81 onwards they do not.
    If clean: my own checks on the final bytes, ONE commit saying Codex has not reviewed it, send it to GitHub, update #552,
    then the approved WORKFLOW PACKAGE (queue task 4), then plan #514 part 8.**
    Round 4 (`p552--verify-r4.md`): round 3's MEDIUM closed (32 recorded shapes match all 96 versions of the install script and a
@@ -270,6 +271,7 @@ silently; no stacked pull requests; nothing hard-coded, because this is a produc
 | 3a | MySQL 8.4 refuses three new links (migrations 202/203) | **#552** | **In progress — build (Sonnet), then Opus check** |
 | 3b | #514 parts 8-11 | #514 | Queued — plan P8 on Opus, build on Sonnet; migration 207 |
 | 3c | Migration 019 removed the category slug key under the wrong name | **#553** | Queued — medium; a small guarded migration (number decided at build time) |
+| 3d | Fresh installs lack the attendance-session → event link `fk_att_sess_event` | **#554** | Queued — low; a small guarded migration (clean dangling `eventID`s first) |
 | 4 | ONE workflow package: the three calendar self-tests into the pull-request checks + the #552 check in `pr-security.yml` + the migration harness on MySQL 8.4 too | — | Queued, ALL APPROVED (8.4 and the #552 check: owner, 24 Sept late evening). Straight after #552. **Needs `-d memory_limit=512M`, and the schema loaded into the `selftest_` database first** (I used `full_schema.sql` then migration 206; the tests' own headers do not say so) |
 | 5 | Anyone can approve their own expense claim and then be paid | **#545** | Queued — **high, live fault** |
 | 6 | The "my volunteering" page crashes for everyone | **#547** | Queued — **high, live fault** |
