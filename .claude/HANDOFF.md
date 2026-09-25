@@ -156,8 +156,17 @@ builder runs**; before that it was clean.
    part 10 otherwise); bulk decide need not be all-or-nothing across calendars but must report a partial result honestly.
    **P8-2 brief must add:** a text search refusing pages that call `ExternalAudience::save()/remove()` or part 7's
    `decideApproval()/withdrawForOrigin()/onAddressChanged()` directly (checker LOW 10).
-   **NOW: FIX ROUND 1 RUNNING** (Opus; brief `.claude-work/briefs/514-p8-1-fix1.md`; report `.claude-work/resume/p514-p8-1--fix1.md`;
-   snapshot of the checked version in `.claude-work/resume/p514-p8-1-r1-snapshot/`; watchdog on it). Then check round 2. Then an Opus check; when accepted, snapshot the chunk's files into
+   **FIX ROUND 1 DONE** (Opus; report `.claude-work/resume/p514-p8-1--fix1.md`; round-1 version snapshotted in
+   `.claude-work/resume/p514-p8-1-r1-snapshot/`): self-test now 261 checks, exact count + every heading D1-D32 required; passes in UTC,
+   Auckland, New York; 52 of 52 planted faults caught; `pendingApprovals()` 1,002 → 3 statements, `calendars()` 204 → 5 (new
+   `ExternalAudience::currentMany()`); FeedResolver unchanged. Fingerprints: FeedAdmin `95a97cf6…`, ExternalAudience `c026a282…`,
+   check_event_visibility `3484049d…`, feed-admin-selftest `2e0bff66…`. Builder's notes for later chunks: (1) the category map's
+   "None" acts as "use the calendar's default" when one is set (`FeedResolver::categoryFor()` skips NULL) — P8-2 must word the
+   option that way; (2) bare `@set_time_limit()` crashes on PHP 8 hosts that switch it off — six committed places — **opened as
+   #563**, queued after part 8; (3) the plan's L5 reasoning is only partly right: `removeChoice()`/`deleteRule()` are what catch a
+   missing lock; (4) save messages count "now waiting" as "changed who can see them" — P8-3 wording must allow for it.
+   **NOW: CHECK ROUND 2 RUNNING** (Opus, fresh agent; brief `.claude-work/briefs/514-p8-1-check.md` ROUND 2; report
+   `.claude-work/resume/p514-p8-1--verify-r2.md`; watchdog on it). Then an Opus check; when accepted, snapshot the chunk's files into
    `.claude-work/resume/p514-p8-snapshot-1/` (nothing staged), then P8-2 … P8-4, then ONE commit for part 8. Plan: a service
    self-test `tools/feed-admin-selftest.php` (part D service checks + part W pages via PHP's built-in server). Four chunks.
    **Decided by me: the owner's 21 Sept rule "#514: one commit per part" stands** — four chunks, each checked, ONE commit and ONE
