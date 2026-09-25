@@ -189,7 +189,16 @@ builder runs**; before that it was clean.
    two attempts produced untrue numbers, and doing it right means a second copy of `EventVisibility`'s decision. Recorded, with the
    exact new choice/rule save messages, in a new section at the top of the plan: **"DECIDED DURING THE P8-1 CHECKS, 25 September
    2026"** — it overrides the plan's older wording at lines ~121, 601-602, 629, 1100, 1109; P8-3/P8-4 briefs must use it.
-   **NOW: FIX ROUND 3 RUNNING** (same Opus builder, resumed; brief `.claude-work/briefs/514-p8-1-fix3.md`; report
+   **OWNER DECISIONS, 25 September 2026 (asked directly, all four answered):** (1) **KEEP the "changed who can see it" count, done
+   properly** — REVERSES my removal decision above; the fix-round-3 builder was redirected mid-round by message: per-level signature of
+   only what `EventVisibility` reads (Everyone: level+in date+website+API boxes; Members: level+in date; Selected groups: level+in
+   date+list CONTENTS not owner; hidden: level), plus an ORACLE check against `EventVisibility::where()` for a viewer panel so the copy
+   cannot drift unnoticed; plan top section item 1 corrected. (2) **YES: add an upgrade-from-the-last-release phase to the e2e migration
+   test AND fix #553, #554, #555 in the same package** so it lands green (workflow edit approved). (3) **YES: fix #556** (pr-security
+   shortcut also looks at `web/_sql/`; workflow edit approved). (4) **YES: `feed-admin-selftest.php` in `calendar-selftests.yml`** —
+   done inside part 8's one commit (plan top section item 8; its `--hold-lock` uses `proc_open`). Items 2+3 bundled as ONE package after
+   #563 (both CI-check changes to the database side).
+   **NOW: FIX ROUND 3 RUNNING** (same Opus builder, resumed; brief `.claude-work/briefs/514-p8-1-fix3.md` + the owner's M1 redirect; report
    `.claude-work/resume/p514-p8-1--fix3.md`; round-3 version snapshotted to `.claude-work/resume/p514-p8-1-r3-snapshot/`; watchdog on
    it). Then check round 4 by a NEW Opus agent. Then an Opus check; when accepted, snapshot the chunk's files into
    `.claude-work/resume/p514-p8-snapshot-1/` (nothing staged), then P8-2 … P8-4, then ONE commit for part 8. Plan: a service
