@@ -181,8 +181,17 @@ builder runs**; before that it was clean.
    the self-test can start itself as a lock-holding second process (`--hold-lock`, refuses numbers outside 910000-919999).
    Fingerprints: FeedAdmin `580d1737…`, feed-admin-selftest `f29991fb…`; ExternalAudience `c026a282…`, check_event_visibility
    `3484049d…`, FeedResolver `ea23ff1e…` unchanged.
-   **NOW: CHECK ROUND 3 RUNNING** (NEW Opus agent; brief `.claude-work/briefs/514-p8-1-check.md` ROUND 3; report
-   `.claude-work/resume/p514-p8-1--verify-r3.md`; round-2 version in `.claude-work/resume/p514-p8-1-r2-snapshot/`; watchdog on it). Then an Opus check; when accepted, snapshot the chunk's files into
+   **CHECK ROUND 3: NOT CLEAN** (`.claude-work/resume/p514-p8-1--verify-r3.md`): still no cross-organisation path; 18/18 re-planted
+   faults caught; hook, `decide()`, `--hold-lock`, +13:00 session all sound. BUT M1 the new "changed who can see it" count
+   overcounts (the snapshot put the owner into every event's signature — a same-level title-only rule on 40 events says "40 changed");
+   10 of 17 new faults uncaught; D25(e)'s `INNODB_TRX` check is flaky (MySQL caches that table ~0.1 s — spurious failures in 11 of
+   the builder's fault runs). **DECIDED by me: REMOVE the "changed who can see it" count entirely** — C10 item 4 never asked for it,
+   two attempts produced untrue numbers, and doing it right means a second copy of `EventVisibility`'s decision. Recorded, with the
+   exact new choice/rule save messages, in a new section at the top of the plan: **"DECIDED DURING THE P8-1 CHECKS, 25 September
+   2026"** — it overrides the plan's older wording at lines ~121, 601-602, 629, 1100, 1109; P8-3/P8-4 briefs must use it.
+   **NOW: FIX ROUND 3 RUNNING** (same Opus builder, resumed; brief `.claude-work/briefs/514-p8-1-fix3.md`; report
+   `.claude-work/resume/p514-p8-1--fix3.md`; round-3 version snapshotted to `.claude-work/resume/p514-p8-1-r3-snapshot/`; watchdog on
+   it). Then check round 4 by a NEW Opus agent. Then an Opus check; when accepted, snapshot the chunk's files into
    `.claude-work/resume/p514-p8-snapshot-1/` (nothing staged), then P8-2 … P8-4, then ONE commit for part 8. Plan: a service
    self-test `tools/feed-admin-selftest.php` (part D service checks + part W pages via PHP's built-in server). Four chunks.
    **Decided by me: the owner's 21 Sept rule "#514: one commit per part" stands** — four chunks, each checked, ONE commit and ONE
