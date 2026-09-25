@@ -141,8 +141,13 @@ builder runs**; before that it was clean.
    **#561 DONE: `32a64d1`, pushed, #561 commented** (4 check rounds; code proved in round 1, rounds 1-3 corrected the wording;
    round 4 clean). Doc sweep: #508 has no CHANGELOG entry of its own.
    **NOW: PART 8 CHUNK P8-1 (service layer: `FeedAdmin`, `ExternalAudience`, three `FeedResolver` methods made public, the self-test's
-   part D checks D1-D32; no pages, no migration) — BUILD RUNNING (Sonnet; brief `.claude-work/briefs/514-p8-1-build.md`; report
-   `.claude-work/resume/p514-p8-1--build.md`; watchdog on it).** Then an Opus check; when accepted, snapshot the chunk's files into
+   part D checks D1-D32; no pages, no migration) — BUILT (Sonnet; 121 assertions pass twice; 8 planted faults caught; resolver 208
+   and visibility 150 still pass). CHECK ROUND 1 RUNNING (Opus; brief `.claude-work/briefs/514-p8-1-check.md`; report
+   `.claude-work/resume/p514-p8-1--verify-r1.md`; watchdog on it).** Fingerprints: FeedAdmin `0fb7422c…`, ExternalAudience
+   `f2ea1a21…`, FeedResolver `ea23ff1e…` (only 3 private→public + docblocks — verified by me), check_event_visibility `4ce3ce1f…`,
+   feed-admin-selftest `576a25b4…`. Builder's structural finding: a Selected-groups request can never leave a date waiting (groups <
+   members < public), so several plan scenarios were rebuilt; D24 hand-inserts such a row. The builder's report times before ~12:17
+   were estimates, not real. Then an Opus check; when accepted, snapshot the chunk's files into
    `.claude-work/resume/p514-p8-snapshot-1/` (nothing staged), then P8-2 … P8-4, then ONE commit for part 8. Plan: a service
    self-test `tools/feed-admin-selftest.php` (part D service checks + part W pages via PHP's built-in server). Four chunks.
    **Decided by me: the owner's 21 Sept rule "#514: one commit per part" stands** — four chunks, each checked, ONE commit and ONE
