@@ -125,8 +125,12 @@ builder runs**; before that it was clean.
    MySQL 8.0.36 and 8.4.11 — each confirmed its server version, all four phases, 204 migrations, 0 failures. #475, #514 and #552
    commented. The calendar workflow and check 23 can only run once a pull request exists.
    **NOW: #557 (high) — BUILT (Sonnet; report `.claude-work/resume/p557--build.md`; the list differs by exactly the seven names +
-   header date, verified by me). INDEPENDENT CHECK ROUND 1 RUNNING (Opus; brief `.claude-work/briefs/557-check.md`; report
-   `.claude-work/resume/p557--verify-r1.md`; watchdog on it).** The builder found a related gap — an old zone name written in a
+   header date, verified by me). CHECK ROUND 1 = NOT CLEAN, LOW ONLY (fix proved correct again; event times unchanged across
+   both clock-change nights; nothing stores the old names). FIX ROUND 1 RUNNING (Sonnet; brief `.claude-work/briefs/557-fix1.md`;
+   report `.claude-work/resume/p557--fixes1.md`; snapshot `.claude-work/resume/p557-r1-snapshot/`; watchdog on it).** Main fix: L6
+   must not go red on correct code under an older ICU (fail only on a DIFFERENT name; skip zones the ICU does not know); L5
+   skipped where `getIanaID()` is missing; NEW generator guard (my addition): refuse a conversion that changes a zone's offset
+   history, not just its spelling; wording fixes (ICU did not 'retire' the old names; the loss was not silent). The builder found a related gap — an old zone name written in a
    calendar file's OWN zone line still loses its zone on such servers (warning, wrong time): opened **#560 (medium)**. Planned by me: the generator converts ICU's answers with `IntlTimeZone::getIanaID()` (refusing if it cannot),
    the list is regenerated (only the seven values should change), L4 names failing zones, a new check keeps old names out; proof on
    Ubuntu 24.04 + PHP 8.4 WITHOUT `tzdata-legacy`. Then an Opus check, commit, then plan #514 part 8.
