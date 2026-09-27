@@ -274,8 +274,16 @@ builder runs**; before that it was clean.
    spelling → #549; real statement counts). 446 checks; UTC ×2, Auckland, New York, 5/5 repeat runs rc 0; 158 of 167 fault runs caught
    — the 9 not caught are K07-K10/K15 (judged harmless, round 5) and the builder's 4 direct-check-OFF controls (proving only the
    direct check sees them). Fingerprints: FeedAdmin `50fe5874…`, self-test `65b2916d…`.
-   **NOW: CHECK ROUND 6 RUNNING** (NEW Opus agent; brief `.claude-work/briefs/514-p8-1-check.md` ROUND 6; report
-   `.claude-work/resume/p514-p8-1--verify-r6.md`; evidence durable; watchdog on it).
+   **CHECK ROUND 6: NOT CLEAN, 1 MEDIUM + 4 LOW, all in the self-test/comments** (`.claude-work/resume/p514-p8-1--verify-r6.md`):
+   the direct check is faithful (its personal-feed-mode "groups" set is right; guards matter). M1: the "today" pins (00:30 London,
+   summer time) cannot catch a date taken in a zone AHEAD of the organisation's — Berlin, fixed +01:00, or `SELECT CURDATE()` all pass
+   the pins (CURDATE only caught by chance in an evening run). LOW: D17all still names round 4's fixed ten (the world has 16 members);
+   no small-group leaders/co-leaders in the world (a leader-dropping copy fault and a leader rule change pass); `pa_realSigs()` discards
+   disagreeing views; docblock wording. Also noted: the tripwire is not in CI until part 8's commit (plan item 8 — do not forget).
+   **Side finding → #549 commented (27 Sep):** `CURDATE()` is used 35 times in 20 files under `web/`, and the portal never sets the
+   database connection's time zone, so "today" there is the database server's, not the organisation's.
+   **NOW: FIX ROUND 6 RUNNING** (same Opus builder; brief `.claude-work/briefs/514-p8-1-fix6.md`; report
+   `.claude-work/resume/p514-p8-1--fix6.md`; watchdog on it). Then check round 7.
    **Decided by me: the owner's 21 Sept rule "#514: one commit per part" stands** — four chunks, each checked, ONE commit and ONE
    migration 207 for part 8. **Owner answered YES (25 Sep):** add `feed-admin-selftest.php` to `calendar-selftests.yml`, inside part 8's commit. Plan found:
    saving a new calendar address could take ~20 h to act (importer skips an unchanged file), `feeds.php:120` shows UTC as local
