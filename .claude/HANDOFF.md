@@ -260,8 +260,16 @@ builder runs**; before that it was clean.
    people-resolution, OC-01…03 oracle controls, C4-22 simulated rule change still caught); save at 1,000 × 2,000 = 0.03-0.11 s (+3
    statements). Fingerprints: FeedAdmin `08ee2dd1…`, self-test `a06f1bf1…`; others unchanged. Builder's note for part 10: change this
    copy AND add a current holder, a former holder and a switched-off grouping of each new kind to the self-test world.
-   **NOW: CHECK ROUND 5 RUNNING** (NEW Opus agent; brief `.claude-work/briefs/514-p8-1-check.md` ROUND 5; report
-   `.claude-work/resume/p514-p8-1--verify-r5.md`; evidence durable; watchdog on it).
+   **CHECK ROUND 5: NOT CLEAN** (`.claude-work/resume/p514-p8-1--verify-r5.md`, evidence durable): the COPY IS CORRECT — line by line
+   against `EventVisibility`, 8 extra states, `ruleToday()` right at 48 pinned moments (midnight, both clock changes, London +
+   Auckland), 0.03-0.22 s per save at 1,000 × 2,000. But the TRIPWIRE has blind spots (M1): no holder of a switched-off role, no
+   assignment removed the way `leadership/delete.php` leaves it, no term starting/ending today, no ended/pending group row isolated,
+   "today" never pinned — 8 copy faults (K01-K04, K06, K12-K14) and 3 simulated rule changes (V01-V03) passed 344/344; and the
+   oracle compares per-event CHANGE counts, so one wrong person hides when another on the same event moves. LOW: `ruleToday()` can differ
+   from the pages' date for up to an hour when `site.timezone` is spelt unusually (#549); cost wording in counter units.
+   **NOW: FIX ROUND 5 RUNNING** (same Opus builder; brief `.claude-work/briefs/514-p8-1-fix5.md` — main change a DIRECT signature
+   check: the copy's per-event people set must equal the real rule's, before and after, in every D17 scenario; plus the world gaps,
+   a pinned-clock case, two docblock corrections; report `.claude-work/resume/p514-p8-1--fix5.md`; watchdog on it). Then check round 6.
    **Decided by me: the owner's 21 Sept rule "#514: one commit per part" stands** — four chunks, each checked, ONE commit and ONE
    migration 207 for part 8. **Owner answered YES (25 Sep):** add `feed-admin-selftest.php` to `calendar-selftests.yml`, inside part 8's commit. Plan found:
    saving a new calendar address could take ~20 h to act (importer skips an unchanged file), `feeds.php:120` shows UTC as local
