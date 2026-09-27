@@ -241,6 +241,16 @@ builder runs**; before that it was clean.
    events whose answer changed (rejected: (b) a closer copy; (c) dropping the count). Builder told to measure 300×500 and 1,000×2,000
    (events × accounts) first and STOP if the large case is over ~2 s per save — that would go back to the owner. Recorded in the
    brief's PART B and the plan's top section item 1.
+   **FIX ROUND 4: PART A DONE, PART B STOPPED ON COST** (report `.claude-work/resume/p514-p8-1--fix4.md`, evidence durable): full oracle
+   over every account × 7 modes (49 views), six new people (role holder, second group, ended member, left member, switched-off group,
+   future role term), new scenarios; 338 checks — 332 pass, the 6 B-cases (B1-B4, B4b, B6) fail by design until the count method is
+   settled; C4-01…C4-08 and C4-22 (simulated later rule change) all caught. Self-test `c0ea31c4…`, FeedAdmin `d783d9fd…` (comments
+   only). PART B measured, not built: asking the real rule costs ~8 µs per event × account × mode — a save at 300 events × 500 accounts
+   ~7-9.5 s, at 1,000 × 2,000 ~93-102 s (today's saves 0.02-0.17 s), inside the calendar lock. Also found: a person's answer for
+   imported events depends only on global admin / site admin here / active member here (+ list), so outsiders equal "nobody signed in".
+   **BACK TO THE OWNER (27 Sep):** my recommendation — a fast copy that compares PEOPLE (entries resolved through the same active-group,
+   current-role and active-membership checks), with the self-test's real-rule full oracle (runs on every pull request, owner-approved)
+   as the tripwire that fails loudly if the rule ever changes and the copy does not.
    **Decided by me: the owner's 21 Sept rule "#514: one commit per part" stands** — four chunks, each checked, ONE commit and ONE
    migration 207 for part 8. **Owner answered YES (25 Sep):** add `feed-admin-selftest.php` to `calendar-selftests.yml`, inside part 8's commit. Plan found:
    saving a new calendar address could take ~20 h to act (importer skips an unchanged file), `feeds.php:120` shows UTC as local
