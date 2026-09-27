@@ -205,6 +205,10 @@ builder runs**; before that it was clean.
    shortcut also looks at `web/_sql/`; workflow edit approved). (4) **YES: `feed-admin-selftest.php` in `calendar-selftests.yml`** —
    done inside part 8's one commit (plan top section item 8; its `--hold-lock` uses `proc_open`). Items 2+3 bundled as ONE package after
    #563 (both CI-check changes to the database side).
+   **QUEUE AFTER PART 8 (in order):** #563 (bare `@set_time_limit()` in six places); **#564** (owner-approved 25 Sep, recorded at the top
+   of this file by a CueRCode cloud session: `stat -L` in `tools/watchdog.sh` AND `~/.claude/bin/watchdog.sh`, kept identical — must be
+   done from this Mac; it does not affect our watchdogs, which point at `.md` report files, not shortcuts); then the upgrade-test +
+   #553-#556 package; then #514 parts 9-11.
    **INTERRUPTED 25 Sep ~18:10 → resumed 27 Sep 16:17: the account's Opus WEEKLY LIMIT** (reset 27 Sep 16:00). It stopped the fix
    builder AND this commissioning session at once, so nothing could hand over — no fallback was used, and none ran for ~46 hours.
    State at the stop (from the builder's progress log): the count rebuilt per the owner's decision (`whoCanSee()`/`whoCanSeeChanges()`,
