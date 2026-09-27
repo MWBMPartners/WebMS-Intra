@@ -198,7 +198,18 @@ builder runs**; before that it was clean.
    shortcut also looks at `web/_sql/`; workflow edit approved). (4) **YES: `feed-admin-selftest.php` in `calendar-selftests.yml`** —
    done inside part 8's one commit (plan top section item 8; its `--hold-lock` uses `proc_open`). Items 2+3 bundled as ONE package after
    #563 (both CI-check changes to the database side).
-   **NOW: FIX ROUND 3 RUNNING** (same Opus builder, resumed; brief `.claude-work/briefs/514-p8-1-fix3.md` + the owner's M1 redirect; report
+   **INTERRUPTED 25 Sep ~18:10 → resumed 27 Sep 16:17: the account's Opus WEEKLY LIMIT** (reset 27 Sep 16:00). It stopped the fix
+   builder AND this commissioning session at once, so nothing could hand over — no fallback was used, and none ran for ~46 hours.
+   State at the stop (from the builder's progress log): the count rebuilt per the owner's decision (`whoCanSee()`/`whoCanSeeChanges()`,
+   per-level signature mirroring `EventVisibility`) + a 7-viewer ORACLE check against `EventVisibility::where()`; 305 checks; the
+   final files (FeedAdmin `25867010…` last changed 25 Sep 17:00, self-test `f4fcc6b1…` 17:50) passed UTC ×2, Auckland, New York and
+   10 of 10 repeat runs beside the `INNODB_TRX` reader; flake-7 was the lock-holder process starting slowly under load (start
+   deadline raised 10 s → 60 s, test only); the 113-fault run reached 40+ with none missed, then died. **Lost:** its fault harness and
+   outputs lived in `/private/tmp/p8-1-fix3/`, since wiped — the fault run must be redone. Clean-up 27 Sep: its test container died
+   with Docker and left one unnamed volume holding `selftest_p8y…` databases — confirmed ours read-only, removed; Docker now only
+   `wrapper-v2` (not ours), 0 dangling volumes (`g2ml-mysql` was already gone; not removed by this work).
+   **NOW: FIX ROUND 3 FINISHING** (same Opus builder, resumed 27 Sep: redo the 113-fault run on the final files with evidence saved
+   durably in `.claude-work/resume/p514-p8-1--fix3-evidence/`, then its final report; brief `.claude-work/briefs/514-p8-1-fix3.md` + the owner's M1 redirect; report
    `.claude-work/resume/p514-p8-1--fix3.md`; round-3 version snapshotted to `.claude-work/resume/p514-p8-1-r3-snapshot/`; watchdog on
    it). Then check round 4 by a NEW Opus agent. Then an Opus check; when accepted, snapshot the chunk's files into
    `.claude-work/resume/p514-p8-snapshot-1/` (nothing staged), then P8-2 … P8-4, then ONE commit for part 8. Plan: a service
