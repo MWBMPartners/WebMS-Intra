@@ -235,10 +235,12 @@ builder runs**; before that it was clean.
    other groups; a simulated later change to the visibility rule (C4-22) passed all 305 checks — the owner's drift guard does not yet
    work. LOW: the rule's plural sentence never checked; the hook guard tested for one key only. 9 of 13 new faults uncaught.
    **NOW: FIX ROUND 4 PART A RUNNING** (same Opus builder; brief `.claude-work/briefs/514-p8-1-fix4.md`: full oracle over every account
-   and mode, new scenarios, LOW 1-2, part 10 note; report `.claude-work/resume/p514-p8-1--fix4.md`; watchdog on it). **PART B (how the
-   count is computed) is WAITING ON AN OWNER QUESTION** asked 27 Sep: (a) ask the real `EventVisibility` rule about every account for
-   the events a save can affect — cannot drift, costs more per save (my recommendation); (b) a closer copy that resolves entries to
-   people with the same joins — cheaper, can drift, guarded by the full oracle; (c) drop the count after all.
+   and mode, new scenarios, LOW 1-2, part 10 note; report `.claude-work/resume/p514-p8-1--fix4.md`; watchdog on it). **PART B —
+   OWNER DECIDED 27 Sep (asked directly): "Ask the real rule"** — the count keeps NO copy: before the writes and after the resolve it
+   asks `EventVisibility` (`where()`/`whereForColumn()`) who can see each event over every relevant account and mode, and counts the
+   events whose answer changed (rejected: (b) a closer copy; (c) dropping the count). Builder told to measure 300×500 and 1,000×2,000
+   (events × accounts) first and STOP if the large case is over ~2 s per save — that would go back to the owner. Recorded in the
+   brief's PART B and the plan's top section item 1.
    **Decided by me: the owner's 21 Sept rule "#514: one commit per part" stands** — four chunks, each checked, ONE commit and ONE
    migration 207 for part 8. **Owner answered YES (25 Sep):** add `feed-admin-selftest.php` to `calendar-selftests.yml`, inside part 8's commit. Plan found:
    saving a new calendar address could take ~20 h to act (importer skips an unchanged file), `feeds.php:120` shows UTC as local
