@@ -219,14 +219,19 @@ builder runs**; before that it was clean.
    outputs lived in `/private/tmp/p8-1-fix3/`, since wiped — the fault run must be redone. Clean-up 27 Sep: its test container died
    with Docker and left one unnamed volume holding `selftest_p8y…` databases — confirmed ours read-only, removed; Docker now only
    `wrapper-v2` (not ours), 0 dangling volumes (`g2ml-mysql` was already gone; not removed by this work).
-   **NOW: FIX ROUND 3 FINISHING** (same Opus builder, resumed 27 Sep: redo the 113-fault run on the final files with evidence saved
-   durably in `.claude-work/resume/p514-p8-1--fix3-evidence/`, then its final report; brief `.claude-work/briefs/514-p8-1-fix3.md` + the owner's M1 redirect; report
-   `.claude-work/resume/p514-p8-1--fix3.md`; round-3 version snapshotted to `.claude-work/resume/p514-p8-1-r3-snapshot/`; watchdog on
-   it). Then check round 4 by a NEW Opus agent. Then an Opus check; when accepted, snapshot the chunk's files into
-   `.claude-work/resume/p514-p8-snapshot-1/` (nothing staged), then P8-2 … P8-4, then ONE commit for part 8. Plan: a service
-   self-test `tools/feed-admin-selftest.php` (part D service checks + part W pages via PHP's built-in server). Four chunks.
+   **FIX ROUND 3 DONE** (27 Sep; report `.claude-work/resume/p514-p8-1--fix3.md`, evidence DURABLE in
+   `.claude-work/resume/p514-p8-1--fix3-evidence/`): count kept per the owner, rebuilt from exactly what `EventVisibility` reads (plus
+   two things the owner's list lacked but the code reads: calendar switched on, and the calendar's own API box); 7-viewer oracle (D17:
+   9 zero cases + 12 real changes; 8 oracle faults caught); `$afterResolve` new-keys-only guard + source-order check; D25(e) now reads
+   `performance_schema.events_transactions_current`; 305 checks; 113 of 113 faults caught on 27 Sep with no spurious failures; UTC +
+   Auckland proofs saved; the 25 Sep 4+10 proof logs were lost with /private/tmp (progress log is the only record). Cost per save:
+   saveRule 19 (23 at Selected groups), saveChoice 24 statements. Fingerprints unchanged from the resume: FeedAdmin `25867010…`,
+   self-test `f4fcc6b1…`.
+   **NOW: CHECK ROUND 4 RUNNING** (NEW Opus agent; brief `.claude-work/briefs/514-p8-1-check.md` ROUND 4 — includes repeating the lost
+   flakiness proof and testing whether the 7-viewer oracle can miss a viewer kind, e.g. a leadership-role holder; report
+   `.claude-work/resume/p514-p8-1--verify-r4.md`; evidence saved durably; watchdog on it).
    **Decided by me: the owner's 21 Sept rule "#514: one commit per part" stands** — four chunks, each checked, ONE commit and ONE
-   migration 207 for part 8. **Owner asked (not blocking):** add `feed-admin-selftest.php` to `calendar-selftests.yml`? Plan found:
+   migration 207 for part 8. **Owner answered YES (25 Sep):** add `feed-admin-selftest.php` to `calendar-selftests.yml`, inside part 8's commit. Plan found:
    saving a new calendar address could take ~20 h to act (importer skips an unchanged file), `feeds.php:120` shows UTC as local
    time, bare `403` refusals — part 8 fixes these.
    Plan facts: the self-tests need only `full_schema.sql` (206 is already folded in); `lsof` is absent on GitHub's runners (stop the
