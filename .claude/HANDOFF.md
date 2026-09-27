@@ -227,9 +227,18 @@ builder runs**; before that it was clean.
    Auckland proofs saved; the 25 Sep 4+10 proof logs were lost with /private/tmp (progress log is the only record). Cost per save:
    saveRule 19 (23 at Selected groups), saveChoice 24 statements. Fingerprints unchanged from the resume: FeedAdmin `25867010…`,
    self-test `f4fcc6b1…`.
-   **NOW: CHECK ROUND 4 RUNNING** (NEW Opus agent; brief `.claude-work/briefs/514-p8-1-check.md` ROUND 4 — includes repeating the lost
-   flakiness proof and testing whether the 7-viewer oracle can miss a viewer kind, e.g. a leadership-role holder; report
-   `.claude-work/resume/p514-p8-1--verify-r4.md`; evidence saved durably; watchdog on it).
+   **CHECK ROUND 4: NOT CLEAN** (`.claude-work/resume/p514-p8-1--verify-r4.md`, evidence durable): everything else holds (organisation
+   separation, 19/19 re-planted faults, D25(e) 5/5 beside `INNODB_TRX` under load). But M1: at Selected groups the count compares list
+   ENTRIES while `EventVisibility` turns entries into PEOPLE — tidying a switched-off group or a departed person off a list, adding
+   someone already in the group, or adding a role nobody holds all say "1 event changed" when nobody's access moved (B1-B4, B6, probed
+   against a FULL oracle of every account and mode). M2: the 7-viewer oracle is blind to a leadership-role holder and to members of
+   other groups; a simulated later change to the visibility rule (C4-22) passed all 305 checks — the owner's drift guard does not yet
+   work. LOW: the rule's plural sentence never checked; the hook guard tested for one key only. 9 of 13 new faults uncaught.
+   **NOW: FIX ROUND 4 PART A RUNNING** (same Opus builder; brief `.claude-work/briefs/514-p8-1-fix4.md`: full oracle over every account
+   and mode, new scenarios, LOW 1-2, part 10 note; report `.claude-work/resume/p514-p8-1--fix4.md`; watchdog on it). **PART B (how the
+   count is computed) is WAITING ON AN OWNER QUESTION** asked 27 Sep: (a) ask the real `EventVisibility` rule about every account for
+   the events a save can affect — cannot drift, costs more per save (my recommendation); (b) a closer copy that resolves entries to
+   people with the same joins — cheaper, can drift, guarded by the full oracle; (c) drop the count after all.
    **Decided by me: the owner's 21 Sept rule "#514: one commit per part" stands** — four chunks, each checked, ONE commit and ONE
    migration 207 for part 8. **Owner answered YES (25 Sep):** add `feed-admin-selftest.php` to `calendar-selftests.yml`, inside part 8's commit. Plan found:
    saving a new calendar address could take ~20 h to act (importer skips an unchanged file), `feeds.php:120` shows UTC as local
