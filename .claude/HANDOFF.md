@@ -288,9 +288,16 @@ builder runs**; before that it was clean.
    discarding; FeedAdmin comments only. 465 checks; UTC ×2 / Auckland / New York + 5/5 repeat runs rc 0; 183 of 195 fault runs caught —
    the 12 not caught are 3 clean controls, 4 direct-check-OFF controls and the 5 judged harmless. Fingerprints: FeedAdmin `b0194318…`,
    self-test `7643d4ea…`.
-   **NOW: CHECK ROUND 7 RUNNING — a WHOLE-CHUNK check** (NEW Opus agent; a clean verdict closes P8-1; brief
-   `.claude-work/briefs/514-p8-1-check.md` ROUND 7; report `.claude-work/resume/p514-p8-1--verify-r7.md`; watchdog on it). If clean:
-   snapshot the six files into `.claude-work/resume/p514-p8-snapshot-1/` (nothing staged), then plan P8-2's brief.
+   **CHECK ROUND 7 (whole chunk): NOT CLEAN, 2 MEDIUM + 3 LOW** (`.claude-work/resume/p514-p8-1--verify-r7.md`): fix round 6 correct;
+   organisations still kept apart (20/20 re-planted faults caught). New, in `saveCategoryMap()`, which no earlier round examined closely:
+   M1 (REAL, confirmed by me against the code + probe) the "twins" sentence is built from the first POSTED spelling, not what is stored —
+   with a twin already stored it is back to front; a "default" group claims something is stored; M2 (test gap) a cross-organisation
+   write there (C7-08/C7-09) passes 465/465. LOW: L1 `findTwinGroups()`'s GROUP_CONCAT is cut at 1,024 bytes, so a hand-made huge form
+   slips past the twin refusal (REAL, own organisation only); L2 `deleteRule()`'s "go back to the calendar's own setting" is untrue
+   when another rule matches (REAL, wording); L3 no co-leader of a switched-off group (hardening).
+   **NOW: FIX ROUND 7 RUNNING** (same Opus builder; brief `.claude-work/briefs/514-p8-1-fix7.md`; report
+   `.claude-work/resume/p514-p8-1--fix7.md`; watchdog on it). Then check round 8 — again a whole-chunk check. If clean: snapshot the six
+   files into `.claude-work/resume/p514-p8-snapshot-1/` (nothing staged), then plan P8-2's brief.
    **Decided by me: the owner's 21 Sept rule "#514: one commit per part" stands** — four chunks, each checked, ONE commit and ONE
    migration 207 for part 8. **Owner answered YES (25 Sep):** add `feed-admin-selftest.php` to `calendar-selftests.yml`, inside part 8's commit. Plan found:
    saving a new calendar address could take ~20 h to act (importer skips an unchanged file), `feeds.php:120` shows UTC as local
