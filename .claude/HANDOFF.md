@@ -282,8 +282,15 @@ builder runs**; before that it was clean.
    disagreeing views; docblock wording. Also noted: the tripwire is not in CI until part 8's commit (plan item 8 — do not forget).
    **Side finding → #549 commented (27 Sep):** `CURDATE()` is used 35 times in 20 files under `web/`, and the portal never sets the
    database connection's time zone, so "today" there is the database server's, not the organisation's.
-   **NOW: FIX ROUND 6 RUNNING** (same Opus builder; brief `.claude-work/briefs/514-p8-1-fix6.md`; report
-   `.claude-work/resume/p514-p8-1--fix6.md`; watchdog on it). Then check round 7.
+   **FIX ROUND 6 DONE** (report end of `.claude-work/resume/p514-p8-1--fix6.md`; evidence durable): third "today" pin at 23:30 London
+   after the clocks go back (catches Berlin / +01:00 / `CURDATE()` at any hour — proved with the connection at +01:00 and with the clock
+   pinned at 07:00); D17all from the database (19 members); leaders LD/CL/LO (+ S8-S10); `pa_realSigs()` returns MIXED instead of
+   discarding; FeedAdmin comments only. 465 checks; UTC ×2 / Auckland / New York + 5/5 repeat runs rc 0; 183 of 195 fault runs caught —
+   the 12 not caught are 3 clean controls, 4 direct-check-OFF controls and the 5 judged harmless. Fingerprints: FeedAdmin `b0194318…`,
+   self-test `7643d4ea…`.
+   **NOW: CHECK ROUND 7 RUNNING — a WHOLE-CHUNK check** (NEW Opus agent; a clean verdict closes P8-1; brief
+   `.claude-work/briefs/514-p8-1-check.md` ROUND 7; report `.claude-work/resume/p514-p8-1--verify-r7.md`; watchdog on it). If clean:
+   snapshot the six files into `.claude-work/resume/p514-p8-snapshot-1/` (nothing staged), then plan P8-2's brief.
    **Decided by me: the owner's 21 Sept rule "#514: one commit per part" stands** — four chunks, each checked, ONE commit and ONE
    migration 207 for part 8. **Owner answered YES (25 Sep):** add `feed-admin-selftest.php` to `calendar-selftests.yml`, inside part 8's commit. Plan found:
    saving a new calendar address could take ~20 h to act (importer skips an unchanged file), `feeds.php:120` shows UTC as local
