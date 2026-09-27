@@ -251,6 +251,9 @@ builder runs**; before that it was clean.
    **BACK TO THE OWNER (27 Sep):** my recommendation — a fast copy that compares PEOPLE (entries resolved through the same active-group,
    current-role and active-membership checks), with the self-test's real-rule full oracle (runs on every pull request, owner-approved)
    as the tripwire that fails loudly if the rule ever changes and the copy does not.
+   **OWNER DECIDED (27 Sep, second question): "Fast copy + automatic tripwire"** — as recommended. Brief `514-p8-1-fix4.md` "PART B,
+   REVISED"; plan top section item 1 updated. **NOW: FIX ROUND 4 PART B (revised) RUNNING** (same Opus builder; part-A state snapshotted
+   to `.claude-work/resume/p514-p8-1-r4-partA-snapshot/`; watchdog on the report). Then check round 5 by a NEW Opus agent.
    **Decided by me: the owner's 21 Sept rule "#514: one commit per part" stands** — four chunks, each checked, ONE commit and ONE
    migration 207 for part 8. **Owner answered YES (25 Sep):** add `feed-admin-selftest.php` to `calendar-selftests.yml`, inside part 8's commit. Plan found:
    saving a new calendar address could take ~20 h to act (importer skips an unchanged file), `feeds.php:120` shows UTC as local
