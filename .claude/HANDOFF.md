@@ -252,8 +252,16 @@ builder runs**; before that it was clean.
    current-role and active-membership checks), with the self-test's real-rule full oracle (runs on every pull request, owner-approved)
    as the tripwire that fails loudly if the rule ever changes and the copy does not.
    **OWNER DECIDED (27 Sep, second question): "Fast copy + automatic tripwire"** — as recommended. Brief `514-p8-1-fix4.md` "PART B,
-   REVISED"; plan top section item 1 updated. **NOW: FIX ROUND 4 PART B (revised) RUNNING** (same Opus builder; part-A state snapshotted
-   to `.claude-work/resume/p514-p8-1-r4-partA-snapshot/`; watchdog on the report). Then check round 5 by a NEW Opus agent.
+   REVISED"; plan top section item 1 updated.
+   **FIX ROUND 4 DONE** (report end of `.claude-work/resume/p514-p8-1--fix4.md`; evidence durable): Selected-groups signature = the
+   sorted ACCOUNT NUMBERS the list lets in (one statement per reading, the rule's own active-group / current-role-term / active-
+   membership conditions; `ruleToday()` = database clock in the organisation's zone); a list letting nobody in = administrators only;
+   344 checks, UTC ×2 / Auckland / New York rc 0, 5/5 repeat runs beside `INNODB_TRX` under load; 138/138 faults caught (PB-01…10
+   people-resolution, OC-01…03 oracle controls, C4-22 simulated rule change still caught); save at 1,000 × 2,000 = 0.03-0.11 s (+3
+   statements). Fingerprints: FeedAdmin `08ee2dd1…`, self-test `a06f1bf1…`; others unchanged. Builder's note for part 10: change this
+   copy AND add a current holder, a former holder and a switched-off grouping of each new kind to the self-test world.
+   **NOW: CHECK ROUND 5 RUNNING** (NEW Opus agent; brief `.claude-work/briefs/514-p8-1-check.md` ROUND 5; report
+   `.claude-work/resume/p514-p8-1--verify-r5.md`; evidence durable; watchdog on it).
    **Decided by me: the owner's 21 Sept rule "#514: one commit per part" stands** — four chunks, each checked, ONE commit and ONE
    migration 207 for part 8. **Owner answered YES (25 Sep):** add `feed-admin-selftest.php` to `calendar-selftests.yml`, inside part 8's commit. Plan found:
    saving a new calendar address could take ~20 h to act (importer skips an unchanged file), `feeds.php:120` shows UTC as local
