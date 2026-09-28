@@ -301,8 +301,15 @@ builder runs**; before that it was clean.
    BOTH `full_schema.sql` and migration 205), refusal names two different spellings. 475 checks; UTC ×2 / Auckland / New York + 5/5
    repeat runs rc 0; 204 of 219 fault runs caught — the 15 not caught are C7-10 (a state the resolver never creates), the 5 judged
    harmless, and 9 intended controls. Fingerprints: FeedAdmin `602cd511…`, self-test `1c2404f7…`.
-   **NOW: CHECK ROUND 8 RUNNING — WHOLE CHUNK** (NEW Opus agent; brief `.claude-work/briefs/514-p8-1-check.md` ROUND 8; report
-   `.claude-work/resume/p514-p8-1--verify-r8.md`; watchdog on it). If clean: snapshot the six files into
+   **CHECK ROUND 8 (whole chunk): NOT CLEAN — NO HIGH OR MEDIUM; 4 LOW real + LOW test gaps** (`.claude-work/resume/p514-p8-1--verify-r8.md`):
+   fix round 7 correct (collation matches in full_schema, migration 205 and the live database); organisation separation and actor checks
+   hold; self-test also ran clean on MySQL 8.4.11. L1 `decide()` reports siblings WITHDRAWN by the same resolve (rule just expired) as
+   "followed" — the plan §4.1 wording itself; L2 `tags()` returns numeric words ("2026") as integers → TypeError in `htmlspecialchars()`
+   under strict types (P8-2's page would crash); L3 a category switched off after a word was mapped to it blocks the whole form or
+   silently drops the mapping (the calendar default's keep-stored rule never carried over); L4 the twins sentence promises a final
+   category too firmly (`categoryFor()` takes the first mapped word alphabetically) and reads badly with 3+ spellings; L5 eleven test gaps.
+   **NOW: FIX ROUND 8 RUNNING** (same Opus builder; brief `.claude-work/briefs/514-p8-1-fix8.md`; report
+   `.claude-work/resume/p514-p8-1--fix8.md`; watchdog on it). Then check round 9 (whole chunk). If clean: snapshot the six files into
    `.claude-work/resume/p514-p8-snapshot-1/` (nothing staged), then plan P8-2's brief.
    **Decided by me: the owner's 21 Sept rule "#514: one commit per part" stands** — four chunks, each checked, ONE commit and ONE
    migration 207 for part 8. **Owner answered YES (25 Sep):** add `feed-admin-selftest.php` to `calendar-selftests.yml`, inside part 8's commit. Plan found:
