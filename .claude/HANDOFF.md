@@ -400,7 +400,17 @@ builder runs**; before that it was clean.
    **Interrupted ~16:45 by the Opus SESSION limit (reset 17:10); checker resumed 17:12.** Already in its log: a REAL MEDIUM layout fault
    (a ~120-character address pushes the list row's buttons out of the box at desktop width — measured in headless Edge) and a test gap:
    removing output escaping from event titles / category words / run messages (N1 N2 N3 N10) was NOT caught by the self-test. Its
-   container `p8-2chk1-mysql80` was left running (its own). If clean: P8-1 CLOSES —
+   container `p8-2chk1-mysql80` was left running (its own).
+   **P8-2 CHECK ROUND 1 (full): NOT CLEAN** (`.claude-work/resume/p514-p8-2--verify-r1.md`, evidence durable): SECURITY SOUND — no
+   cross-organisation path, no missing/late admin or token check, no unescaped outside text (probed with script/onerror/onload payloads on
+   six pages), no open redirect, no `.php` address, no direct table access; harness safe in every case tried; 578/578 UTC + Auckland;
+   e2e 8.0 + 8.4 pass. M1 REAL: a ~120-character address hides the list row's buttons at desktop width (`feeds.php:200`, flex item
+   without `min-width:0`; measured in headless Edge). M2 proof gap: removing escaping (N1/N2/N3/N10) passes all checks. M3 hardening:
+   part W does `SET GLOBAL time_zone` — on a shared dev server every other app is hours out (for ever if killed); refuse when other
+   databases exist. LOW: back= redirect unproved (N5); only 1 of 3 `lastFetchedAt` writes proved (N18); part S misses grouped-import
+   aliases; harness static-file rule serves the wrong folder; a calendar named like a breadcrumb entry overwrites it.
+   **NOW: P8-2 FIX ROUND 1 RUNNING** (the P8-2 builder, resumed; brief `.claude-work/briefs/514-p8-2-fix1.md`; report
+   `.claude-work/resume/p514-p8-2--fix1.md`; watchdog on it). Then a NARROW check of the fixes. If clean: P8-1 CLOSES —
    snapshot the six files into `.claude-work/resume/p514-p8-snapshot-1/` (nothing staged), then plan P8-2's brief.
    **Decided by me: the owner's 21 Sept rule "#514: one commit per part" stands** — four chunks, each checked, ONE commit and ONE
    migration 207 for part 8. **Owner answered YES (25 Sep):** add `feed-admin-selftest.php` to `calendar-selftests.yml`, inside part 8's commit. Plan found:
