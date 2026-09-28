@@ -308,7 +308,13 @@ builder runs**; before that it was clean.
    under strict types (P8-2's page would crash); L3 a category switched off after a word was mapped to it blocks the whole form or
    silently drops the mapping (the calendar default's keep-stored rule never carried over); L4 the twins sentence promises a final
    category too firmly (`categoryFor()` takes the first mapped word alphabetically) and reads badly with 3+ spellings; L5 eleven test gaps.
-   **NOW: FIX ROUND 8 RUNNING** (same Opus builder; brief `.claude-work/briefs/514-p8-1-fix8.md`; report
+   **FIX ROUND 8 — INTERRUPTED 28 Sep ~06:20 by the Opus SESSION limit (reset 07:10); resumed 08:05.** Done before the stop (progress
+   log): code changes L1-L4 in FeedAdmin (`ca1c4f4c…`, 03:27) and self-test edits (`d71ca7f4…`, 03:34, 489 checks, rc 0); 27 static
+   checks rc 0; the 266-fault run — its workers kept going after the builder stopped and finished at 07:34 (`faults/status.txt`
+   ALL-DONE; no summary written yet). The machine was very heavily loaded by another project's work (load 35-300), so the builder
+   planned to re-run on a quiet machine any fault caught only by a timing check. Its container `p8-1fix8-mysql` was left running.
+   **NOW: FIX ROUND 8 FINISHING** (same Opus builder resumed: fault summary + relevance check, 4 proof runs, 5 repeat runs, MySQL 8.4 run,
+   final report; brief `.claude-work/briefs/514-p8-1-fix8.md`; report
    `.claude-work/resume/p514-p8-1--fix8.md`; watchdog on it). Then check round 9 (whole chunk). If clean: snapshot the six files into
    `.claude-work/resume/p514-p8-snapshot-1/` (nothing staged), then plan P8-2's brief.
    **Decided by me: the owner's 21 Sept rule "#514: one commit per part" stands** — four chunks, each checked, ONE commit and ONE
