@@ -320,10 +320,16 @@ builder runs**; before that it was clean.
    faults plus a sample of earlier ones; the FULL set runs once, before the part-8 commit. Why: P8-1 took 8 check rounds over 3 days
    (two usage-limit stops, a heavily loaded machine, full 266-fault re-runs of several hours each); nothing is committed per chunk, so the
    final whole-part check still guards everything.
-   **NOW: FIX ROUND 8 FINISHING** (same Opus builder resumed: fault summary + relevance check, 4 proof runs, 5 repeat runs, MySQL 8.4 run,
-   final report; brief `.claude-work/briefs/514-p8-1-fix8.md`; report
-   `.claude-work/resume/p514-p8-1--fix8.md`; watchdog on it). Then check round 9 — NARROW, round 8's fixes only. If clean: snapshot the six files into
-   `.claude-work/resume/p514-p8-snapshot-1/` (nothing staged), then plan P8-2's brief.
+   **FIX ROUND 8 DONE** (report end of `.claude-work/resume/p514-p8-1--fix8.md`; evidence durable): L1 `decide()` "followed" = siblings
+   whose status is now the decision (`statusesOf()`), others get "N other dates … were not approved with it."; L2 `tags()` returns text;
+   L3 `keepsStoredCategory()` (a word keeps its stored, switched-off category of THIS organisation; refusals name the word); L4 twins
+   sentence never promises a final category, `quotedList()` for 3+ spellings. 489 checks; UTC ×2 / Auckland / New York / 5 repeat runs rc
+   0, AND MySQL 8.4.11 rc 0. Faults: 249 of 266 caught (208 plain + 37 "timing only" + 4 "no fail line"), 9 controls, 8 known
+   not-caught. The builder re-ran 17 speed-sensitive ones at low load (all caught) but its report does not explain the other 20 flagged
+   "timing only" or the 4 "no fail line" — handed to the narrow checker. Fingerprints: FeedAdmin `ca1c4f4c…`, self-test `d71ca7f4…`.
+   **NOW: CHECK ROUND 9 RUNNING — NARROW** (round 8's fixes + those 24 fault entries only; NEW Opus agent; brief
+   `.claude-work/briefs/514-p8-1-check.md` ROUND 9; report `.claude-work/resume/p514-p8-1--verify-r9.md`; watchdog on it). If clean: P8-1
+   CLOSES — snapshot the six files into `.claude-work/resume/p514-p8-snapshot-1/` (nothing staged), then plan P8-2's brief.
    **Decided by me: the owner's 21 Sept rule "#514: one commit per part" stands** — four chunks, each checked, ONE commit and ONE
    migration 207 for part 8. **Owner answered YES (25 Sep):** add `feed-admin-selftest.php` to `calendar-selftests.yml`, inside part 8's commit. Plan found:
    saving a new calendar address could take ~20 h to act (importer skips an unchanged file), `feeds.php:120` shows UTC as local
