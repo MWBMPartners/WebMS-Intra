@@ -351,8 +351,14 @@ builder runs**; before that it was clean.
    **FIX ROUND 11 DONE** (`newestStatusOfDates()` replaces `statusesOf()`; each sibling DATE judged by its newest row after the resolve,
    inside the lock; dates counted once; siblings of changed items left out; 499 checks rc 0 twice; 8/8 faults fail; MySQL 8.4 not yet run).
    Fingerprints: FeedAdmin `ed76c617…`, self-test `b5b5e355…`.
-   **NOW: CHECK ROUND 12 RUNNING — NARROW** (NEW Opus agent, incl. one MySQL 8.4 run; brief `.claude-work/briefs/514-p8-1-check.md` ROUND 12;
-   report `.claude-work/resume/p514-p8-1--verify-r12.md`; watchdog on it). If clean: P8-1 CLOSES —
+   **CHECK ROUND 12 (narrow): NOT CLEAN — one LOW message fault** (`.claude-work/resume/p514-p8-1--verify-r12.md`): fix round 11 built
+   exactly as briefed and runs on 8.0 and 8.4, but MY brief's assumption was wrong — a date can hold several LIVE rows (a saved-but-not-
+   started choice records an approved row; decided rows of older requests stay live), so the newest row is not always the deciding one.
+   P1 (no clock trick): a decline makes two dates follow, yet the message says they "did not follow"; P2: "followed" said of withdrawn
+   dates. The "other dates" sentence has now taken rounds 8-12. **For the final whole-part-8 check (part 7 resolver, not this change):**
+   P4d — a date the administrator just DECLINED can become public at once, because its request changed since the last refresh and its new
+   row follows an older approval of another date; round 10's note — an approved date can wait again at once. Both follow part 7's
+   series rule. **Put to the owner (28 Sep): how the "other dates" sentence should work.** If clean: P8-1 CLOSES —
    snapshot the six files into `.claude-work/resume/p514-p8-snapshot-1/` (nothing staged), then plan P8-2's brief.
    **Decided by me: the owner's 21 Sept rule "#514: one commit per part" stands** — four chunks, each checked, ONE commit and ONE
    migration 207 for part 8. **Owner answered YES (25 Sep):** add `feed-admin-selftest.php` to `calendar-selftests.yml`, inside part 8's commit. Plan found:
