@@ -342,8 +342,10 @@ builder runs**; before that it was clean.
    follow this decision." (always true; pairs with "…followed."). **For the final whole-part-8 check:** after such an approval the
    approved date itself waits again at once, because its approval was for the old combined request (part 7 resolver behaviour; errs the
    safe way).
-   **NOW: FIX ROUND 10 RUNNING — TINY** (same Opus builder; brief `.claude-work/briefs/514-p8-1-fix10.md`; report
-   `.claude-work/resume/p514-p8-1--fix10.md`; watchdog on it). Then narrow check round 11. If clean: P8-1 CLOSES —
+   **FIX ROUND 10 DONE** (49-line diff; the decided sentence; D20 two-date and two-rules cases; 494 checks rc 0 twice; 5/5 faults fail).
+   Fingerprints: FeedAdmin `ca3559cb…`, self-test `76b63eb2…`.
+   **NOW: CHECK ROUND 11 RUNNING — NARROW** (NEW Opus agent; brief `.claude-work/briefs/514-p8-1-check.md` ROUND 11; report
+   `.claude-work/resume/p514-p8-1--verify-r11.md`; watchdog on it). If clean: P8-1 CLOSES —
    snapshot the six files into `.claude-work/resume/p514-p8-snapshot-1/` (nothing staged), then plan P8-2's brief.
    **Decided by me: the owner's 21 Sept rule "#514: one commit per part" stands** — four chunks, each checked, ONE commit and ONE
    migration 207 for part 8. **Owner answered YES (25 Sep):** add `feed-admin-selftest.php` to `calendar-selftests.yml`, inside part 8's commit. Plan found:
