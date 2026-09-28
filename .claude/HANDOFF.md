@@ -396,7 +396,11 @@ builder runs**; before that it was clean.
    field + the stale comment; a real test fault fixed (`pa_newFeed()` clashed with W19's new calendar number on a fresh database); 578
    checks (S 4, D 504, W 70) rc 0 twice. P8-2 state snapshotted in `.claude-work/resume/p514-p8-2-r0-snapshot/` (13 files, FINGERPRINTS.txt).
    **NOW: P8-2 CHECK ROUND 1 — THE FULL CHECK — RUNNING** (new Opus agent; brief `.claude-work/briefs/514-p8-2-check.md`; report
-   `.claude-work/resume/p514-p8-2--verify-r1.md`; watchdog on it). Then narrow checks of any fixes; clean → P8-2 closes → P8-3. If clean: P8-1 CLOSES —
+   `.claude-work/resume/p514-p8-2--verify-r1.md`; watchdog on it). Then narrow checks of any fixes; clean → P8-2 closes → P8-3.
+   **Interrupted ~16:45 by the Opus SESSION limit (reset 17:10); checker resumed 17:12.** Already in its log: a REAL MEDIUM layout fault
+   (a ~120-character address pushes the list row's buttons out of the box at desktop width — measured in headless Edge) and a test gap:
+   removing output escaping from event titles / category words / run messages (N1 N2 N3 N10) was NOT caught by the self-test. Its
+   container `p8-2chk1-mysql80` was left running (its own). If clean: P8-1 CLOSES —
    snapshot the six files into `.claude-work/resume/p514-p8-snapshot-1/` (nothing staged), then plan P8-2's brief.
    **Decided by me: the owner's 21 Sept rule "#514: one commit per part" stands** — four chunks, each checked, ONE commit and ONE
    migration 207 for part 8. **Owner answered YES (25 Sep):** add `feed-admin-selftest.php` to `calendar-selftests.yml`, inside part 8's commit. Plan found:
