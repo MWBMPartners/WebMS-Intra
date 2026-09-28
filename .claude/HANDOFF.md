@@ -361,8 +361,13 @@ builder runs**; before that it was clean.
    series rule. **OWNER DECIDED (28 Sep, asked directly): "One always-true sentence"** — no count of other dates; "Other dates of
    the same repeating event may follow this decision. The list of waiting dates shows where each one now stands." (only when a decided
    item is a series date); `followed` dropped from `decide()`'s result. Recorded as plan top-section item 10.
-   **NOW: FIX ROUND 12 RUNNING — SMALL** (same Opus builder; brief `.claude-work/briefs/514-p8-1-fix12.md`; report
-   `.claude-work/resume/p514-p8-1--fix12.md`; watchdog on it). Then narrow check round 13. If clean: P8-1 CLOSES —
+   **FIX ROUND 12 DONE** (sibling counting and `followed` removed from `decide()`; the always-true sentence, last in the message; series
+   look-up folded into step 4 with a LEFT JOIN, no extra statement; 500 checks rc 0 twice; 5/5 faults fail). **Plus a COMMENT-ONLY edit
+   by me** to `pendingApprovals()`'s docblock (`siblingsWaiting` = a present count of waiting rows, not a prediction; `php -w` identical);
+   plan item 10 now also says P8-4's inbox shows it as "N other dates of this repeating event are waiting for the same decision."
+   Fingerprints: FeedAdmin `1c1b398c…`, self-test `946a1406…`.
+   **NOW: CHECK ROUND 13 RUNNING — NARROW** (NEW Opus agent, incl. one MySQL 8.4 run; brief `.claude-work/briefs/514-p8-1-check.md` ROUND 13;
+   report `.claude-work/resume/p514-p8-1--verify-r13.md`; watchdog on it). If clean: P8-1 CLOSES —
    snapshot the six files into `.claude-work/resume/p514-p8-snapshot-1/` (nothing staged), then plan P8-2's brief.
    **Decided by me: the owner's 21 Sept rule "#514: one commit per part" stands** — four chunks, each checked, ONE commit and ONE
    migration 207 for part 8. **Owner answered YES (25 Sep):** add `feed-admin-selftest.php` to `calendar-selftests.yml`, inside part 8's commit. Plan found:
