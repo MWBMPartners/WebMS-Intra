@@ -409,8 +409,17 @@ builder runs**; before that it was clean.
    part W does `SET GLOBAL time_zone` — on a shared dev server every other app is hours out (for ever if killed); refuse when other
    databases exist. LOW: back= redirect unproved (N5); only 1 of 3 `lastFetchedAt` writes proved (N18); part S misses grouped-import
    aliases; harness static-file rule serves the wrong folder; a calendar named like a breadcrumb entry overwrites it.
-   **NOW: P8-2 FIX ROUND 1 RUNNING** (the P8-2 builder, resumed; brief `.claude-work/briefs/514-p8-2-fix1.md`; report
-   `.claude-work/resume/p514-p8-2--fix1.md`; watchdog on it). Then a NARROW check of the fixes. If clean: P8-1 CLOSES —
+   **P8-2 FIX ROUND 1 DONE** (report end of `.claude-work/resume/p514-p8-2--fix1.md`): M1 layout fixed on the pages only (proved in headless
+   Edge with real Bootstrap at 390-1440 px; W25 reads the markup only); W21 escaping (17 texts, 5 pages); part W refuses a server holding
+   other databases; W22 back=; S2 all three `lastFetchedAt`; part S catches any alias; the harness router serves static files itself
+   (inside `public_html` only, never `.php` as text), W23; W24 breadcrumb. 591 checks rc 0 twice; all 10 faults caught. Fingerprints:
+   feeds `2854e209…`, edit `47117a38…`, view `f9371bb0…`, picker `a571c968…`, self-test `b2c2a301…`; feeds-save/FeedAdmin/importer
+   unchanged. **OUTSIDE PART 8 — opened #568 (high):** three pinned CDN fingerprints in `Asset.php` are WRONG (Bootstrap CSS, Bootstrap
+   JS bundle, Font Awesome — confirmed by me against the real CDN files three ways; wrong since v1.0.0), so browsers refuse them and every
+   page falls back to local copies that are gitignored (a zip install without them would be unstyled); `check_cdn_sri.py` only checks
+   presence. Queue it early (after part 8). Also unverified: the shared navigation bar may run off the window at 1024/1440 px.
+   **NOW: P8-2 CHECK ROUND 2 — NARROW — RUNNING** (new Opus agent; brief `.claude-work/briefs/514-p8-2-check-r2.md`; report
+   `.claude-work/resume/p514-p8-2--verify-r2.md`; watchdog on it). Clean → P8-2 closes → P8-3. If clean: P8-1 CLOSES —
    snapshot the six files into `.claude-work/resume/p514-p8-snapshot-1/` (nothing staged), then plan P8-2's brief.
    **Decided by me: the owner's 21 Sept rule "#514: one commit per part" stands** — four chunks, each checked, ONE commit and ONE
    migration 207 for part 8. **Owner answered YES (25 Sep):** add `feed-admin-selftest.php` to `calendar-selftests.yml`, inside part 8's commit. Plan found:
