@@ -358,7 +358,11 @@ builder runs**; before that it was clean.
    dates. The "other dates" sentence has now taken rounds 8-12. **For the final whole-part-8 check (part 7 resolver, not this change):**
    P4d — a date the administrator just DECLINED can become public at once, because its request changed since the last refresh and its new
    row follows an older approval of another date; round 10's note — an approved date can wait again at once. Both follow part 7's
-   series rule. **Put to the owner (28 Sep): how the "other dates" sentence should work.** If clean: P8-1 CLOSES —
+   series rule. **OWNER DECIDED (28 Sep, asked directly): "One always-true sentence"** — no count of other dates; "Other dates of
+   the same repeating event may follow this decision. The list of waiting dates shows where each one now stands." (only when a decided
+   item is a series date); `followed` dropped from `decide()`'s result. Recorded as plan top-section item 10.
+   **NOW: FIX ROUND 12 RUNNING — SMALL** (same Opus builder; brief `.claude-work/briefs/514-p8-1-fix12.md`; report
+   `.claude-work/resume/p514-p8-1--fix12.md`; watchdog on it). Then narrow check round 13. If clean: P8-1 CLOSES —
    snapshot the six files into `.claude-work/resume/p514-p8-snapshot-1/` (nothing staged), then plan P8-2's brief.
    **Decided by me: the owner's 21 Sept rule "#514: one commit per part" stands** — four chunks, each checked, ONE commit and ONE
    migration 207 for part 8. **Owner answered YES (25 Sep):** add `feed-admin-selftest.php` to `calendar-selftests.yml`, inside part 8's commit. Plan found:
