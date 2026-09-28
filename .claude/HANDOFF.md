@@ -366,8 +366,23 @@ builder runs**; before that it was clean.
    by me** to `pendingApprovals()`'s docblock (`siblingsWaiting` = a present count of waiting rows, not a prediction; `php -w` identical);
    plan item 10 now also says P8-4's inbox shows it as "N other dates of this repeating event are waiting for the same decision."
    Fingerprints: FeedAdmin `1c1b398c…`, self-test `946a1406…`.
-   **NOW: CHECK ROUND 13 RUNNING — NARROW** (NEW Opus agent, incl. one MySQL 8.4 run; brief `.claude-work/briefs/514-p8-1-check.md` ROUND 13;
-   report `.claude-work/resume/p514-p8-1--verify-r13.md`; watchdog on it). If clean: P8-1 CLOSES —
+   **CHECK ROUND 13 (narrow): no fault in the code; one missing test case** (R13-L1: a bulk decision where the calendar holding the
+   series date cannot be decided must show no "Other dates…" sentence — the code is right, no case proves it). 8.0 ×2 and 8.4 rc 0.
+   **P8-1 CLOSED 28 Sep 2026** (owner's pace decision: a narrow round with no code fault closes the chunk; the one test case is carried
+   into P8-2's build and covered by P8-2's full check). Closed state snapshotted in `.claude-work/resume/p514-p8-snapshot-1/`
+   (`FINGERPRINTS.txt`: FeedAdmin `1c1b398c…`, ExternalAudience `c026a282…`, FeedResolver `ea23ff1e…`, check_event_visibility
+   `3484049d…`, self-test `946a1406…`, 500 checks). P8-1 took 13 check rounds and 12 fix rounds over 25-28 Sep (two usage-limit stops).
+   **Carried into P8-2:** R13-L1's test case; the round-1 LOW 10 text check (no page may call `ExternalAudience::save/remove` or
+   `FeedResolver::decideApproval/withdrawForOrigin/onAddressChanged` directly); "None" = the calendar's default category (plan item 7);
+   FeedAdmin messages shown as-is, escaped. **For the FINAL whole-part-8 check:** P4d (a just-declined date can go public at once when
+   its request changed and the new request was approved on another date) and round 10's note (an approved date can wait again at once)
+   — both part 7's series rule; R13-H1 (a one-off date and a lone RECURRENCE-ID date sharing an identity can follow without the
+   sentence — needs a non-standard feed); round 12's P2-P4 notes. **Wire `feed-admin-selftest.php` into `calendar-selftests.yml`
+   in part 8's one commit (owner-approved, plan item 8).**
+   **NOW: P8-2 BUILD RUNNING** (the calendar pages; fresh OPUS builder — part W drives real pages with sign-in credentials, and P8-1's
+   Sonnet build needed many Opus rounds; brief `.claude-work/briefs/514-p8-2-build.md`; report `.claude-work/resume/p514-p8-2--build.md`;
+   evidence `.claude-work/resume/p514-p8-2--build-evidence/`; watchdog on it). Migration 207 confirmed free. Then P8-2's first full check
+   (Opus), then narrow checks. If clean: P8-1 CLOSES —
    snapshot the six files into `.claude-work/resume/p514-p8-snapshot-1/` (nothing staged), then plan P8-2's brief.
    **Decided by me: the owner's 21 Sept rule "#514: one commit per part" stands** — four chunks, each checked, ONE commit and ONE
    migration 207 for part 8. **Owner answered YES (25 Sep):** add `feed-admin-selftest.php` to `calendar-selftests.yml`, inside part 8's commit. Plan found:
