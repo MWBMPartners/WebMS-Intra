@@ -348,9 +348,11 @@ builder runs**; before that it was clean.
    sentence is true in every case round 10 probed, but false in a rare bulk case (Q1: a location-matching rule ends; two dates of a
    series with different requests decided together; the third date's NEW row follows the decision in the same resolve, yet the message
    says it "did not follow"). ROOT CAUSE: `decide()` judges siblings by their OLD rows; no wording can be right that way.
-   **NOW: FIX ROUND 11 RUNNING — SMALL, the root cause** (same Opus builder; brief `.claude-work/briefs/514-p8-1-fix11.md`: judge each
-   sibling DATE by its NEWEST row after the resolve, inside the lock; followed = newest status is this decision; count dates not rows;
-   report `.claude-work/resume/p514-p8-1--fix11.md`; watchdog on it). Then narrow check round 12. If clean: P8-1 CLOSES —
+   **FIX ROUND 11 DONE** (`newestStatusOfDates()` replaces `statusesOf()`; each sibling DATE judged by its newest row after the resolve,
+   inside the lock; dates counted once; siblings of changed items left out; 499 checks rc 0 twice; 8/8 faults fail; MySQL 8.4 not yet run).
+   Fingerprints: FeedAdmin `ed76c617…`, self-test `b5b5e355…`.
+   **NOW: CHECK ROUND 12 RUNNING — NARROW** (NEW Opus agent, incl. one MySQL 8.4 run; brief `.claude-work/briefs/514-p8-1-check.md` ROUND 12;
+   report `.claude-work/resume/p514-p8-1--verify-r12.md`; watchdog on it). If clean: P8-1 CLOSES —
    snapshot the six files into `.claude-work/resume/p514-p8-snapshot-1/` (nothing staged), then plan P8-2's brief.
    **Decided by me: the owner's 21 Sept rule "#514: one commit per part" stands** — four chunks, each checked, ONE commit and ONE
    migration 207 for part 8. **Owner answered YES (25 Sep):** add `feed-admin-selftest.php` to `calendar-selftests.yml`, inside part 8's commit. Plan found:
