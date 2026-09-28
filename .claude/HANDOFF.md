@@ -313,9 +313,16 @@ builder runs**; before that it was clean.
    checks rc 0; the 266-fault run — its workers kept going after the builder stopped and finished at 07:34 (`faults/status.txt`
    ALL-DONE; no summary written yet). The machine was very heavily loaded by another project's work (load 35-300), so the builder
    planned to re-run on a quiet machine any fault caught only by a timing check. Its container `p8-1fix8-mysql` was left running.
+   **OWNER DECISION, 28 Sep 2026 (asked directly, after "Still only on task 6?!"): "Narrow check, then move on".** From now on, for
+   every chunk of part 8: a check round after a fix round checks ONLY that fix round's changes (a new agent, as always); when it is clean
+   the chunk closes and the next chunk starts. The fresh-eyes WHOLE look moves to ONE final check of ALL of part 8 just before its single
+   commit; anything found there is fixed (and re-checked narrowly) before committing. Planted faults: each round re-runs only its NEW
+   faults plus a sample of earlier ones; the FULL set runs once, before the part-8 commit. Why: P8-1 took 8 check rounds over 3 days
+   (two usage-limit stops, a heavily loaded machine, full 266-fault re-runs of several hours each); nothing is committed per chunk, so the
+   final whole-part check still guards everything.
    **NOW: FIX ROUND 8 FINISHING** (same Opus builder resumed: fault summary + relevance check, 4 proof runs, 5 repeat runs, MySQL 8.4 run,
    final report; brief `.claude-work/briefs/514-p8-1-fix8.md`; report
-   `.claude-work/resume/p514-p8-1--fix8.md`; watchdog on it). Then check round 9 (whole chunk). If clean: snapshot the six files into
+   `.claude-work/resume/p514-p8-1--fix8.md`; watchdog on it). Then check round 9 — NARROW, round 8's fixes only. If clean: snapshot the six files into
    `.claude-work/resume/p514-p8-snapshot-1/` (nothing staged), then plan P8-2's brief.
    **Decided by me: the owner's 21 Sept rule "#514: one commit per part" stands** — four chunks, each checked, ONE commit and ONE
    migration 207 for part 8. **Owner answered YES (25 Sep):** add `feed-admin-selftest.php` to `calendar-selftests.yml`, inside part 8's commit. Plan found:
