@@ -379,10 +379,20 @@ builder runs**; before that it was clean.
    — both part 7's series rule; R13-H1 (a one-off date and a lone RECURRENCE-ID date sharing an identity can follow without the
    sentence — needs a non-standard feed); round 12's P2-P4 notes. **Wire `feed-admin-selftest.php` into `calendar-selftests.yml`
    in part 8's one commit (owner-approved, plan item 8).**
-   **NOW: P8-2 BUILD RUNNING** (the calendar pages; fresh OPUS builder — part W drives real pages with sign-in credentials, and P8-1's
-   Sonnet build needed many Opus rounds; brief `.claude-work/briefs/514-p8-2-build.md`; report `.claude-work/resume/p514-p8-2--build.md`;
-   evidence `.claude-work/resume/p514-p8-2--build-evidence/`; watchdog on it). Migration 207 confirmed free. Then P8-2's first full check
-   (Opus), then narrow checks. If clean: P8-1 CLOSES —
+   **P8-2 BUILD DONE (28 Sep, fresh Opus builder; report `.claude-work/resume/p514-p8-2--build.md`, evidence durable):** `feeds.php` and
+   `feeds-save.php` rewritten; new `feeds-edit.php`, `feeds-view.php`, `_audience-picker.php`; migration 207 (+ `full_schema.sql` block,
+   two protected routes); FeedImporter's three `lastFetchedAt` → `UTC_TIMESTAMP()`; the `feeds-save.php` allow-list entry removed; the
+   self-test gained part S (4: no page calls the five write helpers directly — carried item 2) and part W (68: drives the real pages via
+   PHP's built-in server; W17 does not exist in the plan) and D25's R13-L1 case — 573 checks, UTC ×2 / Auckland / MySQL 8.4 rc 0; e2e
+   migrations 8.0.36 + 8.4.11 rc 0; importer 135/0 (1 skipped, real Google/M365), resolver, visibility, reader, SafeFetch pass; every
+   planted fault caught; scratch-folder safety proved incl. fatal/exit; SIGKILL leaves the zone/settings behind (a new refusal catches
+   the leftover zone). Plan differences (code wins): signed-out redirect is `/login?redirect=…`; the form's cross-organisation POST gets
+   the 404 page. **Decided by me:** the stopped "Partly read" badge goes ahead — the builder may add `lastRunCapped` to FeedAdmin's two
+   SELECTs (+ fix FeedAdmin's stale "does not touch the importer" comment). **For CI wiring (plan item 8):** set `SELFTEST_WEB_DIR` to a
+   fresh folder under `runner.temp` (W0 can fail falsely on a busy system temp folder). The "auto mode" action-check service failed
+   ~13:50-15:40 on 28 Sep; nothing could run meanwhile.
+   **NOW: P8-2 FOLLOW-UP RUNNING** (same builder: the badge + comment; progress in the same report; evidence under
+   `…--build-evidence/followup/`; watchdog on it). Then P8-2's FIRST FULL CHECK (a new Opus agent), then narrow checks. If clean: P8-1 CLOSES —
    snapshot the six files into `.claude-work/resume/p514-p8-snapshot-1/` (nothing staged), then plan P8-2's brief.
    **Decided by me: the owner's 21 Sept rule "#514: one commit per part" stands** — four chunks, each checked, ONE commit and ONE
    migration 207 for part 8. **Owner answered YES (25 Sep):** add `feed-admin-selftest.php` to `calendar-selftests.yml`, inside part 8's commit. Plan found:
