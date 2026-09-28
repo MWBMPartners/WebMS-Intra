@@ -332,8 +332,11 @@ builder runs**; before that it was clean.
    a clean run under load ~230 passed 489/489). R9-L1: a word KEPT on a switched-off category is told "no category" (names come from
    switched-on categories only) — message only. R9-L2: three test gaps (C9-01 decline wording, C9-02 plural, C9-06 byte-for-byte keep).
    R9-L3: "…not approved with it" reads oddly after "Approved 0/2" and for declines.
-   **NOW: FIX ROUND 9 RUNNING — SMALL, LEAN PROOFS** (same Opus builder; brief `.claude-work/briefs/514-p8-1-fix9.md`; report
-   `.claude-work/resume/p514-p8-1--fix9.md`; watchdog on it). Then a narrow check round 10 of just these changes. If clean: P8-1 CLOSES —
+   **FIX ROUND 9 DONE** (66-line FeedAdmin diff: category names from ALL of this organisation's categories; sentence "N other date(s) of
+   the same repeating event(s) no longer wait(s) for a decision."; 492 checks, UTC ×2 + New York rc 0; 10/10 faults fail the run).
+   Fingerprints: FeedAdmin `0c2bac11…`, self-test `d44a1048…`.
+   **NOW: CHECK ROUND 10 RUNNING — NARROW** (NEW Opus agent; brief `.claude-work/briefs/514-p8-1-check.md` ROUND 10; report
+   `.claude-work/resume/p514-p8-1--verify-r10.md`; watchdog on it). If clean: P8-1 CLOSES —
    snapshot the six files into `.claude-work/resume/p514-p8-snapshot-1/` (nothing staged), then plan P8-2's brief.
    **Decided by me: the owner's 21 Sept rule "#514: one commit per part" stands** — four chunks, each checked, ONE commit and ONE
    migration 207 for part 8. **Owner answered YES (25 Sep):** add `feed-admin-selftest.php` to `calendar-selftests.yml`, inside part 8's commit. Plan found:
