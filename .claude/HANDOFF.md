@@ -446,7 +446,14 @@ builder runs**; before that it was clean.
    which does not exist yet — `check_route_targets.py` FAILS on the working tree until it is written; do not run the audit checks or
    commit before then.** Next on resume: confirm fingerprints → write feeds-rule.php → self-test (D34, the five carried P8-2 items,
    W26-W38) → proofs.
-   **P8-3 BUILD (PAUSED)** (choices, rules, the series page; the P8-2 builder resumed — it knows the pages, picker and harness; brief
+   **INSTRUCTIONS REVIEW DONE 4 Oct** (read-only; all three guides read; report `.claude-work/resume/instructions-review.md`):
+   recommendations shown to the owner; NOTHING changed; owner decisions pending. Key items: "think hardest/ultrathink" lines (effort is
+   already `xhigh` in settings); "review until clean" lacks a definition of a REAL problem (proposed); stops/ending-turn rules; safety
+   list for the owner (notably: `docker volume prune` called "safe" in ~/.claude/CLAUDE.md:555 would now delete five other projects'
+   volumes; no `ask`/`deny` permission rules exist); the "Blocked on me / Changed / Found" rule wording; Sonnet for small exact fix
+   rounds as an option; stale Fable references (deep-architect agent `model: claude-fable-5`); `.claude/CLAUDE.md` 98.7 KB, 40% "Recent
+   ships" history. The owner's cut-off "Also find …" line is still unanswered.
+   **P8-3 BUILD RESUMED** (choices, rules, the series page; the P8-2 builder resumed — it knows the pages, picker and harness; brief
    `.claude-work/briefs/514-p8-3-build.md` incl. the 8 carried test fixes; report `.claude-work/resume/p514-p8-3--build.md`; evidence
    `…--build-evidence/`; watchdog on it). Then P8-3's ONE full check, narrow checks, close → P8-4. If clean: P8-1 CLOSES —
    snapshot the six files into `.claude-work/resume/p514-p8-snapshot-1/` (nothing staged), then plan P8-2's brief.
