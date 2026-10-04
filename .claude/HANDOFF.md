@@ -509,8 +509,17 @@ builder runs**; before that it was clean.
    copy of the resolver's private in-force rule); W42, D38, W40/W41 additions; 710 checks rc 0 (UTC, Auckland); 3/3 faults caught.
    Fingerprints: choice `ac04fa67…`, self-test `18db0210…`; FeedAdmin unchanged (`c9b3adfd…`). No owner answer on the shortcut, so the
    usual narrow check runs.
-   **NOW: P8-3 CHECK ROUND 4 — NARROW — RUNNING** (new Opus agent; brief `.claude-work/briefs/514-p8-3-check-r4.md`; report
-   `.claude-work/resume/p514-p8-3--verify-r4.md`; watchdog on it). Clean → P8-3 closes → P8-4.
+   **P8-3 CHECK ROUND 4 (narrow): NOT CLEAN — one LOW untrue phrase + one test gap** (`.claude-work/resume/p514-p8-3--verify-r4.md`):
+   the box sentence is true in every state; R4-1 its list reuses `stateLabel()`'s "…will be removed when you save" — untrue for a
+   leftover, which can never be saved; R4-2 W21 never reaches the box (N3 `$esc` removed passes).
+   **INSTRUCTIONS AUDIT 2 DONE (4 Oct ~23:10)** (report `.claude-work/resume/instructions-audit-2.md`; live sources fetched): 103 rows —
+   6 DELETE (all in `.claude/CLAUDE.md`: Recent ships, apps table, counts table, layout, constants = 52% of the file), 33 REWRITE (5 moves
+   to path-scoped rules), 64 KEEP, 5 additions (short answers, document length cap, updates while working, hold scope, few helpers);
+   flags almost empty; all truth/safety rules kept; biggest cost lever is `effortLevel: xhigh` (owner's call); HANDOFF.md is 457 KB / 5,289
+   lines — an archive needs the owner's yes. Nothing changed; results shown to the owner. NOTE: ~/.claude/CLAUDE.md was edited at 18:00
+   4 Oct by someone else ("when NOT to stop", three closing headings, a FileMoCo example) — not by this session.
+   **NOW: P8-3 FIX ROUND 4 RUNNING — TINY** (same builder; brief `.claude-work/briefs/514-p8-3-fix4.md`; report
+   `.claude-work/resume/p514-p8-3--fix4.md`; watchdog on it). Then narrow check round 5 (owner has not taken the shortcut offer).
    **P8-3 (history)** (choices, rules, the series page; the P8-2 builder resumed — it knows the pages, picker and harness; brief
    `.claude-work/briefs/514-p8-3-build.md` incl. the 8 carried test fixes; report `.claude-work/resume/p514-p8-3--build.md`; evidence
    `…--build-evidence/`; watchdog on it). Then P8-3's ONE full check, narrow checks, close → P8-4. If clean: P8-1 CLOSES —
