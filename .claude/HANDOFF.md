@@ -419,7 +419,13 @@ builder runs**; before that it was clean.
    page falls back to local copies that are gitignored (a zip install without them would be unstyled); `check_cdn_sri.py` only checks
    presence. Queue it early (after part 8). Also unverified: the shared navigation bar may run off the window at 1024/1440 px.
    **NOW: P8-2 CHECK ROUND 2 — NARROW — RUNNING** (new Opus agent; brief `.claude-work/briefs/514-p8-2-check-r2.md`; report
-   `.claude-work/resume/p514-p8-2--verify-r2.md`; watchdog on it). Clean → P8-2 closes → P8-3. If clean: P8-1 CLOSES —
+   `.claude-work/resume/p514-p8-2--verify-r2.md`; watchdog on it). Clean → P8-2 closes → P8-3.
+   **STOPPED 28 Sep ~18:35 → resumed 4 Oct 16:41: the account's Opus WEEKLY limit** (reset 4 Oct 16:00) — the checker and this session
+   stopped together; ~6 days lost; no fallback possible. State at the stop: router lab done (62 hostile raw requests — nothing outside
+   `web/public_html` served, no `.php` source sent); M1 layout evidence accepted; item 4 FOUND four places W21 never fills with hostile
+   text (list "Last result:" without a run row, the list flash after `back=list`, the form's refusal box, the calendar page's "Last
+   result:"). Its container died; its leftover volume (selftest_c2a/b/c) removed by me 4 Oct; its scratch folder is gone. Six other
+   unnamed MySQL volumes (other projects, 28 Sep and 2 Oct) left alone. No other session pushed to the branch meanwhile. If clean: P8-1 CLOSES —
    snapshot the six files into `.claude-work/resume/p514-p8-snapshot-1/` (nothing staged), then plan P8-2's brief.
    **Decided by me: the owner's 21 Sept rule "#514: one commit per part" stands** — four chunks, each checked, ONE commit and ONE
    migration 207 for part 8. **Owner answered YES (25 Sep):** add `feed-admin-selftest.php` to `calendar-selftests.yml`, inside part 8's commit. Plan found:
