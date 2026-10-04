@@ -434,7 +434,12 @@ builder runs**; before that it was clean.
    unnamed volumes left alone.)
    **P8-2 CLOSED 4 Oct 2026** (same precedent as P8-1: no code fault, test gaps carried into the next chunk's build and covered by its
    full check). Snapshot `.claude-work/resume/p514-p8-snapshot-2/` (13 files; self-test `b2c2a301…`, 591 checks).
-   **NOW: P8-3 BUILD RUNNING** (choices, rules, the series page; the P8-2 builder resumed — it knows the pages, picker and harness; brief
+   **OWNER, 4 Oct (second message): the instructions review runs BEFORE part 8 continues; two more guides added to it**
+   (https://claude.dev/blog/building-with-claude-sonnet-5-5/ and https://claude.dev/blog/how-we-made-claude-ai-faster/) — passed to the
+   RUNNING reviewer as an extension (no second review, to save credit). The owner's message also had an unfinished line "Also find …" —
+   asked the owner what it should say. **P8-3 build PAUSED** at a clean point by message (its report lists files touched + next step);
+   resume it after the review's recommendations are shown.
+   **P8-3 BUILD (PAUSED)** (choices, rules, the series page; the P8-2 builder resumed — it knows the pages, picker and harness; brief
    `.claude-work/briefs/514-p8-3-build.md` incl. the 8 carried test fixes; report `.claude-work/resume/p514-p8-3--build.md`; evidence
    `…--build-evidence/`; watchdog on it). Then P8-3's ONE full check, narrow checks, close → P8-4. If clean: P8-1 CLOSES —
    snapshot the six files into `.claude-work/resume/p514-p8-snapshot-1/` (nothing staged), then plan P8-2's brief.
