@@ -487,9 +487,11 @@ builder runs**; before that it was clean.
    the choice page say it follows the rules/calendar, and no page can show or remove that leftover choice. "Found" (final whole-part
    check): pause/resume/delete/refresh rely on the save handler's page gate alone (the importer methods do not check the actor; W39
    catches a broken gate today); the preview read includes deleted rows; W40 covers only open-ended choices.
-   **NOW: P8-3 FIX ROUND 2 RUNNING — SMALL** (same builder; brief `.claude-work/briefs/514-p8-3-fix2.md`: sentences by whether an every-date
-   choice EXISTS; a leftover one shown and removable (Remove only) on the choice page; report `.claude-work/resume/p514-p8-3--fix2.md`;
-   watchdog on it). Then narrow check round 3.
+   **P8-3 FIX ROUND 2 DONE:** `removeChoice()` sentence by whether an every-date choice EXISTS (one look-up in the lock); leftover shown and
+   removable (Remove only) on the choice page; `scope=series` on a one-off answers only when a leftover exists; D37, W41; 706 checks rc 0
+   (UTC, Auckland); 4/4 faults caught. Fingerprints: FeedAdmin `c9b3adfd…`, choice `ffd7b50e…`, self-test `ac2ba041…`.
+   **NOW: P8-3 CHECK ROUND 3 — NARROW — RUNNING** (new Opus agent; brief `.claude-work/briefs/514-p8-3-check-r3.md`; report
+   `.claude-work/resume/p514-p8-3--verify-r3.md`; watchdog on it). Clean → P8-3 closes → P8-4.
    **P8-3 (history)** (choices, rules, the series page; the P8-2 builder resumed — it knows the pages, picker and harness; brief
    `.claude-work/briefs/514-p8-3-build.md` incl. the 8 carried test fixes; report `.claude-work/resume/p514-p8-3--build.md`; evidence
    `…--build-evidence/`; watchdog on it). Then P8-3's ONE full check, narrow checks, close → P8-4. If clean: P8-1 CLOSES —
