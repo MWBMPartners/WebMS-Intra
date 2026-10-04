@@ -521,8 +521,22 @@ builder runs**; before that it was clean.
    **P8-3 FIX ROUND 4 DONE:** the leftover box has its own state words (never "when you save"; `stateLabel()` unchanged for the saving
    form), list as its own "Chosen: …" sentence; W21 covers both leftover pages; W43; 713 checks rc 0 (UTC, Auckland); 3/3 faults caught.
    Fingerprints: choice `4068c1b2…`, self-test `58b5f2ae…`.
-   **NOW: P8-3 CHECK ROUND 5 — NARROW — RUNNING** (new Opus agent; brief `.claude-work/briefs/514-p8-3-check-r5.md`; report
-   `.claude-work/resume/p514-p8-3--verify-r5.md`; watchdog on it). Clean → P8-3 closes → P8-4.
+   **P8-3 CHECK ROUND 5 (narrow, 5 Oct): NOT CLEAN — two LOW, neither in what anyone sees** (`.claude-work/resume/p514-p8-3--verify-r5.md`,
+   lines 38-95): the page is right for every entry state, escaped, this organisation only. R5-1: W43 checks pieces of the "Chosen: …"
+   sentence, so NEW1 (a live group shown "(switched off)") and NEW2 (an unused kind saying "…removed when you save") passed 713/713.
+   R5-2: two untrue comments (`feeds-choice.php:377` "only removing the whole choice removes its entries" — erasure and account deletion
+   also do; W43's comment says "two", it is three).
+   **P8-3 CLOSED (5 Oct) by carrying R5-1, R5-2 and round 5's Found 1 into P8-4's build as its step 0** — the commissioning session's call,
+   NOT an owner decision: the owner's rule is "a clean narrow round closes the chunk", and this skips a sixth narrow round for a test and
+   two comments. P8-4's full check covers them BY NAME (NEW1/NEW2 must fail), and the final whole-part check covers them again. The owner
+   was told; if they want a separate round, run a narrow check on step 0 alone. Closed state: `.claude-work/resume/p514-p8-snapshot-3/`
+   (17 files, `FINGERPRINTS.txt`). Six check rounds on P8-3 in all (one full, five narrow) — flagged to the owner (narrow-checks memory).
+   **NOW: P8-4 BUILD** (the same builder, Opus, `acf62aa12d39eeb4f` — it knows the pages and the harness; brief
+   `.claude-work/briefs/514-p8-4-build.md`; report `.claude-work/resume/p514-p8-4--build.md`; evidence `…--build-evidence/`; watchdog on
+   the report). The brief: step 0 first; item 10 overrides §3.3's flash example and §11.3's "followed" check, and gives the sibling line
+   as a present fact; the guide checked claim by claim against the code; plan item 8 (owner-approved) wires the self-test into
+   `calendar-selftests.yml` in this chunk, so the full check and the final check both see it. Then P8-4's full check → narrow rounds →
+   the final whole-of-part-8 check (with the "noted for the final check" list below) → the full fault set → ONE commit.
    **P8-3 (history)** (choices, rules, the series page; the P8-2 builder resumed — it knows the pages, picker and harness; brief
    `.claude-work/briefs/514-p8-3-build.md` incl. the 8 carried test fixes; report `.claude-work/resume/p514-p8-3--build.md`; evidence
    `…--build-evidence/`; watchdog on it). Then P8-3's ONE full check, narrow checks, close → P8-4. If clean: P8-1 CLOSES —
