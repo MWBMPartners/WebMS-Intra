@@ -205,6 +205,14 @@ builder runs**; before that it was clean.
    shortcut also looks at `web/_sql/`; workflow edit approved). (4) **YES: `feed-admin-selftest.php` in `calendar-selftests.yml`** —
    done inside part 8's one commit (plan top section item 8; its `--hold-lock` uses `proc_open`). Items 2+3 bundled as ONE package after
    #563 (both CI-check changes to the database side).
+   **OWNER REQUEST 4 Oct 2026 — TOP PRIORITY, RUNNING NOW (read-only):** review the instruction files (`.claude/CLAUDE.md`, `AGENTS.md`,
+   `.OpenAI/`, `~/.claude/CLAUDE.md`, `.claude/agents/`, `.dev-team/config.yml`, the memory files, the saved briefs) against the guide
+   https://claude.dev/blog/getting-the-most-out-of-opus-5-5/ for (A) "think more" lines, (B) one-step-at-a-time / no definition of done,
+   (C) needless stops for confirmation; safety/permission/destructive approval rules listed SEPARATELY for the owner to decide; propose a
+   "Blocked on me / Changed / Found" end-of-run rule. **Show recommendations first; modify nothing.** Opus reviewer, brief
+   `.claude-work/briefs/instructions-review.md`, report `.claude-work/resume/instructions-review.md`, watchdog on it. Started while P8-2's
+   narrow check runs — allowed because it is read-only and touches nothing the check depends on, and the owner said "as soon as
+   possible".
    **QUEUE AFTER PART 8 (in order):** #563 (bare `@set_time_limit()` in six places); **#564** (owner-approved 25 Sep, recorded at the top
    of this file by a CueRCode cloud session: `stat -L` in `tools/watchdog.sh` AND `~/.claude/bin/watchdog.sh`, kept identical — must be
    done from this Mac; it does not affect our watchdogs, which point at `.md` report files, not shortcuts); then the upgrade-test +
