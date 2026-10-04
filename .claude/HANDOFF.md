@@ -458,7 +458,19 @@ builder runs**; before that it was clean.
    volumes; no `ask`/`deny` permission rules exist); the "Blocked on me / Changed / Found" rule wording; Sonnet for small exact fix
    rounds as an option; stale Fable references (deep-architect agent `model: claude-fable-5`); `.claude/CLAUDE.md` 98.7 KB, 40% "Recent
    ships" history. The owner's cut-off "Also find …" line is still unanswered.
-   **P8-3 BUILD RESUMED** (choices, rules, the series page; the P8-2 builder resumed — it knows the pages, picker and harness; brief
+   **P8-3 BUILD DONE (4 Oct ~19:45):** new `feeds-choice.php`, `feeds-rule.php`; `feeds-view.php` rules section + per-date buttons +
+   identity-less note; `calendar/event.php` link (under the badges — the button row never wraps); `series-edit.php` M5 lookup; FeedAdmin
+   `events()` `inSeries` (7 lines, D34); 207 + full_schema grow (choice, rule); the five carried P8-2 test fixes (G1-G3 in W21, S4 guards
+   G4, exact database-name filter + S3 control, router rule `php\d?|phtml|phar` + W38, part S `class_alias`). 683 checks (S 9, D 505,
+   W 169) rc 0 on UTC ×2, Auckland, MySQL 8.4; e2e 8.0 + 8.4 pass; 25/25 faults caught; layout proved in Edge 390-1440 px. Snapshot
+   `.claude-work/resume/p514-p8-3-r0-snapshot/` (17 files). Builder's lapse: it stopped processes BY PATTERN and killed my watchdog (the
+   exit 144) — I was not woken for ~2 h; briefs now say so explicitly. Seen, not part 8's → commented on **#569**: the event page header
+   is ~884 px wide on a 390 px phone; the shared navigation bar ~2,050 px wide at desktop sizes.
+   **Untracked `.claude/skills/prompt-cache-control/`** (created 18:16 4 Oct) is a third-party "claude-code-templates" (aitmpl.com) cache-
+   meter mod with function hooks — NOT ours; asked the owner whether to commit, ignore or move it; keep it out of every commit.
+   **NOW: P8-3 CHECK ROUND 1 — THE FULL CHECK — RUNNING** (new Opus agent; brief `.claude-work/briefs/514-p8-3-check.md`, with the review's
+   proposed definition of a REAL fault; report `.claude-work/resume/p514-p8-3--verify-r1.md`; watchdog on it).
+   **P8-3 (history)** (choices, rules, the series page; the P8-2 builder resumed — it knows the pages, picker and harness; brief
    `.claude-work/briefs/514-p8-3-build.md` incl. the 8 carried test fixes; report `.claude-work/resume/p514-p8-3--build.md`; evidence
    `…--build-evidence/`; watchdog on it). Then P8-3's ONE full check, narrow checks, close → P8-4. If clean: P8-1 CLOSES —
    snapshot the six files into `.claude-work/resume/p514-p8-snapshot-1/` (nothing staged), then plan P8-2's brief.
