@@ -518,8 +518,11 @@ builder runs**; before that it was clean.
    flags almost empty; all truth/safety rules kept; biggest cost lever is `effortLevel: xhigh` (owner's call); HANDOFF.md is 457 KB / 5,289
    lines — an archive needs the owner's yes. Nothing changed; results shown to the owner. NOTE: ~/.claude/CLAUDE.md was edited at 18:00
    4 Oct by someone else ("when NOT to stop", three closing headings, a FileMoCo example) — not by this session.
-   **NOW: P8-3 FIX ROUND 4 RUNNING — TINY** (same builder; brief `.claude-work/briefs/514-p8-3-fix4.md`; report
-   `.claude-work/resume/p514-p8-3--fix4.md`; watchdog on it). Then narrow check round 5 (owner has not taken the shortcut offer).
+   **P8-3 FIX ROUND 4 DONE:** the leftover box has its own state words (never "when you save"; `stateLabel()` unchanged for the saving
+   form), list as its own "Chosen: …" sentence; W21 covers both leftover pages; W43; 713 checks rc 0 (UTC, Auckland); 3/3 faults caught.
+   Fingerprints: choice `4068c1b2…`, self-test `58b5f2ae…`.
+   **NOW: P8-3 CHECK ROUND 5 — NARROW — RUNNING** (new Opus agent; brief `.claude-work/briefs/514-p8-3-check-r5.md`; report
+   `.claude-work/resume/p514-p8-3--verify-r5.md`; watchdog on it). Clean → P8-3 closes → P8-4.
    **P8-3 (history)** (choices, rules, the series page; the P8-2 builder resumed — it knows the pages, picker and harness; brief
    `.claude-work/briefs/514-p8-3-build.md` incl. the 8 carried test fixes; report `.claude-work/resume/p514-p8-3--build.md`; evidence
    `…--build-evidence/`; watchdog on it). Then P8-3's ONE full check, narrow checks, close → P8-4. If clean: P8-1 CLOSES —
