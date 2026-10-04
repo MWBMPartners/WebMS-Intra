@@ -507,6 +507,24 @@ registered. The mistake was in what the pages pointed AT.
 `tools/audit-checks/check_no_php_in_urls.py` now checks this on every pull
 request.
 
+## Nothing may look unfinished, careless or AI-made (STANDING RULE, this repo AND every project on the device)
+
+**Set by the owner on 4 October 2026**, for this repository and, through `~/.claude/CLAUDE.md` ("Nothing may look unfinished,
+careless or AI-made"), for every other project on the owner's machine. That machine-wide section holds the full eight-point checklist;
+this section records what is specific to WebMS-Intra.
+
+- **The checklist covers every page, including pages behind a sign-in** — the owner's choice, made on 4 October 2026 after being told
+  that a sitemap of signed-in pages would list their addresses publicly. Title, meta description, favicon, Open Graph tags and image,
+  canonical address and social preview on every page; a sitemap and `robots.txt` that were thought about.
+- **"No default or example address" here means #500:** no customer's real address (for example `portal.millrdsdacambridge.uk`) built
+  into code, templates, workflows or the API description — the existing "No web address is ever built in" rule below.
+- **When it is checked: automatically, before every push**, by a git pre-push hook that runs this repository's fast checks and refuses
+  the push on a problem; the browser parts (layouts at many screen widths, visual consistency, how pages actually look) run as a full
+  audit before every release. **The pre-push check does not exist yet** — building it is part of the audit package queued straight
+  after #514 part 8 is committed (#569). Until then, run the checklist by hand before pushing a change that touches
+  pages, and say so; never claim the automatic check ran.
+- **The first full audit and its fixes** are that same package, after part 8 (owner, 4 October 2026: "After part 8 only").
+
 ## No web address is ever built in — WebMS-Intra is a product (STANDING RULE)
 
 **WebMS-Intra is used by many customers. No web address or domain name may be hard-coded** in code, GitHub

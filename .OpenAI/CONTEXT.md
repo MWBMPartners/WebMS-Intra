@@ -381,6 +381,16 @@ in `.claude/CLAUDE.md` under the heading named in brackets.
     reserved), and a version number. *(`.claude/CLAUDE.md` → "Code
     Style".)*
 
+20. **Nothing may look unfinished, careless or AI-made (owner, 4 October 2026; this repo and every project).** Every page —
+    including pages behind a sign-in (owner's choice) — has its own title, meta description, favicon, Open Graph tags and image,
+    canonical address and social preview; there is a real "page not found" page, loading and empty states, and plain-English error
+    messages; headings in order and alt text on images; no console errors, leftover debug output, exposed development files or
+    oversized scripts; layouts hold at every screen size and with long text, empty data and errors; spacing, fonts, buttons, corners,
+    icons and components match from page to page; every button and link really works; no default, preview or example address (#500).
+    Checked automatically before every push by a git pre-push hook (not built yet — part of the audit package #569, queued after #514
+    part 8; until then run the checklist by hand and say so), with a full browser audit before every release. *(`.claude/CLAUDE.md` →
+    "Nothing may look unfinished…"; the full checklist is in `~/.claude/CLAUDE.md`.)*
+
 ## A few more things worth knowing
 
 - **Branches are meant to be promoted through four steps on the way to

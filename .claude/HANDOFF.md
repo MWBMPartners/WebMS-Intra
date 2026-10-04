@@ -213,7 +213,12 @@ builder runs**; before that it was clean.
    `.claude-work/briefs/instructions-review.md`, report `.claude-work/resume/instructions-review.md`, watchdog on it. Started while P8-2's
    narrow check runs — allowed because it is read-only and touches nothing the check depends on, and the owner said "as soon as
    possible".
-   **QUEUE AFTER PART 8 (in order):** #563 (bare `@set_time_limit()` in six places); **#564** (owner-approved 25 Sep, recorded at the top
+   **OWNER, 4 Oct 2026 — new standing rule "Nothing may look unfinished, careless or AI-made"** (machine-wide `~/.claude/CLAUDE.md`,
+   which Codex also reads; `.claude/CLAUDE.md`; `.OpenAI/CONTEXT.md` rule 20). Owner's choices: the audit + fixes run straight AFTER part 8
+   is committed as their own package (**#569**, high); search/sharing items on EVERY page incl. signed-in ones (chosen knowing a sitemap
+   lists private addresses); checked automatically BEFORE EVERY PUSH by a git pre-push hook (not built yet — part of #569; until then run
+   the checklist by hand and say so); the review's other recommendations are applied separately once the owner decides.
+   **QUEUE AFTER PART 8 (in order):** **#569** (the audit + fixes + pre-push check); **#568** (wrong CDN fingerprints); #563 (bare `@set_time_limit()` in six places); **#564** (owner-approved 25 Sep, recorded at the top
    of this file by a CueRCode cloud session: `stat -L` in `tools/watchdog.sh` AND `~/.claude/bin/watchdog.sh`, kept identical — must be
    done from this Mac; it does not affect our watchdogs, which point at `.md` report files, not shortcuts); then the upgrade-test +
    #553-#556 package; then #514 parts 9-11.
