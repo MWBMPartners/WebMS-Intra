@@ -490,8 +490,14 @@ builder runs**; before that it was clean.
    **P8-3 FIX ROUND 2 DONE:** `removeChoice()` sentence by whether an every-date choice EXISTS (one look-up in the lock); leftover shown and
    removable (Remove only) on the choice page; `scope=series` on a one-off answers only when a leftover exists; D37, W41; 706 checks rc 0
    (UTC, Auckland); 4/4 faults caught. Fingerprints: FeedAdmin `c9b3adfd…`, choice `ffd7b50e…`, self-test `ac2ba041…`.
-   **NOW: P8-3 CHECK ROUND 3 — NARROW — RUNNING** (new Opus agent; brief `.claude-work/briefs/514-p8-3-check-r3.md`; report
-   `.claude-work/resume/p514-p8-3--verify-r3.md`; watchdog on it). Clean → P8-3 closes → P8-4.
+   **P8-3 CHECK ROUND 3 (narrow): NOT CLEAN — one LOW untrue sentence + two test gaps** (`.claude-work/resume/p514-p8-3--verify-r3.md`):
+   R3-1 the leftover box says "unless the date has a choice of its own" — untrue while that choice is not yet in force or has ended;
+   R3-2 the leftover look-up widened to the whole organisation (G2) is not caught (same UID in two calendars); R3-3 the leftover box on a
+   repeating date (G4) is not caught. Found: the box shows no days/list; "still applies" too strong for an ended leftover (folded into the fix).
+   **P8-3 has now had 4 check rounds (full + 3 narrow)** — told the owner, with the option of folding the check of this tiny fix into
+   P8-4's full check instead of a fourth narrow round; default (no answer): the usual narrow check.
+   **NOW: P8-3 FIX ROUND 3 RUNNING — TINY** (same builder; brief `.claude-work/briefs/514-p8-3-fix3.md`; report
+   `.claude-work/resume/p514-p8-3--fix3.md`; watchdog on it).
    **P8-3 (history)** (choices, rules, the series page; the P8-2 builder resumed — it knows the pages, picker and harness; brief
    `.claude-work/briefs/514-p8-3-build.md` incl. the 8 carried test fixes; report `.claude-work/resume/p514-p8-3--build.md`; evidence
    `…--build-evidence/`; watchdog on it). Then P8-3's ONE full check, narrow checks, close → P8-4. If clean: P8-1 CLOSES —
