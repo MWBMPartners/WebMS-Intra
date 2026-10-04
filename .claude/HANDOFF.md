@@ -496,8 +496,13 @@ builder runs**; before that it was clean.
    repeating date (G4) is not caught. Found: the box shows no days/list; "still applies" too strong for an ended leftover (folded into the fix).
    **P8-3 has now had 4 check rounds (full + 3 narrow)** — told the owner, with the option of folding the check of this tiny fix into
    P8-4's full check instead of a fourth narrow round; default (no answer): the usual narrow check.
-   **NOW: P8-3 FIX ROUND 3 RUNNING — TINY** (same builder; brief `.claude-work/briefs/514-p8-3-fix3.md`; report
-   `.claude-work/resume/p514-p8-3--fix3.md`; watchdog on it).
+   **P8-3 FIX ROUND 3 DONE:** leftover box "…is still saved: <who>, <its days>. It decides this date while it is in force, except while the
+   date's own choice is in force." (ALWAYS "is still saved" — builder's call, accepted by me: choosing "still applies" would need a page
+   copy of the resolver's private in-force rule); W42, D38, W40/W41 additions; 710 checks rc 0 (UTC, Auckland); 3/3 faults caught.
+   Fingerprints: choice `ac04fa67…`, self-test `18db0210…`; FeedAdmin unchanged (`c9b3adfd…`). No owner answer on the shortcut, so the
+   usual narrow check runs.
+   **NOW: P8-3 CHECK ROUND 4 — NARROW — RUNNING** (new Opus agent; brief `.claude-work/briefs/514-p8-3-check-r4.md`; report
+   `.claude-work/resume/p514-p8-3--verify-r4.md`; watchdog on it). Clean → P8-3 closes → P8-4.
    **P8-3 (history)** (choices, rules, the series page; the P8-2 builder resumed — it knows the pages, picker and harness; brief
    `.claude-work/briefs/514-p8-3-build.md` incl. the 8 carried test fixes; report `.claude-work/resume/p514-p8-3--build.md`; evidence
    `…--build-evidence/`; watchdog on it). Then P8-3's ONE full check, narrow checks, close → P8-4. If clean: P8-1 CLOSES —
