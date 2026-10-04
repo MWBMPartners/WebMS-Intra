@@ -476,8 +476,13 @@ builder runs**; before that it was clean.
    L4: the database-name filter untested at its call site (N16). "Found" (for the final whole-part check): N08 a series whose imported
    dates were all removed opens on series-edit (plan says refuse; no harm found); part S misses `'Class'::save(` and `{'save'}(`; S4
    reads only one echo shape.
-   **NOW: P8-3 FIX ROUND 1 RUNNING** (the same builder; brief `.claude-work/briefs/514-p8-3-fix1.md`; report
-   `.claude-work/resume/p514-p8-3--fix1.md`; watchdog on it). Then a NARROW check.
+   **P8-3 FIX ROUND 1 DONE:** W39 signs in SB (403 on 8 GETs + 12 POSTs, no event link); `previewRule()` lines carry zone + all-day (one
+   read per calendar; D35, W31); choice page + `removeChoice()` sentences follow the resolver's real order (D36, W40); W30 summer time;
+   S3 call-site check; two wording slips. 698 checks rc 0 (UTC, Auckland); 8/8 faults caught. 207 changed in a comment only (SQL
+   identical — confirmed by me). Fingerprints: 207 `a780e738…`, FeedAdmin `1aef7364…`, choice `d405ffc8…`, rule `7e77f9ae…`, self-test
+   `e511cc9d…`.
+   **NOW: P8-3 CHECK ROUND 2 — NARROW — RUNNING** (new Opus agent; brief `.claude-work/briefs/514-p8-3-check-r2.md`; report
+   `.claude-work/resume/p514-p8-3--verify-r2.md`; watchdog on it). Clean → P8-3 closes → P8-4.
    **P8-3 (history)** (choices, rules, the series page; the P8-2 builder resumed — it knows the pages, picker and harness; brief
    `.claude-work/briefs/514-p8-3-build.md` incl. the 8 carried test fixes; report `.claude-work/resume/p514-p8-3--build.md`; evidence
    `…--build-evidence/`; watchdog on it). Then P8-3's ONE full check, narrow checks, close → P8-4. If clean: P8-1 CLOSES —
