@@ -481,8 +481,15 @@ builder runs**; before that it was clean.
    S3 call-site check; two wording slips. 698 checks rc 0 (UTC, Auckland); 8/8 faults caught. 207 changed in a comment only (SQL
    identical — confirmed by me). Fingerprints: 207 `a780e738…`, FeedAdmin `1aef7364…`, choice `d405ffc8…`, rule `7e77f9ae…`, self-test
    `e511cc9d…`.
-   **NOW: P8-3 CHECK ROUND 2 — NARROW — RUNNING** (new Opus agent; brief `.claude-work/briefs/514-p8-3-check-r2.md`; report
-   `.claude-work/resume/p514-p8-3--verify-r2.md`; watchdog on it). Clean → P8-3 closes → P8-4.
+   **P8-3 CHECK ROUND 2 (narrow): NOT CLEAN — one LOW real fault F1** (`.claude-work/resume/p514-p8-3--verify-r2.md`): fix round 1 correct,
+   22/22 faults caught. F1: an every-date choice is found by UID alone (`FeedResolver.php:1087`), so when an outside calendar turns a
+   repeating event into a one-off with the same UID, the old every-date choice still decides the remaining date — but `removeChoice()` and
+   the choice page say it follows the rules/calendar, and no page can show or remove that leftover choice. "Found" (final whole-part
+   check): pause/resume/delete/refresh rely on the save handler's page gate alone (the importer methods do not check the actor; W39
+   catches a broken gate today); the preview read includes deleted rows; W40 covers only open-ended choices.
+   **NOW: P8-3 FIX ROUND 2 RUNNING — SMALL** (same builder; brief `.claude-work/briefs/514-p8-3-fix2.md`: sentences by whether an every-date
+   choice EXISTS; a leftover one shown and removable (Remove only) on the choice page; report `.claude-work/resume/p514-p8-3--fix2.md`;
+   watchdog on it). Then narrow check round 3.
    **P8-3 (history)** (choices, rules, the series page; the P8-2 builder resumed — it knows the pages, picker and harness; brief
    `.claude-work/briefs/514-p8-3-build.md` incl. the 8 carried test fixes; report `.claude-work/resume/p514-p8-3--build.md`; evidence
    `…--build-evidence/`; watchdog on it). Then P8-3's ONE full check, narrow checks, close → P8-4. If clean: P8-1 CLOSES —
