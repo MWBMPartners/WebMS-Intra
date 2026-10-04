@@ -218,6 +218,14 @@ builder runs**; before that it was clean.
    is committed as their own package (**#569**, high); search/sharing items on EVERY page incl. signed-in ones (chosen knowing a sitemap
    lists private addresses); checked automatically BEFORE EVERY PUSH by a git pre-push hook (not built yet — part of #569; until then run
    the checklist by hand and say so); the review's other recommendations are applied separately once the owner decides.
+   **OWNER REQUEST 4 Oct 2026 (third) — TOP PRIORITY, RUNNING (read-only):** a LINE-BY-LINE audit of the instruction files against
+   Anthropic's CURRENT guidance — fetch the live prompting best-practices page and the Opus 5.5 model page first; DELETE / KEEP / REWRITE
+   per instruction, every DELETE quoting an Anthropic sentence (none → KEEP); flags for verify-twice, "only flag big issues", "don't
+   overthink", role padding, stale examples; truth rules always KEEP; the five missing instructions with paste-in wording; an honest count;
+   NOT RUN items. BUILDS ON the first review (no repeat). Opus auditor, brief `.claude-work/briefs/instructions-audit-2.md`, report
+   `.claude-work/resume/instructions-audit-2.md`, watchdog on it. **Part 8 does not move to P8-4 until it is done** (owner: "before picking
+   up where we left off"); P8-3's narrow check round 4 (already running, read-only) finishes meanwhile. The owner's message said "my
+   instructions are below" but nothing followed — scope taken as the same files as the first review; owner told.
    **QUEUE AFTER PART 8 (in order):** **#569** (the audit + fixes + pre-push check); **#568** (wrong CDN fingerprints); #563 (bare `@set_time_limit()` in six places); **#564** (owner-approved 25 Sep, recorded at the top
    of this file by a CueRCode cloud session: `stat -L` in `tools/watchdog.sh` AND `~/.claude/bin/watchdog.sh`, kept identical — must be
    done from this Mac; it does not affect our watchdogs, which point at `.md` report files, not shortcuts); then the upgrade-test +
