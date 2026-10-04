@@ -468,8 +468,16 @@ builder runs**; before that it was clean.
    is ~884 px wide on a 390 px phone; the shared navigation bar ~2,050 px wide at desktop sizes.
    **Untracked `.claude/skills/prompt-cache-control/`** (created 18:16 4 Oct) is a third-party "claude-code-templates" (aitmpl.com) cache-
    meter mod with function hooks — NOT ours; asked the owner whether to commit, ignore or move it; keep it out of every commit.
-   **NOW: P8-3 CHECK ROUND 1 — THE FULL CHECK — RUNNING** (new Opus agent; brief `.claude-work/briefs/514-p8-3-check.md`, with the review's
-   proposed definition of a REAL fault; report `.claude-work/resume/p514-p8-3--verify-r1.md`; watchdog on it).
+   **P8-3 CHECK ROUND 1 (full): NOT CLEAN** (`.claude-work/resume/p514-p8-3--verify-r1.md`): pages' own security CORRECT (every attack
+   refused; SB correctly gets 403 on the real tree). M1 test gap: no part W check signs in another organisation's admin (SB) — a gate
+   accepting any org's admin (N05) passes 169/169 and leaks A's event title and group/role/member names to SB on read; N04 same for the
+   event link. L1 REAL: the rule preview shows all-day events as 00:00 and drops the zone (preview lines carry no zone/all-day). L2 REAL:
+   "No choice yet…" and "Choice removed… go back to the rules" untrue under a series choice. L3: W30 blind to a UTC display in winter.
+   L4: the database-name filter untested at its call site (N16). "Found" (for the final whole-part check): N08 a series whose imported
+   dates were all removed opens on series-edit (plan says refuse; no harm found); part S misses `'Class'::save(` and `{'save'}(`; S4
+   reads only one echo shape.
+   **NOW: P8-3 FIX ROUND 1 RUNNING** (the same builder; brief `.claude-work/briefs/514-p8-3-fix1.md`; report
+   `.claude-work/resume/p514-p8-3--fix1.md`; watchdog on it). Then a NARROW check.
    **P8-3 (history)** (choices, rules, the series page; the P8-2 builder resumed — it knows the pages, picker and harness; brief
    `.claude-work/briefs/514-p8-3-build.md` incl. the 8 carried test fixes; report `.claude-work/resume/p514-p8-3--build.md`; evidence
    `…--build-evidence/`; watchdog on it). Then P8-3's ONE full check, narrow checks, close → P8-4. If clean: P8-1 CLOSES —
