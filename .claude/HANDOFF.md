@@ -439,6 +439,13 @@ builder runs**; before that it was clean.
    RUNNING reviewer as an extension (no second review, to save credit). The owner's message also had an unfinished line "Also find …" —
    asked the owner what it should say. **P8-3 build PAUSED** at a clean point by message (its report lists files touched + next step);
    resume it after the review's recommendations are shown.
+   **P8-3 PAUSE STATE (builder's note at the end of `.claude-work/resume/p514-p8-3--build.md`):** done, untested, each `php -l` clean —
+   207 + full_schema (choice, rule routes) `8ebc3eb7…`/`28a7df9f…`; series-edit (M5) `b1adc83e…`; calendar/event.php link `9051cdbd…`;
+   FeedAdmin `events()` gains `inSeries` `a8d07e06…` (needs part D check D34); feeds-view `95b10a10…`; feeds-choice (new, complete)
+   `6408f129…`. Not done: `feeds-rule.php`; the self-test (still `b2c2a301…`). **TRAP: migration 207 already names `feeds-rule.php`,
+   which does not exist yet — `check_route_targets.py` FAILS on the working tree until it is written; do not run the audit checks or
+   commit before then.** Next on resume: confirm fingerprints → write feeds-rule.php → self-test (D34, the five carried P8-2 items,
+   W26-W38) → proofs.
    **P8-3 BUILD (PAUSED)** (choices, rules, the series page; the P8-2 builder resumed — it knows the pages, picker and harness; brief
    `.claude-work/briefs/514-p8-3-build.md` incl. the 8 carried test fixes; report `.claude-work/resume/p514-p8-3--build.md`; evidence
    `…--build-evidence/`; watchdog on it). Then P8-3's ONE full check, narrow checks, close → P8-4. If clean: P8-1 CLOSES —
