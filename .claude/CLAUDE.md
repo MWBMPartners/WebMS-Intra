@@ -1,5 +1,21 @@
 # WebMS Intra - Claude Code Instructions
 
+<!-- Maintainer note. Claude Code strips block HTML comments before loading this file, so this costs
+     a session nothing. Trimmed on 5 October 2026 at the owner's decision (Salem874), following two
+     reviews of the instruction files: .claude-work/resume/instructions-review.md and
+     .claude-work/resume/instructions-audit-2.md. What went where:
+     - "Recent ships" -> .claude/history/recent-ships.md, word for word. CHANGELOG.md is the record
+       from now on.
+     - The counts table, directory layout, apps table and key constants ->
+       .claude/history/claude-md-inventory-2026-10-04.md, word for word. FEATURES.md and the code
+       hold those facts.
+     - The database, ApiRouter and "two variables" traps -> .claude/rules/, which Claude Code loads
+       only when it opens a file in the folder each one is about. One-line summaries stay below.
+     - Rules that also live in ~/.claude/CLAUDE.md keep a short copy here, because this repository
+       must work on machines without the owner's home folder. -->
+
+Every rule in this file is a standing rule set by the owner (Salem874) unless it says otherwise.
+
 ## Project
 
 Internal portal platform (PHP 8.5, backward-compatible with 8.4, Bootstrap 5.3.3) hosted on DreamHost shared hosting. No CLI, no Composer.
@@ -34,189 +50,41 @@ Internal portal platform (PHP 8.5, backward-compatible with 8.4, Bootstrap 5.3.3
 > — but following a convention is not the same as proving compatibility.
 
 - **Version:** 1.4.0 (on `main`; bump in `web/_core/version.php` — single source of truth)
-- **Brand layer:** runtime product brand picked at install (#296, PR #297). Presets: `WebMS Intra` (generic, default), `ChurchMS` (church), `SchoolMS`/`CharityMS`/`CommunityMS`/`BusinessMS` (functional starter SVG kits shipped #306 — logo.svg wordmark is system-font pending a designer pass, icons are full-quality). See `web/_core/brand-defaults.php` + `Site::productName()`. PWA manifest is a brand-aware PHP controller (`manifest.php`, now with brand-aware `shortcuts[]`, #141); the OpenAPI spec is likewise served brand-aware via `public_html/openapi.php` + `_core/api-spec.json` (#307).
+- **Brand layer:** the product name is chosen at install (#296); presets and per-brand assets are set in `web/_core/brand-defaults.php` and read through `Site::productName()`.
 - **Licence:** All Rights Reserved — MWBM Partners Ltd (t/a MWservices)
 - **Repo:** github.com/MWBMPartners/WebMS-Intra
-- **Server:** portal.millrdsdacambridge.uk
+- **Server (an example of one customer's set-up, not a default):** portal.millrdsdacambridge.uk
 - **Full brief:** `.claude/ProjectBrief_Chat.claude`
 - **Living feature inventory:** [FEATURES.md](../FEATURES.md) (always check this first)
 - **Chronological history:** [CHANGELOG.md](../CHANGELOG.md)
 - **Dev-facing technical notes:** [DEV_NOTES.md](../DEV_NOTES.md)
+- **Content translation is NOT reachable (#485) — never describe it as working.** The engine, its admin page and the member opt-in exist, but nothing a user can reach calls it. Interface translation (`I18n` / `t()`) is a separate system and works normally.
+- **Calendar, Events and the Preaching Plan are ONE app ("Events").** `/calendar` covers viewing, listing and subscribing; the manage pages handle preaching-plan and worship event types and series.
+- **Counts are not kept in this file** (apps, classes, tables, checks): they went stale within days. Count from the code; when any document disagrees with the code, the code is right. Migration numbers 168, 169 and 195 were never used, and nothing depends on the numbering being unbroken.
+- **History** that used to sit here is in `.claude/history/` (moved 5 October 2026). `CHANGELOG.md` is the record from now on.
 
-## Counts, and when they were last checked
+## Rules that load only with their folder
 
-These numbers go stale quickly and have been wrong before. Verified against the
-code on **20 September 2026**:
+Three traps matter only in one part of the code, so they live in `.claude/rules/`, and Claude Code loads each one when it opens a matching file. Here they are in one line each, so that a plan made before any file is opened still sees them:
 
-| What | Count | How to re-check |
-| --- | --- | --- |
-| App folders | 54 | `ls -d web/_apps/*/ | wc -l` |
-| Installable apps (the on/off list) | 47 | `ls web/_core/apps/*.php | wc -l` |
-| Framework classes | 81 | `ls web/_core/*.php | wc -l` |
-| Numbered database migrations | 196 files, numbered 000-198 | `ls web/_sql/[0-9][0-9][0-9]_*.sql | wc -l` |
-| Database tables | 213 | `grep -c 'CREATE TABLE IF NOT EXISTS' web/_sql/full_schema.sql` |
-| PHP files | 803 | `find web -name '*.php' | wc -l` |
-| In-app help guides | 19 | `ls web/_apps/help/*.php | wc -l` |
-| Live addresses the portal answers on | 552 | `python3 tools/audit-checks/check_route_targets.py` |
-| Settings seeded | 575 | `python3 tools/audit-checks/check_settings_keys.py` |
-| Automatic checks in `tools/audit-checks/` | 16 | `ls tools/audit-checks/check_*.py | wc -l` |
-| Self-tests in `tools/` | 8 | `ls tools/*selftest*.php | wc -l` |
+- **`.claude/rules/database.md`** (files under `web/_sql/`) — "Every database change goes in the install script too" and "SQL dialect trap": **every database change goes in BOTH `web/_sql/full_schema.sql` and a numbered migration, and the two must agree** (owner, 11 September 2026); migrations must be safe to run twice; the storage engine stays InnoDB; and the MySQL 8 dialect trap — no MariaDB-only `IF [NOT] EXISTS` on columns or indexes.
+- **`.claude/rules/api-router.md`** (handlers under `web/_apps/**/api/`) — "ApiRouter routing trap": `api/*` addresses ignore `tblRoutes`; a handler is reachable only at `_apps/{app}/api/{action}.php`, and only once `api.{app}.{action}.enabled` is seeded.
+- **`.claude/rules/app-pages.md`** (pages under `web/_apps/`) — "Two variables, and only two": a page inherits only `$mysqli` and `$SETTINGS` — nothing else, not even `$db`.
 
-**If a number here disagrees with the code, the code is right.** Numbers 168,
-169 and 195 are missing from the migration sequence: they were never used, and
-nothing depends on the numbering being unbroken.
+The quoted names are the old section headings, kept here because code comments and other documents still point at them by name.
+Codex reads the same rules as rules 13, 14, 15 and 17 of `.OpenAI/CONTEXT.md`. Change both together.
 
-## Directory Layout
+## Plain English — applies to everything written
 
-```
-repo root/          <- NOT deployed (docs, CI/CD only)
-web/                <- ALL deployable files (synced to server via SFTP)
-  _core/            <- Framework classes (Portal\Core namespace, 78 classes)
-  _apps/            <- App controllers — outside the webroot (#159). Every
-                       app's PHP handlers live here; Router resolves
-                       tblRoutes.targetFile against PORTAL_APPS = _apps/.
-  _vendor/simplejwt/<- Vendored RS256 JWT verifier
-  _sql/             <- Numbered SQL migrations (000-198 + full_schema.sql).
-                     196 files, not 199: 168, 169 and 195 were never used.
-  _lang/            <- I18n translation files (en.php, cy.php, …)
-  _install/         <- Standalone 6-step installation wizard (bootstrap-free)
-  public_html/      <- Web root: ONLY the front controller + static assets +
-                       the 3 entry-point PHP files (index.php, api-docs/,
-                       error.php) Apache can serve directly. Every other
-                       PHP file lives in _apps/. Branch-based deploy mirrors
-                       this dir to the server's public_html/ (main),
-                       public_html_beta/ (beta) or public_html_dev/ (alpha).
-    index.php, error.php, .htaccess, manifest.php, openapi.php,
-    robots.txt, sw.js, assets/, api-docs/, offline/
-  private_html/, public_html_landing/, public_html_redir/  <- non-app server dirs
-  _auth_keys/       <- Credentials + encryption key (gitignored, server-managed)
-  _uploads/         <- User file uploads (gitignored, server-managed)
-  _backups/         <- Server snapshots (gitignored, server-managed)
-  _libraries/       <- Server-managed libs incl. dompdf 3.1.5
-```
+Write the way you would explain something to a capable colleague who does not work on this system. The customer asked for this on 2026-09-07 because jargon "can sometimes be confusing even for some technically proficient users/developers". It covers chat replies, code comments and file headers, commit messages, pull request and issue text, every `.md` file, the in-app help under `web/_apps/help/`, and everything an end user sees: labels, buttons, error messages, tooltips.
 
-## Apps (shipped on `main`)
+- Use ordinary words. When a technical term is genuinely needed — a file name, a function name, a standard such as WCAG or OpenAPI — use it, then say in ordinary words what it means and why it matters. No unexplained abbreviations, no impressive-sounding filler.
+- Keep replies short. Lead with the answer or the outcome, then the detail someone needs to act on it. Keep caveats to a line. Use more words only where they make the meaning clearer — never to fill space, and never squeeze meaning into jargon to save it.
+- Prefer short sentences. Explain the "why", not just the "what".
+- This does not lower the standard of the work. Only the way it is explained changes.
+- **When reporting on work done**, be direct about what is finished, what is not, what was not checked, and what went wrong. Say "I could not test this because there is no database on this machine" rather than implying it was verified.
 
-`web/_apps/` holds 54 top-level entries; `web/_core/apps/*.php` is the
-AppRegistry — the single source of truth for **installable marketplace
-apps** (toggleable per-site at `/admin/apps`), 47 of them. The table below
-is every user-facing app (see note below the table for dirs that are
-infrastructure rather than apps).
-
-| Slug | Route | What it does |
-| --- | --- | --- |
-| admin | `/admin` | Users, roles, settings, sites, errors, activity, audit, migrations, integrations, workflows, reports (fixed dashboards, #93, **+ whitelist-driven custom report builder at `/admin/reports/builder`, #156**), **captcha config** |
-| ai-assist | `/admin/ai-assist` | LLM-assisted drafting for announcements, prayer requests, newsletter (Anthropic / OpenAI / local ollama) |
-| announcements | `/announcements` | Per-site text announcements, pinned + scheduled posts |
-| approvals | `/approvals` | Generic inbox for the Workflow Execution Engine (`Portal\Core\Workflow`) — awaiting-decision queue, approve/reject/comment, decision history (#443) |
-| assets | `/assets` | Physical & digital asset register — ownership/co-ownership, lending & borrowing, maintenance logs, GS1/RFID identifiers, software licence seats, printable QR labels, public lost-and-found page |
-| attendance | `/attendance` | Sessions, headcount by service type, reports, CSV |
-| auth | `/auth/*` | Local + MS365 + Google + WebAuthn + 2FA TOTP; password policy + strength meter; self-service "my account" pages live at `/account/*` |
-| calendar | `/calendar` | Events, series, RSVP, exports; seven view modes shipped via #137/#138 |
-| care | `/care` | Confidential pastoral / wellbeing register with visit log; role-restricted, encrypted notes |
-| cop-live-chat | `/admin/live/chat` | Moderate viewer chat on livestream events (#313); viewer-facing chat widget served alongside the `/live` embed |
-| dashboard | `/dashboard` | Portal home with app cards and pinned announcements |
-| directory | `/directory` | Searchable member directory with opt-in per-field visibility, incl. an independent `visibilityCoords` tier for an optional home map pin (#456 Chunk B) |
-| discipleship | `/discipleship` | Ordered formation pathways with per-member progress tracking, auto-completion from attendance/RSVPs, pastor roster (#303) |
-| documents | `/documents` | File library with categories |
-| expenses | `/expenses` | Submit, approve, treasury, withdraw, multi-approver, PDF, CSV |
-| forms | `/forms` | Generic form designer — admin-built fields, internal + optional public (`/f/{token}`) fill, response review/CSV export; `Portal\Core\FormEngine` is the reusable injection-safety boundary (#153) |
-| giving | `/giving` | Contributions log, Gift Aid capture, HMRC export, year-end statements (self-service + treasurer bulk batch generate/email, #440); two-person offering count, pledge campaigns, bank reconciliation (#299) |
-| help | `/help/*` | In-app guides (getting-started, expenses, calendar, prayer-requests, admin, faq, …) |
-| invites | `/invites` | Single-use invite links so new members self-register with role pre-assigned |
-| kids | `/kids/*` | Children's ministry check-in / check-out with 6-digit safeguarding badge codes (#298) |
-| leadership | `/leadership` | Roles + assignments + history + CSV |
-| livestream | `/live` | Embed YouTube / Vimeo / Twitch / Facebook livestreams with countdown + session analytics; Web Push "we're live now" + service-reminder browser notifications (#322) |
-| milestones | `/milestones` | Birthdays, anniversaries, joining dates with daily digest for designated roles |
-| newsletter | `/newsletter` | Compose, schedule, send branded HTML newsletters (internal sender; MailerMatt adapter slot reserved) |
-| noticeboard | `/noticeboard` | Visual poster wall (Canva embeds, image/video/text posters, weekday recurrence, QR share) (#360, #363) |
-| offboarding | `/offboarding` | One-click revocation when a volunteer/staff member leaves: sessions, credentials, roles, leadership |
-| payments | `/payments` | Pluggable payment processor (Stripe + PayPal live; GoCardless adapter reserved); `/giving/give` + Projects "Pay now" checkout UI; feeds Giving + Projects |
-| photos | `/photos` | Photo gallery, moderation queue, tiered role-based visibility, EXIF-aware serving |
-| praise | `/praise` | Share gratitude / answered prayers / celebrations — counterpart to Prayer Requests |
-| prayer-requests | `/prayer-requests` | Logged-in + anonymous public submission, moderation, lifecycle, prayer-chain assignment (#311) |
-| projects | `/projects` | Project fundraising pages with pledge thermometer, updates feed, public sharing |
-| reading-plans | `/reading-plans` | Daily reading plans with streak tracking and per-day check-off |
-| recordings | `/recordings` | Searchable audio/video library with podcast RSS feed, HTML5 playback |
-| resources | `/resources` | Bookable resources (rooms, equipment, vehicles) with conflict detection + approval workflow |
-| rota | `/rota` | Recurring duty / shift assignments with swap requests and reminders |
-| salvation | `/decision-card` | Public decision-card / salvation tracker form + admin follow-up workflow (#316) |
-| service-plans | `/service-plans` | Programme run-sheet builder (preacher, scripture, hymns, AV, welcome team); operator → confidence-monitor messaging (#300); local hymnal index + default-off remote lookup + congregation-facing public `/os/{token}` view (gap #128, migration 178) |
-| settings | `/settings` | Generic dot-notation settings editor |
-| site | `/site` | Multi-site switcher handler |
-| small-groups | `/small-groups` | Groups/classes register — leaders, member assignment, join requests, meeting rolls tied to attendance service types (#150) |
-| sms | `/admin/sms` | SMS notifications for critical alerts via Twilio / MessageBird / AWS SNS |
-| tasks | `/tasks` | Reminders / task list |
-| transcription | `/admin/transcription` | Auto-transcribe Recordings via Whisper / AssemblyAI / local whisper.cpp; full-text search |
-| translation | `/admin/translation` | ⚠️ **NOT REACHABLE (#485).** The engine, the admin configuration page (provider, API keys, monthly spend cap) and the member opt-in at `/account/translation` all exist. But nothing a user can reach ever calls it: the only caller of `Translation::translate()` is `_apps/api/translate.php`, at an address ApiRouter cannot resolve. **Separate from interface translation** (`I18n` / `t()`), which works normally. Do not describe content translation as working. |
-| venues | `/venues` | Tenant-side venue-hire register — schedule of agreed bookings of a rented building, configurable statuses/usage types, recurring generator, XLSX import, calendar overlay + "is it booked?" warnings, hire agreements + renewal reminders, payable invoice/payment ledger (#429); persisted per-event venue/room links + room-aware coverage verdicts (#436) |
-| visitors | `/visitors` | First-time visitor capture with follow-up cadence + kanban workflow |
-| worship | `/worship/*` | Live presentation layer for Service Plans — operator console, public projector display, song library + CCLI usage log (#308) |
-| zoom | `/admin/integrations/zoom` | OAuth Zoom integration: create meetings from calendar events, auto-link recordings via webhook |
-| api | `/api/*`, `/api/v1/*` | JSON REST API — read + write across events/announcements/attendance/prayer-requests/documents/expenses/leadership/tasks/noticeboard/users; dual-mode auth (session or bearer API key, #323 Phase 2) |
-| offline | `/offline` | PWA offline fallback |
-
-**Infrastructure, not apps:** several `web/_apps/` dirs back the apps above or
-the framework rather than being standalone apps — `account/` (self-service
-"my account" pages spanning several apps above: GDPR export/erasure, payment
-methods, recurring giving, notifications, safeguarding, sms/translation
-prefs), `cron/` (token-gated scheduled-job endpoints: event reminders, feed
-import, discipleship sweep — no UI), `events/api/` + `users/api/` (REST
-handlers backing the `api` app's events/users resources), `live/` +
-`livechat/` (the public `/live` viewer page + its chat API — implementation
-of `livestream`/`cop-live-chat` above), `privacy/` (GDPR consent banner +
-policy pages, public, tied to Auth), `widget/` (public embeddable
-countdown/calendar widgets for external sites), `qr.php` (shared QR-code
-generator utility used by Noticeboard/Visitors/etc), `geo/` (session-authed
-AJAX proxies — `w3w-suggest`/`lookup` — backing the shared location
-partials' "Look up coordinates" button + W3W autosuggest, #456).
-
-Calendar/Events/Preaching Plan is ONE app ("Events") — `/calendar` covers viewing/listing/subscribing; the manage UI handles preaching-plan/worship event types and series.
-
-## Plain English (STANDING RULE — applies to everything written)
-
-**Write the way you would explain something to a capable colleague who does not
-work on this system.** This is not a style preference; the customer asked for it
-explicitly on 2026-09-07 because jargon "can sometimes be confusing even for
-some technically proficient users/developers".
-
-It applies to **everything**, without exception:
-
-- replies in chat
-- code comments and file header comments
-- commit messages
-- pull request titles and descriptions
-- GitHub issue titles, descriptions and closing comments
-- every `.md` document in this repository
-- the in-app help pages under `web/_apps/help/`
-- anything shown to an end user: labels, buttons, error messages, tooltips
-
-**What it means in practice**
-
-- Use ordinary words. Say "a number that only ever counts upward and never
-  resets", not "a monotonically increasing counter". Say "the portal checks who
-  you are before letting you in", not "the middleware performs principal
-  authentication".
-- When a technical term is genuinely needed — a file name, a function name, a
-  standard such as WCAG or OpenAPI — use it, then say in ordinary words what it
-  means and why it matters.
-- **Using more words is fine, and better, if it makes the meaning clearer.**
-  Never compress an explanation into jargon to save space.
-- Prefer short sentences. Break a long one into two.
-- Explain the "why", not just the "what". "This runs after the save, because
-  before the save the row does not have an identity number yet" is far more
-  useful than "ordering constraint".
-- Avoid unexplained abbreviations and internal shorthand on first use.
-- Avoid filler that sounds impressive and says nothing.
-
-**This does not lower the standard of the work.** The code, the analysis and the
-precision stay exactly as rigorous. Only the way it is explained changes.
-
-**When reporting on work done**, be direct about what is finished, what is not,
-what was not checked, and what went wrong. Say "I could not test this because
-there is no database on this machine" rather than implying it was verified.
-
-## Codex review (STANDING RULE — every change gets a second system's review)
+## Codex review — what gets a second system's review, and who does it
 
 *(Heading and "When to run it" reworded 16 September 2026. They used to say
 "before it is committed" throughout. The requirement for a different
@@ -225,9 +93,16 @@ work is committed and pushed after an independent Claude check while Codex
 is unavailable, rather than waiting for Codex — see "When to run it" below
 and `.claude/HANDOFF.md`, decision A, 16 September.)*
 
-**Every piece of work done here must also be reviewed by a different system —
-Codex — before it counts as finished.** The customer asked for this on
-2026-09-10 as a standing task, not a one-off.
+**What gets a review round here.** Any change that could do real harm: code,
+database changes, anything that deletes or overwrites data, touches money,
+credentials or personal details, or changes a safety gate. Those are reviewed by a
+different system — Codex — before they count as finished. **What does not:**
+documentation of every kind (the instruction files, memory, the handoff and
+progress notes included), renames and comment-only changes. The owner set the
+narrowing on 5 October 2026 ("narrow exactly as machine-wide"), knowing it means
+an instruction rewrite is committed without a review round. Until then every
+change here was reviewed, notes included; the customer first asked for reviews
+on 2026-09-10.
 
 The point is a genuinely independent second opinion. Claude plans and builds;
 Codex reviews. If Codex built something, Claude reviews it instead. Two
@@ -235,10 +110,11 @@ different systems rarely make the same mistake in the same place, so this
 catches things one reviewer alone would wave through. It supports the project's
 stated aim of getting things right first time.
 
-**How to run it.** Codex is installed and signed in on the development machine:
+**How to run it.** Codex is installed and signed in on the development machine. Name the
+model and close stdin, or it refuses or sits waiting for typing (see below):
 
 ```bash
-codex exec --skip-git-repo-check "<what you want reviewed>"
+codex exec --skip-git-repo-check -c model="gpt-6-astra" "<what you want reviewed>" < /dev/null
 ```
 
 - `codex exec` is the non-interactive mode: it prints its answer and exits.
@@ -279,13 +155,21 @@ Why: Codex ran out of usage part way through the catch-up on 20 September, after
 four of five areas. Spending what is left on small per-package reviews would
 leave nothing for the review that judges the whole body of work as one piece.
 
-Two things did NOT change. Every package still gets a Claude-side independent
-check by a fresh agent that did not build it, before it is committed. And every
-commit message still says plainly that Codex has not reviewed it yet, so silence
-never implies a review happened.
+Two things did NOT change. Every code package still gets an independent check
+before it is committed, by a fresh agent that did not build it — named in the
+commit message as standing in for Codex, because the machine-wide rule prefers
+the other service and treats a helper as a stand-in. And every commit message
+still says plainly that Codex has not reviewed it yet, so silence never implies
+a review happened.
+
+**One exception, the owner's decision of 5 October 2026: the final whole-of-part-8
+check of #514 goes to Codex**, not to a fresh Claude agent. Part 8 is heavy on
+security and privacy, and that check is a single review — exactly where Codex's
+small allowance is worth most. The end-of-queue whole-branch review still
+happens, possibly after waiting for a reset.
 
 **When to run it.** After the work is written and the mechanical checks pass
-(`php -l`, the sixteen scripts in `tools/audit-checks/`, and the end-to-end
+(`php -l`, every script in `tools/audit-checks/`, and the end-to-end
 migration harness where the database is involved). When Codex is available,
 review before committing remains the normal order. When Codex is not
 available, the owner's decision of 16 September 2026 applies instead:
@@ -294,21 +178,32 @@ code — has independently checked the work, with the commit message stating
 plainly that Codex has not reviewed it yet; Codex reviews the commit as
 soon as it is available again, and any fix it finds lands as a new,
 separate commit. Either way, review by a different system is still
-required for every change before it counts as reviewed — only the timing
-relative to the commit has changed.
+required for every change that gets a review round (see the top of this
+section) before it counts as reviewed — only the timing relative to the commit
+has changed.
 
 **How to treat the result.** As a second opinion, not a verdict. Check each
 point against the code before acting on it. Codex will sometimes be wrong;
 saying so plainly, with the evidence, is the right response. Record in the
 commit message that Codex reviewed the change and what came of it.
 
-**Why this sits alongside the other checks, not instead of them.** The eleven
-audit scripts and the migration harness catch mechanical faults — a mistyped
+**What counts as a real problem, and when the loop stops.** A review round — by
+Codex, or by an independent Claude checker — is NOT CLEAN only for a real problem:
+wrong behaviour, a security or privacy gap, possible data loss, a message or comment
+that is untrue, or a test that passes on broken code. The reviewer still reports
+everything it sees, but hardening ideas, wording preferences and polish go under
+"Found" (or into an issue) and do not start another round. Stop when a round finds
+no real problem. The machine-wide file's narrowing of WHAT gets reviewed applies
+here too (owner, 5 October 2026); this file adds only the timing above and the
+part 8 exception.
+
+**Why this sits alongside the other checks, not instead of them.** The audit
+scripts and the migration harness catch mechanical faults — a mistyped
 column, SQL that only works on MariaDB, a route pointing at a missing file.
 They cannot judge whether the design is right or whether a change has an
 unintended consequence. That is what the second reviewer is for.
 
-## Deep analysis: sequential, one run at a time (STANDING RULE)
+## Deep analysis: sequential, one run at a time
 
 Deep analysis and deep planning use **sequential agents, never parallel**,
 whichever model is doing the thinking. Confirmed by the owner on
@@ -335,6 +230,24 @@ Stopping a run to keep the order is cheap: relaunch with `resumeFromRunId` and
 the script path, and every agent that already finished returns its cached answer
 immediately.
 
+**Fact-gathering may run in parallel; judgements may not.** Reading code, checking
+a long list of issues, web research — work that only finds out what is already
+true — can be split across several agents at once, because none of them makes a
+judgement the others need to see first. Every analysis or planning judgement still
+happens one agent at a time, each seeing what the one before it established.
+(Decided 21 September 2026: seven gatherers took an hour where one at a time would
+have taken most of a day.)
+
+**Keep helper agents few.** Start one only for a large piece of work that is
+genuinely separate — a wide search across many files, a build, or the independent
+check this project requires. Do not start one for work you can finish yourself in a
+handful of steps, and do not start one to re-check your own work: the independent
+checker is the one exception, and it must be a fresh agent that did not build the
+thing. If one helper can do it, use one. No more than 6 at once. On the owner's Mac
+that ceiling is also enforced by `CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS=6` in
+`~/.claude/settings.json` (owner, 5 October 2026): a seventh agent is REFUSED, not
+queued, so a workflow must be shaped to run at most six at a time.
+
 **Deep analysis and deep planning run on Opus**, one agent at a time, in
 sequence. Implementation stays on Sonnet or Haiku, whichever fits — or Opus when
 the work is genuinely complex. **Verification is never done by a weaker model
@@ -350,164 +263,37 @@ should know it was replaced deliberately rather than forgotten.
 available, one agent at a time" is the instruction; which model fills that tier
 will change again. Do not read a model name here as permanent.
 
-**Think hardest at the start.** The owner's word for it is "ultrathink" — typed
-in a live message it raises how much thinking happens before anything is built.
-A plan that is right saves every token a wrong plan would have spent on rework.
+**Give planning the strongest model**, because a plan that is right saves every
+token a wrong plan would have spent on rework. How much the model thinks is set by
+the effort setting (`high` since 5 October 2026, in `~/.claude/settings.json`), not
+by wording in this file.
+
 **Use the planning and orchestration features the tool provides** — in Claude
 Code, workflows and agents — where they fit. The owner has opted in to them.
 
-## When one system runs out: handing over, and handing back (STANDING RULE, all projects)
+## When one system runs out: handing over, and handing back (all projects)
 
-**If whatever is doing a piece of work becomes unavailable — out of credit, rate
-limited, or simply down — hand the work to another suitable one rather than
-stopping.** Then go back to the usual one as soon as it will take work again.
+The full rule is in `~/.claude/CLAUDE.md`; this short form travels with the repository.
 
-This covers **services and the agents inside them**. A particular model refusing,
-a sub-agent failing, or a whole tool being down are the same situation and get the
-same response.
+- If whatever is doing the work becomes unavailable — out of credit, rate limited, refusing, or down, and a retry has already failed once — hand the work to another suitable system or agent rather than stopping. Not merely because something is slow.
+- **The work must survive the move.** Hand over only with what is being attempted, what is established, which files matter, what was tried and rejected, and how the result will be checked. If that cannot be carried across, do not hand over: say plainly that the work is blocked, and why.
+- That is why the handoff (`.claude/HANDOFF.md` — there is only one) is kept current **as the work happens**: after each step, before anything long-running starts, and the moment something is learned that would change how somebody continues.
+- Go back to the usual system at the next natural break, and try it first on every new run even if it failed last time. When it comes back, run a full review of everything done while it was away, as one body of work.
+- **A review must never change hands silently.** If the usual reviewer cannot run: say so in the report and the commit message; get what independence exists (a different model, or a fresh agent that did not build it) and name it; and treat the change as not yet fully reviewed until the catch-up review.
+- Record every fallback in the commit message, the handoff and the progress report.
 
-Deliberately written without naming particular tools. Today that means Claude Code
-and Codex, and within one tool it means falling back from one model or agent to
-another. Tomorrow it may mean something else. The rule is about the situation, not
-the brand.
+This is reasonably safe only because every change is checked by a different system from the one that made it; if that review is skipped, the case for handing over falls with it. Project trap: a Codex refusal that names `gpt-6-sol` is the model-name problem described under "Codex review", not a lack of credit — read the message before recording Codex as unavailable.
 
-### Why this is reasonably safe — and what that safety depends on
+## Never put ".php" in a web address (all projects)
 
-Every change here is already checked by a **different** system from the one that
-made it. That cross-checking is what catches the differences in habit and approach
-between one service or agent and another — which is exactly the risk a hand-over
-introduces.
-
-**So the safety argument depends entirely on that review actually happening.** If
-the review is skipped, or quietly done by the same system that did the building,
-the justification for handing over disappears with it. The two rules hold each
-other up.
-
-### When to hand over
-
-- The service or agent refuses the work: out of credit, a spend cap reached, rate
-  limited, a quota exhausted, or an outage.
-- Retrying has already failed once and the reason will not change by itself.
-
-Do **not** hand over merely because something is slow, or because another system
-might do it better. That is a different decision.
-
-### The one condition that has to be met first
-
-**The work must survive the move.** Hand over only when enough of the situation
-can go with it that the result will be as good. In practice the replacement is
-given: what is being attempted, what has been established so far, which files
-matter, what has already been tried and rejected, and how the result will be
-checked.
-
-If that cannot be carried across, do not hand over. Say plainly that the work is
-blocked and why. A confident answer produced without the context that made the
-question answerable is worse than no answer, because nobody can tell the
-difference by looking at it.
-
-### This is what makes the handoff document load-bearing
-
-The condition above — *the work must survive the move* — is only ever met because
-something wrote down what was going on. **That something is the handoff
-document.** It stops being a courtesy for the next session and becomes the
-mechanism the whole rule depends on.
-
-So it is kept current **as the work happens**, not tidied up at the end:
-
-- After each piece of work, before moving to the next.
-- Immediately when something is learned that would change how somebody continues —
-  a wrong assumption, a trap found, a decision taken.
-- Before starting anything long-running, so an interruption in the middle is
-  survivable.
-
-What it has to carry is exactly what a replacement needs: what is being attempted
-and why, what has been established so far, which files matter, **what was already
-tried and rejected** (the most valuable part, and the first thing lost), what is
-verified versus assumed, and what to do next.
-
-A handoff written an hour ago describes a situation that no longer exists. When
-the moment comes, nobody gets to go back and write it properly — that moment is
-precisely when the system that knew is the one that has stopped answering.
-
-### Go back to the usual one promptly
-
-A fallback is a detour, not a new route. Return at the next natural break — the
-next task, the next planning run, the next review. Do not settle onto the fallback
-because it happens to be working.
-
-**Always try the preferred system first on each new run, even if it failed the
-last time.** Limits reset, outages end, credit gets topped up. Trying costs one
-failed call; assuming costs the whole benefit of the preferred one.
-
-### When the usual one comes back: a FULL review of what it missed
-
-Picking the work back up is not enough. **Once the preferred system for a project
-is available again, run a full review of everything done while it was away** — not
-just the most recent change.
-
-- Review the accumulated work as one body, not change by change. Differences in
-  approach show up across a run of work far more clearly than inside any single
-  commit.
-- Do this **frequently**, not once at the end. The longer the stretch of
-  unreviewed work, the harder it is to unpick anything that turns out to be wrong.
-- This is a real review, not a glance: the same standard as any other, including
-  checking each point against the code rather than taking the reviewer's word.
-
-### The one place a hand-over must NOT happen silently
-
-Reviewing. The value of a second system checking the first is that two different
-systems rarely make the same mistake in the same place. **If the reviewer is
-unavailable and the builder reviews its own work, that value is gone** — and the
-result looks identical from the outside.
-
-So when the usual reviewer cannot run:
-
-1. Say so plainly, in the report and in the commit message. Never let silence
-   imply an independent review happened.
-2. Get what independence is available — a different model, or a fresh agent with
-   no memory of building the thing — and say which was used.
-3. Treat the change as **not yet fully reviewed**, and include it in the catch-up
-   review above.
-
-### Write down what happened
-
-Whenever a fallback is used, record it where the work is recorded — the commit
-message, the handoff note, the progress report. Three reasons. Somebody reading it
-later needs to know which parts had the usual level of checking. The catch-up
-review needs to know what to look at. And a pattern of repeated fallbacks is worth
-noticing: it usually means a limit needs raising, not that the work needs
-re-planning.
-
-## Never put ".php" in a web address (STANDING RULE, all projects)
-
-Links, form targets, redirects and background requests use the **clean address**
-the portal registers, never the file that answers it.
+Links, form targets, redirects and background requests use the **clean address** the portal registers, never the file that answers it.
 
     /expenses/submit/save          yes
     /expenses/submit/save.php      no
 
-Two reasons. It tells a stranger what the site is built with, which narrows down
-for them which weaknesses are worth trying — a free advantage, given away for
-nothing. And **in this portal such an address does not work at all**:
-`.htaccess` answers 404 for every address ending in `.php`, except the three
-pages that genuinely live in the web root (`/index.php`, `/error.php`,
-`/api-docs/index.php`).
+It tells a stranger what the site is built with, and **in this portal such an address does not work at all**: `.htaccess` answers 404 for every address ending in `.php` except the three pages that genuinely live in the web root (`/index.php`, `/error.php`, `/api-docs/index.php`). On 11 September 2026 this rule uncovered three live Expenses forms (submit, approve and treasury) posting to `.php` addresses — pressing Save would have shown "page not found" — and the database upgrade page redirecting to a 404 whenever a form token expired. Nothing else caught it, because every file existed and every address was registered; the mistake was in what the pages pointed AT. `tools/audit-checks/check_no_php_in_urls.py` checks this on every pull request.
 
-That second point is not theoretical. On 11 September 2026 this rule immediately
-uncovered **three live Expenses forms** — submit, approve and treasury — every
-one posting to an address ending in `.php`. Filling in a claim and pressing Save
-would have produced "page not found". The correct addresses were already
-registered and working; the forms simply named the wrong ones. It also found the
-database upgrade page redirecting to a 404 whenever a form token expired,
-stranding an administrator half way through an upgrade.
-
-Nothing else caught it, because every file existed and every address was
-registered. The mistake was in what the pages pointed AT.
-
-`tools/audit-checks/check_no_php_in_urls.py` now checks this on every pull
-request.
-
-## Nothing may look unfinished, careless or AI-made (STANDING RULE, this repo AND every project on the device)
+## Nothing may look unfinished, careless or AI-made (this repo and every project on the device)
 
 **Set by the owner on 4 October 2026**, for this repository and, through `~/.claude/CLAUDE.md` ("Nothing may look unfinished,
 careless or AI-made"), for every other project on the owner's machine. That machine-wide section holds the full eight-point checklist;
@@ -521,11 +307,13 @@ this section records what is specific to WebMS-Intra.
 - **When it is checked: automatically, before every push**, by a git pre-push hook that runs this repository's fast checks and refuses
   the push on a problem; the browser parts (layouts at many screen widths, visual consistency, how pages actually look) run as a full
   audit before every release. **The pre-push check does not exist yet** — building it is part of the audit package queued straight
-  after #514 part 8 is committed (#569). Until then, run the checklist by hand before pushing a change that touches
-  pages, and say so; never claim the automatic check ran.
+  after #514 part 8 is committed (#569). It will be one check per repository, with a small installer that turns
+  the hook on — git never copies hooks between clones, so each clone runs it once (the FileMoCo shape; owner,
+  5 October 2026; not a global hooks folder). Until then, run the checklist by hand before pushing a change that
+  touches pages, and say so; never claim the automatic check ran.
 - **The first full audit and its fixes** are that same package, after part 8 (owner, 4 October 2026: "After part 8 only").
 
-## No web address is ever built in — WebMS-Intra is a product (STANDING RULE)
+## No web address is ever built in — WebMS-Intra is a product
 
 **WebMS-Intra is used by many customers. No web address or domain name may be hard-coded** in code, GitHub
 workflows, settings seeds, templates, emails or the API specification. The owner set this on 13 September 2026:
@@ -544,7 +332,7 @@ Before committing, check: `grep -rn millrdsdacambridge web .github tools` should
 labelled examples. Known offender to remove: the live health-check address in `.github/workflows/deploy.yml`.
 Tracked in #500.
 
-## Times always respect the time zone, including clock changes (STANDING RULE)
+## Times always respect the time zone, including clock changes
 
 **Set by the owner on 23 September 2026.** Every time this portal stores, works
 out, compares or shows must respect the time zone it belongs to, and must stay
@@ -604,31 +392,15 @@ the same exact length — **because the owner chose the standard on 23 September
 judgement like that is made, write it beside the code and put a check on it, so
 nobody quietly reverses it later.
 
-## Comment everything, in every language (STANDING RULE, all projects)
+## Comment everything, in every language (all projects)
 
-Detailed comments in HTML, PHP, CSS, JavaScript, XML, JSON and SQL. Specifically:
+Detailed comments in the code you write or change — HTML, PHP, CSS, JavaScript, XML, JSON and SQL. Explain the WHY, not the what. Record what was tried and rejected ("this used to do X, which was wrong because Y"): it stops the next person reintroducing the fault, or tidying away something load-bearing. Say what code CANNOT do where that is not obvious; an overstated guarantee is worse than none. **JSON has no comments** — never put `//` in a `.json` file; put the explanation in its schema (`description` on every property, `$comment` for maintainers). File headers: see "Code style".
 
-- **Explain the WHY, not the what.** "This runs after the save, because before
-  the save the row has no identity number yet" beats "increments the counter".
-- **Record what was tried and rejected.** The most valuable comment is often
-  "this used to do X, which was wrong because Y" — it stops the next person
-  reintroducing the fault, or tidying away something load-bearing.
-- **Say what code CANNOT do** where that is not obvious. An overstated guarantee
-  is worse than none.
-- **JSON has no comments.** Never put `//` in a `.json` file — it stops being
-  valid JSON. Put the explanation in the schema instead, where JSON Schema gives
-  you `description` on every property and `$comment` for maintainer notes.
+## A schema for every JSON and XML format (all projects)
 
-## A schema for every JSON and XML format (STANDING RULE, all projects)
+Where this project produces or consumes JSON or XML, a JSON Schema file (`*.schema.json`) or an XSD lives beside it, with a `description` on every property — the schema is the documentation as well as the validator. Wire the validation into a check so it actually runs; a schema nothing executes is a document, not a check.
 
-Where this project produces or consumes JSON or XML, the schema describing it
-lives beside it: a JSON Schema file (`*.schema.json`) or an XSD. Give every
-property a `description` — the schema is the documentation as well as the
-validator, which is exactly why the descriptions matter. Wire the validation
-into a check so it actually runs; a schema nothing executes is a document, not a
-check.
-
-## The documentation sweep is a standing task (STANDING RULE)
+## The documentation sweep is a standing task
 
 After each real body of work, and before its pull request is opened, update the
 documentation thoroughly. Not a skim — every one of these:
@@ -651,54 +423,39 @@ falling back to a copy in `/assets/vendor/swagger-ui/` when there is no internet
 **It needs no Docker and no command line**, which is the condition this project
 builds everything to. So do not add a second viewer — keep this one correct.
 
-## Order and bundle the work sensibly (STANDING RULE)
+**Thorough does not mean long.** Cover the substance, with no filler sections, repeated
+summaries or boilerplate; where something no longer applies, delete it rather than explaining
+that it no longer applies. A report the owner reads opens with its verdict and fits on one
+screen, with the evidence below it or in a separate file. A handoff entry says what changed,
+what was learned and what is next, in about 30 lines. When the handoff passes about 1,000
+lines, older entries move into an archive file beside it, marked as history — for
+`.claude/HANDOFF.md` the owner decided on 5 October 2026 that this happens after #514 part 8
+is committed.
 
-The order of tasks in a brief is a suggestion, not a sequence to follow blindly.
-Reorder and combine where that is more efficient — one documentation pass after
-three related fixes, one review round over two small changes — **as long as
-nothing is dropped and the progress table shows what was bundled**. Efficiency
-that hides work is not efficiency.
+## Order and bundle the work sensibly
 
-## Set a watchdog whenever you wait for something to finish (STANDING RULE, this repo AND every repo on the device)
+The order of tasks in a brief is a suggestion. Reorder and combine where that is more efficient — one documentation pass after three related fixes, one review round over two small changes — **as long as nothing is dropped and the progress table shows what was bundled**. Efficiency that hides work is not efficiency.
 
-**Set by the owner on 24 September 2026**, for this repository specifically AND for every project on the owner's machine
-(`~/.claude/CLAUDE.md`, "Set a watchdog whenever you wait for something to finish"). The owner asked for both so that it works
-here on ANY machine — **this repository commits its own copy of the script: `tools/watchdog.sh`** — and on every other project on
-the owner's Mac through `~/.claude/bin/watchdog.sh`. The two copies' logic is kept identical.
+## Set a watchdog whenever you wait for something to finish (this repo and every repo on the device)
 
-**Why.** A session only acts when something wakes it. On 23 September 2026 a background agent finished, its "finished" notice was
-lost, and the queue sat idle until the owner asked "are we stuck?". The owner's instruction since: "continue autonomously, don't
-wait for me to nudge or give the ok."
-
-**The rule.** Whenever you start something that finishes later without you — a background agent, a long test run, the migration
-harness, a review, a deploy — start a watchdog beside it as its own background command, usually:
+Set by the owner on 24 September 2026, after a background agent's "finished" notice was lost and the queue sat idle until the owner asked "are we stuck?". Whenever you start something that finishes later without you — a background agent, a long test run, the migration harness, a review, a deploy — start a watchdog beside it as its own background command, usually:
 
 ```bash
 tools/watchdog.sh quiet .claude-work/resume/<that agent's report>.md 900 14400
 ```
 
-Other modes: `exists <file>`, `contains <file> <text>`, `pid <pid>`. Every mode has a hard deadline (four hours by default).
-When it fires, **look** — it cannot tell "finished" from "stalled" — then act, or start it again if the work is still going.
-**When a step finishes, start the next in the same turn.** Proved on macOS and on Linux; the proofs and the reasons for each line
-are in the script's own header.
+This repository commits its own copy, `tools/watchdog.sh`, so the rule works on any machine; the owner's Mac also has `~/.claude/bin/watchdog.sh`, and the two copies' logic is kept identical. Other modes: `exists <file>`, `contains <file> <text>`, `pid <pid>`; every mode has a hard deadline (four hours by default). When it fires, **look** — it cannot tell "finished" from "stalled" — then act, or start it again if the work is still going. **When a step finishes, start the next in the same turn.**
 
-## Throwaway databases and containers are removed, data included (STANDING RULE)
+## Throwaway databases and containers are removed, data included
 
-**Set by the owner on 24 September 2026**, and written into the machine-wide rules
-as well because it is about this machine, not only this project. Every agent here
-starts MySQL containers to test against. **Removing a container with a plain
-`docker rm` leaves its data behind** in a separate volume — and on 24 September
-this machine held **415 of them, taking 101 GB**, one from almost every check
-round over three weeks. Every agent had reported its clean-up as done.
+Set by the owner on 24 September 2026. Every agent here starts MySQL containers to test against, and **a plain `docker rm` leaves the container's data behind** in a separate volume: on 24 September this machine held 415 of them, taking 101 GB, though every agent had reported its clean-up as done.
 
 - Start test containers with `docker run --rm`, or remove them with `docker rm -v`.
 - Name each after its work (`p514p6chk-mysql`), so it can be identified later.
-- After tearing down, **report both counts**: `docker ps -a` and
-  `docker volume ls -q -f dangling=true | wc -l`. Anything but zero is not clean.
-- Never remove another project's container, a running one, or a NAMED volume
-  without asking. `g2ml-mysql` and `wrapper-v2` belong to other projects.
+- **Report the count of left-behind volumes before and after** (`docker volume ls -q -f dangling=true | wc -l`), and `docker ps -a`. Your own work must add none. Remove only your own containers and volumes, by name.
+- Never remove another project's container, a running one, or a NAMED volume without asking — `g2ml-mysql` and `wrapper-v2` belong to other projects. Never run `docker volume prune` or `docker system prune`: they remove every unused unnamed volume, other projects' included. Claude Code's settings on the owner's Mac refuse both (5 October 2026); Codex is not bound by those settings.
 
-## Code Style (MUST FOLLOW)
+## Code style (house rules that differ from the usual defaults)
 
 - `declare(strict_types=1)` in every PHP file
 - **Full IF notation:** `if ($x === true)` not `if ($x)`
@@ -709,23 +466,6 @@ round over three weeks. Every agent had reported its clean-up as done.
 - `htmlspecialchars($val, ENT_QUOTES, 'UTF-8')` for all output
 - Detailed inline comments with reference links where applicable
 - File header comments must include: file path, description, package, author, copyright (All Rights Reserved), version
-
-## Key Constants (defined in _core/bootstrap.php)
-
-- `PORTAL_ROOT` -- web/ on server
-- `PORTAL_CORE` -- web/_core/
-- `PORTAL_APPS` -- web/_apps/ (since #159)
-- `PORTAL_VENDOR` -- web/_vendor/
-- `PORTAL_SQL` -- web/_sql/
-- `PORTAL_ENV` -- 'dev', 'beta', or 'prod' (auto-detected from DOCUMENT_ROOT)
-
-## ApiRouter routing trap (apply on every new api/* endpoint)
-
-- **`api/*` paths IGNORE tblRoutes.** `Router::handleSpecialRoutes` intercepts them and hands off to `ApiRouter::dispatch`, which splits the path into `appName` + `action` and loads `_apps/{appName}/api/{action}.php`. Handler at any other path is unreachable.
-- **Every endpoint needs `api.{appName}.{action}.enabled = 'true'`** seeded in `tblSettings` or ApiRouter returns 403.
-- **Don't register `api/...` routes in `tblRoutes`** — either the handler is at the convention path (settings flag does the gating) or it's dead code.
-- **Adjacent gotcha**: the `ApiResponse` class exposes `::success()`, NOT `::ok()`. `::setJsonHeaders()` is `private`. Grep `_core/ApiResponse.php` for method names before calling.
-- **v1 facade (#323 Phase 2)**: the `/api/v1/{resource}` facade maps REST verbs onto the same `{app}/{action}` handler files + `api.{app}.{action}.enabled` flags (`ApiRouter::dispatchV1`) — no separate gating vocabulary, nothing registered in `tblRoutes` for it either.
 
 ## Web-root shadowing trap (check whenever you add an address or a file)
 
@@ -753,6 +493,8 @@ This has already bitten twice, found 10 September 2026:
   The address was deleted instead (migration 189); the folder holds
   `countdown.js`, which other people's websites embed, so it cannot move.
 
+**Deleting a folder from the web root that hides an address needs the owner's explicit approval first** (owner, 5 October 2026). The danger is invisible: the folder looks like clutter, and removing it silently publishes whatever page sat behind it. Ask in one line, naming the address it would expose and what the page behind it checks.
+
 **Two collisions remain and both are deliberate:** `assets` has its own
 `RewriteRule ^assets/?$ index.php` ahead of the folder rule, and `api-docs` is
 meant to be served directly by the web server.
@@ -773,22 +515,6 @@ there is no such folder, so that request gets through perfectly well even while
 a dozen addresses that were entirely fine; a check that cries wolf gets switched
 off, and then it catches nothing.
 
-## Two variables, and only two (apply on every page under _apps/)
-
-`web/_core/Router.php` does `global $mysqli, $SETTINGS;` immediately before it
-loads a page. **Those two are the only things a page inherits.** Anything else
-it reaches for is simply not there, and PHP does not complain until the moment
-it is used.
-
-Five Export CSV buttons were dead because their pages used `$db` (#482) — the
-members list, the audit trail, the attendance register, the leadership roster
-and the expenses queue. Each crashed the instant somebody pressed the button:
-no file, no message on screen. Use `$mysqli`.
-
-A helper that receives the connection as a **function parameter** is a different
-thing and is fine — `web/_apps/announcements/_workflow-gate.php` does that
-correctly.
-
 ## Name things by the right identifier (the shape behind several bugs)
 
 Three separate faults on 10 September 2026 were the same mistake: something was
@@ -805,659 +531,20 @@ named by the wrong kind of identifier, and nothing caught it.
 actually uses it** — seeded addresses against `full_schema.sql`, table names
 against the schema — not against the folder layout, which merely looks similar.
 
-## Every database change goes in the install script too (STANDING RULE)
+## Working with the owner (set 16 September 2026, added to since)
 
-**Any change to the shape of the database must ALSO appear in the fresh-install
-script.** The owner confirmed this on 11 September 2026 as a standing rule for
-all future work, not a one-off.
+The sections above cover plain English, reviews, planning, the handoff and the documentation sweep. This is the rest of how the owner wants work run.
 
-It has to reach BOTH of the two ways a customer's database can come into being,
-and they must agree:
-
-1. **THE INSTALLER** — a brand-new database, built from nothing.
-   `web/_sql/full_schema.sql`, run by `web/_install/index.php`.
-2. **THE UPGRADE** — a database that already exists and is being brought up to
-   date. A **numbered migration** in `web/_sql/`, replayed by
-   `web/_core/Migrator.php` through `web/_install/upgrade.php` (which is what
-   the Admin → Upgrade button reaches, via a one-line proxy at
-   `web/_apps/admin/upgrade.php`).
-
-A change that reaches only one of them is the dangerous case, and it is quiet.
-Put it only in a migration and a brand-new install is missing it. Put it only in
-the fresh-install script and every existing customer never gets it. Either way
-two installations of the same version behave differently, and nobody finds out
-until somebody hits it — by which time the difference is old and hard to trace.
-
-Migrations must be safe to run twice, because the installer replays
-`full_schema.sql` and then EVERY numbered migration, ignoring which ones have
-already run.
-
-`tools/audit-checks/check_schema_seed_parity.py` compares the two and fails when
-they disagree, so this is enforced rather than remembered. Run it before
-committing anything that touches `web/_sql/`.
-
-**The storage engine is InnoDB and should stay that way.** All 209 tables use
-it. It is what makes transactions and links between tables possible — and it is
-what makes an all-or-nothing restore possible at all (#472). The alternative,
-MyISAM, supports neither. Moving away from InnoDB would break the backup restore
-and the safety of every multi-step database change in the portal.
-
-## SQL dialect trap (apply on every migration)
-
-- **Production runs MySQL 8** (DreamHost shared hosting offers no other engine and no version choice). **Which** MySQL 8 is not confirmed — 8.0's support ended April 2026, 8.4 LTS runs to 2029; see #475. Either way it is MySQL, so MariaDB-only `IF [NOT] EXISTS` on `ADD`/`DROP COLUMN`, `ADD`/`CREATE`/`DROP INDEX`/`KEY`, or `CHANGE`/`MODIFY COLUMN` is rejected with **ERROR 1064** — `CREATE TABLE IF NOT EXISTS` / `DROP TABLE IF EXISTS` are standard MySQL and stay fine.
-- **Use the `information_schema` + `PREPARE`/`EXECUTE` guard idiom** instead (see DEV_NOTES.md → "Portable DDL convention (MySQL 8.0 ∩ MariaDB)" for the full templates). House examples already shipped this way: migrations **037**, **112**, **138**.
-- **Migrations must replay as no-ops** on an up-to-date schema — the installer replays every numbered migration after `full_schema.sql`, ignoring `tblMigrations`.
-- **CI**: `tools/audit-checks/check_mariadb_only_ddl.py` + the `e2e-migrations` harness enforce this.
-
-## Recent ships (chronological)
-
-- **`claude/backlog156-reports`** (branched off `alpha`) — issue #156:
-  Reports Builder, a whitelist-driven custom report builder at
-  `/admin/reports/builder/*` alongside the pre-existing #93 fixed
-  dashboards. `Portal\Core\ReportRegistry` (pure static data — no DB, no
-  superglobal reads) is the ENTIRE whitelist: six v1 sources (users,
-  events, attendance, expenses, giving, tasks), each a registry-owned
-  table/alias/tenant-scope-expression/curated-JOINs entry with a closed
-  per-column expr/type/gates/aggs whitelist; closed keyed sets for
-  operators, aggregations, and date-bucket transforms.
-  `ReportRegistry::assertSelfConsistent()` hard-fails if a future edit
-  ever references care/kids/safeguarding/prayer-requests/auth/settings/
-  API-key tables — those domains are structurally absent, not merely
-  gated. `Portal\Core\ReportBuilder::compile()` is the ONE place report
-  SQL is assembled: every identifier reaches the SQL string only via
-  strict key lookup against the registry; every value is bound via
-  `bind_param()` with a lockstep types string + an explicit
-  `strlen()===count()` assert; `siteID = ?` is force-injected first,
-  outside the user-filter parentheses, so no `OR` can bypass tenancy.
-  Column gates (a role, `@siteAdmin`, or `@rootAdmin`) apply identically
-  in SELECT and WHERE, closing the filter-as-oracle leak; financial
-  totals need Treasurer/Site Admin, Giving donor identity needs Treasurer
-  strictly. A saved definition is re-validated against the registry on
-  EVERY run — a hand-edited DB row fails closed. Builder UI: drag-
-  reorderable column chips (`Asset::sortableJs()`), repeatable filter rows
-  (one AND/OR toggle), optional group-by + aggregates, an AJAX preview
-  endpoint (session-authed, outside `api/*` — the `geo/` precedent), CSV
-  export, and a bar/line chart on grouped results via a new SRI-pinned
-  `Asset::chartJs()` (Chart.js 4.4.4, hash independently re-derived from
-  the npm registry tarball — jsdelivr itself was policy-denied from this
-  build's sandbox proxy). Migration 184: `tblReportDefinitions`
-  (DEVIATION from #156's literal `tblReports` — documented in the
-  migration header), 3 settings seeds (`reports.enabled` seeded ON so the
-  #93 dashboards survive the upgrade unchanged), 8 route seeds. New
-  AppRegistry entry `reports` folds BOTH the dashboards and the builder
-  under one toggle. GDPR lockstep in the same PR (GdprEraser catalogue
-  entry + data-export.php block). A committed, dependency-free red-team
-  self-test (`tools/report-builder-selftest.php`) exercises the real
-  classes — registry self-consistency, a benign compile with tenant scope
-  provably first, and 15 hostile/malformed definitions each throwing
-  `InvalidArgumentException` before any SQL string exists. All 11 audit
-  checks green, `php -l` clean on every touched file, `node --check`
-  clean on the new JS.
-- **`claude/backlog153-forms`** (branched off `alpha`) — issue #153: new
-  Forms Builder app at `/forms` (`web/_apps/forms/`, 16 pages/handlers) +
-  `Portal\Core\FormEngine` — the single injection-safety boundary for a
-  12-type field registry (`FormEngine::FIELD_TYPES` — a PHP whitelist, NOT a
-  SQL ENUM, so adding a type is code-only, never a migration), a whitelist
-  config sanitiser (`sanitiseConfig()` — `configJson` is DATA, re-sanitised
-  on every read AND write), an escaped-everything renderer
-  (`f_{fieldID}` server-integer field names; choice fields submit
-  bounds-checked integer indexes, never raw option text), per-type
-  server-side validators, and immutable `answersJson` snapshot persistence
-  (`{fieldKey:{label,type,value}}`, survives later field edits/deletes).
-  Admins build/publish forms at `/forms/edit` + `/forms/manage`; members
-  fill published internal/both forms at `/forms/fill`; an OPTIONAL public
-  link `/f/{token}` is a Router special route (cloned from service-plans'
-  `/os/{token}`), default OFF (`forms.allowPublic='false'`), six-gate
-  uniform-404 scoped to the FORM's own siteID throughout (never ambient
-  `Site::id()` — no active-site context on a public route). Public POST:
-  honeypot → CSRF → `Captcha::verify()` → `RateLimiter` (fake-success on
-  `isBlocked()`) → 5/15min per-IP bucket (`prayer-requests/anonymous-save
-  .php` + `assets/found-save.php` precedent). Responses reviewed/exported
-  admin-only at `/forms/responses` (CSV via `FormEngine::csvRows()` +
-  `CsvExporter`). GDPR lockstep in the SAME PR: `GdprEraser::catalogue()`
-  hard-deletes a member's responses by `submitterID`;
-  `auth/account/data-export.php` gained a matching `formResponses` block —
-  a public (anonymous) response carries no `submitterID` and sits outside
-  both by design (salvation decision-card precedent), documented in
-  `/help/forms` + DEV_NOTES. Three residual defaults applied per the build
-  spec (owner sign-off deferred, minimal-safe choice made): the
-  display-only `heading` field type is included; NO per-role fill
-  restriction in v1 (any signed-in site member may fill a published
-  internal/both form); public-response retention = **keep indefinitely**
-  in v1, with a `forms.responseRetentionDays` settings stub (seeded `'0'`
-  = forever) for a future auto-purge cron. Migration 182: 3 new tables
-  (`tblForms`/`tblFormFields`/`tblFormResponses`), 3 settings seeds, 15
-  route seeds (13 protected + 2 public, no `api/*` rows — ApiRouter trap).
-  All 13 audit checks green, `php -l` clean on every touched file.
-- **`claude/backlog150-groups`** (branched off `alpha`) — issue #150: new
-  Small Groups app (`web/_apps/small-groups/`, slug `small-groups`) —
-  groups/classes register for Sabbath School classes, home groups, Bible
-  studies. Roster with leader/co-leader/member roles + optional
-  self-service join requests (pending → approve/decline, last-active-leader
-  guard on remove/demote/leave); per-meeting roll
-  (`tblSmallGroupMeetingAttendance`, presence-row model mirroring
-  `tblEventAttendance`) with an ADDITIVE headcount push into the existing
-  Attendance app via a group's linked `tblAttendanceServiceTypes` row —
-  several groups can share one service type/session, each contributing its
-  own labelled `tblAttendanceCounts` row matched by `(sessionID,
-  groupLabel)`; zero changes to Attendance's own schema/code. Meeting
-  location reuses the #456 shared partials (`portal_location_input`/
-  `portal_location_display`) with canonical column names, byte-identical
-  to migration 180's `tblVenues` shape, plus a new `locationVisibility`
-  gate (leaders/members/site, default `members` — no public tier, since
-  groups often meet in a member's home). New `Portal\Core\SmallGroups`
-  class is the tenant-safety choke-point AND the stable contract #304
-  (group messaging) and #321 (watch-party rooms) are expected to consume —
-  `groupID` scope anchor, `status='active'` membership predicate,
-  `isLeader()`/`canManage()` gates; the denormalised `siteID` on
-  member/meeting rows is written only by `SmallGroups::upsertMembership()`
-  after confirming an ACTIVE `tblUserSites` row for the group's own site
-  (leadership `assign.php:87-93` join precedent), making cross-site
-  membership structurally impossible. New `groups_coordinator` role. GDPR
-  lockstep in the same PR: 6 `GdprEraser::catalogue()` entries, 4
-  `data-export.php` blocks, 1 `offboarding/do.php` step ending a leaver's
-  memberships. **v1 is adults-only** — membership rows are portal users
-  only; zero named-child rows anywhere (the Kids app's `tblKidProfiles`
-  remains the sole place child identity lives, verified by grep). Migration
-  183 (181 = alpha head at spec time, 182 reserved by #153 Forms in
-  flight): 4 new tables, 7 settings seeds (`small-groups.enabled` defaults
-  `'0'`, opt-in — the pre-existing `'1'`-vs-`'true'` nav/dashboard
-  enable-flag quirk is inherited verbatim, not fixed here), 1 role seed
-  (`WHERE NOT EXISTS` idiom), 13 route seeds (12 app + 1 help,
-  `isProtected=0`), zero ALTERs to any existing table. Also found + fixed
-  along the way: `check_sql_columns.py`'s SELECT-column regex false-
-  positives on any `FROM tblSmallGroup*` clause carrying a short alias
-  immediately after the table name — the bare substring "Group" inside
-  every one of the four new table names lets the regex's own greedy-`\w+`
-  backtracking mis-match "Group…" as a false `GROUP BY` terminator,
-  truncating the captured table name to `tblSmall` and reporting a bogus
-  unknown-table finding; worked around by never aliasing the PRIMARY
-  `FROM tblSmallGroup*` table (using full-name column qualification
-  instead) while still freely aliasing any table introduced via `JOIN`
-  (invisible to that checker's FROM-anchored regex) — documented inline at
-  each call site since the same shape will recur for any future table
-  whose name embeds a bare SQL keyword. New help page (`/help/small-groups`)
-  + help-index card. All 13 audit checks green, `php -l` clean on every
-  touched file, zero raw `<table>` (portal-data-list throughout).
-- **`claude/backlog-pwa-brand`** (branched off `alpha`) — two small,
-  low-risk backlog finishers, one PR: **#141 residual** (the push half
-  was already fully shipped as #322 — only install-prompt/manifest/iOS-meta
-  remained) — self-hosted `assets/js/pwa-install.js` captures
-  `beforeinstallprompt`, suppresses the mini-infobar
-  (`event.preventDefault()`), and reveals a dismissible bottom-sheet
-  banner (`#portal-install-prompt` in footer.php, same visual pattern as
-  the existing cookie-consent banner) with a brand-aware "Install
-  {product name}" heading; dismissal remembered 30 days in localStorage,
-  a real install remembered permanently via `appinstalled`.
-  `manifest.php` gains a brand-aware `shortcuts[]` (Dashboard / Calendar
-  / Giving / Prayer Requests) gated through `AppRegistry::isEnabled()`,
-  failing CLOSED (shortcut dropped) on any registry exception.
-  `header.php` gains the missing `apple-mobile-web-app-title`
-  (brand-aware — was absent entirely) + the standard-track
-  `mobile-web-app-capable` twin of the pre-existing apple- tag. **#306**
-  — functional starter SVG brand kits (`icon.svg`/`icon-192.svg`/
-  `icon-512.svg`/`logo.svg`) for the four presets that previously fell
-  back to generic WebMS-Intra assets:
-  `assets/images/brandkit/assets/{schoolms,charityms,communityms,businessms}/`,
-  each a distinct emblem (mortarboard/heart/interlocking-rings/bar-chart)
-  on the same indigo-tile + gradient-token structure as the WebMS/
-  ChurchMS kits. `brand-defaults.php`'s four stub presets now point
-  `assetFolder` at their new kits. Known design debt (documented in-repo,
-  not fixed — no font-outlining tool available): each `logo.svg`'s
-  wordmark is set with a system-font stack, not the WebMS/ChurchMS kits'
-  outlined vector glyphs — a designer pass is recommended before any of
-  the four ship to a real customer; the PWA-install-facing `icon*.svg`
-  files need no such caveat. Also fixed two stale DEV_NOTES.md doc-drift
-  items found along the way: the "Per-brand assets" section still
-  described the pre-brandkit-move `assets/images/brands/` path, and its
-  #297 deferred-follow-ups list still showed sub-brand artwork and
-  OpenAPI brand-awareness as open when both are now done (#306 here,
-  #307 previously). No migration in either half. All 10 audit checks
-  green, `php -l` clean on every touched PHP file, all 16 new SVGs
-  well-formed XML.
-- **`claude/gap322-webpush`** (branched off `alpha`) — issue #322: Web Push
-  notifications ("we're live now" + service-reminder channels). Migration
-  111 shipped `tblPushSubscriptions` + the four `push.vapid*`/
-  `push.contact`/`push.enabled` settings, but the subscribe/unsubscribe
-  handlers sat at `_apps/api/push/*` — a path ApiRouter never resolves
-  (same routing trap already fixed for worship/livestream in #372/#373) —
-  and NO sender existed anywhere. This ships the whole loop:
-  `Portal\Core\WebPush` (VAPID ES256 JWT with the mandatory DER→JOSE
-  signature conversion, RFC 8291 aes128gcm payload encryption via a fresh
-  ephemeral P-256 keypair per message + triple `hash_hkdf()`, RFC 8030
-  delivery with TTL/Urgency/Topic); a committed crypto self-test
-  (`tools/webpush-selftest.php`, no DB/network, exercises the real private
-  methods via reflection) that PASSES; relocated
-  `_apps/push/api/{subscribe,unsubscribe}.php` + the two
-  `api.push.*.enabled` flags migration 177 seeds; SSRF-guarded endpoint
-  validation (https-only, no IP-literal/local host, admin-editable
-  host-suffix allowlist) enforced at BOTH subscribe and send time; the
-  VAPID private key sodium-encrypted at rest, never redisplayed, never
-  sent to the client; client subscribe UI (`assets/js/push-subscribe.js`)
-  + new `sw.js` `push`/`notificationclick` handlers; the "we're live now"
-  manual admin button (`/admin/livestream` + Host Console) plus a
-  default-OFF auto-detect cron (`cron/push-golive.php`, dedupe once per
-  channel per day) and a default-OFF anonymous "starting soon" broadcast;
-  a Web Push companion to `cron/event-reminders.php`'s 1h window (same
-  dedupe claim as the email send); `/admin/integrations/push` config page
-  (generate-or-paste keys, TTLs, toggles, per-channel subscription counts,
-  test-send); GdprEraser + offboarding coverage of `tblPushSubscriptions`.
-  INERT until an admin sets VAPID keys (`WebPush::isConfigured()` gates
-  every send path). Migration 177 (renumbered from 175 — #423's UPC-E took
-  175, #234's shared-mailbox took 176): 3 additive `tblPushSubscriptions`
-  columns (dead-subscription pruning), settings seeds, 4 route seeds, no
-  new tables (reuses `tblUserReminderLog` / `tblEventReminderLog` for
-  dedupe). All 13 audit checks green, `php -l` clean on every touched file.
-- **`claude/gap128-oos`** (branched off `alpha`) — gap #128 residual
-  (re-scoped #128 "Order of Service planner with iHymns integration"):
-  service-plans (#262/#300) + Worship (#308/#355) already covered
-  everything the issue asked for except three genuine gaps, all additive
-  on the EXISTING `tblServicePlan`/`tblServicePlanItem`/`tblSongs` tables —
-  no third service-plan model, no new app. **R1** local hymnal index —
-  new `tblHymnals`/`tblHymnalEntries` (metadata only, never lyrics),
-  `Portal\Core\Hymnal::searchLocal()`, admin CRUD + CSV import at
-  `/admin/hymns`. **R2** optional remote ("iHymns") lookup, Tier 2,
-  default OFF (`hymns.remote.enabled='false'`) — a generic SSRF-hardened
-  HTTPS JSON client (`Hymnal::searchRemote()`: https-only, single-host
-  allowlist, private/reserved-IP refusal, no-redirect-follow, 3s/5s
-  timeouts, ~512 KB body cap, JSON-only, 24h cache in
-  `tblHymnLookupCache`), reachable via session-authed
-  `service-plans/api/hymn-search.php` (ApiRouter convention path,
-  `api.service-plans.hymn-search.enabled` flag, NOT a tblRoutes row).
-  **R3** congregation-facing public Order of Service — new
-  `tblServicePlan.publicToken`/`isPublicShared`, Router special route
-  `/os/{token}` (cloned from `/a/{token}`) → `service-plans/public.php`:
-  congregation fields only, `notes` never queried, uniform 404 for
-  unknown/unshared/unpublished/disabled tokens, OFF by default at both
-  site (`service_plans.public_share.enabled`) and plan level; CSRF'd
-  `service-plans/share.php` (enable/disable/rotate) + a `/qr.php` code.
-  `print.php` gains `?version=leader|congregation` (default `leader`,
-  byte-identical to before). **R4 (glue)** nullable
-  `tblServicePlanItem.songID` FK → `tblSongs` — picking a hymn/song
-  auto-promotes it into `tblSongs` (check-first upsert) and links it;
-  free-text `title` stays the universal fallback. Migration 178 (176/177
-  reserved by in-flight webpush/shared-mailbox work); all 11 audit checks
-  green, `php -l` clean on every touched file.
-- **`claude/gap436-venue-coverage`** (branched off `alpha`) — gap #436:
-  additive follow-up to the shipped Venue Bookings app (#429, migration
-  170) and the wall-clock fix (#435). `tblEvents` gains two optional
-  nullable columns, `venueID`/`roomID` (migration 179, FKs
-  `ON DELETE SET NULL`) — the calendar manage form's venue picker upgrades
-  from a transient advisory-only check into a **persisted** link, with a
-  cascading room `<select>` (disabled, not hidden, when the venue has no
-  rooms). `Venues::classifyEventCoverage()` gains an optional trailing
-  `?int $roomId = null` — when set, per-day booking rows are filtered to
-  `roomID IS NULL OR roomID = $roomId` (a whole-venue booking still covers
-  every room) before the untouched wall-clock day-cascade runs, and a new
-  `COVERAGE_ROOM_NOT_COVERED` verdict (severity danger) fires when the room
-  itself is uncovered but the venue has a confirmed bookable hire for a
-  *different* room that day; null `$roomId` (both pre-#436 call sites)
-  reproduces today's output bit-for-bit, and an unresolvable room silently
-  degrades to venue-level coverage (no existence oracle). New public
-  `Venues::getRoom()` accessor. `calendar/manage/save.php` validates and
-  persists both links site+venue-scoped (`Venues::getVenue()`/`getRoom()`)
-  on create/update — invalid/foreign posts silently NULL, never a
-  save-blocking error — and OMITS the columns from the UPDATE entirely
-  when the Venues app is disabled/absent/throws, so a toggle can never
-  wipe an existing link; an event can only ever link its own site's
-  venue/room. `full_schema.sql` folds the two columns + KEY indexes inline
-  into `tblEvents`' CREATE but deliberately leaves the two FKs out
-  (`tblEvents` is created thousands of lines before `tblVenues`/
-  `tblVenueRooms` in that file — see DEV_NOTES.md's new "full_schema.sql
-  fold pattern" subsection) — migration 179's guarded `ADD CONSTRAINT`
-  blocks add both FKs on replay instead. Also fixed in this PR: the
-  event-form's live "is it booked?" JS posted `startDateTime`/
-  `endDateTime`/`timezone` while `venues/api/check.php` has always read
-  `start`/`end`/`tz` — every live check silently 400'd since #429 shipped;
-  canonicalised on `check.php`'s existing contract and fixed the JS to
-  match, adding `roomID`. All 10 audit checks green, `php -l` clean on
-  every touched file.
-- **`claude/gap456-location-chunkB`** (branched off
-  `claude/gap456-location-chunkA`) — #456 Chunk B: the PII + GDPR half.
-  Migration 181 adds FOUR columns to `tblUsers` ONLY — `latitude`/
-  `longitude`/`what3words` (member home coordinates, PRIVATE by default,
-  NEVER auto-geocoded — no `geocodedAt`/`geocodeSource` pair) and
-  `visibilityCoords` (ENUM, default `'private'`, INDEPENDENT of the
-  existing `visibilityAddress`). Capture on the owner surface
-  (`directory/me.php`, per the spec — NOT `/account`); `directory/
-  save.php` validates the pair (10 → 14 bind_param placeholders).
-  `directory/profile.php` gates coords through a SEPARATE
-  `$can($u['visibilityCoords'])` check: owner/admin see full precision +
-  the exact what3words, any other permitted viewer sees coords coarsened
-  to 3dp (~110m, `GeoLocation::coarsenCoords()`) with an "Approximate
-  location" badge and the what3words value suppressed entirely (a
-  3m-precise W3W square can't be meaningfully coarsened). The pre-existing
-  `$can()` "team tier = private" quirk is inherited verbatim, not fixed.
-  GDPR lockstep in the SAME PR: `data-export.php` gained a
-  `giftAidDeclarations` block (closed a pre-existing gap — Gift Aid
-  address PII was never exported); `delete-confirm.php`'s tblUsers
-  anonymise UPDATE now also nulls `displayAddress`/`displayPhone` (a
-  separate pre-existing miss) plus the three new PII columns;
-  `GdprEraser::catalogue()`'s tblUsers `nullCols` extended with
-  `latitude`/`longitude`/`what3words`. GiftAid (`giving/gift-aid.php`) and
-  Salvation (`salvation/card.php`) reuse the shared `location-input`
-  partial in TEXT-ONLY "reduced names map" mode mapped onto their existing
-  `address`/`postcode` POST fields — no new columns, no new erasure
-  surface. Kids/Care/Visitors hard-excluded, verified by grep (zero
-  matches). `UserCreate`/`UserUpdate` API schemas document that member
-  coordinates/W3W are never readable or writable via the REST API in any
-  mode. All 13 audit checks green, `php -l` clean on every touched file.
-- **`claude/gap456-location-chunkA`** (branched off `alpha`) — #456 Chunk A:
-  full address + geocoordinates + what3words platform layer (foundation,
-  non-PII, interactive map — Chunk B lands the PII/GDPR half in a later
-  PR off this branch). Cross-repo data-format CONTRACT with
-  ProjectBookIT/ProjectEPass (identical column shapes, canonical
-  `location` JSON wire object, what3words canonical form) but fully
-  standalone — zero runtime dependency on either repo. New
-  `Portal\Core\GeoLocation` (address normalise/format mirroring
-  `Venues::saveVenue()`, DECIMAL(10,7) coord validation, W3W
-  canonicalisation, map link-outs, `toLocationObject()`/
-  `fromLocationObject()` serializer), `Portal\Core\What3Words` (v3 API
-  client — key in the QUERY STRING not a header, unlike every other
-  Bearer adapter in this codebase; never logged; default OFF via
-  `w3w.enabled`, which gates ONLY the API — the `///word.word.word` input
-  is always present as a stored-field fallback), `Portal\Core\Geocoder`
-  (Google primary → Nominatim/OSM fallback, policy-compliant User-Agent +
-  ≤1 rps throttle + `tblGeocodeCache`, `geo.autoGeocode` default OFF,
-  every method best-effort/never-throws). Three new shared partials —
-  first in the codebase at `web/_core/partials/`:
-  `location-display.php`/`location-input.php`/`location-map-assets.php`
-  (pinned Leaflet 1.9.4 from cdn.jsdelivr.net with SRI — hashes verified
-  by independently re-deriving them from the npm registry tarball, since
-  jsdelivr itself was unreachable from the build sandbox; all four
-  sha384/sha256 digests matched the build spec exactly). New admin pages
-  (`/admin/integrations/{what3words,geocoding}`,
-  `/admin/settings/organisation`) + two session-authed AJAX proxies
-  (`/geo/w3w-suggest`, `/geo/lookup`) outside `api/*`. Wired into Venues,
-  Events (existing `locationGeoLat/locationGeoLng/locationW3W` columns
-  now validated + JSON-LD `geo` + interactive map + canonical `location`
-  object additively emitted by the events REST API create/update/list/
-  detail), Event occurrence overrides (`overrideGeoLat/overrideGeoLng/
-  overrideW3W`, hand-entered, NULL = inherit), Resources, Asset Locations.
-  Migration 180: five-column location block on
-  `tblVenues`/`tblResource`/`tblAssetLocations`, three override columns on
-  `tblEventOccurrenceOverrides`, new `tblGeocodeCache`, 14 settings seeds
-  (all default OFF/empty), 10 route seeds — upgrade is a full no-op. No
-  PII table touched (tblUsers/directory/GiftAid/Salvation are Chunk B).
-  All 13 audit checks green, `php -l` clean on every touched file.
-- **`claude/gap234-shared-mailbox`** (branched off `alpha`) — gap #234:
-  MS365 Graph email via an admin-configured shared mailbox, formalising
-  and hardening the app-only `Mailer::sendViaGraph()` path already in
-  place rather than adding the issue body's delegated `Mail.Send.Shared`
-  auth model (deferred — zero new secrets vs. an entire OAuth refresh
-  surface + a dependency on a licensed human account). New
-  `mail.ms365.sharedMailbox` (empty = off, today's behaviour unchanged)
-  + `Mailer::effectiveSender()` resolver; explicit `message.from` object
-  now built in BOTH modes (benign fix — `mail.defaultFromName` finally
-  works on MS365, not just Google); 401-retry-once / 429-bounded-retry
-  (≤5s `Retry-After` only) / 403-404-Graph-error-code-surfaced / optional
-  opt-in `mail.fallbackProvider='google'` (default off, fail loud). New
-  `tblEmailLog` (migration 176) logs every send from BOTH providers via
-  the new public `Mailer::logSend()` — closes the #230 audit-trail
-  dependency too; opportunistic retention prune, no new cron.
-  `GdprEraser` gained a bespoke (not `catalogue()`) step scrubbing an
-  erased user's address out of the comma-joined `toRecipients` column,
-  captured before the catalogue's own `tblUsers` step nulls it. Admin UI:
-  `/admin/integrations` MS365 Graph card gained a Shared-Mailbox Sending
-  sub-section + CSRF'd save handler (`admin/integrations/ms365-mail-
-  save.php`); Send Test Email now calls the real `Mailer::send()` instead
-  of a duplicated inline cURL flow, closing the test/production drift
-  risk permanently. Fold-in fix: `/admin/integrations/email` was reading
-  a dead `email.provider`/`email.from` vocabulary and always reported
-  "smtp" — now reports `Mailer::provider()` + effective sender, plus a
-  "Recent sends" `portal-data-list`. Shared mailbox is admin-config-only
-  (never request-derived); no secret ever logged. Migration 176:
-  `tblEmailLog` + 5 non-sensitive settings seeds + 1 route seed, folded
-  into `full_schema.sql`. All 13 audit checks green, `php -l` clean.
-- **`claude/gap7-workflow-engine`** (branched off `alpha`) — gap #7
-  (#443): Workflow Execution Engine + generic `/approvals` inbox.
-  Migration 034 shipped four workflow tables + an admin definition CRUD
-  but no code anywhere started/advanced/completed/timed-out an instance —
-  this ships the engine (`Portal\Core\Workflow`, `web/_core/Workflow.php`).
-  Every mutator (`start`/`act`/`cancelForSubject`/`timeoutSweep`) is
-  atomic: `begin_transaction` + `SELECT … FOR UPDATE` + `UPDATE …
-  WHERE currentStep=? AND status IN (…)` gated on `affected_rows === 1`
-  (the `expenses/approve/save.php` / `Payments::markPaymentSucceeded`
-  discipline) before recording the action row or applying any subject
-  side effect — a losing racer does nothing. Authorisation (role/user/
-  group match on the CURRENT step, or a default-on site-admin override)
-  lives INSIDE `act()`, never trusted from the HTTP layer; a cross-tenant
-  instanceID is indistinguishable from a missing one. New `/approvals`
-  app (AppRegistry entry, default-on) with an awaiting-decision queue,
-  CSRF'd approve/reject/comment handler, and history timeline. New
-  token-gated hourly `cron/workflow-timeouts.php` — escalates an overdue
-  step unless it explicitly sets `autoAction=approve|reject`; never
-  auto-acts on a bare timeout. Reference consumer wired: Announcements
-  publish approval behind default-off per-site
-  `workflows.announcements.enabled` — final approval flips
-  `tblAnnouncements.isPublished` inside the SAME transaction as the
-  approval claim (no double-publish, no approved-but-unpublished ghost);
-  a misconfigured gate fails OPEN (publishes directly + logs a platform
-  warning) rather than blocking publishing. Admin CRUD completion at
-  `/admin/workflows`: per-step delete (FK-aware, refuses with active
-  instances), an `isActive` toggle, an `autoAction` selector. The seeded
-  `expense_approval` definition (034) stays dormant by design — Expenses
-  keeps its own independent multi-approver system. Migration 174: four
-  additive `tblWorkflowInstances` columns + one composite index + one
-  `tblWorkflowActions` enum value (no new tables), plus the
-  `announcement_approver` role/definition/step, 8 settings seeds, 4
-  route seeds. All 13 audit checks green, `php -l` clean on every
-  touched file.
-- **`claude/gap4-bulk-statements`** (this session, branched off `alpha`) —
-  gap #4: treasurer-only bulk year-end giving statements at
-  `/giving/statements` (#440). Generalised `Portal\Core\Giving::
-  renderStatementPdf()` to `(siteId, donorId, from, to, label)` so the
-  self-service page (`giving/my-statement.php`) and the new bulk batch
-  render through the exact same function — byte-identical output. Three
-  upgrades landed on that shared renderer: donor lookup is now site-scoped
-  (active membership OR giving history at the site — an `OR` of two
-  `EXISTS`, closing a latent cross-tenant render hole while still allowing
-  a treasurer to pull a departed donor's historical statement); a
-  Gift-Aid-eligible column + summary via correlated `EXISTS` (never a
-  JOIN, so overlapping declarations can't double-count, mirroring
-  `buildHmrcCsv()`'s own known hazard), deliberately with no projected 25%
-  reclaim figure; and the output path is now namespaced by
-  `{siteID}/{periodKey}`, fixing a cross-site filename overwrite the old
-  flat naming had. New `tblGivingStatementLog` (migration 172) is a
-  `UNIQUE(siteID, donorID, periodKey)` dedupe/audit log; generate/email
-  both cap at `giving.statements.batchPerRun` (default 25) per request
-  (Newsletter-dispatch pattern, re-trigger to continue), with an explicit
-  audit-logged "resend" override, ZIP download (`ZipArchive`, never a
-  combined PDF, degrades to per-row links), and an optional token-gated
-  `cron/giving-statements.php` sweeper (`giving.cron_token`, empty ⇒ 403
-  fail-closed). New `givingStatements` notifyPrefs opt-out (default on)
-  enforced at both queue and live-send time; `GdprEraser` now also
-  unlinks an erased donor's rendered statement PDFs from disk. All 11
-  audit checks green, `php -l` clean on every touched file.
-- **`claude/gap6-serviceplan-bridge`** (branched off `alpha`) — gap #6
-  (#442): additive, non-destructive bridge between the two parallel
-  "service plan" data models that never knew about each other — the
-  run-sheet builder (`tblServicePlan` SINGULAR, migration 089, #262/#300)
-  and the worship presentation engine (`tblServicePlans` PLURAL, migration
-  137, #308/#355). New nullable, UNIQUE `tblServicePlans.runSheetPlanID`
-  FK (`ON DELETE SET NULL` → `tblServicePlan.planID`) — NULL (unpaired) is
-  the state of every pre-existing row, zero data migration. New
-  `Portal\Core\ServicePlanLink` resolver is the only code that knows about
-  both models; `pair()`/`unpair()` enforce same-site (hard), same-event
-  when both sides declare one (hard, either-NULL always proceeds), and
-  1:1 (hard — UNIQUE key + errno-1062 race catch, never fatal). A
-  NULL-only, one-directional (worship → run-sheet) backfill wakes the
-  run-sheet's dormant, write-dead `eventID` at pair time — never the
-  reverse, since the worship side's `eventID` is ACL-bearing. New CSRF'd
-  `worship/plan/link` POST handler (`worship/plan-link.php`) reuses the
-  worship app's admin-or-coordinator write gate verbatim (copied, not
-  refactored out of `plan-save.php`); own-row re-pairing overwrites, a
-  foreign run-sheet claim is refused with a flash. Read-only counterpart
-  panels on both editors (`service-plans/edit.php`, `worship/plan.php`),
-  each guarded by `AppRegistry::isEnabled()` + try/catch (venue-overlay
-  resilience precedent) so a disabled counterpart app or any resolver
-  exception leaves the panel empty rather than breaking the page. No
-  field sync in v1 — the song representations are structurally
-  incompatible (free-text title vs canonical `songID` FK) — read-only
-  visibility only. Migration 173: guarded MySQL-8-safe DDL, one route
-  seed, no new settings keys, folded into `full_schema.sql`. All 11 audit
-  checks green, `php -l` clean on every touched file.
-- **`claude/gap3-reminders`** (branched off `alpha`) — gap #3 (#439):
-  new `cron/user-reminders.php` sweeps three reminder fields earlier
-  migrations shipped but no code ever consumed —
-  `tblTasks.reminderDate`/`reminderSent` (036), `tblRotaSlot.
-  reminderSentAt` + `rota.reminder_days_before` (074), and the milestones
-  daily digest promised by `milestones.digest_recipients` (076). Token-
-  gated (`user_reminders.cron_token`, empty-fails-closed), 15-minute
-  cadence, per-site loop with `App::settingForSite()` read INSIDE the
-  loop (venue-cron discipline). Dedupe: tasks/rota reuse their existing
-  sent-flag columns via an atomic claim UPDATE; milestone-digest uses a
-  new generic `tblUserReminderLog` `(refType, refID, dueDate)` table
-  (check-first + race-catch), reserved so a future single-shot family
-  (e.g. DBS-expiry) can reuse it with zero DDL. Milestone-digest is
-  explicit opt-in only — an empty `milestones.digest_recipients` skips
-  the site rather than falling back to admins. Two new notification
-  preferences (`taskReminders`/`rotaReminders`, default on) on
-  `/account/notifications` — the first prefs this codebase actually
-  honours when sending. Write-path fixes so dedupe stamps stay correct as
-  rows change: `tasks/save.php` re-arms `reminderSent` on a future
-  reminder edit, `tasks/complete.php` carries the reminder forward
-  (interval-shifted) into a recurring task's spawned next occurrence,
-  `rota/swap-respond.php` clears `reminderSentAt` on an accepted swap.
-  Also fixed in this PR: `cron/event-reminders.php` selected `u.email`
-  from `tblUsers` (real column: `emailAddress`) — under this app's strict
-  mysqli reporting, the very first `prepare()` threw, so the event-
-  reminder cron 500'd on every single invocation; fixed throughout
-  (`u.emailAddress AS email`). Three other `u.email` sites found during
-  this work are tracked separately in #438, not touched here. Migration
-  171: new `tblUserReminderLog` table + six settings seeds + one route
-  seed, zero ALTERs, folded into `full_schema.sql`.
-- **`claude/paypal-checkout`** (branched off `alpha`) — gap #1:
-  PayPal Orders v2 fully wired into `Portal\Core\Payments` (create checkout,
-  capture-on-return + `CHECKOUT.ORDER.APPROVED` webhook backstop for a payer
-  who approves and never returns, verified webhooks via PayPal's own
-  verify-webhook-signature API, refunds by capture id) plus the previously-
-  missing user-facing checkout UI (new `giving/give.php` "Give online" page,
-  Projects `my-pledges.php` "Pay now"). The S1 amount/currency integrity
-  gate now lives INSIDE `markPaymentSucceeded()` itself (signature gained
-  `?int $observedAmountPence, ?string $observedCurrency`) — every PayPal
-  success path (return capture, 422 `ORDER_ALREADY_CAPTURED` reconcile,
-  verified `PAYMENT.CAPTURE.COMPLETED`) asserts the captured amount+
-  currency against the pending row before any Giving/Projects fan-out, and
-  a mismatch marks the row `failed` + logs `PaymentIntegrityFail` instead.
-  The status transition is now a single atomic
-  `UPDATE … WHERE status = "pending"` gated on `affected_rows === 1`,
-  closing the return-path-vs-webhook race (and incidentally Stripe's own
-  two-event race too — Stripe call sites keep passing null observed values
-  unchanged, upgrading them is a follow-up). `checkout.php` (already
-  #430-hardened for pledge/giving/else purpose validation) gained the two
-  remaining §6.3 pieces: a £10,000 online-giving ceiling
-  (`GIVING_MAX_AMOUNT_PENCE`) and server-built descriptions
-  (`'Giving — {category}'` / `'Pledge — {project}'`) — the POSTed
-  `description` field is removed from the flow entirely. Migration 167
-  (seeds only, no DDL): `payments.paypal.{webhookId,mode}`, `clientId`
-  flipped to encrypted-at-rest (predicate-guarded — only where still
-  empty, since `decrypt_setting()` returns `''` for a plaintext value), and
-  the new `giving/give` route.
-- **PR #372** (accumulating, draft, `claude/alpha-enhancements` → `alpha`) — a
-  discovery-pass fold-in batch on top of #386/#387 (migrations 155-157):
-  #373 ApiRouter half — `ApiRouter.php` never got the `global $mysqli,
-  $SETTINGS;` import Router.php gained for #373, fatally breaking 6 live-chat
-  /livestream handlers; fixed at both `dispatch()` and `dispatchV1()`. #339
-  residual — `calendar/manage/save.php`'s create-flow slug-uniqueness probe
-  now scopes to `siteID`. Worship live-sync (#308) — `/api/worship/state` +
-  `/api/worship/advance` were unreachable (dead legacy `_apps/api/worship-
-  *.php` + tblRoutes rows, no `api.worship.*.enabled` flags); relocated to
-  the ApiRouter convention path `_apps/worship/api/{state,advance}.php`
-  (precedent: migration 144's livestream/ping relocation). AppRegistry
-  (#255) — added `_core/apps/{noticeboard,worship,salvation,kids}.php` so
-  all 41 apps surface in `/admin/apps`; seeded the 3 missing enable flags
-  (worship/salvation/kids) so registering them didn't silently 403 three
-  live apps. Dead-route cleanup — removed 19 unreachable `api/*` tblRoutes
-  rows (Router never consults tblRoutes for `api/*` paths) plus the matching
-  full_schema.sql seed-block prune. Cloudflare Stream `testConnection()` +
-  admin "Test connection" button (#386 parity with BookIT Phase 2). All in
-  migration 158 + one full_schema fold; CI-green (10/10 audit checks, `php
-  -l` clean). See `.claude/HANDOFF.md` for the fuller discovery-pass notes.
-- **PR #372** — this
-  session's additions on top of the #323 Phase 2 base below: #299 "Giving
-  polish" sub-features — two-person offering-count session (sub-1, migration
-  150), pledge campaigns (sub-2, migration 151), bank reconciliation (sub-3,
-  migration 152), plus the online/project-gift auto-attribution follow-up
-  wiring `Giving::attributeGift()` into `Payments::markPaymentSucceeded()` and
-  `Projects::fulfilPledge()`; #303 Phase 2 Discipleship — per-user progress +
-  auto-completion (migration 153); #300 v2 Service Plans — operator →
-  confidence-monitor message channel (migration 154); a data-protection fix to
-  `Portal\Core\GdprEraser::catalogue()` (wrong/mis-cased table names silently
-  skipping erasure; added auth-residue tables `tblLocalAccounts` /
-  `tblLinkedAccounts` / `tblTrustedDevices` / `tblPasswordResets` /
-  `tblKidProfiles`) plus a demo-data-wipe table-name fix; a new
-  `tools/audit-checks/check_php_table_refs.py` CI check (flags `tblXxx`
-  identifiers hard-coded in PHP that aren't real tables) and a native
-  `confirm()` → `data-confirm` cleanup sweep. All CI-green through migration
-  154; see `.claude/HANDOFF.md` for the full remaining/next breakdown.
-- **PR #372** — #323 Phase 2: REST API v1 write surface — dual-mode `ApiAuth` (bearer API key OR session), `/api/v1/{resource}[/{id}]` RESTful facade, new write endpoints (Attendance/Documents/Expenses create+delete/Users), canonical `ApiKey::SCOPES` + rotation grace, per-key rate limiting, `Site::forceContext` tenant pinning, admin scope-checkbox + audit source-badge UI, OpenAPI v1 paths + `bearerAuth` scheme (v1.4.0). Plus #324 outbound webhooks admin CRUD UI.
-- **PR #358** (in flight) — #303 Discipleship Pathway Tracker Phase 1 + #313 COP Live Chat Phase 1 + Phase 2 (push prompts + viewer widget) + #317 Virtual Host Console Phase 2 (overlap on `tblLivePrompts`) + #360 Community Noticeboard Phase 1 (poster wall, self-hosted React, page-scoped CSP extension). Includes a Phase 1 hotfix (`::ok`→`::success`) and multiple security-check-clean bug fixes.
-- **PR #357** — #317 Phase 1 + #323 API key infrastructure Phase 1.
-- **PR #356** — Plus Jakarta Sans modular embed.
-- **PR #355** — Worship Presentation Engine full v1.
-- **PR #354** — Post-merge cleanups (composer fix + 1.3.0 + installer favicons).
-- **PR #340** — Events platform overhaul (36 issues / 39 commits).
-- **PR #297** — Multi-brand product layer (#296).
-- **PR #129** — Prayer Requests app (logged-in + anonymous public route)
-- **PR #130** — Multi-provider Captcha (Turnstile / reCAPTCHA v2+v3 / hCaptcha) with admin priority drag-and-drop
-- **PR #131** — Release prep v0.11.0 (version bump + CHANGELOG stamp)
-- **PR #132** — Password policy hardening (#53) — min 12 chars, full-flow coverage, JS strength meter
-- **PR #133** — Debug mode refused in production (#54), error display silenced
-- **PR #134** — Deploy `dry_run` workflow_dispatch + DEV_NOTES SFTP `--delete` docs (#107)
-- **PR #135** — Anchor colour bound to `--bs-link-color` for both themes (was leaking browser-default blue)
-- **PR #137** (in flight) — Calendar seven view modes (closes #136)
-- **PR #138** (in flight) — Calendar per-month strap-lines + category display-style toggle
-
-## Working with the owner (STANDING RULES, set 16 September 2026)
-
-These restate how the owner wants work run. Several already appear above; this section
-is the one place that lists them together.
-
-- **Plain English in every explanation and piece of feedback,** not only in documents.
-  Technical terms confuse even technically skilled readers; if one is unavoidable, say
-  what it means straight away. (Also in the "Plain English" rule above.)
-- **Keep `.claude/HANDOFF.md` current as the work happens**, so the work can be picked up
-  at any moment if a session stops. Update it before anything long starts, after each
-  step, and the moment something important is learned.
-- **Deep analysis and deep planning:** sequential agents, never parallel, one analysis
-  run at a time, **on Opus** (changed 23 September 2026 — it used to be Fable; see the
-  deep-analysis rule above for why). Think hardest at the start; use workflows and agents
-  where they fit.
-- **Building:** Sonnet or Haiku, whichever fits; Opus only when the build is genuinely
-  complex. Use tokens efficiently without ever trading away correctness (GIRFT: Get It
-  Right First Time).
-- **Plugins:** the dev-team plugins may be used for any of this, including suggesting
-  fixes and features and routing reviews to a different AI system.
-- **Documentation sweep after each real body of work**, before its pull request: every
-  `.md` file, the in-app help, `.claude/`, `.OpenAI/`, and the API description. Swagger UI
-  is already in place and already suits shared hosting — keep it correct, do not replace it.
-- **Reorder and bundle tasks** where it is more efficient, as long as nothing is dropped and
-  the progress table shows what was bundled.
-- **Cross-system review until clean:** every change is reviewed by a different AI system
-  from the one that built it (today: built by Claude Code, reviewed by Codex, and the
-  reverse). Findings are fixed and the change is reviewed again, round after round,
-  until the review comes back clean.
-- **After each piece of work:**
-  1. commit and push to the single working branch that will later be merged into
-     `alpha` (no extra pull requests; no stacking);
-  2. update the related GitHub issue(s), one by one;
-  3. update the Claude memory and the context in `.claude/`;
-  4. update the OpenAI/Codex memory and context in `.OpenAI/`;
-  5. update the handoff document.
-- **Never wait for a nudge (owner, 24 September 2026):** "continue autonomously, don't wait for me to nudge or give the ok."
-  When a step finishes, start the next in the same turn. Start `tools/watchdog.sh` beside anything you wait on (standing rule
-  above), so a lost "finished" notice can never leave the queue idle.
-- **Autonomy:** work through the whole queue without stopping. Stop only for a decision
-  or approval that genuinely needs the owner, say simply what is needed and why, and
-  raise such questions at the START, not one by one as they come up. Carry on with
-  everything else while waiting.
-- **Progress updates:** report often, showing the task queue as a table with each
-  task's status.
-- **Switching AI systems when one runs out:** see "When one system runs out" above. It
-  applies to any AI service or agent, not a named one, and relies on the handoff being
-  current and on cross-system review; switch back to the main system promptly and run a
-  full review of what it missed.
+- **GIRFT — Get It Right First Time.** Spend tokens efficiently, never at the cost of correctness. Verify before asserting, and say plainly what was not verified.
+- **After each piece of work:** 1. commit and push to the single working branch that will later be merged into `alpha` (no extra pull requests, no stacking); 2. update the related GitHub issue(s), one by one; 3. update the Claude memory and `.claude/`; 4. update `.OpenAI/` in the same sitting, or the two drift apart; 5. update the handoff.
+- **Never wait for a nudge** (owner, 24 September 2026): "continue autonomously, don't wait for me to nudge or give the ok." When a step finishes, start the next in the same turn, with a watchdog beside anything you wait on.
+- **Questions up front.** Work through the whole queue. Raise every decision only the owner can make at the START, in one numbered block — what is needed, why, the recommended answer, and what carries on meanwhile — then continue with everything not blocked. A question never stops the queue. A decision the owner has already taken is final; do not reopen it.
+- **When NOT to stop:** stop and ask only when you cannot continue without an answer, or before anything destructive — deleting data, force-pushing, or changing anything outside this repository. Everything else, carry on and report afterwards.
+- **Hold the scope.** Deliver what was asked, at the scope intended. Make routine judgement calls yourself. If the request looks mistaken, or a better way exists, say so in one sentence and carry on with the task as asked — do not quietly narrow, widen or change it. Anything found outside the task goes under "Found", or into an issue; it is not built unless the owner says so.
+- **Keeping the owner posted.** Before the first step of a task, say in one sentence what you are about to do. While working, give a short update only when you find something important, change direction, or finish a piece of work — always in the same message as your next action, never as a place to stop. For a queue, the update includes the task table, at least after each finished unit and whenever the queue changes: columns #, Task, Issue, Status, Notes; status words Queued · In progress · In review · Blocked (say on what) · Done (say the commit) · Dropped (say why).
+- **End a long run with three headings**, in this order: **Blocked on me** (what needs the owner and why, one line each — questions that came up part way through go here too); **Changed** (what landed, with the commits); **Found** (anything discovered and not done, each with an issue number). Write "nothing" under a heading with nothing in it.
+- **Narrow checks, then move on** (owner, 28 September 2026), for work built in chunks and committed once: after a chunk's first full check, each later round checks only the latest fix round's changes, still by a new agent; one fresh whole-part check happens once, just before the single commit; each round re-runs its own new planted faults plus a sample of earlier ones, and the full set runs once, before that commit. If a chunk goes past three check rounds, say so plainly in the next report, put the ways to speed up under "Blocked on me", and carry on meanwhile. If the same item fails two rounds running, consider simplifying the design before refining it again. This does not relax the final check before a commit.
+- **Plugins:** the dev-team plugins may be used for any of this, including suggesting fixes and features and routing reviews to a different AI system.
 
 ## GitHub Labels
 
@@ -1473,19 +560,22 @@ is the one place that lists them together.
 When making changes:
 
 1. Create a GitHub Issue with description, scope, and acceptance criteria
-2. Run ALL code through syntax/lint checks -- fix ALL issues until zero remain
+2. Run a real check that exercises the change: the self-test, the scripts in
+   `tools/audit-checks/`, and the migration test when the database is touched; also
+   `php -l` on every changed PHP file. Fix every problem they report in what you
+   changed. If a real check cannot run, say which one and why.
 3. Update CHANGELOG.md, **FEATURES.md**, DEV_NOTES.md, README.md as appropriate
 4. Update `.claude/` memory and context
-5. Update GitHub Wiki/Project/Milestones alongside Issues
+5. Add the issue to the project board if there is one; say so if that fails
 6. Commit and push to the single working branch after each task; do not
    open extra pull requests *(updated 16 September 2026 to match the
    owner's decision to commit and push finished work right away — see
    "Codex review" above and `.claude/HANDOFF.md`, decision A. This step
    used to read "COMMIT changes (DO NOT PUSH unless the user explicitly
    asks for a PR)".)*
-7. Close GitHub Issue with commit / PR reference
+7. Close the GitHub issue once the work has merged, with the commit or pull request reference
 
-### STANDING: monitor & fix GitHub PR Security checks (always applicable)
+### Monitor and fix the pull-request security checks (always applies)
 
 On EVERY PR you touch, actively monitor GitHub's own automated checks — the
 `pr-security.yml` "PR Security Checks" bot comment (route-target-missing,
@@ -1504,3 +594,8 @@ until the security comment is clean. This applies regardless of session.
 - Never commit: `_auth_keys/`, `_uploads/`, `_backups/`, `_libraries/`, `.env`, `*.key`
 - Deploy workflow syncs `web/` only, excluding server-managed dirs
 - Shared dirs (`_core/`, `_vendor/`, `_sql/`, `_includes/`, `_functions/`, `_libraries/`) mirror with `--delete` — manual server-side edits to these dirs vanish on the next deploy (see DEV_NOTES.md → Troubleshooting)
+- Branch-based deploy (one customer's set-up — see `DEV_NOTES.md` for the full table): `alpha` → `public_html_dev/`, `beta` → `public_html_beta/`, `main` → `public_html/`.
+- `web/public_html/` is the only web root, and the web server answers directly for just three PHP addresses: `/index.php`, `/error.php` and `/api-docs/index.php`. Every app page lives under `web/_apps/`, outside the web root (#159), and is reached only through the router.
+- Never force-push, hard-reset or change a remote without an explicit instruction, and never push straight to a release or protected branch. Claude Code's settings on the owner's Mac refuse force-push and hard reset outright (5 October 2026), but the written rule still stands: those settings cannot catch every form of the command, and they do not bind Codex.
+
+Keep replies and reports reasonably short.

@@ -24,8 +24,9 @@
 > statement of what is true today.
 >
 > **For what is actually true today, check the code.** The counts and the
-> commands to re-derive them are in `.claude/CLAUDE.md` under "Counts, and when
-> they were last checked". As of 20 September 2026: 54 app folders, 47 of them
+> commands to re-derive them used to be in `.claude/CLAUDE.md`; since
+> 5 October 2026 they are kept, as a dated record, in
+> `.claude/history/claude-md-inventory-2026-10-04.md`. As of 20 September 2026: 54 app folders, 47 of them
 > switchable on and off per site, 81 framework classes, 196 database changes
 > numbered 000-198, 213 tables, 19 in-app help guides.
 >

@@ -29,6 +29,26 @@ proceeds, so the session can be picked up at any point).
 10. **Helper agents: at most six at once, in writing AND enforced** by `CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS=6` — DONE. The seventh
     agent is REFUSED, not queued, and the setting is read only at session start: shape workflows to six at a time.
 11. The cut-off "Also find" in the second instruction review: **nothing more** — drop it.
+12. **The 01:59 edit to `~/.claude/CLAUDE.md` (5 Oct) was the owner's — keep it.** It added the five new instructions in Anthropic's
+    wording, narrowed reviews to harm-capable changes, and prefers the other service over a helper as reviewer.
+13. **What gets reviewed HERE: narrowed exactly as machine-wide.** Only changes that could do real harm (code, database, data,
+    money, credentials, personal details, safety gates) get a review round. Documentation of every kind — instruction files, memory,
+    the handoff and notes — renames and comment-only changes do not. The owner chose this knowing the instruction rewrite is then
+    committed without a review round. Written into `.claude/CLAUDE.md` ("Codex review"), `.OpenAI/CONTEXT.md` rule 2, `AGENTS.md`
+    and the review memory.
+14. **Who checks: a fresh agent checks each code package as Codex's named stand-in; the FINAL whole-of-part-8 check goes to CODEX**
+    (`codex … -c model="gpt-6-astra" < /dev/null`; read the output for a limit message — a limit can exit 0); the end-of-queue
+    whole-branch Codex review still happens, possibly after a reset.
+15. **Deleting a web-root folder that hides an address needs the owner's explicit approval first** (first review S13). Written into
+    `.claude/CLAUDE.md` (web-root section), `.OpenAI/CONTEXT.md` rule 16 and the shadowing memory.
+
+**Instruction work — DONE (5 Oct ~03:50):** both reviews applied in full by an Opus editor (report: end of
+`.claude-work/resume/instructions-apply.md`; before-copies in `instructions-apply-before/`). `.claude/CLAUDE.md` 1,506 → ~590 lines;
+nothing deleted outright — "Recent ships" and the inventories moved word for word to `.claude/history/`, three folder-only traps to
+`.claude/rules/` (path-scoped). Also fixed: `.dev-team/config.yml`'s stale review comments (first review C2) and FEATURES.md's pointer
+to the removed counts table. **Left for later, noted by the editor:** two plans (`.claude/plans/public-door-5…:1063-1064`,
+`public-door-6…:1280`) edit sections that have moved — fix when #499/#500 is built; `common-builder.md:25-26` (a saved brief) still
+promises a per-package Codex review; path rules and HTML-comment stripping are documented but not yet seen working in a live session.
 
 ## OWNER DECISION, 25 SEPTEMBER 2026, about 16:00 — `tools/watchdog.sh` shortcut fix APPROVED (recorded by a CueRCode session)
 The owner approved the fix for the watchdog "always fires on a shortcut" fault: add `-L` to both `stat` calls in `mtime()` so

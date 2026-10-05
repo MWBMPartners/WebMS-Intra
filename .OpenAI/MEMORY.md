@@ -1,7 +1,7 @@
 # WebMS-Intra — lessons learned, for Codex and other OpenAI-based agents
 
 This mirrors the lessons kept in Claude Code's own memory for this project,
-**as of 16 September 2026**. It leaves out anything that is purely about how
+**as of 5 October 2026** (entries run from 7 September to 5 October 2026). It leaves out anything that is purely about how
 Claude Code's own tools behave and would mean nothing here; a few entries
 that started as a Claude-specific note have been reworded to state the
 general lesson instead. It contains no secrets, credentials or personal
@@ -509,7 +509,8 @@ editing the tree muddies that test.
 push to the single working branch that will later target `alpha`; update each
 related GitHub issue individually; update the Claude memory and `.claude/`;
 update this `.OpenAI/` mirror in the same sitting so the two cannot drift;
-update `.claude/HANDOFF.md`; show the progress table.
+update `.claude/HANDOFF.md`; show the progress table, in the same message
+as your next step.
 
 **The documentation sweep is a standing task**, done after each real body of
 work and before any pull request: every `.md` file, the in-app help under
@@ -539,9 +540,13 @@ queue, moving to the very end again if tasks are added. Run it with
 volume that a plain `docker rm` leaves behind. On 24 September this machine held
 415 of them, 101 GB, from three weeks of check rounds, and every agent had
 reported its clean-up as done. Remove with `docker rm -v` or start with
-`docker run --rm`, name each after its work, and report both `docker ps -a` and
-the count of left-behind volumes. Never remove a running container, another
-project's, or a named volume without asking.
+`docker run --rm`, name each after its work, and report `docker ps -a` and
+the count of left-behind volumes before and after — your own work must add
+none, and you remove only your own volumes, by name. Never remove a running
+container, another project's, or a named volume without asking. Never run
+`docker volume prune` or `docker system prune`: a prune removes every unused
+unnamed volume, other projects' included. (On the owner's Mac, Claude Code's
+settings refuse both since 5 October 2026; Codex is not bound by them.)
 *Before asking the owner a design question, look for an answer already given* —
 the #514 plan had its answers at the very top, and "built as recommended"
 further down meant the recommendation was built, not that it was unanswered.
@@ -627,3 +632,15 @@ every one has a hard deadline. It cannot tell "finished" from "stalled", so when
 it fires, look. And when a step finishes, start the next without waiting to be
 asked. In a tool with no background commands, never end a turn on "I'll wait"
 with nothing that will bring you back.
+
+**Decisions of 5 October 2026 (owner), for whichever assistant picks this up.**
+*Thinking effort* on the owner's Mac was lowered from `xhigh` to `high`; nothing
+was ever measured to justify `xhigh`, and part 8's faults were caught by
+independent checkers and planted faults, not by extra thinking. *Claude Code's
+settings now refuse* force-push, `git reset --hard`, `docker volume prune` and
+`docker system prune` outright, and cap Claude's helper agents at six at once
+(a seventh is refused, not queued). Those settings bind Claude Code only — the
+written rules are what bind Codex. *The instruction files were trimmed*:
+`.claude/CLAUDE.md` lost its history and inventories (now in
+`.claude/history/`), three folder-specific traps moved to `.claude/rules/`, and
+"a round finds no real problem" is now defined (`.OpenAI/CONTEXT.md`, rule 2).

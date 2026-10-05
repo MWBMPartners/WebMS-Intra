@@ -134,12 +134,16 @@ features:
 
   # OFF. When on, the plugin makes a local commit (never a push) as soon as a
   # task is finished and has passed the plugin's own checks. Those checks are
-  # not the Codex review that this project's standing rule requires before
-  # anything is committed.
+  # not the independent check this project requires before anything is
+  # committed (see .claude/CLAUDE.md, "Codex review"). (Until 5 October 2026
+  # this said "the Codex review … before anything is committed"; that order
+  # changed on 16 September, when the owner decided work is committed after an
+  # independent Claude check while Codex reviews the whole branch later.)
   #
   # Turning this off does not promise the plugin will never commit in some
-  # other way. Any run here must still be told: commit nothing until Codex has
-  # reviewed it, and stage files by name only.
+  # other way. Any run here must still be told: commit nothing until an agent
+  # that did not build it has checked it, say in the commit message that Codex
+  # has not reviewed it, and stage files by name only.
   auto-commit: off
 
   update-notifier: on

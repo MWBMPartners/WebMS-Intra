@@ -24,8 +24,10 @@ such an agent, read these three files before doing anything else:
 
 ## How this relates to `.claude/` and the handoff
 
-- **`.claude/CLAUDE.md` is the one source of truth for the rules.** This
-  folder's `CONTEXT.md` is a plain-English summary of it, written for a
+- **`.claude/CLAUDE.md` is the one source of truth for the rules**, together
+  with `.claude/rules/`, which since 5 October 2026 holds three rules that
+  apply to one folder each. This folder's `CONTEXT.md` is a plain-English
+  summary of them, written for a
   reader who does not use Claude Code. Where the two disagree, `.claude/
   CLAUDE.md` is right, and `.OpenAI/CONTEXT.md` should be corrected to match.
 - **`.claude/HANDOFF.md` is the one source of truth for "where things are

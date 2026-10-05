@@ -1,9 +1,10 @@
 # WebMS-Intra — project context for Codex and other OpenAI-based agents
 
-> **`.claude/CLAUDE.md` is the source of truth.** This file is a plain-English
-> summary of it for a reader who does not use Claude Code. If anything here
-> disagrees with `.claude/CLAUDE.md`, that file is right, and this one should
-> be corrected to match.
+> **`.claude/CLAUDE.md` is the source of truth**, together with the three
+> folder-specific rules in `.claude/rules/` (moved there on 5 October 2026).
+> This file is a plain-English summary of them for a reader who does not use
+> Claude Code. If anything here disagrees with them, they are right, and this
+> one should be corrected to match.
 
 ## What the product is
 
@@ -40,9 +41,11 @@ built in, each customer's hosting can differ).
   someone with only a web hosting control panel — no command line.
 
 **Where to find things that change over time.** Counts of apps, files,
-tables and so on go stale within days and are not repeated here — see
-`.claude/CLAUDE.md`'s "Counts, and when they were last checked" table for
-current numbers and the exact command to re-check each one. `FEATURES.md`
+tables and so on go stale within days, so they are not kept here or in
+`.claude/CLAUDE.md` any more (its counts table was removed on 5 October 2026;
+a snapshot with the commands to re-count is in
+`.claude/history/claude-md-inventory-2026-10-04.md`). Count from the code;
+when any document disagrees with the code, the code is right. `FEATURES.md`
 at the repository root is the living inventory of what each app does;
 `CHANGELOG.md` is the chronological history; `DEV_NOTES.md` carries the
 deeper technical notes (including the exact SQL patterns referenced below).
@@ -111,21 +114,34 @@ in `.claude/CLAUDE.md` under the heading named in brackets.
    point against the code before acting on it, and when the reviewer is
    wrong, say so plainly, with the evidence, rather than applying the
    finding anyway. Findings that do hold up get fixed and the change is
-   reviewed again, round after round, until the review comes back clean.
+   reviewed again, round after round, until a round finds no real problem.
+   **A real problem is** wrong behaviour, a security or privacy gap, possible
+   data loss, a message or comment that is untrue, or a test that passes on
+   broken code. The reviewer still reports everything it sees; hardening
+   ideas, wording preferences and polish go under "Found" (or into an issue)
+   and do not start another round.
    This is not optional and not a one-off; it is how "finished" is defined
    on this project. This whole approach follows the project's guiding
    principle, **GIRFT — Get It Right First Time**: verify before asserting,
    prefer a fix that refuses when it is unsure over one that guesses and
    reports success, and say plainly when something has not been verified.
+   **What gets reviewed (owner, 5 October 2026, "narrow exactly as machine-wide"):** only changes that could do real harm — code, database changes, anything that deletes or overwrites data, touches money, credentials or personal details, or changes a safety gate. Documentation of every kind (instruction files, memory, the handoff and progress notes), renames and comment-only changes get no review round. **Who:** a fresh agent that did not build it checks each code package before commit, named as standing in for Codex; the final whole-of-part-8 check of #514 goes to Codex itself; one Codex review of the whole branch still ends the queue.
    *(`.claude/CLAUDE.md` → "Codex review" and "Standing Instructions".)*
 
 3. **Deep analysis and planning run sequentially, one at a time — never in
-   parallel — even when the model is Opus.** Each step tries Fable first
-   and only falls back to Opus for that one step if Fable is unavailable;
-   the next step tries Fable again. Building (writing the actual code) uses
-   Sonnet or Haiku, moving up to Opus only when the work is genuinely
-   complex. *(`.claude/CLAUDE.md` → "Deep analysis: sequential, one run at
-   a time" and "Working with the owner".)*
+   parallel — on Opus** (since 23 September 2026; it used to be Fable,
+   falling back to Opus, and was changed deliberately because the newest
+   Opus is cheaper and at least as good). **Fact-gathering may run in
+   parallel; judgements may not:** reading code, checking a long list of
+   issues or web research can be split across several agents at once,
+   because none of them makes a judgement the others need to see first.
+   Keep helper agents few — no more than six at once (on the owner's Mac
+   Claude Code enforces this with a setting, and refuses a seventh). One
+   package is in flight at a time, and checking counts. Building (writing
+   the actual code) uses Sonnet or Haiku, moving up to Opus only when the
+   work is genuinely complex; verification is never done by a weaker model
+   than the build. *(`.claude/CLAUDE.md` → "Deep analysis: sequential, one
+   run at a time".)*
 
 4. **Switching AI systems when one runs out.** If whatever is doing a piece
    of work becomes unavailable — out of credit, rate limited, or down — hand
@@ -150,8 +166,9 @@ in `.claude/CLAUDE.md` under the heading named in brackets.
    criteria; commit and push to the single working branch (never stack pull
    requests); keep `CHANGELOG.md`, `FEATURES.md`, `DEV_NOTES.md` and
    `README.md` current where the change touches them; update the related
-   GitHub issue(s) and close them with a reference to the commit or pull
-   request; update `.claude/` memory and context; update **this folder**
+   GitHub issue(s), and close them once the work has merged, with a
+   reference to the commit or pull request; update `.claude/` memory and
+   context; update **this folder**
    (`.OpenAI/`); and update the handoff. Treat these as part of the
    definition of "done", not optional extras.
 
@@ -168,34 +185,27 @@ in `.claude/CLAUDE.md` under the heading named in brackets.
    commit message must say plainly, in words, that the cross-system review
    has not happened yet. The other system reviews the commit afterwards,
    and any fix it finds lands as a new, separate commit. Either way, review
-   by a different system is still required for every change before it
-   counts as reviewed — only the timing relative to the commit changes.
+   by a different system is still required for every change that gets a
+   review round (see rule 2) before it counts as reviewed — only the timing relative to the commit changes.
 
-   **TEMPORARY ARRANGEMENT, set by the owner on 20 September 2026.** Reviews are
-   NOT being run package by package at the moment. One comprehensive review of
-   the whole branch happens after the #514 build: it covers the work that was
-   never reviewed while Codex was out of usage (13 to 20 September) and
-   everything built since. No pull request is raised until that review is done
+   **TEMPORARY ARRANGEMENT, set by the owner on 20 September 2026 and moved on
+   24 September 2026.** Reviews are NOT being run package by package at the
+   moment. One comprehensive review of the whole branch happens **at the END OF
+   THE WHOLE QUEUE** — after #514, the follow-up issues, #549 and the
+   documentation sweep — and it moves to the very end again if tasks are added.
+   It covers the work that was never reviewed while Codex was out of usage (13
+   to 20 September) and everything built since. Run Codex with
+   `-c model="gpt-6-astra"` and stdin closed, or it refuses. No pull request
+   is raised until that review is done
    and every finding is either fixed and re-reviewed clean, or written up as an
    issue the owner has agreed to leave for later. Once that pull request is
    raised, the normal arrangement returns: each finished piece goes to Codex as
    it lands. Claude-side independent checking never stopped — every package
    still gets a fresh agent that did not build it, before it is committed.
-   Committed under this arrangement so far (all NOT yet Codex-reviewed):
-   `5f278cb`, `12e637a`, `1e0809c`, `bd1ef12`, `6989b26` (#515) and
-   `c99dc87` (#516, roles per organisation, 21 September 2026) and
-   `5753bf3` (#538, the treasury list limited to treasurers and
-   administrators), `26aa70d` (alpha's copy of Psalm's `actions: read`) and
-   `d3b906d` (#517, user groups and departments per organisation), `e49ae58` (#544,
-   the series download refuses internal events to signed-out visitors), `8e7fb21`
-   (#542, a department flag is enough to approve its claims), `2cd68f1` (#514
-   part 1: the event visibility rule, migration 204), `de31cb8` (#514 part 2:
-   the rule in every place events are shown), `4a915db` (#514 part 3: imported
-   events read-only elsewhere, check_event_visibility.py wired into pr-security.yml),
-   `51cb46b` (#514 part 4: SafeFetch, the safe fetcher for outside calendars), plus the
-   documentation and handoff commits in between.
-   Two commits live OUTSIDE the working branch and must be reviewed by
-   name: `560a4f2` on main (the #504 squash: codeql-action bump, the
+   The list of commits waiting for that review is kept in `.claude/HANDOFF.md`
+   (it used to be repeated here, and went stale). Two commits live OUTSIDE the
+   working branch and must be reviewed by name: `560a4f2` on main (the #504
+   squash: codeql-action bump, the
    security-backport guard, Psalm's `actions: read`, a DEV_NOTES paragraph)
    and `1830dd7` on beta (Psalm's `actions: read`).
 
@@ -217,12 +227,26 @@ in `.claude/CLAUDE.md` under the heading named in brackets.
    decision that genuinely needs the project owner, state plainly what is
    needed and why, and raise such questions at the START of a piece of work
    rather than one at a time as they come up — then keep working on
-   everything else while waiting for an answer. *(`.claude/CLAUDE.md` →
-   "Working with the owner".)*
+   everything else while waiting for an answer. **When NOT to stop:** stop
+   and ask only when you cannot continue without an answer, or before
+   anything destructive — deleting data, force-pushing, or changing anything
+   outside this repository; everything else, carry on and report afterwards.
+   **Hold the scope:** deliver what was asked, at the scope intended; if the
+   request looks mistaken, say so in one sentence and carry on as asked;
+   anything found outside the task goes under "Found" or into an issue, and
+   is not built unless the owner says so. *(`.claude/CLAUDE.md` → "Working
+   with the owner".)*
 
-8. **Progress updates as a table.** When reporting on a queue of tasks, show
-   each task and its current status as a table, and report often rather than
-   only at the end. *(`.claude/CLAUDE.md` → "Working with the owner".)*
+8. **Progress updates, and how a long run ends.** Say in one sentence what
+   you are about to do; while working, update only when you find something
+   important, change direction or finish a piece of work — always in the same
+   message as your next action, never as a place to stop. For a queue, show
+   each task and its status as a table, often. End any run longer than a
+   single change with three headings, in this order: **Blocked on me** (what
+   needs the owner, and why), **Changed** (what landed, with the commits),
+   **Found** (anything discovered and not done, each with an issue number);
+   write "nothing" under an empty one. *(`.claude/CLAUDE.md` → "Working with
+   the owner".)*
 
 9. **No web address ever ends in `.php` (or any other language extension).**
    Every link, form target, redirect and background request uses the clean
@@ -289,8 +313,8 @@ in `.claude/CLAUDE.md` under the heading named in brackets.
     committing anything touching `web/_sql/`. **The storage engine is InnoDB
     and must stay that way** — it is what makes transactions, table links
     and an all-or-nothing backup restore possible; the alternative (MyISAM)
-    supports none of that. *(`.claude/CLAUDE.md` → "Every database change
-    goes in the install script too".)*
+    supports none of that. *(`.claude/rules/database.md` → "Every database
+    change goes in the install script too".)*
 
 14. **The MySQL 8 dialect trap.** Production runs some version of MySQL 8
     (exact version unconfirmed — see `.claude/CLAUDE.md`'s database-version
@@ -304,7 +328,7 @@ in `.claude/CLAUDE.md` under the heading named in brackets.
     prepared statement, when it is not (worked examples: migrations 037,
     112, 138; full templates in `DEV_NOTES.md`). `CREATE TABLE IF NOT
     EXISTS` / `DROP TABLE IF EXISTS`
-    are standard MySQL and are fine as they stand. *(`.claude/CLAUDE.md` →
+    are standard MySQL and are fine as they stand. *(`.claude/rules/database.md` →
     "SQL dialect trap".)*
 
 15. **The ApiRouter trap.** Any address starting `api/` is intercepted
@@ -316,7 +340,7 @@ in `.claude/CLAUDE.md` under the heading named in brackets.
     router answers 403 regardless of the code being correct. Adjacent trap:
     the response helper class exposes `::success()`, not `::ok()`, and its
     header-setting method is private — check the real class before calling
-    it. *(`.claude/CLAUDE.md` → "ApiRouter routing trap".)*
+    it. *(`.claude/rules/api-router.md`.)*
 
 16. **Web-root shadowing.** A real file or folder that already exists inside
     the public web root silently wins over any address the portal itself
@@ -330,7 +354,8 @@ in `.claude/CLAUDE.md` under the heading named in brackets.
     accumulates unnoticed for as long as it stays unreachable. So before
     making a shadowed address reachable again, read what is genuinely
     behind it first; deleting the shadowing folder as a "tidy-up" is a
-    security decision, not routine cleaning. Before adding a new address,
+    security decision, not routine cleaning, and it needs the owner's
+    explicit approval first (owner, 5 October 2026). Before adding a new address,
     check `tools/audit-checks/check_webroot_shadowing.py`, which compares
     the whole address (not just its first segment) against what genuinely
     exists on disk. *(`.claude/CLAUDE.md` → "Web-root shadowing trap".)*
@@ -343,8 +368,8 @@ in `.claude/CLAUDE.md` under the heading named in brackets.
     variable, for instance) compiles fine and then fails the instant the
     page runs, with no file and no message. A helper that receives the
     database connection as an ordinary function parameter is a different,
-    perfectly fine, thing. *(`.claude/CLAUDE.md` → "Two variables, and only
-    two".)*
+    perfectly fine, thing. *(`.claude/rules/app-pages.md` → "Two variables,
+    and only two".)*
 
 18. **Check a name against the thing that actually uses it, not against
     what merely looks similar.** Several real bugs here were the same
@@ -388,8 +413,17 @@ in `.claude/CLAUDE.md` under the heading named in brackets.
     oversized scripts; layouts hold at every screen size and with long text, empty data and errors; spacing, fonts, buttons, corners,
     icons and components match from page to page; every button and link really works; no default, preview or example address (#500).
     Checked automatically before every push by a git pre-push hook (not built yet — part of the audit package #569, queued after #514
-    part 8; until then run the checklist by hand and say so), with a full browser audit before every release. *(`.claude/CLAUDE.md` →
+    part 8; until then run the checklist by hand and say so), with a full browser audit before every release. The hook is one per
+    repository, with its own installer, because git never copies hooks between clones (owner, 5 October 2026). *(`.claude/CLAUDE.md` →
     "Nothing may look unfinished…"; the full checklist is in `~/.claude/CLAUDE.md`.)*
+
+21. **Narrow checks, then move on (owner, 28 September 2026).** For work built in chunks and committed once: after a chunk's first
+    full check, each later round checks only the latest fix round's changes, still by a new agent; one fresh whole-part check
+    happens once, just before the single commit; each round re-runs its own new planted faults plus a sample of earlier ones, and
+    the full set runs once, before that commit. If a chunk goes past three check rounds, say so plainly in the next report, put the
+    ways to speed up under "Blocked on me", and carry on meanwhile. If the same item fails two rounds running, consider simplifying
+    the design before refining it again. This does not relax the final check before a commit.
+    *(`.claude/CLAUDE.md` → "Working with the owner".)*
 
 ## A few more things worth knowing
 
