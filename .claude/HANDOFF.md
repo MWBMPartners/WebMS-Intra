@@ -626,6 +626,17 @@ builder runs**; before that it was clean.
    reason (a waiting row is updated in place, never replaced). Snapshot `.claude-work/resume/p514-p8-4-r1-snapshot/` (13 files changed).
    **NOW: P8-4 NARROW CHECK ROUND 2** (fresh Opus, Codex stand-in; brief `.claude-work/briefs/514-p8-4-check-r2.md`; report
    `.claude-work/resume/p514-p8-4--verify-r2.md`; watchdog on it).
+   **P8-4 NARROW CHECK ROUND 2: NOT CLEAN — three LOW** (end of `.claude-work/resume/p514-p8-4--verify-r2.md`): every round-1 fix
+   confirmed right, no security or privacy gap, 779/779 UTC and Auckland, 15 of 19 faults caught. LOW 1 the new "What people see now"
+   link (choice page) opens the event preview, which ignores a paused calendar (nobody sees it) and a run-out answer (only
+   administrators see it) — untrue in those states (probe X3); LOW 2 W53 does not pin the "Later" links (M2a/M2b passed); LOW 3 the
+   comment "Logger::activity() … does not read the session" is untrue (it stores the session id and a copy of `$_SESSION`), now in
+   five files. Found: the "private" wording is unpinned on the calendar page's waiting section and `help/approvals.php` (M12 passed —
+   folded into fix 2); a widening for a date the outside calendar lists twice neither waits nor applies, and no "waits for approval"
+   sentence says so — FOR THE FINAL WHOLE-PART CHECK.
+   **NOW: P8-4 FIX ROUND 2 (tiny)** — same Opus builder; brief `.claude-work/briefs/514-p8-4-fix2.md`; report
+   `.claude-work/resume/p514-p8-4--fix2.md`; watchdog on it. Then narrow check round 3. **P8-4 will then have had three check rounds —
+   flag to the owner (narrow-checks memory).**
    **P8-3 (history)** (choices, rules, the series page; the P8-2 builder resumed — it knows the pages, picker and harness; brief
    `.claude-work/briefs/514-p8-3-build.md` incl. the 8 carried test fixes; report `.claude-work/resume/p514-p8-3--build.md`; evidence
    `…--build-evidence/`; watchdog on it). Then P8-3's ONE full check, narrow checks, close → P8-4. If clean: P8-1 CLOSES —
