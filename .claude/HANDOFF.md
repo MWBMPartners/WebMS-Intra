@@ -9,6 +9,27 @@ proceeds, so the session can be picked up at any point).
 
 ## Read this first — where we are right now
 
+## OWNER DECISIONS, 5 OCTOBER 2026, about 03:00 — eleven answers to questions put up front (final; do not reopen)
+
+1. **Chunk 3 closed by carrying its last fixes into chunk 4** — accepted.
+2. **The builder's two FOUND items:** the `#categories-help` phone-width fix is folded into P8-4 (builder told); the wrong app name on
+   the app-switched-off page is its own issue, **#570**, fixed after part 8 alongside #569. Part 8's checks must not rely on that heading.
+3. **Builder:** Opus for the rest of part 8; Sonnet for the simpler items after it (#568, #563 …); Opus still checks.
+4. **Thinking effort `xhigh` → `high`** — DONE in `~/.claude/settings.json` (top level + both per-model entries). A settings-file
+   change applies from the NEXT session (Claude Code's docs); `/effort high` applies it to a running one.
+5. **Instruction reviews (`.claude-work/resume/instructions-review.md` and `instructions-audit-2.md`): apply EVERYTHING now** — all 103
+   verdicts including the big trim of `.claude/CLAUDE.md` (history and inventory out; its two buried traps saved to DEV_NOTES first),
+   the five new instructions, and the "real problem" definition. Being done by its own Opus agent (see section 2).
+6. **Handoff:** move old entries into an archive file beside it, marked as history — AFTER part 8 is committed.
+7. **Deny rules** for force-push, hard reset and docker prune — DONE and PROVED (each refused; the same commands without the flag
+   ran). Deny only; no "ask" prompts. They cannot catch `bash -c '…'` or `/usr/bin/git …` (Claude Code's docs).
+8. **The cache add-on** moved from `.claude/skills/prompt-cache-control/` to `~/.claude/skills/` — DONE; the repository no longer
+   holds it, so the "leave it out of every commit" rule is retired.
+9. **#569's pre-push check:** one per repository, with its own installer (the FileMoCo shape); not a global hooks folder.
+10. **Helper agents: at most six at once, in writing AND enforced** by `CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS=6` — DONE. The seventh
+    agent is REFUSED, not queued, and the setting is read only at session start: shape workflows to six at a time.
+11. The cut-off "Also find" in the second instruction review: **nothing more** — drop it.
+
 ## OWNER DECISION, 25 SEPTEMBER 2026, about 16:00 — `tools/watchdog.sh` shortcut fix APPROVED (recorded by a CueRCode session)
 The owner approved the fix for the watchdog "always fires on a shortcut" fault: add `-L` to both `stat` calls in `mtime()` so
 the script reads the real file's age, not the shortcut's. Apply it to **both copies together** — this repo's `tools/watchdog.sh`
