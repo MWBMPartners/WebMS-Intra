@@ -645,6 +645,21 @@ builder runs**; before that it was clean.
    a browser. Snapshot `.claude-work/resume/p514-p8-4-r2-snapshot/` (8 files changed).
    **NOW: P8-4 NARROW CHECK ROUND 3** (fresh Opus, Codex stand-in; brief `.claude-work/briefs/514-p8-4-check-r3.md`; report
    `.claude-work/resume/p514-p8-4--verify-r3.md`; watchdog on it). Clean → P8-4 closes → the Codex final whole-of-part-8 check.
+   **P8-4 NARROW CHECK ROUND 3: NOT CLEAN — one LOW, in the test only** (end of `.claude-work/resume/p514-p8-4--verify-r3.md`): the
+   code is right in every state probed (paused, run out, both, neither; waiting and decided requests); "deciding renews the setting"
+   proved live; no security gap; 784/784 UTC and Auckland; notices fit at 390 px. Gap: nothing checks the REQUEST preview's paused
+   notice is ABSENT while the calendar runs (N1, N1b passed); N4 (both notices at once) uncovered. Found: the integrity codes in
+   `Asset.php` (#568) confirmed wrong with fresh evidence — added to #568 as a comment.
+   **P8-4 CLOSED (5 Oct ~11:15) by carrying round 3's test gap into a tiny fix round 3 with NO separate narrow round** — the same call
+   the owner accepted for chunk 3 (4 rounds on P8-4; the fix is test lines and one comment); Codex's final whole-of-part-8 check covers
+   it. Fix round 3: W45 checks the request preview after resuming; the paused+run-out state; the Logger comment ("less its form token
+   and its sign-in secrets"). Report `.claude-work/resume/p514-p8-4--fix3.md` (watchdog on it).
+   **NEXT: the CODEX final whole-of-part-8 check** — brief `.claude-work/briefs/514-p8-final-codex.md` (organisation separation and
+   permission first; data loss; untrue words; SQL; the five saved edge cases; the self-test last). Run, read-only, once fix 3 is in and
+   the tree is snapshotted (`p514-p8-final-snapshot/`):
+   `codex exec -C "<repo>" -s read-only -c model="gpt-6-astra" --color never -o .claude-work/resume/p514-p8--codex-final.md "Read and follow .claude-work/briefs/514-p8-final-codex.md" < /dev/null > .claude-work/resume/p514-p8--codex-final.log 2>&1`
+   — read the output for a usage-limit message (a limit can exit 0). Then: fix what it finds → narrow check → the FULL fault set + the
+   final combined run (every self-test, audit check, static grep, migration test on 8.0.36 and 8.4) → ONE commit.
    **P8-3 (history)** (choices, rules, the series page; the P8-2 builder resumed — it knows the pages, picker and harness; brief
    `.claude-work/briefs/514-p8-3-build.md` incl. the 8 carried test fixes; report `.claude-work/resume/p514-p8-3--build.md`; evidence
    `…--build-evidence/`; watchdog on it). Then P8-3's ONE full check, narrow checks, close → P8-4. If clean: P8-1 CLOSES —
