@@ -660,6 +660,15 @@ builder runs**; before that it was clean.
    `codex exec -C "<repo>" -s read-only -c model="gpt-6-astra" --color never -o .claude-work/resume/p514-p8--codex-final.md "Read and follow .claude-work/briefs/514-p8-final-codex.md" < /dev/null > .claude-work/resume/p514-p8--codex-final.log 2>&1`
    — read the output for a usage-limit message (a limit can exit 0). Then: fix what it finds → narrow check → the FULL fault set + the
    final combined run (every self-test, audit check, static grep, migration test on 8.0.36 and 8.4) → ONE commit.
+   **P8-4 FIX ROUND 3 DONE (~11:20):** 785/785 (S 11, D 522, W 252) UTC; N1, N1b, N4 each fail W45. P8-4 CLOSED. Part 8 frozen in
+   `.claude-work/resume/p514-p8-final-snapshot/` (30 files).
+   **CODEX WAS OUT OF USAGE at 11:20 ("try again at 2:07 PM"; it exited 0 — read the log, not the exit code). NOT handed to anything
+   else: the owner chose Codex for this check and the limit lifts by itself.** A background waiter starts it at 14:09 (attempt 1's log:
+   `.claude-work/resume/p514-p8--codex-final-attempt1-limit.log`). **If this session has ended, run it by hand** (from the repository):
+   `codex exec -C "$PWD" -s read-only -c model="gpt-6-astra" --color never -o .claude-work/resume/p514-p8--codex-final.md "Read and follow .claude-work/briefs/514-p8-final-codex.md exactly. It is your whole brief: a read-only final review of #514 part 8, the uncommitted changes in this working tree." < /dev/null > .claude-work/resume/p514-p8--codex-final.log 2>&1`
+   **MEANWHILE: the FULL fault set once + the final combined run** (fresh Opus checker; brief `.claude-work/briefs/514-p8-final-faults.md`;
+   report `.claude-work/resume/p514-p8--final-faults.md`; watchdog on it) — read-only on the same frozen tree, so it cannot disturb the
+   Codex review. If Codex finds faults, fixes get narrow checks and the combined run is repeated on the fixed tree.
    **P8-3 (history)** (choices, rules, the series page; the P8-2 builder resumed — it knows the pages, picker and harness; brief
    `.claude-work/briefs/514-p8-3-build.md` incl. the 8 carried test fixes; report `.claude-work/resume/p514-p8-3--build.md`; evidence
    `…--build-evidence/`; watchdog on it). Then P8-3's ONE full check, narrow checks, close → P8-4. If clean: P8-1 CLOSES —
