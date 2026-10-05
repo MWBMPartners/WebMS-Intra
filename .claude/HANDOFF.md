@@ -693,6 +693,11 @@ builder runs**; before that it was clean.
    `git show <sha>:<path>`; lean prompt — fixed file list, no instruction/plan/handoff reading, lower reasoning, findings printed as it
    goes). Suggested pieces: 1 `FeedAdmin.php` + `ExternalAudience.php`; 2 the `feeds-*` pages and handlers + partials; 3 approvals,
    help, upgrade, api-keys, migration 207; 4 the self-test.
+   **m-X05 CLOSED (~14:50):** a new D39 check asks `whoCanSee()` about a date running out in two hours by UTC with the session at
+   +13:00; m-X05 now fails it; the header names the checks that read each moment. 786/786 (S 11, D 523, W 252) UTC and Auckland. Only
+   the self-test changed. Re-frozen: `.claude-work/resume/p514-p8-final2-snapshot/` (self-test `bed6a2e6…`).
+   **NOW: the FINAL whole-of-part-8 check by a fresh Opus agent standing in for Codex** (brief
+   `.claude-work/briefs/514-p8-final-standin.md`; report `.claude-work/resume/p514-p8--final-standin.md`; watchdog on it).
    **P8-3 (history)** (choices, rules, the series page; the P8-2 builder resumed — it knows the pages, picker and harness; brief
    `.claude-work/briefs/514-p8-3-build.md` incl. the 8 carried test fixes; report `.claude-work/resume/p514-p8-3--build.md`; evidence
    `…--build-evidence/`; watchdog on it). Then P8-3's ONE full check, narrow checks, close → P8-4. If clean: P8-1 CLOSES —
