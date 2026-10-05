@@ -600,6 +600,12 @@ builder runs**; before that it was clean.
    **NOW: P8-4 CHECK ROUND 1 (FULL), fresh Opus agent standing in for Codex** (brief `.claude-work/briefs/514-p8-4-check.md`; report
    `.claude-work/resume/p514-p8-4--verify-r1.md`; watchdog on it). Then narrow rounds → **Codex** final whole-of-part-8 check → the full
    fault set → wire nothing more → ONE commit.
+   **Check round 1 stopped by the session usage limit at ~04:41 (reset 07:40); resumed ~08:26, same agent; its containers
+   `p8-4chk1-a/b/c` still up, its fault queues died with it (it re-runs only unfinished ones).** Already found before the stop
+   (NOT yet ranked): N07 — the upgrade card shows after ANY successful run if the 206 condition is removed, and no check catches it;
+   a hash with a trailing newline passes the handler's pattern (`$` allows a final newline) and is counted "changed"; `wpage` set to
+   PHP's largest integer gives an HTTP 500 (`pendingApprovals` offset becomes a float); the preview of an APPROVED row may still say
+   "Changed since…". No open redirect via `back`/`feed` (9 hostile shapes); a 501-character note is refused.
    **P8-3 (history)** (choices, rules, the series page; the P8-2 builder resumed — it knows the pages, picker and harness; brief
    `.claude-work/briefs/514-p8-3-build.md` incl. the 8 carried test fixes; report `.claude-work/resume/p514-p8-3--build.md`; evidence
    `…--build-evidence/`; watchdog on it). Then P8-3's ONE full check, narrow checks, close → P8-4. If clean: P8-1 CLOSES —
