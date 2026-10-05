@@ -162,11 +162,16 @@ the other service and treats a helper as a stand-in. And every commit message
 still says plainly that Codex has not reviewed it yet, so silence never implies
 a review happened.
 
-**One exception, the owner's decision of 5 October 2026: the final whole-of-part-8
-check of #514 goes to Codex**, not to a fresh Claude agent. Part 8 is heavy on
-security and privacy, and that check is a single review — exactly where Codex's
-small allowance is worth most. The end-of-queue whole-branch review still
-happens, possibly after waiting for a reset.
+**Part 8 of #514, as it actually went (owner, 5 October 2026).** The owner first
+chose Codex for the final whole-of-part-8 check. Codex then ran out of usage
+twice: the second time it spent its whole allowance (about 260,000 tokens) on
+reading before giving any verdict. The owner then decided: a fresh Opus agent
+does that final check as Codex's named stand-in, so part 8 can be committed and
+the queue can move on; **Codex reviews part 8 later, split into pieces across its
+resets, and no other work waits for those pieces.** Anything a piece finds is
+fixed as its own commit. Lesson for sizing a Codex review: give it a fixed file
+list and tell it not to read the instruction files, the plan or the handoff —
+a review of about 8,000 lines does not fit one allowance otherwise.
 
 **When to run it.** After the work is written and the mechanical checks pass
 (`php -l`, every script in `tools/audit-checks/`, and the end-to-end

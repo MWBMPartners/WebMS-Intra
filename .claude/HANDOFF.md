@@ -673,6 +673,26 @@ builder runs**; before that it was clean.
    plan and the whole diff) and hit the usage limit AGAIN before any verdict; rc 1; next reset 19:08 ("7:08 PM").** Log:
    `.claude-work/resume/p514-p8--codex-final-attempt2-limit.log`. Its allowance may not fit a review this size in one go. Asked the
    owner how to proceed (lean retry at 19:08 vs an Opus stand-in now).
+16. **OWNER DECISION (5 Oct ~14:20): "Opus stand-in now, to allow us to proceed … but then also flag for later codex split across codex
+    resets (dont stall further work until the codex split runs complete though, lets continue)".** So: a fresh Opus agent does the
+    final whole-of-part-8 check as Codex's NAMED stand-in; part 8 is committed after it; **Codex reviews part 8 LATER in pieces across
+    its resets — a non-blocking queue item; findings become their own commits.** Written into `.claude/CLAUDE.md` ("Codex review"),
+    `.OpenAI/CONTEXT.md` rule 2 and the review memory.
+   **FULL FAULT SET + FINAL COMBINED RUN DONE (fresh Opus, ~11:25-14:20; report end of `.claude-work/resume/p514-p8--final-faults.md`):
+   NOT CLEAN on ONE real test gap.** 3,642 fault definitions across 46 rounds → 466 distinct faults planted on the frozen code: 452
+   caught; 12 not caught break nothing anyone can see (each reason re-checked); c2-M3 proved by the harness instead; **m-X05 is a REAL
+   gap** — `whoCanSee()`'s "still in date" test using `NOW()` instead of `UTC_TIMESTAMP()` passes every check, and makes a save say
+   "1 date changed who can see it" untruly (the portal never sets a database session zone); the test's header claimed it was caught.
+   36 old faults dropped (they targeted `decide()`'s removed "other dates" counting). Combined run ALL rc 0: feed-admin 785/785 UTC ×2,
+   Auckland ×2, 8.4.11; visibility 150, resolver 208, importer 135 (+1 skipped), ics-reader 333 (+2 skipped); migration test on 8.0.36
+   and 8.4.11; php -l; 21 audit checks + static calls; json.tool; actionlint; timezones --check; static greps clean.
+   **NOW: closing m-X05** (same builder; a part D check + the header's claim; report `.claude-work/resume/p514-p8--fix-x05.md`;
+   watchdog). **THEN:** re-freeze → the Opus stand-in FINAL whole-of-part-8 check (brief to adapt from
+   `.claude-work/briefs/514-p8-final-codex.md`, plus a re-run of the combined run's self-test on the fixed tree) → ONE commit.
+   **QUEUED, non-blocking: the Codex split review of part 8** (after the commit; at each reset; read the COMMITTED files with
+   `git show <sha>:<path>`; lean prompt — fixed file list, no instruction/plan/handoff reading, lower reasoning, findings printed as it
+   goes). Suggested pieces: 1 `FeedAdmin.php` + `ExternalAudience.php`; 2 the `feeds-*` pages and handlers + partials; 3 approvals,
+   help, upgrade, api-keys, migration 207; 4 the self-test.
    **P8-3 (history)** (choices, rules, the series page; the P8-2 builder resumed — it knows the pages, picker and harness; brief
    `.claude-work/briefs/514-p8-3-build.md` incl. the 8 carried test fixes; report `.claude-work/resume/p514-p8-3--build.md`; evidence
    `…--build-evidence/`; watchdog on it). Then P8-3's ONE full check, narrow checks, close → P8-4. If clean: P8-1 CLOSES —
