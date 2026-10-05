@@ -669,6 +669,10 @@ builder runs**; before that it was clean.
    **MEANWHILE: the FULL fault set once + the final combined run** (fresh Opus checker; brief `.claude-work/briefs/514-p8-final-faults.md`;
    report `.claude-work/resume/p514-p8--final-faults.md`; watchdog on it) — read-only on the same frozen tree, so it cannot disturb the
    Codex review. If Codex finds faults, fixes get narrow checks and the combined run is repeated on the fixed tree.
+   **CODEX ATTEMPT 2 (14:09-14:16): ran, read ~260,000 tokens (its own AGENTS.md chain — `.OpenAI/CONTEXT.md` and `MEMORY.md` — the
+   plan and the whole diff) and hit the usage limit AGAIN before any verdict; rc 1; next reset 19:08 ("7:08 PM").** Log:
+   `.claude-work/resume/p514-p8--codex-final-attempt2-limit.log`. Its allowance may not fit a review this size in one go. Asked the
+   owner how to proceed (lean retry at 19:08 vs an Opus stand-in now).
    **P8-3 (history)** (choices, rules, the series page; the P8-2 builder resumed — it knows the pages, picker and harness; brief
    `.claude-work/briefs/514-p8-3-build.md` incl. the 8 carried test fixes; report `.claude-work/resume/p514-p8-3--build.md`; evidence
    `…--build-evidence/`; watchdog on it). Then P8-3's ONE full check, narrow checks, close → P8-4. If clean: P8-1 CLOSES —
