@@ -618,6 +618,14 @@ builder runs**; before that it was clean.
    **NOW: P8-4 FIX ROUND 1** (same Opus builder; brief `.claude-work/briefs/514-p8-4-fix1.md` — all six findings plus five cheap Found
    items: link the unreachable `feeds/preview?event=N`, the guide's Approvals-off link, two inaccurate sentences, a stray space;
    report `.claude-work/resume/p514-p8-4--fix1.md`; watchdog on it). Then narrow check round 2.
+   **P8-4 FIX ROUND 1 DONE (~09:40):** all six findings + the five Found items fixed, plus an addendum making the two P8-3 "more widely
+   than before" sentences true (one wording for the rule everywhere: "more widely than the calendar's own setting — or, for a date
+   the outside calendar marks private, to anyone but administrators"). 779/779 (S 11, D 521, W 247) in UTC; 778/778 in Auckland before
+   the addendum; 14 planted faults all caught. FeedAdmin changed only in `saveChoice()`'s "seen" pattern (`\z` — a real gap: a trailing
+   newline filed the date as "content_changed"). The builder first changed `approval()` and REVERTED it after a run disproved its
+   reason (a waiting row is updated in place, never replaced). Snapshot `.claude-work/resume/p514-p8-4-r1-snapshot/` (13 files changed).
+   **NOW: P8-4 NARROW CHECK ROUND 2** (fresh Opus, Codex stand-in; brief `.claude-work/briefs/514-p8-4-check-r2.md`; report
+   `.claude-work/resume/p514-p8-4--verify-r2.md`; watchdog on it).
    **P8-3 (history)** (choices, rules, the series page; the P8-2 builder resumed — it knows the pages, picker and harness; brief
    `.claude-work/briefs/514-p8-3-build.md` incl. the 8 carried test fixes; report `.claude-work/resume/p514-p8-3--build.md`; evidence
    `…--build-evidence/`; watchdog on it). Then P8-3's ONE full check, narrow checks, close → P8-4. If clean: P8-1 CLOSES —
