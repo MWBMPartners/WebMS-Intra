@@ -606,6 +606,18 @@ builder runs**; before that it was clean.
    a hash with a trailing newline passes the handler's pattern (`$` allows a final newline) and is counted "changed"; `wpage` set to
    PHP's largest integer gives an HTTP 500 (`pendingApprovals` offset becomes a float); the preview of an APPROVED row may still say
    "Changed since…". No open redirect via `back`/`feed` (9 hostile shapes); a 501-character note is refused.
+   **P8-4 CHECK ROUND 1 (full, Codex stand-in): NOT CLEAN — no security or privacy gap** (report end of
+   `.claude-work/resume/p514-p8-4--verify-r1.md`): MEDIUM 1 the guide offers an "Only administrators" calendar setting and a calendar
+   "detail" setting that do not exist; MEDIUM 2 five planted faults pass the whole self-test (N05 note cut not refused, N06 sibling
+   count ignoring details, N07 upgrade card without its 206 condition, N08 row forms always back to the inbox, N09 `feed` not checked as
+   this organisation's); LOW 3 the preview of a decided request says "Changed since…" untruly; LOW 4 `?wpage=` huge → HTTP 500, and the
+   events' page links drop `wpage` (comment untrue); LOW 5 `/^…$/` lets a trailing newline through (header untrue); LOW 6 nine activity
+   lines on the P8-2/P8-3 pages record no person (the Activity page shows "System"). Judged fine: the reworded Decline confirmation; the
+   guide's "settles"/"follow" wording against item 10; FeedAdmin's additions; the workflow (estimated 3-6 min on GitHub, unproven).
+   29 faults planted, 24 caught. Runs: 763/763 UTC and Auckland; migration test rc 0; 21 checks rc 0.
+   **NOW: P8-4 FIX ROUND 1** (same Opus builder; brief `.claude-work/briefs/514-p8-4-fix1.md` — all six findings plus five cheap Found
+   items: link the unreachable `feeds/preview?event=N`, the guide's Approvals-off link, two inaccurate sentences, a stray space;
+   report `.claude-work/resume/p514-p8-4--fix1.md`; watchdog on it). Then narrow check round 2.
    **P8-3 (history)** (choices, rules, the series page; the P8-2 builder resumed — it knows the pages, picker and harness; brief
    `.claude-work/briefs/514-p8-3-build.md` incl. the 8 carried test fixes; report `.claude-work/resume/p514-p8-3--build.md`; evidence
    `…--build-evidence/`; watchdog on it). Then P8-3's ONE full check, narrow checks, close → P8-4. If clean: P8-1 CLOSES —
