@@ -698,6 +698,14 @@ builder runs**; before that it was clean.
    the self-test changed. Re-frozen: `.claude-work/resume/p514-p8-final2-snapshot/` (self-test `bed6a2e6…`).
    **NOW: the FINAL whole-of-part-8 check by a fresh Opus agent standing in for Codex** (brief
    `.claude-work/briefs/514-p8-final-standin.md`; report `.claude-work/resume/p514-p8--final-standin.md`; watchdog on it).
+   **FINAL CHECK (stand-in for Codex): NOT CLEAN — no separation, permission, data-loss or SQL fault; four untrue things** (end of
+   `.claude-work/resume/p514-p8--final-standin.md`): F1 MEDIUM removing a choice from a PRIVATE date says it "follows the rules" (rules
+   never reach it); F2 MEDIUM the event preview says details are hidden from people INSIDE the calendar's own audience, who see them
+   (unsafe direction); F3 LOW a stale "Declined on…" badge after a newer approval; F4 LOW FeedAdmin's header overstates the locked
+   sequence. 786/786 in UTC, Auckland, New York and at 512M; 20 of 23 new faults caught (2 harmless, N33 a guide claim unpinned).
+   Found → issues after the commit: `seen[]` per date with no cap vs PHP's `max_input_vars`; migration 207's deprecated `VALUES()`.
+   **NOW: FINAL FIX ROUND** (same builder; brief `.claude-work/briefs/514-p8-final-fix.md`; report
+   `.claude-work/resume/p514-p8--final-fix.md`; watchdog). Then a narrow check of it → ONE commit → Codex pieces later.
    **P8-3 (history)** (choices, rules, the series page; the P8-2 builder resumed — it knows the pages, picker and harness; brief
    `.claude-work/briefs/514-p8-3-build.md` incl. the 8 carried test fixes; report `.claude-work/resume/p514-p8-3--build.md`; evidence
    `…--build-evidence/`; watchdog on it). Then P8-3's ONE full check, narrow checks, close → P8-4. If clean: P8-1 CLOSES —
