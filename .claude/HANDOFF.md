@@ -537,6 +537,15 @@ builder runs**; before that it was clean.
    as a present fact; the guide checked claim by claim against the code; plan item 8 (owner-approved) wires the self-test into
    `calendar-selftests.yml` in this chunk, so the full check and the final check both see it. Then P8-4's full check → narrow rounds →
    the final whole-of-part-8 check (with the "noted for the final check" list below) → the full fault set → ONE commit.
+   **P8-4 BUILD PROGRESS (5 Oct, 02:46):** the session usage limit stopped the builder at ~02:20 (reset 02:40); resumed 02:47, same
+   agent, its servers `p8-4-a`/`p8-4-b` still up. Done before the stop: step 0 PROVED (713/713; NEW1 and NEW2 each fail W43); all P8-4
+   pages, the guide, the upgrade card, the API sentences, 207 grown, the workflow wired (actionlint rc 0); FeedAdmin gained small READ
+   additions only (`importedEvent` +audience, `approval` +superseded snapshot +siblingsWaiting, `pendingApprovals` +reason, `decide`
+   +decidedIds; D39 checks them); full run 763/763 (S 11, D 519, W 233) in UTC; 21 audit checks + static calls rc 0. Left: the layout
+   re-render, Auckland, 8.4.11, migration test on both, the other self-tests, the planted faults, the report. **Builder's FOUND items
+   (outside P8-4, not fixed):** `Router::renderAppDisabled()` names the wrong app (nav.php's loop reuses `$appName` — "Forms Builder is
+   disabled" shown for Approvals); `feeds-view.php`'s `#categories-help` (P8-2) has no `text-break`, so a long default category makes
+   the page 670px wide on a 390px phone. Both need an issue (or a fold-in) once the build reports.
    **P8-3 (history)** (choices, rules, the series page; the P8-2 builder resumed — it knows the pages, picker and harness; brief
    `.claude-work/briefs/514-p8-3-build.md` incl. the 8 carried test fixes; report `.claude-work/resume/p514-p8-3--build.md`; evidence
    `…--build-evidence/`; watchdog on it). Then P8-3's ONE full check, narrow checks, close → P8-4. If clean: P8-1 CLOSES —
