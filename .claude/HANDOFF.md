@@ -637,6 +637,14 @@ builder runs**; before that it was clean.
    **NOW: P8-4 FIX ROUND 2 (tiny)** — same Opus builder; brief `.claude-work/briefs/514-p8-4-fix2.md`; report
    `.claude-work/resume/p514-p8-4--fix2.md`; watchdog on it. Then narrow check round 3. **P8-4 will then have had three check rounds —
    flag to the owner (narrow-checks memory).**
+   **P8-4 FIX ROUND 2 DONE (~10:45):** `importedEvent()` gains `feedActive` and `stale` (same statement; `stale` by the database's
+   clock); the event preview says "That calendar is paused…" / "Until the scheduled refresh next runs, this date is shown only to
+   administrators." when true (the request preview gets the paused notice only — deciding renews the setting); link now "Preview what
+   people see"; W53 pins the "Later"/"Earlier" links; the Logger comment corrected in five files; the "private" wording pinned on the
+   waiting section and `help/approvals.php`. 784/784 (S 11, D 522, W 251) UTC and Auckland; 6/6 faults caught. Notices NOT rendered in
+   a browser. Snapshot `.claude-work/resume/p514-p8-4-r2-snapshot/` (8 files changed).
+   **NOW: P8-4 NARROW CHECK ROUND 3** (fresh Opus, Codex stand-in; brief `.claude-work/briefs/514-p8-4-check-r3.md`; report
+   `.claude-work/resume/p514-p8-4--verify-r3.md`; watchdog on it). Clean → P8-4 closes → the Codex final whole-of-part-8 check.
    **P8-3 (history)** (choices, rules, the series page; the P8-2 builder resumed — it knows the pages, picker and harness; brief
    `.claude-work/briefs/514-p8-3-build.md` incl. the 8 carried test fixes; report `.claude-work/resume/p514-p8-3--build.md`; evidence
    `…--build-evidence/`; watchdog on it). Then P8-3's ONE full check, narrow checks, close → P8-4. If clean: P8-1 CLOSES —
