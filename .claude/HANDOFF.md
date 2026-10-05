@@ -587,6 +587,19 @@ builder runs**; before that it was clean.
    (outside P8-4, not fixed):** `Router::renderAppDisabled()` names the wrong app (nav.php's loop reuses `$appName` — "Forms Builder is
    disabled" shown for Approvals); `feeds-view.php`'s `#categories-help` (P8-2) has no `text-break`, so a long default category makes
    the page 670px wide on a 390px phone. Both need an issue (or a fold-in) once the build reports.
+   **P8-4 BUILD DONE (5 Oct ~04:00):** 763/763 rc 0 four times on the final code (UTC ×2 and Auckland on 8.0.36; UTC on 8.4.11);
+   S 11, D 519, W 233; 13 planted faults all caught; migration test rc 0 on 8.0.36 and 8.4.11; visibility 150, resolver 208, importer
+   rc 0; 22 audit checks rc 0; workflow actionlint rc 0 (NOT run on GitHub). Folded in: `#categories-help` wraps (670 → 390 px).
+   Snapshot `.claude-work/resume/p514-p8-4-r0-snapshot/` (30 files). Builder's FOUND for the checker / later: activity lines from the
+   P8-2/P8-3 pages carry no user (`Logger::activity()` does not read the session) — checker to judge; after a decision the flash
+   draws at the top while the page jumps to `#imports`/`#waiting` (phone users may miss it; same on P8-2/P8-3 pages) — issue
+   candidate; the workflow job's 20-minute limit is unmeasured on GitHub (the test alone took 1.6 min here) — watch the first run;
+   the Approvals page's older bare addresses are #536's. Builder's plan corrections: §11.3's "This event changed…" is really
+   decide()'s "Approved 0. 1 had changed since you opened the page; please review it again."; the Decline confirmation now says a
+   privately marked date may stay hidden (the plan's wording was untrue for it); a calendar cannot be "Only administrators".
+   **NOW: P8-4 CHECK ROUND 1 (FULL), fresh Opus agent standing in for Codex** (brief `.claude-work/briefs/514-p8-4-check.md`; report
+   `.claude-work/resume/p514-p8-4--verify-r1.md`; watchdog on it). Then narrow rounds → **Codex** final whole-of-part-8 check → the full
+   fault set → wire nothing more → ONE commit.
    **P8-3 (history)** (choices, rules, the series page; the P8-2 builder resumed — it knows the pages, picker and harness; brief
    `.claude-work/briefs/514-p8-3-build.md` incl. the 8 carried test fixes; report `.claude-work/resume/p514-p8-3--build.md`; evidence
    `…--build-evidence/`; watchdog on it). Then P8-3's ONE full check, narrow checks, close → P8-4. If clean: P8-1 CLOSES —
