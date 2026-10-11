@@ -108,6 +108,22 @@ rebuilds "Delete my account"; brief = `.claude-work/briefs/rollout-A2-decisions.
 primary text; Philippines 5 by statute but keep 10 as the cautious figure; Bangladesh has no official figure; Zambia 6; Ecuador,
 Zambia and Morocco have clear exceptions; France 10 confirmed) — A2b's builder merges all four files.
 
+**PACKAGE A2a IS BUILT (12 Oct ~01:00; 19 files, NOT committed; snapshot `.claude-work/resume/rollout-A2a-snapshot/`) and IN ITS ONE
+CHECK** (fresh Opus; brief `.claude-work/briefs/rollout-A2a-check.md`; report `.claude-work/resume/rollout-A2a--check.md`; watchdog).
+Built: other people's records kept, worker cleared (delete on an "acted on it" column now refused by construction); the eraser builds
+one instruction for EVERY person column a table has (195 instructions; 31 of 37 extra "who did it" columns cleared); the person's own
+visitor record deleted; photo, biography, `calendarToken`, `notifyPrefs` cleared; **"Delete my account" files a CONFIRMED erasure
+request through `GdprEraser::fileRequest()` and changes nothing itself**; an administrator can "Confirm on the person's behalf";
+a request stuck at "processing" can be put back (15 minutes, `claimedAt` in UTC); migration **208** (four columns emptiable;
+`tblErasureRequest.claimedAt`), proved on 8.0.36 and 8.4.11 and from the previous release. 126 + 40 checks; 75 faults caught.
+**Six columns left pinned in `KNOWN_STILL_NAMED`, needing decisions:** five may not be empty (`tblAssetLicenseAssignments.linkedByID`,
+`tblAssetLoans.requestedByID`, `tblOffboarding.offboardedByID`, `tblResourceBooking.bookedByID`, `tblRotaSwapRequest.requestedByID`
+— a migration); `tblInvitation.acceptedByID` (the row holds the invited person's own email address — delete an accepted invitation
+with its person?). **For the owner's safeguarding lead:** who made a pastoral visit, and who recorded a DBS check, are now cleared.
+Builder's other Found items: its report, list items 2, 4, 6-13, 16, 17.
+**THEN:** fix what the check finds → commit → A2b (giving records; migration 209; Opus) → B2 → C → D → E → #499/#500/#502 → #514
+parts 9-11 → the workflow edit → documentation sweep → Codex pass.
+
 **(done)** NEXT, in order (one package in flight; nothing edits the tree while B is being checked): B's check → fix → commit → A2a build →
 check → commit → A2b → B2 → C → D → E → #499/#500/#502 → #514 parts 9-11 → the workflow edit → documentation sweep → Codex pass.
 
