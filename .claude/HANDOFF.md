@@ -97,7 +97,18 @@ booking itself shows across organisations; the Team Hub data endpoints are wider
 `prompts.php` need no sign-in (with #548); `live/index.php` reveals which event numbers exist; three handlers store any event number
 they are sent (`kids/checkin-do.php`, `salvation/card-save.php`, `livestream/api/ping.php`); expense handlers redirect to bare
 addresses; the `AppRegistry::all()` comment; `FEATURES.md` and `api-spec.json` not updated for B.
-**NEXT, in order (one package in flight; nothing edits the tree while B is being checked):** B's check → fix → commit → A2a build →
+**PACKAGE B IS COMMITTED: `6223e2e` (11 Oct ~23:10), pushed; #545, #478, #570, #534 commented.** One check: PASS, no real fault. Seven
+planted faults that passed the tests were closed afterwards (tests only; the access and money code byte for byte as checked — I
+compared it with the snapshot). New committed tests: `tools/expense-rules-selftest.php` (50), `tools/app-switch-selftest.php` (86
+with a database), `tools/access-pages-selftest.php` (94, drives real pages; must not run at the same moment as
+`feed-admin-selftest.php` on one database); `feed-admin-selftest.php` is now 831.
+**NOW: PACKAGE A2a BUILD** (fresh OPUS builder — the plan said Sonnet, but this decides what personal data is deleted or kept and now
+rebuilds "Delete my account"; brief = `.claude-work/briefs/rollout-A2-decisions.md` + the plan's A2a; migration 208; report
+`.claude-work/resume/rollout-A2a--build.md`; watchdog). Research re-check DONE (`…-research-recheck.md`: 29 entries, 24 now on
+primary text; Philippines 5 by statute but keep 10 as the cautious figure; Bangladesh has no official figure; Zambia 6; Ecuador,
+Zambia and Morocco have clear exceptions; France 10 confirmed) — A2b's builder merges all four files.
+
+**(done)** NEXT, in order (one package in flight; nothing edits the tree while B is being checked): B's check → fix → commit → A2a build →
 check → commit → A2b → B2 → C → D → E → #499/#500/#502 → #514 parts 9-11 → the workflow edit → documentation sweep → Codex pass.
 
 **(older note)** PACKAGE A2 (erasure, part two) — being designed with the owner: (i) erasing a follow-up worker today DELETES other people's
