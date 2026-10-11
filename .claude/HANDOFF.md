@@ -706,6 +706,13 @@ builder runs**; before that it was clean.
    Found → issues after the commit: `seen[]` per date with no cap vs PHP's `max_input_vars`; migration 207's deprecated `VALUES()`.
    **NOW: FINAL FIX ROUND** (same builder; brief `.claude-work/briefs/514-p8-final-fix.md`; report
    `.claude-work/resume/p514-p8--final-fix.md`; watchdog). Then a narrow check of it → ONE commit → Codex pieces later.
+   **THE WEEKLY OPUS LIMIT stopped everything on 5 Oct ~19:50 (reset 11 Oct 16:00).** The builder had finished the F1-F4 edits and their
+   tests (five files differ from final2: FeedAdmin, feeds-choice, feeds-preview, help/calendar-imports, the self-test; expected 793
+   checks) and was cut off as its first full run started. **Resumed 11 Oct 16:27, same agent**, to finish the proofs and to check two
+   new unnamed Docker volumes (4 dangling, was 2 — probably its `p8-ff-a/b` servers' data).
+   **OWNER, 11 Oct: "we really are wanting to get through this so we can try and finalise and begin roll-out usage — so lets focus on
+   this and cleaning up anything else now".** A read-only Sonnet gatherer is listing which open issues are already fixed on this branch
+   (`.claude-work/resume/rollout-issue-status.md`), so the roll-out order can be put to the owner with facts.
    **P8-3 (history)** (choices, rules, the series page; the P8-2 builder resumed — it knows the pages, picker and harness; brief
    `.claude-work/briefs/514-p8-3-build.md` incl. the 8 carried test fixes; report `.claude-work/resume/p514-p8-3--build.md`; evidence
    `…--build-evidence/`; watchdog on it). Then P8-3's ONE full check, narrow checks, close → P8-4. If clean: P8-1 CLOSES —
