@@ -9,6 +9,35 @@ proceeds, so the session can be picked up at any point).
 
 ## Read this first — where we are right now
 
+## OWNER DECISIONS, 11 OCTOBER 2026 — THE ROLL-OUT PLAN (final; this is the queue now)
+
+The owner: "we really are wanting to get through this so we can try and finalise and begin roll-out usage — so lets focus on this and
+cleaning up anything else now". Asked up front, with facts from `.claude-work/resume/rollout-issue-status.md` (85 open issues
+classified: 37 already fixed on this branch, 38 not started, 7 partly):
+
+1. **The first roll-out is an organisation the owner is involved in — AND it includes #499 (zip installer), #500 (no built-in
+   address) and #502 (multi-organisation "session" mode).**
+2. **Must-fix before roll-out — "the roll-out set":** #510 (erasure stops part-way, critical), #535 (erasure skips four tables), #545
+   (self-approval of expenses), #547 (my-volunteering crashes), #568 (wrong library fingerprints), #570 (wrong app name), #563
+   (`set_time_limit` crash), #478 (a switched-off app's data endpoints still answer), the rest of #534 (items 3-4), #488 (make the
+   recovery runbook true). **Everything else waits until after roll-out** (#569's audit and push check, #564, the upgrade test and
+   #553-#556, #558-#562, #549 and the rest) unless the owner pulls it forward.
+3. **#514 parts 9, 10 and 11 are finished BEFORE roll-out** (not deferred).
+4. **Codex: the riskiest parts only, NOT a gate, and only once the queued items are done.** A fresh Opus agent's independent check
+   before a commit stays available as an option. **"Minimise multiple rounds of code reviews, wasting potential codex
+   usage/credits/tokens."** So: one independent check per code package, sized to the risk; tiny wording-and-test fixes after it are
+   committed on the builder's proofs without another round; Codex gets ONE lean, security-first pass over the riskiest areas at the end
+   (sign-in and permissions, erasure, expenses and payments, calendar import), split across its resets, blocking nothing.
+
+**ORDER:** part 8's commit → the roll-out set → #499, #500, #502 → #514 parts 9-11 → documentation sweep → the Codex pass alongside →
+the pull request when the owner says.
+
+**At merge time:** commits `f0eb9d5` ("Closes #477", "Closes #482") and `20d7a05` ("Closes #483") would close issues that are NOT done
+(the #477 page does not exist; 33 of 62 endpoints documented; three dead files remain). History cannot be rewritten — reopen those
+three straight after the merge, and say so in the pull request.
+**Open question for the owner (asked 11 Oct):** is the roll-out a FRESH install or an UPGRADE of an existing database? An upgrade of a
+database installed before 25 June 2026 stops at migration 124 (#555), so #553/#555 would join the roll-out set.
+
 ## OWNER DECISIONS, 5 OCTOBER 2026, about 03:00 — eleven answers to questions put up front (final; do not reopen)
 
 1. **Chunk 3 closed by carrying its last fixes into chunk 4** — accepted.
