@@ -189,8 +189,22 @@ return [
         'columns'  => ['notes', 'counterpartyUserID'],
     ],
     'tblAssetOrgs' => [
-        'decision' => 'erase',
-        'reason'   => 'Holds information about the person themselves',
+        'decision' => 'retain',
+        // #535, 11 October 2026. This said 'erase' with the stock reason "Holds information about the person themselves",
+        // and the erasure routine did nothing at all to the table, without a
+        // word in the audit trail: none of the columns listed ties a row to an
+        // account, so there was nothing to find the person by. The
+        // machine-readable half promised something the code cannot do. It now
+        // follows the tblAnonymousCheckins precedent above (#525): 'retain',
+        // because the row IS kept, with the true reason and a 'period' that
+        // does not pretend there is a time limit. Searched on that day: no
+        // scheduled job and no page clears this table by age. Choosing a time
+        // limit is a separate decision for the owner, not made here.
+        'reason'   => 'An outside organisation that lends or hires equipment, with the name, email address and '
+                    . 'telephone number of its contact. That contact is somebody outside the portal: nothing on the '
+                    . 'row links it to an account, so an erasure request cannot reach it. An administrator can edit '
+                    . 'or clear the contact on the organisation\'s page in the asset register',
+        'period'   => 'as long as the organisation keeps the row: nothing clears it on a timer today',
         'columns'  => ['contactName', 'contactEmail', 'contactPhone', 'notes'],
     ],
     'tblAssetOwners' => [
@@ -209,8 +223,15 @@ return [
         'columns'  => ['startedByID', 'notes'],
     ],
     'tblAttendanceCounts' => [
-        'decision' => 'erase',
-        'reason'   => 'Holds information about the person themselves',
+        'decision' => 'not-personal',
+        // #535, 11 October 2026. This said 'erase', and the erasure routine did
+        // nothing to it, silently. It was listed because of its `sessionID`
+        // column, a name that elsewhere means a browser session. Here it is the
+        // number of an ATTENDANCE session (tblAttendanceSessions): which service
+        // the count belongs to. The row is a group label and a head count.
+        'reason'   => 'Head counts only: how many adults, children or visitors were counted at one service. '
+                    . 'Its sessionID is the number of the attendance session, not of anybody\'s browser session, '
+                    . 'and nothing on the row is about a person.',
         'columns'  => ['sessionID'],
     ],
     'tblAttendanceSessions' => [
@@ -267,9 +288,27 @@ return [
         'columns'  => ['tableName', 'rowID'],
     ],
     'tblErasureRequest' => [
-        'decision' => 'erase',
-        'reason'   => 'Holds information about the person themselves',
-        'columns'  => ['userID', 'notes'],
+        'decision' => 'unlink',
+        // 🛑 #510, 11 October 2026. This said 'erase', and that one word broke
+        //    every erasure. The table walk deleted the request it was in the
+        //    middle of carrying out; the database deleted the request's audit
+        //    lines with it; the next audit line had no request to belong to;
+        //    and the run crashed with the person half erased and no record of
+        //    what had been done.
+        //
+        //    The request is the organisation's record that an erasure was
+        //    asked for and carried out, so the row and its audit lines stay.
+        //    What goes is what identifies the person, and it goes LAST, once
+        //    every other step has succeeded.
+        //
+        //    The table walk does NOT do this, on purpose: this table is in
+        //    GdprEraser::FINAL_STEP_TABLES and GdprEraser::closeRequest() does
+        //    the work. tools/gdpr-coverage-selftest.php fails if any
+        //    instruction ever deletes from this table or from tblErasureAudit.
+        'reason'   => 'The organisation\'s record that an erasure was asked for, when, and that it was done. The '
+                    . 'request, its dates, its outcome and its audit lines are kept. The account number, name, email '
+                    . 'address and notes are cleared from it as the last step, once everything else has succeeded.',
+        'columns'  => ['userID', 'subjectEmail', 'subjectName', 'notes'],
     ],
     'tblEventAttendance' => [
         'decision' => 'unlink',
@@ -354,8 +393,26 @@ return [
         'columns'  => ['submitterID'],
     ],
     'tblGiftAidDeclaration' => [
-        'decision' => 'erase',
-        'reason'   => 'Holds information about the person themselves',
+        'decision' => 'retain',
+        // 🔒 Changed from 'erase' on 11 October 2026, on Salem874's decision
+        //    (roll-out decision 8). Deleting a declaration when the donor
+        //    asked to be forgotten destroyed the evidence for tax the
+        //    organisation had already reclaimed. The file header of this very
+        //    list names Gift Aid declarations as the first example of
+        //    something to KEEP; this entry said the opposite.
+        //
+        //    THE SIX YEARS BELOW HAVE NOT BEEN CONFIRMED WITH AN ACCOUNTANT.
+        //    They are the project's understanding of HMRC's guidance. Nothing
+        //    deletes a declaration when the period is up, either: there is no
+        //    timer for this table.
+        //
+        //    The erasure's audit trail records each of these as kept on
+        //    purpose, with this reason. tools/gdpr-coverage-selftest.php and
+        //    tools/gdpr-eraser-selftest.php both fail if it is ever set back.
+        'reason'   => 'A Gift Aid declaration is the organisation\'s evidence for tax it has reclaimed on a donor\'s '
+                    . 'gifts. Kept for tax reasons: HMRC can ask to see it for six years after the last gift claimed '
+                    . 'under it. The donor\'s name is on their account, not on this row, and the account is emptied',
+        'period'   => 'six years after the last gift claimed under the declaration (not confirmed with an accountant)',
         'columns'  => ['donorID', 'address', 'postcode', 'notes'],
     ],
     'tblGivingEntry' => [
@@ -384,9 +441,24 @@ return [
         'columns'  => ['userID'],
     ],
     'tblLiveChatMessages' => [
-        'decision' => 'erase',
-        'reason'   => 'Holds information about the person themselves',
-        'columns'  => ['displayName'],
+        'decision' => 'unlink',
+        // #535, 11 October 2026. This said 'erase' and listed only the typed
+        // display name, so the erasure routine had no column to find anybody
+        // by and did nothing, silently. The one link to an account on this
+        // table is `moderatedByID`: the administrator who approved or hid a
+        // message. That is somebody acting on another person's message, so
+        // the message stays and their number goes.
+        //
+        // WHAT ERASURE CANNOT FIND: the SENDER. A message is posted without
+        // signing in, under a name the sender types, with a random session
+        // token and the address it came from. Nothing ties it to an account,
+        // so a request to be forgotten cannot find a person's own messages.
+        // Nothing clears them on a timer either (searched 11 October 2026).
+        'reason'   => 'A message in a live-stream chat. The only link to an account is which administrator moderated '
+                    . 'it, so the message stays and that number goes. A sender\'s own messages cannot be found by an '
+                    . 'account: they are posted without signing in, under a typed name, and nothing links them to '
+                    . 'anybody.',
+        'columns'  => ['displayName', 'senderIP', 'moderatedByID'],
     ],
     'tblLocalAccounts' => [
         'decision' => 'erase',
@@ -489,13 +561,36 @@ return [
         'columns'  => ['fullName', 'email', 'phone', 'address', 'assignedToID', 'notes'],
     ],
     'tblServicePlanItem' => [
-        'decision' => 'erase',
-        'reason'   => 'Holds information about the person themselves',
-        'columns'  => ['notes'],
+        'decision' => 'unlink',
+        // #535, 11 October 2026. This said 'erase' and listed only `notes`, so
+        // the erasure routine had no column to find anybody by and did
+        // nothing, silently. The real link is `presenterID`: who leads one
+        // item of a service. 'erase' would have been wrong even had it worked:
+        // it would delete an item from the organisation's running order
+        // because of who was down to present it.
+        //
+        // WHAT ERASURE CANNOT FIND: `presenterText` is a name typed by hand,
+        // and may still spell the person's name (#492).
+        'reason'   => 'One item in a service running order. The running order is the organisation\'s own working '
+                    . 'document, so the item stays and the number of whoever was down to present it goes.',
+        'columns'  => ['presenterID', 'notes'],
     ],
     'tblServicePlanItems' => [
-        'decision' => 'erase',
-        'reason'   => 'Holds information about the person themselves',
+        'decision' => 'retain',
+        // #535, 11 October 2026. This said 'erase' with the stock reason "Holds information about the person themselves",
+        // and the erasure routine did nothing at all to the table, without a
+        // word in the audit trail: none of the columns listed ties a row to an
+        // account, so there was nothing to find the person by. The
+        // machine-readable half promised something the code cannot do. It now
+        // follows the tblAnonymousCheckins precedent above (#525): 'retain',
+        // because the row IS kept, with the true reason and a 'period' that
+        // does not pretend there is a time limit. Searched on that day: no
+        // scheduled job and no page clears this table by age. Choosing a time
+        // limit is a separate decision for the owner, not made here.
+        'reason'   => 'One slide in a worship presentation, with the operator\'s own notes. The notes are free text '
+                    . 'and may mention somebody, but nothing on the row links it to an account, so an erasure '
+                    . 'request cannot reach it. It goes when an operator deletes the slide or its plan',
+        'period'   => 'as long as the organisation keeps the plan: nothing clears it on a timer today',
         'columns'  => ['slideNotes'],
     ],
     'tblServicePlans' => [
@@ -600,28 +695,39 @@ return [
     ],
     'tblRecording' => [
         'decision' => 'unlink',
-        'reason'   => 'Who uploaded a recording. The recording is the organisation\'s, so it stays and the name goes.',
-        'columns'  => ['createdByID'],
+        // The columns were listed as `createdByID`, which this table does not
+        // have (corrected by #535, 11 October 2026; the instructions in
+        // GdprEraser were already right). `presenterID` was added then too:
+        // it was never emptied before.
+        'reason'   => 'Who uploaded a recording, and who presented it. The recording is the organisation\'s, so it stays and both numbers go.',
+        'columns'  => ['uploadedByID', 'presenterID'],
     ],
     'tblCareAccessLog' => [
         'decision' => 'erase',
+        // The column was listed as `userID`; the table's column is `viewerID`
+        // (corrected by #535, 11 October 2026). Deleting on an "acted on it"
+        // column is allowed here only because the table is named, with its
+        // reason, in GdprEraser::DELETE_ON_ACTOR_COLUMN.
         'reason'   => 'A record of this person opening somebody\'s pastoral file. It is about their own actions and is removed with them.',
-        'columns'  => ['userID'],
+        'columns'  => ['viewerID'],
     ],
     'tblAssetAudit' => [
         'decision' => 'unlink',
+        // The column was listed as `userID`; it is `actorUserID` (#535).
         'reason'   => 'Who changed something in the asset register. The change history stays; the name goes.',
-        'columns'  => ['userID'],
+        'columns'  => ['actorUserID'],
     ],
     'tblAssetScanLog' => [
         'decision' => 'unlink',
+        // The column was listed as `userID`; it is `actorUserID` (#535).
         'reason'   => 'Who scanned an asset label. The scan history stays; the name goes.',
-        'columns'  => ['userID'],
+        'columns'  => ['actorUserID'],
     ],
     'tblAssetValueHistory' => [
         'decision' => 'unlink',
+        // The column was listed as `createdByID`; it is `recordedByID` (#535).
         'reason'   => 'Who recorded a change in an item\'s value. A financial history, so it stays; the name goes.',
-        'columns'  => ['createdByID'],
+        'columns'  => ['recordedByID'],
     ],
     'tblUsers' => [
         'decision' => 'unlink',
@@ -639,8 +745,22 @@ return [
         'columns'  => ['notes', 'createdByID', 'updatedByID'],
     ],
     'tblVenueImportRows' => [
-        'decision' => 'erase',
-        'reason'   => 'Holds information about the person themselves',
+        'decision' => 'retain',
+        // #535, 11 October 2026. This said 'erase' with the stock reason "Holds information about the person themselves",
+        // and the erasure routine did nothing at all to the table, without a
+        // word in the audit trail: none of the columns listed ties a row to an
+        // account, so there was nothing to find the person by. The
+        // machine-readable half promised something the code cannot do. It now
+        // follows the tblAnonymousCheckins precedent above (#525): 'retain',
+        // because the row IS kept, with the true reason and a 'period' that
+        // does not pretend there is a time limit. Searched on that day: no
+        // scheduled job and no page clears this table by age. Choosing a time
+        // limit is a separate decision for the owner, not made here.
+        'reason'   => 'One row of a spreadsheet of venue bookings, held while it is being imported. Its notes cell is '
+                    . 'copied as it was typed and may mention somebody, but nothing on the row links it to an '
+                    . 'account, so an erasure request cannot reach it. (Who ran the import is on the batch, '
+                    . 'tblVenueImportBatches, and that IS unlinked.)',
+        'period'   => 'as long as the organisation keeps the import batch: nothing clears it on a timer today',
         'columns'  => ['rawNotes'],
     ],
     'tblVenueInvoicePayments' => [
@@ -785,11 +905,11 @@ return [
         // counts only, never names, on purpose (migration 206's header), so
         // erasure is never defeated by a name hidden inside a label.
         //
-        // `decidedByID` is NOT one of the names `GdprEraser` recognises by
-        // itself (`GdprEraser::LINK_COLUMNS`) — the same trap part P6 fell into
-        // with `triggeredByID` (#535). So `GdprEraser::catalogue()` carries a
-        // hand-written entry for this table; without it the table would be
-        // skipped. `check_personal_data_coverage.py` now knows the name too.
+        // `decidedByID` was not one of the names `GdprEraser` recognised by
+        // itself, so `GdprEraser::catalogue()` carries a hand-written entry
+        // for this table. #535 added the name to `GdprEraser::LINK_COLUMNS` on
+        // 11 October 2026; the hand-written entry still wins.
+        // `check_personal_data_coverage.py` knows the name too.
         'reason'   => 'Records which administrator approved or declined showing an'
                     . ' outside calendar\'s event more widely. The decision is the'
                     . ' organisation\'s and stays; the name goes',
@@ -843,19 +963,13 @@ return [
         // person on it is `triggeredByID`, which says who pressed the Refresh
         // button. So the history stays and the name goes.
         //
-        // WHAT THIS ENTRY DOES NOT DO TODAY, stated plainly rather than left
-        // to be discovered. `GdprEraser` works out how to reach a table from
-        // its own list of column names that mean "a person"
-        // (`GdprEraser::LINK_COLUMNS`), and `triggeredByID` is not on that
-        // list — no other table in the portal uses that name. So the erasure
-        // routine currently SKIPS this table rather than emptying the column.
-        // The information involved is one account number on an internal job
-        // log, the column is already emptied outright if the account is ever
-        // really deleted (`fk_extrun_user … ON DELETE SET NULL`), and the row
-        // holds nothing else about anybody. Adding the name to
-        // `LINK_COLUMNS` is a one-word change in a file part P6 was not asked
-        // to touch, so it is written down here and raised as a follow-up
-        // rather than done quietly.
+        // #535, fixed 11 October 2026. From part P6 until then the erasure
+        // routine SKIPPED this table: it worked out how to reach a table from
+        // a list of column names that mean "a person", and `triggeredByID` was
+        // not on it. The name is now in `GdprEraser::LINK_COLUMNS` (and in
+        // ACTOR_COLUMNS, because pressing Refresh is something a person DID),
+        // so the column is emptied wherever it names the person being erased.
+        // tools/gdpr-eraser-selftest.php proves it on a real database.
         'reason'   => 'A record of what the portal did when it refreshed an outside'
                     . ' calendar. The only thing about a person is who pressed'
                     . ' Refresh, so the record stays and the name goes',
@@ -878,11 +992,22 @@ return [
         'columns'  => ['createdByID'],
     ],
     'tblLivestreamSessions' => [
-        'decision' => 'unlink',
-        'reason'   => 'Kept for running and repairing the portal. The record stays;'
-                    . ' the link to the person is cut, so it can no longer be traced'
-                    . ' back to them',
-        'columns'  => ['sessionID', 'userAgent'],
+        'decision' => 'retain',
+        // #535, 11 October 2026. This said 'unlink' with the stock reason "the link to the person is cut",
+        // and the erasure routine did nothing at all to the table, without a
+        // word in the audit trail: none of the columns listed ties a row to an
+        // account, so there was nothing to find the person by. The
+        // machine-readable half promised something the code cannot do. It now
+        // follows the tblAnonymousCheckins precedent above (#525): 'retain',
+        // because the row IS kept, with the true reason and a 'period' that
+        // does not pretend there is a time limit. Searched on that day: no
+        // scheduled job and no page clears this table by age. Choosing a time
+        // limit is a separate decision for the owner, not made here.
+        'reason'   => 'One viewer of a live stream: a random token made by the player, when they joined and left, '
+                    . 'their browser description and a two-letter country. Viewers do not sign in, and nothing on '
+                    . 'the row links it to an account, so an erasure request cannot reach it',
+        'period'   => 'as long as the organisation keeps the row: nothing clears it on a timer today',
+        'columns'  => ['sessionToken', 'userAgent', 'ipCountry'],
     ],
     'tblNewsletter' => [
         'decision' => 'unlink',
@@ -1043,9 +1168,22 @@ return [
     ],
     'tblCareVisit' => [
         'decision' => 'retain',
-        'reason'   => 'Safeguarding and pastoral record',
+        // The columns were listed as `notes` alone until 11 October 2026.
+        // The table also has `visitedByID` (who made the visit; it may not
+        // be empty) and `followUpAssignedToID`. With neither named, every
+        // erasure's audit trail said that no column tied a pastoral visit to
+        // an account, which was untrue. GdprEraser::catalogue() now carries
+        // a hand-written "kept" instruction matched on `visitedByID`.
+        //
+        // WHAT ERASURE DOES NOT DO: it does not remove the person's number
+        // from the visits they made (the database forbids emptying that
+        // column), and it does not find a visit somebody else made whose
+        // follow-up was assigned to them.
+        'reason'   => 'A pastoral visit. Safeguarding and pastoral record: the visit and its notes are kept with '
+                    . 'the case. The number of whoever made the visit stays on it, because that column may not be '
+                    . 'empty; their account is emptied, so the number names nobody',
         'period'   => 'as required by safeguarding policy',
-        'columns'  => ['notes'],
+        'columns'  => ['visitedByID', 'followUpAssignedToID', 'notes'],
     ],
     'tblDbsChecks' => [
         'decision' => 'retain',

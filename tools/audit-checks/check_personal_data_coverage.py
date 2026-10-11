@@ -107,8 +107,20 @@ PERSONAL_COLUMNS = re.compile(
     # Added by #514 part P7: who approved or declined an outside calendar's
     # event (tblExternalEventApprovals). Named here so that removing that
     # table's catalogue entry later fails this check instead of passing
-    # silently. (`triggeredByID` is #535's, and deliberately left to it.)
+    # silently.
     r"|decidedByID"
+    # Added by #535 (11 October 2026): who pressed Refresh on an outside
+    # calendar, who opened a pastoral file, and who changed or scanned an
+    # asset. Each is the ONLY personal column on its table, so without the
+    # name here that table's catalogue entry could be deleted and this check
+    # would still pass.
+    #
+    # `uploadedByID` is deliberately NOT here, although GdprEraser knows it.
+    # Three tables that use it have no catalogue entry at all, so adding it
+    # would fail this check for a gap that is a separate decision for the
+    # owner (twelve uncatalogued tables that link to an account). This check
+    # cannot see those tables until that is settled.
+    r"|triggeredByID|viewerID|actorUserID"
     r")$",
     re.IGNORECASE,
 )

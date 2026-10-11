@@ -2,6 +2,50 @@
 
 
 ## [Unreleased] (alpha)
+- fix(privacy): erasing a person's data now finishes, and says truthfully
+  what it did (#510, #535). **Until this fix every erasure crashed part
+  way.** The routine deleted the erasure request it was carrying out, the
+  database deleted that request's audit lines with it, and the next audit
+  line had nothing to belong to. The administrator saw a server error; the
+  person was left half erased with no record of what had been done.
+  - The request and its audit lines are now kept as the organisation's
+    record. The request is closed as the last step, and the person's
+    account number, name, email address and notes are cleared from it (and
+    from any other request from the same account).
+  - An erasure is a list of steps, each saved with its own audit line. A
+    step that fails is recorded and the rest still run; the request then
+    goes back to "pending review" unchanged, to be run again. If the audit
+    trail itself cannot be written, the run stops.
+  - Every step writes one audit line, including "nothing held".
+  - The erasure page shows one of three plain messages (completed; some
+    steps could not be done; stopped) on the list of requests. It used to
+    say "Erasure completed" whatever had happened, and showed it on the
+    wrong visit.
+  - Eight tables the written list promised to deal with were never
+    touched (#535, which named the wrong four). Now reached:
+    `tblExternalFeedRuns.triggeredByID`, `tblRecording.presenterID`,
+    `tblServicePlanItem.presenterID`, `tblLiveChatMessages.moderatedByID`.
+    Four tables cannot be reached at all, because nothing ties a row to an
+    account (`tblLivestreamSessions`, `tblAssetOrgs`, `tblVenueImportRows`,
+    `tblServicePlanItems`): the list now says so, and every erasure's
+    audit trail records them as kept and not searched. Nothing clears them
+    on a timer yet.
+  - A kept table is recorded as kept. Three used to be recorded as "table
+    missing", and the account row's own line wrongly said its address had
+    been left in place. Pastoral visits a person made are recorded as
+    kept, with the true reason: their number stays on each visit because
+    that column may not be empty.
+  - **Gift Aid declarations are now KEPT on erasure** (owner's decision,
+    11 October 2026). They were deleted. Kept for tax reasons: HMRC can
+    ask for a declaration for six years after the last gift claimed under
+    it. That period has not been confirmed with an accountant, and nothing
+    removes a declaration when it is up.
+  - The list of column names that mean "a person" existed four times and
+    had drifted; there is now one (`GdprEraser::LINK_COLUMNS`).
+  - New test `tools/gdpr-eraser-selftest.php` runs a real erasure on a
+    throwaway database; `tools/gdpr-coverage-selftest.php` now checks the
+    real instructions. Neither runs on GitHub yet. Proven on MySQL 8.0.36
+    only. Codex has not reviewed this.
 - fix(admin): the Upgrade page (`web/_install/upgrade.php`) no longer
   breaks off part-way after running migrations (#561). After running the
   pending migrations, the page tried to draw a results table by reading

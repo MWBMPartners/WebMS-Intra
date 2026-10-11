@@ -4244,6 +4244,30 @@ filesystem-only `eraseGivingStatementFiles()` step: a rendered PDF is a
 name-bearing document with no retention duty once its subject is erased,
 even though the underlying ledger entries stay anonymised-in-place.
 
+#### How an erasure runs (#510, #535, 11 October 2026)
+
+`GdprEraser::execute()` works step by step, not as one transaction: the
+header of `web/_core/GdprEraser.php` says why. Each instruction saves its
+change and its one audit line together. A failed step is recorded and the
+run carries on; the request then goes back to `pending_review` untouched.
+The request is closed only as the last step, and is never deleted. If the
+audit trail cannot be written the run stops and throws.
+
+- **One list of person columns:** `GdprEraser::LINK_COLUMNS`. A person
+  column missing from it is skipped, or emptied on other people's rows.
+- **Kept on purpose:** Gift Aid declarations (tax; the six-year period is
+  not confirmed with an accountant), and five tables no column ties to an
+  account. Each gets a `retain` audit line.
+- **Two tests, neither on GitHub yet.** `php tools/gdpr-coverage-selftest.php`
+  needs no database. `tools/gdpr-eraser-selftest.php` runs a real erasure:
+  give it a throwaway MySQL database built from `full_schema.sql`, named
+  `selftest_…`, through `SELFTEST_DB_PORT`, `SELFTEST_DB_PASS` and
+  `SELFTEST_DB_NAME`. Run it after any change to the catalogue or the
+  eraser. Proven on MySQL 8.0.36 only.
+- **Still not handled:** a second person column no instruction matches on
+  (#492), names typed as free text, and twelve tables that link to an
+  account but are not in the catalogue.
+
 ### User reminders cron (#439, migration 171)
 
 Token in `user_reminders.cron_token`, seeded empty + `isSensitive = 1` — set
@@ -5352,6 +5376,9 @@ without its export/erasure wiring in the same commit):
    shows all three coordinate columns NULL, and the admin path's
    `tblGiftAidDeclaration` DELETE (pre-existing catalogue entry, unchanged
    this chunk) removes the declaration's address entirely.
+   **No longer true since 11 October 2026:** Gift Aid declarations are
+   now KEPT on erasure, address included (the owner's decision; see
+   "How an erasure runs" under "GDPR erasure" above).
 
 ### GiftAid / Salvation — text-only partial reuse, deliberately no schema change
 

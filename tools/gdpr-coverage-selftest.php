@@ -8,6 +8,17 @@
  * It checks that the instructions the erasure routine will follow actually match
  * the written list of where personal information lives.
  *
+ * It loads the REAL class (`GdprEraser::catalogue()` needs no database) and
+ * checks the instructions it really produces, using the class's own lists of
+ * column names. It used to keep copies of those lists; the copies drifted
+ * (#535), which is how eight tables came to be promised and never touched.
+ *
+ * WHAT IT CANNOT DO. It proves the instructions are the right ones. It cannot
+ * prove they WORK on a database: that a statement runs, that only the right
+ * rows change, or that a request survives its own erasure (#510). That is
+ * `tools/gdpr-eraser-selftest.php`, which runs the real erasure on a throwaway
+ * database.
+ *
  * WHY THIS IS WORTH HAVING
  * ------------------------
  * Somebody has two rights over their own information: a copy of it, and its
@@ -43,8 +54,10 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2026 MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.0.0
+ * @version   1.1.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/479
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/510
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/535
  * -----------------------------------------------------------------------------
  */
 
@@ -52,6 +65,10 @@ declare(strict_types=1);
 
 $catalogueFile = __DIR__ . '/../web/_core/personal-data-catalogue.php';
 $eraserFile    = __DIR__ . '/../web/_core/GdprEraser.php';
+$schemaFile    = __DIR__ . '/../web/_sql/full_schema.sql';
+
+// 🔢 How many checks this file makes — EXACTLY. See the end of the file.
+const EXPECTED_CHECKS = 26;
 
 $failures = 0;
 $passes   = 0;
@@ -184,63 +201,254 @@ check(
 );
 
 // -----------------------------------------------------------------------------
-// 7. Tables with no link to an account at all. These cannot be found by
-//    matching on a person, so they need handling another way. Reported rather
-//    than failed — the point is that somebody knows about them.
+// 7. ONE list of the columns that tie a record to a person (#535).
+//
+//    This file used to carry its own copy of that list, and a second copy of
+//    the "acted on it" names, each "kept in step" with GdprEraser by hand.
+//    GdprEraser carried a third, private copy. They drifted: two names were in
+//    one and not another, and the tables that used them were passed over in
+//    silence. Everything below now reads the real class's constants, and the
+//    REAL instructions it produces, so this test cannot agree with itself
+//    while disagreeing with the code.
 // -----------------------------------------------------------------------------
-$linkColumns = [
-    'userID', 'memberID', 'donorID', 'submitterID', 'recipientUserID',
-    'assignedToID', 'targetUserID', 'convertedUserID', 'leaderID',
-    'uploadedByUserID', 'approverID', 'reviewedByID', 'startedByID',
-    'submittedByUserID', 'createdByID', 'updatedByID',
-    'parentUserID', 'counterpartyUserID', 'recordedByID',
-    'approvedByID', 'assignedByID',
-];
+require_once $eraserFile;
 
-// Columns that say the person ACTED on a record, rather than that the record is
-// about them. Kept in step with GdprEraser::ACTOR_COLUMNS.
-$actorColumns = [
-    'uploadedByUserID', 'approverID', 'reviewedByID', 'startedByID',
-    'submittedByUserID', 'createdByID', 'updatedByID',
-    'parentUserID', 'counterpartyUserID', 'recordedByID',
-    'approvedByID', 'assignedByID',
-    'addedByID', 'markedByID', 'openedByID', 'closedByID',
-    'moderatedByID', 'moderatorID', 'presenterID', 'scannedByID',
-    'bookedByID', 'requestedByID', 'acceptedByID', 'revokedByID',
-    'counter1ID', 'counter2ID', 'offboardedByID', 'rehiredByID',
-    'grantedByID', 'enrolledByID', 'linkedByID', 'releasedByID',
-    'processedByID',
-];
+$linkColumns       = \Portal\Core\GdprEraser::LINK_COLUMNS;
+$actorColumns      = \Portal\Core\GdprEraser::ACTOR_COLUMNS;
+// Tables that DO delete the whole record even though the only link says the
+// person acted on it. Each was looked at deliberately and carries its reason.
+$deliberateDeletes = \Portal\Core\GdprEraser::DELETE_ON_ACTOR_COLUMN;
+// Tables a dedicated step erases, because no single column can be matched
+// against a person. Each maps to the name of that step (check 10).
+$dedicatedSteps    = \Portal\Core\GdprEraser::DEDICATED_STEP_TABLES;
+// Tables execute() deals with itself, last, and the table walk never touches.
+$finalStepTables   = \Portal\Core\GdprEraser::FINAL_STEP_TABLES;
+// What the erasure routine will really do: needs no database.
+$instructions      = \Portal\Core\GdprEraser::catalogue();
 
-// Tables that DO delete the whole record even though the only link is one of
-// those columns. Every entry here has been looked at deliberately and needs a
-// reason. Adding to this list should feel uncomfortable.
-$deliberateDeletes = [
-    // A parent signs a child up. The record holds the CHILD's name, date of
-    // birth, allergies and medical notes - deleting it is the entire point.
-    'tblEventRegistrations' => 'A child\'s medical details; deletion is the purpose',
-];
+check(
+    'the erasure routine keeps no second, private list of person columns',
+    strpos($eraser, '$linkColumns') === false,
+    'GdprEraser.php has a $linkColumns of its own again; use self::LINK_COLUMNS'
+);
+check(
+    'every "acted on it" column name is also on the one list of person columns',
+    array_diff($actorColumns, $linkColumns) === [],
+    implode(', ', array_diff($actorColumns, $linkColumns))
+);
 
-// Tables with no single column that can be matched against a person, which a
-// dedicated step in GdprEraser erases instead (with a matching block in the
-// data export). Each maps to the name of that step. Check 10 below proves each
-// step exists and runs, so these are left out of the "no link" report rather
-// than listed there as if nothing handled them.
-$dedicatedSteps = [
-    // #498: a list entry only means "this person" together with its tableName.
-    'tblDemoDataRegister' => 'eraseDemoDataRegisterEntries',
-];
+// Instructions grouped by table, for the checks below.
+$byTable = [];
+foreach ($instructions as $instruction) {
+    $byTable[(string) $instruction['table']][] = $instruction;
+}
 
-$unreachable = [];
-foreach ($catalogue as $table => $meta) {
-    if ((string) ($meta['decision'] ?? '') !== 'erase') {
-        continue;
-    }
-    $columns = (array) ($meta['columns'] ?? []);
-    if (array_intersect($linkColumns, $columns) === [] && isset($dedicatedSteps[(string) $table]) === false) {
-        $unreachable[] = (string) $table;
+// -----------------------------------------------------------------------------
+// 7a. Every instruction is one the erasure routine will carry out. A 'refuse'
+//     instruction is how GdprEraser says "the written list asks for something
+//     I will not do"; at run time it is a failed step. Here it fails the build.
+// -----------------------------------------------------------------------------
+$refusals = [];
+foreach ($instructions as $instruction) {
+    if (in_array((string) $instruction['action'], ['delete', 'anonymise', 'retain'], true) === false) {
+        $refusals[] = (string) $instruction['table'] . ' ("' . (string) $instruction['action'] . '": '
+            . (string) ($instruction['reason'] ?? '') . ')';
     }
 }
+check(
+    'every instruction is one the erasure routine will carry out',
+    $refusals === [],
+    implode('; ', array_slice($refusals, 0, 4))
+);
+
+// -----------------------------------------------------------------------------
+// 7b. THE #535 SHAPE. A table the written list says to erase or unlink must get
+//     at least one instruction that really deletes or empties something, or be
+//     handled by a dedicated or final step. Eight tables were promised and got
+//     nothing at all, with no line in any audit trail to show it.
+// -----------------------------------------------------------------------------
+$promisedAndSkipped = [];
+foreach ($catalogue as $table => $meta) {
+    $table    = (string) $table;
+    $decision = (string) ($meta['decision'] ?? '');
+    if ($decision !== 'erase' && $decision !== 'unlink') {
+        continue;
+    }
+    if (isset($dedicatedSteps[$table]) === true || in_array($table, $finalStepTables, true) === true) {
+        continue;
+    }
+    $acts = false;
+    foreach ($byTable[$table] ?? [] as $instruction) {
+        if (in_array((string) $instruction['action'], ['delete', 'anonymise'], true) === true) {
+            $acts = true;
+        }
+    }
+    if ($acts === false) {
+        $promisedAndSkipped[] = $table;
+    }
+}
+check(
+    'every table the list says to erase or unlink really gets an instruction',
+    $promisedAndSkipped === [],
+    implode(', ', $promisedAndSkipped) . ' -- the list promises something the erasure routine cannot do: '
+    . 'list a real person column, or mark the table "retain" with the true reason'
+);
+
+// -----------------------------------------------------------------------------
+// 7c. Names are checked against the thing that uses them: the database. Every
+//     table and column an instruction names, and every column a catalogue entry
+//     lists, must exist in the fresh-install script. A wrong name does not
+//     crash anything - it is a table quietly never reached, or (for a kept
+//     table) an audit line saying "table missing" about a table that exists.
+// -----------------------------------------------------------------------------
+/**
+ * 🗺️ Every table in the fresh-install script, with its columns.
+ *
+ * Read as text, the same way tools/audit-checks/check_personal_data_coverage.py
+ * reads it, so the two agree about what exists. What it cannot do: it sees only
+ * CREATE TABLE statements, so a column added by an ALTER TABLE would be missed.
+ * (The script has none that adds an ordinary column; the count check below
+ * fails loudly if the reading ever stops working.)
+ *
+ * @return array<string, string[]> Table name => column names.
+ */
+function schemaColumns(string $file): array
+{
+    $text = (string) file_get_contents($file);
+    $text = (string) preg_replace('#/\*.*?\*/#s', '', $text);
+    $text = (string) preg_replace('/--[^\n]*/', '', $text);
+
+    $tables = [];
+    preg_match_all('/CREATE TABLE IF NOT EXISTS\s+`(\w+)`(.*?)\n\)\s*ENGINE/s', $text, $found, PREG_SET_ORDER);
+    foreach ($found as $one) {
+        preg_match_all('/^\s+`(\w+)`/m', $one[2], $columns);
+        $tables[$one[1]] = array_values(array_unique(array_merge($tables[$one[1]] ?? [], $columns[1])));
+    }
+
+    return $tables;
+}
+
+$schema = schemaColumns($schemaFile);
+check(
+    'the fresh-install script could be read (more than 200 tables found)',
+    count($schema) > 200,
+    'found ' . count($schema) . ' -- the checks below would prove nothing'
+);
+
+$wrongInInstructions = [];
+foreach ($instructions as $instruction) {
+    $table = (string) $instruction['table'];
+    if (isset($schema[$table]) === false) {
+        $wrongInInstructions[] = $table . ' (no such table)';
+        continue;
+    }
+    $named = array_merge(
+        (string) $instruction['userCol'] === '' ? [] : [(string) $instruction['userCol']],
+        array_map('strval', (array) ($instruction['nullCols'] ?? [])),
+        array_map('strval', array_keys((array) ($instruction['overrides'] ?? [])))
+    );
+    foreach ($named as $column) {
+        if (in_array($column, $schema[$table], true) === false) {
+            $wrongInInstructions[] = $table . '.' . $column;
+        }
+    }
+}
+check(
+    'every table and column an instruction names exists in the database',
+    $wrongInInstructions === [],
+    implode(', ', array_slice($wrongInInstructions, 0, 8))
+);
+
+$wrongInList = [];
+foreach ($catalogue as $table => $meta) {
+    $table = (string) $table;
+    if (isset($schema[$table]) === false) {
+        $wrongInList[] = $table . ' (no such table)';
+        continue;
+    }
+    foreach ((array) ($meta['columns'] ?? []) as $column) {
+        if (in_array((string) $column, $schema[$table], true) === false) {
+            $wrongInList[] = $table . '.' . (string) $column;
+        }
+    }
+}
+check(
+    'every column the written list names exists in the database',
+    $wrongInList === [],
+    implode(', ', array_slice($wrongInList, 0, 8))
+);
+
+// -----------------------------------------------------------------------------
+// 7d. THE #510 SHAPE. No instruction may touch the erasure request or its audit
+//     trail. One did: it deleted the request being carried out, the database
+//     deleted every audit line with it, and the run crashed half way. The
+//     request is closed by execute() as its last step, and nowhere else.
+// -----------------------------------------------------------------------------
+$touchesTheRecord = [];
+foreach ($instructions as $instruction) {
+    $table = (string) $instruction['table'];
+    if ($table === 'tblErasureAudit' || in_array($table, $finalStepTables, true) === true) {
+        $touchesTheRecord[] = $table . ' (' . (string) $instruction['action'] . ')';
+    }
+}
+check(
+    'no instruction touches the erasure request or its audit trail',
+    $touchesTheRecord === [],
+    implode(', ', $touchesTheRecord)
+);
+check(
+    'the erasure request is listed as a final step, and the list says "unlink"',
+    in_array('tblErasureRequest', $finalStepTables, true) === true
+        && (string) ($catalogue['tblErasureRequest']['decision'] ?? '') === 'unlink',
+    'it says "' . (string) ($catalogue['tblErasureRequest']['decision'] ?? '(missing)') . '"'
+);
+
+// -----------------------------------------------------------------------------
+// 7e. A record the list says to KEEP must have nothing but "keep" instructions.
+// -----------------------------------------------------------------------------
+$keptButChanged = [];
+foreach ($catalogue as $table => $meta) {
+    if ((string) ($meta['decision'] ?? '') !== 'retain') {
+        continue;
+    }
+    $kept = $byTable[(string) $table] ?? [];
+    if ($kept === []) {
+        $keptButChanged[] = (string) $table . ' (no instruction, so the audit trail would not say it was kept)';
+    }
+    foreach ($kept as $instruction) {
+        if ((string) $instruction['action'] !== 'retain') {
+            $keptButChanged[] = (string) $table . ' (' . (string) $instruction['action'] . ')';
+        }
+    }
+}
+check(
+    'everything the list says to keep is kept, and the audit trail will say so',
+    $keptButChanged === [],
+    implode(', ', $keptButChanged)
+);
+
+// Tables the owner has decided, by name, must be KEPT. The check above only
+// proves the list and the code agree; if both were changed back together they
+// would still agree. This one fails whichever of them is changed.
+$ownerSaysKeep = [
+    // Roll-out decision 8: kept for tax reasons (HMRC may ask for six years
+    // after the last gift claimed; that period is not confirmed with an
+    // accountant). It was deleted on erasure until then.
+    'tblGiftAidDeclaration' => 'Salem874, 11 October 2026',
+];
+$notKept = [];
+foreach ($ownerSaysKeep as $table => $decidedBy) {
+    $actions = array_map(static fn (array $e): string => (string) $e['action'], $byTable[$table] ?? []);
+    if ((string) ($catalogue[$table]['decision'] ?? '') !== 'retain' || $actions !== ['retain']) {
+        $notKept[] = $table . ' (list: "' . (string) ($catalogue[$table]['decision'] ?? 'missing') . '", code: '
+            . ($actions === [] ? 'no instruction' : implode('+', $actions)) . '; kept by decision of ' . $decidedBy . ')';
+    }
+}
+check(
+    'the records the owner decided must be kept (Gift Aid declarations) are kept',
+    $notKept === [],
+    implode('; ', $notKept)
+);
 
 // -----------------------------------------------------------------------------
 // 8. THE ONE THAT WOULD DESTROY SOMEBODY ELSE'S RECORDS. A table set to delete
@@ -254,6 +462,9 @@ foreach ($catalogue as $table => $meta) {
 //
 //    This FAILS rather than warns. Getting it wrong destroys other people's
 //    records on one person's request, and it cannot be undone.
+//
+//    Checked twice, on purpose: once against what the written list SAYS, and
+//    once (below) against the instructions the code really PRODUCES.
 // -----------------------------------------------------------------------------
 $dangerous = [];
 foreach ($catalogue as $table => $meta) {
@@ -278,13 +489,30 @@ check(
     'nothing deletes a whole record just because somebody acted on it',
     $dangerous === [],
     implode('; ', $dangerous)
-    . ' -- keep the record and drop the name, or add it to $deliberateDeletes '
-    . 'with a reason'
+    . ' -- keep the record and drop the name, or add it to '
+    . 'GdprEraser::DELETE_ON_ACTOR_COLUMN with a reason'
+);
+
+// The same rule, on the real instructions - hand-written and derived alike.
+$actorDeletes = [];
+foreach ($instructions as $instruction) {
+    if ((string) $instruction['action'] === 'delete'
+        && in_array((string) $instruction['userCol'], $actorColumns, true) === true
+        && isset($deliberateDeletes[(string) $instruction['table']]) === false
+    ) {
+        $actorDeletes[] = (string) $instruction['table'] . '.' . (string) $instruction['userCol'];
+    }
+}
+check(
+    'the code never deletes a record just because somebody acted on it',
+    $actorDeletes === [],
+    implode(', ', $actorDeletes)
 );
 
 // -----------------------------------------------------------------------------
 // 9. THE ONE THAT MAKES THIS WHOLE FILE WORTH HAVING. There are TWO lists, and
-//    until today they disagreed about 17 tables without anybody noticing.
+//    until 11 September 2026 they disagreed about 17 tables without anybody
+//    noticing.
 //
 //    GdprEraser holds a hand-written list of instructions. The written
 //    catalogue holds the complete inventory. The hand-written one silently
@@ -322,11 +550,10 @@ $sameThing = [
 // same table's "who added them" column is only unlinked. Both are right.
 //
 // So the catalogue's decision is compared against the instruction for the
-// SUBJECT - the one not keyed on an actor column - and any actor-keyed
-// instruction is checked separately for the thing that would actually do harm.
+// SUBJECT - the one not keyed on an actor column. An actor-keyed instruction
+// is covered by the check just above, which is the one that would do harm.
 $disagreements = [];
 $notListed     = [];
-$actorDeletes  = [];
 foreach ($handMatches as $entry) {
     $table   = (string) $entry[1];
     $userCol = (string) $entry[2];
@@ -337,17 +564,11 @@ foreach ($handMatches as $entry) {
         continue;
     }
 
-    $decision = (string) ($catalogue[$table]['decision'] ?? '');
-
     if (in_array($userCol, $actorColumns, true) === true) {
-        // Keyed on "they did this". Deleting the whole record here would
-        // destroy somebody else's record on this person's request.
-        if ($action === 'delete' && isset($deliberateDeletes[$table]) === false) {
-            $actorDeletes[] = $table . '.' . $userCol;
-        }
         continue;
     }
 
+    $decision = (string) ($catalogue[$table]['decision'] ?? '');
     $expected = $sameThing[$decision] ?? '';
     if ($expected !== $action) {
         $disagreements[] = $table . '.' . $userCol . ': the list says "'
@@ -356,9 +577,9 @@ foreach ($handMatches as $entry) {
 }
 
 check(
-    'the code never deletes a record just because somebody acted on it',
-    $actorDeletes === [],
-    implode(', ', $actorDeletes)
+    'the hand-written instructions could be read (more than 50 found)',
+    count($handMatches) > 50,
+    'found ' . count($handMatches) . ' -- the two checks below would prove nothing'
 );
 
 check(
@@ -377,7 +598,7 @@ check(
 
 // -----------------------------------------------------------------------------
 // 10. Tables erased by a DEDICATED step, because no single column can be
-//     matched against a person (see $dedicatedSteps above). The generic
+//     matched against a person (GdprEraser::DEDICATED_STEP_TABLES). The generic
 //     handling skips such a table on purpose, so if the dedicated step were
 //     removed, or never called, nothing would erase it and nothing would say
 //     so. Each one must: be marked "erase" in the written list; have its step
@@ -395,6 +616,9 @@ $executePart = ($executeFrom !== false && $executeTo !== false && $executeTo > $
     : '';
 
 $dedicatedFaults = [];
+if ($dedicatedSteps === []) {
+    $dedicatedFaults[] = 'GdprEraser::DEDICATED_STEP_TABLES is empty, so this check would prove nothing';
+}
 foreach ($dedicatedSteps as $table => $method) {
     if ((string) ($catalogue[$table]['decision'] ?? '') !== 'erase') {
         $dedicatedFaults[] = $table . ' is not marked "erase" in the written list';
@@ -419,6 +643,18 @@ check(
     implode('; ', $dedicatedFaults)
 );
 
+// -----------------------------------------------------------------------------
+// Reported, not failed: what an erasure request CANNOT reach. Each of these is
+// kept, and the audit trail of every erasure says so. The point of printing
+// them is that somebody knows, and can decide on a time limit for each.
+// -----------------------------------------------------------------------------
+$unreachable = [];
+foreach ($instructions as $instruction) {
+    if ((string) $instruction['action'] === 'retain' && (string) $instruction['userCol'] === '') {
+        $unreachable[] = (string) $instruction['table'];
+    }
+}
+
 echo "\n" . str_repeat('-', 78) . "\n";
 if ($unreachable !== []) {
     echo "Tables holding personal information with NO link to an account:\n\n";
@@ -426,15 +662,29 @@ if ($unreachable !== []) {
         echo '  • ' . $table . "\n";
     }
     echo "\nThese cannot be found by matching on a person, so an erasure request\n";
-    echo "cannot reach them on its own. Each needs either a link adding, or a rule\n";
-    echo "that removes it after a set time. This is not a failure — it is the list\n";
-    echo "of things that need a decision.\n";
+    echo "cannot reach them. Each is kept, and every erasure's audit trail says so.\n";
+    echo "Each needs either a link adding, or a rule that removes it after a set\n";
+    echo "time. This is not a failure — it is the list of things that need a\n";
+    echo "decision.\n";
 } else {
     echo "Every table holding personal information can be traced to a person.\n";
 }
 
 echo "\n" . str_repeat('=', 78) . "\n";
 printf("%d passed, %d failed\n", $passes, $failures);
+
+// 🔢 The run must have reached this line having made every check. A check that
+//    was never made cannot fail, so "0 failed" alone proves nothing. Change the
+//    number only together with adding or removing a check.
+if (($passes + $failures) !== EXPECTED_CHECKS) {
+    printf(
+        "\nFAIL: %d checks were made and exactly %d were expected. A check was skipped,\n"
+        . "added or removed without updating EXPECTED_CHECKS at the top of this file.\n",
+        $passes + $failures,
+        EXPECTED_CHECKS
+    );
+    exit(1);
+}
 
 if ($failures > 0) {
     echo "\nSomething about how personal information is erased has changed, and it is\n";

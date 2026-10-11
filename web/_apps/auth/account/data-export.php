@@ -238,9 +238,12 @@ $payload = [
         // 📍 #456 Chunk B — closes a pre-existing gap found while building
         // the location/GDPR lockstep: Gift Aid declarations carry a home
         // address + postcode (HMRC requires it) but were never exported
-        // for the declaring donor. GdprEraser::catalogue() already
-        // hard-DELETEs this table on erasure (donorID match) — this export
-        // block is the missing access/portability half of that pair.
+        // for the declaring donor. This export block is the access/
+        // portability half; GdprEraser::catalogue() holds the erasure half.
+        // (That half used to hard-DELETE the declaration. Since 11 October
+        // 2026, on the owner's decision, it KEEPS it for tax reasons and
+        // records that in the erasure's audit trail - so a person may see a
+        // declaration here that an erasure will not remove.)
         'giftAidDeclarations' => $fetchUserRows(
             'SELECT declarationID, siteID, status, validFrom, validTo, address, postcode, acceptedAt, createdAt '
             . 'FROM tblGiftAidDeclaration WHERE donorID = ?'
