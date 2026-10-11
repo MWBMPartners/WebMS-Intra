@@ -121,7 +121,19 @@ a request stuck at "processing" can be put back (15 minutes, `claimedAt` in UTC)
 — a migration); `tblInvitation.acceptedByID` (the row holds the invited person's own email address — delete an accepted invitation
 with its person?). **For the owner's safeguarding lead:** who made a pastoral visit, and who recorded a DBS check, are now cleared.
 Builder's other Found items: its report, list items 2, 4, 6-13, 16, 17.
-**THEN:** fix what the check finds → commit → A2b (giving records; migration 209; Opus) → B2 → C → D → E → #499/#500/#502 → #514
+**A2a's ONE CHECK (12 Oct ~01:15): NOT CLEAN on three small points, no data loss** (end of `.claude-work/resume/rollout-A2a--check.md`):
+its own erasure on linked data deleted eight rows, all the person's own (the old code lost 18, most of them other people's); 34 of 34
+page attacks refused; migration 208 right. Findings: three unlinked "who did it" columns never reached (`tblEvents.submittedByID`,
+`tblErrors.resolvedByID`, `tblMigrations.executedByID`) with four untrue sentences; the emptied account checked against 15 named
+columns only (K19 passes); one untrue reason in `check_account_writes_guarded.py`.
+**OWNER, 12 Oct ~01:00 ("just OK those now, we need to resolve them anyway"):** the five pinned columns get the database change
+(extend 208 — not committed yet); an accepted invitation is DELETED with its person. NOT decided (no recommendation was given): the
+safeguarding question — who made a pastoral visit / recorded a DBS check is CLEARED as built; say so in the roll-out notes.
+**NOW: A2a FIX ROUND (same Opus builder; no second check)** — the three findings; the two owner items; and from the checker's Found
+list: end the erased person's sessions (if that needs an `Auth` change on every page it goes to B2 instead — the builder reports);
+the approval line that vanishes once its approver is erased (inner joins in `expenses/view/index.php`, `ExpensePdf.php`); a committed
+page-driving test for the erasure pages; three untrue sentences on the pages. Watchdog on `.claude-work/resume/rollout-A2a--build.md`.
+**THEN:** commit → A2b (giving records; migration 209; Opus) → B2 → C → D → E → #499/#500/#502 → #514
 parts 9-11 → the workflow edit → documentation sweep → Codex pass.
 
 **(done)** NEXT, in order (one package in flight; nothing edits the tree while B is being checked): B's check → fix → commit → A2a build →
