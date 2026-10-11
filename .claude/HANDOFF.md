@@ -34,7 +34,19 @@ stand-in for Codex; the last narrow check's two LOW faults + four uncaught previ
 (no further round, per decision 4). Follow-ups opened: #571 (a very long series can lose dates on an every-date choice), #572
 (migration 207's deprecated `VALUES()`), #573 (the result message off screen on a phone). Still to record for the Codex pass: part 8
 is one of its "riskiest parts". Evidence for all 46+ rounds: `.claude-work/resume/p514-p8-*`.
-**NOW: the roll-out set is being PLANNED** (Opus planner, read-only; `.claude-work/resume/rollout-set--plan.md`; watchdog on it).
+**THE ROLL-OUT SET IS PLANNED** — `.claude-work/resume/rollout-set--plan.md` (407 lines; no database change; every fix has a check
+that fails today). Packages, one in flight at a time, ONE independent check each: **A erasure** (#510, #535 — Opus; #535's four named
+tables already have instructions, what is really skipped is `tblExternalFeedRuns`, `tblRecording.presenterID` and eight catalogue
+entries); **B access and money** (#478, #570, #545, rest of #534 — Opus; two confirmed leaks: `calendar/api/hub-resources.php`,
+`hub-videos.php`); **C broken pages** (#547, #568, #563 — Sonnet; a FOURTH wrong fingerprint in `web/_install/index.php:1286`);
+**D the recovery runbook** (#488 — Opus; commands must be proved by running them). The plan's decisions 1-7 follow its
+recommendations. Found list F1-F11 in the plan.
+**OWNER, 11 Oct ~18:10:** (8) **Gift Aid declarations are KEPT on erasure, with the reason recorded** (builder A told); (9) **the
+twelve tables that link to an account but are not in the erasure list JOIN the roll-out set** — package A2, straight after A (same
+files), once the owner has settled each table (builder A lists what each holds); **fresh install or upgrade: "not sure yet" → #553
+and #555 JOIN the roll-out set** as package E, with a test that upgrades from the last release; the stray folder — DONE (the #516
+report moved to `.claude-work/resume/p516--fix-r1.md`; the empty misnamed folders removed).
+**NOW: PACKAGE A BUILD** (fresh Opus builder; brief = the plan's Package A; report `.claude-work/resume/rollout-A--build.md`; watchdog).
 
 **ORDER:** part 8's commit → the roll-out set → #499, #500, #502 → #514 parts 9-11 → documentation sweep → the Codex pass alongside →
 the pull request when the owner says.
