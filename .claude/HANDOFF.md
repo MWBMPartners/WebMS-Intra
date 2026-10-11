@@ -46,7 +46,24 @@ twelve tables that link to an account but are not in the erasure list JOIN the r
 files), once the owner has settled each table (builder A lists what each holds); **fresh install or upgrade: "not sure yet" → #553
 and #555 JOIN the roll-out set** as package E, with a test that upgrades from the last release; the stray folder — DONE (the #516
 report moved to `.claude-work/resume/p516--fix-r1.md`; the empty misnamed folders removed).
-**NOW: PACKAGE A BUILD** (fresh Opus builder; brief = the plan's Package A; report `.claude-work/resume/rollout-A--build.md`; watchdog).
+**PACKAGE A BUILT (11 Oct ~19:30), NOT committed — nine files, snapshot `.claude-work/resume/rollout-A-snapshot/`:** an erasure now
+finishes (every erasure used to crash on `fk_ea_request` — #510 reproduced on a real database), keeps and closes its own request last,
+writes one audit line per instruction; Gift Aid declarations KEPT (owner); `tblExternalFeedRuns`, `tblRecording.presenterID` and others
+now reached; four lists said truthfully to be unreachable; `/account/my-data` lists the person's own request again. 68/68 and 26/26;
+16 planted faults caught. The builder went beyond the plan in six small ways (its report) — the checker judges them.
+**NOW: PACKAGE A's ONE CHECK** (fresh Opus, Codex stand-in; brief `.claude-work/briefs/rollout-A-check.md`; report
+`.claude-work/resume/rollout-A--check.md`; watchdog).
+**PACKAGE A2 (erasure, part two) — being designed with the owner:** (i) erasing a follow-up worker today DELETES other people's
+records (`tblVisitor`, `tblSalvationCards`, `tblTasks`, `tblRotaSlot` on `assignedToID`; `tblRotaSwapRequest` on `targetUserID`) —
+OWNER: keep the record, clear the worker; (ii) nine "who did it" tables not in the list — OWNER: keep the record, clear who did it
+(three columns cannot be empty today → a migration, 208); (iii) giving records — the owner asked about legal duties: HMRC requires the
+donor's name and address on the declaration and a link from each claimed gift to it (sources in this session: gov.uk Chapter 3 and
+7, the 2016 Regulations), so names on tax-claimed gifts must be KEPT for a period; and the owner wants it right for EVERY country,
+not only the UK. Design direction: country-neutral — keep the tax evidence the organisation's own country requires for a period that
+is a per-organisation setting, default suggested from `org.address.countryCode`, then removed automatically by the retention job;
+everything else erased at once. **Research running** (Sonnet, facts only, 24 countries, sources quoted):
+`.claude-work/resume/donation-retention-research.md`. Also for A2: the email-log step alters longer addresses (`ann@` inside `joann@`);
+kept declarations carry no name today; `/account/erasure-request` prints "retaind".
 
 **ORDER:** part 8's commit → the roll-out set → #499, #500, #502 → #514 parts 9-11 → documentation sweep → the Codex pass alongside →
 the pull request when the owner says.
