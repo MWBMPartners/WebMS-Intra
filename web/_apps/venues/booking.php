@@ -32,6 +32,7 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\EventVisibility;
 use Portal\Core\Router;
 use Portal\Core\Settings;
 use Portal\Core\Site;
@@ -118,6 +119,43 @@ if ($evStmt !== false) {
     $evStmt->close();
 }
 $currentEventId = (int) ($booking['eventID'] ?? 0);
+
+// 👁️ #534 (11 October 2026): may THIS viewer be told which event a booking is
+//    linked to? Asked only for the read-only card, which is what everybody
+//    who is not a venue manager gets.
+//
+//    WHAT WAS WRONG: the card printed "Linked event: <name>" for whoever
+//    opened the booking. This page asks only for a sign-in, so that was any
+//    signed-in account, a member of a DIFFERENT organisation included, and
+//    the name was printed for an internal event and for a draft alike —
+//    events whose own page answers that same person "not found".
+//
+//    Now the name is printed only when the one shared rule
+//    (EventVisibility, "session" mode) would show that person the event: a
+//    public event, or an internal one of an organisation they are an active
+//    member of or administer; and never a draft or a deleted event. A
+//    venue manager is not asked: their form lists the organisation's events
+//    to choose from, which is part of managing bookings.
+//
+//    WHAT THIS CANNOT DO: it hides the event's NAME only. The booking itself
+//    (its date, room, times, status and notes) is still shown to any
+//    signed-in account that opens this address, as before. Who may see a
+//    venue booking at all is a separate question and is not changed here.
+$linkedEventVisible = false;
+if ($isMgr === false && $currentEventId > 0) {
+    $visibility = EventVisibility::where('e', EventVisibility::MODE_SESSION, EventVisibility::sessionViewerId(), date('Y-m-d'));
+    $seeStmt = $db->prepare(
+        'SELECT 1 FROM tblEvents e WHERE e.eventID = ? AND e.siteID = ? AND e.isDeleted = 0 AND e.externalFeedID IS NULL '
+        . "AND e.status IN ('published', 'cancelled', 'postponed')" . $visibility['sql'] . ' LIMIT 1'
+    );
+    if ($seeStmt !== false) {
+        $seeStmt->bind_param('ii' . $visibility['types'], $currentEventId, $siteId, ...$visibility['params']);
+        $seeStmt->execute();
+        $linkedEventVisible = $seeStmt->get_result()->fetch_row() !== null;
+        $seeStmt->close();
+    }
+}
+
 if ($currentEventId > 0 && isset($events[$currentEventId]) === false) {
     // Imported events are read-only (#514 D5); this makes an imported event exactly as "not found" as a missing one.
     $evStmt = $db->prepare('SELECT eventID, eventName, startDateTime FROM tblEvents WHERE eventID = ? AND siteID = ? AND isDeleted = 0 AND externalFeedID IS NULL LIMIT 1');
@@ -203,7 +241,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             </p>
             <p><strong>Status:</strong> <span class="badge" style="background-color: <?php echo $esc(Venues::statusColor(['color' => $booking['statusColorRaw'] ?? null, 'statusCategory' => $booking['statusCategory'] ?? null])); ?>; color:#fff;"><?php echo $esc($booking['statusName']); ?></span></p>
             <?php if (($booking['notes'] ?? '') !== ''): ?><p><strong>Notes:</strong> <?php echo nl2br($esc($booking['notes'])); ?></p><?php endif; ?>
-            <?php if (($booking['eventName'] ?? '') !== ''): ?><p><strong>Linked event:</strong> <?php echo $esc($booking['eventName']); ?></p><?php endif; ?>
+            <?php // #534: only when this viewer may see that event at all (worked out above). ?>
+            <?php if (($booking['eventName'] ?? '') !== '' && $linkedEventVisible === true): ?><p><strong>Linked event:</strong> <?php echo $esc($booking['eventName']); ?></p><?php endif; ?>
         </div>
     </div>
     <a href="/venues?venue=<?php echo (int) $venueId; ?>" class="btn btn-outline-secondary mt-3"><i class="fa-solid fa-arrow-left me-1"></i>Back to schedule</a>

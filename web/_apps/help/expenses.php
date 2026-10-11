@@ -172,6 +172,15 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <strong>Tip:</strong> A PDF summary of your approved claim is generated automatically by the system and can be used for your personal records.
         </div>
     </div>
+
+    <?php // #545: said here, in the claimant's own guide, because the person it surprises is an approver or treasurer making a claim of their own. ?>
+    <p class="mb-0">
+        <strong>Nobody decides or pays their own claim.</strong> If you are an approver, a treasurer or an administrator,
+        a claim you make yourself does not appear in your own approvals or treasury list, and the portal refuses if you
+        try to approve, reject or pay it. It must be decided by the other leads and required approvers of its
+        department or, when there are none, by another approver or an administrator. Another treasurer or an
+        administrator must pay it. If you are the only approver of your department, ask an administrator.
+    </p>
 </div>
 
 <!-- Section 3: Status Meanings -->

@@ -15,6 +15,11 @@
  *   4. If all mandatory approvers have approved → claim is Approved
  *   5. High-value claims may also require treasury sign-off (configurable)
  *
+ * Nobody decides their own claim (#545): the claimant is refused here,
+ * whatever authority they hold, and is left off the list of people whose
+ * approval the claim waits for. The rule itself is in
+ * `Portal\Core\ExpenseRules`.
+ *
  * @package   Portal\Expenses
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
@@ -30,6 +35,7 @@ require_once dirname(__DIR__, 3) . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEP
 use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Departments;
+use Portal\Core\ExpenseRules;
 use Portal\Core\Logger;
 use Portal\Core\ExpensePdf;
 use Portal\Core\ExpenseMailer;
@@ -127,6 +133,33 @@ if ($claim === null) {
     exit();
 }
 
+// 🙅 #545: nobody decides their own claim — not a department lead, not a
+//    holder of the Expense Approver role, and not an administrator.
+//
+//    WHAT WAS WRONG: the claim's owner was read above and never compared
+//    with the person deciding. A lead could approve (or reject) a claim
+//    they had made themselves, and an administrator could approve their own
+//    claim in any department. The owner decided on 21 September 2026 to
+//    refuse outright.
+//
+//    It comes BEFORE the per-department test below on purpose. A claimant
+//    who has authority somewhere, but not over this claim's department,
+//    would otherwise get the bare "Forbidden" answer; this sentence tells
+//    them what is actually wrong, and tells them nothing new, because it is
+//    their own claim. Somebody with no authority anywhere was already
+//    answered at the top, before any claim was looked up, and that answer
+//    is unchanged.
+//
+//    The page no longer lists a person's own claims (approve/index.php), so
+//    this is normally reached only by a request made by hand, or from a
+//    page that was open before the claim was submitted.
+if (ExpenseRules::isOwnClaim((int) $claim['userID'], $userId) === true) {
+    $_SESSION['flash_msg']  = ExpenseRules::MSG_OWN_DECISION;
+    $_SESSION['flash_type'] = 'danger';
+    header('Location: /expenses/approve');
+    exit();
+}
+
 // -----------------------------------------------------------------------------
 // 🔍 Determine approver's role for this department
 // -----------------------------------------------------------------------------
@@ -217,22 +250,20 @@ try {
         // had left the organisation stayed on this list for ever, so a claim
         // could never be fully approved by anybody. Still no test that the
         // department is switched on (owner's answer Q3; see the gate above).
-        $mandatoryApprovers = [];
-        $stmt = $mysqli->prepare(
-            'SELECT UD.userID FROM tblUserDepts UD '
-            . 'JOIN tblUserSites US ON US.userID = UD.userID AND US.siteID = UD.siteID AND US.isActive = 1 '
-            . 'WHERE UD.deptID = ? AND UD.siteID = ? AND (UD.isDeptLead = 1 OR UD.isMandatoryApprover = 1)'
+        //
+        // #545: the CLAIMANT is left off the list. They are refused above,
+        // so a claim made by a lead or required approver of its own
+        // department would otherwise wait for an approval that can never be
+        // given. The query moved to ExpenseRules::requiredApprovers() so the
+        // self-test runs the very same one. When leaving the claimant out
+        // leaves nobody, the "no mandatory approvers" rule below applies:
+        // one approval from anybody else with authority is enough.
+        $mandatoryApprovers = ExpenseRules::requiredApprovers(
+            $mysqli,
+            (int) $claim['deptID'],
+            $siteId,
+            (int) $claim['userID']
         );
-        if ($stmt !== false) {
-            $mandatoryDeptId = (int) $claim['deptID'];
-            $stmt->bind_param('ii', $mandatoryDeptId, $siteId);
-            $stmt->execute();
-            $result = $stmt->get_result();
-            while ($r = $result->fetch_assoc()) {
-                $mandatoryApprovers[] = (int) $r['userID'];
-            }
-            $stmt->close();
-        }
 
         // 📋 Get all approvals that have been given for this claim
         $existingApprovals = [];

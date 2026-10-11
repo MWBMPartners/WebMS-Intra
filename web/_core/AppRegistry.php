@@ -10,6 +10,10 @@
  * Used by:
  *   • /admin/apps marketplace UI — list, enable, disable.
  *   • Router::dispatch() — gates routes whose owning app is disabled.
+ *   • ApiRouter — refuses a data endpoint whose app is switched off (#478).
+ *     Which app owns which `api` folder, and which pages sit outside their
+ *     app's own address, are written out by hand in API_FOLDER_APPS and
+ *     ROUTES_OUTSIDE_PREFIX below.
  *   • Dashboard — renders cards for enabled apps only.
  *   • Industry filter — apps tagged with industries (church, school, business,
  *     nonprofit) can be hidden from orgs whose `portal.industry` doesn't match.
@@ -45,6 +49,109 @@ namespace Portal\Core;
 
 class AppRegistry
 {
+    /**
+     * 🔌 Which app each `web/_apps/{folder}/api` folder belongs to (#478).
+     *
+     * WHAT WAS WRONG: switching an app off in Admin → Apps hid its pages
+     * and left every one of its data endpoints answering. The page gate is
+     * in Router::dispatch(), and an `api/…` address never reaches it:
+     * ApiRouter loads the handler file straight from the folder. So an
+     * organisation that had switched Calendar off still handed out its
+     * events through `/api/events/list`.
+     *
+     * WHY THIS IS WRITTEN OUT BY HAND and not worked out from the folder
+     * names: five of the folders are not app names at all (`events`,
+     * `livechat`, `push`, `tours`, `users`), and guessing wrong in either
+     * direction is harmful: a wrong "no app" leaves data open, a wrong app
+     * locks people out of something that should work.
+     *
+     * The value is the app's slug (the file name under `_core/apps/`), or
+     * null for "belongs to the portal itself, so no app's switch applies".
+     * The three nulls are decision 3 of the roll-out plan (11 October 2026),
+     * built as that plan recommended; each line below says why.
+     *
+     * A NEW `api` FOLDER NEEDS A LINE HERE. Without one ApiRouter refuses
+     * it (it cannot tell which switch applies, and refusing is the safe
+     * direction). `tools/app-switch-selftest.php` fails for a folder on
+     * disk that has no line, and for a line that names an app that is not
+     * registered.
+     *
+     * WHAT THIS CANNOT DO: it covers the `api/…` addresses only. A
+     * switched-off app's scheduled jobs, its personal pages under
+     * `account/` and the router's short addresses (`/e/…`, `/f/…`, `/a/…`,
+     * `/os/…`) are not covered by this map.
+     *
+     * @var array<string, string|null>
+     */
+    public const API_FOLDER_APPS = [
+        // The fourteen folders named after the app they belong to.
+        'announcements'   => 'announcements',
+        'assets'          => 'assets',
+        'attendance'      => 'attendance',
+        'calendar'        => 'calendar',
+        'documents'       => 'documents',
+        'expenses'        => 'expenses',
+        'leadership'      => 'leadership',
+        'livestream'      => 'livestream',
+        'noticeboard'     => 'noticeboard',
+        'prayer-requests' => 'prayer-requests',
+        'service-plans'   => 'service-plans',
+        'tasks'           => 'tasks',
+        'venues'          => 'venues',
+        'worship'         => 'worship',
+        // Events is the Calendar app: there is no separate "events" app,
+        // and these endpoints read and write the same tblEvents rows the
+        // calendar pages show.
+        'events'          => 'calendar',
+        // Live chat's app is called `cop-live-chat` and its switch is the
+        // setting `chat.enabled`, which these handlers already test for
+        // themselves. Naming it here keeps the answer the same sentence as
+        // every other switched-off app.
+        'livechat'        => 'cop-live-chat',
+        // Web push notifications belong to the portal itself (reminders
+        // from several apps use them). Whether push is on at all is its own
+        // setting, `push.enabled`, tested by the handlers.
+        'push'            => null,
+        // Guided tours are part of the portal's own interface, shown on
+        // pages of every app.
+        'tours'           => null,
+        // Accounts belong to the portal, not to an app. These endpoints are
+        // for administrators only and each has its own per-endpoint switch
+        // (two of the three are seeded off).
+        'users'           => null,
+    ];
+
+    /**
+     * 🧭 Pages that belong to an app but do NOT sit under its address (#478).
+     *
+     * appForRoute() finds a page's app by the start of its address:
+     * `/calendar/…` belongs to Calendar. These pages live in an app's
+     * folder but have an address of their own, so that test missed them
+     * and they kept working with the app switched off. The key is the
+     * address exactly as seeded in tblRoutes; the value is the app's slug.
+     * appForRoute() looks here only when no app's own address matches.
+     *
+     * `unsubscribe` IS DELIBERATELY NOT LISTED, although its page lives in
+     * the Newsletter app's folder. Somebody who is already receiving mail
+     * must always be able to stop it, whatever the Newsletter switch says
+     * (decision 3 of the roll-out plan, 11 October 2026, built as
+     * recommended). `tools/app-switch-selftest.php` fails if it is ever
+     * added.
+     *
+     * `visit` (the public "I'm new" form) is listed, and its page still
+     * tests its own setting, `visitors.public_capture_enabled`, as well.
+     *
+     * @var array<string, string>
+     */
+    public const ROUTES_OUTSIDE_PREFIX = [
+        'attend'                => 'calendar',   // the check-in page for somebody not signed in
+        'attend/save'           => 'calendar',   // … and the handler its form posts to
+        'calendar.ics'          => 'calendar',   // the calendar feed other programs subscribe to
+        'account/calendar-feed' => 'calendar',   // the page that hands a member their feed link
+        'recordings.rss'        => 'recordings', // the recordings feed
+        'visit'                 => 'visitors',   // the public "I'm new" form
+    ];
+
     /** @var array<string, array<string, mixed>>|null Cached registry */
     private static ?array $registry = null;
 
@@ -284,6 +391,45 @@ class AppRegistry
     }
 
     /**
+     * Is the app switched on FOR ONE NAMED ORGANISATION? (#478)
+     *
+     * isEnabled() above reads the settings that were loaded for the
+     * organisation the ADDRESS points at. That is right for a signed-in
+     * person. An API key is different: it belongs to its own organisation,
+     * whatever address it is sent to, and the handler then answers with
+     * that organisation's data. So for a key the switch that counts is the
+     * key's organisation's. Reading the address's settings instead would
+     * let a key reach an app its own organisation had switched off, simply
+     * by being sent to another organisation's address.
+     *
+     * This is the same reasoning, and the same lookup
+     * (App::settingForSite(): the organisation's own value, else the
+     * portal-wide one), as ApiRouter::resolveEnabledFlag() uses for the
+     * per-endpoint switch.
+     *
+     * An app that is not registered reads as off, as in isEnabled(). A
+     * core app is always on.
+     *
+     * @param string $slug   The app's slug.
+     * @param int    $siteId The organisation to ask about.
+     *
+     * @return bool
+     */
+    public static function isEnabledForSite(string $slug, int $siteId): bool
+    {
+        $all = self::all();
+        if (isset($all[$slug]) === false) {
+            return false;
+        }
+        if (($all[$slug]['isCore'] ?? false) === true) {
+            return true;
+        }
+        $value = App::settingForSite((string) $all[$slug]['settingKey'], $siteId);
+
+        return $value === '1' || $value === 'true';
+    }
+
+    /**
      * Return only enabled apps.
      *
      * @return array<string, array<string, mixed>>
@@ -328,6 +474,13 @@ class AppRegistry
      *
      * Match strategy: the longest registered `route` prefix that the request
      * path starts with wins (so `prayer-requests` beats `prayer`).
+     *
+     * When no app's own address matches, the hand-written list
+     * ROUTES_OUTSIDE_PREFIX is consulted (#478): a few pages live in an
+     * app's folder under an address of their own, and used to count as
+     * "no app, always allowed". An address that names an app there which is
+     * not registered also comes back as null: the same answer as before
+     * #478 for that page, rather than a new refusal nobody asked for.
      */
     public static function appForRoute(string $routeKey): ?array
     {
@@ -346,6 +499,9 @@ class AppRegistry
                     $bestLen   = strlen($prefix);
                 }
             }
+        }
+        if ($bestMatch === null && isset(self::ROUTES_OUTSIDE_PREFIX[$routeKey]) === true) {
+            $bestMatch = $all[self::ROUTES_OUTSIDE_PREFIX[$routeKey]] ?? null;
         }
         return $bestMatch;
     }

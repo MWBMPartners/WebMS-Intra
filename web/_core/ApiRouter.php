@@ -7,6 +7,9 @@
  * Handles dispatching of API requests (api/{appName}/{action}) to their
  * handler files. Separated from the main Router for single-responsibility.
  *
+ * Since #478 it also refuses an endpoint whose app is switched off in
+ * Admin → Apps: see requireAppSwitchedOn().
+ *
  * @package   Portal\Core
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
@@ -14,6 +17,7 @@
  * @version   0.9.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/80
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/323
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/478
  * -----------------------------------------------------------------------------
  */
 
@@ -121,6 +125,9 @@ class ApiRouter
             ApiResponse::error('API endpoint not found', 404);
         }
 
+        // 🚪 The app's own off switch (#478), before the per-endpoint one.
+        self::requireAppSwitchedOn($appName);
+
         // 🔍 Check if the API endpoint is enabled in settings. For a bearer
         //    request the authoritative site is the KEY's site, not the
         //    host-detected site the bootstrap $SETTINGS snapshot was frozen for
@@ -140,6 +147,73 @@ class ApiRouter
         //    No-op for handlers already using App::db()/App::settings().
         global $mysqli, $SETTINGS; // #373 — expose bootstrap globals to controllers
         require $apiFile;
+    }
+
+    /**
+     * 🚪 Refuse the request when the app this `api` folder belongs to is
+     * switched off (#478). Used by BOTH ways in, dispatch() and
+     * dispatchV1(), after the "does the handler file exist" test and before
+     * the per-endpoint switch, so neither can drift from the other.
+     *
+     * WHAT WAS WRONG: nothing in this file asked the app registry anything.
+     * Switching an app off in Admin → Apps hid its pages (the gate in
+     * Router::dispatch()) while every one of its data endpoints went on
+     * answering, for a signed-in person and for an API key alike. Each
+     * endpoint has its own `api.{app}.{action}.enabled` switch, but those
+     * are seeded on and are not what an administrator turns off.
+     *
+     * WHOSE SWITCH: for a request carrying a valid API key, the key's own
+     * organisation's, whatever address the key was sent to, because that is
+     * the organisation whose data the handler will answer with. For
+     * everybody else, the organisation the address points at. This is the
+     * same choice resolveEnabledFlag() below makes for the per-endpoint
+     * switch, for the same reason.
+     *
+     * Which app a folder belongs to is the hand-written list
+     * AppRegistry::API_FOLDER_APPS. A folder mapped to null there belongs
+     * to the portal itself (`push`, `tours`, `users`) and is never refused
+     * here. A folder with NO line is refused: this method cannot tell which
+     * switch applies to it, and guessing "none" would bring back the fault
+     * this fixes for every folder added later. That answer is the same
+     * sentence as an endpoint whose own switch is missing, and the reason
+     * is written to PHP's error log for whoever added the folder.
+     *
+     * WHAT THIS CANNOT DO: it does not look at who is asking. A person with
+     * no right to the data is still refused by the handler, as before; and
+     * the answer here does tell any caller that the app is switched off,
+     * which the "app is disabled" page already tells anybody who opens one
+     * of the app's pages (a signed-in person, or anybody at all on a page
+     * that needs no sign-in).
+     *
+     * @param string $folder The folder under `_apps/` (already checked to
+     *                       be lower-case letters, digits and hyphens).
+     *
+     * @return void Terminates with 403 when the app is switched off.
+     */
+    private static function requireAppSwitchedOn(string $folder): void
+    {
+        if (array_key_exists($folder, AppRegistry::API_FOLDER_APPS) === false) {
+            error_log(
+                'ApiRouter: the api folder "' . $folder . '" has no line in AppRegistry::API_FOLDER_APPS, '
+                . 'so its endpoints are refused. Add a line saying which app it belongs to (or null for none).'
+            );
+            ApiResponse::error('This API endpoint is disabled', 403);
+        }
+
+        $slug = AppRegistry::API_FOLDER_APPS[$folder];
+        if ($slug === null) {
+            return; // belongs to the portal itself, not to an app
+        }
+
+        $keyRow     = ApiAuth::bearerKeyRow();
+        $switchedOn = $keyRow !== null
+            ? AppRegistry::isEnabledForSite($slug, (int) ($keyRow['siteID'] ?? 0))
+            : AppRegistry::isEnabled($slug);
+
+        if ($switchedOn === false) {
+            $appName = (string) (AppRegistry::all()[$slug]['name'] ?? $slug);
+            ApiResponse::error('The ' . $appName . ' app is switched off for this organisation.', 403);
+        }
     }
 
     /**
@@ -225,6 +299,9 @@ class ApiRouter
         if (is_readable($apiFile) === false) {
             ApiResponse::error('API endpoint not found', 404);
         }
+
+        // 🚪 The app's own off switch (#478), exactly as in dispatch().
+        self::requireAppSwitchedOn($app);
 
         $enabled = self::resolveEnabledFlag('api.' . $app . '.' . $action . '.enabled');
         if ($enabled !== 'true') {

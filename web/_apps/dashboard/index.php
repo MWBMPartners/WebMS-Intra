@@ -49,11 +49,15 @@ $widgets = [];
 // 📋 Pending expense claims (user's own, or all for admins/approvers)
 if (isset($SETTINGS['expenses']['enabled']) === true && $SETTINGS['expenses']['enabled'] === 'true') {
     if ($isAdmin === true) {
+        // #545: the administrator's OWN pending claims are left out of this
+        // number, because the page it links to (/expenses/approve) no longer
+        // lists them: nobody decides their own claim. Counting them would
+        // show "1" above a list that is empty.
         $expStmt = $mysqli->prepare(
-            'SELECT COUNT(*) AS cnt FROM tblExpenseClaims WHERE status = \'Pending\' AND siteID = ?'
+            'SELECT COUNT(*) AS cnt FROM tblExpenseClaims WHERE status = \'Pending\' AND siteID = ? AND userID <> ?'
         );
         if ($expStmt !== false) {
-            $expStmt->bind_param('i', $siteId);
+            $expStmt->bind_param('ii', $siteId, $userId);
             $expStmt->execute();
             $cnt = (int) ($expStmt->get_result()->fetch_assoc()['cnt'] ?? 0);
             $expStmt->close();

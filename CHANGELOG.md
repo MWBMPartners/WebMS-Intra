@@ -2,6 +2,100 @@
 
 
 ## [Unreleased] (alpha)
+- fix(core,api): switching an app off now switches off its data endpoints
+  and its stray pages too (#478). Before this, Admin → Apps hid an app's
+  pages and left every `/api/…` address of that app answering, for a
+  signed-in person and for an API key alike; and a few pages that live in an
+  app's folder under an address of their own were never tied to the app at
+  all. Now:
+  - An `/api/{folder}/…` or `/api/v1/{resource}` request whose app is off
+    is answered 403: "The <app name> app is switched off for this
+    organisation." For an API key the switch that counts is the KEY's own
+    organisation's, whatever address the key was sent to.
+  - Which app each `api` folder belongs to is written out by hand in
+    `AppRegistry::API_FOLDER_APPS` (`events` belongs to Calendar, `livechat`
+    to Live Chat). Three folders belong to the portal itself and are never
+    refused: `push`, `tours` and `users`. **A new `api` folder needs a line
+    there, or it is refused.**
+  - `/attend`, `/attend/save`, `/calendar.ics` and `/account/calendar-feed`
+    now follow the Calendar switch, `/recordings.rss` the Recordings switch
+    and `/visit` the Visitors switch (`AppRegistry::ROUTES_OUTSIDE_PREFIX`).
+  - **`/unsubscribe` is deliberately left alone.** Somebody already
+    receiving mail must be able to stop it whatever the Newsletter switch
+    says.
+  - **Check Admin → Apps before upgrading.** An organisation whose Calendar
+    app is off loses `/api/events/*`, the Team Hub endpoints, its calendar
+    feed link and the check-in page for people not signed in. That is the
+    fix working, but anybody relying on the old leak will notice. Measured
+    on MySQL 8.0.36 on 11 October 2026: a fresh install (the install script
+    and then every numbered migration, as the installer runs them) ends
+    with Calendar, Attendance and Leadership ON, and with Livestream,
+    Newsletter, Recordings, Service Plans, Venue Bookings, Visitors and Live
+    Chat OFF. The install script on its own leaves Calendar, Attendance and
+    Leadership off; later migrations switch them on.
+  - Not covered: a switched-off app's scheduled jobs, the personal pages
+    under `/account/` that belong to an app, `/auth/invite`, the countdown
+    widget and the short addresses `/e/…`, `/f/…`, `/a/…`, `/os/…`.
+  - New `tools/app-switch-selftest.php` (no database needed) fails for an
+    `api` folder with no line, for a folder tied to the wrong app, for a
+    page of a switchable app that is not tied to it, and for any change to
+    the gate that its own copy does not match. New
+    `tools/access-pages-selftest.php` (needs a throwaway database) asks the
+    running portal the same questions, folder by folder, for a session and
+    for an API key.
+- fix(core): the "app is disabled" page names the right app (#570). It named
+  whichever app came last in the menu ("Forms Builder is disabled" when
+  Calendar was the one switched off), because the menu template reused the
+  same variable. Its two links now stay inside the organisation's own
+  address.
+- fix(expenses): nobody can approve, reject or pay their own expense claim
+  (#545, the owner's decision of 21 September 2026). Before this a department
+  lead could approve a claim they had made, a treasurer could record their
+  own claim as paid, and an administrator could do both. Now:
+  - Both handlers refuse, administrators included: "You cannot approve or
+    reject your own expense claim. It must be decided by the other leads and
+    required approvers of its department or, when there are none, by another
+    approver or an administrator." and "You cannot record payment of your own
+    expense claim. Another treasurer or an administrator must pay it." A
+    claimant who could otherwise have decided the claim is told the same on
+    the claim's own page.
+  - A claim no longer waits for its own claimant. The claimant is left off
+    the list of leads and required approvers whose approval it needs; when
+    that leaves nobody, one approval from anybody else with authority is
+    enough. Every other lead and required approver is still needed, and an
+    administrator's approval still does not stand in for theirs.
+  - A person's own claims are left out of the approvals list and the
+    treasury list (each says so in one line), of the "Go to Approvals" and
+    "Go to Treasury" buttons on the claim page, of the e-mail that asks
+    approvers for a decision, and of the administrator's "Pending Claims"
+    number on the dashboard.
+  - The rule is in one new class, `Portal\Core\ExpenseRules`, checked by
+    the new `tools/expense-rules-selftest.php`, and through the real
+    handlers by `tools/access-pages-selftest.php`.
+  - Claims approved or paid by their own claimant before this change keep
+    their history as recorded. A department whose only approver is the
+    claimant needs an administrator, or a second approver, to decide.
+- fix(calendar): two Team Hub data endpoints and one venue page no longer
+  show an internal event to somebody outside its organisation (#534, items 3
+  and 4).
+  - `/api/calendar/hub-resources` and `/api/calendar/hub-videos` answered
+    ANY signed-in account, from any organisation, with an internal event's
+    team links, notes and videos. They now use the one shared rule
+    (`EventVisibility`), as the event's page does: a refused event is the
+    same "Event not found" as a missing one. An API key is answered as
+    before.
+  - The read-only card of a venue booking (`/venues/booking?id=N`) printed
+    "Linked event: <name>" for any signed-in account, for an internal event
+    and a draft alike. It now names the event only to somebody who may see
+    it. The booking itself is still shown to any signed-in account; that is
+    a separate question.
+  - Still open, written up rather than changed: for a signed-in person the
+    two hub endpoints answer anybody who may see the EVENT, while the Team
+    Hub page itself lets in only the event's team.
+  - The table #534 asked for (six kinds of viewer by five kinds of event, on
+    the event's page, the single-event download and the two hub endpoints)
+    is section W59 of `tools/feed-admin-selftest.php`, with a control that
+    takes the rule out of one page and checks the table notices.
 - fix(privacy): erasing a person's data now finishes, and says truthfully
   what it did (#510, #535). **Until this fix every erasure crashed part
   way.** The routine deleted the erasure request it was carrying out, the

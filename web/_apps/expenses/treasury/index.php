@@ -12,6 +12,10 @@
  * records a payment. Everybody else gets the standard "Access Denied" page
  * before any claim is fetched.
  *
+ * A person's OWN claims are never listed (#545): nobody records their own
+ * claim as paid, so offering it here would only lead to a refusal. The page
+ * says so in one line.
+ *
  * @package   Portal\Expenses
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
@@ -85,19 +89,23 @@ $flashMsg  = $_SESSION['flash_msg']  ?? '';
 $flashType = $_SESSION['flash_type'] ?? 'info';
 unset($_SESSION['flash_msg'], $_SESSION['flash_type']);
 
-// 📋 Fetch approved claims awaiting reimbursement
+// 📋 Fetch approved claims awaiting reimbursement — except the viewer's own
+//    (#545). save.php refuses a person's own claim, so listing it would be
+//    offering a Pay button that cannot work. The same `EC.userID <> ?` is
+//    in both approval-list queries (approve/index.php).
 $claims = [];
 $siteId = Site::id();
+$currentUserId = (int) ($_SESSION['user_id'] ?? 0);
 $stmt = $mysqli->prepare(
     'SELECT EC.claimID, EC.claimTitle, U.fullName, D.deptName, EC.totalAmount, EC.createdAt '
     . 'FROM tblExpenseClaims EC '
     . 'JOIN tblUsers U ON U.userID = EC.userID '
     . 'JOIN tblDepts D ON D.deptID = EC.deptID '
-    . 'WHERE EC.status = "Approved" AND EC.siteID = ? '
+    . 'WHERE EC.status = "Approved" AND EC.siteID = ? AND EC.userID <> ? '
     . 'ORDER BY EC.createdAt DESC'
 );
 if ($stmt !== false) {
-    $stmt->bind_param('i', $siteId);
+    $stmt->bind_param('ii', $siteId, $currentUserId);
     $stmt->execute();
     $res = $stmt->get_result();
     while ($row = $res->fetch_assoc()) {
@@ -119,6 +127,10 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
 <!-- 💷 Treasury Dashboard -->
 <h1 class="mb-4"><i class="fa-solid fa-sterling-sign me-2"></i>Treasury — Approved Claims</h1>
+
+<!-- #545: said whether or not the list is empty, so a treasurer looking for
+     a claim they made themselves is told why it is not here. -->
+<p class="small text-secondary">Your own claims are not listed here: somebody else must pay them.</p>
 
 <?php if (empty($claims) === true): ?>
     <div class="alert alert-info">No approved claims awaiting reimbursement.</div>

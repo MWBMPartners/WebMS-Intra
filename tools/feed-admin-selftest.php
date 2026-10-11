@@ -34,6 +34,20 @@
  * the database's own clock runs seven hours behind UTC — see "PART W" below
  * for exactly how it keeps that safe.
  *
+ * ONE SECTION THAT IS NOT ABOUT PART 8: W59, the #534 table
+ * ---------------------------------------------------------
+ * #534 asked for a table of who is shown ONE event (six kinds of viewer by
+ * five kinds of event) proved on the real pages: the event's page, the
+ * single-event download and the two Team Hub data endpoints. Part W is the
+ * portal's only harness that drives real pages, and already has the two
+ * organisations and the accounts, so the table lives here as W59 rather
+ * than in a second harness of its own (roll-out plan, decision 4, 11
+ * October 2026). The expected answers are written out by hand inside W59,
+ * and W59 carries its own control: it takes the rule out of one page of
+ * the run's scratch copy and checks that the table would notice. W59 also
+ * checks the one other page the #534 sweep found naming an internal event
+ * to outsiders: the read-only card of a venue booking.
+ *
  * `SELFTEST_ONLY=S`, `=D` or `=W` runs one part only, which is handy while
  * working on it. Such a run can NEVER pass: it always ends with exit 1 and
  * says so, because the parts it skipped proved nothing.
@@ -100,13 +114,14 @@
  *   - every refusal is checked by its EXACT sentence, not just "it said
  *     no";
  *   - `pa_finish()` fails unless every heading was reached (S1-S4, D1 to
- *     D39, and W0 to W58 — there is no W17: the plan's list goes from W16
+ *     D39, and W0 to W59 — there is no W17: the plan's list goes from W16
  *     to W18, with "W8 also" folded into W8; D33 and W20 are the "Partly
  *     read" flag, added by chunk P8-2's follow-up; S2 and W21-W25 came with
  *     fix round 1; S3, S4, D34 and W26-W38 with chunk P8-3; D35, D36, W39
  *     and W40 with chunk P8-3's fix round 1; D37 and W41 with its fix round
  *     2; D38 and W42 with fix round 3; W43 with fix round 4; D39 and
- *     W44-W52 with chunk P8-4; W53 and W54 with its fix round 1; W55 and W56 after the final whole-part check; W57 and W58 after its last narrow check) AND exactly
+ *     W44-W52 with chunk P8-4; W53 and W54 with its fix round 1; W55 and W56 after the final whole-part check; W57 and W58 after its last narrow check;
+ *     W59, the #534 table, with roll-out package B) AND exactly
  *     `EXPECTED_CHECKS`
  *     checks ran — fewer means something was skipped, more means something
  *     ran twice or was added without the number being updated. Either way
@@ -234,6 +249,7 @@
  * @license   All Rights Reserved
  * @version   1.4.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/514
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/534
  * -----------------------------------------------------------------------------
  */
 
@@ -300,7 +316,7 @@ if (($argv[1] ?? '') === '--hold-lock') {
 // =============================================================================
 const EXPECTED_S      = 11;   // part S: S1 pages never write around the service layer (4); S2 the importer's UTC writes (2, fix round 1); S3 the server filter (1, chunk P8-3, + its call site 2, P8-3 fix round 1) and S4 message boxes (2, chunk P8-3)
 const EXPECTED_D      = 526;  // part D: 500 from chunk P8-1, + D25's R13-L1 case and D33's three (chunk P8-2), + D34 (chunk P8-3), + D35 (2) and D36 (2) (P8-3 fix round 1), + D37 (3) (fix round 2), + D38 (fix round 3), + D39 (6, chunk P8-4; + 2 in its fix round 1; + 1 in fix round 2; + 1 after the final fault run, m-X05; + 3 after the final whole-part check, F1 and F3)
-const EXPECTED_W      = 262;  // part W: 81 for chunk P8-2's pages (W0-W16, W18-W25); chunk P8-3 grows W21 by 6 and adds W26-W38 (82); its fix round 1 adds a W31 check, W39 (4) and W40 (4); fix round 2 adds W41 (5); fix round 3 adds W42 (3); fix round 4 grows W21 by 2 and adds W43 (1); chunk P8-4 grows W21 by 5 and adds W44 (5), W45 (6), W46 (5), W47 (2), W48 (5), W49 (5), W50 (4), W51 (2) and W52 (5); its fix round 1 adds 2 to W45, 3 to W46, 3 to W48, 1 to W49, 1 to W50, 1 to W52, and W53 (2) and W54 (1); fix round 2 adds 2 to W45, 1 to W48 and 1 to W53; fix round 3 adds 1 to W45; the final whole-part check's fixes add 1 to W50, and W55 (2) and W56 (1); the last narrow check's fixes add 1 to W55, and W57 (4) and W58 (1)
+const EXPECTED_W      = 294;  // part W: 81 for chunk P8-2's pages (W0-W16, W18-W25); chunk P8-3 grows W21 by 6 and adds W26-W38 (82); its fix round 1 adds a W31 check, W39 (4) and W40 (4); fix round 2 adds W41 (5); fix round 3 adds W42 (3); fix round 4 grows W21 by 2 and adds W43 (1); chunk P8-4 grows W21 by 5 and adds W44 (5), W45 (6), W46 (5), W47 (2), W48 (5), W49 (5), W50 (4), W51 (2) and W52 (5); its fix round 1 adds 2 to W45, 3 to W46, 3 to W48, 1 to W49, 1 to W50, 1 to W52, and W53 (2) and W54 (1); fix round 2 adds 2 to W45, 1 to W48 and 1 to W53; fix round 3 adds 1 to W45; the final whole-part check's fixes add 1 to W50, and W55 (2) and W56 (1); the last narrow check's fixes add 1 to W55, and W57 (4) and W58 (1); W59, the #534 table (roll-out package B, 11 October 2026), adds 32: its set-up (1), six viewers by four addresses (24), its own control (2), an API key answered as before (2, added after the independent check) and the venue booking card (3)
 const EXPECTED_CHECKS = EXPECTED_S + EXPECTED_D + EXPECTED_W;
 
 // 🧩 One part only (SELFTEST_ONLY=S, D or W), or all of them. A one-part run
@@ -508,7 +524,9 @@ function pa_requiredHeadings(): array
         // W26-W38 came with chunk P8-3; W39 and W40 with its fix round 1; W41 with fix round 2; W42 with fix round 3; W43 with fix round 4;
         // W44-W52 with chunk P8-4; W53 and W54 with its fix round 1; W55 and W56 after the final whole-part check; W57 and W58 after its last narrow check.
         foreach ([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43,
-            44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58] as $w) {
+            44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58,
+            // W59 is the #534 table (roll-out package B, 11 October 2026), not a part 8 check: see its heading.
+            59] as $w) {
             $want[] = 'W' . $w;
         }
     }
@@ -589,7 +607,7 @@ function pa_finish(): never
     if ($bad === true) {
         exit(1);
     }
-    echo 'PASS — all ' . $GLOBALS['pa_pass'] . " checks passed; every heading (S1-S4, D1-D39, W0-W58) ran.\n";
+    echo 'PASS — all ' . $GLOBALS['pa_pass'] . " checks passed; every heading (S1-S4, D1-D39, W0-W59) ran.\n";
     exit(0);
 }
 
@@ -672,6 +690,13 @@ function pa_removeWorld(): void
     // RSVPs have no link to the event that would remove them with it; part
     // W's delete check makes one (chunk P8-2).
     pa_q('DELETE FROM tblEventRSVPs WHERE eventID BETWEEN 910000 AND 919999 OR siteID IN (?, ?)', 'ii', [ORG_A, ORG_B]);
+    // W59 (the #534 table) makes one hall with three bookings. None of these
+    // rows is deleted with its organisation (and a booking is not deleted
+    // with its event), so they go here, before the organisations do.
+    pa_q('DELETE FROM tblVenueBookings WHERE siteID IN (?, ?)', 'ii', [ORG_A, ORG_B]);
+    pa_q('DELETE FROM tblVenueUsageTypes WHERE siteID IN (?, ?)', 'ii', [ORG_A, ORG_B]);
+    pa_q('DELETE FROM tblVenueStatuses WHERE siteID IN (?, ?)', 'ii', [ORG_A, ORG_B]);
+    pa_q('DELETE FROM tblVenues WHERE siteID IN (?, ?)', 'ii', [ORG_A, ORG_B]);
     pa_q('DELETE FROM tblEvents WHERE eventID BETWEEN 910000 AND 919999 OR siteID IN (?, ?)', 'ii', [ORG_A, ORG_B]);
     // Part W's series-page check (W35, chunk P8-3) makes three series. Their
     // link to the organisation has no "delete with it", so they go before
@@ -1946,11 +1971,14 @@ function pw_plainConnect(): mysqli
  * otherwise tidies "/../" and "/./" away before sending, so a check of the
  * test server's own fence would never reach the server with them.
  *
+ * `$bearer` (W59) sends an API key in the `Authorization` header, for the
+ * two checks that ask as a key instead of as a signed-in person.
+ *
  * @param array<string,mixed>|null $post
  *
  * @return array{status:int, location:string, body:string, head:string}
  */
-function pw_req(string $jar, string $method, string $path, ?array $post = null, bool $asIs = false): array
+function pw_req(string $jar, string $method, string $path, ?array $post = null, bool $asIs = false, string $bearer = ''): array
 {
     $pw =& $GLOBALS['pw'];
     $h  = curl_init($pw['base'] . $path);
@@ -1964,7 +1992,7 @@ function pw_req(string $jar, string $method, string $path, ?array $post = null, 
         CURLOPT_CONNECTTIMEOUT => 5,
         CURLOPT_PROXY          => '',
         CURLOPT_NOPROXY        => '*',
-        CURLOPT_HTTPHEADER     => ['Expect:'],
+        CURLOPT_HTTPHEADER     => $bearer === '' ? ['Expect:'] : ['Expect:', 'Authorization: Bearer ' . $bearer],
     ]);
     if ($asIs === true) {
         curl_setopt($h, CURLOPT_PATH_AS_IS, true);
@@ -2386,7 +2414,10 @@ ROUTER;
     // chunk P8-3's fix round 1 (check finding M1): W39 proves the pages ask
     // "an administrator of THIS organisation?", not "an administrator
     // anywhere?".
-    foreach (['sa' => SA, 'm' => M, 'la' => LA, 'ga' => GA, 'sgm' => SGM, 'p' => P_ID, 'sb' => SB] as $who => $userId) {
+    // PB (a member of organisation B ONLY, and nothing else) signs in for W59,
+    // the #534 table: "a member of another organisation" must be exactly that,
+    // not also an administrator somewhere, as SB is.
+    foreach (['sa' => SA, 'm' => M, 'la' => LA, 'ga' => GA, 'sgm' => SGM, 'p' => P_ID, 'sb' => SB, 'pb' => PB] as $who => $userId) {
         pa_q('INSERT INTO tblLocalAccounts (userID, username, passwordHash, isVerified) VALUES (?, ?, ?, 1)', 'iss', [$userId, 'p8w-' . $who, $hash]);
     }
 
@@ -2399,7 +2430,15 @@ ROUTER;
     $log  = $child . $sep . 'server-output.log';
     $proc = proc_open(
         [PHP_BINARY, '-d', 'session.save_path=' . $child . $sep . 'sessions', '-d', 'error_log=' . $child . $sep . 'php-errors.log',
-            '-d', 'log_errors=1', '-d', 'display_errors=0', '-S', '127.0.0.1:' . $port,
+            '-d', 'log_errors=1', '-d', 'display_errors=0',
+            // W59's control changes ONE page of the scratch copy part way
+            // through the run. PHP keeps compiled pages in memory (opcache)
+            // and by default looks at a file again only every two seconds,
+            // so the changed page could be answered from the old copy. These
+            // two settings make it look every time. They change nothing a
+            // page does; a PHP without opcache ignores them.
+            '-d', 'opcache.validate_timestamps=1', '-d', 'opcache.revalidate_freq=0',
+            '-S', '127.0.0.1:' . $port,
             // `-t`: the server's own document root is the copy's web root
             // (fix round 1, L4; it used to be the scratch child).
             '-t', $child . $sep . 'web' . $sep . 'public_html', $child . $sep . 'router.php'],
@@ -4901,15 +4940,15 @@ function pw_run(): void
             $list49 = pw_req($sa, 'GET', $list)['body'];
             // The switched-off page is recognised by its "… is disabled"
             // heading and the Approvals app's OWN description. Not by the name
-            // in the heading: that page (Router::renderAppDisabled(), not part
-            // 8's) currently names the WRONG app — the navigation template it
-            // includes reuses the same `$appName` variable in its loop, so the
-            // heading shows the last app the menu listed ("Forms Builder is
-            // disabled" here). Found by this check on 5 October 2026; the
-            // owner decided the same day that it is fixed after part 8, as
-            // its own issue. So this check asserts only what is true either
-            // way: HTTP 403, the "… is disabled" heading, and the Approvals
-            // app's OWN description on the page — never the name in the heading.
+            // in the heading. When this check was written that page
+            // (Router::renderAppDisabled(), not part 8's) named the WRONG app:
+            // the navigation template it includes reuses the same `$appName`
+            // variable in its loop, so the heading showed the last app the
+            // menu listed ("Forms Builder is disabled" here). Found by this
+            // check on 5 October 2026; fixed as #570 on 11 October 2026, and
+            // `tools/app-switch-selftest.php` now guards the cause. This check
+            // was left asserting what it always did: HTTP 403, the "… is
+            // disabled" heading, and the Approvals app's OWN description.
             $seen49 = [
                 'status'   => $off49['status'],
                 'disabled' => str_contains($off49['body'], ' is disabled</h1>') && str_contains($off49['body'], 'Generic inbox for pending workflow approval steps'),
@@ -5499,6 +5538,270 @@ function pw_run(): void
             && str_contains($rows58[0], 'A request was declined on ') === true && str_contains($rows58[1], 'A request was declined on ') === true
             && str_contains(pw_main($page58), 'Declined on ') === false && str_contains($rowOf($page58, 'date-' . $q58a), 'bg-danger') === false,
             pa_show([$ok58, $mid58, pa_ls($q58a), pa_ls($q58b), $rows58])
+        );
+
+        // ---------------------------------------------------------------------
+        pa_heading('W59 — #534: who is shown ONE event, on the four addresses that show one (six viewers by five events)');
+        // NOT a part 8 check. #534 asked for a table of who may open a single
+        // event, proved on the real pages; this file holds the portal's only
+        // harness that drives real pages (a scratch copy of web/, real
+        // sign-ins, one cookie jar per account) and already has two
+        // organisations and these kinds of account, so the table lives here
+        // rather than in a second harness saying the same thing (roll-out plan,
+        // decision 4, 11 October 2026).
+        //
+        // FOUR ADDRESSES: the event's own page, the single-event download, and
+        // the two Team Hub data endpoints (which had NO viewer test at all
+        // until #534: any signed-in account, of any organisation, was answered).
+        // FIVE EVENTS of organisation A, all the portal's own (not imported):
+        // public; internal; a draft; a deleted one; and a number that matches
+        // nothing. The draft is marked PUBLIC on purpose, so its column tests
+        // the draft rule on its own and the internal column tests the
+        // membership rule on its own.
+        // SIX VIEWERS: nobody; PB, a member of organisation B only, on A's
+        // address; M, a member of A; P, a member of A who is also a
+        // coordinator of all four events; SA, a site administrator of A; GA,
+        // a global administrator with no membership anywhere.
+        //
+        // An answer is written "200+shown" (HTTP 200 AND the event's own
+        // marker word is in the answer), or the bare status of a refusal. A
+        // refusal that still carried the marker would read "404+shown" and
+        // fail: the status alone is not trusted.
+        $w59 = ['public' => 919001, 'internal' => 919002, 'draft' => 919003, 'deleted' => 919004, 'missing' => 919009];
+        $day59 = pa_todayLocal()->modify('+9 days')->format('Y-m-d');
+        foreach ([['public', 'published', 1, 0], ['internal', 'published', 0, 0], ['draft', 'draft', 1, 0], ['deleted', 'published', 1, 1]] as [$kind59, $status59, $public59, $deleted59]) {
+            pa_q(
+                'INSERT INTO tblEvents (eventID, siteID, eventSlug, eventName, description, startDateTime, endDateTime, timezone, eventTimezone, status, isPublic, isDeleted) '
+                . 'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                'iissssssssii',
+                [$w59[$kind59], ORG_A, 'w59-' . $kind59, 'W59 ' . $kind59 . ' w59mark' . $w59[$kind59], 'W59 description', $day59 . ' 10:00:00', $day59 . ' 11:00:00', SITE_ZONE, SITE_ZONE, $status59, $public59, $deleted59]
+            );
+            pa_q("INSERT INTO tblEventHubResources (eventID, section, resourceType, title, body) VALUES (?, 'W59', 'note', ?, 'W59 team note')", 'is', [$w59[$kind59], 'Hub note w59mark' . $w59[$kind59]]);
+            pa_q("INSERT INTO tblEventHubVideos (eventID, provider, videoRef, title) VALUES (?, 'youtube', 'w59ref', ?)", 'is', [$w59[$kind59], 'Hub video w59mark' . $w59[$kind59]]);
+            pa_q('INSERT INTO tblEventCoordinators (eventID, userID, grantedByID) VALUES (?, ?, ?)', 'iii', [$w59[$kind59], P_ID, SA]);
+        }
+        $pb59 = pw_signIn('pb');
+        $made59 = pa_one(
+            'SELECT (SELECT COUNT(*) FROM tblEvents WHERE eventID BETWEEN 919001 AND 919004 AND siteID = ? AND externalFeedID IS NULL) AS events, '
+            . '(SELECT COUNT(*) FROM tblEventHubResources WHERE eventID BETWEEN 919001 AND 919004) AS notes, '
+            . '(SELECT COUNT(*) FROM tblEventHubVideos WHERE eventID BETWEEN 919001 AND 919004) AS videos, '
+            . '(SELECT COUNT(*) FROM tblEventCoordinators WHERE eventID BETWEEN 919001 AND 919004 AND userID = ? AND revokedAt IS NULL) AS coordinating, '
+            . '(SELECT COUNT(*) FROM tblEvents WHERE eventID = 919009) AS missing, '
+            . '(SELECT COUNT(*) FROM tblUserSites WHERE userID = ? AND siteID = ?) AS pbInA, '
+            . '(SELECT COUNT(*) FROM tblUserSites WHERE userID = ? AND siteID = ? AND isActive = 1) AS pbInB, '
+            . '(SELECT COUNT(*) FROM tblUserSites WHERE userID = ?) AS gaAnywhere',
+            'iiiiiii', [ORG_A, P_ID, PB, ORG_A, PB, ORG_B, GA]
+        );
+        pa_ok(
+            'W59 set-up: four events of A (public, internal, draft, deleted), each with a Team Hub note and video and P as coordinator; number 919009 matches nothing; PB belongs to B only; GA belongs to no organisation',
+            $made59 === ['events' => 4, 'notes' => 4, 'videos' => 4, 'coordinating' => 4, 'missing' => 0, 'pbInA' => 0, 'pbInB' => 1, 'gaAnywhere' => 0],
+            pa_show($made59)
+        );
+        $ask59 = static function (string $jar, string $address, string $kind) use ($w59): string {
+            $path = [
+                'page'          => PW_A . '/calendar/event?slug=' . ($kind === 'missing' ? 'w59-no-such-event' : 'w59-' . $kind),
+                'download'      => PW_A . '/calendar/export?id=' . $w59[$kind],
+                'hub-resources' => PW_A . '/api/calendar/hub-resources?eventID=' . $w59[$kind],
+                'hub-videos'    => PW_A . '/api/calendar/hub-videos?eventID=' . $w59[$kind],
+            ][$address];
+            $answer = pw_req($jar, 'GET', $path);
+            // Any of this run's markers in the answer counts, not only the
+            // asked event's own: a refusal that showed a DIFFERENT event
+            // would be just as wrong.
+            return $answer['status'] . (str_contains($answer['body'], 'w59mark') === true ? '+shown' : '');
+        };
+        // 📋 THE EXPECTED TABLE — written out by hand from the rule
+        //    (EventVisibility in "session" mode, the draft rule, and
+        //    ApiAuth::requireRead()), BEFORE the first run, never worked out by
+        //    code: a loop that computed it would be a second copy of the rule
+        //    and agree with it even when both were wrong.
+        //    Columns: public, internal, draft, deleted, a number that matches nothing.
+        //      - public: shown to everybody, signed in or not (the two hub
+        //        endpoints need a sign-in first: 401 for nobody, whatever the event);
+        //      - internal: only an active member of A, or an administrator of it;
+        //      - draft: only somebody who can manage events (App::isAdmin()). A
+        //        coordinator is NOT that, on any of these four addresses;
+        //      - deleted, missing: nobody, and the SAME answer as each other
+        //        and as a refused event, so the answer never says which it is.
+        $expected59 = [
+            'nobody (signed out)' => [
+                'page'          => ['200+shown', '404', '404', '404', '404'],
+                'download'      => ['200+shown', '404', '404', '404', '404'],
+                'hub-resources' => ['401', '401', '401', '401', '401'],
+                'hub-videos'    => ['401', '401', '401', '401', '401'],
+            ],
+            'PB, a member of ANOTHER organisation only' => [
+                'page'          => ['200+shown', '404', '404', '404', '404'],
+                'download'      => ['200+shown', '404', '404', '404', '404'],
+                'hub-resources' => ['200+shown', '404', '404', '404', '404'],
+                'hub-videos'    => ['200+shown', '404', '404', '404', '404'],
+            ],
+            'M, a member' => [
+                'page'          => ['200+shown', '200+shown', '404', '404', '404'],
+                'download'      => ['200+shown', '200+shown', '404', '404', '404'],
+                'hub-resources' => ['200+shown', '200+shown', '404', '404', '404'],
+                'hub-videos'    => ['200+shown', '200+shown', '404', '404', '404'],
+            ],
+            'P, a member who coordinates all four events' => [
+                'page'          => ['200+shown', '200+shown', '404', '404', '404'],
+                'download'      => ['200+shown', '200+shown', '404', '404', '404'],
+                'hub-resources' => ['200+shown', '200+shown', '404', '404', '404'],
+                'hub-videos'    => ['200+shown', '200+shown', '404', '404', '404'],
+            ],
+            'SA, a site administrator' => [
+                'page'          => ['200+shown', '200+shown', '200+shown', '404', '404'],
+                'download'      => ['200+shown', '200+shown', '200+shown', '404', '404'],
+                'hub-resources' => ['200+shown', '200+shown', '200+shown', '404', '404'],
+                'hub-videos'    => ['200+shown', '200+shown', '200+shown', '404', '404'],
+            ],
+            'GA, a global administrator' => [
+                'page'          => ['200+shown', '200+shown', '200+shown', '404', '404'],
+                'download'      => ['200+shown', '200+shown', '200+shown', '404', '404'],
+                'hub-resources' => ['200+shown', '200+shown', '200+shown', '404', '404'],
+                'hub-videos'    => ['200+shown', '200+shown', '200+shown', '404', '404'],
+            ],
+        ];
+        // The jars are taken from where pw_signIn() recorded them, not from the
+        // short variables set at the top of this function: an earlier check
+        // reuses `$p` for something else (W58), and a jar variable quietly
+        // holding a different value would test the wrong person.
+        $jars59 = [
+            'nobody (signed out)'                         => $out,
+            'PB, a member of ANOTHER organisation only'   => $pb59,
+            'M, a member'                                 => (string) $pw['jars']['m'],
+            'P, a member who coordinates all four events' => (string) $pw['jars']['p'],
+            'SA, a site administrator'                    => (string) $pw['jars']['sa'],
+            'GA, a global administrator'                  => (string) $pw['jars']['ga'],
+        ];
+        $kinds59 = ['public', 'internal', 'draft', 'deleted', 'missing'];
+        foreach ($expected59 as $viewer59 => $byAddress59) {
+            foreach ($byAddress59 as $address59 => $want59) {
+                $got59 = [];
+                foreach ($kinds59 as $kind59) {
+                    $got59[] = $ask59($jars59[$viewer59], $address59, $kind59);
+                }
+                pa_ok(
+                    'W59 ' . $viewer59 . ' — ' . $address59 . ': public, internal, draft, deleted, missing answer ' . implode(', ', $want59),
+                    $got59 === $want59,
+                    'got ' . implode(', ', $got59)
+                );
+            }
+        }
+        // 🧪 THE TABLE'S OWN CONTROL. In THIS RUN'S SCRATCH COPY (never the
+        //    repository), the shared rule is taken out of one of the four
+        //    pages, and the cell the rule exists for is asked again: PB, a
+        //    member of another organisation only, must now be SHOWN A's
+        //    internal event's Team Hub note. If that does not happen, the table
+        //    above could not have noticed the rule missing, and every "404" in
+        //    it proves nothing. The page is then put back byte for byte and
+        //    must refuse again. The file's time stamp is moved on each write so
+        //    the server reads the new text at once (see the two opcache
+        //    settings where the server is started).
+        $hub59  = $pw['child'] . DIRECTORY_SEPARATOR . 'web' . DIRECTORY_SEPARATOR . '_apps' . DIRECTORY_SEPARATOR . 'calendar' . DIRECTORY_SEPARATOR . 'api' . DIRECTORY_SEPARATOR . 'hub-resources.php';
+        $real59 = (string) file_get_contents($hub59);
+        $rule59 = "\$visibility = EventVisibility::where('e', \$ruleMode, \$viewerId, date('Y-m-d'));";
+        $none59 = "\$visibility = ['sql' => '', 'types' => '', 'params' => []];";
+        $time59 = (int) filemtime($hub59);
+        try {
+            file_put_contents($hub59, str_replace($rule59, $none59, $real59));
+            touch($hub59, $time59 + 60);
+            clearstatcache(true, $hub59);
+            $leak59 = $ask59($pb59, 'hub-resources', 'internal');
+        } finally {
+            file_put_contents($hub59, $real59);
+            touch($hub59, $time59 + 120);
+            clearstatcache(true, $hub59);
+        }
+        pa_ok(
+            'W59 control: with the shared rule taken out of the scratch copy\'s hub-resources page, PB IS shown A\'s internal event\'s Team Hub note — so the table above can tell',
+            substr_count($real59, $rule59) === 1 && $leak59 === '200+shown',
+            'the rule\'s line was found ' . substr_count($real59, $rule59) . ' time(s); PB was answered ' . $leak59
+        );
+        pa_ok(
+            'W59 control: with the page put back exactly as it was, PB is refused again',
+            (string) file_get_contents($hub59) === $real59 && $ask59($pb59, 'hub-resources', 'internal') === '404',
+            'PB was answered ' . $ask59($pb59, 'hub-resources', 'internal')
+        );
+        // 🔑 AN API KEY IS ANSWERED AS BEFORE #534. The table above asks only
+        //    as people. The two hub endpoints exist for an outside system that
+        //    reads them with a key (scope `eventhub:read`), and a key is
+        //    answered for the organisation's own events whether public or
+        //    internal — that did not change. Without these two checks, a
+        //    version that applied the people's rule to keys as well (so a key
+        //    stopped being answered for internal events) passed every check
+        //    in this file. A key of the OTHER organisation is still "not
+        //    found", as it always was.
+        $keyA59 = 'wbms_' . bin2hex(random_bytes(16));
+        $keyB59 = 'wbms_' . bin2hex(random_bytes(16));
+        foreach ([[ORG_A, $keyA59], [ORG_B, $keyB59]] as [$org59, $plain59]) {
+            pa_q(
+                "INSERT INTO tblApiKeys (siteID, name, keyHash, keyPrefix, scopes, isActive, createdByID) VALUES (?, 'W59 key', ?, ?, 'eventhub:read', 1, NULL)",
+                'iss', [$org59, hash('sha256', $plain59), substr($plain59, 0, 12)]
+            );
+        }
+        // B's key is judged by B's own Calendar switch (#478), so B has it on for these two requests.
+        pa_q("INSERT INTO tblSettings (siteID, settingKey, settingValue, defaultValue, isSensitive) VALUES (?, 'calendar.enabled', 'true', 'false', 0)", 'i', [ORG_B]);
+        $asKey59 = static function (string $key, string $address, string $kind) use ($w59, $out): string {
+            $answer = pw_req($out, 'GET', PW_A . '/api/calendar/' . $address . '?eventID=' . $w59[$kind], null, false, $key);
+
+            return $answer['status'] . (str_contains($answer['body'], 'w59mark') === true ? '+shown' : '');
+        };
+        foreach (['hub-resources', 'hub-videos'] as $address59) {
+            $gotA59 = [];
+            $gotB59 = [];
+            foreach ($kinds59 as $kind59) {
+                $gotA59[] = $asKey59($keyA59, $address59, $kind59);
+                $gotB59[] = $asKey59($keyB59, $address59, $kind59);
+            }
+            pa_ok(
+                'W59 an API key of organisation A — ' . $address59 . ': public, internal, draft, deleted, missing answer 200+shown, 200+shown, 404, 404, 404 (as before #534); a key of organisation B gets 404 for all five',
+                $gotA59 === ['200+shown', '200+shown', '404', '404', '404'] && $gotB59 === ['404', '404', '404', '404', '404'],
+                "A's key: " . implode(', ', $gotA59) . " | B's key: " . implode(', ', $gotB59)
+            );
+        }
+
+        // 🏛️ ONE MORE PAGE OF THE SAME KIND, found by the #534 sweep: the
+        //    read-only card of a venue booking (what anybody who is not a
+        //    venue manager gets) printed "Linked event: <name>" for whoever
+        //    opened it — any signed-in account, for an internal event and a
+        //    draft alike. It now names the event only to somebody the shared
+        //    rule would show that event to. Three bookings of one hall, linked
+        //    to the public, the internal and the draft event above. Only the
+        //    page's own content is read (pw_main()), never its menu.
+        //    WHAT THIS DOES NOT CHECK: who may open a booking at all. The page
+        //    still answers any signed-in account; that is a separate question.
+        pa_q("INSERT INTO tblSettings (siteID, settingKey, settingValue, defaultValue, isSensitive) VALUES (?, 'venues.enabled', '1', '0', 0)", 'i', [ORG_A]);
+        pa_q("INSERT INTO tblVenues (venueID, siteID, venueName, isActive) VALUES (919101, ?, 'W59 hall', 1)", 'i', [ORG_A]);
+        pa_q("INSERT INTO tblVenueUsageTypes (usageTypeID, siteID, venueID, typeName) VALUES (919111, ?, 919101, 'W59 use')", 'i', [ORG_A]);
+        pa_q("INSERT INTO tblVenueStatuses (statusID, siteID, statusName) VALUES (919121, ?, 'W59 status')", 'i', [ORG_A]);
+        foreach ([919131 => 'public', 919132 => 'internal', 919133 => 'draft'] as $booking59 => $kind59) {
+            pa_q(
+                'INSERT INTO tblVenueBookings (bookingID, siteID, venueID, bookingDate, usageTypeID, statusID, eventID) VALUES (?, ?, 919101, ?, 919111, 919121, ?)',
+                'iisi', [$booking59, ORG_A, $day59, $w59[$kind59]]
+            );
+        }
+        $card59 = static function (string $jar, int $booking): string {
+            $answer = pw_req($jar, 'GET', PW_A . '/venues/booking?id=' . $booking);
+            $main   = pw_main($answer['body']);
+            // "hall" proves the card itself was drawn; "+event" that it names the linked event.
+            return $answer['status'] . (str_contains($main, 'W59 hall') === true ? '+hall' : '') . (str_contains($main, 'w59mark') === true ? '+event' : '');
+        };
+        $pbCards59 = [$card59($pb59, 919131), $card59($pb59, 919132), $card59($pb59, 919133)];
+        pa_ok(
+            'W59 venue booking card, PB (another organisation only): a PUBLIC event is named; an internal one and a draft are not, though the card itself is still drawn',
+            $pbCards59 === ['200+hall+event', '200+hall', '200+hall'],
+            'public, internal, draft: ' . implode(', ', $pbCards59)
+        );
+        $mCards59 = [$card59((string) $pw['jars']['m'], 919131), $card59((string) $pw['jars']['m'], 919132), $card59((string) $pw['jars']['m'], 919133)];
+        pa_ok(
+            'W59 venue booking card, M (a member): the public and the internal event are named; the draft is not',
+            $mCards59 === ['200+hall+event', '200+hall+event', '200+hall'],
+            'public, internal, draft: ' . implode(', ', $mCards59)
+        );
+        $form59 = pw_main(pw_req((string) $pw['jars']['sa'], 'GET', PW_A . '/venues/booking?id=919133')['body']);
+        pa_ok(
+            'W59 venue booking, SA (who manages bookings): still gets the form, with the organisation\'s events to choose from, the draft included',
+            str_contains($form59, 'name="eventID"') === true && str_contains($form59, 'w59mark' . $w59['draft']) === true && str_contains($form59, 'w59mark' . $w59['internal']) === true
         );
 
         // ---------------------------------------------------------------------

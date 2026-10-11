@@ -11,6 +11,10 @@
  * open, or an administrator, with the standard "Access Denied" page — before
  * the form token is even checked (#538).
  *
+ * Nobody records their own claim as paid (#545): a treasurer or an
+ * administrator who made the claim is refused, and somebody else must pay
+ * it. The rule itself is in `Portal\Core\ExpenseRules`.
+ *
  * @package   Portal\Expenses
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
@@ -24,6 +28,7 @@ require_once dirname(__DIR__, 3) . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEP
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\ExpenseRules;
 use Portal\Core\Logger;
 use Portal\Core\ExpensePdf;
 use Portal\Core\ExpenseMailer;
@@ -104,6 +109,26 @@ if ($stmt !== false) {
 if ($claim === null) {
     $_SESSION['flash_msg']  = 'Claim not found or not in Approved status.';
     $_SESSION['flash_type'] = 'warning';
+    header('Location: /expenses/treasury');
+    exit();
+}
+
+// 🙅 #545: nobody records their own claim as paid — not a treasurer, and
+//    not an administrator.
+//
+//    WHAT WAS WRONG: the claim's owner was read above and never compared
+//    with the person paying. A treasurer could mark their own claim as
+//    reimbursed, with any payment reference they cared to type. The owner
+//    decided on 21 September 2026 to refuse outright.
+//
+//    Everybody who reaches this line is a treasurer or an administrator of
+//    this organisation (the test at the top), and the claim is their own,
+//    so the sentence tells them nothing they did not already know. The
+//    list page no longer shows a person's own claims (treasury/index.php),
+//    so this is normally reached only by a request made by hand.
+if (ExpenseRules::isOwnClaim((int) $claim['userID'], $userId) === true) {
+    $_SESSION['flash_msg']  = ExpenseRules::MSG_OWN_PAYMENT;
+    $_SESSION['flash_type'] = 'danger';
     header('Location: /expenses/treasury');
     exit();
 }

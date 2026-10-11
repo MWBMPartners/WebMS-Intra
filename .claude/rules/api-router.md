@@ -17,4 +17,5 @@ paths:
 - **Every endpoint needs `api.{appName}.{action}.enabled = 'true'`** seeded in `tblSettings` or ApiRouter returns 403.
 - **Don't register `api/...` routes in `tblRoutes`** — either the handler is at the convention path (settings flag does the gating) or it's dead code.
 - **Adjacent gotcha**: the `ApiResponse` class exposes `::success()`, NOT `::ok()`. `::setJsonHeaders()` is `private`. Grep `_core/ApiResponse.php` for method names before calling.
+- **A new `api` folder needs a line in `AppRegistry::API_FOLDER_APPS`** (#478) saying which app it belongs to, or `null` for none — without one ApiRouter refuses it (403). An app switched off in Admin → Apps now answers 403 for all its endpoints; `tools/app-switch-selftest.php` checks every folder has a line.
 - **v1 facade (#323 Phase 2)**: the `/api/v1/{resource}` facade maps REST verbs onto the same `{app}/{action}` handler files + `api.{app}.{action}.enabled` flags (`ApiRouter::dispatchV1`) — no separate gating vocabulary, nothing registered in `tblRoutes` for it either.

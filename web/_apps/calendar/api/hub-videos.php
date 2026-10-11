@@ -10,7 +10,8 @@
  * Team Hub Phase 3 integration (#387).
  *
  * Read-only, dual-mode auth (session or bearer `eventhub:read` scope) via
- * ApiAuth::requireRead(). Tenant-scoped: the requested event MUST belong to
+ * ApiAuth::requireRead(). Since #534 a signed-in person is answered only for
+ * an event they may see (the shared rule, EventVisibility; see the lookup). Tenant-scoped: the requested event MUST belong to
  * the resolved site (Site::id() — already tenant-pinned to the bearer key's
  * own site by ApiAuth for bearer requests) or this 404s rather than leaking
  * another tenant's event/video rows.
@@ -45,6 +46,7 @@ use Portal\Core\ApiAuth;
 use Portal\Core\ApiKey;
 use Portal\Core\ApiResponse;
 use Portal\Core\App;
+use Portal\Core\EventVisibility;
 use Portal\Core\Site;
 
 ApiAuth::requireRead('eventhub:read');
@@ -106,15 +108,54 @@ $canManageEvents = $apiKeyRow !== null
     : App::isAdmin();
 $canManageFlag   = $canManageEvents === true ? 1 : 0;
 
+// 👁️ WHO may read the event at all (#534, 11 October 2026). The one shared
+//    rule, EventVisibility::where(), is now part of the lookup below, used
+//    exactly as events/api/detail.php uses it:
+//      - a signed-in person ("session" mode) is answered only for an event
+//        the calendar would show them: a public one, or an internal one of
+//        an organisation they are an active member of or administer;
+//      - an API key ("key" mode) is answered for the organisation's own
+//        events as before (#127 and #511 track that separately); for a key
+//        the session, if there is one, is ignored.
+//    A refused event comes back as no row: the same "Event not found" as a
+//    missing one, from the same statement, so the answer does not reveal
+//    that the event exists.
+//
+//    WHAT WAS WRONG: the lookup tested the event's number, organisation,
+//    "not deleted" and status, and nothing about the VIEWER. ApiAuth::
+//    requireRead() at the top asks only "is somebody signed in?". So any
+//    signed-in account on the whole installation, a member of a different
+//    organisation included, could read an internal event's Team Hub
+//    videos by opening this address under that organisation's own
+//    address and trying eventID=1, 2, 3 and so on.
+//
+//    WHAT THIS CANNOT DO: it applies the rule for who may see the EVENT. The
+//    Team Hub PAGE (calendar/event-hub.php) is narrower: it lets in only
+//    the event's own team (Auth::isEventTeamMember()). A member of the
+//    organisation who is not on the team, and for a public event any
+//    signed-in person, is refused by that page and still answered here.
+//    That difference is older than #534 and is not changed by it; it is
+//    written up as a follow-up rather than quietly narrowed in a change
+//    that was about something else.
+//
+//    The fragment goes LAST, after the literal conditions, and its values
+//    are bound after theirs (binding is by position). In key mode it binds
+//    nothing; the three values before it mean bind_param() is never empty.
+$ruleMode   = $apiKeyRow !== null ? EventVisibility::MODE_KEY : EventVisibility::MODE_SESSION;
+$viewerId   = $ruleMode === EventVisibility::MODE_SESSION ? EventVisibility::sessionViewerId() : 0;
+$visibility = EventVisibility::where('e', $ruleMode, $viewerId, date('Y-m-d'));
+
 // Imported events are read-only (#514 D5); this makes an imported event exactly as "not found" as a missing one.
+// `externalFeedID IS NULL` stays written out here although the rule also knows about imported events: with it,
+// the rule's "imported" half can never match, so an imported event's hub is never answered whatever its level.
 $eventStmt = $db->prepare(
-    'SELECT eventID FROM tblEvents WHERE eventID = ? AND siteID = ? AND isDeleted = 0 AND externalFeedID IS NULL '
-    . "AND (status IN ('published', 'cancelled', 'postponed') OR ? = 1) LIMIT 1"
+    'SELECT e.eventID FROM tblEvents e WHERE e.eventID = ? AND e.siteID = ? AND e.isDeleted = 0 AND e.externalFeedID IS NULL '
+    . "AND (e.status IN ('published', 'cancelled', 'postponed') OR ? = 1)" . $visibility['sql'] . ' LIMIT 1'
 );
 if ($eventStmt === false) {
     ApiResponse::error('Database error', 500);
 }
-$eventStmt->bind_param('iii', $eventId, $siteId, $canManageFlag);
+$eventStmt->bind_param('iii' . $visibility['types'], $eventId, $siteId, $canManageFlag, ...$visibility['params']);
 $eventStmt->execute();
 $eventRow = $eventStmt->get_result()->fetch_assoc();
 $eventStmt->close();

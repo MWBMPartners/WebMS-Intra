@@ -337,7 +337,11 @@ in `.claude/CLAUDE.md` under the heading named in brackets.
     placed anywhere else, or a row added for it in the normal routing table,
     is simply never reached. Each such endpoint also needs a setting
     `api.{appName}.{action}.enabled = 'true'` seeded in the database, or the
-    router answers 403 regardless of the code being correct. Adjacent trap:
+    router answers 403 regardless of the code being correct. A new `api`
+    folder also needs a line in `AppRegistry::API_FOLDER_APPS` (#478) saying
+    which app it belongs to, or `null` for none; without one the router
+    refuses it, and an app switched off in Admin → Apps answers 403 for all
+    its endpoints. Adjacent trap:
     the response helper class exposes `::success()`, not `::ok()`, and its
     header-setting method is private — check the real class before calling
     it. *(`.claude/rules/api-router.md`.)*

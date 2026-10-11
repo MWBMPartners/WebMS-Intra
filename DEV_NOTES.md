@@ -2338,6 +2338,65 @@ all `api/{app}/{action}` patterns with JSON content-type enforcement, CORS heade
 and standardised error envelopes via `ApiResponse`. The main `Router::dispatch()`
 delegates to `ApiRouter` for any path starting with `api/`.
 
+#### A switched-off app's endpoints are refused (#478, 11 October 2026)
+
+Switching an app off in Admin → Apps used to hide its pages and leave its data
+endpoints answering, because an `api/…` address never reaches the page gate in
+`Router::dispatch()`. Both ways in (`dispatch()` and `dispatchV1()`) now call one
+private method, `requireAppSwitchedOn()`, after "does the handler file exist"
+(404) and before the per-endpoint switch. An app that is off answers 403: "The
+<app name> app is switched off for this organisation."
+
+- **Whose switch.** For a request with a valid API key, the key's own
+  organisation's (`AppRegistry::isEnabledForSite()`), whatever address it was
+  sent to, because that is the organisation whose data the handler answers
+  with. For everybody else, the organisation the address points at
+  (`AppRegistry::isEnabled()`). The same choice `resolveEnabledFlag()` makes.
+- **Which app.** `AppRegistry::API_FOLDER_APPS`, written out by hand: one line
+  for each folder under `web/_apps/*/api`. Fourteen folders map to the app of
+  the same name; `events` maps to `calendar` (Events is the Calendar app) and
+  `livechat` to `cop-live-chat` (setting `chat.enabled`).
+- **The three exceptions** (mapped to `null`, never refused): `push` (web push
+  belongs to the portal; its own setting is `push.enabled`), `tours` (guided
+  tours are part of the interface) and `users` (accounts; administrators only,
+  each endpoint with its own switch).
+- **A new `api` folder needs a line.** Without one the router refuses it with
+  "This API endpoint is disabled" and writes the reason to PHP's error log. It
+  cannot tell which switch applies, and guessing "none" would bring the fault
+  back for every folder added later.
+
+Pages that live in an app's folder under an address of their own are tied to
+the app by a second hand-written list, `AppRegistry::ROUTES_OUTSIDE_PREFIX`,
+which `appForRoute()` consults when no app's own address matches: `attend`,
+`attend/save`, `calendar.ics` and `account/calendar-feed` (Calendar),
+`recordings.rss` (Recordings) and `visit` (Visitors). **`unsubscribe` is
+deliberately not listed:** people must be able to stop mail whatever the
+Newsletter switch says.
+
+`tools/app-switch-selftest.php` checks all of this with no database: every
+folder has a line, every named app is registered, the exceptions are exactly
+these, no other seeded page of a switchable app is left untied (it knows about
+`unsubscribe` and `auth/invite`), and `ApiRouter` calls the gate in both ways
+in. It compares the gate, and `isEnabledForSite()`, with a copy written out in
+the test, word for word: a first version looked only for the gate's pieces and
+still passed with the gate skipped for every request carrying a key. **So a
+deliberate change to either function must be made in the test's copy too.**
+Given a throwaway database it also runs `isEnabledForSite()`.
+
+`tools/access-pages-selftest.php` (needs a throwaway database) asks the running
+portal: for each of the 19 folders, with only that folder's app off, one
+endpoint answers 403 naming that app; a key is judged by its own organisation;
+a folder with no line is refused and its handler never runs; the stray pages
+and the "disabled" page behave. It also runs the #545 handlers for real. It
+copies `web/` to a scratch folder and starts PHP's built-in server, as part W
+of `tools/feed-admin-selftest.php` does; do not run the two at the same moment
+on one database. None of these is part of the pull-request checks yet; run them
+by hand.
+
+Not covered by #478: a switched-off app's scheduled jobs, the personal pages
+under `account/` that belong to an app, `auth/invite`, `widget/countdown`, and
+the router's short addresses (`e`, `f`, `a`, `os`).
+
 ### CsvExporter (`_core/CsvExporter.php`)
 
 Generic CSV export helper used across five apps: expenses, attendance, leadership,
@@ -3707,9 +3766,23 @@ convention path `ApiRouter::dispatch()` resolves directly from the URL
 **Neither is registered in `tblRoutes`** — `api/*` paths never reach
 `tblRoutes` at all (`Router::handleSpecialRoutes` hands them straight to
 `ApiRouter::dispatch` first) — see CLAUDE.md's "ApiRouter routing trap".
-The only gate is `api.calendar.hub-resources.enabled` /
+Their own switches are `api.calendar.hub-resources.enabled` /
 `api.calendar.hub-videos.enabled` in `tblSettings`, seeded `'true'` by
-migration 157 (settings-only migration — no schema, no routes).
+migration 157 (settings-only migration — no schema, no routes). Since #478
+the Calendar app's own switch applies as well: with Calendar off, both answer
+403 before the handler runs.
+
+**Who is answered (#534, 11 October 2026).** Until then the event lookup
+tested the event's number, organisation, "not deleted" and status, and nothing
+about the viewer, so any signed-in account from any organisation could read an
+internal event's Team Hub. Both lookups now carry the shared rule
+(`EventVisibility::where()`), used exactly as `events/api/detail.php` uses it:
+"session" mode for a signed-in person, "key" mode for an API key (which is
+answered as before). A refused event is the same "Event not found" as a
+missing one. What this does not do: the Team Hub PAGE lets in only the event's
+team (`Auth::isEventTeamMember()`), and these endpoints still answer anybody
+who may see the event. That is older than #534 and is written up as a
+follow-up.
 
 Note `calendar` was **not** added to `ApiRouter::V1_RESOURCES` — these two
 endpoints are legacy-convention-path only, reachable at
@@ -4556,6 +4629,40 @@ double-escalate) plus an email to the site's admins and the step's own
 assignees, with the instance left active awaiting a human. The seeded
 `announcement_publish` step ships `timeoutHours=72, autoAction=NULL`
 (escalate after 72h, never auto-decide).
+
+### Nobody decides or pays their own expense claim (#545, 11 October 2026)
+
+`Portal\Core\ExpenseRules` holds the rule once: `isOwnClaim()`, the two
+refusal sentences, and `requiredApprovers()` (the query that used to sit in
+`expenses/approve/save.php`, with the claimant left out). Both save handlers
+ask `isOwnClaim()` straight after the claim is found and before anything is
+written; administrators are refused too. Leaving the claimant off the
+required list is what stops a lead's own claim waiting for ever for an
+approval that is now refused: when nobody else is a lead or required
+approver, one approval from anybody else with authority is enough.
+
+The two lists (`approve/index.php`, `treasury/index.php`), the claim page's
+two buttons, the "submitted" e-mail and the administrator's dashboard number
+all leave a person's own claims out, so nothing offers a button that cannot
+work. Unchanged on purpose: an administrator's approval never stands in for a
+required approver's; a retired department's approvers still finish its
+pending claims; somebody with no authority at all is refused before any claim
+is looked up, with the same sentence as before.
+
+`tools/expense-rules-selftest.php` (needs a throwaway database) checks the
+rule against real rows and reads the seven pages to make sure they still call
+it, requiring the own-claim test as one exact statement (so "unless an
+administrator" written in front of it fails). `tools/access-pages-selftest.php`
+proves it through the real handlers: a lead, a treasurer and an administrator
+each try to approve, reject or pay their own claim, and nothing is recorded.
+Neither is part of the pull-request checks yet; run them by hand.
+
+The refusal says who DOES decide: "the other leads and required approvers of
+its department or, when there are none, another approver or an administrator".
+The first wording ("Another approver or an administrator must decide it") was
+untrue where another required approver exists, because an administrator's
+approval alone leaves such a claim waiting. A claimant who holds approval
+authority is told the same on the claim's own page.
 
 ### Why the seeded `expense_approval` workflow stays dormant
 

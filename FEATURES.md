@@ -78,7 +78,7 @@ Foundational classes loaded by every request via `bootstrap.php`. All ✅.
 | `Auth` | Sessions, CSRF, local + MS365 + Google OAuth + WebAuthn, password policy, 2FA TOTP, account linking |
 | `Router`, `ApiRouter` | Front-controller URL dispatch + dedicated JSON API dispatch |
 | `Site` | Multi-site context — detection, branding, per-site settings overrides; product-brand resolution helpers `productName()` / `productTagline()` / `productPublisher()` (#296) |
-| `AppRegistry` | Single source of truth for installable apps; powers `/admin/apps` toggle + Router enablement gating + industry filter (#255) |
+| `AppRegistry` | Single source of truth for installable apps; powers `/admin/apps` toggle + Router enablement gating + industry filter (#255). Since #478 a switched-off app's `/api/…` endpoints are refused too (`ApiRouter`, 403 "The <app> app is switched off for this organisation."; for an API key the key's own organisation's switch decides), and its pages under an address of their own (`/attend`, `/calendar.ics`, `/account/calendar-feed`, `/recordings.rss`, `/visit`) follow the switch. `/unsubscribe` deliberately does not. Two hand-written lists: `API_FOLDER_APPS`, `ROUTES_OUTSIDE_PREFIX` |
 | `Captcha` | Provider-agnostic — Turnstile / reCAPTCHA v2+v3 / hCaptcha with admin-configurable priority |
 | `Mailer`, `MailerGoogle` | Microsoft Graph app-only send (direct or admin-configured shared mailbox, #234) + Google Workspace SendAs; every send logged to `tblEmailLog` |
 | `ExpenseMailer`, `ExpensePdf`, `Pdf` | Expense email notifier, PDF generator, dompdf wrapper |
@@ -433,6 +433,7 @@ Full claim lifecycle with multi-approver, treasury, PDF, CSV.
 - Submit (`/expenses/submit`) — claim with line items, receipt uploads, auto-attached PDF.
 - Approve (`/expenses/approve`) — multi-approver workflow with comments.
 - Treasury (`/expenses/treasury`) — record reimbursement, payment reference.
+- **Nobody approves, rejects or pays their own claim (#545)** — a lead, a treasurer and an administrator are all refused; a claim does not wait for its own claimant; a person's own claims are left out of both lists. The rule is `Portal\Core\ExpenseRules`.
 - Withdraw (`/expenses/withdraw`) — claimant can cancel pre-approval (#73).
 - View (`/expenses/view`) — claim detail + audit trail.
 - API endpoints: `/expenses/api/list`, `/expenses/api/export`.
@@ -612,7 +613,7 @@ Read-only JSON list endpoints over `Portal\Core\ApiRouter`.
 - `/api/announcements/list`
 - `/api/users/list`
 - `/api/events/list`, `/api/events/detail`
-- `/api/calendar/hub-resources`, `/api/calendar/hub-videos` — Event Team Hub read endpoints, scope `eventhub:read` (#387)
+- `/api/calendar/hub-resources`, `/api/calendar/hub-videos` — Event Team Hub read endpoints, scope `eventhub:read` (#387). A signed-in person is answered only for an event they may see (#534); they follow the Calendar app's switch (#478)
 
 **Gaps:** #95 was closed as "REST API expansion — CRUD for all modules" but only list endpoints exist. Full CRUD would still be additional work.
 
@@ -1074,6 +1075,7 @@ Exposes the Event Team Hub tables shipped in #386 (migration 155) to external in
 | `_apps/calendar/api/hub-resources.php` — `GET /api/calendar/hub-resources?eventID=`, returns that event's `tblEventHubResources` rows (`resourceID, section, resourceType, title, url, body, sortOrder`), ordered `section, sortOrder, resourceID` | #387 | 157 | ✅ |
 | `_apps/calendar/api/hub-videos.php` — `GET /api/calendar/hub-videos?eventID=`, returns that event's `tblEventHubVideos` rows (`videoID, provider, videoRef, title, requiresSignedUrl, allowedOrigins, uploadStatus, sortOrder`), ordered `sortOrder, videoID`. Never emits a signing key, playback token, or any `cfstream.*` credential — `videoRef` is the public provider ID/UID a player embeds against | #387 | 157 | ✅ |
 | Both mirror the `events/list.php`/`detail.php` dual-mode-auth pattern (`ApiAuth::requireRead('eventhub:read')`) with an explicit tenant guard — the requested event must belong to `Site::id()` or the endpoint 404s, never leaking another tenant's event | #387 | — | ✅ |
+| Who is answered (#534): the event lookup carries the shared rule (`EventVisibility::where()`), as `events/api/detail.php` does. A signed-in person is answered only for a public event or an internal one of an organisation they are an active member of or administer; anything else is the same 404 as a missing event. An API key is answered as before. Until #534 any signed-in account from any organisation was answered. Still wider than the Team Hub page, which lets in only the event's team | #534 | — | ✅ |
 | New bearer scope `eventhub:read` added to `ApiKey::SCOPES` — mintable immediately, surfaces in the Admin → Integrations → API Keys checkbox grid with no other UI changes needed | #387 | — | ✅ |
 | Settings-only migration — `api.calendar.hub-resources.enabled` / `api.calendar.hub-videos.enabled` seeded `'true'`; NO `tblRoutes` rows (`api/*` paths are dispatched directly by `ApiRouter`, never via `tblRoutes` — see .claude/CLAUDE.md → "ApiRouter routing trap") | #387 | 157 | ✅ |
 | OpenAPI — new `Event Team Hub` tag, `EventHubResource`/`EventHubVideo` schemas, both `GET /api/calendar/hub-*` paths documented in `_core/api-spec.json` | #387 | — | ✅ |

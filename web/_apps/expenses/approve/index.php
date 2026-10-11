@@ -8,6 +8,10 @@
  * summary info, status badges, and opens a modal to approve / decline each.
  * Supports multi-approver workflow with dept-based filtering.
  *
+ * A person's OWN claims are never listed (#545): nobody decides their own
+ * claim, so offering it here would only lead to a refusal. The page says so
+ * in one line, so a lead looking for their own claim knows why it is absent.
+ *
  * @package   Portal\Expenses
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
@@ -38,13 +42,16 @@ $currentUserId = (int) ($_SESSION['user_id'] ?? 0);
 $siteId = Site::id();
 
 if (App::isAdmin() === true) {
-    // 🛡️ Admins see all pending claims for this site
+    // 🛡️ Admins see all pending claims for this site — except their own
+    //    (#545). `EC.userID <> ?` is in BOTH queries here and in the
+    //    treasury list: the handlers refuse a person's own claim, so a list
+    //    that offered it would be offering a button that cannot work.
     $stmt = $mysqli->prepare(
         'SELECT EC.claimID, EC.claimTitle, U.fullName, D.deptName, EC.totalAmount, EC.createdAt '
         . 'FROM tblExpenseClaims EC '
         . 'JOIN tblUsers U ON U.userID = EC.userID '
         . 'JOIN tblDepts D ON D.deptID = EC.deptID '
-        . "WHERE EC.status = 'Pending' AND EC.siteID = ? "
+        . "WHERE EC.status = 'Pending' AND EC.siteID = ? AND EC.userID <> ? "
         . 'ORDER BY EC.createdAt DESC'
     );
 } else {
@@ -75,7 +82,7 @@ if (App::isAdmin() === true) {
         . 'JOIN tblDepts D ON D.deptID = EC.deptID '
         . 'JOIN tblUserDepts UD ON UD.deptID = EC.deptID AND UD.siteID = EC.siteID AND UD.userID = ? '
         . 'JOIN tblUserSites US ON US.userID = UD.userID AND US.siteID = UD.siteID AND US.isActive = 1 '
-        . "WHERE EC.status = 'Pending' AND EC.siteID = ? "
+        . "WHERE EC.status = 'Pending' AND EC.siteID = ? AND EC.userID <> ? "
         . 'AND (UD.isApprover = 1 OR UD.isDeptLead = 1 OR UD.isMandatoryApprover = 1) '
         . 'ORDER BY EC.createdAt DESC'
     );
@@ -83,9 +90,9 @@ if (App::isAdmin() === true) {
 
 if ($stmt !== false) {
     if (App::isAdmin() === true) {
-        $stmt->bind_param('i', $siteId);
+        $stmt->bind_param('ii', $siteId, $currentUserId);
     } else {
-        $stmt->bind_param('ii', $currentUserId, $siteId);
+        $stmt->bind_param('iii', $currentUserId, $siteId, $currentUserId);
     }
     $stmt->execute();
     $res = $stmt->get_result();
@@ -114,6 +121,10 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <i class="fa-solid fa-file-csv me-1"></i> Export
     </a>
 </div>
+
+<!-- #545: said whether or not the list is empty, so somebody looking for a
+     claim they made themselves is told why it is not here. -->
+<p class="small text-secondary">Your own claims are not listed here: somebody else must decide them.</p>
 
 <?php if (empty($claims) === true): ?>
     <div class="alert alert-info">No claims awaiting your approval.</div>

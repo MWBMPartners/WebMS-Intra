@@ -21,6 +21,7 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Departments;
+use Portal\Core\ExpenseRules;
 use Portal\Core\Router;
 use Portal\Core\Site;
 
@@ -435,17 +436,38 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 </div>
 <?php endif; ?>
 
+<?php
+// #545: a claimant who is also an approver or an administrator used to get a
+// "Go to Approvals" button here. The button is no longer offered on their
+// own claim, and without a word in its place the page said nothing about who
+// decides it — which matters most to somebody who is their department's
+// only approver (found by the independent check of 11 October 2026). The
+// sentence is the same one the refusal uses (ExpenseRules::WHO_DECIDES). It
+// is shown only to a claimant who holds that authority; an ordinary claimant
+// never had the button and is shown nothing new.
+?>
+<?php if ($claim['status'] === 'Pending' && $isClaimant === true && ($hasApprover === true || $isAdmin === true || $hasDeptFlag === true)): ?>
+    <p class="small text-secondary" id="own-claim-note"><?php echo htmlspecialchars(ExpenseRules::MSG_OWN_CLAIM_PAGE, ENT_QUOTES, 'UTF-8'); ?></p>
+<?php endif; ?>
+
 <!-- 🔗 Action Buttons -->
 <div class="d-flex gap-2 mb-4">
     <a href="/expenses/submit" class="btn btn-outline-secondary">
         <i class="fa-solid fa-arrow-left me-1"></i> Back to Submit
     </a>
-    <?php if ($claim['status'] === 'Pending' && ($hasApprover === true || $isAdmin === true || $hasDeptFlag === true)): ?>
+    <?php
+    // #545: neither button is offered on a person's OWN claim. Nobody
+    // decides or pays their own claim, the two lists leave it out, and both
+    // handlers refuse it, so the button would lead to a page where the
+    // claim is not listed. $isClaimant is worked out at the top of this
+    // page, from the same account number ExpenseRules::isOwnClaim() compares.
+    ?>
+    <?php if ($claim['status'] === 'Pending' && $isClaimant === false && ($hasApprover === true || $isAdmin === true || $hasDeptFlag === true)): ?>
         <a href="/expenses/approve" class="btn btn-outline-primary">
             <i class="fa-solid fa-check me-1"></i> Go to Approvals
         </a>
     <?php endif; ?>
-    <?php if ($claim['status'] === 'Approved' && ($hasTreasurer === true || $isAdmin === true)): ?>
+    <?php if ($claim['status'] === 'Approved' && $isClaimant === false && ($hasTreasurer === true || $isAdmin === true)): ?>
         <a href="/expenses/treasury" class="btn btn-outline-success">
             <i class="fa-solid fa-sterling-sign me-1"></i> Go to Treasury
         </a>

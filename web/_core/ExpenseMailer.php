@@ -96,8 +96,14 @@ class ExpenseMailer
 
         switch ($event) {
             case 'submitted':
-                // 📧 Notify dept approvers + treasury
-                $recipients = self::getApproverEmails((int) $claim['deptID'], $siteId);
+                // 📧 Notify dept approvers + treasury.
+                //    #545: this is the one message that ASKS FOR A DECISION
+                //    ("requires your review"), so the claimant is left out
+                //    of it even when they are an approver of the claim's own
+                //    department: they may not decide their own claim. The
+                //    'withdrawn' and 'reimbursed' messages below only report
+                //    what happened, so they still go to every approver.
+                $recipients = self::getApproverEmails((int) $claim['deptID'], $siteId, (int) $claim['userID']);
                 $subject    = '[' . $siteName . '] New Expense Claim #' . $claimID . ' — ' . $claim['claimTitle'];
                 $body       = self::buildHtml(
                     'New Expense Claim Submitted',
@@ -218,10 +224,16 @@ class ExpenseMailer
      * switched on: a retired department's pending claims are still finished
      * (and so announced) by its own approvers (owner's answer Q3).
      *
-     * @param int $deptID The claim's department.
-     * @param int $siteId The organisation the claim belongs to.
+     * #545: `$exceptUserId` leaves one account out — the claimant, when the
+     * message asks for a decision, because nobody decides their own claim.
+     * The default 0 matches no account, so the two callers that only report
+     * what happened get the same list as before.
+     *
+     * @param int $deptID       The claim's department.
+     * @param int $siteId       The organisation the claim belongs to.
+     * @param int $exceptUserId An account to leave out, or 0 for nobody.
      */
-    private static function getApproverEmails(int $deptID, int $siteId): array
+    private static function getApproverEmails(int $deptID, int $siteId, int $exceptUserId = 0): array
     {
         global $mysqli;
         $emails = [];
@@ -229,11 +241,11 @@ class ExpenseMailer
             'SELECT DISTINCT U.emailAddress FROM tblUserDepts UD '
             . 'JOIN tblUsers U ON U.userID = UD.userID '
             . 'JOIN tblUserSites US ON US.userID = U.userID AND US.siteID = UD.siteID AND US.isActive = 1 '
-            . 'WHERE UD.deptID = ? AND UD.siteID = ? '
+            . 'WHERE UD.deptID = ? AND UD.siteID = ? AND UD.userID <> ? '
             . 'AND (UD.isApprover = 1 OR UD.isDeptLead = 1 OR UD.isMandatoryApprover = 1) AND U.isActive = 1'
         );
         if ($stmt !== false) {
-            $stmt->bind_param('ii', $deptID, $siteId);
+            $stmt->bind_param('iii', $deptID, $siteId, $exceptUserId);
             $stmt->execute();
             $result = $stmt->get_result();
             while ($r = $result->fetch_assoc()) {

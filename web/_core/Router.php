@@ -499,29 +499,51 @@ class Router
      * than a generic 403 so users understand the feature isn't broken,
      * just turned off.
      *
+     * THE PAGE USED TO NAME THE WRONG APP (#570). The header template is
+     * loaded INSIDE this function, so it shares this function's variables,
+     * and the menu it draws (templates/nav.php) writes `$appName` once for
+     * every app in the menu. This function had put the switched-off app's
+     * name in `$appName` before loading the header, so by the time the
+     * heading was printed it held the LAST app in the menu: with Approvals
+     * switched off the page said "Forms Builder is disabled" (seen by the
+     * part 8 self-test, 5 October 2026). The description was not
+     * overwritten, so name and description could disagree.
+     *
+     * The two values now have names the templates do not use.
+     * `tools/app-switch-selftest.php` reads the templates and fails if a
+     * variable this function sets before the header and reads after it is
+     * ever one the templates assign. Do not rename them back.
+     *
+     * The two links are built by Router::url(), as the menu's are, so they
+     * stay inside the organisation's own address when organisations are
+     * told apart by the first part of the address; they used to be the
+     * bare `/admin/apps` and `/`, which left it.
+     *
      * @param array<string, mixed> $app Metadata from AppRegistry.
      */
     public static function renderAppDisabled(array $app): void
     {
         http_response_code(403);
-        $pageTitle   = 'App disabled';
-        $pageSection = '';
-        $breadcrumbs = [];
-        $appName     = (string) ($app['name'] ?? 'This app');
-        $appDesc     = (string) ($app['description'] ?? '');
+        $pageTitle       = 'App disabled';
+        $pageSection     = '';
+        $breadcrumbs     = [];
+        $disabledAppName = (string) ($app['name'] ?? 'This app');
+        $disabledAppDesc = (string) ($app['description'] ?? '');
         require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
         echo '<div class="portal-error-page text-center py-5">';
         echo '<div class="portal-error-code"><i class="fa-solid fa-power-off text-muted"></i></div>';
-        echo '<h1 class="portal-error-title">' . htmlspecialchars($appName, ENT_QUOTES, 'UTF-8') . ' is disabled</h1>';
-        if ($appDesc !== '') {
-            echo '<p class="text-muted">' . htmlspecialchars($appDesc, ENT_QUOTES, 'UTF-8') . '</p>';
+        echo '<h1 class="portal-error-title">' . htmlspecialchars($disabledAppName, ENT_QUOTES, 'UTF-8') . ' is disabled</h1>';
+        if ($disabledAppDesc !== '') {
+            echo '<p class="text-muted">' . htmlspecialchars($disabledAppDesc, ENT_QUOTES, 'UTF-8') . '</p>';
         }
         if (App::isAdmin() === true) {
-            echo '<p>An administrator can enable this app at <a href="/admin/apps">/admin/apps</a>.</p>';
+            echo '<p>An administrator can enable this app at <a href="'
+                . htmlspecialchars(self::url('admin/apps'), ENT_QUOTES, 'UTF-8') . '">Admin &rarr; Apps</a>.</p>';
         } else {
             echo '<p>Please ask an administrator if you need this feature.</p>';
         }
-        echo '<a href="/" class="btn btn-primary"><i class="fa-solid fa-house-chimney me-1"></i> Return to portal</a>';
+        echo '<a href="' . htmlspecialchars(self::url(''), ENT_QUOTES, 'UTF-8')
+            . '" class="btn btn-primary"><i class="fa-solid fa-house-chimney me-1"></i> Return to portal</a>';
         echo '</div>';
         require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'footer.php';
     }

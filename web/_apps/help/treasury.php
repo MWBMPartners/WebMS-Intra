@@ -89,6 +89,13 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <strong>Note:</strong> If there are no approved claims awaiting payment, you will see a blue information banner stating "No approved claims awaiting reimbursement."
         </div>
     </div>
+
+    <?php // #545: why a treasurer's own approved claim is missing from the list. ?>
+    <p class="mb-0">
+        <strong>Your own claims are not listed.</strong> Nobody records their own expense claim as paid, so a claim you
+        made yourself is left off this list and the portal refuses if you try to pay it. Another treasurer or an
+        administrator must pay it.
+    </p>
 </div>
 
 <!-- Section 2: Recording a Reimbursement -->

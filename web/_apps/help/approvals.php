@@ -128,12 +128,22 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <strong>Who approves a claim.</strong> A claim is approved by members of the department it is charged to,
         in that organisation, who are flagged there as <strong>lead</strong>, <strong>approver</strong> or
         <strong>required approver</strong> (Admin &rarr; Departments, the Members page). Any rejection rejects the
-        claim at once. A claim is fully approved only when every lead and every required approver has approved
-        it; if the department has neither, one approval is enough. The flag is all you need: you do not also
+        claim at once. A claim is fully approved only when every lead and every required approver, other than
+        the person who made the claim, has approved it; if there is nobody like that, one approval is enough.
+        The flag is all you need: you do not also
         need the <strong>Expense Approver</strong> role, and the role on its own does not let you decide a
-        department's claims. An administrator can decide any claim. If a
+        department's claims. An administrator can decide any claim except one they made themselves. If a
         department is retired, no new claim can be charged to it, but claims already submitted to it are still
         finished by its approvers in the usual way.
+    </p>
+    <!-- #545: the two exceptions above ("other than the person who made the claim", "except one they
+         made themselves") and this paragraph. The page used to say an administrator could decide ANY
+         claim, which stopped being true when deciding your own claim was refused. -->
+    <p>
+        <strong>Nobody decides their own claim.</strong> A claim you made yourself is not in your approvals list,
+        and the portal refuses if you try to approve or reject it, whatever your role. It must be decided by
+        the other leads and required approvers of its department or, when there are none, by another approver
+        or an administrator.
     </p>
     <!-- #542: this used to say the Expense Approver role was ALSO needed unless you were an
          administrator. That was true, and it was a trap: the role and the flags are set on different
