@@ -9618,3 +9618,30 @@ ON DUPLICATE KEY UPDATE `filename` = `filename`;
 -- give. No settings and no routes: part P8's pages bring those (migration 207).
 INSERT INTO `tblMigrations` (`filename`) VALUES ('206_external_calendar_choices_rules_approvals.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- ── from 207_calendar_feed_admin_pages.sql (#514, part P8) ───────────────────
+-- The addresses of the outside-calendar administrator pages. Route rows only,
+-- repeated word for word from the migration, because every database change has
+-- to reach BOTH the installer and the upgrade path. All but the guide are
+-- protected: a signed-out visitor is sent to the sign-in page, and each page
+-- then refuses anybody who is not an administrator of the organisation being
+-- looked at. The guide (help/calendar-imports) is not protected, like every
+-- help page: it holds nothing secret.
+-- Part P8 is built in chunks and this block grows with the migration: chunk
+-- P8-2 brought the calendar form (feeds/edit) and the calendar's own page
+-- (feeds/view); chunk P8-3 the choice page (feeds/choice) and the rule page
+-- (feeds/rule); chunk P8-4 the preview (feeds/preview), the decision handler
+-- (feeds/approvals/act) and the guide. The duplicate-key clause also rewrites
+-- isProtected, so a replay puts right an address that was left unprotected.
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('admin/calendar/feeds/edit',          'admin/calendar/feeds-edit.php',          1),
+    ('admin/calendar/feeds/view',          'admin/calendar/feeds-view.php',          1),
+    ('admin/calendar/feeds/choice',        'admin/calendar/feeds-choice.php',        1),
+    ('admin/calendar/feeds/rule',          'admin/calendar/feeds-rule.php',          1),
+    ('admin/calendar/feeds/preview',       'admin/calendar/feeds-preview.php',       1),
+    ('admin/calendar/feeds/approvals/act', 'admin/calendar/feeds-approvals-act.php', 1),
+    ('help/calendar-imports',              'help/calendar-imports.php',              0)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`), `isProtected` = VALUES(`isProtected`);
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('207_calendar_feed_admin_pages.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;

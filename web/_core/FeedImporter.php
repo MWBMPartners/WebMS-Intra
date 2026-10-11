@@ -1806,8 +1806,19 @@ final class FeedImporter
         $backoff = (int) max(1, min($backoff, self::MAX_BACKOFF_MINUTES));
 
         $short = self::forColumn($message, 255);
+        // ⏰ `lastFetchedAt` is a MOMENT, so it is written in UTC with
+        //    UTC_TIMESTAMP(), like `nextFetchAt` beside it (#514 part P8,
+        //    challenge M4). It used to be NOW(), which is the database
+        //    SERVER's own zone: on a server not set to UTC the stored time
+        //    was hours out, and nothing in the row said which clock wrote
+        //    it. Rows written before this change keep their old value;
+        //    the administrator pages show "last tried" from the newest
+        //    run's `startedAt` (always UTC) instead, so those never reach
+        //    the screen. `deletedAt = NOW()` further up is NOT changed:
+        //    other pages write that column too, and changing one writer
+        //    would mix two clocks in one column (#549).
         $stmt  = $db->prepare(
-            'UPDATE tblExternalFeeds SET lastFetchedAt = NOW(), lastFetchStatus = ?, lastFetchOk = 0, '
+            'UPDATE tblExternalFeeds SET lastFetchedAt = UTC_TIMESTAMP(), lastFetchStatus = ?, lastFetchOk = 0, '
             . 'lastFetchMessage = ?, consecutiveFailures = ?, '
             . 'nextFetchAt = UTC_TIMESTAMP() + INTERVAL ? MINUTE, refreshLeaseUntil = NULL '
             . 'WHERE feedID = ?'
@@ -1862,8 +1873,10 @@ final class FeedImporter
         // shortcut may keep being taken — moving it would let a calendar be
         // skipped for ever on the strength of its own unchanged fingerprint.
         $short = self::forColumn($message, 255);
+        // ⏰ UTC_TIMESTAMP(), not NOW() — see recordFailure() for why (#514
+        //    part P8, challenge M4).
         $stmt  = $db->prepare(
-            'UPDATE tblExternalFeeds SET lastFetchedAt = NOW(), lastFetchStatus = ?, lastFetchOk = 1, '
+            'UPDATE tblExternalFeeds SET lastFetchedAt = UTC_TIMESTAMP(), lastFetchStatus = ?, lastFetchOk = 1, '
             . 'lastFetchMessage = ?, consecutiveFailures = 0, '
             . 'nextFetchAt = UTC_TIMESTAMP() + INTERVAL GREATEST(fetchEveryMins, ?) MINUTE, '
             . 'refreshLeaseUntil = NULL WHERE feedID = ?'
@@ -1915,8 +1928,10 @@ final class FeedImporter
         $short   = self::forColumn($message, 255);
         $wasCapped = ($capped === true) ? 1 : 0;
         $minEvery  = self::MIN_FETCH_MINUTES;
+        // ⏰ UTC_TIMESTAMP(), not NOW() — see recordFailure() for why (#514
+        //    part P8, challenge M4).
         $stmt = $db->prepare(
-            'UPDATE tblExternalFeeds SET lastFetchedAt = NOW(), lastFetchStatus = ?, lastImportCount = ?, '
+            'UPDATE tblExternalFeeds SET lastFetchedAt = UTC_TIMESTAMP(), lastFetchStatus = ?, lastImportCount = ?, '
             . 'lastFetchOk = 1, lastFetchMessage = ?, consecutiveFailures = 0, lastContentHash = ?, '
             . 'lastCompleteAt = UTC_TIMESTAMP(), lastRunCapped = ?, '
             . 'nextFetchAt = UTC_TIMESTAMP() + INTERVAL GREATEST(fetchEveryMins, ?) MINUTE, '

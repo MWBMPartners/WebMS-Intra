@@ -212,6 +212,22 @@ if ($refused === true) {
 //    because redact() only knows the event row's own columns.
 $canSeeFull = (int) $event['canSeeFull'] === 1;
 $isImported = $event['externalFeedID'] !== null;
+
+// 🔧 #514 part P8 (chunk P8-3): a "Manage who sees this" link for an
+//    administrator OF THE EVENT'S OWN organisation — asked with
+//    `EventVisibility::isAdminOfSite()`, never `App::isAdmin()` (`$canManage`
+//    above), which also says yes to the old portal-wide flag and says nothing
+//    about which organisation. Worked out only HERE, after the page has
+//    decided the event may be shown at all, so a refused event and a missing
+//    one still cost exactly the same database work (the #503 rule), and only
+//    for an imported event, with somebody signed in. An imported row with no
+//    identity (left by the old importer, challenge M3) cannot have a choice
+//    yet, so it gets no link — the choice page would answer "not found".
+//    Read before redact(), which empties details but must not decide this.
+$canManageImport = false;
+if ($isImported === true && $event['externalUidHash'] !== null && $viewerId > 0) {
+    $canManageImport = EventVisibility::isAdminOfSite($mysqli, $viewerId, (int) $event['siteID']);
+}
 $event      = EventVisibility::redact($event, $canSeeFull);
 if ($canSeeFull === false) {
     // The outside calendar's name is itself a detail (section 1.4).
@@ -622,6 +638,21 @@ endif;
                     </span>
                 <?php endforeach; ?>
             </div>
+            <?php // 🔧 #514 part P8 (chunk P8-3): the link sits here, under the
+                  //    badges, and NOT among the buttons on the right. That
+                  //    row of buttons never wraps, so one more button there
+                  //    pushed the page another 80 pixels past a phone's
+                  //    screen (measured in Edge at 390 pixels wide). The row
+                  //    already reaches past a phone's edge without it — that
+                  //    is this page's own layout, not part 8's, and is left
+                  //    alone here. ?>
+            <?php if ($canManageImport === true): ?>
+                <p class="small mb-2">
+                    <a href="<?php echo htmlspecialchars(Site::url('admin/calendar/feeds/choice') . '?event=' . (int) $event['eventID'] . '&scope=date', ENT_QUOTES, 'UTF-8'); ?>">
+                        <i class="fa-solid fa-eye me-1" aria-hidden="true"></i>Manage who sees this
+                    </a>
+                </p>
+            <?php endif; ?>
         </div>
         <div class="d-flex gap-2">
             <?php if (Auth::check() === true && Auth::isEventTeamMember((int) $event['eventID']) === true): ?>

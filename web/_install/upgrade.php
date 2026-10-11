@@ -30,6 +30,7 @@ require_once dirname(__DIR__) . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEPARA
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\FeedAdmin;
 use Portal\Core\Migrator;
 use Portal\Core\Router;
 use Portal\Core\Site;
@@ -61,6 +62,7 @@ $results  = [];
 $error    = '';
 $ranMigrations = false;
 $unplacedAfterUpgrade = 0; // #533 — only computed for real after a run; see below
+$apiNotice = ['calendars' => 0, 'organisations' => 0]; // #514 part 8 — see below
 
 // Handle POST to run migrations
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -139,6 +141,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     );
     if ($unplacedResult !== false) {
         $unplacedAfterUpgrade = (int) ($unplacedResult->fetch_assoc()['cnt'] ?? 0);
+    }
+
+    // 🔑 #514 part 8 (the plan's section 7.1, part 7's B7): the run that
+    //    applied migration 206 changed what API keys receive — events from an
+    //    outside calendar set to Everyone now reach a key exactly as a
+    //    signed-out visitor sees them. Counted only when THIS run applied 206
+    //    successfully, by the Migrator's own key names (`filename`,
+    //    `success` — #561 fixed the page to read those; the plan's first
+    //    draft read `file`, which does not exist). The count is wrapped so
+    //    that the upgrade page can never break over a notice: a failure here
+    //    simply shows no card.
+    foreach ($results as $r) {
+        if (($r['filename'] ?? '') === '206_external_calendar_choices_rules_approvals.sql' && ($r['success'] ?? false) === true) {
+            try {
+                $apiNotice = FeedAdmin::apiUpgradeNotice($mysqli);
+            } catch (\Throwable $e) {
+                $apiNotice = ['calendars' => 0, 'organisations' => 0];
+            }
+            break;
+        }
     }
 
     // 🪞 Mark every migration as successful → record current version and
@@ -301,6 +323,29 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         </p>
                         <a href="<?php echo htmlspecialchars(Site::url('admin/users/unplaced'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-sm btn-warning">
                             Place them
+                        </a>
+                    </div>
+                </div>
+            <?php endif; ?>
+
+            <!-- 🔑 #514 part 8: outside calendars that now send their public events to API keys -->
+            <?php if ($ranMigrations === true && $apiNotice['calendars'] > 0): ?>
+                <div class="card mb-4 border-info" id="upgrade-api-notice">
+                    <div class="card-header bg-info-subtle">
+                        <h2 class="h6 mb-0">Outside calendars and API keys</h2>
+                    </div>
+                    <div class="card-body">
+                        <p class="mb-2">
+                            <?php echo $apiNotice['calendars'] === 1
+                                ? '1 outside calendar now sends its public events to API keys.'
+                                : (int) $apiNotice['calendars'] . ' outside calendars now send their public events to API keys.'; ?>
+                            If you have given a key to a website and do not want that, tick 'Don't show via API' on each calendar.
+                            <?php if ($apiNotice['organisations'] > 1): ?>
+                                These calendars belong to <?php echo (int) $apiNotice['organisations']; ?> organisations; open Outside calendars in each one.
+                            <?php endif; ?>
+                        </p>
+                        <a href="<?php echo htmlspecialchars(Site::url('admin/calendar/feeds'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-sm btn-info">
+                            Open Outside calendars
                         </a>
                     </div>
                 </div>

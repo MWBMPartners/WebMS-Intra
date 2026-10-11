@@ -17,6 +17,19 @@
  *      non-admins see only instances they started or acted on. Each row
  *      expands (Bootstrap collapse) to the full decision timeline.
  *
+ * IMPORTED EVENTS WAITING FOR APPROVAL (#514 part 8, chunk P8-4)
+ * Between sections 1 and 3 sits a second kind of item: dates copied in from
+ * an outside calendar that a rule or a choice would show more widely than
+ * the calendar's own setting (`_imports-section.php`, anchored `#imports`).
+ * They are not workflow items, so the workflow engine knows nothing of them.
+ * The section is shown ONLY to somebody `EventVisibility::isAdminOfSite()`
+ * says is an administrator of THIS organisation — its site administrators
+ * and every global administrator. `App::isAdmin()` (used above for the
+ * workflow filter) is NOT enough for this: it also says yes to the old
+ * portal-wide administrator flag, which says nothing about which
+ * organisation somebody belongs to, and deciding these dates decides who in
+ * THIS organisation may see them (#514 leak-hunt finding 3).
+ *
  * @package   Portal\Approvals
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2026-present MWBM Partners Ltd (t/a MWservices)
@@ -30,6 +43,7 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\EventVisibility;
 use Portal\Core\I18n;
 use Portal\Core\Site;
 use Portal\Core\Workflow;
@@ -161,6 +175,14 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <?php endforeach; ?>
     </div>
 <?php endif; ?>
+
+<?php
+// ⏳ Imported events waiting for approval — for administrators of THIS
+//    organisation only (see the header; #514 part 8, chunk P8-4).
+if (EventVisibility::isAdminOfSite($mysqli, $userId, $siteId) === true) {
+    require __DIR__ . DIRECTORY_SEPARATOR . '_imports-section.php';
+}
+?>
 
 <h2 class="h5 mb-3">History</h2>
 <?php if (count($history) === 0): ?>

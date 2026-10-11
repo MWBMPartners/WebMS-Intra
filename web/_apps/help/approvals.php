@@ -49,6 +49,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <a href="#reviewing" class="badge text-bg-secondary text-decoration-none">Reviewing a Claim</a>
             <a href="#deciding" class="badge text-bg-secondary text-decoration-none">Approving or Rejecting</a>
             <a href="#comments" class="badge text-bg-secondary text-decoration-none">Adding Comments</a>
+            <a href="#imported" class="badge text-bg-secondary text-decoration-none">Imported Events</a>
         </div>
     </div>
 </div>
@@ -232,6 +233,29 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <strong>Tip:</strong> Keep comments professional and factual. They form part of the permanent record for each expense claim.
         </div>
     </div>
+</div>
+
+<!-- Section 5: Imported events (#514 part 8, chunk P8-4). Its links come from
+     Site::url(), so they keep the organisation's own address prefix. -->
+<div class="portal-card p-4 mb-4" id="imported">
+    <h2 class="h4 mb-3"><i class="fa-solid fa-rss me-2 text-primary"></i>Imported Events</h2>
+    <p>
+        Events copied in from an outside calendar can wait for approval too: when a rule or a choice would show
+        one to more people than its calendar's own setting — or, for an event the outside calendar marks private,
+        to anyone but administrators. They are listed in their own section of the
+        <a href="<?php echo htmlspecialchars(\Portal\Core\Site::url('approvals') . '#imports', ENT_QUOTES, 'UTF-8'); ?>">Approvals</a>
+        inbox, <strong>Imported events waiting for approval</strong>, because they are not workflow items like the
+        claims above, and only administrators of your organisation see that section.
+    </p>
+    <p>
+        Deciding one date of a repeating event also settles its other dates that wait for the same request with
+        exactly the same details; the list shows where each one now stands. If your organisation has switched the
+        Approvals app off, these dates are decided on each outside calendar's own page instead.
+    </p>
+    <p class="mb-0">
+        The <a href="<?php echo htmlspecialchars(\Portal\Core\Site::url('help/calendar-imports') . '#approval', ENT_QUOTES, 'UTF-8'); ?>">Outside Calendars Guide</a>
+        explains why a date waits and what sends it back for approval.
+    </p>
 </div>
 
 <!-- Navigation -->

@@ -1823,9 +1823,12 @@ final class FeedResolver
      * data" could never find a name hidden inside a label. The names are
      * shown live from the list itself, which erasure does reach.
      *
+     * Public since part 8 so the administrator pages use exactly this, never
+     * a copy.
+     *
      * @param list<string> $list `kind:refID` texts.
      */
-    private static function audienceSummary(string $level, array $list): string
+    public static function audienceSummary(string $level, array $list): string
     {
         if ($level === 'public') {
             return 'Anyone (public)';
@@ -1965,9 +1968,14 @@ final class FeedResolver
      * closed cannot expose anything. The rule form (part P8) refuses all of
      * these, so only a hand edit of the database can create one.
      *
+     * Public since part 8 so the administrator pages use exactly this, never
+     * a copy. Answers only whether the resolver would treat the rule as
+     * matching nothing; it is not the form's validation — it accepts, for
+     * example, a category condition with 'contains', which the form refuses.
+     *
      * @param array<string,mixed> $rule
      */
-    private static function ruleIsValid(array $rule): bool
+    public static function ruleIsValid(array $rule): bool
     {
         if (isset(self::LEVEL_RANK[(string) ($rule['audienceLevel'] ?? '')]) === false
             || in_array((string) ($rule['detailLevel'] ?? ''), ['basic', 'full'], true) === false
@@ -2042,8 +2050,11 @@ final class FeedResolver
      * quietly turns the broken bytes into "?" ("Caf\xC3" becomes "caf?"), so
      * the text would compare as if it were something else, and a check
      * waiting for a failure later could never run.
+     *
+     * Public since part 8 so the administrator pages use exactly this, never
+     * a copy.
      */
-    private static function normaliseText(string $text): ?string
+    public static function normaliseText(string $text): ?string
     {
         if (preg_match('//u', $text) !== 1) {
             return null;

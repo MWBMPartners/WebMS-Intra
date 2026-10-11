@@ -205,6 +205,22 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         </a>
     </div>
 
+    <!-- Outside Calendars (#514 part 8). Its link comes from Site::url(), so it
+         keeps the organisation's own address prefix. -->
+    <div class="col-12 col-sm-6 col-lg-4">
+        <a href="<?php echo htmlspecialchars(\Portal\Core\Site::url('help/calendar-imports'), ENT_QUOTES, 'UTF-8'); ?>" class="text-decoration-none text-reset">
+            <div class="portal-card portal-card-branded h-100 p-4">
+                <div class="d-flex align-items-center gap-3 mb-3">
+                    <span class="d-inline-flex align-items-center justify-content-center rounded-3 bg-primary bg-opacity-10 text-primary" style="width:48px;height:48px;">
+                        <i class="fa-solid fa-rss fa-lg"></i>
+                    </span>
+                    <h5 class="mb-0">Outside Calendars</h5>
+                </div>
+                <p class="text-secondary mb-0 small">Copying events in from a published calendar, who sees them, choices, rules, approval, and API keys.</p>
+            </div>
+        </a>
+    </div>
+
     <!-- Translations & Languages -->
     <div class="col-12 col-sm-6 col-lg-4">
         <a href="/help/translations" class="text-decoration-none text-reset">

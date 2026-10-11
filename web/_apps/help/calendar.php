@@ -44,6 +44,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <a href="#admin-categories" class="badge text-bg-secondary text-decoration-none">For admins — categories</a>
             <a href="#admin-themes" class="badge text-bg-secondary text-decoration-none">For admins — month themes</a>
             <a href="#anon-checkins" class="badge text-bg-secondary text-decoration-none">Anonymous check-ins at the door</a>
+            <a href="#imported" class="badge text-bg-secondary text-decoration-none">Imported calendars</a>
         </div>
     </div>
 </div>
@@ -325,6 +326,22 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         link to any account on an anonymous check-in, which is also why somebody cannot ask for
         &ldquo;their&rdquo; check-ins to be deleted &mdash; there would be nothing to match them
         against. That is exactly why the technical detail goes on a timer instead.
+    </p>
+</section>
+
+<!-- 📥 Imported calendars (#514 part 8, chunk P8-4). Its links come from
+     Site::url(), so they keep the organisation's own address prefix. -->
+<section id="imported" class="mb-5">
+    <h2 class="h4 mb-3"><i class="fa-solid fa-rss me-2"></i>Imported calendars</h2>
+    <p>
+        Administrators can copy events into this calendar from a calendar somebody else publishes, such as a
+        partner organisation's diary. Each imported event shows only to the people its administrators chose, and
+        the <a href="<?php echo htmlspecialchars(\Portal\Core\Site::url('help/calendar-imports'), ENT_QUOTES, 'UTF-8'); ?>">Outside Calendars Guide</a>
+        explains how.
+    </p>
+    <p class="mb-0">
+        An API key receives an imported event exactly when a signed-out visitor could see it, unless "Don't show via
+        API" is ticked on its calendar, or on a choice or rule that covers it.
     </p>
 </section>
 

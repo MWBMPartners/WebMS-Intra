@@ -100,6 +100,16 @@ if (isset($_SESSION['api_key_minted']) === true) {
         rotation carries a grace window so in-flight callers can switch over before the old
         key stops working.
     </p>
+    <?php // 🔑 #514 part 8 (plan section 7.2): this is where an administrator hands
+          //    out a key, so it is where they need to know what a key receives from
+          //    outside calendars. The link comes from Site::url(), so it keeps the
+          //    organisation's own address prefix. ?>
+    <p class="small" id="api-keys-outside-calendars">
+        <i class="fa-solid fa-rss me-1" aria-hidden="true"></i>
+        An API key receives your events from outside calendars exactly as a signed-out visitor sees them. To stop a
+        calendar's events being sent through API keys, tick 'Don't show via API' on that calendar in
+        <a href="<?php echo htmlspecialchars(Site::url('admin/calendar/feeds'), ENT_QUOTES, 'UTF-8'); ?>">Outside calendars</a>.
+    </p>
 
     <details class="mb-4" <?php echo count($keys) === 0 ? 'open' : ''; ?>>
         <summary class="btn btn-sm btn-outline-primary"><i class="fa-solid fa-plus me-1"></i>Mint a new key</summary>

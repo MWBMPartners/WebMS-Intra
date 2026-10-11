@@ -57,8 +57,28 @@ if ($seriesID <= 0) {
 }
 
 // 📋 Fetch series details
+//
+// #514 part P8 (chunk P8-3, challenge M5): a series that holds an event
+// copied in from an outside calendar is the importer's, managed on that
+// calendar's own page (who may see it, through a choice) — never edited
+// here. Part 6 handed this page over in writing, and before this change it
+// opened any series of the organisation by number, although its list and
+// its update already skip imported events. The test is IN THIS ONE
+// STATEMENT, the shape `series.php` already uses for its list: a series is
+// recognised as imported by the events in it, never by its "imp-" address
+// (an administrator can type a name that makes the same address). No event
+// row is filtered on `isDeleted`, so a series whose imported dates were
+// removed stays refused too. A series holding imported events, a number
+// that does not exist and another organisation's number therefore run the
+// SAME statement and get the SAME answer below ("Series not found."), so
+// none of the three can be told apart.
 $series = null;
-$stmt = $mysqli->prepare('SELECT seriesID, seriesName FROM tblEventSeries WHERE seriesID = ? AND siteID = ? LIMIT 1');
+$stmt = $mysqli->prepare(
+    'SELECT s.seriesID, s.seriesName FROM tblEventSeries s '
+    . 'WHERE s.seriesID = ? AND s.siteID = ? '
+    . '  AND NOT EXISTS (SELECT 1 FROM tblEvents xi WHERE xi.seriesID = s.seriesID AND xi.externalFeedID IS NOT NULL) '
+    . 'LIMIT 1'
+);
 if ($stmt !== false) {
     $stmt->bind_param('ii', $seriesID, $siteId);
     $stmt->execute();

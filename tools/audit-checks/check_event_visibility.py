@@ -204,7 +204,30 @@ FILE_ALLOWLIST: dict[str, str] = {
     "_apps/cron/import-feeds.php": "runs the importer/resolver job itself; the ONE place allowed to write an imported row",
     "_core/FeedImporter.php": "the importer itself (#514 part P6); reads and writes imported rows by design",
     "_core/FeedResolver.php": "the resolver itself (#514 part P6); reads and writes imported rows by design",
-    "_apps/admin/calendar/feeds-save.php": "saves a calendar's OWN settings (address, audience level); does not read an event row",
+    # 🧹 (#514 part P8-2, challenge L4.) "_apps/admin/calendar/feeds-save.php"
+    # used to be listed here, with the reason "saves a calendar's OWN
+    # settings (address, audience level); does not read an event row". The
+    # rewritten file no longer saves settings at all (the calendar form,
+    # feeds-edit.php, does that through FeedAdmin) and names no event
+    # table, so the reason had stopped describing it — and a file on this
+    # list is never looked inside, so a stale entry is a blind spot. It
+    # was removed, and the file is checked like any other page again.
+    # 🖥️ The administrator pages' service class (#514 part P8): it reads
+    # and writes imported rows of ONE organisation's calendars, each
+    # found by its number AND siteID (a few second look-ups then use a
+    # number just read from such a row — see the class header). Every
+    # WRITE first checks the actor is an administrator of that
+    # organisation; READS take no actor — the page that calls one has
+    # already checked who is asking (part W proves the pages do).
+    # Administrators see every event of their own organisation by
+    # design. (Fix round 1 of P8-1: this comment used to say every
+    # statement came "after the organisation-administrator check",
+    # which was true of writes only.) P8-2 removed the "feeds-save.php"
+    # entry (see the note just above) once that file was rewritten to go
+    # through this class, so the list grew by this one entry and shrank by
+    # that one (part 7's C8 said this list must not grow quietly — this
+    # comment is the reason for both).
+    "_core/FeedAdmin.php": "the administrator pages' service class (#514 part P8); reads and writes imported rows of ONE organisation's calendars, each found by number AND siteID; writes check the actor is that organisation's administrator, reads rely on the calling page's check; administrators see every event of their own organisation by design",
     # 🔗 (fix round 1: checker findings 2 and 2b — the six files this
     # group used to list are GONE from it.) The plan's original premise
     # here — "cannot link to an imported event as of this part, and never
