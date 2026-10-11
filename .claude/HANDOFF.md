@@ -29,6 +29,13 @@ classified: 37 already fixed on this branch, 38 not started, 7 partly):
    committed on the builder's proofs without another round; Codex gets ONE lean, security-first pass over the riskiest areas at the end
    (sign-in and permissions, erasure, expenses and payments, calendar import), split across its resets, blocking nothing.
 
+**#514 PART 8 IS COMMITTED: `6abed16` (11 Oct ~17:35), pushed; #514 commented.** 799 checks; final whole-part check by an Opus
+stand-in for Codex; the last narrow check's two LOW faults + four uncaught preview faults fixed and committed on the builder's proofs
+(no further round, per decision 4). Follow-ups opened: #571 (a very long series can lose dates on an every-date choice), #572
+(migration 207's deprecated `VALUES()`), #573 (the result message off screen on a phone). Still to record for the Codex pass: part 8
+is one of its "riskiest parts". Evidence for all 46+ rounds: `.claude-work/resume/p514-p8-*`.
+**NOW: the roll-out set is being PLANNED** (Opus planner, read-only; `.claude-work/resume/rollout-set--plan.md`; watchdog on it).
+
 **ORDER:** part 8's commit → the roll-out set → #499, #500, #502 → #514 parts 9-11 → documentation sweep → the Codex pass alongside →
 the pull request when the owner says.
 
