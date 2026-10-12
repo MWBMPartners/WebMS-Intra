@@ -17,6 +17,38 @@ How it is run: each builder gets its exact file list; `CHANGELOG.md`, `DEV_NOTES
 packages at once (a builder working alongside another writes its entries to `<evidence>/DOC-ENTRIES.md`, added at commit); **stage each
 package by ITS OWN file list — never from `git status`, which now mixes packages**; own named containers and ports.
 
+## WHERE THINGS ARE, 12 OCTOBER 2026, 06:40 — four jobs running; two owner answers; one trap
+
+**Running now (each with a watchdog on its report in `.claude-work/resume/`):**
+
+| Package | What | Where it works | Report |
+| --- | --- | --- | --- |
+| C | three broken pages (#547, #568, #563) — in its ONE check | MAIN folder, 18 uncommitted files, list in `rollout-C-FILES.txt` | `rollout-C--check.md` |
+| D | recovery runbook and backup documents (#488) — build | MAIN folder (documents and one new check script) | `rollout-D--build.md` |
+| B2a | access gaps, plan items 1-9, 11, 12 — build | its own checkout `.claude-work/worktrees/b2a`, branch `ro-b2a-build` | `rollout-B2a--build.md` |
+| E | older databases that stop part-way through upgrading (#553, #555, #554) — build | its own checkout `.claude-work/worktrees/e`, branch `ro-e-build` | `rollout-E--build.md` |
+
+B2a and E each make ONE commit on their own branch and do not push. Bring each across with `git cherry-pick <hash>` onto
+`claude/alpha-wip` after its one check, then remove the checkout (`git worktree remove`) and delete its branch. B2b (plan item 10, the
+erasure pages' addresses) starts after B2a. C's document lines wait in `rollout-C--build-evidence/DOC-ENTRIES.md`.
+
+**Trap, learned the hard way today:** the Agent tool's own "separate checkout" option (`isolation: worktree`) cuts the checkout from
+`main`, which is about 400 commits behind the working branch, and refuses writes to the main folder. A builder started that way found
+none of the code it was told to change, and rightly stopped. **Do not use it.** Make the checkout by hand instead:
+`git worktree add -b <branch> .claude-work/worktrees/<name> claude/alpha-wip`, and tell the builder to work there.
+
+**Two owner answers, 12 October, about 06:25 (final):**
+
+1. **How one installation serves several organisations (#502).** The owner: "Best scenario is that all three are possible (own
+   address each, first part, or sign in session. Ideally it is sign-in session, but what if a signed in user has access to multiple
+   organisations - a real possibility)". So all three ways must work: each organisation on its own address; the organisation as the
+   first part of the address; and the organisation chosen by the sign-in session, which is the preferred one. Session mode therefore
+   needs a way for a person who belongs to several organisations to choose one at sign-in and switch later. "First part of the
+   address" needs every link in the portal to be built through `Site::url()`: that is the #536 sweep, about 905 bare links. NOT yet
+   planned — it is planned with #499, #500 and #502, after the roll-out set.
+2. **Live chat on an internal event (B2a item 4):** yes to the fix. An internal event's chat works only inside the portal, for people
+   who may see that event; the chat box embedded on a public website works for public events only.
+
 ## OWNER DECISIONS, 11 OCTOBER 2026 — THE ROLL-OUT PLAN (final; this is the queue now)
 
 The owner: "we really are wanting to get through this so we can try and finalise and begin roll-out usage — so lets focus on this and
