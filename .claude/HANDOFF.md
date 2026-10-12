@@ -28,12 +28,12 @@ script loads Babel with no fingerprint) and #576 (small follow-ups).
 
 | Package | What | Where it works | Report |
 | --- | --- | --- | --- |
-| D | recovery runbook and backup documents (#488) — its one check came back NOT CLEAN (four serious, three medium, all in what the pages do not say, one command and the example script); ONE FIX ROUND is running | MAIN folder: the same five uncommitted files, and only those | `rollout-D--check.md` (the work list), `rollout-D--fix.md` |
-| B2a | access gaps — BUILT as commit `1953360` on `ro-b2a-build` (41 files), in its ONE check | its own checkout `.claude-work/worktrees/b2a` | `rollout-B2a--build.md`, `rollout-B2a--check.md` |
+| D | recovery runbook and backup documents (#488) — first check NOT CLEAN; fix round DONE (it wrote its own design for the script, not the checker's); a NARROW check of the fix round is running | MAIN folder: the same five uncommitted files | `rollout-D--fix.md`, `rollout-D--check2.md` |
+| B2a + B2b | access gaps — B2a's one check came back NOT CLEAN (none HIGH); ONE FIX ROUND is running in the same checkout, and it also builds B2b (plan item 10), so one narrow check covers both. It makes two more commits on `ro-b2a-build` after `1953360` | its own checkout `.claude-work/worktrees/b2a` | `rollout-B2a--check.md` (the work list), `rollout-B2a--fix.md` |
 | E | older databases (#553, #555, #554) — BUILT as commit `28ff8f3` on `ro-e-build` (six files, migration 210), in its ONE check | its own checkout `.claude-work/worktrees/e` | `rollout-E--build.md`, `rollout-E--check.md` |
-| G (plan only) | the three backup faults (#577, #578, #579), one package | reads the MAIN folder; changes nothing | `rollout-G--plan.md` |
+| G | the backup faults (#577, #578, #579, plus prune and freshness) — plan written (`rollout-G--plan.md`, 236 lines); BUILD running | its own checkout `.claude-work/worktrees/g`, branch `ro-g-build` | `rollout-G--build.md` |
 | F6 part 1 | the zip package's build script and guards (#499) — BUILT as commit `84c6180` on `ro-f6-build` (six files), in its ONE check. The workflow is PROPOSED only, in `rollout-F6--build-evidence/package.yml` | its own checkout `.claude-work/worktrees/f6` | `rollout-F6--build.md`, `rollout-F6--check.md` |
-| F7 | the deploy's settings logic and its test (#500) — BUILT as commit `425ca9c` on `ro-f7-build` (two new files), in its ONE check. The replacement `deploy.yml` is PROPOSED only, in `rollout-F7--build-evidence/proposed-deploy.yml`; it cannot be placed before F3 is committed | its own checkout `.claude-work/worktrees/f7` | `rollout-F7--build.md`, `rollout-F7--check.md` |
+| F7 | the deploy's settings logic (#500) — check NOT CLEAN: nothing HIGH in the two committed files, one HIGH in the PROPOSED workflow (a dry run prints the password). ONE FIX ROUND is running; it adds a commit after `425ca9c` and writes a corrected proposal to `rollout-F7--fix-evidence/` | its own checkout `.claude-work/worktrees/f7` | `rollout-F7--check.md` (the work list), `rollout-F7--fix.md` |
 
 B2a and E each make ONE commit on their own branch and do not push. Bring each across with `git cherry-pick <hash>` onto
 `claude/alpha-wip` after its one check, then remove the checkout (`git worktree remove`) and delete its branch. B2b (plan item 10, the
@@ -117,6 +117,33 @@ summary and its section 4.1, "what runs beside what"). The short of it:
 - F6's proposed `package.yml` differs from W2 in four ways (listed in its header). As with F7: show the owner the checker's list
   of differences before placing it.
 - F6's commit message gives a check count (94) that later grew to 103. When bringing the commit across, write the message afresh.
+
+**Owner answers and check results, 12 October, about 08:45 (final where they are the owner's):**
+
+- **Package G, the owner's three answers:** the check-only run becomes a FULL REHEARSAL; a "Check this snapshot" button is added
+  to the backup page IN this package; the new backup self-test and the column-type check run automatically on GitHub (one new
+  workflow file, one report-only block in `pr-security.yml`). The builder was told by message. Its proposed workflow text goes
+  in its evidence folder; place it after G's check.
+- **Workflow changes approved so far, all of them, so nobody has to piece it together:** W1 `deploy.yml` replaced; W2
+  `package.yml` new and `release.yml` deleted; W3 three report-only blocks in `pr-security.yml`; W4 the new self-tests in the
+  test workflow; plus one block for `check_docs_table_refs.py`; plus G's workflow file and its one block; plus E's proposed diff
+  (#556). **Before placing `deploy.yml` or `package.yml`, show the owner the list of where the proposal differs from what the
+  plan described** (each checker wrote that table). Nothing else in any workflow file changes; no `continue-on-error`.
+- **B2a's check** (`rollout-B2a--check.md`): the access rules and the session change do what the owner decided; it could not
+  sign an active person out wrongly or keep a switched-off one in. Real faults: another address of the same site can post into an
+  internal event's chat through a signed-in member (proved in a real browser); three planted faults the tests let through; the
+  new address check can pass without reading a folder; untrue comments. And owner decision 1 is NOT yet met: `venues/venue.php`
+  shows a venue's address and bookings to any signed-in account, and the calendar's venue strip shows booked days to a
+  signed-OUT visitor. All in the fix round.
+- **Routed to F2, not fixed in B2a — put both in F2's brief with a named test:** `/api/attendance/list` gives any signed-in
+  account another organisation's session list with notes, and `/attendance` shows them head counts. F2's one members-only gate
+  must cover data endpoints as well as pages.
+- **D's fix round** fixed every finding except one LOW item, now stated as a limit (the off-site script does not check a
+  snapshot's files against its manifest). Because the script deletes backup copies and the fix is a new design, it gets a narrow
+  check before D is committed. After D is committed: apply G's `RUNBOOK-CORRECTIONS.md`, and correct runbook 7.7 for B2a.
+- **F7's check**: 328 hostile settings and all 576 login combinations gave a right answer or a refusal. Faults: `remote` calls
+  an occupied folder "no portal yet"; six planted faults pass the self-test; in the PROPOSAL a dry run prints the password and
+  signing in with a key cannot work (both proved with the real `lftp` in a container, with tried fixes).
 
 **Trap, learned the hard way today:** the Agent tool's own "separate checkout" option (`isolation: worktree`) cuts the checkout from
 `main`, which is about 400 commits behind the working branch, and refuses writes to the main folder. A builder started that way found
