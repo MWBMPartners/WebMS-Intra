@@ -25,11 +25,14 @@ Internal portal platform (PHP 8.5, backward-compatible with 8.4, Bootstrap 5.3.3
 > Everything here still assumes it. The automated database test covered only
 > `mysql:8.0.36` until 25 September 2026; it is now built to run on MySQL
 > 8.4.11 as well (not yet run on GitHub — it runs on pull requests and on
-> updates to the release branches that change `web/_sql/`). **It still never
-> upgrades a database built by an older release** — every phase starts from
-> today's `full_schema.sql` — so faults that only show on older databases
-> (#553, #554, #555) are invisible to it. MySQL 8.4 refuses a link that
-> points at a non-unique key (ERROR 6125, #552);
+> updates to the release branches that change `web/_sql/`). **Since 12 October
+> 2026 it also upgrades two older databases** — one built from the last release
+> (the `main` branch) and one from the install script of 6 March 2026 — and
+> requires each to end up equal to a fresh install. It also holds the
+> installer's replay against the install script alone, and loads the install
+> script a second time. It still cannot stand for a database whose history
+> matches neither, and none of this has yet run on GitHub. MySQL 8.4 refuses a
+> link that points at a non-unique key (ERROR 6125, #552);
 > `tools/audit-checks/check_fk_references_unique_key.py` checks for that.
 >
 > Two things to be precise about, because loose wording has already caused

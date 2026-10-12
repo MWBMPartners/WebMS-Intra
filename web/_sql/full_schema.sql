@@ -6,7 +6,19 @@
 -- Safety guarantees:
 --   • CREATE TABLE IF NOT EXISTS  — skips tables that already exist
 --   • INSERT ... ON DUPLICATE KEY — preserves existing settings & route values
---   • No DROP, TRUNCATE, or DELETE — existing data is never removed
+--   • No table is ever dropped or emptied. A FEW STORED ROWS ARE CHANGED OR
+--     REMOVED, each explained where it stands. This line used to read "No
+--     DROP, TRUNCATE, or DELETE — existing data is never removed", which was
+--     untrue. Run over an existing database, this file:
+--       - removes seeded rows that should not be there (four DELETEs: surplus
+--         copies of portal-wide settings, four settings for API actions that
+--         have no handler, the old `portal.version` setting, and the `widget`
+--         address);
+--       - marks the built-in roles as built-in and fills in a description
+--         where one is empty (one UPDATE);
+--       - empties an attendance session's pointer to an event that no longer
+--         exists (one UPDATE, in the "from 210_upgrade_gaps.sql" block at the
+--         very end).
 --   • FK ordering respected       — parent tables created before children
 --
 -- After running, all individual migrations through the highest-numbered file
@@ -817,6 +829,13 @@ CREATE TABLE IF NOT EXISTS `tblAttendanceSessions` (
     KEY `idx_attsess_site_date_type` (`siteID`, `sessionDate`, `serviceTypeID`),
     CONSTRAINT `fk_att_sess_type` FOREIGN KEY (`serviceTypeID`)
         REFERENCES `tblAttendanceServiceTypes` (`serviceTypeID`) ON DELETE RESTRICT,
+    -- The link from `eventID` to tblEvents (`fk_att_sess_event`, emptied when the
+    -- event is deleted) is NOT declared inside this CREATE TABLE, and that is
+    -- deliberate: tblEvents is created further down this file, and a link
+    -- written here cannot name a table that does not exist yet. It is added at
+    -- the very end of this file instead, in the "from 210_upgrade_gaps.sql"
+    -- block, once both tables exist (#554). Do not "restore" it here: the file
+    -- stops loading.
     CONSTRAINT `fk_att_sess_creator` FOREIGN KEY (`createdByID`)
         REFERENCES `tblUsers` (`userID`) ON DELETE SET NULL,
     CONSTRAINT `fk_att_sess_updater` FOREIGN KEY (`updatedByID`)
@@ -998,6 +1017,66 @@ CREATE TABLE IF NOT EXISTS `tblRecurrenceRules` (
         REFERENCES `tblSites` (`siteID`) ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
 COMMENT='Recurrence rules for event series — generates individual event dates.';
+
+
+-- -----------------------------------------------------------------------------
+-- 🛑 Stop here if tblEvents is MISSING while attendance sessions point at events
+-- -----------------------------------------------------------------------------
+-- This file is about to make tblEvents if it is not there. On a brand-new
+-- database that is all there is to it. But take an existing database that has
+-- lost the table (a restore that got part-way, or a table dropped by hand)
+-- while tblAttendanceSessions still holds rows pointing at events. Making the
+-- table again, EMPTY, turns every one of those pointers into "a pointer to an
+-- event that no longer exists", and the block at the very end of this file
+-- (and migration 210, which the installer replays next) then empties them all.
+-- An independent check showed exactly that on 12 October 2026, the day the
+-- block at the end was added: six sessions, five pointers, all emptied, exit
+-- code 0, no message. Once the events were put back, no session would have
+-- been attached to its event any more. It was caught before any release.
+--
+-- So: if the table is missing AND any session holds a pointer, the load stops
+-- HERE, before the table is made, with the database's own error
+-- ("Table '…tblEvents' doesn't exist", error 1146). No session is touched.
+-- That is the same stop, with the same message, that migration 210 gives on
+-- the same database, which is how the two files stay in step: 210 never makes
+-- tblEvents, so it needs no such statement; this file does, so it needs this
+-- one. The fix is to put tblEvents back from a backup and run again.
+--
+-- Why the stop is here and not at the end of the file. The first idea was to
+-- remember here whether the table was there, skip the UPDATE at the end when
+-- it was not, and let the ALTER there stop the load (error 1452). That only
+-- protects the FIRST run: it leaves the new, empty tblEvents behind, so a
+-- second run of the installer (the natural thing to try after an error), or
+-- migration 210 run from the upgrade page, finds the table "already there" and
+-- empties every pointer after all. Stopping before the table is made leaves
+-- the database exactly as broken as it was, so every later run stops the same
+-- way until somebody repairs it.
+--
+-- What this CANNOT tell: a tblEvents that is there but does not have its rows
+-- back yet (a restore still half done). A pointer at an event missing from a
+-- table that exists is emptied at the end of this file, exactly as migration
+-- 210 does. Restore the whole database before running the installer over it.
+--
+-- A brand-new database passes straight through: tblAttendanceSessions was
+-- made, empty, a little above, so no session holds a pointer. The first
+-- question is asked of information_schema, so it works whether or not the
+-- table exists; the second names only tblAttendanceSessions, which always
+-- exists by this line. A SELECT that is made to fail is the way this file
+-- already stops a load further down (search for SCHEMA_LOAD_STOPPED).
+
+SET @events_table_missing := (
+    SELECT COUNT(*) = 0 FROM information_schema.TABLES
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME   = 'tblEvents'
+);
+SET @sessions_pointing := (
+    SELECT COUNT(*) FROM `tblAttendanceSessions` WHERE `eventID` IS NOT NULL
+);
+SET @sql := IF(@events_table_missing = 1 AND @sessions_pointing > 0,
+    'SELECT 1 FROM `tblEvents`',
+    'SELECT 1'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
 
 -- -----------------------------------------------------------------------------
@@ -9717,4 +9796,63 @@ INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
 ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`), `isProtected` = VALUES(`isProtected`);
 
 INSERT INTO `tblMigrations` (`filename`) VALUES ('209_giving_kept_donors.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- ── from 210_upgrade_gaps.sql (roll-out package E) ───────────────────────────
+-- Almost all of that migration brings an UPGRADED database into line with
+-- this file, so there is nothing to copy for those parts. The one thing a
+-- fresh install lacked is the link `fk_att_sess_event` (#554), from
+-- tblAttendanceSessions.eventID to tblEvents. It is added here, at the end,
+-- because both tables exist by now (see the note inside tblAttendanceSessions
+-- above for why it cannot sit in that CREATE TABLE).
+--
+-- This comment used to say the link "cannot be written here" and would arrive
+-- when the installer replayed the migration. That was untrue, and it mattered:
+-- the line below records migration 210 as already run, so a database built
+-- from this file ALONE (the manual route in README.md) never got the link, and
+-- the upgrade page never added it either.
+--
+-- The three statements below are the migration's own, word for word, and
+-- like the migration they do nothing once a link from that column to
+-- tblEvents is there. (tools/e2e-migrations/run.sh compares all three with
+-- the migration's as text, loads this file a second time over a finished
+-- database, and runs this copy against planted rows.)
+--
+-- This comment used to say that, the words being the same, the two files
+-- "cannot disagree". They could, and did: the same UPDATE emptied EVERY
+-- pointer when run from this file over a database whose tblEvents was
+-- missing, because this file had just made that table again, empty, while
+-- the migration on the same database stops at once. The stop just above
+-- CREATE TABLE `tblEvents` is what closes that; read its comment before
+-- changing anything here.
+--
+-- The UPDATE finds nothing on a brand-new database, where the table is empty.
+-- It is here for the installer's "carry on with the existing database"
+-- choice, which runs this file over a database that may hold a session
+-- pointing at a deleted event. The installer stops at the first error in this
+-- file, and without the UPDATE the ALTER would be that error (1452). What the
+-- UPDATE changes, and why nothing of value is lost, is explained beside the
+-- same statement in the migration.
+
+SET @fk_exists := (
+    SELECT COUNT(*) FROM information_schema.KEY_COLUMN_USAGE
+    WHERE TABLE_SCHEMA          = DATABASE()
+      AND TABLE_NAME            = 'tblAttendanceSessions'
+      AND COLUMN_NAME           = 'eventID'
+      AND REFERENCED_TABLE_NAME = 'tblEvents'
+);
+
+SET @sql := IF(@fk_exists = 0,
+    'UPDATE `tblAttendanceSessions` SET `eventID` = NULL, `updatedAt` = `updatedAt` WHERE `eventID` IS NOT NULL AND NOT EXISTS (SELECT 1 FROM `tblEvents` WHERE `tblEvents`.`eventID` = `tblAttendanceSessions`.`eventID`)',
+    'SELECT 1'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+SET @sql := IF(@fk_exists = 0,
+    'ALTER TABLE `tblAttendanceSessions` ADD CONSTRAINT `fk_att_sess_event` FOREIGN KEY (`eventID`) REFERENCES `tblEvents`(`eventID`) ON DELETE SET NULL',
+    'SELECT 1'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('210_upgrade_gaps.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;

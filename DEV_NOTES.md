@@ -330,7 +330,7 @@ SFTP_BASE_PATH/
   on PRs and on pushes to alpha/beta/main, in both cases only when
   `web/_sql/`, the harness folder or the workflow itself changes, plus
   manual runs. Runs the
-  harness's four phases twice, as two jobs side by side, on MySQL 8.0.36
+  harness's six phases and its three data checks twice, as two jobs side by side, on MySQL 8.0.36
   and MySQL 8.4.11.
 - `repo-config-audit.yml` — weekly + on PRs touching `.github/workflows/`.
   Detects orphaned required-status-check rules (see gotchas section).
@@ -1755,6 +1755,20 @@ phase would test one older starting point, the last release, not every
 older install. It is proposed, awaiting the owner's decision. It is not
 planned and not under way.
 
+Since 12 October 2026 that is no longer the whole story. `run.sh` has two more
+phases that upgrade an older database: phase 5 from the last release (the `main`
+branch) and phase 6 from the install script of 6 March 2026
+(`tools/e2e-migrations/fixtures/full_schema-2026-03-06.sql`, a frozen file that
+must never be edited below its header; `run.sh` checks its checksum, and that its
+header holds comments only). Both must end up equal to a fresh install. Migration
+210 closed the differences this section lists: `uq_category_slug` is removed
+(#553), `fk_att_sess_event` is added wherever no link from that column to
+`tblEvents` exists (#554) and the install script now adds it too, and the two
+`tblTrustedDevices` keys are renamed to the install script's names. Two links are
+still added only by a migration (179: `fk_event_room`, `fk_event_venue`). The
+foreign-key check itself has not been changed: its fixed list and its notes still
+describe the old names, and it does not read `RENAME INDEX`.
+
 **`check_fk_references_unique_key.py` is BUILT to run on every pull
 request** since 25 September 2026 — the owner agreed to this on
 24 September 2026 — but, like the paragraph above, that workflow change has
@@ -3006,21 +3020,43 @@ Before each release, run every migration through real MySQL 8.0.36 and
 
 ### Procedure
 
-Requires `docker` + `docker compose` on your local machine.
+Requires `docker` on your own machine.
 
 ```bash
-tools/e2e-migrations/run.sh                # all three phases (~30s)
-tools/e2e-migrations/run.sh --skip-stale   # phases 1+2 only
-tools/e2e-migrations/run.sh --keep         # leave container up for poking
+tools/e2e-migrations/run.sh                # all six phases and the data checks
+E2E_MYSQL_VERSION=8.4.11 tools/e2e-migrations/run.sh   # the same on MySQL 8.4.11
+tools/e2e-migrations/run.sh --skip-stale   # phase 4 without its catching-up half
+tools/e2e-migrations/run.sh --keep         # leave the container up afterwards
 ```
 
-The script drives three phases:
-1. **Fresh install** — apply every `web/_sql/NNN_*.sql` in order to an
-   empty DB. Any SQL error fails the run.
-2. **Idempotency** — re-run the same loop. Schema row counts
-   (information_schema.tables/columns/statistics) must be unchanged.
-3. **Stale-DB upgrade** — wipe, apply first half, then apply the rest.
-   Catch-up must reach the same final state as fresh install.
+The script runs six phases and three data checks:
+1. **Fresh install**: load `full_schema.sql` into an empty database.
+2. **Installer replay**: run every migration over it. No table, column, index, link,
+   address or setting value may change, apart from five differences named in `run.sh`.
+3. **Run it all again**: the migrations a second time (no count may change), then
+   `full_schema.sql` a second time over the same database (nothing in the inventory
+   may change).
+4. **Catching up**: reload, forget the newest half of the migrations, let them run again.
+- **Data checks**: plant three attendance sessions and run migration 210, then three
+  more and run the install script; each time only the pointer at a deleted event may
+  be emptied and no other column of any session may change. Then take the events
+  table away: both files must stop and change nothing.
+5. **Upgrade from the last release** (`origin/main`, or `E2E_BASE_REF`).
+6. **Upgrade from the oldest install script** (6 March 2026: a frozen file holding that
+   day's base tables, upgraded by today's migrations).
+
+Phases 5 and 6 must end up equal to a fresh install, compared by name and not by
+count. Each phase has its own list of named exceptions in `run.sh`, and fails when a
+line in its list is no longer seen. The test cannot see MariaDB, a database whose
+history matches neither starting point, a setting's stored default, or the contents
+of tables other than addresses, settings and their values, recorded migrations and
+the planted sessions.
+
+**After this work reaches `main`.** The first run of the migration test after roll-out package E reaches `main` will fail
+in phase 5, on purpose: `auth.password.minLength | every organisation | 12 → 8` in
+`KNOWN_P5_VALUE_DIFFERENCES` (`tools/e2e-migrations/run.sh`) stops being true, because
+a database built from `main` then holds 12. The failure message says to delete that
+line. Delete it then, in its own commit, and not before.
 
 See `tools/e2e-migrations/README.md` for details.
 

@@ -53,3 +53,4 @@ and the safety of every multi-step database change in the portal.
 - **Use the `information_schema` + `PREPARE`/`EXECUTE` guard idiom** instead (see DEV_NOTES.md → "Portable DDL convention (MySQL 8.0 ∩ MariaDB)" for the full templates). House examples already shipped this way: migrations **037**, **112**, **138**.
 - **Migrations must replay as no-ops** on an up-to-date schema — the installer replays every numbered migration after `full_schema.sql`, ignoring `tblMigrations`.
 - **CI**: `tools/audit-checks/check_mariadb_only_ddl.py` + the `e2e-migrations` harness enforce this.
+- Since 12 October 2026 the migration test (`tools/e2e-migrations/run.sh`) also upgrades two older databases, one built from the last release and one from the install script of 6 March 2026, and requires each to end up equal to a fresh install. Run it whenever a change touches `web/_sql/`.

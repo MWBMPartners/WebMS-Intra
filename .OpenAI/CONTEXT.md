@@ -315,8 +315,12 @@ in `.claude/CLAUDE.md` under the heading named in brackets.
     committing anything touching `web/_sql/`. **The storage engine is InnoDB
     and must stay that way** — it is what makes transactions, table links
     and an all-or-nothing backup restore possible; the alternative (MyISAM)
-    supports none of that. *(`.claude/rules/database.md` → "Every database
-    change goes in the install script too".)*
+    supports none of that. Since 12 October 2026 the migration test
+    (`tools/e2e-migrations/run.sh`) also upgrades two older databases, one
+    built from the last release and one from the install script of 6 March
+    2026, and requires each to end up equal to a fresh install. Run it whenever
+    a change touches `web/_sql/`. *(`.claude/rules/database.md` → "Every
+    database change goes in the install script too".)*
 
 14. **The MySQL 8 dialect trap.** Production runs some version of MySQL 8
     (exact version unconfirmed — see `.claude/CLAUDE.md`'s database-version

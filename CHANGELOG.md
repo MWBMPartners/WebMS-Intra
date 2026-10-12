@@ -2,6 +2,65 @@
 
 
 ## [Unreleased] (alpha)
+- fix(upgrade): an older database no longer stops part-way through upgrading,
+  and ends up the same as a new install (roll-out package E; #553, #554, #555).
+  - **The upgrade stopped at migration 124 on any database installed before
+    25 June 2026** ("Unknown column 'capacityCount'"), and nothing after it
+    ran (#555). Migration 124 now adds that column itself when it is missing.
+    The file was corrected in place, because a later migration would never
+    have been reached. A database that already ran the old version is not
+    changed by the new one.
+  - **The podcast feed answered "page not found" on every upgraded database.**
+    Its two addresses were written into the install script and into no
+    migration. Migration 210 adds them, and two more addresses
+    (`admin/release-notes`, `help/calendar`) and three Calendar settings that
+    were missing the same way on older databases.
+  - **A second organisation could not use a category short name the first one
+    already used**, on databases installed before 8 March 2026 (#553).
+    Migration 210 removes the old key that caused it.
+  - **Deleting an event left its attendance sessions pointing at nothing**, on
+    every database built by the install script (#554). Migration 210 adds the
+    missing link, and the install script now adds it too, so a database built
+    from that file alone has it. Before the link can be added, pointers to
+    events that are gone are emptied: this is the one place a customer's own
+    rows are changed. The session, its date, its counts, its notes and its
+    "last changed" time are untouched. A link already there under another name
+    is left as it is, and no second one is added.
+  - **If the events table itself is missing** (a restore that got part-way)
+    while sessions still point at events, both the upgrade and the installer
+    stop with the database's own message ("Table 'tblEvents' doesn't exist")
+    and change nothing. Put the table back from a backup and run again.
+    Neither can tell an events table that is there but has not got its rows
+    back yet: restore the whole database before running the installer over it.
+  - **A backup taken before this upgrade can hold such a dead pointer**, and
+    the database now refuses that row. Whatever restores an older backup has
+    to empty those pointers first. That is the restore code's job
+    (`web/_core/DbBackup.php`), and it is done by the backup fixes that
+    follow this change (#577, #578, #579). **Until those are on the branch
+    too, this change must not be released by itself.**
+  - Two small tidy-ups in migration 210 so that an upgraded database matches a
+    new install exactly: two keys on `tblTrustedDevices` renamed, and the
+    default colour for a NEW organisation (existing ones keep theirs).
+  - **The migration test now upgrades old databases** (two new phases): from
+    the last release (the `main` branch), and from the install script of
+    6 March 2026, kept as a frozen file guarded by a checksum. Each must end
+    up equal to a new install: every column, index, link between tables and
+    address must match exactly, every setting and recorded migration must be
+    there, every setting both have must hold the same value, and a setting
+    only the upgraded database has is a failure unless it is named.
+  - **The test also holds the installer's replay against the install script
+    alone**, and loads the install script a second time over a finished
+    database, which must change nothing. Five existing differences are named
+    in the test and printed on every run: two links only migration 179 adds,
+    and three apps that migrations 008, 009 and 017 switch on over the install
+    script's "off". A named difference that is no longer seen fails the test.
+  - **The one statement that changes a customer's own rows has three checks**:
+    attendance sessions are planted and every column of every session is
+    looked at after migration 210 runs, and again after the install script
+    runs; and with the events table taken away, both must stop and change
+    nothing.
+  - None of the test's new parts has run on GitHub yet.
+  - Codex has not reviewed this.
 - tooling: **scripts that build and guard the installation zip, part 1** (#499,
   roll-out package F6). `tools/package/build.sh` makes the package from git at
   one commit, never from a working folder, and `tools/package/check-package.py`
