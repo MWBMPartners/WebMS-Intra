@@ -1,291 +1,975 @@
 # Disaster-recovery runbook
 
-**Audience:** a volunteer admin with shell access and minimal PHP / SQL
-background. Every command is paste-ready. Read the section header, copy the
-command beneath it.
+For the person who has to get the portal working again: after a break-in, a
+failed upgrade, or lost data. You do not need to know how the portal is built.
+Work down the page. Every step says what you should see, and what to do if you
+do not.
 
-**Linked from:** `docs/day2-support.md`, `/help/admin-first-steps`.
+**Linked from:** `docs/day2-support.md`, `/help/admin-first-steps`,
+`/help/disaster-recovery`.
 
----
+## How to read this page
 
-## 1. First five minutes — confirm it's broken
+Every command, and every button, carries one of two marks:
 
-Before doing anything destructive, work out **what** is failing.
+- **Tested** means we ran that exact command, or pressed that exact button, on
+  12 October 2026, on a throwaway copy of release 1.4.0 (MySQL 8.0.36,
+  PHP 8.5.10), and it did what this page says. The number points at a row in
+  the table at the [end of this page](#what-was-tested).
+- **Your host** means it depends on your hosting company. We could not run it,
+  so check it before you need it.
 
-1. Open the portal in a private/incognito tab. Does the homepage load?
-2. Visit `/admin/maintenance/health` (admin login). Which probe is red?
-3. Visit `/admin/errors`. Anything in the last 60 minutes?
-4. Check email — `Logger::criticalAlert` emails on rate-limited alarms.
+MySQL 8.4 and MariaDB were **not** tested.
 
-If the homepage 500s before you can log in, jump to **section 3 — diagnose**.
+Words used here: a **snapshot** is the portal's own backup of its database. A
+**global administrator** is the account that owns the whole installation, not
+an administrator of one organisation on it. Only a global administrator can use
+the backup pages.
 
-If only one app is broken, you can usually leave the rest running and only
-fix that app. Skip to **section 4 — common failure modes**.
-
-If the whole portal is unresponsive AND the DreamHost status page
-([status.dreamhost.com](https://status.dreamhost.com/)) shows nothing,
-go to **section 2 — stop the bleeding**.
-
----
-
-## 2. Stop the bleeding — maintenance mode
-
-Tells visitors a friendly "we'll be back" page instead of a 500.
-
-**Via UI** (preferred — if admin still works):
-
-`/admin/maintenance/health` → toggle **maintenance mode**.
-
-**Via SQL** (if admin pages are down):
-
-```bash
-ssh USER@portal.example.com
-cd ~/portal/web
-mysql -h mysql.example.com -u USER -p DATABASE_NAME -e \
-  "UPDATE tblSettings SET settingValue='1' WHERE settingKey='portal.maintenance.active';"
-```
-
-To bring the portal back later:
-
-```bash
-mysql -h mysql.example.com -u USER -p DATABASE_NAME -e \
-  "UPDATE tblSettings SET settingValue='0' WHERE settingKey='portal.maintenance.active';"
-```
+Addresses such as `/admin/users` go after your portal's own address, for
+example `https://portal.example.com/admin/users`. Every name on this page
+containing "example", and the folder `~/portal/web`, is an example: put your
+own in its place.
 
 ---
 
-## 3. Diagnose — where to look
+## 1. Before you start
 
-| Symptom | Where to look |
-|---|---|
-| White page / 500 | DreamHost panel → Error Log; `web/_logs/` if writable |
-| Slow but loading | `/admin/maintenance/health` → DB latency probe |
-| Login broken | `/admin/errors` → AUTH category |
-| Email not arriving | `/admin/integrations/email-templates` → test send |
-| One app 404s | `tblRoutes` row missing — re-run migrations |
-| Migration error | `/admin/migrations` → red rows + error column |
+Many steps can be done from the portal's own pages. Some need a **command
+line** on the server (a terminal, often called SSH). Where a step has no
+other way, it says so. Not every host gives you one.
+
+### 1.1 Set five values, once per terminal window
+
+Every command below uses these. Open
+`_auth_keys/auth_creds.php` in the portal's folder: it lists `db_host`,
+`db_port`, `db_user`, `db_name` and `db_pass`. Then type the first four here.
+`PORTAL` is the folder that holds `_core`, `_apps`, `_auth_keys` and
+`_backups`.
 
 ```bash
-# Tail PHP error log (location varies; check phpinfo()):
-tail -200 ~/logs/portal.example.com/http/error.log
-
-# Tail the portal's audit log:
-mysql -h mysql.example.com -u USER -p DATABASE_NAME -e \
-  "SELECT createdAt, severity, category, message FROM tblErrors \
-   ORDER BY errorID DESC LIMIT 50;"
+PORTAL=~/portal/web
+DB_HOST=mysql.example.com
+DB_PORT=3306
+DB_USER=example_user
+DB_NAME=example_portal
 ```
+
+*Example values. Yours come from your own server.*
+
+If you open a new terminal window, set them again.
+
+### 1.2 Check the server's PHP
+
+```bash
+php -v
+php -m | grep -E '^(mysqli|sodium)$'
+```
+
+*Tested (22).* You should see `PHP 8.4` or newer, then the two words `mysqli`
+and `sodium`.
+
+If not: your host has more than one PHP. Ask them for the name of the right
+one (often `php8.4`, or a full path) and use it wherever this page says `php`.
+*Your host.*
+
+### 1.3 How to run a piece of SQL
+
+SQL is what you type to the database. This page shows it in grey boxes marked
+`sql`. There are two ways to run one.
+
+**With a command line.** Start the database program:
+
+```bash
+mysql -h "$DB_HOST" -P "$DB_PORT" -u "$DB_USER" -p "$DB_NAME"
+```
+
+*Tested (16).* It asks `Enter password:`. Type the `db_pass` value (nothing
+shows as you type) and press Enter. You get a `mysql>` prompt. Paste the SQL,
+press Enter, read the answer. Type `exit` to leave.
+
+If it says `ERROR 1045 ... Access denied`, a value in 1.1 or the password is
+wrong. If it cannot connect at all, see [6.1](#61-the-database-cannot-be-reached).
+
+**Without a command line.** Use the database tool in your hosting panel (often
+called phpMyAdmin): choose the portal's database, open the "SQL" tab, paste,
+press "Go". *Your host.*
 
 ---
 
-## 4. Common failure modes + recovery
+## 2. What is backed up, and what is not
 
-### 4.1 DB connection lost
+Read this on a calm day. It decides what you can get back.
 
-**Symptom:** every page shows "Database error" or a bare 500.
+| | |
+| --- | --- |
+| **What a snapshot holds** | Every row of every table in the database. |
+| **What it does not hold** | Uploaded files (`_uploads/`), the keys (`_auth_keys/`), and the tables' own structure. |
+| **Where it is** | A folder `_backups/upgrade-YYYYMMDD-HHMMSS/` in the portal's folder: one file per table, and `_manifest.json`, written last. The time in the name is in the portal's own time zone. |
+| **When one is made** | Only when an upgrade runs, or when a global administrator presses **Run snapshot now** on `/admin/maintenance/backup`. **Nothing makes one on a timer.** |
+| **Who can read it** | Anyone who can read that folder. It contains everything, password fingerprints included. |
 
-```bash
-# Confirm MySQL is reachable from the shell:
-mysql -h mysql.example.com -u USER -p -e "SELECT NOW();"
-```
+*Tested (11, 23): the button, the folder, its contents.*
 
-If that hangs → DreamHost MySQL is down. Check
-[status.dreamhost.com](https://status.dreamhost.com/) and wait, OR open
-a ticket. There is nothing the portal can do.
+Close the portal ([section 4](#4-close-the-portal)) before you press **Run
+snapshot now**, if you can. The tables are copied one after another, so a
+snapshot taken while people are entering things can hold a record whose other
+half was not copied, and such a snapshot may not go back. *Read from the code,
+not tested.*
 
-If that responds → application-level issue. Check the credentials in
-`web/_auth_keys/db.php` haven't been edited.
+### 2.1 Three things the portal's own backup cannot do today
 
-### 4.2 Disk full
+We found these on 12 October 2026 by trying. Each is a fault in the portal,
+not in your installation. Until they are fixed, **also keep the second kind of
+backup** in [section 9](#9-the-second-kind-of-backup-a-full-dump).
 
-**Symptom:** uploads fail; backups fail; maintenance probe red.
+1. **Once the portal has imported one event from an outside calendar, no
+   snapshot can be made.** "Run snapshot now" says
+   `Snapshot failed: Failed to dump tblEvents: JSON encode failed: Malformed UTF-8 characters`.
+   The automatic snapshot before an upgrade fails the same way, and the
+   upgrade then refuses to run. Each failed try leaves a half-made folder in
+   the list, showing 0 tables: delete it there. *Tested (15, 23).*
+2. **Some snapshots cannot be put back.** If a record points at a *newer*
+   record of the same kind (a venue agreement replaced by a later one, a
+   category moved under a category made later), the restore stops with
+   `Cannot add or update a child row: a foreign key constraint fails`. The
+   check-only run does not notice. Nothing is damaged, but that snapshot is of
+   no use. *Tested (15).*
+3. **A large database needs more memory than most hosts allow.** With 200,000
+   rows in the activity log, a snapshot needed 434 MB and a restore 533 MB.
+   Under the common limit of 128 MB both stopped with
+   `Allowed memory size ... exhausted`. *Tested (15).*
 
-```bash
-# Where are the bytes?
-du -sh ~/portal/web/_backups/* | sort -h | tail
-du -sh ~/portal/web/_uploads/* | sort -h | tail
-```
+### 2.2 What to keep somewhere other than the server
 
-**Prune old backups** (KEEP at least 4 most recent):
+- A recent **full dump** of the database ([section 9](#9-the-second-kind-of-backup-a-full-dump)).
+- The three files in `_auth_keys/`: `auth_creds.php` (how to reach the
+  database), `enc.key` (unlocks every secret stored in the database) and
+  `offsite.key` (unlocks the off-site copies). **Keep the files themselves**,
+  not text copied out of them.
+- The `_uploads/` folder. Nothing in the portal copies it anywhere.
+- The off-site copy described in `docs/offsite-backup-setup.md`.
 
-```bash
-ls -1tr ~/portal/web/_backups/snapshot-* | head -n -4 | xargs rm -rf
-```
+A backup you have never put back is a hope, not a backup. Practise section 8
+on a spare copy.
 
-**Prune queue-rejected photos older than 30 days:**
+---
 
-```bash
-find ~/portal/web/_uploads/photos/queue -type f -mtime +30 -delete
-```
+## 3. First five minutes: what is actually wrong?
 
-### 4.3 Bad migration
+Do nothing that changes anything yet.
 
-**Symptom:** site 500s right after a deploy. `/admin/migrations` red.
+1. Open the portal in a private browser window. What do you see?
 
-```bash
-# Roll back to the last known-good snapshot via the admin UI:
-#   /admin/maintenance/backup → select the previous snapshot → Restore.
-```
+   | You see | It means | Go to |
+   | --- | --- | --- |
+   | The sign-in page | The portal is up. Sign in and carry on with step 2. | |
+   | "Portal Maintenance" | The portal is closed: somebody closed it, or an upgrade is waiting. | `/admin/upgrade` after signing in at `/login` |
+   | `Database connection error.` | The portal cannot reach its database. | [6.1](#61-the-database-cannot-be-reached) |
+   | "Install — Welcome" | **Stop.** The file `_auth_keys/auth_creds.php` is missing. The portal is offering its installation wizard to every visitor. | [6.1](#61-the-database-cannot-be-reached) |
+   | A blank page or "500" | A fault in the code or the server. | [section 5](#5-where-to-look) |
 
-If admin is also broken, do it from the shell — see **section 5**.
+   *Tested (16, 22).*
+2. Open `/admin/maintenance/health`. Which card is not green?
+3. Open `/admin/errors`. Anything in the last hour?
+4. Open `/admin/activity`. Anything you do not recognise: sign-ins at odd
+   hours, settings changed, accounts made?
 
-### 4.4 Stolen credentials
+*Tested (23): these pages open for a global administrator.*
 
-**Symptom:** unfamiliar admin activity in `/admin/activity` or an alert
-from `Logger::criticalAlert`.
+- Something you do not recognise in step 4: go to [section 7](#7-after-a-break-in).
+- Data is wrong or missing: go to [section 8](#8-put-a-snapshot-back).
+- Everything is down and your host's status page shows a fault: wait for the
+  host. There is nothing the portal can do. *Your host.*
 
-1. Force-revoke every session:
-   ```sql
-   DELETE FROM tblSessions;
-   ```
-2. Force a password reset for every user (sets `passwordResetRequired = 1`):
-   ```sql
-   UPDATE tblUsers SET passwordResetRequired = 1;
-   ```
-3. Rotate the encryption key (re-encrypts every sensitive setting):
-   ```bash
-   php ~/portal/web/_install/rotate-enc-key.php
-   ```
-   If that script doesn't exist on your release, regenerate manually:
-   ```bash
-   openssl rand -base64 64 > ~/portal/web/_auth_keys/enc.key.new
-   # Then re-key every sensitive setting via the admin/settings UI.
-   mv ~/portal/web/_auth_keys/enc.key.new ~/portal/web/_auth_keys/enc.key
-   ```
-4. Audit `/admin/activity` for the last 48 hours; flag anything suspect.
-5. Rotate API keys for every integration in `/admin/integrations/*` whose
-   keys were stored encrypted (Zoom, Stripe, MS365, Google, OpenAI,
-   Anthropic, Twilio, etc).
+---
 
-### 4.5 Compromised user account (not admin)
+## 4. Close the portal
+
+Closing it shows everybody a holding page while you work. Global
+administrators can still sign in and use every page. `/login` and
+`/forgot-password` stay open to everyone.
+
+The holding page always says the portal "is being upgraded". Type your own
+message so people are not misled.
+
+### 4.1 From the portal
+
+1. Open `/admin/settings/maintenance`.
+2. Tick **Maintenance mode active**. Type a message, for example "Back at
+   3pm".
+3. Press Save. You should see "Maintenance mode settings saved."
+
+*Tested (16).* A visitor now gets the holding page with your message. Your own
+dashboard shows "Maintenance mode is on" at the top.
+
+To open the portal again, untick the box and save.
+
+### 4.2 With SQL, when the pages will not load
 
 ```sql
--- Disable + force re-login:
-UPDATE tblUsers SET isActive = 0 WHERE emailAddress = 'compromised@example.com';
-DELETE FROM tblSessions WHERE userID = (
-  SELECT userID FROM tblUsers WHERE emailAddress = 'compromised@example.com'
-);
+UPDATE tblSettings SET settingValue = '1' WHERE settingKey = 'portal.maintenance.active' AND siteID IS NULL;
+SELECT settingValue FROM tblSettings WHERE settingKey = 'portal.maintenance.active' AND siteID IS NULL;
 ```
 
-Then run the offboarding flow at
-`/admin/users → Offboard → Revoke all access`.
+*Tested (16).* The second line should answer `1`.
+
+If it answers `Empty set`, the setting is missing. Add it:
+
+```sql
+INSERT INTO tblSettings (siteID, settingKey, settingValue, defaultValue, isSensitive) VALUES (NULL, 'portal.maintenance.active', '1', '0', 0);
+```
+
+*Tested (16).*
+
+To open the portal again:
+
+```sql
+UPDATE tblSettings SET settingValue = '0' WHERE settingKey = 'portal.maintenance.active' AND siteID IS NULL;
+SELECT settingValue FROM tblSettings WHERE settingKey = 'portal.maintenance.active' AND siteID IS NULL;
+```
+
+*Tested (16).* It should answer `0`.
+
+If the portal stays closed with the setting at `0`, an upgrade is waiting: the
+code is newer than the database. Sign in and open `/admin/upgrade`.
 
 ---
 
-## 5. Full restore from local snapshot
+## 5. Where to look
 
-When `_backups/` still exists on the server.
+| You see | Look here |
+| --- | --- |
+| Blank page or "500" | `/admin/errors`, then your host's PHP error log. *Your host.* |
+| `Database connection error.` | [6.1](#61-the-database-cannot-be-reached) |
+| "Too many failed attempts" at sign-in | Three wrong passwords from one address block that address for 15 minutes. *Tested (17).* Wait, and make sure nobody at that address tries meanwhile: a try while blocked is counted as another wrong one and keeps the block going. *Read from the code; the 15 minutes were not waited out.* |
+| Pages are slow | `/admin/maintenance/health` |
+| Email is not arriving | `/admin/integrations/email`, "Send test" |
+| An upgrade stopped | `/admin/migrations` lists every database change and its error. Then [6.3](#63-after-an-upgrade-that-went-wrong). |
 
-### 5.1 Via UI (preferred)
+The newest errors, when the pages will not load:
 
-1. SSH in and confirm `/admin/maintenance/backup` is reachable.
-2. Toggle **maintenance mode** (section 2).
-3. Pick the snapshot under `web/_backups/snapshot-YYYYMMDD_HHMMSS/`.
-4. Click **Full restore**. Confirm the prompt.
-5. Wait for "Restore complete" (1-10 minutes depending on size).
-6. Toggle maintenance mode off.
-7. Verify with `/admin/maintenance/health` — every probe green.
-
-### 5.2 Via CLI (admin UI broken)
-
-```bash
-ssh USER@portal.example.com
-cd ~/portal/web
-SNAP=$(ls -1tr _backups/snapshot-* | tail -1)
-echo "Restoring from ${SNAP}"
-
-# Each table is a JSON file under the snapshot dir.
-# DbBackup::restoreTable() is callable via a one-shot PHP harness:
-php -r '
-require "_core/bootstrap.php";
-use Portal\Core\DbBackup;
-$snap = $argv[1] ?? "";
-foreach (glob("$snap/*.json") as $f) {
-    $table = basename($f, ".json");
-    echo "Restoring $table … ";
-    $ok = DbBackup::restoreTable($table, $f);
-    echo ($ok ? "ok" : "FAILED") . "\n";
-}
-' "${SNAP}"
+```sql
+SELECT createdAt, errorSeverity, errorPlatform, errorCode, errorTitle FROM tblErrors ORDER BY errorID DESC LIMIT 50;
 ```
 
-If the harness fails midway, run it again — `restoreTable` is idempotent
-(TRUNCATE + bulk insert).
+*Tested (16).*
 
 ---
 
-## 6. Off-site restore — `_backups/` is gone
+## 6. Common failures
 
-When DreamHost lost the disk or the account, the local backup directory
-no longer exists. Fetch from the off-site copy you configured per
-[`docs/offsite-backup-setup.md`](offsite-backup-setup.md).
+### 6.1 The database cannot be reached
 
-### 6.1 Pull the latest ciphertext
+Every page shows `Database connection error.` *Tested (22).*
 
-```bash
-# rclone destination
-rclone copy myremote:portal-backups/snapshot-YYYYMMDD.tar.gz.enc ./
-# OR S3:
-aws s3 cp s3://my-bucket/portal-backups/snapshot-YYYYMMDD.tar.gz.enc ./
-# OR SFTP:
-scp user@backup.example.com:portal-backups/snapshot-YYYYMMDD.tar.gz.enc ./
-```
+1. Start the database program ([1.3](#13-how-to-run-a-piece-of-sql)) and run:
 
-### 6.2 Decrypt + extract
+   ```sql
+   SELECT NOW();
+   ```
 
-```bash
-openssl enc -aes-256-cbc -d -pbkdf2 \
-    -in snapshot-YYYYMMDD.tar.gz.enc \
-    -out snapshot-YYYYMMDD.tar.gz \
-    -pass file:web/_auth_keys/offsite.key
+   *Tested (16).* You should get today's date and time.
+2. **If the program cannot connect either**, the fault is at your host or in
+   the five values. Check your host's status page. Check the values against
+   the database page of your hosting panel. *Your host.*
+3. **If the program connects but the portal does not**, the portal's own copy
+   of the details is wrong. Compare `_auth_keys/auth_creds.php` with what you
+   typed in 1.1. A wrong password there gives exactly this message.
+   *Tested (22).*
 
-tar -xzf snapshot-YYYYMMDD.tar.gz -C web/_backups/
-```
+> **Never move, rename or delete `auth_creds.php` on a live portal.** Without
+> it the portal shows its installation wizard to every visitor.
+> *Tested (22).* Edit the file in place. If it is already missing, close the
+> site at your host first (*your host*), then put the file back from your safe
+> copy.
 
-### 6.3 Restore
+### 6.2 The disk is full
 
-Now follow **section 5** with the extracted snapshot.
+Uploads fail. "Run snapshot now" fails. (Not tested: we did not fill a disk.)
 
-**If `offsite.key` was also lost** (single point of failure): the
-ciphertext is permanently unrecoverable. This is why the key belongs in
-a separate password manager — see the off-site-backup threat model.
+1. See what is using the space:
+
+   ```bash
+   du -sh "$PORTAL"/_backups/* | sort -h | tail
+   du -sh "$PORTAL"/_uploads/* | sort -h | tail
+   ```
+
+   *Tested (22).* The biggest are listed last.
+2. Remove old snapshots. **Keep at least the newest four.** The safest way is
+   the **Delete** button beside each one on `/admin/maintenance/backup`.
+   *Tested (23).*
+3. Or from the command line. First list what would go:
+
+   ```bash
+   cd "$PORTAL/_backups" && for M in upgrade-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9]/_manifest.json; do [ -f "$M" ] && [ ! -L "${M%/_manifest.json}" ] && echo "${M%/_manifest.json}"; done | sort -r | tail -n +5
+   ```
+
+   *Tested (24).* This lists every **finished** snapshot except the newest
+   four. If it lists nothing, there are four or fewer finished snapshots and
+   nothing will be deleted. `No such file or directory` means `PORTAL` is not
+   set (1.1); nothing will be deleted then either.
+
+   Only a folder named exactly the way the portal names a snapshot
+   (`upgrade-`, eight digits, a hyphen, six digits) is counted. Half-made
+   folders (no `_manifest.json`, see 2.1), folders you named yourself and
+   links are never listed, never counted and never deleted by these commands.
+   Remove a half-made one with the **Delete** button.
+
+   Read the list. Then delete exactly those:
+
+   ```bash
+   cd "$PORTAL/_backups" && for M in upgrade-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9]/_manifest.json; do [ -f "$M" ] && [ ! -L "${M%/_manifest.json}" ] && echo "${M%/_manifest.json}"; done | sort -r | tail -n +5 | while IFS= read -r OLD; do rm -rf -- "$OLD"; done
+   cd "$PORTAL/_backups" && ls -1d upgrade-*/
+   ```
+
+   *Tested (24).* The last line shows what is left, half-made folders
+   included. Running it a second time deletes nothing more.
+
+Do not delete anything under `_uploads/` by hand. The database points at those
+files.
+
+### 6.3 After an upgrade that went wrong
+
+What the upgrade page does first, read from its code and not run by us as a
+whole: it closes the portal, takes a snapshot, and only then changes the
+database. If the snapshot fails it stops and changes nothing.
+
+- **"Backup failed: … — aborting upgrade."** This is fault 1 or 3 in
+  [2.1](#21-three-things-the-portals-own-backup-cannot-do-today). The message
+  offers a setting that skips the backup. **Do not use it until you have made
+  a full dump** ([section 9](#9-the-second-kind-of-backup-a-full-dump)).
+- **A database change failed part way.** Open `/admin/migrations` and read the
+  error. If you have a developer, send them that error before going back.
+- **To go back**, put back the snapshot the upgrade took
+  ([section 8](#8-put-a-snapshot-back)). Know this first: **a restore puts the
+  rows back. It never changes a table's shape.** If the upgrade had already
+  added or removed columns, the restore may refuse, with one of the messages
+  in [8.4](#84-when-it-refuses). It changes nothing when it refuses.
+  *Tested (15).* In that case only a full dump made before the upgrade
+  (section 9) brings everything back.
+
+Not tested: we did not run a real upgrade that failed.
 
 ---
 
-## 7. Communication template
+## 7. After a break-in
 
-Paste verbatim into Slack / email / SMS once you've taken **section 2**'s
-maintenance toggle.
+**The portal has no button that signs everybody out, and none that makes
+everybody choose a new password.** The steps below are what works today.
+Do them in this order. The order is what stops you locking yourself out.
+
+### 7.1 Close the portal
+
+[Section 4](#4-close-the-portal). You can still work; nobody else can.
+
+### 7.2 Check the portal can send email
+
+Open `/admin/integrations/email` and use "Send test" to send yourself a
+message. *Tested (23): the page opens. Sending was not tested: our copy has no
+mail settings.*
+
+Why now: step 7.6 depends on it. Read from the code, not run: "Send test"
+uses whichever mail service is set, but "Forgot password" sends its email only
+when the Microsoft 365 mail settings are filled in, and says "sent" either
+way. So one more test: in a private window, press "Forgot password" and type
+your own address. If no email comes within a few minutes, treat email as not
+working, whatever "Send test" did.
+
+**If either test does not arrive, carry on anyway.** In 7.6 you will set
+people's passwords yourself.
+
+### 7.3 Make every stored password unusable
+
+```sql
+UPDATE tblLocalAccounts SET passwordHash = '';
+SELECT COUNT(*) AS password_accounts, SUM(passwordHash = '') AS now_unusable FROM tblLocalAccounts;
+```
+
+*Tested (17).* The two numbers must be the same.
+
+What this does: nobody can sign in with a password until they have set a new
+one. What it does **not** do:
+
+- People who are signed in **stay** signed in. That is step 7.5.
+- Passkeys, and signing in with Microsoft or Google, are untouched. A
+  Microsoft or Google password is changed at Microsoft or Google. A passkey
+  has no provider: it is a row in the portal's own database.
+
+**Look for a way back in that a new password does not close.** An intruder
+who was signed in may have added a passkey, linked a Microsoft or Google
+account of their own, or made an account a global administrator. None of the
+steps on this page removes those. *Read from the code, not run: adding a
+passkey does not ask for the password.* List all three:
+
+```sql
+SELECT U.userID, U.fullName, U.emailAddress, W.createdAt AS passkey_added FROM tblWebAuthnCredentials W JOIN tblUsers U ON U.userID = W.userID ORDER BY W.createdAt DESC;
+SELECT U.userID, U.fullName, U.emailAddress, L.provider, L.linkedAt AS link_added FROM tblLinkedAccounts L JOIN tblUsers U ON U.userID = L.userID ORDER BY L.linkedAt DESC;
+SELECT userID, fullName, emailAddress, isActive FROM tblUsers WHERE isRootAdmin = 1;
+```
+
+*Tested (25).* The first lists every passkey, newest first; the second every
+linked account; the third every global administrator. For every row you do
+not recognise, ask the person it names whether it is theirs. This page has no
+tested command that removes one of these rows. Until somebody who knows the
+database has removed it, lock that account out
+([7.7](#77-lock-one-account-out)).
+
+### 7.4 Give yourself a new password, now, while you are still signed in
+
+1. Open `/admin/users`.
+2. Press **Edit** beside your own name.
+3. Type a new password. Save.
+
+*Tested (17).* You should see `User "your name" updated successfully.`
+
+**Before 7.5, sign in with the new password in a private window.** The page
+says "updated successfully" even when no password was stored, which happens
+for an account that never had a password of its own. *Seen once while this
+page was being checked, on 12 October 2026; not one of the numbered tests.*
+
+If you are not signed in, it will not save, or the new password does not let
+you in, do [7.8](#78-no-administrator-can-get-in) instead.
+
+### 7.5 Sign everybody out
+
+The portal keeps each signed-in person in a small file on the server. Deleting
+the files signs everybody out, you included.
+
+1. Open `/admin/maintenance/health`. On the card **Active sessions**, read the
+   line `Files in /some/folder (last 30 min)`. That folder is where the files
+   are. *Tested (17).*
+2. Count them, using that folder:
+
+   ```bash
+   SESSIONS=/folder/named/on/the/health/page
+   ls "$SESSIONS" | grep -c '^sess_'
+   ```
+
+   *Tested (17).* It must say at least `1`: you are signed in. `0` here
+   means the folder is wrong or was not typed. Put that right before step 3,
+   because a wrong folder also makes step 3 end on `0`.
+3. Delete them:
+
+   ```bash
+   SESSIONS=/folder/named/on/the/health/page
+   find "$SESSIONS" -maxdepth 1 -type f -name 'sess_*' -user "$(id -un)" -delete
+   ls "$SESSIONS" | grep -c '^sess_'
+   ```
+
+   *Tested (17).* The last line should say `0`. Everybody's next click takes
+   them to the sign-in page.
+
+   On a server shared with other customers the number may stay above 0: the
+   files left are other people's, and were not touched. *Your host.*
+
+Things to know:
+
+- Every PHP website on the same hosting account that uses that folder is
+  signed out too, including test copies of the portal.
+- If the card says `save_path unreadable`, or names something that is not a
+  folder, your host keeps sessions somewhere else. Ask them how to clear all
+  PHP sessions for your account. *Your host.*
+- Without a command line: use your host's file manager if it can reach that
+  folder. Otherwise ask the host. *Your host.*
+
+### 7.6 Sign in again, and tell everybody what to do
+
+1. Sign in with the password from 7.4. *Tested (17).*
+2. Tell people, in these words:
+
+   > Go to the sign-in page and press "Forgot password". You will get an email
+   > with a link. It works for 60 minutes. **Do not try your old password.**
+
+   *Tested (17): the link lets a person set a new password and sign in. The
+   email itself was not tested.*
+
+Why the warning: three wrong passwords from one address block that address for
+15 minutes. An office usually shares one address, so one person's guesses lock
+out everybody there. While it is blocked, "Forgot password" still says the
+email was sent, and sends nothing. *Tested (17).* Every try while blocked is
+counted as another wrong one, so the block lasts until that address has made
+fewer than three in 15 minutes: everybody there has to stop. *Read from the
+code; not waited out.*
+
+People can do this while the portal is still closed: the "Forgot password"
+page stays open. *Tested (16).* After signing in they see the holding page
+until you open the portal.
+
+**If email is not working**, set each person's password yourself: `/admin/users`,
+Edit, new password, Save. Tell them by phone, not by a message.
+
+### 7.7 Lock one account out
+
+Use this when one person's account is the problem.
+
+From the portal: `/admin/users`, **Edit**, untick **Active**, Save.
+*Tested (17).* Or with SQL:
+
+```sql
+UPDATE tblUsers SET isActive = 0 WHERE emailAddress = 'person@example.com';
+SELECT userID, fullName, emailAddress, isActive FROM tblUsers WHERE emailAddress = 'person@example.com';
+```
+
+*Tested (17).* The last column should say `0`. Note the `userID`.
+
+From then on that person cannot sign in with a password (*tested, 17*), a
+passkey, Microsoft or Google (*read from the code, not run*).
+
+**If they are signed in at this moment, they stay signed in.** Switching the
+account off does not end a session that is already open. *Tested (17).* End it
+yourself, with the folder from 7.5 and the `userID` from above in place of
+`NUMBER`:
+
+```bash
+SESSIONS=/folder/named/on/the/health/page
+grep -l 'user_id|i:NUMBER;' "$SESSIONS"/sess_* 2>/dev/null | xargs rm -f
+grep -l 'user_id|i:NUMBER;' "$SESSIONS"/sess_* 2>/dev/null | wc -l
+```
+
+*Tested (25).* The first command prints nothing whether it worked or not; the
+last line counts that person's sessions still open and should say `0`. Only
+that person is signed out. With no command line, sign everybody out (7.5).
+
+`0` is also what a wrong folder or a wrong number gives. If you ran the count
+in 7.5 step 2 with this folder and it said `1` or more, the folder is right.
+
+To let the person back in, tick **Active** again, or run the same SQL with
+`isActive = 1`.
+
+### 7.8 No administrator can get in
+
+Step 2 needs PHP on a command line. Without one on the server: press "Forgot
+password", if email works (7.2). Or run step 2 on any computer that has PHP
+(the line it prints works on any server), and paste steps 1 and 3 into your
+host's database tool.
+
+1. Find a global administrator's username:
+
+   ```sql
+   SELECT LA.username, U.emailAddress FROM tblLocalAccounts LA JOIN tblUsers U ON U.userID = LA.userID WHERE U.isRootAdmin = 1 AND U.isActive = 1;
+   ```
+
+   *Tested (17).*
+2. Turn a new password into the form the database stores:
+
+   ```bash
+   php -r 'echo "New password: "; echo password_hash(trim(fgets(STDIN)), PASSWORD_DEFAULT), "\n";'
+   ```
+
+   *Tested (17).* Type the password and press Enter. It prints one line of 60
+   characters starting `$2y$`. Copy that whole line.
+3. Store it, with the line and the username in place of the two capitalised
+   words:
+
+   ```sql
+   UPDATE tblLocalAccounts SET passwordHash = 'PASTE_THE_LINE_PHP_PRINTED' WHERE username = 'YOUR_USERNAME';
+   SELECT username, passwordHash <> '' AS has_password FROM tblLocalAccounts WHERE username = 'YOUR_USERNAME';
+   ```
+
+   *Tested (17).* `has_password` should say `1`. Sign in with the new
+   password.
+
+Paste this at the `mysql>` prompt or into your host's tool. Do not put it
+after `mysql -e` on a command line: the `$` signs would be changed.
+
+### 7.9 Secrets and keys
+
+**The file `_auth_keys/enc.key`.** The portal has no tool that changes this
+key. **Do not replace the file by hand.** Everything stored with the old key
+becomes unreadable at once: every integration's secret, and every person's
+two-factor sign-in. Putting the old file back makes it readable again.
+*Tested (18).*
+
+What to do instead, after a break-in:
+
+1. At each outside service (payments, text messages, video, email, maps and
+   the rest), make a new secret and cancel the old one. *Your provider.*
+2. Type the new secret into that service's page under `/admin/integrations`.
+3. On `/admin/integrations/api-keys`, revoke every key and issue new ones.
+   *Tested (23): the page opens. Revoking was not run.*
+4. Change the database password in your hosting panel, then change `db_pass`
+   in `_auth_keys/auth_creds.php` to match. Edit the file; do not move it.
+   *Your host.*
+5. If you use the off-site copy: the intruder could read `offsite.key`. Make a
+   new one for future copies (`docs/offsite-backup-setup.md`). Keep the old
+   one for as long as you keep the old copies.
+
+Assume everything in the database was read, and everything in `_backups/`:
+each snapshot is a full copy.
+
+### 7.10 Work out what was done
+
+Open `/admin/activity` and read back from now to before the break-in. Write
+down anything changed. If data was altered, go to section 8. **If you
+restore, come back and repeat 7.3 to 7.9**: a restore undoes them
+([8.1](#81-what-a-restore-does)).
+
+Open the portal again ([section 4](#4-close-the-portal)) only when you are
+satisfied.
+
+---
+
+## 8. Put a snapshot back
+
+### 8.1 What a restore does
+
+- It replaces **every row of every table** with the rows in the snapshot.
+  Everything entered since the snapshot was made is lost. If the present data
+  might matter, make a full dump first (section 9).
+- It is **all or nothing**. If anything goes wrong, nothing changes. We made
+  it fail in seven different ways, and killed it half way; each time the
+  database was exactly as before. *Tested (14, 15).*
+- It does not touch files, keys or who is signed in.
+- **After a break-in, a restore undoes section 7.** A snapshot from before
+  you did those steps brings back every old password, switches back on any
+  account you switched off, and undoes your own new password. The portal can
+  be open afterwards even though you closed it (8.2, and 8.3 step 4).
+  *Tested (26).* It brings back revoked keys too, because they are rows like
+  any other (*not run*). Close the portal again straight after the restore
+  ([4.2](#42-with-sql-when-the-pages-will-not-load)) and repeat 7.3 to 7.9
+  before you open it.
+- It needs the tables to exist already. If the database is empty, go to
+  [8.5](#85-the-database-is-empty-or-gone) first.
+- Put a snapshot back onto the **same release** that made it. To compare, with
+  the snapshot's name in place of the example:
+
+  ```bash
+  cd "$PORTAL"
+  SNAP=_backups/upgrade-YYYYMMDD-HHMMSS
+  grep -A1 '"settingKey": "portal.installed_version"' "$SNAP/tblSettings.json"
+  php -r 'echo "This portal: ", require "_core/version.php", "\n";'
+  ```
+
+  *Tested (22).* The two version numbers should match. If the snapshot's is
+  older, it was made before an upgrade: read
+  [6.3](#63-after-an-upgrade-that-went-wrong) first.
+
+### 8.2 From the portal
+
+1. Open `/admin/maintenance/backup`.
+2. Find the snapshot. The name is the date and time it was made.
+3. Press **Inspect**. You see one line per table.
+4. Press **Restore ALL tables** and confirm. (The box that asks you to confirm
+   uses the word "TRUNCATE". Ignore that; it is out of date.)
+5. Wait. From the command line, our test machine wrote about 1,650 rows a
+   second. *Tested (15).*
+
+*Tested (11).* Green means done: `Snapshot put back in full: 224 tables, 1472 rows.`
+(your numbers will differ). Red means it refused and changed nothing: go to
+[8.4](#84-when-it-refuses).
+
+The page closes the portal while it works and **opens it again when it
+finishes**. If you had closed the portal yourself, close it again
+([section 4](#4-close-the-portal)).
+
+Do not use the **Restore** button beside a single table. Read from the code:
+it refuses for any table that other tables point at, which is about a third of
+them.
+
+Not tested: a restore so long that the page itself times out. If that happens,
+use 8.3.
+
+### 8.3 From the command line
+
+Use this when the pages will not load. Close the portal first if you can
+([4.2](#42-with-sql-when-the-pages-will-not-load)).
+
+1. List the newest snapshots:
+
+   ```bash
+   cd "$PORTAL"
+   ls -1d _backups/upgrade-*/ | sort | tail -3
+   ```
+
+   *Tested (23).* The newest is last.
+2. Check the one you chose. **This changes nothing.** Put its name in place of
+   the example:
+
+   ```bash
+   cd "$PORTAL"
+   SNAP=_backups/upgrade-YYYYMMDD-HHMMSS
+   php -r '
+   require "_core/bootstrap.php";
+   $checkOnly = ($argv[2] ?? "") !== "restore";
+   echo $checkOnly ? "CHECK ONLY - nothing will be changed\n" : "RESTORE\n";
+   $result = (new Portal\Core\DbBackup(Portal\Core\App::db()))->restoreAll($argv[1], $checkOnly);
+   print_r($result);
+   exit($result["success"] === true ? 0 : 1);
+   ' "$SNAP" check
+   ```
+
+   *Tested (12).* You should see `CHECK ONLY`, then `[success] => 1` with the
+   number of tables and rows.
+
+   The check reads every file and confirms none is damaged. It cannot promise
+   the restore will succeed, but a restore that fails changes nothing.
+3. Do it. The same command, with the last word changed to `restore`:
+
+   ```bash
+   cd "$PORTAL"
+   SNAP=_backups/upgrade-YYYYMMDD-HHMMSS
+   php -r '
+   require "_core/bootstrap.php";
+   $checkOnly = ($argv[2] ?? "") !== "restore";
+   echo $checkOnly ? "CHECK ONLY - nothing will be changed\n" : "RESTORE\n";
+   $result = (new Portal\Core\DbBackup(Portal\Core\App::db()))->restoreAll($argv[1], $checkOnly);
+   print_r($result);
+   exit($result["success"] === true ? 0 : 1);
+   ' "$SNAP" restore
+   ```
+
+   *Tested (12).* You should see `RESTORE`, then `[success] => 1`.
+4. Open the portal if it should be open
+   ([4.2](#42-with-sql-when-the-pages-will-not-load)). After this kind of
+   restore it is open or closed as it was **when the snapshot was made**,
+   because that setting is a row like any other. *Tested (12).* A snapshot
+   taken by an upgrade was made with the portal closed. *Read from the code,
+   not run.*
+
+If your connection drops while it runs, nothing has changed. Start again.
+*Tested (15).*
+
+### 8.4 When it refuses
+
+In every case below the database is unchanged. *Tested (13, 14, 15, 23).*
+
+| The message contains | It means | Do this |
+| --- | --- | --- |
+| `The saved copy of ... is damaged` | A file in the snapshot was cut short or altered. | Use another snapshot, or the off-site copy. |
+| `This snapshot has no manifest` | The snapshot never finished being made. | Use another snapshot. |
+| `not in the backups folder` | The name after `SNAP=` is wrong. | It must be a folder inside `_backups/`. |
+| `Cannot add or update a child row` | Fault 2 in [2.1](#21-three-things-the-portals-own-backup-cannot-do-today), or a file was altered. | The portal cannot put this snapshot back. Use a full dump (section 9). |
+| `Unknown column`, `doesn't have a default value`, or `Table '...' doesn't exist` inside the `[error]` line | The tables have changed shape since the snapshot, usually by an upgrade. | [6.3](#63-after-an-upgrade-that-went-wrong) |
+| No `Array` at all, only a long `Fatal error` naming `tblSites` | The database has no tables. | [8.5](#85-the-database-is-empty-or-gone) |
+| `Allowed memory size ... exhausted` | Fault 3 in 2.1. | Use the command line, and change `php -r` to `php -d memory_limit=1G -r` in both commands of 8.3. *Tested (23).* If your host refuses that much, use a full dump. |
+
+### 8.5 The database is empty or gone
+
+Needs a command line. Not possible from the portal's pages: a new database has
+no accounts, so nobody can sign in to press Restore.
+
+1. Make sure an empty database exists, with the name and user in
+   `auth_creds.php`. You make one in your hosting panel. *Your host.*
+2. Count its tables:
+
+   ```sql
+   SELECT COUNT(*) AS tables_in_database FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE();
+   ```
+
+   *Tested (13).* It should say `0`. **If it does not, stop.** This section is
+   only for an empty database; use 8.3 instead.
+3. Build the empty tables:
+
+   ```bash
+   mysql -h "$DB_HOST" -P "$DB_PORT" -u "$DB_USER" -p "$DB_NAME" < "$PORTAL/_sql/full_schema.sql"
+   ```
+
+   *Tested (13).* It asks for the password, then prints eight lines that each
+   say `1`. That is normal.
+4. Count the tables again with the SQL in step 2. On release 1.4.0 it says
+   `224`. *Tested (13).*
+5. Put the snapshot back: [8.3](#83-from-the-command-line), steps 2 to 4.
+6. Sign in with an account from before.
+
+*Tested (13): we dropped the whole database, followed these steps, and every
+table came back identical.*
+
+Without a command line, your host's database tool can import
+`_sql/full_schema.sql` for step 3 (*your host*), but step 5 still needs one,
+so this route is closed. Put back a full dump instead
+([9.2](#92-put-one-back), your host's "Import"). With no dump, you need
+somebody who has a command line.
+
+### 8.6 The server's own snapshots are gone
+
+Use the off-site copy, if you set one up (`docs/offsite-backup-setup.md`).
+
+1. Get the portal's files back onto a server. *Your host.*
+2. Put your safe copies of `auth_creds.php`, `enc.key` and `offsite.key` back
+   into `_auth_keys/`.
+3. Fetch the newest file from your destination into the portal's `_backups`
+   folder. It is named `upgrade-YYYYMMDD-HHMMSS.tar.gz.enc`. One of:
+
+   ```bash
+   rclone copy myremote:portal-backups/upgrade-YYYYMMDD-HHMMSS.tar.gz.enc "$PORTAL/_backups/"
+   aws s3 cp s3://my-bucket/portal-backups/upgrade-YYYYMMDD-HHMMSS.tar.gz.enc "$PORTAL/_backups/"
+   scp user@backup.example.com:portal-backups/upgrade-YYYYMMDD-HHMMSS.tar.gz.enc "$PORTAL/_backups/"
+   ```
+
+   *Your host and your destination. Not run by us.* `myremote`, `my-bucket`
+   and the address are examples.
+4. Unlock and unpack it, with the file's name in place of the example:
+
+   ```bash
+   cd "$PORTAL/_backups"
+   NAME=upgrade-YYYYMMDD-HHMMSS
+   openssl enc -aes-256-cbc -d -pbkdf2 -in "$NAME.tar.gz.enc" -out "$NAME.tar.gz" -pass file:../_auth_keys/offsite.key
+   tar -xzf "$NAME.tar.gz"
+   ls -1 "$NAME" | wc -l
+   ```
+
+   *Tested (27).* The number is one more than the number of tables: `225` on
+   release 1.4.0.
+
+   `bad decrypt` means the key is wrong, or is not the file as it was made.
+   A key made with an older version of our instructions has two lines; if it
+   was pasted back as one line it no longer works. Use the file itself.
+   *Tested (20; a wrong key, 27).*
+
+   **Only when you have seen that number**, remove the two packed files. The
+   unpacked folder stays:
+
+   ```bash
+   NAME=upgrade-YYYYMMDD-HHMMSS
+   cd "$PORTAL/_backups" && rm "$NAME.tar.gz" "$NAME.tar.gz.enc"
+   ```
+
+   *Tested (27).* It prints nothing. If `PORTAL` is not set it prints
+   `No such file or directory` and removes nothing. This used to be the last
+   line of the box above, where it deleted the file you had fetched even when
+   unlocking it had failed.
+5. Carry on with [8.5](#85-the-database-is-empty-or-gone), or with 8.3 if the
+   database still has its tables.
+
+*Tested (20): database, snapshots and key file all lost, then rebuilt this
+way: identical to the original.*
+
+Step 4 can be done on your own computer, then the unpacked folder uploaded
+into `_backups/`.
+
+**If `enc.key` is lost**, the database comes back but every stored secret is
+unreadable. Type each integration's secret in again. People who use a
+two-factor code will not be able to sign in; that needs a developer.
+*Not tested.*
+
+**If `offsite.key` is lost**, the off-site copies cannot be opened by anybody,
+ever.
+
+---
+
+## 9. The second kind of backup: a full dump
+
+A dump is one file holding the whole database, structure and rows, made by the
+database's own tool. It copes with everything in
+[2.1](#21-three-things-the-portals-own-backup-cannot-do-today). Make one
+before every upgrade and on a regular day.
+
+### 9.1 Make one
+
+```bash
+mysqldump -h "$DB_HOST" -P "$DB_PORT" -u "$DB_USER" -p --single-transaction --no-tablespaces --hex-blob "$DB_NAME" > ~/portal-dump.sql
+tail -1 ~/portal-dump.sql
+```
+
+*Tested (21).* The last line must read `-- Dump completed on` and a date. If
+it does not, the dump is incomplete: do not rely on it.
+
+The file contains everything, password fingerprints included. Keep it out of
+any folder a browser can reach, copy it off the server, then delete it there.
+
+Without a command line: your hosting panel's own database backup, or
+phpMyAdmin's "Export". *Your host.*
+
+### 9.2 Put one back
+
+Close the portal first ([section 4](#4-close-the-portal)).
+
+```bash
+mysql -h "$DB_HOST" -P "$DB_PORT" -u "$DB_USER" -p "$DB_NAME" < ~/portal-dump.sql
+```
+
+*Tested (21): database dropped, dump put back, every table and every row
+identical, including the two kinds of record the portal's own snapshot cannot
+handle.* It prints nothing when it works.
+
+**This is not all or nothing.** If it stops half way, the database is part
+old and part new. Fix what stopped it and run the same command again from the
+top; running it twice is safe. *Tested (21).*
+
+It replaces every table that is in the dump. Everything entered since the dump
+was made is lost.
+
+Afterwards the portal is open or closed as it was **when the dump was made**,
+whatever you did before putting it back. *Tested (26).* Check with the second
+line of the SQL in [4.2](#42-with-sql-when-the-pages-will-not-load), and close
+it again if it should be closed. After a break-in, a dump from before your
+steps undoes section 7 exactly as a snapshot does
+([8.1](#81-what-a-restore-does)).
+
+Without a command line: phpMyAdmin's "Import". *Your host.*
+
+---
+
+## 10. Tell people
+
+Send this once the portal is closed.
 
 > **Subject:** Portal temporarily unavailable
 >
-> Hi team,
+> The portal is closed while we look into a technical problem. Signing in and
+> every page are affected.
 >
-> Our portal is currently unavailable while we investigate a technical
-> issue. Sign-in, dashboards, and uploads are all affected.
+> We expect it back by **[time and time zone]**, and will write again by
+> **[time]** either way.
 >
-> We're aware and working on it. Expected back: **[time + timezone]** /
-> we'll update by **[time]** if we don't have a fix yet.
+> We will tell you if anything you entered needs entering again.
 >
-> Nothing you submitted is lost — we'll send a follow-up once we're
-> sure everything is in order.
+> Sorry for the trouble.
 >
-> Sorry for the disruption.
->
-> — [Name]
+> [Name]
+
+Do not promise that nothing was lost. A restore loses whatever was entered
+after the snapshot.
 
 ---
 
-## 8. Post-incident review
+## 11. Afterwards
 
-Within 7 days of any incident that triggered maintenance mode:
+Within a week:
 
-1. **What happened?** Two-sentence summary.
-2. **Timeline.** When did each step occur? (Lift from `/admin/activity`.)
-3. **What broke?** Specific failing component.
-4. **What worked?** Probes that caught it, dashboards that helped.
-5. **Where did the runbook fail us?** Update this file.
-6. **Action items.** Ideally 1–3 concrete items, with owners + dates.
-7. **Disclosure.** Did personal data leak? If yes, ICO notification within
-   72 hours is mandatory under UK GDPR.
+1. **What happened**, in two sentences.
+2. **When**: each step and its time, from `/admin/activity`.
+3. **What broke**, exactly.
+4. **What helped.**
+5. **Where this page was wrong or unclear.** Correct it.
+6. **What will change**: one to three things, each with a name and a date.
+7. **Was personal information exposed?** Many countries set a deadline for
+   telling the regulator and the people affected (in the United Kingdom, 72
+   hours to the Information Commissioner's Office). Check your own country's
+   rule the same day.
 
-File the review under `docs/incidents/YYYY-MM-DD-summary.md`.
+---
+
+## What was tested
+
+All on 12 October 2026: release 1.4.0, MySQL 8.0.36, PHP 8.5.10, a database
+user with rights to one database only, and a throwaway copy of the portal.
+"Identical" means every one of 224 tables had the same number of rows and the
+same fingerprint of its contents before and after.
+
+| # | What we did | Result |
+| --- | --- | --- |
+| 11 | Snapshot made with "Run snapshot now"; data damaged; **Restore ALL tables** pressed | Identical |
+| 12 | Data damaged; the two commands of 8.3 | Check changed nothing; restore: identical |
+| 13 | Whole database dropped; the steps of 8.5 | Identical, structure included |
+| 14 | Three faulty snapshots (a file cut short; a row the database refuses, half way through writing; no manifest) | Each refused; database unchanged |
+| 15 | The three faults in 2.1; tables changed shape four ways; a restore killed half way | As described; database unchanged after every failure |
+| 16 | Portal closed and opened, by SQL and from the page; the errors query | As described |
+| 17 | Every step of section 7 except sending email | As described |
+| 18 | `enc.key` replaced, then put back | Secret unreadable, then readable again |
+| 19 | The example off-site script: whole runs; every message in its table except the `aws` and `scp` ones; a failed upload and a failed encryption; stopped by a signal (interrupt, terminate, hang-up, quit); a keep number that is not a whole number; old copies deleted, with the real rclone 1.75.2 and a folder on the test machine. In bash 5.3, 3.2 and (on Linux) 4.4 | As `docs/offsite-backup-setup.md` describes |
+| 20 | Database, snapshots and key file lost; the steps of 8.6 then 8.5 | Identical |
+| 21 | Full dump made; database dropped; dump put back, twice | Identical both times |
+| 22 | PHP check; database unreachable; missing `auth_creds.php`; the two disk-usage commands; release check | As described |
+| 23 | Every address on this page opened; snapshot Delete button; the memory option | As described |
+| 24 | The two commands of 6.2 step 3: finished and half-made folders mixed; `PORTAL` not set; a folder name with a space; a folder named by hand; a link named like a snapshot; a name holding a line break; four or fewer; no finished snapshot; run twice | Only the oldest finished snapshots were deleted; in every other case nothing was |
+| 25 | The three queries of 7.3; the count of 7.5 step 2 with the right folder and a wrong one; the three lines of 7.7 | As described |
+| 26 | A snapshot made; 4.2, 7.3, 7.7 and 7.8 step 3 done by SQL; the snapshot put back with 8.3. Then a dump made with the portal open, the portal closed, the dump put back with 9.2 | Every old password matched its stored fingerprint again, the locked account was switched on, the new password no longer matched, the portal was open. After the dump: the portal open |
+| 27 | A copy made by the example script fetched back; 8.6 step 4 with a wrong key, then the right one; the box that removes the packed files, with `PORTAL` set and not set; the check of 8.3 step 2 | Wrong key: `bad decrypt`, the fetched file untouched. Right key: 225 files, identical to the original snapshot; the check passed |
+
+**Not tested:** MySQL 8.4 and MariaDB; any real hosting company; real email;
+rclone with anything but a folder on the test machine; S3 or SFTP; a real
+failed upgrade; a snapshot from an older
+release; a restore long enough to time out a web page; signing in with a
+passkey, Microsoft or Google.

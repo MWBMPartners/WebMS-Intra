@@ -2905,6 +2905,30 @@ Use the workflow_dispatch **dry-run** input on `deploy.yml` to preview what
 a deploy would change (and crucially, what it would delete) before pushing.
 See issue #107 for the full rationale and mitigation list.
 
+## Backups and recovery: what was proved on 12 October 2026 (#488)
+
+- **The runbook is `docs/disaster-recovery-runbook.md`.** Its table "What was
+  tested" lists each proof.
+- **A snapshot is rows only.** `DbBackup::snapshot()` writes one file per table
+  and a manifest last. It holds no table structure, no uploaded file and no
+  key. Nothing makes one on a timer (#581): only the upgrade page and the "Run
+  snapshot now" button do.
+- **A full restore is all or nothing, and that is now proved**: planted bad
+  snapshots, changes of table shape, and a restore killed half way each left
+  the database identical before and after.
+- **Three known faults of `DbBackup`**: #577 (raw bytes in a column stop every
+  snapshot, so one imported calendar event blocks upgrades), #578 (a row that
+  points at a later row of its own table cannot be put back), #579 (a whole
+  table is held in memory). Until they are fixed, the runbook tells
+  administrators to keep a full dump as well.
+- **When changing a document under `docs/`**, run
+  `python3 tools/audit-checks/check_docs_table_refs.py --strict`. A made-up
+  example name goes in its `ALLOWED_EXAMPLE_NAMES`, with the reason.
+- **When changing a command in the runbook, run it first.** The mark "Tested"
+  is a statement about that exact text.
+
+---
+
 ## End-to-end migration test (#248)
 
 Before each release, run every migration through real MySQL 8.0.36 and

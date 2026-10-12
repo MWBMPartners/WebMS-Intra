@@ -2,6 +2,38 @@
 
 
 ## [Unreleased] (alpha)
+- docs: **the disaster-recovery runbook now works** (#488). The old one told
+  an administrator to restore from a folder name the portal has never used, to
+  delete from a sessions table that does not exist, and to replace the
+  encryption key in a way that makes every stored secret unreadable. It is
+  rewritten. Every command in it was run on 12 October 2026 against a throwaway
+  copy of release 1.4.0 (MySQL 8.0.36), and each is marked "Tested" or "Your
+  host". A database damaged, then dropped outright, then lost together with
+  every snapshot on the server, was put back each time with all 224 tables
+  identical. It also says plainly what the portal cannot do today: no button
+  signs everybody out or forces new passwords, and nothing changes the
+  encryption key (#582); and that a restore after a break-in brings back every
+  old password and switches back on any account that was switched off.
+- docs: **three faults in the portal's own backup, found by this proof and not
+  fixed in this change**, are written into the runbook with what to do
+  meanwhile (keep a full dump as well; that route was proved too): #577, #578
+  and #579.
+- fix(tooling): **the example off-site backup script**
+  (`tools/offsite-backup/sync-offsite.sh.example`) had four faults. It looked
+  for a folder name the portal never makes, so it never sent anything. Once 20
+  copies were stored it deleted the newest ones, including the one it had just
+  sent, and reported success. It left the unencrypted snapshot readable by
+  other accounts while it uploaded. And a failed upload was silent. It now
+  takes the newest finished snapshot by name; counts and deletes only files of
+  the portal's own exact name, never the copy just sent; works in a private
+  folder that only its own account can open; and every way it can stop prints
+  an ERROR line, records the failure and leaves nothing behind.
+  `docs/offsite-backup-setup.md` is rewritten to match.
+- docs: **the erasure policy no longer names tables that do not exist**
+  (`docs/gdpr-erasure-policy.md`).
+- tooling: new `tools/audit-checks/check_docs_table_refs.py`. Every table a
+  document under `docs/` names must exist in `full_schema.sql`. It failed on
+  six names before the documents were corrected.
 - fix(account): **the "My volunteering" page no longer crashes for everyone**
   (#547). Its list of events asked MySQL 8 for a column it had not grouped,
   which MySQL 8 refuses by default (error 1055), so every member saw an error

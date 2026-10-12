@@ -1,43 +1,105 @@
 #!/usr/bin/env bash
 # -----------------------------------------------------------------------------
-# Off-site backup sync — DreamHost cron-compatible
+# tools/offsite-backup/sync-offsite.sh.example — copy the newest database
+# snapshot, encrypted, to a place outside the hosting account 📤
 # -----------------------------------------------------------------------------
-# Copy this script + log-offsite-result.php into web/_backups/ on the
-# server (a gitignored directory), make it executable, then schedule via
-# DreamHost's web panel:
+# An EXAMPLE to copy and edit, not a file the portal runs from here. Only web/
+# is deployed, so this file and log-offsite-result.php have to be put on the
+# server by hand, into the portal's _backups folder (which git ignores):
 #
-#   cp tools/offsite-backup/sync-offsite.sh.example web/_backups/sync-offsite.sh
-#   cp tools/offsite-backup/log-offsite-result.php  web/_backups/log-offsite-result.php
-#   chmod +x web/_backups/sync-offsite.sh
+#   cp sync-offsite.sh.example  "$PORTAL/_backups/sync-offsite.sh"
+#   cp log-offsite-result.php   "$PORTAL/_backups/log-offsite-result.php"
+#   chmod +x "$PORTAL/_backups/sync-offsite.sh"
 #
-#   Schedule:    Weekly, Sundays, 04:00 UTC
-#   Command:     /home/USER/portal/web/_backups/sync-offsite.sh
+# Then schedule it in the hosting panel (weekly is the usual choice). The full
+# steps, and how to get a copy back, are in docs/offsite-backup-setup.md.
 #
 # What it does:
-#   1. Picks the newest snapshot dir under web/_backups/.
-#   2. tars + gzips it.
-#   3. Encrypts with AES-256-CBC, key file at _auth_keys/offsite.key.
-#   4. Pushes to the configured destination (rclone | s3 | sftp).
-#   5. Prunes older off-site copies to keep-weekly / keep-monthly window.
-#   6. Writes a status line into tblOffsiteSyncLog via the helper PHP.
-#   7. Emails the alertEmail setting on failure.
+#   1. Picks the newest COMPLETE snapshot folder under _backups/ that is named
+#      the way the portal names one (upgrade-YYYYMMDD-HHMMSS). A folder with
+#      any other name is left out. One whose name starts "upgrade-" but is not
+#      of that exact shape also gets a WARNING line.
+#   2. Packs it into one .tar.gz file, in a folder made for this run that only
+#      the account running the script can open.
+#   3. Encrypts that with AES-256-CBC. The password is the FIRST LINE of the
+#      key file _auth_keys/offsite.key. The unencrypted pack is deleted as soon
+#      as the encrypted one exists, before anything is sent.
+#   4. Sends the encrypted file to the one destination chosen below (rclone,
+#      S3 or SFTP).
+#   5. With rclone only, deletes this portal's own older copies at the
+#      destination: files named upgrade-YYYYMMDD-HHMMSS.tar.gz.enc, beyond the
+#      newest KEEP_WEEKLY + KEEP_MONTHLY of them by name. The copy just sent is
+#      never deleted. A file with any other name is never counted or deleted.
+#      If the destination cannot be listed, nothing is deleted and a WARNING
+#      line says so.
+#   6. Records the run in tblOffsiteSyncLog, through log-offsite-result.php.
+#   7. If it stops before the end — a step fails, it refuses to start, or it is
+#      sent an interrupt, terminate, hang-up or quit signal — it deletes its
+#      working folder, records the run as failed (6), prints a line starting
+#      "ERROR:", emails ALERT_EMAIL when that is set below, and ends with exit
+#      code 1. One refusal cannot be recorded or emailed: "Cannot find the
+#      portal folder", because the recorder lives in that folder. It still
+#      prints its ERROR line and ends with exit code 1.
 #
-# Reference: https://github.com/MWBMPartners/webMS-Intra/issues/249
+# What it CANNOT do — read this before relying on it:
+#   - It does not MAKE a snapshot. The portal makes one only when an upgrade
+#     runs or when somebody presses "Run snapshot now" on
+#     /admin/maintenance/backup. If neither has happened since the last run,
+#     this sends the same old snapshot again. Each run prints the snapshot's
+#     name so that can be seen.
+#   - It copies the database snapshot ONLY. Uploaded files (_uploads/) and the
+#     keys (_auth_keys/) are not in it. Without a separate copy of
+#     _auth_keys/enc.key, the secrets inside a restored database cannot be read.
+#   - It reads none of the settings on /admin/maintenance/offsite-backup. The
+#     destination, how many copies to keep and the alert address are the
+#     variables in THIS file.
+#   - It does NOT check the snapshot's files against the checksums in its
+#     manifest. A snapshot that has a manifest but a damaged table file is sent
+#     and reported as a success. The portal's own check finds that: the
+#     check-only restore in docs/disaster-recovery-runbook.md, section 8.3.
+#   - It cannot tidy up after "kill -9", a crash of the server or a power cut.
+#     Its working folder (portal-offsite.XXXXXXXX in the temporary folder) is
+#     then left behind. Nobody but the account that ran the script can open
+#     it; delete it by hand.
+#   - A signal is acted on when the step in progress ends, not at once. If the
+#     upload was running, it runs to its end first.
+#   - It does not know whether the failure email arrived. Sending needs the
+#     server's "mail" program, and the recorded row (6) needs the logger to
+#     reach the database.
+#   - Old copies are deleted for rclone only, and judged by NAME only, never by
+#     the date a file was sent. What follows from that: if the destination
+#     already holds as many copies as are kept, all with LATER names than
+#     today's (a server clock that was wrong, or copies sent by another
+#     server), those are kept, and each run's new copy only replaces the copy
+#     the run before it sent.
+#   - It expects the destination folder to be this portal's ALONE. Two portals
+#     sending to one folder count and delete each other's copies.
+#
+# @package   WebMS-Intra (tooling — copied to the server by hand, never deployed)
+# @author    MWBM Partners Ltd (t/a MWservices)
+# @copyright MWBM Partners Ltd (t/a MWservices). All Rights Reserved.
+# @version   1.1.0 (12 October 2026, #488)
+# @link      https://github.com/MWBMPartners/WebMS-Intra/issues/249
 # -----------------------------------------------------------------------------
 
 set -euo pipefail
 
-# Resolve PORTAL_ROOT to web/ regardless of whether this script is run
-# from web/_backups/ (the deployed location) or tools/offsite-backup/ (the
-# repo location). We expect web/_backups/ + web/_auth_keys/ to exist
-# relative to PORTAL_ROOT.
+# Every file this script makes is for its owner only. The packed snapshot is
+# the whole database, password fingerprints included, and until step 2 ends it
+# is not encrypted. Without this line it was written readable by every account
+# on a shared server (#488).
+umask 077
+
+# Find the portal's own folder (the one holding _backups and _auth_keys),
+# whether this script runs from there (the copy on the server) or from
+# tools/offsite-backup/ in a checkout of the repository.
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 if [[ -d "${SCRIPT_DIR}/../_auth_keys" ]]; then
-    PORTAL_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"        # web/_backups → web/
+    PORTAL_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"        # _backups → the portal folder
 elif [[ -d "${SCRIPT_DIR}/../../web/_auth_keys" ]]; then
     PORTAL_ROOT="$(cd "${SCRIPT_DIR}/../../web" && pwd)" # tools/offsite-backup → web/
 else
-    echo "Cannot locate PORTAL_ROOT (expected web/_auth_keys/ near script)." >&2
+    echo "ERROR: Cannot find the portal folder (expected _auth_keys/ beside _backups/)." >&2
     exit 1
 fi
 
@@ -46,7 +108,7 @@ KEY_FILE="${PORTAL_ROOT}/_auth_keys/offsite.key"
 LOG_PHP="${BACKUPS_DIR}/log-offsite-result.php"
 
 # --- Destination (pick ONE block; comment out the others) -------------------
-# A. rclone remote (Backblaze B2, R2, GDrive, OneDrive, …)
+# A. rclone remote (Backblaze B2, R2, Google Drive, OneDrive, …)
 DESTINATION="rclone"
 RCLONE_REMOTE="myremote:portal-backups"
 
@@ -60,47 +122,246 @@ RCLONE_REMOTE="myremote:portal-backups"
 
 KEEP_WEEKLY=8
 KEEP_MONTHLY=12
+# Where a failure is emailed. Empty = no email. This is the ONLY place the
+# address is read from; the "alert email" box on the admin page is not used.
 ALERT_EMAIL=""
 
-# --- Helpers ----------------------------------------------------------------
+# The portal's own names: a snapshot folder is upgrade-YYYYMMDD-HHMMSS
+# (DbBackup::snapshot(), web/_core/DbBackup.php), and the copy this script
+# sends is that name plus .tar.gz.enc. Only these exact shapes are picked up
+# (step 1) or deleted (step 4). The looser "upgrade-*" used before took a
+# hand-named folder such as upgrade-before-the-move as the newest for ever,
+# because a letter sorts after every digit.
+SNAP_NAME_RE='^upgrade-[0-9]{8}-[0-9]{6}$'
+COPY_NAME_RE='^upgrade-[0-9]{8}-[0-9]{6}\.tar\.gz\.enc$'
+
+# --- How the script stops ---------------------------------------------------
+#
+# Every way out that bash can catch goes through die(), so the working folder
+# is always removed and the run is always recorded. The quit signal
+# (Ctrl-backslash) is in the lists below because bash 3.2, the Mac's /bin/bash,
+# does not ignore it the way bash 4 and 5 do: without it the script died on the
+# spot there and left the unencrypted pack behind (owner-only, but left).
+#
+# This used to rely on calling die() by hand, plus a trap for two signals. A
+# step that simply failed (a refused upload, a failed encryption) stopped the
+# script on the spot because of "set -e", WITHOUT die(): the unencrypted pack
+# stayed in /tmp for good, no failed row was written, no email was sent and no
+# ERROR line was printed (#488).
+#
+# An ERR trap that calls die() was tried and is not enough by itself: bash does
+# not run it for an unset variable or for a failure inside a function (seen in
+# bash 3.2 and 5.3). So the EXIT trap does the work, and the ERR trap only
+# notes the line number, which in bash 3.2 can be a few lines out. Because the
+# ERR trap stops nothing, it cannot go wrong on a command that is allowed to
+# fail.
+
+WORK_DIR=""           # the private folder for this run, once it exists
+LOG_TMP=""            # this run's output, kept for the recorded row
+BUNDLE=""             # the packed snapshot, NOT encrypted
+ENC=""                # the encrypted file that is sent
+OUTCOME_RECORDED=0    # 1 once the run has been recorded and tidied up
+FAIL_LINE=""          # set by the ERR trap
+
+remove_work_dir() {
+    # Only ever a folder this run made itself with mktemp. The test for an
+    # empty value is what stops this becoming "rm -rf" of nothing in particular.
+    if [[ -n "${WORK_DIR}" && -d "${WORK_DIR}" ]]; then
+        rm -rf -- "${WORK_DIR}"
+    fi
+}
 
 die() {
     local msg="$1"
-    echo "ERROR: ${msg}" >&2
-    php "${LOG_PHP}" --status=failed --destination="${DESTINATION}" --error="${msg}" --output="$(cat /tmp/portal-offsite-$$.log 2>/dev/null || true)" || true
-    if [[ -n "${ALERT_EMAIL}" ]]; then
-        echo "${msg}" | mail -s "[Portal] Off-site backup FAILED" "${ALERT_EMAIL}" || true
+    local run_output=""
+    # Nothing may cut the tidying short: not a second signal, not a failing
+    # command, and not a broken pipe (if "tee", below, has been stopped, the
+    # next line printed through it would otherwise end this script on the spot).
+    set +e
+    trap '' INT TERM HUP QUIT PIPE
+    trap - ERR EXIT
+    OUTCOME_RECORDED=1
+    # The unencrypted pack goes first, before anything that could be slow.
+    if [[ -n "${BUNDLE}" ]]; then
+        rm -f -- "${BUNDLE}"
     fi
-    rm -f /tmp/portal-offsite-$$.log /tmp/portal-offsite-$$.bundle.tar.gz /tmp/portal-offsite-$$.bundle.enc
+    # Straight to where errors went when the script started (4, kept below),
+    # and straight into the log, NOT through "tee": if tee has been stopped,
+    # a line sent through it would be lost.
+    echo "ERROR: ${msg}" >&4
+    if [[ -n "${LOG_TMP}" && -f "${LOG_TMP}" ]]; then
+        echo "ERROR: ${msg}" >> "${LOG_TMP}"
+        run_output="$(cat "${LOG_TMP}" 2>/dev/null)"
+    fi
+    php "${LOG_PHP}" --status=failed --destination="${DESTINATION:-unknown}" --error="${msg}" --output="${run_output}"
+    if [[ -n "${ALERT_EMAIL}" ]]; then
+        echo "${msg}" | mail -s "[Portal] Off-site backup FAILED" "${ALERT_EMAIL}"
+    fi
+    remove_work_dir
     exit 1
 }
 
-trap 'die "Script interrupted"' INT TERM
-LOG_TMP="/tmp/portal-offsite-$$.log"
-exec > >(tee -a "${LOG_TMP}") 2>&1
+on_exit() {
+    local rc=$?
+    if [[ "${OUTCOME_RECORDED}" -eq 0 ]]; then
+        die "A step failed${FAIL_LINE:+ near line ${FAIL_LINE}} (exit code ${rc}). If the upload had started, check the destination: the copy there may be missing or incomplete."
+    fi
+}
+
+# A second door to wherever errors went when the script started. die() writes
+# its ERROR line here, so that line does not depend on "tee" (below).
+exec 4>&2
+
+trap 'FAIL_LINE=${LINENO}' ERR
+trap on_exit EXIT
+trap 'die "Stopped by a signal before the end. If the upload had started, check the destination: the copy there may be missing or incomplete."' INT TERM HUP QUIT
+
+# A new folder with a name nobody can guess, which mktemp makes for this
+# account only. The fixed names used before (/tmp/portal-offsite-<number>.…)
+# could be made first by another account on a shared server. "umask" changes
+# nothing about a file that already exists, so on a server that lets the
+# script write into such a file, that account could read the unencrypted pack.
+# (The umask half was tried; the two-account half was not.)
+WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/portal-offsite.XXXXXXXX")" \
+    || die "Could not make a private working folder under ${TMPDIR:-/tmp}."
+LOG_TMP="${WORK_DIR}/run.log"
+BUNDLE="${WORK_DIR}/bundle.tar.gz"
+ENC="${WORK_DIR}/bundle.enc"
+
+# Everything printed from here on also goes into the run's log. "tee" must
+# outlive a signal sent to the whole group (Ctrl-C at a terminal does that),
+# or the lines printed while tidying up are lost and the first of them ends
+# this script on a broken pipe. Its own -i makes it ignore the interrupt; the
+# trap makes it ignore terminate and hang-up. Tried and rejected: ignoring all
+# three with the trap alone, which in bash 5.3 left tee open to the interrupt.
+# tee ends by itself when this script does.
+exec > >(trap '' TERM HUP QUIT; exec tee -i -a "${LOG_TMP}") 2>&1
+
+# --- 0. Refuse early, before any copy of the database is made ---------------
 
 if [[ ! -r "${KEY_FILE}" ]]; then
-    die "Encryption key not found at ${KEY_FILE}. Generate one: openssl rand -base64 64 > '${KEY_FILE}' && chmod 600 '${KEY_FILE}'"
+    die "Encryption key not found at ${KEY_FILE}. Make one: openssl rand -base64 48 > '${KEY_FILE}' && chmod 600 '${KEY_FILE}'"
 fi
 
-# --- 1. Pick newest snapshot ------------------------------------------------
+# openssl takes the password from the first line of the key file. A blank
+# first line means an EMPTY password: the copy would be "encrypted", reported
+# as a success, and openable by anybody. Counted here without ever putting the
+# key itself into a variable.
+KEY_FIRST_LINE_LENGTH="$(head -n 1 "${KEY_FILE}" | LC_ALL=C tr -d '[:space:]' | wc -c | tr -d '[:space:]')"
+if [[ "${KEY_FIRST_LINE_LENGTH}" -eq 0 ]]; then
+    die "The first line of ${KEY_FILE} is blank, so the copy would be locked with an empty password. Nothing was sent. If earlier copies were made with this file, move it aside and keep it: it is what opens them. Then make a new key: openssl rand -base64 48 > '${KEY_FILE}' && chmod 600 '${KEY_FILE}'"
+fi
 
-LATEST_SNAP="$(ls -1td "${BACKUPS_DIR}"/snapshot-* 2>/dev/null | head -1 || true)"
+# Characters 5 to 10 of what "ls -l" prints are the rights of the group and of
+# everybody else. Anything but six dashes means another account can read (or
+# change) the key. A warning, not a refusal: the copy is still worth sending.
+KEY_RIGHTS="$(ls -lLd "${KEY_FILE}")"
+if [[ "${KEY_RIGHTS:4:6}" != "------" ]]; then
+    echo "WARNING: other accounts on this server can use the key file (${KEY_RIGHTS:0:10}). Anybody who can read it can open every copy. Put it right: chmod 600 '${KEY_FILE}'"
+fi
+
+# The program and the address for the chosen destination. These were checked
+# only after the snapshot had been packed and encrypted; a destination with
+# its address still commented out then stopped on an "unbound variable".
+case "${DESTINATION}" in
+    rclone)
+        [[ -n "${RCLONE_REMOTE:-}" ]] || die "DESTINATION is rclone but RCLONE_REMOTE is not set in this file."
+        command -v rclone >/dev/null 2>&1 || die "rclone not installed"
+        ;;
+    s3)
+        [[ -n "${S3_BUCKET:-}" ]] || die "DESTINATION is s3 but S3_BUCKET is not set in this file."
+        command -v aws >/dev/null 2>&1 || die "aws CLI not installed"
+        ;;
+    sftp)
+        [[ -n "${SFTP_TARGET:-}" ]] || die "DESTINATION is sftp but SFTP_TARGET is not set in this file."
+        command -v scp >/dev/null 2>&1 || die "scp not installed"
+        ;;
+    *)
+        die "Unknown DESTINATION: ${DESTINATION}"
+        ;;
+esac
+
+# The two keep numbers are added together in step 4. Bash reads a number with
+# a leading nought as base eight, so "08" or "09" was an arithmetic error
+# there, and so was "8.5". The error skipped the whole tidy-up, and the run
+# still ended "complete" with exit code 0: old copies piled up with nothing to
+# say so (#488). Refused here instead, before anything is packed. Step 4 also
+# reads each as base ten, so "08" means eight.
+if [[ ! "${KEEP_WEEKLY}" =~ ^[0-9]+$ || ! "${KEEP_MONTHLY}" =~ ^[0-9]+$ ]]; then
+    die "KEEP_WEEKLY and KEEP_MONTHLY must be whole numbers; they are '${KEEP_WEEKLY}' and '${KEEP_MONTHLY}'. Nothing was sent."
+fi
+
+# --- 1. Pick the newest COMPLETE snapshot ----------------------------------
+#
+# The portal names a snapshot folder upgrade-YYYYMMDD-HHMMSS. This used to
+# look for snapshot-*, a name the portal has never used, so it always stopped
+# with "No snapshot found" (#488).
+#
+# Newest is decided by NAME, because the name carries the time; the portal's
+# own list (DbBackup::listSnapshots()) sorts the same way. The folder's
+# modified time is not used: unpacking an old snapshot beside newer ones would
+# make the old one look newest.
+#
+# The shell hands the names over in order, oldest first, so the last complete
+# one seen is the newest. That order is only certain for names of the exact
+# shape, which is one more reason the others are left out.
+#
+# A folder with no _manifest.json is skipped. The manifest is written last, so
+# its absence means the snapshot failed part way; sending that would report a
+# successful backup of something that cannot be restored.
+#
+# The trailing slash in upgrade-*/ matters: it matches folders only. Without it
+# a packed file left beside the folders (upgrade-….tar.gz, from a restore)
+# counts as a snapshot too, and is then reported as an unfinished one.
+LATEST_SNAP=""
+SKIPPED=""
+OTHER_NAMES=""
+for candidate in "${BACKUPS_DIR}"/upgrade-*/; do
+    if [[ ! -d "${candidate}" ]]; then
+        continue    # nothing matched, so the pattern itself came back
+    fi
+    candidate="${candidate%/}"
+    candidate_name="$(basename "${candidate}")"
+    if [[ ! "${candidate_name}" =~ ${SNAP_NAME_RE} ]]; then
+        OTHER_NAMES="${OTHER_NAMES} '${candidate_name}'"
+        continue
+    fi
+    if [[ -f "${candidate}/_manifest.json" ]]; then
+        LATEST_SNAP="${candidate}"
+        SKIPPED=""  # only unfinished ones NEWER than the chosen one are reported
+    else
+        SKIPPED="${SKIPPED} ${candidate_name}"
+    fi
+done
+
+if [[ -n "${OTHER_NAMES}" ]]; then
+    echo "WARNING: left out folder(s) not named upgrade-YYYYMMDD-HHMMSS, which this script never sends:${OTHER_NAMES}"
+fi
+if [[ -n "${SKIPPED}" ]]; then
+    echo "WARNING: skipped unfinished snapshot(s) with no _manifest.json:${SKIPPED}"
+fi
 if [[ -z "${LATEST_SNAP}" ]]; then
-    die "No snapshot found under ${BACKUPS_DIR}"
+    die "No complete snapshot (a folder named upgrade-YYYYMMDD-HHMMSS holding _manifest.json) found under ${BACKUPS_DIR}. Press 'Run snapshot now' on /admin/maintenance/backup first."
 fi
 SNAP_NAME="$(basename "${LATEST_SNAP}")"
 echo "Selected snapshot: ${SNAP_NAME}"
 
 # --- 2. Bundle + encrypt ---------------------------------------------------
 
-BUNDLE="/tmp/portal-offsite-$$.bundle.tar.gz"
-ENC="/tmp/portal-offsite-$$.bundle.enc"
-tar -czf "${BUNDLE}" -C "${BACKUPS_DIR}" "${SNAP_NAME}"
-openssl enc -aes-256-cbc -salt -pbkdf2 -in "${BUNDLE}" -out "${ENC}" -pass "file:${KEY_FILE}"
+# TMPDIR points both programs at the private folder for any scratch file of
+# their own. The tar on macOS makes one (tar.md.XXXXXX) and leaves it behind
+# when it is interrupted; without this it stayed in the shared temporary
+# folder after Ctrl-C (seen on 12 October 2026).
+TMPDIR="${WORK_DIR}" tar -czf "${BUNDLE}" -C "${BACKUPS_DIR}" "${SNAP_NAME}"
+TMPDIR="${WORK_DIR}" openssl enc -aes-256-cbc -salt -pbkdf2 -in "${BUNDLE}" -out "${ENC}" -pass "file:${KEY_FILE}"
+# The unencrypted pack has done its job. It used to stay until the upload had
+# finished, which on a slow connection is most of the run.
+rm -f -- "${BUNDLE}"
 BUNDLE_SIZE="$(stat -c%s "${ENC}" 2>/dev/null || stat -f%z "${ENC}")"
 echo "Bundle size: ${BUNDLE_SIZE} bytes"
 
+# The name at the destination follows the snapshot's own name, so the file to
+# fetch back is upgrade-YYYYMMDD-HHMMSS.tar.gz.enc.
 REMOTE_NAME="${SNAP_NAME}.tar.gz.enc"
 
 # --- 3. Upload --------------------------------------------------------------
@@ -108,18 +369,13 @@ REMOTE_NAME="${SNAP_NAME}.tar.gz.enc"
 START_TS="$(date +%s)"
 case "${DESTINATION}" in
     rclone)
-        command -v rclone >/dev/null 2>&1 || die "rclone not installed"
         rclone copyto "${ENC}" "${RCLONE_REMOTE}/${REMOTE_NAME}" --quiet
         ;;
     s3)
-        command -v aws >/dev/null 2>&1 || die "aws CLI not installed"
         aws s3 cp "${ENC}" "${S3_BUCKET}/${REMOTE_NAME}" --no-progress
         ;;
     sftp)
         scp -q "${ENC}" "${SFTP_TARGET}${REMOTE_NAME}"
-        ;;
-    *)
-        die "Unknown DESTINATION: ${DESTINATION}"
         ;;
 esac
 END_TS="$(date +%s)"
@@ -130,27 +386,63 @@ echo "Upload completed in ${DURATION}s"
 
 case "${DESTINATION}" in
     rclone)
-        # Keep the most recent KEEP_WEEKLY copies; older than that, keep one
-        # per month for KEEP_MONTHLY months. Simplified: keep the N newest.
-        TOTAL_KEEP=$((KEEP_WEEKLY + KEEP_MONTHLY))
-        rclone lsf --format "pt" --files-only --order-by modtime,desc "${RCLONE_REMOTE}" \
-            | awk -v keep="${TOTAL_KEEP}" 'NR > keep { print }' \
-            | awk -F';' '{ print $1 }' \
-            | while read -r OLD; do
-                [[ -n "${OLD}" ]] && rclone delete "${RCLONE_REMOTE}/${OLD}" || true
-            done
+        # Keeps the newest KEEP_WEEKLY + KEEP_MONTHLY copies and deletes the
+        # older ones. It does NOT keep "one per month": the two numbers are
+        # simply added together.
+        #
+        # This used to ask rclone for the list "newest first" (--order-by
+        # modtime,desc) and delete everything after the first 20 lines. That
+        # option orders TRANSFERS, not listings: "rclone lsf" lists by name,
+        # oldest first. So once 20 files were there it deleted the NEWEST ones,
+        # the copy it had just sent included, and still reported success. It
+        # also counted every file in the folder, whoever had put it there
+        # (#488, found with rclone 1.75.2).
+        #
+        # Now: the list is fetched FIRST and its exit code read, so a listing
+        # that fails half way deletes nothing. Only names of the exact shape
+        # this script sends are counted. They are sorted here, newest first, by
+        # name. The copy just sent is skipped by name as well, so it survives
+        # even when the destination already holds 20 copies with later names.
+        TOTAL_KEEP=$((10#${KEEP_WEEKLY} + 10#${KEEP_MONTHLY}))
+        if [[ "${TOTAL_KEEP}" -lt 1 ]]; then
+            echo "WARNING: KEEP_WEEKLY + KEEP_MONTHLY is ${TOTAL_KEEP}, so no old copy was deleted. Set them to the number of copies to keep."
+        elif ! REMOTE_LISTING="$(rclone lsf --files-only "${RCLONE_REMOTE}" < /dev/null)"; then
+            echo "WARNING: the destination could not be listed, so no old copy was deleted. The new copy was sent. If this happens every run, old copies will build up there."
+        else
+            COPIES_SEEN=0
+            COPIES_DELETED=0
+            while IFS= read -r REMOTE_FILE; do
+                if [[ ! "${REMOTE_FILE}" =~ ${COPY_NAME_RE} ]]; then
+                    continue    # not one of ours: never counted, never deleted
+                fi
+                COPIES_SEEN=$((COPIES_SEEN + 1))
+                if [[ "${COPIES_SEEN}" -le "${TOTAL_KEEP}" || "${REMOTE_FILE}" == "${REMOTE_NAME}" ]]; then
+                    continue
+                fi
+                # "deletefile" removes exactly one file. "delete", used before,
+                # removes whatever the path matches, a whole folder included.
+                # Its input is closed so it cannot swallow the rest of the list.
+                if rclone deletefile "${RCLONE_REMOTE}/${REMOTE_FILE}" < /dev/null; then
+                    COPIES_DELETED=$((COPIES_DELETED + 1))
+                    echo "Deleted old copy: ${REMOTE_FILE}"
+                else
+                    echo "WARNING: could not delete old copy ${REMOTE_FILE}. It is still at the destination."
+                fi
+            done < <(printf '%s\n' "${REMOTE_LISTING}" | LC_ALL=C sort -r)
+            echo "Copies at the destination: ${COPIES_SEEN}. Old ones deleted: ${COPIES_DELETED}. The newest ${TOTAL_KEEP} are kept."
+        fi
         ;;
     s3|sftp)
-        echo "Retention pruning for ${DESTINATION} is destination-specific — set a lifecycle rule on the bucket / a cron on the SFTP host."
+        echo "Old copies are not deleted for ${DESTINATION}: set a lifecycle rule on the bucket, or a scheduled clean-up on the SFTP host."
         ;;
 esac
 
 # --- 5. Cleanup + log success ----------------------------------------------
 
-rm -f "${BUNDLE}" "${ENC}"
 php "${LOG_PHP}" --status=success --destination="${DESTINATION}" \
     --snapshot="${SNAP_NAME}" --bundle-size="${BUNDLE_SIZE}" \
     --duration-sec="${DURATION}" --output="$(cat "${LOG_TMP}")" || true
-rm -f "${LOG_TMP}"
+remove_work_dir
+OUTCOME_RECORDED=1
 
 echo "Off-site backup complete."
