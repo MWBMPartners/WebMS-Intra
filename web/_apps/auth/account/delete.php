@@ -14,6 +14,13 @@
  * request, confirmed by the typed words (there is no email to click on this
  * route), then a review by an administrator.
  *
+ * ADDRESSES: every redirect, link and form target here is built by
+ * Router::url(), so it stays inside the organisation's own address. They
+ * used to be written out ("/account/my-data"), which lands on the DEFAULT
+ * organisation when organisations are told apart by the first part of the
+ * address (roll-out package B2b, 12 October 2026; part of #536).
+ * tools/audit-checks/check_site_aware_addresses.py holds this file to it.
+ *
  * @package   Portal\Auth
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2026-present MWBM Partners Ltd (t/a MWservices)
@@ -39,7 +46,7 @@ if ($allowDelete === false) {
 
 $pageTitle   = 'Delete my account';
 $pageSection = 'auth';
-$breadcrumbs = ['Dashboard' => '/', 'Account' => '/account', 'Delete' => ''];
+$breadcrumbs = ['Dashboard' => Router::url(''), 'Account' => Router::url('account'), 'Delete' => ''];
 $contactEmail = (string) (App::settings('privacy.contactEmail') ?? '');
 
 // A message from /account/delete/confirm when the form could not be accepted
@@ -54,7 +61,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
 <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
     <h1 class="mb-0 text-danger"><i class="fa-solid fa-triangle-exclamation me-2"></i>Delete my account</h1>
-    <a href="/account" class="btn btn-outline-secondary">
+    <a href="<?php echo htmlspecialchars(Router::url('account'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary">
         <i class="fa-solid fa-arrow-left me-1"></i> Back to Account
     </a>
 </div>
@@ -80,7 +87,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             Until the request is carried out your account works exactly as it does now, and you stay signed in.
             When it is carried out, your sign-in details are deleted and you will not be able to sign in again.
             You can see the request, and whether it is still waiting, on
-            <a href="/account/my-data">My data</a>.
+            <a href="<?php echo htmlspecialchars(Router::url('account/my-data'), ENT_QUOTES, 'UTF-8'); ?>">My data</a>.
         </p>
 
         <h2 class="h5 mt-4">What is erased when the request is carried out</h2>
@@ -96,13 +103,13 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             attendance you took, tasks you were given, notes you wrote about somebody else.
             Some records, such as gifts and expense claims, are kept without your name where the law
             or the organisation's own duties require it.
-            <a href="/account/erasure-request">Request data erasure</a> lists exactly what we hold about you
+            <a href="<?php echo htmlspecialchars(Router::url('account/erasure-request'), ENT_QUOTES, 'UTF-8'); ?>">Request data erasure</a> lists exactly what we hold about you
             and what would happen to each kind of record.
         </p>
 
         <h2 class="h5 mt-4">Need a copy of your data first?</h2>
         <p class="small mb-0">
-            Use <a href="/account/data-export">Data Export</a> to download a copy of what we hold.
+            Use <a href="<?php echo htmlspecialchars(Router::url('account/data-export'), ENT_QUOTES, 'UTF-8'); ?>">Data Export</a> to download a copy of what we hold.
             <?php if ($contactEmail !== ''): ?>
                 Questions? Email
                 <a href="mailto:<?php echo htmlspecialchars($contactEmail, ENT_QUOTES, 'UTF-8'); ?>">
@@ -113,7 +120,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     </div>
 </div>
 
-<form method="post" action="/account/delete/confirm"
+<form method="post" action="<?php echo htmlspecialchars(Router::url('account/delete/confirm'), ENT_QUOTES, 'UTF-8'); ?>"
       data-confirm="Send a request to delete your account? Typing the words is your confirmation: an administrator will then review the request and carry it out." data-confirm-destructive="true" data-confirm-confirm-label="Send the request">
     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
 
@@ -128,7 +135,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <button type="submit" class="btn btn-danger">
         <i class="fa-solid fa-trash me-1"></i> Ask for my account to be deleted
     </button>
-    <a href="/account" class="btn btn-outline-secondary">Cancel</a>
+    <a href="<?php echo htmlspecialchars(Router::url('account'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary">Cancel</a>
 </form>
 
 <?php require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'footer.php'; ?>

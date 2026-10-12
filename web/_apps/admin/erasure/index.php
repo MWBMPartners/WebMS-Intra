@@ -3,6 +3,13 @@
 /**
  * Admin — GDPR erasure-request queue with SLA monitoring.
  *
+ * ADDRESSES: every redirect, link and form target here is built by
+ * Router::url(), so it stays inside the organisation's own address. They
+ * used to be written out ("/account/my-data"), which lands on the DEFAULT
+ * organisation when organisations are told apart by the first part of the
+ * address (roll-out package B2b, 12 October 2026; part of #536).
+ * tools/audit-checks/check_site_aware_addresses.py holds this file to it.
+ *
  * @package   Portal\Admin
  * @link      https://github.com/MWBMPartners/webMS-Intra/issues/235
  */
@@ -48,7 +55,7 @@ $csrf = Auth::csrfToken();
 
 $pageTitle   = 'Erasure requests';
 $pageSection = 'admin';
-$breadcrumbs = ['Dashboard' => '/', 'Admin' => '/admin', 'Erasure requests' => ''];
+$breadcrumbs = ['Dashboard' => Router::url(''), 'Admin' => Router::url('admin'), 'Erasure requests' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 
@@ -92,7 +99,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     </div>
                     <div class="col-md-3 text-end">
                         <?php if ((string) $r['status'] === 'pending_review'): ?>
-                            <form method="post" action="/admin/erasure-requests/process" class="d-inline">
+                            <form method="post" action="<?php echo htmlspecialchars(Router::url('admin/erasure-requests/process'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                                 <input type="hidden" name="requestID" value="<?php echo (int) $r['requestID']; ?>">
                                 <input type="hidden" name="action" value="execute">
@@ -100,7 +107,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                     <i class="fa-solid fa-play me-1"></i>Execute
                                 </button>
                             </form>
-                            <form method="post" action="/admin/erasure-requests/process" class="d-inline">
+                            <form method="post" action="<?php echo htmlspecialchars(Router::url('admin/erasure-requests/process'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                                 <input type="hidden" name="requestID" value="<?php echo (int) $r['requestID']; ?>">
                                 <input type="hidden" name="action" value="cancel">
@@ -117,7 +124,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                             //    request is the person's, because that is
                             //    what the email step was for.
                             ?>
-                            <form method="post" action="/admin/erasure-requests/process" class="d-inline">
+                            <form method="post" action="<?php echo htmlspecialchars(Router::url('admin/erasure-requests/process'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                                 <input type="hidden" name="requestID" value="<?php echo (int) $r['requestID']; ?>">
                                 <input type="hidden" name="action" value="confirm">
@@ -139,7 +146,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                             //    it still opens on a database that has not
                             //    had its upgrade yet.)
                             ?>
-                            <form method="post" action="/admin/erasure-requests/process" class="d-inline">
+                            <form method="post" action="<?php echo htmlspecialchars(Router::url('admin/erasure-requests/process'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                                 <input type="hidden" name="requestID" value="<?php echo (int) $r['requestID']; ?>">
                                 <input type="hidden" name="action" value="putback">
@@ -148,7 +155,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                 </button>
                             </form>
                         <?php endif; ?>
-                        <a class="btn btn-outline-primary btn-sm" href="/admin/erasure-requests/report?id=<?php echo (int) $r['requestID']; ?>">Report</a>
+                        <a class="btn btn-outline-primary btn-sm" href="<?php echo htmlspecialchars(Router::url('admin/erasure-requests/report'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo (int) $r['requestID']; ?>">Report</a>
                     </div>
                 </div>
             <?php endforeach; ?>

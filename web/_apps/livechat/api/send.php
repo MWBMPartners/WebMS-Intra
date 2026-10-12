@@ -2,25 +2,36 @@
 // Path: _apps/livechat/api/send.php
 /**
  * -----------------------------------------------------------------------------
- * COP Live Chat — public viewer chat send (#313 Phase 1) 💬
+ * COP Live Chat — viewer chat send (#313 Phase 1) 💬
  * -----------------------------------------------------------------------------
- * PUBLIC, no-login, no-CSRF. Routed via ApiRouter as api/livechat/send →
- * _apps/livechat/api/send.php. Gated by:
+ * Routed via ApiRouter as api/livechat/send → _apps/livechat/api/send.php.
+ * No form token is asked for. A PUBLIC event's chat needs no sign-in. An
+ * INTERNAL event is answered only for a signed-in person who may see it,
+ * and only when the request was made by one of the portal's own pages
+ * (gate 2). Gated by:
  *   1. api.livechat.send.enabled = 'true' (ApiRouter checks)
- *   2. sessionToken MUST exist in tblLivestreamSessions for the active site
- *      (proves the client actually joined a livestream and isn't minting
- *      tokens client-side just to bypass the rate limit)
- *   3. First-message captcha: Captcha::verify on the FIRST send from a given
+ *   2. the event must be one this viewer may see:
+ *      LiveChat::eventOpenToViewer(), asked on every send (12 October 2026,
+ *      #548). It, not a form token, is what stops a page somewhere else
+ *      posting through a signed-in member's browser: for such a request
+ *      the sign-in does not count.
+ *   3. sessionToken MUST exist in tblLivestreamSessions for the active site
+ *      and this event (proves the client actually joined a livestream and
+ *      isn't minting tokens client-side just to bypass the rate limit)
+ *   4. First-message captcha: Captcha::verify on the FIRST send from a given
  *      sessionToken only; skipped on subsequent sends (Turnstile / reCAPTCHA /
  *      hCaptcha tokens are single-use)
- *   4. Sliding-window rate limit (per sessionToken AND per IP) — fail-closed
- *   5. Profanity stub auto-flags (does not reject)
- *   6. chat.autoApprove setting decides initial status (pending vs approved)
+ *   5. Sliding-window rate limit (per sessionToken AND per IP) — fail-closed
+ *   6. Profanity stub auto-flags (does not reject)
+ *   7. chat.autoApprove setting decides initial status (pending vs approved)
  *
- * Cross-origin friendly: Access-Control-Allow-Origin: * — embed page can live
- * on any tenant marketing site. NO CSRF (third-party cookies + SameSite=Lax
- * break the session check). sessionToken-exists gate is the "real visitor"
- * proof equivalent.
+ * Access-Control-Allow-Origin: * is sent, so a page on another address may
+ * read the answer to a request that carries NO cookie (a public event's
+ * chat, from a program or a page written to call the portal). Browsers
+ * refuse to show such a page the answer to a request that did carry one.
+ * WHAT THAT DOES NOT MEAN: the portal's own chat box script does not work
+ * on another website; it asks the address of the page it is on (see
+ * web/public_html/assets/js/livechat-widget.js).
  *
  * @package   Portal\LiveChat
  * @author    MWBM Partners Ltd (t/a MWservices)
@@ -68,6 +79,22 @@ if (LiveChat::isValidSessionToken($sessionToken) === false) {
 }
 if ($eventId <= 0) {
     ApiResponse::error('eventID required', 400);
+}
+
+// 👁️ Only for an event this viewer may see: LiveChat::eventOpenToViewer() says
+//    who that is and why. Asked BEFORE the viewer-session test below, and on
+//    every send, on purpose: a viewer-session row made before 12 October 2026
+//    (when the ping stored any event number it was sent, #548), or an event
+//    made internal after its viewers arrived, must not keep the door open.
+//    The refusal is the one an unknown session gets, so it does not say
+//    whether the event exists.
+//
+//    The last argument (true) is "only inside the portal": for an internal
+//    event the sign-in counts only when the browser says one of the portal's
+//    own pages made this request. A page on another address of the same site
+//    used to be able to post here through a signed-in member's browser.
+if (LiveChat::eventOpenToViewer($mysqli, $siteId, $eventId, true) === false) {
+    ApiResponse::error('Unknown session', 401);
 }
 
 // 🛡️ sessionToken-exists guard.

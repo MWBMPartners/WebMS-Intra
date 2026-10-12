@@ -94,6 +94,16 @@ final class ExpenseRules
     public const MSG_OWN_PAYMENT = 'You cannot record payment of your own expense claim. Another treasurer or an administrator must pay it.';
 
     /**
+     * Shown on an APPROVED claim's own page to a claimant who could otherwise
+     * have paid it (a treasurer or an administrator). The "Go to Treasury"
+     * button is not offered on a person's own claim, and until 12 October
+     * 2026 nothing was said in its place, so the page gave no clue who pays.
+     * Like WHO_DECIDES it holds no apostrophe, so a test can look for it as
+     * written.
+     */
+    public const MSG_OWN_PAYMENT_PAGE = 'This is your own claim, so you cannot record its payment yourself. Another treasurer or an administrator must pay it.';
+
+    /**
      * Is this claim the acting person's own?
      *
      * An account number of 0 or less is "nobody" and never owns a claim:

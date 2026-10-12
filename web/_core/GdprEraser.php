@@ -63,17 +63,22 @@
  * ties to an account - see the entries marked "retain" for that reason in
  * personal-data-catalogue.php.
  *
- * IT DOES NOT END AN OPEN SESSION. It deletes everything a person could sign
- * in WITH (password, linked accounts, passkeys, trusted devices, reset
- * tokens, the calendar-feed key), so nobody can sign in as them again. But if
- * they are signed in on some device when the erasure runs, that session goes
- * on working until it ends by itself. The portal keeps sessions as PHP's own
- * files, not in a table this class can reach, and Portal\Core\Auth::check()
- * only asks whether a session holds an account number - not whether that
- * account is still active. Such a session belongs to no organisation and has
- * no administrator rights, because those rows and flags ARE cleared. Ending
- * it needs a change to Auth that runs on every page, which was deliberately
- * not made here (found by the independent check of 12 October 2026).
+ * AN OPEN SESSION IS ENDED ON THE PERSON'S NEXT REQUEST. The erasure deletes
+ * everything a person could sign in WITH (password, linked accounts,
+ * passkeys, trusted devices, reset tokens, the calendar-feed key), so nobody
+ * can sign in as them again, and it switches the account off.
+ * Portal\Core\Auth::ensureSession() looks the account up on every request
+ * that carries a signed-in session, and ends the session of an account that
+ * is switched off (roll-out package B2a, 12 October 2026). So a device they
+ * were signed in on is signed out the next time it asks for anything.
+ * WHAT THIS CLASS STILL CANNOT DO: reach that device. The portal keeps
+ * sessions as PHP's own files, not in a table this class can read, so a page
+ * already open stays on the screen until they click again, and the session's
+ * stored file is deleted then, not when the erasure runs.
+ * (This paragraph used to begin "IT DOES NOT END AN OPEN SESSION". That was
+ * true until the change to Auth: found by the independent check of
+ * 12 October 2026, fixed the same day. tools/access-pages-selftest.php,
+ * part K3, erases a signed-in person through the real pages and proves it.)
  *
  * OTHER PEOPLE'S RECORDS ARE NEVER DELETED (roll-out package A2a, Salem874's
  * decision of 11 October 2026)

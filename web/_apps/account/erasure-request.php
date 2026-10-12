@@ -13,6 +13,13 @@
  * phrase, so its request needs the emailed link; if that email cannot be sent,
  * an administrator can confirm the request from their list instead.
  *
+ * ADDRESSES: every redirect, link and form target here is built by
+ * Router::url(), so it stays inside the organisation's own address. They
+ * used to be written out ("/account/my-data"), which lands on the DEFAULT
+ * organisation when organisations are told apart by the first part of the
+ * address (roll-out package B2b, 12 October 2026; part of #536).
+ * tools/audit-checks/check_site_aware_addresses.py holds this file to it.
+ *
  * @package   Portal\Account
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2026-present MWBM Partners Ltd (t/a MWservices)
@@ -27,6 +34,7 @@ use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\GdprEraser;
 use Portal\Core\Logger;
+use Portal\Core\Router;
 use Portal\Core\Site;
 
 Auth::ensureSession();
@@ -69,14 +77,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $_SESSION['flash_msg']  = 'Your request could not be recorded, and nothing was changed. Please try again; if it '
             . 'keeps happening, ask an administrator for help.';
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /account/my-data');
+        header('Location: ' . Router::url('account/my-data'));
         exit();
     }
 
     $next = GdprEraser::whatHappensNext($filed);
     $_SESSION['flash_msg']  = $next['message'];
     $_SESSION['flash_type'] = $next['type'];
-    header('Location: /account/my-data');
+    header('Location: ' . Router::url('account/my-data'));
     exit();
 }
 
@@ -94,7 +102,7 @@ $csrf = Auth::csrfToken();
 
 $pageTitle   = 'Request erasure';
 $pageSection = 'account';
-$breadcrumbs = ['Dashboard' => '/', 'My Account' => '/account', 'My data' => '/account/my-data', 'Erasure request' => ''];
+$breadcrumbs = ['Dashboard' => Router::url(''), 'My Account' => Router::url('account'), 'My data' => Router::url('account/my-data'), 'Erasure request' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 
@@ -127,7 +135,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <button class="btn btn-danger" type="submit" data-confirm="Send the erasure confirmation email?">
         <i class="fa-solid fa-envelope me-1"></i>Send confirmation email
     </button>
-    <a class="btn btn-outline-secondary" href="/account/my-data">Cancel</a>
+    <a class="btn btn-outline-secondary" href="<?php echo htmlspecialchars(Router::url('account/my-data'), ENT_QUOTES, 'UTF-8'); ?>">Cancel</a>
 </div></form>
 
 <?php require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'footer.php'; ?>

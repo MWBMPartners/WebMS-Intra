@@ -58,8 +58,17 @@ use Portal\Core\ApiResponse;
 use Portal\Core\Settings;
 use Portal\Core\Venues;
 
-// 🔐 Session OR bearer — read-only, no CSRF surface (02 §12 item 6).
+// 🔐 A signed-in session — read-only, no CSRF surface (02 §12 item 6).
+//    (This comment used to say "session OR bearer". That was never true:
+//    requireAuth() accepts a session only, so an API key gets 401 here.)
 ApiResponse::requireAuth();
+
+// 🛡️ Only this organisation's own people may ask whether its venue is booked:
+//    Venues::canView() says why. Somebody who may not is answered further
+//    down exactly as an unknown venue is (the "venue-missing" answer, HTTP
+//    200), after the same checks on the dates, so the reply does not tell an
+//    outsider whether the venue exists or is booked.
+$mayView = Venues::canView();
 
 /**
  * Strict `Y-m-d\TH:i` validator (the exact `datetime-local` input shape) —
@@ -99,6 +108,11 @@ try {
 
 $venueIdParam = (int) ($_GET['venueID'] ?? 0);
 $venueId = $venueIdParam > 0 ? $venueIdParam : (int) Settings::get('venues.calendar_default_venue', '0');
+if ($mayView === false) {
+    // Venue number 0 never exists, so classifyEventCoverage() gives its own
+    // "venue-missing" answer and reads no booking.
+    $venueId = 0;
+}
 
 // 🚪 #436 — optional room narrowing. Re-validated inside
 // classifyEventCoverage() itself (site+venue scoped) — no duplicate check

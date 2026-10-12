@@ -11,7 +11,9 @@
  *
  * Read-only, dual-mode auth (session or bearer `eventhub:read` scope) via
  * ApiAuth::requireRead(). Since #534 a signed-in person is answered only for
- * an event they may see (the shared rule, EventVisibility; see the lookup). Tenant-scoped: the requested event MUST belong to
+ * an event they may see (the shared rule, EventVisibility; see the lookup),
+ * and since 12 October 2026 only when they are on that event's own team, as
+ * on the Team Hub page. An API key is not asked the team question. Tenant-scoped: the requested event MUST belong to
  * the resolved site (Site::id() — already tenant-pinned to the bearer key's
  * own site by ApiAuth for bearer requests) or this 404s rather than leaking
  * another tenant's event/video rows.
@@ -46,6 +48,7 @@ use Portal\Core\ApiAuth;
 use Portal\Core\ApiKey;
 use Portal\Core\ApiResponse;
 use Portal\Core\App;
+use Portal\Core\Auth;
 use Portal\Core\EventVisibility;
 use Portal\Core\Site;
 
@@ -129,33 +132,57 @@ $canManageFlag   = $canManageEvents === true ? 1 : 0;
 //    videos by opening this address under that organisation's own
 //    address and trying eventID=1, 2, 3 and so on.
 //
-//    WHAT THIS CANNOT DO: it applies the rule for who may see the EVENT. The
-//    Team Hub PAGE (calendar/event-hub.php) is narrower: it lets in only
-//    the event's own team (Auth::isEventTeamMember()). A member of the
-//    organisation who is not on the team, and for a public event any
-//    signed-in person, is refused by that page and still answered here.
-//    That difference is older than #534 and is not changed by it; it is
-//    written up as a follow-up rather than quietly narrowed in a change
-//    that was about something else.
+//    WHAT THIS CANNOT DO: it is the rule for who may see the EVENT, and
+//    that is wider than who may see its Team Hub. The team rule is the next
+//    block, $onTeamFlag; both must say yes.
 //
 //    The fragment goes LAST, after the literal conditions, and its values
 //    are bound after theirs (binding is by position). In key mode it binds
-//    nothing; the three values before it mean bind_param() is never empty.
+//    nothing; the four values before it mean bind_param() is never empty.
 $ruleMode   = $apiKeyRow !== null ? EventVisibility::MODE_KEY : EventVisibility::MODE_SESSION;
 $viewerId   = $ruleMode === EventVisibility::MODE_SESSION ? EventVisibility::sessionViewerId() : 0;
 $visibility = EventVisibility::where('e', $ruleMode, $viewerId, date('Y-m-d'));
+
+// 👥 ONLY THE EVENT'S OWN TEAM, for a signed-in person (12 October 2026). The
+//    same test as the Team Hub page (calendar/event-hub.php):
+//    Auth::isEventTeamMember(), which says yes to an administrator, a
+//    coordinator of the event, a crew member, somebody with a job on it and
+//    somebody named on the event as one of its people (host, speaker,
+//    musician, organiser and so on).
+//
+//    WHAT WAS WRONG: this endpoint was wider than the page. A member of the
+//    organisation who is not on the team, and for a public event any
+//    signed-in account at all, was refused by the page and answered here
+//    with the hub's videos.
+//
+//    Like the draft rule, it is worked out BEFORE the look-up, for every
+//    request, and bound into the look-up as a yes/no value. So somebody who
+//    is not on the team, a deleted event and a made-up number all run the
+//    same statements and get the same "Event not found".
+//
+//    An API key is not a person on a team: a key holding eventhub:read is the
+//    organisation's own program and still reads the hub of any event of its
+//    own organisation (the owner's decision, 12 October 2026). For a key the
+//    session, if there is one, is ignored, as everywhere else in this file.
+//
+//    WHAT THIS CANNOT DO: it does not make the answer and the page agree in
+//    every detail. The page asks the team question only; this asks the team
+//    question AND the event rule above, so somebody on the team of an
+//    internal event who is no longer a member of the organisation is let in
+//    by the page and refused here.
+$onTeamFlag = ($apiKeyRow !== null || Auth::isEventTeamMember($eventId) === true) ? 1 : 0;
 
 // Imported events are read-only (#514 D5); this makes an imported event exactly as "not found" as a missing one.
 // `externalFeedID IS NULL` stays written out here although the rule also knows about imported events: with it,
 // the rule's "imported" half can never match, so an imported event's hub is never answered whatever its level.
 $eventStmt = $db->prepare(
     'SELECT e.eventID FROM tblEvents e WHERE e.eventID = ? AND e.siteID = ? AND e.isDeleted = 0 AND e.externalFeedID IS NULL '
-    . "AND (e.status IN ('published', 'cancelled', 'postponed') OR ? = 1)" . $visibility['sql'] . ' LIMIT 1'
+    . "AND (e.status IN ('published', 'cancelled', 'postponed') OR ? = 1) AND ? = 1" . $visibility['sql'] . ' LIMIT 1'
 );
 if ($eventStmt === false) {
     ApiResponse::error('Database error', 500);
 }
-$eventStmt->bind_param('iii' . $visibility['types'], $eventId, $siteId, $canManageFlag, ...$visibility['params']);
+$eventStmt->bind_param('iiii' . $visibility['types'], $eventId, $siteId, $canManageFlag, $onTeamFlag, ...$visibility['params']);
 $eventStmt->execute();
 $eventRow = $eventStmt->get_result()->fetch_assoc();
 $eventStmt->close();

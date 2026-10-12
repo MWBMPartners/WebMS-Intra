@@ -316,7 +316,7 @@ if (($argv[1] ?? '') === '--hold-lock') {
 // =============================================================================
 const EXPECTED_S      = 11;   // part S: S1 pages never write around the service layer (4); S2 the importer's UTC writes (2, fix round 1); S3 the server filter (1, chunk P8-3, + its call site 2, P8-3 fix round 1) and S4 message boxes (2, chunk P8-3)
 const EXPECTED_D      = 526;  // part D: 500 from chunk P8-1, + D25's R13-L1 case and D33's three (chunk P8-2), + D34 (chunk P8-3), + D35 (2) and D36 (2) (P8-3 fix round 1), + D37 (3) (fix round 2), + D38 (fix round 3), + D39 (6, chunk P8-4; + 2 in its fix round 1; + 1 in fix round 2; + 1 after the final fault run, m-X05; + 3 after the final whole-part check, F1 and F3)
-const EXPECTED_W      = 294;  // part W: 81 for chunk P8-2's pages (W0-W16, W18-W25); chunk P8-3 grows W21 by 6 and adds W26-W38 (82); its fix round 1 adds a W31 check, W39 (4) and W40 (4); fix round 2 adds W41 (5); fix round 3 adds W42 (3); fix round 4 grows W21 by 2 and adds W43 (1); chunk P8-4 grows W21 by 5 and adds W44 (5), W45 (6), W46 (5), W47 (2), W48 (5), W49 (5), W50 (4), W51 (2) and W52 (5); its fix round 1 adds 2 to W45, 3 to W46, 3 to W48, 1 to W49, 1 to W50, 1 to W52, and W53 (2) and W54 (1); fix round 2 adds 2 to W45, 1 to W48 and 1 to W53; fix round 3 adds 1 to W45; the final whole-part check's fixes add 1 to W50, and W55 (2) and W56 (1); the last narrow check's fixes add 1 to W55, and W57 (4) and W58 (1); W59, the #534 table (roll-out package B, 11 October 2026), adds 32: its set-up (1), six viewers by four addresses (24), its own control (2), an API key answered as before (2, added after the independent check) and the venue booking card (3)
+const EXPECTED_W      = 298;  // part W: 81 for chunk P8-2's pages (W0-W16, W18-W25); chunk P8-3 grows W21 by 6 and adds W26-W38 (82); its fix round 1 adds a W31 check, W39 (4) and W40 (4); fix round 2 adds W41 (5); fix round 3 adds W42 (3); fix round 4 grows W21 by 2 and adds W43 (1); chunk P8-4 grows W21 by 5 and adds W44 (5), W45 (6), W46 (5), W47 (2), W48 (5), W49 (5), W50 (4), W51 (2) and W52 (5); its fix round 1 adds 2 to W45, 3 to W46, 3 to W48, 1 to W49, 1 to W50, 1 to W52, and W53 (2) and W54 (1); fix round 2 adds 2 to W45, 1 to W48 and 1 to W53; fix round 3 adds 1 to W45; the final whole-part check's fixes add 1 to W50, and W55 (2) and W56 (1); the last narrow check's fixes add 1 to W55, and W57 (4) and W58 (1); W59, the #534 table (roll-out package B, 11 October 2026), adds 32: its set-up (1), six viewers by four addresses (24), its own control (2), an API key answered as before (2, added after the independent check) and the venue booking card (3); roll-out package B2a (12 October 2026) adds a seventh W59 viewer, on a crew (4), and changes the Team Hub and venue card rows it made stricter
 const EXPECTED_CHECKS = EXPECTED_S + EXPECTED_D + EXPECTED_W;
 
 // 🧩 One part only (SELFTEST_ONLY=S, D or W), or all of them. A one-part run
@@ -5541,7 +5541,7 @@ function pw_run(): void
         );
 
         // ---------------------------------------------------------------------
-        pa_heading('W59 — #534: who is shown ONE event, on the four addresses that show one (six viewers by five events)');
+        pa_heading('W59 — #534: who is shown ONE event, on the four addresses that show one (seven viewers by five events)');
         // NOT a part 8 check. #534 asked for a table of who may open a single
         // event, proved on the real pages; this file holds the portal's only
         // harness that drives real pages (a scratch copy of web/, real
@@ -5558,10 +5558,24 @@ function pw_run(): void
         // nothing. The draft is marked PUBLIC on purpose, so its column tests
         // the draft rule on its own and the internal column tests the
         // membership rule on its own.
-        // SIX VIEWERS: nobody; PB, a member of organisation B only, on A's
+        // SEVEN VIEWERS: nobody; PB, a member of organisation B only, on A's
         // address; M, a member of A; P, a member of A who is also a
-        // coordinator of all four events; SA, a site administrator of A; GA,
-        // a global administrator with no membership anywhere.
+        // coordinator of all four events; SGM, a member of A who is on a crew
+        // of the public, internal and draft events and has no other rights;
+        // SA, a site administrator of A; GA, a global administrator with no
+        // membership anywhere.
+        //
+        // THE TWO TEAM HUB ENDPOINTS ANSWER ONLY THE EVENT'S OWN TEAM (roll-out
+        // package B2a, 12 October 2026), as the Team Hub page always did.
+        // Before that they applied the event rule alone, so M (a member not on
+        // the team) and, for the public event, PB were answered. Two rules now
+        // meet on those two rows, and the table keeps them apart:
+        //   - M is a member, so the EVENT rule says yes to the public and the
+        //     internal event; M is on no team, so only the TEAM rule refuses.
+        //   - PB is put on a crew of the INTERNAL event (an outside helper), so
+        //     the TEAM rule says yes there; PB is not a member of A, so only
+        //     the EVENT rule refuses. PB is on no crew of the public event, so
+        //     there the team rule refuses.
         //
         // An answer is written "200+shown" (HTTP 200 AND the event's own
         // marker word is in the answer), or the bare status of a refusal. A
@@ -5580,6 +5594,12 @@ function pw_run(): void
             pa_q("INSERT INTO tblEventHubVideos (eventID, provider, videoRef, title) VALUES (?, 'youtube', 'w59ref', ?)", 'is', [$w59[$kind59], 'Hub video w59mark' . $w59[$kind59]]);
             pa_q('INSERT INTO tblEventCoordinators (eventID, userID, grantedByID) VALUES (?, ?, ?)', 'iii', [$w59[$kind59], P_ID, SA]);
         }
+        // Crews: SGM on a crew of the public, internal and draft events; PB on a
+        // crew of the internal event only. (Removed with their events.)
+        foreach ([[919201, 'public', SGM], [919202, 'internal', SGM], [919203, 'draft', SGM], [919204, 'internal', PB]] as [$crew59, $kind59, $person59]) {
+            pa_q("INSERT INTO tblEventCrews (crewID, eventID, name) VALUES (?, ?, 'W59 crew')", 'ii', [$crew59, $w59[$kind59]]);
+            pa_q("INSERT INTO tblEventCrewMembers (crewID, userID, role) VALUES (?, ?, 'participant')", 'ii', [$crew59, $person59]);
+        }
         $pb59 = pw_signIn('pb');
         $made59 = pa_one(
             'SELECT (SELECT COUNT(*) FROM tblEvents WHERE eventID BETWEEN 919001 AND 919004 AND siteID = ? AND externalFeedID IS NULL) AS events, '
@@ -5589,12 +5609,15 @@ function pw_run(): void
             . '(SELECT COUNT(*) FROM tblEvents WHERE eventID = 919009) AS missing, '
             . '(SELECT COUNT(*) FROM tblUserSites WHERE userID = ? AND siteID = ?) AS pbInA, '
             . '(SELECT COUNT(*) FROM tblUserSites WHERE userID = ? AND siteID = ? AND isActive = 1) AS pbInB, '
-            . '(SELECT COUNT(*) FROM tblUserSites WHERE userID = ?) AS gaAnywhere',
-            'iiiiiii', [ORG_A, P_ID, PB, ORG_A, PB, ORG_B, GA]
+            . '(SELECT COUNT(*) FROM tblUserSites WHERE userID = ?) AS gaAnywhere, '
+            . '(SELECT COUNT(*) FROM tblEventCrewMembers cm JOIN tblEventCrews c ON c.crewID = cm.crewID WHERE cm.userID = ? AND c.eventID IN (919001, 919002, 919003)) AS sgmCrews, '
+            . '(SELECT GROUP_CONCAT(c.eventID) FROM tblEventCrewMembers cm JOIN tblEventCrews c ON c.crewID = cm.crewID WHERE cm.userID = ?) AS pbCrewOf, '
+            . '(SELECT COUNT(*) FROM tblEventCrewMembers cm JOIN tblEventCrews c ON c.crewID = cm.crewID WHERE cm.userID = ? AND c.eventID BETWEEN 919001 AND 919004) AS mCrews',
+            'iiiiiiiiii', [ORG_A, P_ID, PB, ORG_A, PB, ORG_B, GA, SGM, PB, M]
         );
         pa_ok(
-            'W59 set-up: four events of A (public, internal, draft, deleted), each with a Team Hub note and video and P as coordinator; number 919009 matches nothing; PB belongs to B only; GA belongs to no organisation',
-            $made59 === ['events' => 4, 'notes' => 4, 'videos' => 4, 'coordinating' => 4, 'missing' => 0, 'pbInA' => 0, 'pbInB' => 1, 'gaAnywhere' => 0],
+            'W59 set-up: four events of A (public, internal, draft, deleted), each with a Team Hub note and video and P as coordinator; number 919009 matches nothing; PB belongs to B only and is on a crew of the internal event only; SGM is on a crew of the public, internal and draft events; M is on none; GA belongs to no organisation',
+            $made59 === ['events' => 4, 'notes' => 4, 'videos' => 4, 'coordinating' => 4, 'missing' => 0, 'pbInA' => 0, 'pbInB' => 1, 'gaAnywhere' => 0, 'sgmCrews' => 3, 'pbCrewOf' => '919002', 'mCrews' => 0],
             pa_show($made59)
         );
         $ask59 = static function (string $jar, string $address, string $kind) use ($w59): string {
@@ -5622,7 +5645,11 @@ function pw_run(): void
         //      - draft: only somebody who can manage events (App::isAdmin()). A
         //        coordinator is NOT that, on any of these four addresses;
         //      - deleted, missing: nobody, and the SAME answer as each other
-        //        and as a refused event, so the answer never says which it is.
+        //        and as a refused event, so the answer never says which it is;
+        //      - the two hub endpoints ALSO need the viewer to be on that
+        //        event's own team (Auth::isEventTeamMember(): an administrator,
+        //        a coordinator, a crew member, somebody with a job on it).
+        //        Both rules must say yes. Not on the team is the same 404.
         $expected59 = [
             'nobody (signed out)' => [
                 'page'          => ['200+shown', '404', '404', '404', '404'],
@@ -5630,13 +5657,27 @@ function pw_run(): void
                 'hub-resources' => ['401', '401', '401', '401', '401'],
                 'hub-videos'    => ['401', '401', '401', '401', '401'],
             ],
+            // Hub rows: public, PB is on no team of it (the team rule refuses);
+            // internal, PB IS on a crew of it but is not a member of A (the
+            // event rule refuses).
             'PB, a member of ANOTHER organisation only' => [
                 'page'          => ['200+shown', '404', '404', '404', '404'],
                 'download'      => ['200+shown', '404', '404', '404', '404'],
-                'hub-resources' => ['200+shown', '404', '404', '404', '404'],
-                'hub-videos'    => ['200+shown', '404', '404', '404', '404'],
+                'hub-resources' => ['404', '404', '404', '404', '404'],
+                'hub-videos'    => ['404', '404', '404', '404', '404'],
             ],
+            // Hub rows: M may see the public and the internal event, and is
+            // on the team of neither (the team rule refuses both).
             'M, a member' => [
+                'page'          => ['200+shown', '200+shown', '404', '404', '404'],
+                'download'      => ['200+shown', '200+shown', '404', '404', '404'],
+                'hub-resources' => ['404', '404', '404', '404', '404'],
+                'hub-videos'    => ['404', '404', '404', '404', '404'],
+            ],
+            // On a crew of the public, internal and draft events: both rules
+            // say yes for the first two. Being on the draft's crew does not
+            // open the draft: only somebody who can manage events sees one.
+            'SGM, a member on a crew of the public, internal and draft events' => [
                 'page'          => ['200+shown', '200+shown', '404', '404', '404'],
                 'download'      => ['200+shown', '200+shown', '404', '404', '404'],
                 'hub-resources' => ['200+shown', '200+shown', '404', '404', '404'],
@@ -5669,6 +5710,7 @@ function pw_run(): void
             'nobody (signed out)'                         => $out,
             'PB, a member of ANOTHER organisation only'   => $pb59,
             'M, a member'                                 => (string) $pw['jars']['m'],
+            'SGM, a member on a crew of the public, internal and draft events' => (string) $pw['jars']['sgm'],
             'P, a member who coordinates all four events' => (string) $pw['jars']['p'],
             'SA, a site administrator'                    => (string) $pw['jars']['sa'],
             'GA, a global administrator'                  => (string) $pw['jars']['ga'],
@@ -5690,8 +5732,9 @@ function pw_run(): void
         // 🧪 THE TABLE'S OWN CONTROL. In THIS RUN'S SCRATCH COPY (never the
         //    repository), the shared rule is taken out of one of the four
         //    pages, and the cell the rule exists for is asked again: PB, a
-        //    member of another organisation only, must now be SHOWN A's
-        //    internal event's Team Hub note. If that does not happen, the table
+        //    member of another organisation only (and on a crew of A's
+        //    internal event, so the team rule is not what refuses), must now
+        //    be SHOWN A's internal event's Team Hub note. If that does not happen, the table
         //    above could not have noticed the rule missing, and every "404" in
         //    it proves nothing. The page is then put back byte for byte and
         //    must refuse again. The file's time stamp is moved on each write so
@@ -5768,8 +5811,13 @@ function pw_run(): void
         //    rule would show that event to. Three bookings of one hall, linked
         //    to the public, the internal and the draft event above. Only the
         //    page's own content is read (pw_main()), never its menu.
-        //    WHAT THIS DOES NOT CHECK: who may open a booking at all. The page
-        //    still answers any signed-in account; that is a separate question.
+        //    WHO MAY OPEN A BOOKING AT ALL changed with roll-out package B2a
+        //    (12 October 2026): only the organisation's own members and venue
+        //    managers (Venues::canView()). So PB, who belongs to another
+        //    organisation only, used to get the card with the public event
+        //    named, and now gets "page not found" for all three bookings.
+        //    tools/access-pages-selftest.php (part H) tests that rule on all
+        //    six venue addresses; here it is one row.
         pa_q("INSERT INTO tblSettings (siteID, settingKey, settingValue, defaultValue, isSensitive) VALUES (?, 'venues.enabled', '1', '0', 0)", 'i', [ORG_A]);
         pa_q("INSERT INTO tblVenues (venueID, siteID, venueName, isActive) VALUES (919101, ?, 'W59 hall', 1)", 'i', [ORG_A]);
         pa_q("INSERT INTO tblVenueUsageTypes (usageTypeID, siteID, venueID, typeName) VALUES (919111, ?, 919101, 'W59 use')", 'i', [ORG_A]);
@@ -5788,8 +5836,8 @@ function pw_run(): void
         };
         $pbCards59 = [$card59($pb59, 919131), $card59($pb59, 919132), $card59($pb59, 919133)];
         pa_ok(
-            'W59 venue booking card, PB (another organisation only): a PUBLIC event is named; an internal one and a draft are not, though the card itself is still drawn',
-            $pbCards59 === ['200+hall+event', '200+hall', '200+hall'],
+            'W59 venue booking card, PB (another organisation only): "page not found" for all three bookings, and neither the hall nor any event is named',
+            $pbCards59 === ['404', '404', '404'],
             'public, internal, draft: ' . implode(', ', $pbCards59)
         );
         $mCards59 = [$card59((string) $pw['jars']['m'], 919131), $card59((string) $pw['jars']['m'], 919132), $card59((string) $pw['jars']['m'], 919133)];

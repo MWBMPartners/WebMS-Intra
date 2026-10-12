@@ -3,7 +3,7 @@
 /**
  * -----------------------------------------------------------------------------
  * The erasure pages, on the REAL pages — self-test 🗑️🚪
- * (roll-out package A2a)
+ * (roll-out packages A2a, A2b and B2b)
  * -----------------------------------------------------------------------------
  * `tools/gdpr-coverage-selftest.php` reads the erasure code as text, and
  * `tools/gdpr-eraser-selftest.php` runs the erasure ENGINE on a database.
@@ -68,6 +68,14 @@
  *      not switch the organisation's own on. And the privacy page says
  *      "every gift" for an organisation that keeps the name on every gift,
  *      before it has confirmed a figure as well as after.
+ *   I. (Roll-out package B2b, 12 October 2026.) Every redirect, link and
+ *      form target on the eight erasure and "delete my account" pages stays
+ *      inside the organisation's own address: each press on the account
+ *      pages lands back inside A's address, and an administrator of B who
+ *      presses a button on B's list lands back on B's list. They used to be
+ *      bare addresses, which land on the default organisation. B's
+ *      administrator also carries out one of B's requests: the browser is
+ *      sent to B's own list, and that address opens.
  *
  * TAKING PICTURES OF THE SETTINGS PAGE
  * ------------------------------------
@@ -110,11 +118,22 @@
  * - That a confirmation email is sent: there is no mail service here, so the
  *   pages are seen saying that the email could NOT be sent.
  * - How a page looks in a browser, at any width.
- * - That an erased person's OPEN SESSION is ended. It is not: the portal
- *   keeps sessions as PHP's own files and nothing checks, page by page, that
- *   the account behind a session is still active. That needs a change to
- *   `Portal\Core\Auth`, which this package did not make.
+ * - That an erased person's OPEN SESSION is ended. It now is, on their
+ *   next request (`Auth::ensureSession()`, since 12 October 2026), but this
+ *   file does not test it: `tools/access-pages-selftest.php`, part K3, does,
+ *   through these same pages.
  * - Two administrators pressing at the same moment.
+ * - Part I presses three of the fifteen redirects on the administrator's
+ *   handler (a request put back, a request that does not exist, a request
+ *   carried out) and five of the eight on "Delete my account". The rest are
+ *   held to the rule by reading their text:
+ *   `tools/audit-checks/check_site_aware_addresses.py`. That check reads
+ *   whether an address is built by the helper, not whether it is the RIGHT
+ *   address, so a redirect it does not press could point at a page that
+ *   does not exist and nothing here would say so.
+ * - Part I: the link inside the confirmation EMAIL. It is built in
+ *   `GdprEraser::fileRequest()`, not in a page, and carries no organisation
+ *   in front; no mail is sent here, so it is not followed.
  * - MariaDB. It has been run on MySQL 8.0.36 and 8.4.11.
  *
  * Usage:  SELFTEST_DB_NAME=selftest_x SELFTEST_DB_PORT=… SELFTEST_DB_PASS=… \
@@ -138,7 +157,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 57;
+const EXPECTED_CHECKS = 66;
 
 function refuse(string $why): never
 {
@@ -241,6 +260,7 @@ const NIA  = 917014; // a member of A: her request is stuck at "processing"
 const CAL  = 917015; // a member of A whose records Mel worked on; files an ordinary request
 const ADMB = 917016; // an administrator of B ONLY
 const GIO  = 917017; // a member of A who gives at A and at B: his run stops part way (section H)
+const BEN  = 917020; // a member of B ONLY: his request is carried out by B's administrator (section I). Made there, not at the start, so B's list is as the earlier sections expect
 const HAL  = 917018; // a member of A who gives at A: his request is never run, and is cancelled (section H)
 const IVY  = 917019; // a member of A with NO giving records: her run stops after deleting her membership (section H)
 
@@ -248,6 +268,7 @@ const REQ_STUCK = 917101; // Nia's, at "processing", its run dead for 20 minutes
 const REQ_LIVE  = 917102; // Cal's, at "processing", a run showed signs of life 1 minute ago
 const REQ_B_PUT = 917103; // ORG_B's, at "processing", dead for 20 minutes
 const REQ_B_ASK = 917104; // ORG_B's, waiting to be confirmed
+const REQ_B_RUN = 917980; // ORG_B's, Ben's, at "pending review": carried out by B's administrator (section I). Far above the others for the same reason as REQ_KEPT below: 917105 onwards are taken by the requests the pages file
 const REQ_GIO   = 917901; // Gio's, at "pending review" (section H)
 const REQ_HAL   = 917902; // Hal's, at "pending review" (section H)
 const REQ_IVY   = 917903; // Ivy's, at "pending review" (section H)
@@ -652,18 +673,21 @@ ok('the form says what it does: it sends a request, the typed words are the conf
     && str_contains($formText, 'where the law or the organisation\'s own duties require it')
     && str_contains($formText, 'because the law requires it') === false, mb_substr($formText, 0, 700));
 
-$noToken = req($jar['mel'], 'POST', '/account/delete/confirm', ['confirm_phrase' => 'DELETE MY ACCOUNT']);
+// Part I (package B2b) checks where each press below sent the browser.
+$landings = [];
+$noToken  = req($jar['mel'], 'POST', '/account/delete/confirm', ['confirm_phrase' => 'DELETE MY ACCOUNT']);
+$landings['"Delete my account" with no form token'] = $noToken['location'];
 $told    = message(req($jar['mel'], 'GET', '/account/delete')['body']);
 ok('with NO form token nothing is filed, and the person is told nothing was changed',
     requestsOf(MEL) === [] && str_contains($told, 'Nothing was changed'), 'HTTP ' . $noToken['status'] . ' ' . $told);
 
 $form  = req($jar['mel'], 'GET', '/account/delete');
-req($jar['mel'], 'POST', '/account/delete/confirm', ['csrf_token' => token($form['body']), 'confirm_phrase' => 'delete my account']);
+$landings['"Delete my account" with the wrong words'] = req($jar['mel'], 'POST', '/account/delete/confirm', ['csrf_token' => token($form['body']), 'confirm_phrase' => 'delete my account'])['location'];
 $told = message(req($jar['mel'], 'GET', '/account/delete')['body']);
 ok('with the wrong words (small letters) nothing is filed, and the page says why', requestsOf(MEL) === [] && str_contains($told, 'did not match'), $told);
 
 $form = req($jar['root'], 'GET', '/account/delete');
-req($jar['root'], 'POST', '/account/delete/confirm', ['csrf_token' => token($form['body']), 'confirm_phrase' => 'DELETE MY ACCOUNT']);
+$landings['"Delete my account" by a root administrator (refused)'] = req($jar['root'], 'POST', '/account/delete/confirm', ['csrf_token' => token($form['body']), 'confirm_phrase' => 'DELETE MY ACCOUNT'])['location'];
 $told = message(req($jar['root'], 'GET', '/account/delete')['body']);
 ok('a ROOT ADMINISTRATOR is refused, and nothing is filed', requestsOf(ROOT) === [] && str_contains($told, 'Root admins cannot'), $told);
 
@@ -672,6 +696,7 @@ $good  = token($form['body']);
 $press = req($jar['mel'], 'POST', '/account/delete/confirm', ['csrf_token' => $good, 'confirm_phrase' => 'DELETE MY ACCOUNT', 'userID' => CAL, 'siteID' => ORG_B]);
 $land  = req($jar['mel'], 'GET', '/account/my-data');
 $filed = requestsOf(MEL);
+$landings['"Delete my account", a good press'] = $press['location'];
 ok('a good press files exactly ONE request: for the signed-in person (not the account number sent in a forged field), at this organisation, already confirmed, with no link token',
     count($filed) === 1 && (int) $filed[0]['siteID'] === ORG_A && $filed[0]['status'] === 'pending_review' && $filed[0]['confirmToken'] === null
     && $filed[0]['confirmedAt'] !== null && count(requestsOf(CAL)) === 1 /* Cal's seeded one only */, json_encode($filed));
@@ -685,7 +710,7 @@ ok('the person is told what happens next: nothing erased yet, no email to wait f
     message($land['body']));
 
 // A double-click: the very same press again, with the form token the first one used up.
-req($jar['mel'], 'POST', '/account/delete/confirm', ['csrf_token' => $good, 'confirm_phrase' => 'DELETE MY ACCOUNT']);
+$landings['"Delete my account", the same press again'] = req($jar['mel'], 'POST', '/account/delete/confirm', ['csrf_token' => $good, 'confirm_phrase' => 'DELETE MY ACCOUNT'])['location'];
 $again = message(req($jar['mel'], 'GET', '/account/my-data')['body']);
 ok('a DOUBLE-CLICK (the same press again) is told the request is already recorded, not "Nothing was changed. Please try again."; still one request',
     count(requestsOf(MEL)) === 1 && str_contains($again, 'already recorded') && str_contains($again, 'Please try again') === false, $again);
@@ -702,7 +727,7 @@ $askText = text($askPage['body']);
 ok('the page says in words what happens to each kind of record: "kept" for a Gift Aid declaration, and never "retaind"',
     $askPage['status'] === 200 && preg_match('/tblGiftAidDeclaration — 1 row\(s\) will be kept\s*\./', $askText) === 1
     && str_contains($askText, 'retaind') === false, mb_substr($askText, 0, 700));
-req($jar['cal'], 'POST', '/account/erasure-request', ['csrf_token' => token($askPage['body'])]);
+$landings['"Request data erasure", a good press'] = req($jar['cal'], 'POST', '/account/erasure-request', ['csrf_token' => token($askPage['body'])])['location'];
 $askTold  = message(req($jar['cal'], 'GET', '/account/my-data')['body']);
 $calAsked = array_values(array_filter(requestsOf(CAL), static fn (array $r): bool => $r['status'] === 'pending_confirmation'));
 ok('it files a request that WAITS for the emailed link; with no mail service the person is told to ask an administrator to confirm it',
@@ -769,6 +794,7 @@ ok('pressing it confirms the request, and ONE audit line records who confirmed a
     && str_contains((string) ($line['details'] ?? ''), 'account #' . ADM) && str_contains((string) ($line['details'] ?? ''), 'states that they checked the person\'s identity')
     && str_contains($told, 'is confirmed and is now at pending review'), $told . ' ' . json_encode($line));
 $link = req($jar['cal'], 'GET', '/account/erasure-confirm?token=' . $calToken);
+$confirmPage = $link['body']; // read again in part I
 ok('the link that was emailed (had it arrived) is dead afterwards, and pressing confirm again adds no second line',
     str_contains($link['body'], 'Link expired') && str_contains(act($jar['adm'], $calRequest, 'confirm'), 'no longer waiting') && auditLines($calRequest) === 1,
     mb_substr(text($link['body']), 0, 200));
@@ -1228,6 +1254,87 @@ ok('THE PRIVACY PAGE says "(for this organisation, every gift)" when the organis
     && str_contains($everyGiftConfirmed, 'a giving statement (for this organisation, every gift) keep your name and home address for ' . $plain['yearsFound'] . ' years')
     && str_contains($narrow, 'every gift') === false,
     mb_substr($everyGift, (int) strpos($everyGift, 'One exception'), 420));
+
+// =============================================================================
+head('I. Every address on these pages stays inside the organisation\'s own address (roll-out package B2b)');
+// =============================================================================
+// Organisations are told apart by the first part of the address in this run.
+// Until 12 October 2026 these eight pages wrote bare addresses
+// ("/admin/erasure-requests"), which land on the DEFAULT organisation: an
+// administrator of B who pressed a button on B's list was dropped onto
+// another organisation's address. Every one is now built by Router::url().
+/** `$name="…"` values on a page that contain `$needle`, de-duplicated. */
+$attributes = static function (string $html, string $name, string $needle): array {
+    preg_match_all('/\b' . $name . '="([^"]*)"/', $html, $m);
+
+    return array_values(array_unique(array_filter(array_map(static fn (string $v): string => html_entity_decode($v, ENT_QUOTES, 'UTF-8'), $m[1]), static fn (string $v): bool => str_contains($v, $needle))));
+};
+$delete  = ADDR_A . '/account/delete';
+$myData  = ADDR_A . '/account/my-data';
+ok('every press on "Delete my account" and "Request data erasure" sends the browser back inside A\'s own address',
+    $landings === [
+        '"Delete my account" with no form token'               => $delete,
+        '"Delete my account" with the wrong words'             => $delete,
+        '"Delete my account" by a root administrator (refused)' => $delete,
+        '"Delete my account", a good press'                    => $myData,
+        '"Delete my account", the same press again'            => $myData,
+        '"Request data erasure", a good press'                 => $myData,
+    ], json_encode($landings, JSON_UNESCAPED_SLASHES));
+$page = req($jar['adm'], 'GET', '/account/delete')['body'];
+ok('the "Delete my account" page: its form, and its links to the account pages, are inside A\'s own address',
+    $attributes($page, 'action', 'account/delete') === [$delete . '/confirm']
+    && array_diff([ADDR_A . '/account/my-data', ADDR_A . '/account/erasure-request', ADDR_A . '/account/data-export'], $attributes($page, 'href', '/account/')) === []
+    && str_contains($page, 'action="/account/') === false,
+    'form target(s): ' . implode(', ', $attributes($page, 'action', 'account/delete')) . '; links: ' . implode(', ', $attributes($page, 'href', '/account/')));
+$page  = req($jar['adm'], 'GET', '/account/my-data')['body'];
+$page2 = req($jar['adm'], 'GET', '/account/erasure-request')['body'];
+ok('the "My data" and "Request data erasure" pages: the download, the request and the cancel links are inside A\'s own address',
+    array_diff([$myData . '?download=1', ADDR_A . '/account/erasure-request'], $attributes($page, 'href', '/account/')) === []
+    && in_array($myData, $attributes($page2, 'href', '/account/'), true) === true,
+    'My data: ' . implode(', ', $attributes($page, 'href', '/account/')) . '; request page: ' . implode(', ', $attributes($page2, 'href', '/account/')));
+ok('the page the emailed link opens offers "Return to the portal" inside A\'s own address',
+    str_contains($confirmPage, '<a href="' . ADDR_A . '/">Return to the portal</a>') === true, mb_substr(text($confirmPage), 0, 200));
+// The administrator of B, on B's own address.
+$process = ADDR_B . '/admin/erasure-requests/process';
+$listB   = req($jar['admb'], 'GET', '/admin/erasure-requests', null, ADDR_B);
+$buttons = substr_count($listB['body'], 'name="action" value="');
+$reports = $attributes($listB['body'], 'href', 'erasure-requests/report');
+ok('B\'s own list of requests: every button posts inside B\'s address, and every "Report" link stays there too',
+    $listB['status'] === 200 && $buttons >= 2 && substr_count($listB['body'], 'action="' . $process . '"') === $buttons
+    && $reports === [ADDR_B . '/admin/erasure-requests/report?id=' . REQ_B_PUT, ADDR_B . '/admin/erasure-requests/report?id=' . REQ_B_ASK],
+    'HTTP ' . $listB['status'] . '; ' . $buttons . ' button(s), ' . substr_count($listB['body'], 'action="' . $process . '"') . ' posting to ' . $process . '; report links: ' . implode(', ', $reports));
+$pressB = req($jar['admb'], 'POST', '/admin/erasure-requests/process', ['csrf_token' => token($listB['body']), 'requestID' => REQ_B_PUT, 'action' => 'putback'], ADDR_B);
+$after  = req($jar['admb'], 'GET', '/admin/erasure-requests', null, ADDR_B);
+ok('B\'s administrator presses "Put back to waiting" on B\'s list: it is done, and the browser lands back on B\'s own list, which says so',
+    $pressB['status'] === 302 && $pressB['location'] === ADDR_B . '/admin/erasure-requests' && request(REQ_B_PUT)['status'] === 'pending_review'
+    && str_contains(message($after['body']), 'is back at pending review'),
+    'HTTP ' . $pressB['status'] . ' Location: ' . $pressB['location'] . '; request: ' . request(REQ_B_PUT)['status'] . '; ' . message($after['body']));
+$pressB = req($jar['admb'], 'POST', '/admin/erasure-requests/process', ['csrf_token' => token($after['body']), 'requestID' => 917999, 'action' => 'cancel'], ADDR_B);
+ok('…and a press that is REFUSED (a request number that does not exist) lands back on B\'s own list as well',
+    $pressB['status'] === 302 && $pressB['location'] === ADDR_B . '/admin/erasure-requests', 'HTTP ' . $pressB['status'] . ' Location: ' . $pressB['location']);
+$report = req($jar['admb'], 'GET', '/admin/erasure-requests/report?id=' . REQ_B_PUT, null, ADDR_B);
+ok('the report page of one of B\'s requests: its download link, and its way back to the list, are inside B\'s address',
+    $report['status'] === 200 && array_diff([ADDR_B . '/admin/erasure-requests/report?id=' . REQ_B_PUT . '&download=1', ADDR_B . '/admin/erasure-requests'], $attributes($report['body'], 'href', 'erasure-requests')) === [],
+    'HTTP ' . $report['status'] . '; links: ' . implode(', ', $attributes($report['body'], 'href', 'erasure-requests')));
+// WHERE "EXECUTE" LANDS. No check used to look, with or without the first
+// part of the address. Two faults planted by the independent check (12
+// October 2026) passed all 65: that redirect written as a bare address again,
+// and that redirect pointed at an address that does not exist, which the
+// address check cannot see either because the helper still builds it. So the
+// press is made, and the address it gives is then OPENED.
+// Ben and his request are made here, not at the start: the checks above
+// count the buttons and the Report links on B's list.
+q('INSERT INTO tblUsers (userID, fullName, emailAddress, isActive, isAdmin, isRootAdmin) VALUES (?, ?, ?, 1, 0, 0)', 'iss', [BEN, 'Ben Elsewhere', 'u' . BEN . '.erasure@selftest.invalid']);
+q('INSERT INTO tblUserSites (userID, siteID, isActive, isSiteAdmin, isSiteRootAdmin) VALUES (?, ?, 1, 0, 0)', 'ii', [BEN, ORG_B]);
+$seed(REQ_B_RUN, ORG_B, BEN, 'pending_review', null);
+$listB  = req($jar['admb'], 'GET', '/admin/erasure-requests', null, ADDR_B);
+$pressB = req($jar['admb'], 'POST', '/admin/erasure-requests/process', ['csrf_token' => token($listB['body']), 'requestID' => REQ_B_RUN, 'action' => 'execute'], ADDR_B);
+// The address the browser was given, asked for exactly as given.
+$landed = str_starts_with($pressB['location'], '/') === true ? req($jar['admb'], 'GET', $pressB['location'], null, '') : ['status' => 0, 'location' => '', 'body' => ''];
+ok('B\'s administrator presses "Execute" on one of B\'s requests: it is carried out, the browser is sent to B\'s own list, and that address opens (200) and says the request is completed',
+    $pressB['status'] === 302 && $pressB['location'] === ADDR_B . '/admin/erasure-requests' && request(REQ_B_RUN)['status'] === 'completed'
+    && $landed['status'] === 200 && str_contains(message($landed['body']), 'Erasure request #' . REQ_B_RUN . ' is completed'),
+    'HTTP ' . $pressB['status'] . ' Location: ' . $pressB['location'] . '; request: ' . request(REQ_B_RUN)['status'] . '; following it: HTTP ' . $landed['status'] . ' ' . mb_substr(message($landed['body']), 0, 120));
 
 // =============================================================================
 head('Nothing went wrong behind the pages, and everything is put back');

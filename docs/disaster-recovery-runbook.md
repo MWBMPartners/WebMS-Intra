@@ -516,9 +516,15 @@ SELECT userID, fullName, emailAddress, isActive FROM tblUsers WHERE emailAddress
 From then on that person cannot sign in with a password (*tested, 17*), a
 passkey, Microsoft or Google (*read from the code, not run*).
 
-**If they are signed in at this moment, they stay signed in.** Switching the
-account off does not end a session that is already open. *Tested (17).* End it
-yourself, with the folder from 7.5 and the `userID` from above in place of
+**If they are signed in at this moment, they are signed out on their next
+click.** On every request a signed-in person makes, the portal checks that the
+account is still switched on, and ends the session if it is not. A page they
+already have open stays on their screen until they click again. Switching the
+account back on does not bring the old session back. *Tested (28).*
+
+You no longer need to end the session yourself. The commands below are kept
+for one case: ending one person's open sessions WITHOUT switching their
+account off. Use the folder from 7.5 and the `userID` from above in place of
 `NUMBER`:
 
 ```bash
@@ -956,7 +962,7 @@ same fingerprint of its contents before and after.
 | 14 | Three faulty snapshots (a file cut short; a row the database refuses, half way through writing; no manifest) | Each refused; database unchanged |
 | 15 | The three faults in 2.1; tables changed shape four ways; a restore killed half way | As described; database unchanged after every failure |
 | 16 | Portal closed and opened, by SQL and from the page; the errors query | As described |
-| 17 | Every step of section 7 except sending email | As described |
+| 17 | Every step of section 7 except sending email. (7.7's sentence about an open session was true when this ran and has since changed: see 28) | As described |
 | 18 | `enc.key` replaced, then put back | Secret unreadable, then readable again |
 | 19 | The example off-site script: whole runs; every message in its table except the `aws` and `scp` ones; a failed upload and a failed encryption; stopped by a signal (interrupt, terminate, hang-up, quit); a keep number that is not a whole number; old copies deleted, with the real rclone 1.75.2 and a folder on the test machine. In bash 5.3, 3.2 and (on Linux) 4.4 | As `docs/offsite-backup-setup.md` describes |
 | 20 | Database, snapshots and key file lost; the steps of 8.6 then 8.5 | Identical |
@@ -967,6 +973,7 @@ same fingerprint of its contents before and after.
 | 25 | The three queries of 7.3; the count of 7.5 step 2 with the right folder and a wrong one; the three lines of 7.7 | As described |
 | 26 | A snapshot made; 4.2, 7.3, 7.7 and 7.8 step 3 done by SQL; the snapshot put back with 8.3. Then a dump made with the portal open, the portal closed, the dump put back with 9.2 | Every old password matched its stored fingerprint again, the locked account was switched on, the new password no longer matched, the portal was open. After the dump: the portal open |
 | 27 | A copy made by the example script fetched back; 8.6 step 4 with a wrong key, then the right one; the box that removes the packed files, with `PORTAL` set and not set; the check of 8.3 step 2 | Wrong key: `bad decrypt`, the fetched file untouched. Right key: 225 files, identical to the original snapshot; the check passed |
+| 28 | Switching an account off, and erasing one, while that person is signed in: the portal's own page test (`tools/access-pages-selftest.php`, part K: real sign-ins and real cookies), run on 12 October 2026 on the code that holds this change | The next request is signed out; a public page treats them as signed out; switching the account back on does not revive the old session |
 
 **Not tested:** MySQL 8.4 and MariaDB; any real hosting company; real email;
 rclone with anything but a folder on the test machine; S3 or SFTP; a real

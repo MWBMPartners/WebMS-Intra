@@ -1358,7 +1358,7 @@
           "Legacy Alias"
         ],
         "summary": "List an event's Team Hub resources (links + notes)",
-        "description": "Requires scope `eventhub:read` (bearer) or an authenticated session. The event must belong to the caller's own site — a bearer key is tenant-pinned to the site it was minted for — or this 404s rather than revealing another tenant's event. A session is answered only for an event the calendar would show that person: a public event, or an internal one of an organisation they are an active member of or administer (#534); any other event is the same 404 as one that does not exist. A bearer key is answered for the organisation's own events as before. Built for the projectBookIT Event Team Hub integration (#387).",
+        "description": "Requires scope `eventhub:read` (bearer) or an authenticated session. The event must belong to the caller's own site — a bearer key is tenant-pinned to the site it was minted for — or this 404s rather than revealing another tenant's event. A session is answered only for an event the calendar would show that person: a public event, or an internal one of an organisation they are an active member of or administer (#534); and only when that person is on the event's own team (an administrator, a coordinator of the event, a crew member, somebody with a job on it, or somebody named on the event as one of its people, such as a host or a speaker), which is the same test as the Team Hub page. Any other event is the same 404 as one that does not exist. A bearer key is not a person on a team: it is answered for the organisation's own events as before. Built for the projectBookIT Event Team Hub integration (#387).",
         "parameters": [
           {
             "name": "eventID",
@@ -1408,7 +1408,7 @@
             "description": "Endpoint disabled, the Calendar app switched off for the organisation, or bearer key missing the `eventhub:read` scope"
           },
           "404": {
-            "description": "Event not found (including: exists, but on a different tenant's site; or, for a session, an event that person may not see)"
+            "description": "Event not found (including: exists, but on a different tenant's site; or, for a session, an event that person may not see or is not on the team of)"
           }
         }
       }
@@ -1420,7 +1420,7 @@
           "Legacy Alias"
         ],
         "summary": "List an event's Team Hub video grid",
-        "description": "Requires scope `eventhub:read` (bearer) or an authenticated session. Same tenant guard, and the same rule for which events a session is answered for (#534), as GET /api/calendar/hub-resources. The response NEVER includes a signing key, playback token, or any `cfstream.*` credential — only `videoRef` (the public provider ID/UID a player embeds against) and playback-policy metadata. Built for the projectBookIT Event Team Hub integration (#387).",
+        "description": "Requires scope `eventhub:read` (bearer) or an authenticated session. Same tenant guard, and the same two rules for which events a session is answered for (the event rule of #534, and the event's own team only: an administrator, a coordinator, a crew member, somebody with a job on it, or somebody named on the event as one of its people), as GET /api/calendar/hub-resources. The response NEVER includes a signing key, playback token, or any `cfstream.*` credential — only `videoRef` (the public provider ID/UID a player embeds against) and playback-policy metadata. Built for the projectBookIT Event Team Hub integration (#387).",
         "parameters": [
           {
             "name": "eventID",
@@ -1470,7 +1470,7 @@
             "description": "Endpoint disabled, the Calendar app switched off for the organisation, or bearer key missing the `eventhub:read` scope"
           },
           "404": {
-            "description": "Event not found (including: exists, but on a different tenant's site; or, for a session, an event that person may not see)"
+            "description": "Event not found (including: exists, but on a different tenant's site; or, for a session, an event that person may not see or is not on the team of)"
           }
         }
       }

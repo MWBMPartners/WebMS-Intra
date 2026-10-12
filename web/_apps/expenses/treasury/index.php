@@ -34,7 +34,7 @@ use Portal\Core\Site;
 // 📌 Page metadata for the template system
 $pageTitle   = 'Treasury';
 $pageSection = 'expenses';
-$breadcrumbs = ['Dashboard' => '/', 'Expenses' => '/expenses/treasury', 'Treasury' => ''];
+$breadcrumbs = ['Dashboard' => Router::url(''), 'Expenses' => Router::url('expenses/treasury'), 'Treasury' => ''];
 
 // -----------------------------------------------------------------------------
 // 🔒 #538 (21 September 2026) — who may open this page at all
@@ -185,7 +185,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <div class="modal fade" id="payModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-lg modal-dialog-scrollable modal-fullscreen-sm-down">
         <div class="modal-content">
-            <form method="post" action="/expenses/treasury/save">
+            <form method="post" action="<?php echo htmlspecialchars(Router::url('expenses/treasury/save'), ENT_QUOTES, 'UTF-8'); ?>">
                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
                 <input type="hidden" name="claimID" id="payClaimID">
                 <div class="modal-header">

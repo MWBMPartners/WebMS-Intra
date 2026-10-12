@@ -444,7 +444,7 @@ check(
 $ownBlock = $own >= 0 ? substr($approveSave, $own, 400) : '';
 check(
     '…and its answer is the refusal sentence, then back to the approvals page, then stop',
-    preg_match('/^' . preg_quote($ownCall, '/') . '\)\s*\{\s*\$_SESSION\[\'flash_msg\'\]\s*=\s*ExpenseRules::MSG_OWN_DECISION;\s*\$_SESSION\[\'flash_type\'\]\s*=\s*\'danger\';\s*header\(\'Location: \/expenses\/approve\'\);\s*exit\(\);\s*\}/', $ownBlock) === 1,
+    preg_match('/^' . preg_quote($ownCall, '/') . '\)\s*\{\s*\$_SESSION\[\'flash_msg\'\]\s*=\s*ExpenseRules::MSG_OWN_DECISION;\s*\$_SESSION\[\'flash_type\'\]\s*=\s*\'danger\';\s*header\(\'Location: \' \. Router::url\(\'expenses\/approve\'\)\);\s*exit\(\);\s*\}/', $ownBlock) === 1,
     'Found: ' . substr($ownBlock, 0, 200)
 );
 // The whole statement, exactly, at the top level of the handler, straight
@@ -453,7 +453,7 @@ check(
 // this no longer matches.
 $approveSqueezed = squeezed((string) @file_get_contents($apps . 'expenses/approve/save.php'));
 $approveExact    = "exit();}if(ExpenseRules::isOwnClaim((int)\$claim['userID'],\$userId)===true){\$_SESSION['flash_msg']=ExpenseRules::MSG_OWN_DECISION;"
-    . "\$_SESSION['flash_type']='danger';header('Location: /expenses/approve');exit();}\$approverRole=null;";
+    . "\$_SESSION['flash_type']='danger';header('Location: '.Router::url('expenses/approve'));exit();}\$approverRole=null;";
 check(
     '…as a plain top-level `if` holding that ONE question — nothing in front of it (no "unless an administrator"), nothing wrapped round it — asked exactly once',
     substr_count($approveSqueezed, $approveExact) === 1 && substr_count($approveSqueezed, 'isOwnClaim(') === 1
@@ -468,13 +468,18 @@ check(
     '…and no longer carries its own copy of that query (two copies would drift apart)',
     str_contains($approveSave, 'isMandatoryApprover = 1') === false && str_contains($approveSave, 'FROM tblUserDepts') === false
 );
-// The "no authority at all" refusal: byte for byte what it was, and before any claim lookup.
+// The "no authority at all" refusal: what it always was, and before any claim lookup.
+// One thing in it changed on 12 October 2026 (roll-out package B2a), here and
+// in the two "own claim" statements this file pins above and below: the
+// address the person is sent back to is now built by Router::url(), so it
+// stays inside their own organisation's address. The words, the test and the
+// order did not change.
 $noAuthority = "if (\$isAdmin === false && App::hasRole('Approver') === false) {\n"
     . "    \$approverDepts = Departments::approverDepts(\$mysqli, \$userId, \$siteId);\n"
     . "    if (count(\$approverDepts) === 0) {\n"
     . "        \$_SESSION['flash_msg']  = 'Access denied — Approver or Admin role required.';\n"
     . "        \$_SESSION['flash_type'] = 'danger';\n"
-    . "        header('Location: /expenses/approve');\n"
+    . "        header('Location: ' . Router::url('expenses/approve'));\n"
     . "        exit();\n"
     . "    }\n"
     . "}\n";
@@ -507,12 +512,12 @@ check(
 $payBlock = $payOwn >= 0 ? substr($paySave, $payOwn, 400) : '';
 check(
     '…and its answer is the refusal sentence, then back to the treasury page, then stop',
-    preg_match('/^' . preg_quote($ownCall, '/') . '\)\s*\{\s*\$_SESSION\[\'flash_msg\'\]\s*=\s*ExpenseRules::MSG_OWN_PAYMENT;\s*\$_SESSION\[\'flash_type\'\]\s*=\s*\'danger\';\s*header\(\'Location: \/expenses\/treasury\'\);\s*exit\(\);\s*\}/', $payBlock) === 1,
+    preg_match('/^' . preg_quote($ownCall, '/') . '\)\s*\{\s*\$_SESSION\[\'flash_msg\'\]\s*=\s*ExpenseRules::MSG_OWN_PAYMENT;\s*\$_SESSION\[\'flash_type\'\]\s*=\s*\'danger\';\s*header\(\'Location: \' \. Router::url\(\'expenses\/treasury\'\)\);\s*exit\(\);\s*\}/', $payBlock) === 1,
     'Found: ' . substr($payBlock, 0, 200)
 );
 $paySqueezed = squeezed((string) @file_get_contents($apps . 'expenses/treasury/save.php'));
 $payExact    = "exit();}if(ExpenseRules::isOwnClaim((int)\$claim['userID'],\$userId)===true){\$_SESSION['flash_msg']=ExpenseRules::MSG_OWN_PAYMENT;"
-    . "\$_SESSION['flash_type']='danger';header('Location: /expenses/treasury');exit();}\$paidByName=";
+    . "\$_SESSION['flash_type']='danger';header('Location: '.Router::url('expenses/treasury'));exit();}\$paidByName=";
 check(
     '…as a plain top-level `if` holding that ONE question — nothing in front of it (no "unless an administrator"), nothing wrapped round it — asked exactly once',
     substr_count($paySqueezed, $payExact) === 1 && substr_count($paySqueezed, 'isOwnClaim(') === 1

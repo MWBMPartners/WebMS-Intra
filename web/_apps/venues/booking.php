@@ -41,6 +41,15 @@ use Portal\Core\Venues;
 Auth::ensureSession();
 Auth::requireLogin();
 
+// 🛡️ Only this organisation's own people may see its bookings: Venues::canView()
+//    says why. A refusal looks exactly like a page that does not exist, the
+//    same answer this app gives for another organisation's venue or booking,
+//    so nothing here tells an outsider what this organisation has.
+if (Venues::canView() === false) {
+    Router::renderError(404);
+    return;
+}
+
 $siteId = Site::id();
 $isMgr  = Venues::canManage();
 $db     = App::db();
@@ -137,10 +146,11 @@ $currentEventId = (int) ($booking['eventID'] ?? 0);
 //    venue manager is not asked: their form lists the organisation's events
 //    to choose from, which is part of managing bookings.
 //
-//    WHAT THIS CANNOT DO: it hides the event's NAME only. The booking itself
-//    (its date, room, times, status and notes) is still shown to any
-//    signed-in account that opens this address, as before. Who may see a
-//    venue booking at all is a separate question and is not changed here.
+//    WHAT THIS CANNOT DO: it hides the event's NAME only, from a viewer who
+//    may see the booking but not that event. Who may see the booking at all
+//    is decided at the top of this page by Venues::canView() (12 October
+//    2026): this organisation's own members and venue managers. Before that
+//    date any signed-in account could open it.
 $linkedEventVisible = false;
 if ($isMgr === false && $currentEventId > 0) {
     $visibility = EventVisibility::where('e', EventVisibility::MODE_SESSION, EventVisibility::sessionViewerId(), date('Y-m-d'));

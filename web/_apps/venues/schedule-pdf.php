@@ -34,6 +34,15 @@ use Portal\Core\Venues;
 Auth::ensureSession();
 Auth::requireLogin();
 
+// 🛡️ Only this organisation's own people may see its bookings: Venues::canView()
+//    says why. A refusal looks exactly like a page that does not exist, the
+//    same answer this app gives for another organisation's venue or booking,
+//    so nothing here tells an outsider what this organisation has.
+if (Venues::canView() === false) {
+    Router::renderError(404);
+    return;
+}
+
 $siteId = Site::id();
 $isMgr  = Venues::canManage();
 $esc    = static fn (mixed $s): string => htmlspecialchars((string) $s, ENT_QUOTES, 'UTF-8');

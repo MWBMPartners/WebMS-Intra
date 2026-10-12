@@ -40,8 +40,18 @@ use Portal\Core\ApiResponse;
 use Portal\Core\Site;
 use Portal\Core\Venues;
 
-// 🔐 Session OR bearer — read-only, no CSRF surface (02 §12 item 6).
+// 🔐 A signed-in session — read-only, no CSRF surface (02 §12 item 6).
+//    (This comment used to say "session OR bearer". That was never true:
+//    requireAuth() accepts a session only, so an API key gets 401 here.)
 ApiResponse::requireAuth();
+
+// 🛡️ Only this organisation's own people may read its bookings:
+//    Venues::canView() says why. A refusal is the very answer an unknown
+//    venue gets below ("invalid-range", 400), so it does not tell an outsider
+//    whether this organisation has venues or bookings.
+if (Venues::canView() === false) {
+    ApiResponse::error('invalid-range', 400);
+}
 
 $siteId = Site::id();
 

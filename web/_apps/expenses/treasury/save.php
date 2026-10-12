@@ -63,7 +63,7 @@ if (App::hasRole('treasurer') === false && App::isAdmin() === false) {
 if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
     $_SESSION['flash_msg']  = 'Invalid CSRF token.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /expenses/treasury');
+    header('Location: ' . Router::url('expenses/treasury'));
     exit();
 }
 
@@ -76,14 +76,14 @@ $refs     = array_filter(array_map('trim', explode(',', implode(',', $_POST['pay
 if ($claimID === 0) {
     $_SESSION['flash_msg']  = 'Invalid claim ID.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /expenses/treasury');
+    header('Location: ' . Router::url('expenses/treasury'));
     exit();
 }
 
 if (empty($refs) === true) {
     $_SESSION['flash_msg']  = 'At least one payment reference is required.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /expenses/treasury');
+    header('Location: ' . Router::url('expenses/treasury'));
     exit();
 }
 
@@ -109,7 +109,7 @@ if ($stmt !== false) {
 if ($claim === null) {
     $_SESSION['flash_msg']  = 'Claim not found or not in Approved status.';
     $_SESSION['flash_type'] = 'warning';
-    header('Location: /expenses/treasury');
+    header('Location: ' . Router::url('expenses/treasury'));
     exit();
 }
 
@@ -129,7 +129,7 @@ if ($claim === null) {
 if (ExpenseRules::isOwnClaim((int) $claim['userID'], $userId) === true) {
     $_SESSION['flash_msg']  = ExpenseRules::MSG_OWN_PAYMENT;
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /expenses/treasury');
+    header('Location: ' . Router::url('expenses/treasury'));
     exit();
 }
 
@@ -181,7 +181,7 @@ try {
     // 6. ✅ Redirect with flash message
     $_SESSION['flash_msg']  = 'Claim #' . $claimID . ' has been marked as reimbursed.';
     $_SESSION['flash_type'] = 'success';
-    header('Location: /expenses/treasury');
+    header('Location: ' . Router::url('expenses/treasury'));
     exit();
 
 } catch (\Throwable $ex) {
@@ -189,6 +189,6 @@ try {
     Logger::exception($ex);
     $_SESSION['flash_msg']  = 'Error processing reimbursement. Please try again.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /expenses/treasury');
+    header('Location: ' . Router::url('expenses/treasury'));
     exit();
 }

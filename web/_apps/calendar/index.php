@@ -441,16 +441,33 @@ if ($view === 'list') {
 // renders byte-identical to pre-#429 output (security item 14 — the hard
 // resilience requirement). List view has no fixed date range, so it never
 // computes an overlay.
+//
+// WHO SEES IT: only this organisation's own people, by the same test the
+// venue pages make (Venues::canView()). For everybody else $venueOverlay
+// stays [] and the page is drawn exactly as it is when the Venues app is
+// off; nothing else on the calendar depends on the answer.
+//
+// WHAT WAS WRONG (found by the independent check, 12 October 2026): the
+// overlay was worked out for whoever opened the page. `/calendar` is a
+// public address, so a SIGNED-OUT visitor, and any signed-in account of
+// another organisation, was shown which days this organisation's venues
+// are booked, with each venue's name and booking status.
+//
+// The test is INSIDE the try on purpose: it reads the database, and a
+// fault there must leave the calendar standing with no strip, as every
+// other Venues fault here does.
 // -----------------------------------------------------------------------------
 $venueOverlay = [];
 if ($view !== 'list' && $rangeStart !== null && $rangeEnd !== null && AppRegistry::isEnabled('venues') === true) {
     try {
-        $venueOverlay = Venues::availabilityForRange(
-            $siteId,
-            null,
-            $rangeStart->format('Y-m-d'),
-            $rangeEnd->format('Y-m-d')
-        );
+        if (Venues::canView() === true) {
+            $venueOverlay = Venues::availabilityForRange(
+                $siteId,
+                null,
+                $rangeStart->format('Y-m-d'),
+                $rangeEnd->format('Y-m-d')
+            );
+        }
     } catch (\Throwable $e) {
         error_log('Calendar venue overlay failed: ' . $e->getMessage());
         $venueOverlay = [];

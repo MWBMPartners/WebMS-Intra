@@ -24,12 +24,13 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\Router;
 use Portal\Core\Site;
 
 // 📌 Page metadata for the template system
 $pageTitle   = 'Approve Expense Claims';
 $pageSection = 'expenses';
-$breadcrumbs = ['Dashboard' => '/', 'Expenses' => '/expenses/approve', 'Approve' => ''];
+$breadcrumbs = ['Dashboard' => Router::url(''), 'Expenses' => Router::url('expenses/approve'), 'Approve' => ''];
 
 // 📋 Flash message
 $flashMsg  = $_SESSION['flash_msg']  ?? '';
@@ -116,7 +117,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <!-- ✔️ Pending Expense Approvals -->
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h1 class="mb-0"><i class="fa-solid fa-check-double me-2"></i>Pending Expense Approvals</h1>
-    <a href="/expenses/api/export?csrf_token=<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>"
+    <a href="<?php echo htmlspecialchars(Router::url('expenses/api/export'), ENT_QUOTES, 'UTF-8'); ?>?csrf_token=<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>"
        class="btn btn-outline-success" title="Export all claims CSV">
         <i class="fa-solid fa-file-csv me-1"></i> Export
     </a>
@@ -179,7 +180,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <div class="modal fade" id="approveModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-lg modal-dialog-scrollable modal-fullscreen-sm-down">
         <div class="modal-content">
-            <form method="post" action="/expenses/approve/save">
+            <form method="post" action="<?php echo htmlspecialchars(Router::url('expenses/approve/save'), ENT_QUOTES, 'UTF-8'); ?>">
                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
                 <input type="hidden" name="claimID" id="claimID">
                 <div class="modal-header">

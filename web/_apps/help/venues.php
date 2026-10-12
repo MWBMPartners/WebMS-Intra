@@ -87,7 +87,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         </div>
     </div>
     <p class="text-muted small mb-0">
-        Anyone logged in can view the schedule and a venue's details (without costs). Adding and editing bookings,
+        Any signed-in member of your organisation can view the schedule and a venue's details (without costs). Adding and editing bookings,
         agreements, and invoices is limited to the Venue Manager role and admins — see
         <a href="#roles">Who Can Do What</a> below.
     </p>
@@ -381,8 +381,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <h2 class="h4 mb-3"><i class="fa-solid fa-users me-2"></i>Who Can Do What</h2>
     <div class="portal-data-list mb-3">
         <div class="portal-data-row">
-            <div class="col-12 col-md-3"><strong>Any logged-in user</strong></div>
-            <div class="col-12 col-md-9">Can view the schedule, a venue's details, and the calendar overlay — all without seeing costs. Can export the schedule to CSV or PDF (also without costs).</div>
+            <div class="col-12 col-md-3"><strong>Any signed-in member of your organisation</strong></div>
+            <div class="col-12 col-md-9">Can view the schedule, a venue's details, and the calendar overlay — all without seeing costs. Can export the schedule to CSV or PDF (also without costs). Somebody who is not a member of your organisation, or is not signed in, sees none of these.</div>
         </div>
         <div class="portal-data-row">
             <div class="col-12 col-md-3"><strong>Venue Manager</strong> (or admin)</div>

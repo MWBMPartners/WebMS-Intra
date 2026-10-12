@@ -19,6 +19,7 @@ require_once dirname(__DIR__, 3) . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEP
 
 use Portal\Core\Auth;
 use Portal\Core\App;
+use Portal\Core\Router;
 use Portal\Core\Site;
 use Portal\Core\CsvExporter;
 
@@ -41,7 +42,7 @@ if ($isAdmin === false && $isApprover === false) {
 if (Auth::verifyCsrf($_GET['csrf_token'] ?? '') === false) {
     $_SESSION['flash_msg']  = 'Invalid or expired form token. Please try again.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /expenses');
+    header('Location: ' . Router::url('expenses'));
     exit();
 }
 

@@ -16,6 +16,13 @@
  *   confirm  confirm, on the person's behalf, one still waiting for them to
  *            click the emailed link (roll-out package A2a).
  *
+ * ADDRESSES: every redirect, link and form target here is built by
+ * Router::url(), so it stays inside the organisation's own address. They
+ * used to be written out ("/account/my-data"), which lands on the DEFAULT
+ * organisation when organisations are told apart by the first part of the
+ * address (roll-out package B2b, 12 October 2026; part of #536).
+ * tools/audit-checks/check_site_aware_addresses.py holds this file to it.
+ *
  * @package   Portal\Admin
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2026-present MWBM Partners Ltd (t/a MWservices)
@@ -62,7 +69,7 @@ if ($stmt !== false) {
 if ($row === null) {
     $_SESSION['flash_msg']  = 'Erasure request not found.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /admin/erasure-requests');
+    header('Location: ' . Router::url('admin/erasure-requests'));
     exit();
 }
 
@@ -108,7 +115,7 @@ if ($action === 'cancel') {
             . 'leave them with part of their records gone and a request that says nothing happened. '
             . 'Run the request again to finish it. Nothing was changed.';
         $_SESSION['flash_type'] = 'warning';
-        header('Location: /admin/erasure-requests');
+        header('Location: ' . Router::url('admin/erasure-requests'));
         exit();
     }
     $cancelled = false;
@@ -127,13 +134,13 @@ if ($action === 'cancel') {
             . str_replace('_', ' ', (string) $row['status']) . '". Only a request that has not been run yet can be '
             . 'cancelled. Nothing was changed.';
         $_SESSION['flash_type'] = 'warning';
-        header('Location: /admin/erasure-requests');
+        header('Location: ' . Router::url('admin/erasure-requests'));
         exit();
     }
     Logger::activity('GdprErasureCancelled', 'Cancelled erasure request #' . $requestId, $adminId);
     $_SESSION['flash_msg']  = 'Erasure request cancelled.';
     $_SESSION['flash_type'] = 'info';
-    header('Location: /admin/erasure-requests');
+    header('Location: ' . Router::url('admin/erasure-requests'));
     exit();
 }
 
@@ -151,7 +158,7 @@ if ($action === 'confirm') {
         $_SESSION['flash_msg']  = 'Erasure request #' . $requestId . ' could not be confirmed, and nothing was changed. '
             . 'Try again in a minute; if it keeps happening, tell whoever looks after the portal.';
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /admin/erasure-requests');
+        header('Location: ' . Router::url('admin/erasure-requests'));
         exit();
     }
     if ($result === 'confirmed') {
@@ -169,7 +176,7 @@ if ($action === 'confirm') {
             . 'Nothing was changed.';
         $_SESSION['flash_type'] = 'info';
     }
-    header('Location: /admin/erasure-requests');
+    header('Location: ' . Router::url('admin/erasure-requests'));
     exit();
 }
 
@@ -185,7 +192,7 @@ if ($action === 'putback') {
         $_SESSION['flash_msg']  = 'Erasure request #' . $requestId . ' could not be put back, and nothing was changed. '
             . 'If this portal has just been updated, run the database upgrade (Admin, Upgrade) and try again.';
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /admin/erasure-requests');
+        header('Location: ' . Router::url('admin/erasure-requests'));
         exit();
     }
     if ($result === 'put-back') {
@@ -207,14 +214,14 @@ if ($action === 'putback') {
             . 'nothing to put back. Nothing was changed.';
         $_SESSION['flash_type'] = 'info';
     }
-    header('Location: /admin/erasure-requests');
+    header('Location: ' . Router::url('admin/erasure-requests'));
     exit();
 }
 
 if ($action !== 'execute' || (string) $row['status'] !== 'pending_review') {
     $_SESSION['flash_msg']  = 'Request is not in a reviewable state.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /admin/erasure-requests');
+    header('Location: ' . Router::url('admin/erasure-requests'));
     exit();
 }
 
@@ -246,13 +253,13 @@ try {
             : 'The database refused to start it. Try again in a minute; if it keeps happening, tell whoever looks '
                 . 'after the portal.');
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /admin/erasure-requests');
+    header('Location: ' . Router::url('admin/erasure-requests'));
     exit();
 }
 if ($claimed === false) {
     $_SESSION['flash_msg']  = 'Another admin is processing this request.';
     $_SESSION['flash_type'] = 'warning';
-    header('Location: /admin/erasure-requests');
+    header('Location: ' . Router::url('admin/erasure-requests'));
     exit();
 }
 
@@ -266,7 +273,7 @@ if ($userId === 0) {
     }
     $_SESSION['flash_msg']  = 'No user attached to this request.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /admin/erasure-requests');
+    header('Location: ' . Router::url('admin/erasure-requests'));
     exit();
 }
 
@@ -298,7 +305,7 @@ try {
         . 'missing from it). If the request shows as "pending review" below, run it again. If it shows as '
         . '"processing", it could not be put back and needs setting back by whoever looks after the portal.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /admin/erasure-requests');
+    header('Location: ' . Router::url('admin/erasure-requests'));
     exit();
 }
 
@@ -318,7 +325,7 @@ if ($outcome['failed'] > 0) {
         . 'names a missing column means the database needs its upgrade first, and running the request again will '
         . 'not help until that is done.';
     $_SESSION['flash_type'] = 'warning';
-    header('Location: /admin/erasure-requests');
+    header('Location: ' . Router::url('admin/erasure-requests'));
     exit();
 }
 
@@ -327,5 +334,5 @@ Logger::activity('GdprErasureExecuted', 'Executed erasure request #' . $requestI
 $_SESSION['flash_msg']  = 'Erasure request #' . $requestId . ' is completed: all ' . $outcome['steps'] . ' steps ran '
     . 'and none failed. Its report lists each step, and the audit chain can be verified there.';
 $_SESSION['flash_type'] = 'success';
-header('Location: /admin/erasure-requests');
+header('Location: ' . Router::url('admin/erasure-requests'));
 exit();

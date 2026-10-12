@@ -25,6 +25,7 @@ use Portal\Core\Captcha;
 use Portal\Core\Logger;
 use Portal\Core\ExpensePdf;
 use Portal\Core\ExpenseMailer;
+use Portal\Core\Router;
 use Portal\Core\Site;
 
 // 🛡️ Session and security checks
@@ -34,14 +35,14 @@ Auth::requireLogin();
 if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
     $_SESSION['flash_msg']  = 'Invalid CSRF token.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /expenses/submit');
+    header('Location: ' . Router::url('expenses/submit'));
     exit();
 }
 
 if (Captcha::verify($_POST) === false) {
     $_SESSION['flash_msg']  = 'Captcha verification failed. Please try again.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /expenses/submit');
+    header('Location: ' . Router::url('expenses/submit'));
     exit();
 }
 
@@ -53,7 +54,7 @@ $claimTitle = trim($_POST['claimTitle'] ?? '');
 if ($deptID === 0 || $claimTitle === '') {
     $_SESSION['flash_msg']  = 'Missing required fields (department and title).';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /expenses/submit');
+    header('Location: ' . Router::url('expenses/submit'));
     exit();
 }
 
@@ -70,7 +71,7 @@ foreach ($_POST['itemDesc'] ?? [] as $i => $desc) {
 if ($totalAmt <= 0) {
     $_SESSION['flash_msg']  = 'Total must be greater than zero.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /expenses/submit');
+    header('Location: ' . Router::url('expenses/submit'));
     exit();
 }
 
@@ -91,7 +92,7 @@ $deptCheck = $mysqli->prepare('SELECT deptID FROM tblDepts WHERE deptID = ? AND 
 if ($deptCheck === false) {
     $_SESSION['flash_msg']  = 'Error saving claim. Please try again.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /expenses/submit');
+    header('Location: ' . Router::url('expenses/submit'));
     exit();
 }
 $deptCheck->bind_param('ii', $deptID, $siteId);
@@ -101,7 +102,7 @@ $deptCheck->close();
 if ($deptExists === false) {
     $_SESSION['flash_msg']  = 'Selected department is not valid for this site.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /expenses/submit');
+    header('Location: ' . Router::url('expenses/submit'));
     exit();
 }
 
@@ -190,7 +191,7 @@ try {
     ]);
 
     // 7. ✅ Redirect to success view
-    header('Location: /expenses/submit?success=' . $claimID);
+    header('Location: ' . Router::url('expenses/submit') . '?success=' . $claimID);
     exit();
 
 } catch (\Throwable $ex) {
@@ -198,6 +199,6 @@ try {
     Logger::exception($ex);
     $_SESSION['flash_msg']  = 'Error saving claim. Please try again.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /expenses/submit');
+    header('Location: ' . Router::url('expenses/submit'));
     exit();
 }

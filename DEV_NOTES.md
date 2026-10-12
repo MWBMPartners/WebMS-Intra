@@ -2905,6 +2905,36 @@ Use the workflow_dispatch **dry-run** input on `deploy.yml` to preview what
 a deploy would change (and crucially, what it would delete) before pushing.
 See issue #107 for the full rationale and mitigation list.
 
+## Who may see and do what: the rules added on 12 October 2026 (#534, #548)
+
+- **`Auth::ensureSession()` looks the signed-in account up on every request** (`SELECT isActive FROM
+  tblUsers WHERE userID = ? LIMIT 1`). It must keep naming only `userID` and `isActive`: it runs on the
+  upgrade page, on databases that are part way through upgrading. A failed look-up is never read as "not
+  active".
+- **`LiveChat::eventOpenToViewer()` is the one rule** for the chat list, prompts, send, the viewer ping and
+  the chat box on `/live`. Its fourth argument has no default on purpose, and a test now holds that: the
+  four data endpoints pass `true` ("count the sign-in only for a request made by the portal's own pages"),
+  and `/live` passes `false` because it is a page a person opens. **A new chat endpoint must pass `true`.**
+- **How "made by the portal's own pages" is read** (`LiveChat::requestCameFromOwnPages()`): from
+  `Sec-Fetch-Site: same-origin` when the browser sent that header; otherwise from an `Origin` equal to the
+  address the request was sent to; failing that, from a `Referer` at that address; otherwise no. **Browsers
+  send `Sec-Fetch-Site` only to an https address** (or to the machine itself), so on a portal reached over
+  plain http `Origin` and `Referer` decide for every browser, and a page that sends no `Referer` leaves an
+  internal event's chat empty there. Nothing is compared with a name written in the code or a setting.
+  Behind a proxy that ends https without sending `X-Forwarded-Proto`, an older browser is refused, and in
+  one narrow case accepted; both are written beside the function, with why the second adds no exposure.
+- `Venues::canView()` is the one "may see venue bookings" test. A new page that shows bookings, venue
+  details or booked days must ask it. `calendar/index.php` asks it inside its `try`, so a database fault
+  there leaves the calendar standing with no booked days.
+- **The chat box script sends the sign-in cookie to its own address only** (`credentials: 'same-origin'`).
+  It sends every request to the address of the page it is on, so it cannot work on another website.
+- **Addresses in a cleaned folder go through `Router::url()`**; add the folder, or the single file, to
+  `LISTED` in `check_site_aware_addresses.py` in the same change. A folder is listed whole only when every
+  file in it is clean. The check reads whether an address is built by the helper, not whether it is the
+  right address; only a page test that follows the redirect shows that.
+
+---
+
 ## Backups and recovery: what was proved on 12 October 2026 (#488)
 
 - **The runbook is `docs/disaster-recovery-runbook.md`.** Its table "What was

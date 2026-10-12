@@ -5,6 +5,10 @@
  * `<div data-livechat-widget data-event-id="N">` element is present. Boots
  * automatically on DOMContentLoaded.
  *
+ * WHERE IT WORKS: on the portal's own pages only. Every request goes to the
+ * address of the page this script runs on, so on a page served from another
+ * address it asks that address, not the portal, and shows no chat there.
+ *
  * Responsibilities:
  *   • Mint a 32-char hex sessionToken on first load; persist in
  *     sessionStorage so a page refresh doesn't drop the viewer's identity.
@@ -32,7 +36,45 @@
     const POLL_MESSAGES_MS = 4000;
     const POLL_PROMPTS_MS  = 8000;
     const PING_MS          = 30000;
+    // The address every request below is sent to: the address of the PAGE
+    // this script is running on, never a name written in here.
+    //
+    // WHAT THAT MEANS, said plainly because an earlier comment here had it
+    // wrong: on a page served from another address (the organisation's own
+    // website, say) this script asks THAT address, not the portal. Nothing
+    // there answers, so the box shows no chat at all, for a public event or
+    // an internal one. The box works on the portal's own pages only, which
+    // today means `/live`. Making it work elsewhere would need the portal's
+    // address handed to this script; it is not, and that is a separate job.
     const ORIGIN           = window.location.protocol + '//' + window.location.host;
+
+    // Whether the four requests below carry the visitor's sign-in cookie.
+    // 'same-origin' means: yes, because every request goes to this page's
+    // own address (ORIGIN above); a browser never sends it anywhere else
+    // under this setting.
+    //
+    // This used to be 'omit' (never send it). Since 12 October 2026 the chat
+    // of an INTERNAL event is answered only for a signed-in member of the
+    // organisation (LiveChat::eventOpenToViewer() on the server). With 'omit'
+    // the server saw every viewer as signed out, so an internal event's chat
+    // would have gone quiet for the very members allowed to use it. A public
+    // event's chat needs no sign-in and works either way.
+    //
+    // The cookie alone is not enough for an internal event: the server also
+    // needs the browser to say that one of the portal's own pages made the
+    // request. The browser says so by itself on the requests this script
+    // makes from `/live`: with `Sec-Fetch-Site` when the portal is reached
+    // over https, and with `Origin` or `Referer` when it is reached over
+    // plain http, where no browser sends `Sec-Fetch-Site`. Nothing has to
+    // be added here, and nothing a script could add would count.
+    //
+    // ONE CASE WHERE IT DOES NOT: in a browser that sends no
+    // `Sec-Fetch-Site` (any browser over plain http, or an older one), on a
+    // page that sends no `Referer` (the organisation chose `no-referrer`,
+    // or a privacy tool strips it), the GET requests below carry nothing
+    // that says where they came from, so an internal event's chat stays
+    // empty.
+    const SEND_SIGN_IN     = 'same-origin';
 
     function mintSessionToken() {
         let t = sessionStorage.getItem('webms-livechat-token');
@@ -208,7 +250,7 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ sessionToken: token, eventID: eventID, leaving: !!leaving }),
                     keepalive: true,
-                    credentials: 'omit',
+                    credentials: SEND_SIGN_IN,
                 });
             } catch (_) { /* swallow */ }
         }
@@ -216,7 +258,7 @@
         async function pollMessages() {
             try {
                 const r = await fetch(ORIGIN + '/api/livechat/list?eventID=' + encodeURIComponent(String(eventID)) + '&sinceID=' + lastMsgId, {
-                    credentials: 'omit',
+                    credentials: SEND_SIGN_IN,
                 });
                 if (!r.ok) { return; }
                 const j = await r.json();
@@ -229,7 +271,7 @@
         async function pollPrompts() {
             try {
                 const r = await fetch(ORIGIN + '/api/livechat/prompts?eventID=' + encodeURIComponent(String(eventID)), {
-                    credentials: 'omit',
+                    credentials: SEND_SIGN_IN,
                 });
                 if (!r.ok) { return; }
                 const j = await r.json();
@@ -261,7 +303,7 @@
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(payload),
-                    credentials: 'omit',
+                    credentials: SEND_SIGN_IN,
                 });
                 const j = await r.json().catch(() => null);
                 if (!r.ok) {

@@ -13,6 +13,7 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\LiveChat;
 use Portal\Core\Livestream;
 use Portal\Core\Site;
 use Portal\Core\WebPush;
@@ -138,61 +139,35 @@ if ($livePushPublicKey !== ''):
 // 💬 Viewer chat widget injection (#313 Phase 2 / #317 Phase 2).
 //    The widget binds to a specific eventID supplied via ?eventID=N. The host
 //    shares the URL with the bound eventID when going live for that event.
-//    Chat is gated server-side by chat.enabled + api.livechat.*.enabled and
-//    the sessionToken-exists guard against tblLivestreamSessions; this PHP
-//    block just emits a div + the loader script, defensively side-effect-free
-//    if the eventID is missing or invalid.
+//    Chat is gated server-side by chat.enabled + api.livechat.*.enabled,
+//    LiveChat::eventOpenToViewer() and the sessionToken-exists guard against
+//    tblLivestreamSessions; this PHP block just emits a div + the loader
+//    script, defensively side-effect-free if the eventID is missing or
+//    invalid.
 $widgetEventId = (int) ($_GET['eventID'] ?? 0);
 if ($widgetEventId > 0) {
-    // 🛡️ Drafts (#503). The same rule as the event's own page
-    //    (calendar/event.php): only an event whose status is published,
-    //    cancelled or postponed counts for people in general, and a DRAFT only
-    //    for somebody who can manage events (App::isAdmin(), exactly the check
-    //    every page under calendar/manage/ makes). For everybody else a draft
-    //    is treated exactly like a number that matches no event: no chat
-    //    widget, and nothing else on the page changes.
+    // 👁️ The chat box appears only for an event this viewer may see:
+    //    LiveChat::eventOpenToViewer(), the same test the chat's own
+    //    endpoints make, so the page and the endpoints cannot disagree.
     //
-    //    The rights are decided BEFORE the lookup, for every request that gets
-    //    this far, and the draft rule is inside the lookup's WHERE clause as
-    //    the bound yes/no value $canManageFlag. So a refused draft, a deleted
-    //    event and a number that matches nothing are all the same empty
-    //    result and take the same PHP path (no widget).
+    //    WHAT WAS WRONG (12 October 2026): the look-up that used to be here
+    //    tested the organisation, "not deleted" and the draft rule (#503), and
+    //    nothing about the VIEWER. This page asks only for a sign-in. So
+    //    whether the box appeared told any signed-in account, a member of a
+    //    different organisation included, which INTERNAL event numbers exist.
     //
-    //    What was wrong before #503: the check asked only that the event
-    //    existed and was not deleted, so whether the chat widget appeared told
-    //    any signed-in member which event numbers belonged to drafts.
+    //    The draft rule of #503 is kept: it is inside the helper, which
+    //    decides the viewer's rights before its look-up, so a refused event,
+    //    a deleted one and a number that matches nothing are all the same
+    //    empty result and take the same path here (no box).
     //
-    //    ⏱️ Round 4 (16 September 2026): unlike the four other files this
-    //       package touched, this page showed NO measured round-trip
-    //       difference before this change (member: 23 database commands for
-    //       every one of missing/draft/deleted/published), because
-    //       header.php includes nav.php, and nav.php already calls
-    //       App::user() to draw the navigation bar for every signed-in
-    //       request, BEFORE this block runs. So App::isAdmin() here has
-    //       always been free — the account query was already paid for.
-    //       This change is made anyway so the widget decision no longer
-    //       depends on an include order in a DIFFERENT file happening to
-    //       run first: if nav.php's own query is ever moved, made
-    //       conditional, or this block is reused somewhere nav.php is not
-    //       loaded, the shape would silently reopen otherwise. This is a
-    //       consistency fix, not a fix for a measured leak here.
-    //
-    //    Deleted events are refused by the query too (isDeleted = 0). Sign-in
-    //    is already required at the top of this page, which covers the event
-    //    page's rule for events not marked public.
-    //
-    //    See events/api/detail.php for the fuller write-up (rejected
-    //    alternatives, what "cannot promise" means) — the same design.
-    $canManageFlag = App::isAdmin() === true ? 1 : 0;
-    // Imported events are read-only (#514 D5); this makes an imported event exactly as "not found" as a missing one.
-    $stmt = $mysqli->prepare(
-        'SELECT 1 FROM tblEvents WHERE eventID = ? AND siteID = ? AND isDeleted = 0 AND externalFeedID IS NULL '
-        . "AND (status IN ('published', 'cancelled', 'postponed') OR ? = 1) LIMIT 1"
-    );
-    $stmt->bind_param('iii', $widgetEventId, $siteId, $canManageFlag);
-    $stmt->execute();
-    $eventOk = $stmt->get_result()->fetch_assoc() !== null;
-    $stmt->close();
+    //    The last argument is FALSE here and true in the four endpoints.
+    //    This is a page a person opens (from a bookmark, or a link in an
+    //    email), not a request another page makes, so "was it made by one of
+    //    the portal's own pages?" is the wrong question for it. It only
+    //    decides whether to draw the box and writes nothing; every request
+    //    the box then makes is judged by the endpoints with true.
+    $eventOk = LiveChat::eventOpenToViewer($mysqli, $siteId, $widgetEventId, false);
     if ($eventOk === true): ?>
     <div class="mt-3" data-livechat-widget data-event-id="<?php echo (int) $widgetEventId; ?>"></div>
     <script src="/assets/js/livechat-widget.js" defer></script>

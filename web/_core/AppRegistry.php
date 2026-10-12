@@ -190,11 +190,30 @@ class AppRegistry
      * to fix it. There was no way back except editing files on the server by
      * hand.
      *
-     * Now a file that cannot be read is skipped and the other forty-six carry
-     * on working. The app in the broken file simply does not appear, which
-     * means anything gated on it is treated as switched off — the safe
-     * direction, and visible: the administrator sees one app missing from
-     * /admin/apps rather than a portal that will not load at all.
+     * Now a file that cannot be read is skipped and the others carry on
+     * working. The app in the broken file simply does not appear, and the
+     * administrator sees one app missing from /admin/apps rather than a
+     * portal that will not load at all.
+     *
+     * WHAT "DOES NOT APPEAR" MEANS, PLACE BY PLACE (corrected 12 October
+     * 2026; this comment used to say such an app is "treated as switched
+     * off", which is true of only three of the four):
+     *   - the menu, the dashboard and the data endpoints (`/api/...`) treat
+     *     it as switched off: isEnabled() answers false for an app that is
+     *     not in the list;
+     *   - its PAGES are the opposite. They stay reachable, WHATEVER its
+     *     on/off switch says. Router::dispatch() asks appForRoute() which
+     *     app owns an address, and the answer comes from each app's `route`
+     *     line, which lives in the very file that could not be read. So the
+     *     registry no longer knows those addresses belonged to an app at
+     *     all, appForRoute() answers "no owning app", and the router lets
+     *     every such address through as an ordinary page.
+     * So a broken definition file is NOT a safe way to switch an app off,
+     * and an app an organisation has switched off has its pages back for as
+     * long as its definition file stays broken. Each page still makes its
+     * own sign-in and rights tests; only the on/off gate is lost. Whether
+     * pages should be refused instead is an open question for the owner,
+     * not something this method decides.
      *
      * What this CANNOT do: it cannot rescue a file that breaks PHP before the
      * loop starts, and it cannot tell a deliberately removed app from a broken
@@ -226,14 +245,16 @@ class AppRegistry
         //    half-built list depends on the alphabetical order of the file
         //    names, so the same code would see different apps depending on what
         //    its own file happens to be called. Empty is the same every time,
-        //    and every consumer already reads a missing app as switched off —
-        //    isEnabled() returns false for it.
+        //    and isEnabled() reads a missing app as switched off (it returns
+        //    false for it).
         //
-        //    One thing to know: appForRoute() treats "no owning app" as "not an
-        //    app, so always allowed". Code running inside a definition file
-        //    must therefore not use appForRoute() to make an access decision.
-        //    Nothing does today; the router only calls it long after loading
-        //    has finished.
+        //    One consumer reads it the OTHER way: appForRoute() treats "no
+        //    owning app" as "not an app, so always allowed", which is what
+        //    the router uses for pages (see "WHAT DOES NOT APPEAR MEANS" in
+        //    this method's own comment). Code running inside a definition
+        //    file must therefore not use appForRoute() to make an access
+        //    decision. Nothing does today; the router only calls it long
+        //    after loading has finished.
         if (self::$loading === true) {
             return [];
         }

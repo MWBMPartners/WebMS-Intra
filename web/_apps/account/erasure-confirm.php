@@ -4,6 +4,13 @@
  * Public confirmation landing — token in the email turns
  * pending_confirmation → pending_review.
  *
+ * ADDRESSES: every redirect, link and form target here is built by
+ * Router::url(), so it stays inside the organisation's own address. They
+ * used to be written out ("/account/my-data"), which lands on the DEFAULT
+ * organisation when organisations are told apart by the first part of the
+ * address (roll-out package B2b, 12 October 2026; part of #536).
+ * tools/audit-checks/check_site_aware_addresses.py holds this file to it.
+ *
  * @package   Portal\Account
  * @link      https://github.com/MWBMPartners/webMS-Intra/issues/235
  */
@@ -11,6 +18,7 @@
 declare(strict_types=1);
 
 use Portal\Core\App;
+use Portal\Core\Router;
 
 $token = (string) ($_GET['token'] ?? '');
 if ($token === '' || preg_match('/^[a-f0-9]{64}$/', $token) !== 1) {
@@ -41,5 +49,5 @@ if ($stmt !== false) {
     <h1>Link expired</h1>
     <p>This confirmation link is invalid, expired (24-hour window), or already used. Submit a new request from your account page.</p>
 <?php endif; ?>
-<p><a href="/">Return to the portal</a></p>
+<p><a href="<?php echo htmlspecialchars(Router::url(''), ENT_QUOTES, 'UTF-8'); ?>">Return to the portal</a></p>
 </body></html>

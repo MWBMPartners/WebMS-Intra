@@ -491,6 +491,11 @@ class Auth
      * already started the session, which is why it comes before the early
      * return.
      *
+     * And it ENDS the session of an account that has been switched off or
+     * erased since it signed in — see endSessionOfInactiveAccount(). That
+     * runs on both ways out of this method, because a session some other
+     * code started still has to be checked.
+     *
      * @see https://owasp.org/www-community/controls/Session_Management_Cheat_Sheet
      *
      * @return void
@@ -500,6 +505,8 @@ class Auth
         self::registerOfflineCopyDecision();
 
         if (session_status() === PHP_SESSION_ACTIVE) {
+            self::endSessionOfInactiveAccount();
+
             return;
         }
 
@@ -546,6 +553,176 @@ class Auth
         }
 
         session_start();
+        self::endSessionOfInactiveAccount();
+    }
+
+    /**
+     * The account number already asked about in this request, or null.
+     * See endSessionOfInactiveAccount() for why it is a number and not a
+     * plain "done" flag.
+     */
+    private static ?int $activeAccountAsked = null;
+
+    /**
+     * End the session of an account that is switched off, or no longer
+     * exists (12 October 2026).
+     *
+     * WHAT WAS WRONG
+     * check() asks only "does the session hold an account number?". Nothing
+     * ever asked whether that account is still allowed in. So somebody who
+     * was offboarded, switched off by an administrator, or erased at their
+     * own request stayed signed in on every browser they had open, for as
+     * long as the session lasted, with every right they had before. A
+     * switched-off global administrator still walked past maintenance mode.
+     *
+     * WHY HERE, AND NOT INSIDE check()
+     * About 300 files read `$_SESSION['user_id']` directly, and some decide
+     * "signed in or not" from it without calling check() at all, on
+     * addresses anybody can open (calendar/submit.php is one). A test
+     * inside check() would have left all of those seeing the old account
+     * number. web/public_html/index.php calls ensureSession() for every
+     * request, before the maintenance gate, the channel gate and the router,
+     * so this ONE place covers every page, every handler and every data
+     * endpoint.
+     *
+     * WHAT IT DOES
+     * No account number in the session: nothing, and NO query. That is
+     * every signed-out visitor, every scheduled job and every request made
+     * with an API key (a key belongs to an organisation, carries its own
+     * on/off flag and uses no session). Somebody half way through two-step
+     * sign-in holds `2fa_user_id`, not `user_id`, so they are not asked
+     * about either; if their account is switched off in that minute, the
+     * request after they finish is the one that ends it.
+     *
+     * Otherwise it reads the account's `isActive`. Not exactly 1, or no such
+     * row: the session is ENDED FOR REAL. `$_SESSION` is emptied and the
+     * session is given a new identifier, which deletes the old session's
+     * stored data. The rest of the request carries on with a new, empty
+     * session, as for a visitor who never signed in.
+     *
+     * TRIED AND REJECTED
+     *   - Answering "no" from check() and leaving the session alone. Every
+     *     direct reader of `$_SESSION` would still see the account. And
+     *     switching the account back ON would bring the old browser session
+     *     back to life, which is not what "switch off" should mean.
+     *   - session_destroy(), as logout() uses. logout() ends the request;
+     *     this does not. The request usually goes on to a redirect to the
+     *     sign-in page, and that code expects a live session for the form
+     *     token and for messages.
+     *   - Re-checking only every minute or so. It saves one look-up by
+     *     primary key and leaves a window in which an erased person's
+     *     session still works.
+     *   - Reading the answer from App::user()'s own query, which already
+     *     selects isActive. That query joins the organisation and returns
+     *     "nobody" when it cannot be prepared, so "could not ask" and "not
+     *     active" would look the same.
+     *   - A plain "already done in this request" flag. A request that signs
+     *     somebody in (the sign-in pages, the invitation page) starts with
+     *     no account number; a flag set then would let the account that
+     *     arrives later in the same request go unasked. Remembering WHICH
+     *     account was asked about costs the same and has no such gap.
+     *
+     * WHAT "ACTIVE" MEANS
+     * `tblUsers.isActive = 1`, and the row exists. NOT membership of one
+     * organisation (`tblUserSites.isActive`): a person removed from one
+     * organisation may still belong to another. What they may see in an
+     * organisation is a membership question, asked by the pages.
+     *
+     * WHEN IT CANNOT ASK
+     * A failed look-up is NEVER read as "not active": one database hiccup
+     * would sign everybody out.
+     *   - No database connection at all (only the stand-alone error page
+     *     gets this far without one): it does nothing. Nothing can be read
+     *     without a database anyway.
+     *   - The query throws: the exception goes to the portal's error
+     *     handler and the session is left alone. The account number is
+     *     remembered BEFORE the query runs, so that the error page, which
+     *     comes back through here, does not run the same failing query
+     *     again and fail in turn.
+     *
+     * WHAT IT COSTS
+     * One look-up by primary key for each request that carries a signed-in
+     * session, and none for any other request. No cache.
+     *
+     * WHAT IT CANNOT DO
+     *   - It acts on the person's NEXT request. A page already open in a
+     *     browser stays on screen, and a download already running finishes.
+     *   - It does not look at API keys, or at a personal calendar feed
+     *     address: neither uses a session.
+     *   - It ends the session it is asked about. It does not hunt down the
+     *     same person's sessions in other browsers; each of those is ended
+     *     the same way on its own next request.
+     *
+     * @return void
+     */
+    private static function endSessionOfInactiveAccount(): void
+    {
+        if (isset($_SESSION['user_id']) === false) {
+            return;
+        }
+        $userId = (int) $_SESSION['user_id'];
+        if (self::$activeAccountAsked === $userId) {
+            return;
+        }
+
+        try {
+            $db = App::db();
+        } catch (RuntimeException) {
+            return;
+        }
+
+        // Remembered BEFORE the query: see "WHEN IT CANNOT ASK" above.
+        self::$activeAccountAsked = $userId;
+
+        // ⚠️ ONLY `userID` and `isActive`, and it must stay that way. This
+        //    runs on the database upgrade page too (admin/upgrade), on a
+        //    database that is still part way through upgrading. Both columns
+        //    have been in tblUsers since the first install script, so this
+        //    works on every database however old. A column added by a later
+        //    migration would make this query fail on a database that has not
+        //    run that migration yet, and so lock the administrator out of the
+        //    page that would add it.
+        $stmt = $db->prepare('SELECT isActive FROM tblUsers WHERE userID = ? LIMIT 1');
+        if ($stmt === false) {
+            // Only possible if the connection stops reporting errors by
+            // throwing. Could not ask, so the session is left alone, and
+            // the reason is written down instead of passing silently.
+            error_log('Auth: could not ask whether account ' . $userId . ' is still active; its session was left as it was.');
+
+            return;
+        }
+        $stmt->bind_param('i', $userId);
+        $stmt->execute();
+        $row = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+
+        // 🔢 Compared as a NUMBER. The flag arrives from a prepared statement
+        //    as the whole number 1, not the text '1'; `=== '1'` here would
+        //    sign every active person out on every request.
+        if ($row !== null && (int) $row['isActive'] === 1) {
+            return;
+        }
+
+        // 🚪 End it. Emptied first, so that even if the new identifier cannot
+        //    be issued the old one now names an empty session.
+        $_SESSION = [];
+        if (headers_sent() === false) {
+            // `true` deletes the old session's stored data.
+            session_regenerate_id(true);
+        }
+        self::$activeAccountAsked = null;
+        App::resetUser();
+
+        // The account number goes in the row's own column only when the
+        // account still exists; that column is linked to tblUsers, and a row
+        // naming a number that is gone would be refused.
+        Logger::activity(
+            'SessionEndedInactiveAccount',
+            $row !== null
+                ? 'A signed-in session was ended because the account has been switched off.'
+                : 'A signed-in session was ended because account #' . $userId . ' no longer exists.',
+            $row !== null ? $userId : null
+        );
     }
 
     /**

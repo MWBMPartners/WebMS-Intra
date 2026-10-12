@@ -24,6 +24,7 @@ require_once dirname(__DIR__, 3) . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEP
 use Portal\Core\Auth;
 use Portal\Core\Logger;
 use Portal\Core\ExpenseMailer;
+use Portal\Core\Router;
 use Portal\Core\Site;
 
 // 🛡️ Session and CSRF checks
@@ -35,7 +36,7 @@ $claimID = (int) ($_POST['claimID'] ?? 0);
 if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
     $_SESSION['flash_msg']  = 'Invalid CSRF token.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /expenses/view?id=' . $claimID);
+    header('Location: ' . Router::url('expenses/view') . '?id=' . $claimID);
     exit();
 }
 
@@ -43,7 +44,7 @@ if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
 if ($claimID <= 0) {
     $_SESSION['flash_msg']  = 'Invalid claim ID.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /expenses/submit');
+    header('Location: ' . Router::url('expenses/submit'));
     exit();
 }
 
@@ -69,7 +70,7 @@ if ($stmt !== false) {
 if ($claim === null) {
     $_SESSION['flash_msg']  = 'Claim not found.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /expenses/submit');
+    header('Location: ' . Router::url('expenses/submit'));
     exit();
 }
 
@@ -77,7 +78,7 @@ if ($claim === null) {
 if ((int) $claim['userID'] !== $userId) {
     $_SESSION['flash_msg']  = 'Access denied — only the claimant can withdraw a claim.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /expenses/view?id=' . $claimID);
+    header('Location: ' . Router::url('expenses/view') . '?id=' . $claimID);
     exit();
 }
 
@@ -85,7 +86,7 @@ if ((int) $claim['userID'] !== $userId) {
 if ($claim['status'] !== 'Pending') {
     $_SESSION['flash_msg']  = 'This claim cannot be withdrawn — it is no longer in Pending status.';
     $_SESSION['flash_type'] = 'warning';
-    header('Location: /expenses/view?id=' . $claimID);
+    header('Location: ' . Router::url('expenses/view') . '?id=' . $claimID);
     exit();
 }
 
@@ -112,7 +113,7 @@ try {
         $mysqli->rollback();
         $_SESSION['flash_msg']  = 'This claim has already been processed and cannot be withdrawn.';
         $_SESSION['flash_type'] = 'warning';
-        header('Location: /expenses/view?id=' . $claimID);
+        header('Location: ' . Router::url('expenses/view') . '?id=' . $claimID);
         exit();
     }
 
@@ -145,7 +146,7 @@ try {
     // ✅ Redirect with success flash message
     $_SESSION['flash_msg']  = 'Claim #' . $claimID . ' has been withdrawn successfully.';
     $_SESSION['flash_type'] = 'success';
-    header('Location: /expenses/view?id=' . $claimID);
+    header('Location: ' . Router::url('expenses/view') . '?id=' . $claimID);
     exit();
 
 } catch (\Throwable $ex) {
@@ -153,6 +154,6 @@ try {
     Logger::exception($ex);
     $_SESSION['flash_msg']  = 'Error withdrawing claim. Please try again.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /expenses/view?id=' . $claimID);
+    header('Location: ' . Router::url('expenses/view') . '?id=' . $claimID);
     exit();
 }

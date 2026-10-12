@@ -99,7 +99,7 @@ if ($isClaimant === false && $isAdmin === false && $hasApprover === false && $ha
 }
 
 $pageTitle   = 'Claim #' . $claimID . ' — ' . $claim['claimTitle'];
-$breadcrumbs = ['Dashboard' => '/', 'Expenses' => '/expenses/submit', 'Claim #' . $claimID => ''];
+$breadcrumbs = ['Dashboard' => Router::url(''), 'Expenses' => Router::url('expenses/submit'), 'Claim #' . $claimID => ''];
 
 // -----------------------------------------------------------------------------
 // 📋 Fetch line items
@@ -453,10 +453,21 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <?php if ($claim['status'] === 'Pending' && $isClaimant === true && ($hasApprover === true || $isAdmin === true || $hasDeptFlag === true)): ?>
     <p class="small text-secondary" id="own-claim-note"><?php echo htmlspecialchars(ExpenseRules::MSG_OWN_CLAIM_PAGE, ENT_QUOTES, 'UTF-8'); ?></p>
 <?php endif; ?>
+<?php
+// The same for payment (12 October 2026). Once the claim is APPROVED, a
+// claimant who is a treasurer or an administrator is not offered "Go to
+// Treasury" on it (see the buttons below), and used to be told nothing in its
+// place. The test is the button's own test with "is the claimant" turned
+// round, so the note appears exactly where the button is withheld. An
+// ordinary claimant never had the button and is shown nothing new.
+?>
+<?php if ($claim['status'] === 'Approved' && $isClaimant === true && ($hasTreasurer === true || $isAdmin === true)): ?>
+    <p class="small text-secondary" id="own-payment-note"><?php echo htmlspecialchars(ExpenseRules::MSG_OWN_PAYMENT_PAGE, ENT_QUOTES, 'UTF-8'); ?></p>
+<?php endif; ?>
 
 <!-- 🔗 Action Buttons -->
 <div class="d-flex gap-2 mb-4">
-    <a href="/expenses/submit" class="btn btn-outline-secondary">
+    <a href="<?php echo htmlspecialchars(Router::url('expenses/submit'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary">
         <i class="fa-solid fa-arrow-left me-1"></i> Back to Submit
     </a>
     <?php
@@ -467,18 +478,18 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     // page, from the same account number ExpenseRules::isOwnClaim() compares.
     ?>
     <?php if ($claim['status'] === 'Pending' && $isClaimant === false && ($hasApprover === true || $isAdmin === true || $hasDeptFlag === true)): ?>
-        <a href="/expenses/approve" class="btn btn-outline-primary">
+        <a href="<?php echo htmlspecialchars(Router::url('expenses/approve'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-primary">
             <i class="fa-solid fa-check me-1"></i> Go to Approvals
         </a>
     <?php endif; ?>
     <?php if ($claim['status'] === 'Approved' && $isClaimant === false && ($hasTreasurer === true || $isAdmin === true)): ?>
-        <a href="/expenses/treasury" class="btn btn-outline-success">
+        <a href="<?php echo htmlspecialchars(Router::url('expenses/treasury'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-success">
             <i class="fa-solid fa-sterling-sign me-1"></i> Go to Treasury
         </a>
     <?php endif; ?>
     <?php if ($claim['status'] === 'Pending' && $isClaimant === true): ?>
         <!-- 🔄 Withdraw claim form — only visible to claimant for Pending claims -->
-        <form method="POST" action="/expenses/withdraw/save" class="d-inline">
+        <form method="POST" action="<?php echo htmlspecialchars(Router::url('expenses/withdraw/save'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
             <input type="hidden" name="claimID" value="<?php echo (int) $claim['claimID']; ?>">
             <button type="submit" class="btn btn-outline-danger"

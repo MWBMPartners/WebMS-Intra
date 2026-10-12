@@ -2,6 +2,68 @@
 
 
 ## [Unreleased] (alpha)
+- security(access): **who may see and do what, tightened** (roll-out packages B2a and B2b; #534, #548, #574, part of #511 and #536).
+
+  **Security: what somebody can no longer see or do**
+
+  - **A switched-off or erased account is signed out on its next click.** Somebody who was offboarded,
+    switched off by an administrator or erased used to stay signed in on every browser they had open, with
+    every right they had before. The portal now asks, once for each request that carries a signed-in session,
+    whether the account is still switched on, and ends the session if it is not. Switching the account back on
+    does not bring an old session back. Cost: one extra database look-up for a signed-in request; none for
+    signed-out visitors, scheduled jobs or API keys. (`Auth::ensureSession()`)
+  - **Event registrations can no longer be approved or rejected from another organisation.** An administrator
+    of one organisation could decide a registration for another organisation's event by posting its numbers.
+  - **Only an organisation's own people can record or delete attendance.** Any signed-in account, of any
+    organisation, could add, change and delete another organisation's head counts. (#511 names the wider
+    cause.)
+  - **Venue bookings are shown only to the organisation's own people.** The year schedule, one booking, one
+    venue's own page, the CSV and printable exports and the two data endpoints answered any signed-in
+    account. The booked days on the calendar page (every view: month, week, day and year) were shown to
+    everybody, signed-out visitors included, because `/calendar` is a public address. All of them now ask
+    `Venues::canView()`. The rest of the calendar page is unchanged.
+  - **The Team Hub data endpoints answer only the event's own team**, as the Team Hub page always did. An
+    API key holding `eventhub:read` is unchanged.
+  - **Live chat and the viewer count (#548).** Anybody, signed in or not, could read an internal event's
+    approved chat messages and prompts, start a viewer session for any event number and then post into its
+    chat. An internal event's chat now works only inside the portal: for a signed-in person who may see the
+    event, and only when their browser says the request was made by one of the portal's own pages (in
+    practice `/live`). A page on another website, or on another address of the same site, can no longer read,
+    join or post through a signed-in member who happens to open it. A public event's chat still needs no
+    sign-in.
+
+  **Fixed**
+
+  - **A child's check-in and a decision card are no longer lost over a bad event number.** A number that
+    matched no event stopped the whole record being saved; another organisation's number was stored. Only the
+    organisation's own event number is kept now, and the record is always saved.
+  - **Expenses, and the erasure and "delete my account" pages, stay inside the organisation's own address.**
+    44 redirects, links, form targets and breadcrumb links in the Expenses app, and 53 more in the eight
+    erasure and "delete my account" pages, were bare addresses, which land on the default organisation when
+    organisations are told apart by the first part of the address. (Part of #536; the rest of the portal is
+    not done.)
+  - **A treasurer or administrator opening their own approved claim is told who pays it.**
+  - **A chat name longer than 40 characters no longer answers "500".** The server cut a name at 60 characters
+    and the column holds 40. The chat box itself stops at 40, so only a program posting directly met it. A
+    longer name is now cut to its first 40 characters and the message is stored.
+
+  **Removed**
+
+  - `web/_apps/api/livestream-ping.php`. No address could ever reach it.
+
+  **Checks**
+
+  - New: `tools/audit-checks/check_site_aware_addresses.py`. Fails on a bare address in the places on its own
+    short list (the Expenses app, the administrator's erasure pages, five single account pages), and fails
+    when any part of a listed place cannot be read. It reports a redirect (`Location:` in any capitals), a
+    link or form target (with or without quotes), and any quoted text that starts with a single "/", followed
+    through a space or a PHP tag to its closing quote. Its header lists what it cannot see. It is not yet
+    run on pull requests; that workflow change is approved and is made once, later.
+  - `tools/access-pages-selftest.php`: 94 to 240 checks (parts F to L).
+  - `tools/erasure-pages-selftest.php`: 57 to 66 checks (new part I: every press on the erasure pages,
+    "Execute" included, lands inside the organisation's own address, and that address opens).
+  - `tools/feed-admin-selftest.php` W59: 294 to 298 checks in part W.
+
 - tooling: **the rules for where a deploy puts files are now a tested script**
   (#500, roll-out package F7). `tools/deploy/resolve-settings.sh` decides, from
   the settings, which hosting login a deploy uses and which folder each release

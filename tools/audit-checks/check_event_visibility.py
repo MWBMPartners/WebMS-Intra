@@ -234,12 +234,13 @@ FILE_ALLOWLIST: dict[str, str] = {
     # displays one either" — turned out to be false in two ways the
     # checker proved: (1) a link made BEFORE this fix landed stays in the
     # database, because a fix that closes a door going forward cannot
-    # reach back and undo what already walked through it; (2) the
-    # anonymous `api/livestream/ping.php` endpoint accepts ANY posted
-    # event number with no check at all (a separate, pre-existing gap —
-    # see the follow-up issue this fix round raises — not closed here),
-    # so a livestream session row can point at a hidden imported event
-    # without anyone ever having "linked" it through an admin screen.
+    # reach back and undo what already walked through it; (2) until
+    # 12 October 2026 the viewer ping (`api/livestream/ping.php`) stored
+    # a session for ANY posted event number with no check at all (#548).
+    # It now refuses an event the viewer may not see, but rows written
+    # before then remain, so a livestream session row can still point at
+    # a hidden imported event without anyone ever having "linked" it
+    # through an admin screen.
     # Six files (Venues.php, ServicePlanLink.php, worship/plan.php,
     # worship/plans.php, admin/live/chat.php, admin/livestream/
     # dashboard.php) proved to show a linked imported event's NAME to a

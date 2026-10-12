@@ -85,11 +85,15 @@
  * proved by `tools/attendance-access-selftest.php` with no database
  * connection at all. It does not decide who may see the SESSIONS list on
  * `/attendance` (that is `attendance/index.php`'s own, narrower change —
- * see that file) or who may RECORD or DELETE a headcount — those stay
- * `Auth::check()` only, tracked separately (see the #529 closing comment,
- * "bigger than it looks", §9.1), because they are entangled with a
- * different question: who may CHANGE the record, not who may READ a
- * summary of it.
+ * see that file) or WHICH of an organisation's members may RECORD or DELETE
+ * a headcount: any active member may, and an administrator. Until
+ * 12 October 2026 those three pages (`attendance/record.php`,
+ * `record/save.php`, `record/delete.php`) asked only for a sign-in, so a
+ * member of a DIFFERENT organisation could change this one's figures. They
+ * now call `viewerIsMember()` below to shut outsiders out. Narrowing it
+ * further (administrators only, or a named "recorder" role) is a separate
+ * question (see the #529 closing comment, "bigger than it looks", §9.1):
+ * who may CHANGE the record, not who may READ a summary of it.
  *
  * @package   Portal\Core
  * @author    MWBM Partners Ltd (t/a MWservices)

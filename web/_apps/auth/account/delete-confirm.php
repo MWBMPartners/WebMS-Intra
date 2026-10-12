@@ -44,6 +44,13 @@
  * What this page cannot do: carry the request out. An administrator does
  * that, and the page says so.
  *
+ * ADDRESSES: every redirect, link and form target here is built by
+ * Router::url(), so it stays inside the organisation's own address. They
+ * used to be written out ("/account/my-data"), which lands on the DEFAULT
+ * organisation when organisations are told apart by the first part of the
+ * address (roll-out package B2b, 12 October 2026; part of #536).
+ * tools/audit-checks/check_site_aware_addresses.py holds this file to it.
+ *
  * @package   Portal\Auth
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2026-present MWBM Partners Ltd (t/a MWservices)
@@ -62,7 +69,7 @@ use Portal\Core\Router;
 use Portal\Core\Site;
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    header('Location: /account/delete', true, 302);
+    header('Location: ' . Router::url('account/delete'), true, 302);
     exit();
 }
 
@@ -88,28 +95,28 @@ if ($alreadyAsked !== null) {
         . 'administrators. Nothing more was sent just now, and nothing has been erased yet. Until the request is '
         . 'carried out your account works exactly as it does now.';
     $_SESSION['flash_type'] = 'info';
-    header('Location: /account/my-data', true, 302);
+    header('Location: ' . Router::url('account/my-data'), true, 302);
     exit();
 }
 
 if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
     $_SESSION['flash_msg']  = 'This form had been open too long, so it was not sent. Nothing was changed. Please try again.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /account/delete', true, 302);
+    header('Location: ' . Router::url('account/delete'), true, 302);
     exit();
 }
 
 if (trim((string) ($_POST['confirm_phrase'] ?? '')) !== 'DELETE MY ACCOUNT') {
     $_SESSION['flash_msg']  = 'The words you typed did not match DELETE MY ACCOUNT, so nothing was sent. Nothing was changed.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /account/delete', true, 302);
+    header('Location: ' . Router::url('account/delete'), true, 302);
     exit();
 }
 
 $user   = App::user();
 $userId = (int) ($user['userID'] ?? 0);
 if ($userId <= 0) {
-    header('Location: /account/delete', true, 302);
+    header('Location: ' . Router::url('account/delete'), true, 302);
     exit();
 }
 
@@ -120,7 +127,7 @@ if ($userId <= 0) {
 if ((string) ($user['isRootAdmin'] ?? '0') === '1') {
     $_SESSION['flash_msg']  = 'Root admins cannot delete their own account. Demote yourself first or ask another root admin.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /account/delete', true, 302);
+    header('Location: ' . Router::url('account/delete'), true, 302);
     exit();
 }
 
@@ -135,7 +142,7 @@ try {
     $_SESSION['flash_msg']  = 'Your request could not be recorded, and nothing was changed. Please try again; if it '
         . 'keeps happening, ask an administrator for help.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /account/delete', true, 302);
+    header('Location: ' . Router::url('account/delete'), true, 302);
     exit();
 }
 
@@ -150,5 +157,5 @@ Logger::activity(
 $next = GdprEraser::whatHappensNext($filed);
 $_SESSION['flash_msg']  = $next['message'];
 $_SESSION['flash_type'] = $next['type'];
-header('Location: /account/my-data', true, 302);
+header('Location: ' . Router::url('account/my-data'), true, 302);
 exit();

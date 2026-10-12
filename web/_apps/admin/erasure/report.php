@@ -4,6 +4,13 @@
  * Admin — Per-request compliance report. Shows the audit chain + verify
  * result. Exportable as JSON for the data subject.
  *
+ * ADDRESSES: every redirect, link and form target here is built by
+ * Router::url(), so it stays inside the organisation's own address. They
+ * used to be written out ("/account/my-data"), which lands on the DEFAULT
+ * organisation when organisations are told apart by the first part of the
+ * address (roll-out package B2b, 12 October 2026; part of #536).
+ * tools/audit-checks/check_site_aware_addresses.py holds this file to it.
+ *
  * @package   Portal\Admin
  * @link      https://github.com/MWBMPartners/webMS-Intra/issues/235
  */
@@ -67,7 +74,7 @@ if (isset($_GET['download']) === true) {
 
 $pageTitle   = 'Erasure report #' . $requestId;
 $pageSection = 'admin';
-$breadcrumbs = ['Dashboard' => '/', 'Admin' => '/admin', 'Erasure requests' => '/admin/erasure-requests', 'Report' => ''];
+$breadcrumbs = ['Dashboard' => Router::url(''), 'Admin' => Router::url('admin'), 'Erasure requests' => Router::url('admin/erasure-requests'), 'Report' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 
@@ -118,7 +125,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             </table>
         </div>
     <?php endif; ?>
-    <a class="btn btn-outline-primary btn-sm mt-2" href="/admin/erasure-requests/report?id=<?php echo (int) $requestId; ?>&download=1">
+    <a class="btn btn-outline-primary btn-sm mt-2" href="<?php echo htmlspecialchars(Router::url('admin/erasure-requests/report'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo (int) $requestId; ?>&download=1">
         <i class="fa-solid fa-download me-1"></i>Download JSON report
     </a>
 </div></div>

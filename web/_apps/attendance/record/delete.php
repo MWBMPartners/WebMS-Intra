@@ -17,6 +17,8 @@
 
 declare(strict_types=1);
 
+use Portal\Core\App;
+use Portal\Core\AttendanceAccess;
 use Portal\Core\Auth;
 use Portal\Core\Logger;
 use Portal\Core\Router;
@@ -24,6 +26,24 @@ use Portal\Core\Site;
 
 // 🛡️ Auth check
 if (Auth::check() === false) {
+    Router::renderError(403);
+    return;
+}
+
+// 🛡️ Only this organisation's own people may record or delete a head count
+//    (12 October 2026). The sign-in test above used to be the only test, and
+//    the rows written here are tied to the organisation in the ADDRESS. So a
+//    member of another organisation, signed in and on this organisation's
+//    address, could add, change and delete its head counts.
+//
+//    Now: an administrator, or an active member of this organisation.
+//    AttendanceAccess::viewerIsMember() is the same membership test the
+//    attendance report page uses; do not write a second copy of it here.
+//    WHICH members may record is not narrowed: any active member still may
+//    (the owner's decision). The same test is in record.php, record/save.php
+//    and record/delete.php; change all three together.
+if (App::isAdmin() === false
+    && AttendanceAccess::viewerIsMember($mysqli, (int) ($_SESSION['user_id'] ?? 0), Site::id()) === false) {
     Router::renderError(403);
     return;
 }

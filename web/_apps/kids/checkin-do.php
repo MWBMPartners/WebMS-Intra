@@ -49,6 +49,33 @@ if ((int) $child['isCheckedIn'] === 1) {
 $badge = str_pad((string) random_int(100000, 999999), 6, '0', STR_PAD_LEFT);
 $eventIdArg = $eventId > 0 ? $eventId : null;
 
+// 🔗 Keep the event number only when it is one of THIS organisation's own
+//    events, not deleted and not imported. Anything else is stored as "no
+//    event". WHAT WAS WRONG (12 October 2026): the posted number was stored
+//    unchecked. Another organisation's event number was accepted, and a
+//    number that matched no event made the database refuse the whole row
+//    (the column is linked to tblEvents), so the staff member lost what they had
+//    just entered: the child was not checked in.
+//    NEVER refuse the check-in over a bad event number. The event is a label on
+//    the record, not the reason for it. attendance/record/save.php treats a
+//    posted event number the same way.
+if ($eventIdArg !== null) {
+    $eventHere  = false;
+    $eventCheck = $mysqli->prepare(
+        'SELECT eventID FROM tblEvents WHERE eventID = ? AND siteID = ? AND isDeleted = 0 AND externalFeedID IS NULL'
+    );
+    if ($eventCheck !== false) {
+        $eventCheck->bind_param('ii', $eventIdArg, $siteId);
+        $eventCheck->execute();
+        $eventHere = $eventCheck->get_result()->fetch_assoc() !== null;
+        $eventCheck->close();
+    }
+    // Could not ask counts as "not ours": the record is still saved.
+    if ($eventHere === false) {
+        $eventIdArg = null;
+    }
+}
+
 $stmt = $mysqli->prepare('INSERT INTO tblKidCheckins (childID, eventID, badgeCode, checkedInByID) VALUES (?, ?, ?, ?)');
 $stmt->bind_param('iisi', $childId, $eventIdArg, $badge, $staffId);
 $stmt->execute();

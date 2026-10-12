@@ -2,8 +2,8 @@
 // Path: tools/access-pages-selftest.php
 /**
  * -----------------------------------------------------------------------------
- * Switched-off apps and own expense claims, on the REAL pages — self-test 🚪💷
- * (#478, #570, #545)
+ * Who may see and do what, on the REAL pages — self-test 🚪💷
+ * (#478, #570, #545, and the access gaps of roll-out package B2a)
  * -----------------------------------------------------------------------------
  * `tools/app-switch-selftest.php` and `tools/expense-rules-selftest.php`
  * prove the rules and read the code as text. Reading text cannot see a
@@ -42,17 +42,59 @@
  *      required approver still needs them; the claim's own page tells such
  *      a claimant who decides it.
  *
+ * Roll-out package B2a (12 October 2026) added parts F to L, and its fix
+ * round the same day added to H, I, J and K. Each sends the request an
+ * OUTSIDER would send (a member or administrator of the other organisation,
+ * an account with no membership, or nobody at all), then the one an insider
+ * would:
+ *   F. An administrator of one organisation cannot approve or reject
+ *      another organisation's event registration.
+ *   G. Only an organisation's own people record or delete a head count.
+ *   H. The six addresses that show venue bookings are closed to a member of
+ *      another organisation, each with the answer an unknown venue gets.
+ *      So are the two places the first round missed: the page for one
+ *      venue, and the strip of booked days on the calendar page, which a
+ *      signed-out visitor could see. Each is tried as a member of the other
+ *      organisation, as an account with no membership, and as nobody.
+ *   I. Live chat and the viewer ping (#548): an internal event's chat is
+ *      answered only for somebody who may see the event, AND only when the
+ *      browser says one of the portal's own pages made the request
+ *      (nineteen ways a request can arrive, each with a member's cookie); a
+ *      public event's still works with no sign-in, from anywhere; a name
+ *      longer than its column is cut, not refused; the old ping address was
+ *      never reachable.
+ *   J. A child's check-in and a decision card are saved whatever event
+ *      number comes with them; only the organisation's own number is kept,
+ *      and not that of a deleted event or one copied in from outside.
+ *   K. An account that is switched off or erased while signed in: its open
+ *      session is ENDED on its next request (Auth::ensureSession()), whether
+ *      that request is a GET or a POST and whatever headers it carries, and
+ *      switching the account back on does not revive it. With the controls:
+ *      sign-in, sign-out, two-step sign-in, the invitation page, API keys,
+ *      maintenance mode, the upgrade page, and a count of the look-ups made.
+ *   L. A treasurer is told who pays their own approved claim; and the
+ *      Expenses addresses stay inside the organisation's own address.
+ *
  * SAFETY
  * ------
  * - It writes rows, so it REFUSES unless the database's name starts with
  *   `selftest_`. Every row it makes is numbered 916000 to 916999 or belongs
- *   to one of its two made-up organisations; they are removed at the START
- *   (in case an earlier run was interrupted) and at the END.
+ *   to one of its two made-up organisations (the one account the invitation
+ *   page creates gets a number of its own, and is found by its made-up
+ *   address); they are removed at the START (in case an earlier run was
+ *   interrupted) and at the END.
  * - It sets two portal-wide settings for the run (`multisite.enabled`,
  *   `multisite.detectionMode`), so the two organisations are told apart by
  *   the first part of the address, and puts them back. So do NOT run it at
  *   the same moment as `tools/feed-admin-selftest.php` on the same database:
  *   that test changes the same two settings.
+ * - Part K changes two more things for a short while, and puts both back
+ *   (the clean-up does it too, if the run stops early): it switches
+ *   maintenance mode on (`portal.maintenance.active`), and it switches on
+ *   the database SERVER's query log, written to a table, so it can count
+ *   statements. So the database account must be allowed to do that (the
+ *   root account of a throwaway server is), and nothing else should be
+ *   using that server while this runs: its statements would be counted too.
  * - The scratch folder is a NEW child of `SELFTEST_WEB_DIR` (or the system's
  *   temporary folder). It refuses if that folder contains the repository or
  *   is inside it. The child is deleted at the end only if it still holds
@@ -75,6 +117,24 @@
  *   rolled-back transaction by `tools/app-switch-selftest.php` (part 9).
  * - That mail is sent, or what the dashboard shows.
  * - Two people deciding at the same moment.
+ * - Part I: that a BROWSER sends its sign-in cookie with the chat box's
+ *   requests. The test sends the cookie itself; the script that decides it
+ *   in a browser is web/public_html/assets/js/livechat-widget.js.
+ * - Part I: that a browser really writes `Sec-Fetch-Site`, `Origin` and
+ *   `Referer` as the rows say. The test writes those headers itself. In a
+ *   browser a page's script cannot write `Sec-Fetch-Site`, and cannot make
+ *   `Origin` or `Referer` name an address other than its own page's; it CAN
+ *   have `Origin` say `null` and leave `Referer` out, and both are rows
+ *   here. A program that is not a browser can write all three as it likes,
+ *   which is why the rule also needs the person's own cookie.
+ * - Part I: a portal reached over https, or through a proxy. The test's
+ *   server is plain http on 127.0.0.1.
+ * - Part K: sign-in through Microsoft or Google (it needs their servers);
+ *   the installation wizard (it never loads the class being tested); and a
+ *   database that is part way through upgrading.
+ * - Part H: a venue manager who is not an administrator; and the calendar's
+ *   "weekdays" and "weekend" views, which draw their days with the same
+ *   code as the week and day views that ARE tried.
  *
  * Usage:  SELFTEST_DB_NAME=selftest_x SELFTEST_DB_PORT=… SELFTEST_DB_PASS=… \
  *             SELFTEST_WEB_DIR=/a/quiet/folder php tools/access-pages-selftest.php
@@ -89,17 +149,18 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2026-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.0.0
+ * @version   1.2.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/478
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/545
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/570
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/548
  * -----------------------------------------------------------------------------
  */
 
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 94;
+const EXPECTED_CHECKS = 240;
 
 function refuse(string $why): never
 {
@@ -208,6 +269,33 @@ const ADM  = 916013; // a site administrator of A
 const TRS  = 916014; // member of A; a treasurer of A
 const MEM  = 916015; // member of A; in DEPT with no flag
 const DEPT = 916101;
+// Roll-out package B2a (12 October 2026): the "other organisation" people, and
+// the rows parts F to L need.
+const BMEM = 916021; // member of B ONLY, nothing else
+const BADM = 916022; // a site administrator of B ONLY
+const GADM = 916023; // a global administrator (isRootAdmin), no membership row anywhere
+const NOMEM = 916024; // an active account that is a member of NO organisation
+// Part K (the session look-up): each is a member of A unless it says otherwise.
+const PX  = 916031; // switched off while signed in, then switched back on
+const QX  = 916032; // erased while signed in, through the real erasure pages
+const GX  = 916033; // a global administrator, switched off while signed in during maintenance
+const TF  = 916034; // signs in with two steps (a backup code)
+const TF2 = 916035; // the same, but switched off while waiting at the second step
+const PY  = 916036; // switched off; its first requests afterwards are a POST, and a GET with an "Authorization" header
+/** The statement Auth::ensureSession() makes for a signed-in request, as the database's query log shows it. */
+const LOOKUP_LIKE = 'SELECT isActive FROM tblUsers WHERE userID = %';
+const EV_INT   = 916401; // A: internal, published
+const EV_PUB   = 916402; // A: public, published
+const EV_DRAFT = 916403; // A: a draft, marked public on purpose so only the draft rule refuses it
+const EV_B     = 916404; // B: public, published, so on A's address only "wrong organisation" refuses it
+const EV_GONE     = 916405; // A: public and published, but DELETED
+const EV_IMPORTED = 916406; // A: public and published, but copied in from an outside calendar
+const EV_NONE  = 916499; // matches no event
+const VENUE    = 916701; // A's hall
+const BOOKING  = 916711; // one booking of it, today
+const BOOKING_LATER = 916712; // a second booking, on the day of the events, so one calendar view holds both
+/** In every venue row's text, so "is any of A's venue data in this answer?" is one search. */
+const VENUE_MARK = 'ACCESS-VENUE';
 /** The made-up folder and handler part C plants in the scratch copy. */
 const UNLISTED_FOLDER = 'zz-selftest-unlisted';
 const PLANTED_ACTION  = 'zz-selftest-ping';
@@ -215,6 +303,34 @@ const PLANTED_MARK    = 'ZZ-SELFTEST-HANDLER-RAN';
 
 function removeWorld(): void
 {
+    // Parts F to L (package B2a). Rows that point at an event, a venue or a
+    // child go first; the events themselves take their registrations with them.
+    // Part K: the erasure request the real pages file, the invitation, and
+    // the account the invitation page creates (it gets a number of its own,
+    // so it is found by its made-up address).
+    q('DELETE a FROM tblErasureAudit a JOIN tblErasureRequest r ON r.requestID = a.requestID WHERE r.siteID IN (?, ?)', 'ii', [ORG_A, ORG_B]);
+    q('DELETE FROM tblErasureRequest WHERE siteID IN (?, ?)', 'ii', [ORG_A, ORG_B]);
+    q('DELETE FROM tblEmailLog WHERE siteID IN (?, ?)', 'ii', [ORG_A, ORG_B]);
+    q('DELETE FROM tblInvitation WHERE siteID IN (?, ?)', 'ii', [ORG_A, ORG_B]);
+    q('DELETE FROM tblTotpBackupCodes WHERE userID BETWEEN 916000 AND 916999');
+    q("DELETE s FROM tblUserSites s JOIN tblUsers u ON u.userID = s.userID WHERE u.emailAddress = 'invited.access@selftest.invalid'");
+    q("DELETE a FROM tblActivityLogs a JOIN tblUsers u ON u.userID = a.userID WHERE u.emailAddress = 'invited.access@selftest.invalid'");
+    q("DELETE l FROM tblLocalAccounts l JOIN tblUsers u ON u.userID = l.userID WHERE u.emailAddress = 'invited.access@selftest.invalid'");
+    q("DELETE FROM tblUsers WHERE emailAddress = 'invited.access@selftest.invalid'");
+    q('DELETE FROM tblLiveRateLimits WHERE siteID IN (?, ?)', 'ii', [ORG_A, ORG_B]);
+    q('DELETE FROM tblLiveChatMessages WHERE siteID IN (?, ?)', 'ii', [ORG_A, ORG_B]);
+    q('DELETE FROM tblLivePrompts WHERE siteID IN (?, ?)', 'ii', [ORG_A, ORG_B]);
+    q('DELETE FROM tblLivestreamSessions WHERE siteID IN (?, ?)', 'ii', [ORG_A, ORG_B]);
+    q('DELETE c FROM tblKidCheckins c JOIN tblKidProfiles k ON k.childID = c.childID WHERE k.siteID IN (?, ?)', 'ii', [ORG_A, ORG_B]);
+    q('DELETE FROM tblKidProfiles WHERE siteID IN (?, ?)', 'ii', [ORG_A, ORG_B]);
+    q('DELETE FROM tblSalvationCards WHERE siteID IN (?, ?)', 'ii', [ORG_A, ORG_B]);
+    q('DELETE FROM tblAttendanceSessions WHERE siteID IN (?, ?)', 'ii', [ORG_A, ORG_B]);
+    q('DELETE FROM tblAttendanceServiceTypes WHERE siteID IN (?, ?)', 'ii', [ORG_A, ORG_B]);
+    q('DELETE FROM tblVenueBookings WHERE siteID IN (?, ?)', 'ii', [ORG_A, ORG_B]);
+    q('DELETE FROM tblVenueUsageTypes WHERE siteID IN (?, ?)', 'ii', [ORG_A, ORG_B]);
+    q('DELETE FROM tblVenueStatuses WHERE siteID IN (?, ?)', 'ii', [ORG_A, ORG_B]);
+    q('DELETE FROM tblVenues WHERE siteID IN (?, ?)', 'ii', [ORG_A, ORG_B]);
+    q('DELETE FROM tblEvents WHERE siteID IN (?, ?) OR eventID BETWEEN 916000 AND 916999', 'ii', [ORG_A, ORG_B]);
     q('DELETE p FROM tblExpenseClaimPayments p JOIN tblExpenseClaims c ON c.claimID = p.claimID WHERE c.siteID IN (?, ?)', 'ii', [ORG_A, ORG_B]);
     q('DELETE a FROM tblExpenseClaimApprovals a JOIN tblExpenseClaims c ON c.claimID = a.claimID WHERE c.siteID IN (?, ?)', 'ii', [ORG_A, ORG_B]);
     q('DELETE FROM tblExpenseClaims WHERE siteID IN (?, ?)', 'ii', [ORG_A, ORG_B]);
@@ -263,7 +379,7 @@ function claimState(int $id): string
 // =============================================================================
 // 🧰 The server, and one request
 // =============================================================================
-$state = ['proc' => null, 'child' => '', 'token' => bin2hex(random_bytes(16)), 'settings' => [], 'started' => false, 'cleaned' => false];
+$state = ['proc' => null, 'child' => '', 'token' => bin2hex(random_bytes(16)), 'settings' => [], 'started' => false, 'cleaned' => false, 'queryLog' => null];
 
 function portAnswers(int $port): bool
 {
@@ -299,6 +415,13 @@ function cleanup(): void
         $state['proc'] = null;
     }
     try {
+        // The database's query log, exactly as part K found it.
+        if (is_array($state['queryLog']) === true) {
+            // Both values were checked when they were read (0 or 1; capital letters and commas only).
+            q('SET GLOBAL general_log = ' . (int) $state['queryLog']['general_log']);
+            q("SET GLOBAL log_output = '" . $state['queryLog']['log_output'] . "'");
+            q('TRUNCATE TABLE mysql.general_log');
+        }
         foreach ($state['settings'] as $key => $before) {
             if ($before === null) {
                 q('DELETE FROM tblSettings WHERE settingKey = ? AND siteID IS NULL', 's', [(string) $key]);
@@ -328,10 +451,13 @@ function cleanup(): void
  * and is returned as status -1, which no check expects.
  *
  * @param array<string,mixed>|null $post
+ * @param list<string>             $extra Whole header lines to add, such as
+ *                                        the ones a browser writes to say
+ *                                        where a request came from.
  *
- * @return array{status:int, location:string, body:string}
+ * @return array{status:int, location:string, body:string, head:string}
  */
-function req(string $jar, string $method, string $path, ?array $post = null, string $bearer = ''): array
+function req(string $jar, string $method, string $path, ?array $post = null, string $bearer = '', ?string $json = null, array $extra = []): array
 {
     global $port, $state;
     $handle  = curl_init('http://127.0.0.1:' . $port . $path);
@@ -339,6 +465,13 @@ function req(string $jar, string $method, string $path, ?array $post = null, str
     if ($bearer !== '') {
         $headers[] = 'Authorization: Bearer ' . $bearer;
     }
+    // `$extra` is a list of whole header lines. One that names the body's
+    // type replaces the usual "application/json".
+    $typed = array_filter($extra, static fn (string $line): bool => stripos($line, 'Content-Type:') === 0) !== [];
+    if ($json !== null && $typed === false) {
+        $headers[] = 'Content-Type: application/json';
+    }
+    $headers = array_merge($headers, $extra);
     curl_setopt_array($handle, [
         CURLOPT_RETURNTRANSFER => true, CURLOPT_HEADER => true, CURLOPT_FOLLOWLOCATION => false, CURLOPT_TIMEOUT => 60,
         CURLOPT_CONNECTTIMEOUT => 5, CURLOPT_PROXY => '', CURLOPT_NOPROXY => '*', CURLOPT_HTTPHEADER => $headers,
@@ -349,22 +482,23 @@ function req(string $jar, string $method, string $path, ?array $post = null, str
     }
     if ($method === 'POST') {
         curl_setopt($handle, CURLOPT_POST, true);
-        curl_setopt($handle, CURLOPT_POSTFIELDS, http_build_query($post ?? []));
+        curl_setopt($handle, CURLOPT_POSTFIELDS, $json ?? http_build_query($post ?? []));
     }
     $raw = curl_exec($handle);
     if ($raw === false) {
-        return ['status' => 0, 'location' => '', 'body' => 'no answer: ' . curl_error($handle)];
+        return ['status' => 0, 'location' => '', 'body' => 'no answer: ' . curl_error($handle), 'head' => ''];
     }
     $headSize = (int) curl_getinfo($handle, CURLINFO_HEADER_SIZE);
     $head     = substr((string) $raw, 0, $headSize);
     if (preg_match('/^X-Access-Pages-Selftest:\s*' . $state['token'] . '\s*$/mi', $head) !== 1) {
-        return ['status' => -1, 'location' => '', 'body' => 'an answer without this run\'s header: it came from a server this run did not start'];
+        return ['status' => -1, 'location' => '', 'body' => 'an answer without this run\'s header: it came from a server this run did not start', 'head' => ''];
     }
 
     return [
         'status'   => (int) curl_getinfo($handle, CURLINFO_HTTP_CODE),
         'location' => preg_match('/^Location:\s*(\S+)\s*$/mi', $head, $l) === 1 ? $l[1] : '',
         'body'     => substr((string) $raw, $headSize),
+        'head'     => $head,
     ];
 }
 
@@ -384,6 +518,41 @@ function post(string $jar, string $formPage, string $to, array $fields): array
     $fields['csrf_token'] = token(req($jar, 'GET', $formPage)['body']);
 
     return req($jar, 'POST', $to, $fields);
+}
+
+/**
+ * A JSON POST, the way the chat box script sends one. An empty `$jar` sends
+ * no cookie. `$extra` is a list of whole header lines (see req()).
+ */
+function postJson(string $jar, string $path, array $payload, array $extra = []): array
+{
+    return req($jar, 'POST', $path, null, '', (string) json_encode($payload), $extra);
+}
+
+/** The `data` part of a JSON answer, or [] when there is none. */
+function data(array $answer): array
+{
+    $json = json_decode($answer['body'], true);
+
+    return (is_array($json) === true && is_array($json['data'] ?? null) === true) ? $json['data'] : [];
+}
+
+/**
+ * An answer with the one part that changes on every request (the time in
+ * `meta`) taken out. Two answers that are the same after this are the same
+ * answer, which is how "a refused event looks exactly like a made-up
+ * number" is checked.
+ */
+function stable(array $answer): string
+{
+    $json = json_decode($answer['body'], true);
+    if (is_array($json) === true) {
+        unset($json['meta']);
+
+        return $answer['status'] . ' ' . json_encode($json);
+    }
+
+    return $answer['status'] . ' ' . trim($answer['body']);
 }
 
 /** "status: message" of a JSON answer (or the start of the page's text). */
@@ -423,11 +592,83 @@ foreach ([[LEAD, 1, 0], [APPR, 0, 1], [MEM, 0, 0], [ADM, 0, 0]] as [$user, $lead
 }
 q("INSERT INTO tblRoles (roleID, siteID, roleKey, roleName, isStandard) VALUES (916201, ?, 'treasurer', 'Treasurer', 1)", 'i', [ORG_A]);
 q('INSERT INTO tblUserRoles (userID, roleID, siteID) VALUES (?, 916201, ?), (?, 916201, ?)', 'iiii', [LEAD, ORG_A, TRS, ORG_A]);
+// 👥 Package B2a: a member and an administrator of B ONLY, a global administrator with no membership anywhere,
+//    and an ordinary account with no membership anywhere (it gets no row in the next statement).
+foreach ([BMEM => 'B member', BADM => 'B admin', GADM => 'Global admin', NOMEM => 'No membership'] as $id => $name) {
+    q('INSERT INTO tblUsers (userID, fullName, emailAddress, isActive, isAdmin, isRootAdmin) VALUES (?, ?, ?, 1, 0, ?)', 'issi', [$id, 'Selftest access ' . $name, 'u' . $id . '.access@selftest.invalid', $id === GADM ? 1 : 0]);
+}
+q('INSERT INTO tblUserSites (userID, siteID, isActive, isSiteAdmin, isSiteRootAdmin) VALUES (?, ?, 1, 0, 0), (?, ?, 1, 1, 0)', 'iiii', [BMEM, ORG_B, BADM, ORG_B]);
+// K: six more accounts. GX is a global administrator with no membership; the rest are members of A.
+// (No name here may contain the words "switched off": part A searches whole answers for them, and api/users/list prints names.)
+foreach ([PX => 'Paused', QX => 'Erased', GX => 'Global paused', TF => 'Two step', TF2 => 'Two step paused', PY => 'Paused poster'] as $id => $name) {
+    q('INSERT INTO tblUsers (userID, fullName, emailAddress, isActive, isAdmin, isRootAdmin) VALUES (?, ?, ?, 1, 0, ?)', 'issi', [$id, 'Selftest access ' . $name, 'u' . $id . '.access@selftest.invalid', $id === GX ? 1 : 0]);
+    if ($id !== GX) {
+        q('INSERT INTO tblUserSites (userID, siteID, isActive, isSiteAdmin, isSiteRootAdmin) VALUES (?, ?, 1, 0, 0)', 'ii', [$id, ORG_A]);
+    }
+}
+// Two-step sign-in, finished here with a one-time backup code (the code is
+// stored as a password hash, so the test can make one; the authenticator
+// secret is encrypted with a key the test does not hold).
+$backupCode = 'ACCESS-' . bin2hex(random_bytes(6));
+foreach ([TF, TF2] as $id) {
+    q("UPDATE tblUsers SET totpEnabled = 1, totpSecret = 'not-used-by-this-test' WHERE userID = ?", 'i', [$id]);
+    q('INSERT INTO tblTotpBackupCodes (userID, codeHash, isUsed) VALUES (?, ?, 0)', 'is', [$id, password_hash($backupCode, PASSWORD_DEFAULT)]);
+}
+// An invitation to join A, not yet accepted.
+$inviteToken = bin2hex(random_bytes(32));
+q("INSERT INTO tblInvitation (siteID, email, tokenHash, intendedRole, expiresAt) VALUES (?, 'invited.access@selftest.invalid', ?, 'user', DATE_ADD(NOW(), INTERVAL 1 DAY))", 'is', [ORG_A, hash('sha256', $inviteToken)]);
+// 📅 Events. Dates are worked out from today, never written as fixed dates.
+$today    = date('Y-m-d');
+$eventDay = date('Y-m-d', strtotime('+9 days'));
+foreach ([[EV_INT, ORG_A, 'internal', 'published', 0], [EV_PUB, ORG_A, 'public', 'published', 1], [EV_DRAFT, ORG_A, 'draft', 'draft', 1], [EV_B, ORG_B, 'other-org', 'published', 1]] as [$id, $site, $kind, $status, $public]) {
+    q(
+        'INSERT INTO tblEvents (eventID, siteID, eventSlug, eventName, description, startDateTime, endDateTime, timezone, eventTimezone, status, isPublic, isDeleted) '
+        . "VALUES (?, ?, ?, ?, 'ACCESS description', ?, ?, 'UTC', 'UTC', ?, ?, 0)",
+        'iisssssi', [$id, $site, 'access-' . $kind, 'ACCESS ' . $kind . ' event', $eventDay . ' 10:00:00', $eventDay . ' 11:00:00', $status, $public]
+    );
+}
+// J: two more events of A whose number a check-in or a decision card must NOT keep: one deleted, and one
+//    copied in from an outside calendar (the calendar's own row is not needed: nothing links the two tables).
+q(
+    'INSERT INTO tblEvents (eventID, siteID, eventSlug, eventName, description, startDateTime, endDateTime, timezone, eventTimezone, status, isPublic, isDeleted) '
+    . "VALUES (?, ?, 'access-deleted', 'ACCESS deleted event', 'ACCESS description', ?, ?, 'UTC', 'UTC', 'published', 1, 1)",
+    'iiss', [EV_GONE, ORG_A, $eventDay . ' 10:00:00', $eventDay . ' 11:00:00']
+);
+q(
+    'INSERT INTO tblEvents (eventID, siteID, externalFeedID, eventSlug, eventName, description, startDateTime, endDateTime, timezone, eventTimezone, status, isPublic, isDeleted) '
+    . "VALUES (?, ?, 916901, 'access-imported', 'ACCESS imported event', 'ACCESS description', ?, ?, 'UTC', 'UTC', 'published', 1, 0)",
+    'iiss', [EV_IMPORTED, ORG_A, $eventDay . ' 10:00:00', $eventDay . ' 11:00:00']
+);
+// F: one pending registration on A's internal event, one on B's event.
+q("INSERT INTO tblEventRegistrations (registrationID, eventID, fullName, status) VALUES (916501, ?, 'ACCESS registration A', 'pending'), (916502, ?, 'ACCESS registration B', 'pending')", 'ii', [EV_INT, EV_B]);
+// G: a service type of A and two recorded sessions of it.
+q("INSERT INTO tblAttendanceServiceTypes (serviceTypeID, siteID, typeName, typeSlug, isActive) VALUES (916601, ?, 'ACCESS service', 'access-service', 1)", 'i', [ORG_A]);
+q("INSERT INTO tblAttendanceSessions (sessionID, siteID, serviceTypeID, sessionDate, notes) VALUES (916611, ?, 916601, ?, 'ACCESS-ATT seeded one'), (916612, ?, 916601, ?, 'ACCESS-ATT seeded two')", 'isis', [ORG_A, $today, ORG_A, $today]);
+// H: A's hall, with one booking today. Every text carries VENUE_MARK.
+q('INSERT INTO tblVenues (venueID, siteID, venueName, isActive) VALUES (?, ?, ?, 1)', 'iis', [VENUE, ORG_A, VENUE_MARK . ' hall']);
+q('INSERT INTO tblVenueUsageTypes (usageTypeID, siteID, venueID, typeName) VALUES (916721, ?, ?, ?)', 'iis', [ORG_A, VENUE, VENUE_MARK . ' use']);
+q('INSERT INTO tblVenueStatuses (statusID, siteID, statusName) VALUES (916731, ?, ?)', 'is', [ORG_A, VENUE_MARK . ' status']);
+q("INSERT INTO tblVenueBookings (bookingID, siteID, venueID, bookingDate, usageTypeID, statusID, startTime, endTime, notes) VALUES (?, ?, ?, ?, 916721, 916731, '09:00:00', '12:00:00', ?)", 'iiiss', [BOOKING, ORG_A, VENUE, $today, VENUE_MARK . ' note']);
+q("INSERT INTO tblVenueBookings (bookingID, siteID, venueID, bookingDate, usageTypeID, statusID, startTime, endTime, notes) VALUES (?, ?, ?, ?, 916721, 916731, '09:00:00', '12:00:00', ?)", 'iiiss', [BOOKING_LATER, ORG_A, VENUE, $eventDay, VENUE_MARK . ' note']);
+// I: an approved chat message and a live prompt on A's internal event and on its public one.
+foreach ([EV_INT => 'internal', EV_PUB => 'public'] as $id => $kind) {
+    q("INSERT INTO tblLiveChatMessages (siteID, eventID, sessionToken, displayName, body, status) VALUES (?, ?, ?, 'Seeded', ?, 'approved')", 'iiss', [ORG_A, $id, str_repeat('ab', 16), 'ACCESS-CHAT ' . $kind . ' message']);
+    q("INSERT INTO tblLivePrompts (siteID, eventID, promptType, title, expiresAt) VALUES (?, ?, 'announcement', ?, DATE_ADD(NOW(), INTERVAL 1 DAY))", 'iis', [ORG_A, $id, 'ACCESS-CHAT ' . $kind . ' prompt']);
+}
+// J: five children of A, none checked in.
+foreach ([916801, 916802, 916803, 916804, 916805] as $id) {
+    q('INSERT INTO tblKidProfiles (childID, siteID, fullName, isActive) VALUES (?, ?, ?, 1)', 'iis', [$id, ORG_A, 'ACCESS child ' . $id]);
+}
+// L: three APPROVED claims, to be opened by their own claimants.
 claim(916301, LEAD, 'ACCESS lead own claim');
 claim(916302, MEM, 'ACCESS member claim');
 claim(916303, ADM, 'ACCESS admin own claim');
 claim(916304, MEM, 'ACCESS claim to reject');
 claim(916305, LEAD, 'ACCESS lead second claim');
+claim(916307, TRS, 'ACCESS treasurer approved claim');
+claim(916308, MEM, 'ACCESS member approved claim');
+claim(916309, ADM, 'ACCESS admin approved claim');
+q("UPDATE tblExpenseClaims SET status = 'Approved' WHERE claimID IN (916307, 916308, 916309)");
 // One API key belonging to each organisation (the length ApiKey::findByPlaintext() accepts).
 $keyA = 'wbms_' . bin2hex(random_bytes(16));
 $keyB = 'wbms_' . bin2hex(random_bytes(16));
@@ -493,7 +734,7 @@ siteSetting(ORG_A, 'expenses.enabled', 'true');
 
 $password = bin2hex(random_bytes(12)) . 'Aa1!';
 $hash     = password_hash($password, PASSWORD_DEFAULT);
-foreach (['lead' => LEAD, 'appr' => APPR, 'adm' => ADM, 'trs' => TRS, 'mem' => MEM] as $who => $id) {
+foreach (['lead' => LEAD, 'appr' => APPR, 'adm' => ADM, 'trs' => TRS, 'mem' => MEM, 'bmem' => BMEM, 'badm' => BADM, 'gadm' => GADM, 'nomem' => NOMEM, 'py' => PY, 'px' => PX, 'qx' => QX, 'gx' => GX, 'tf' => TF, 'tf2' => TF2] as $who => $id) {
     q('INSERT INTO tblLocalAccounts (userID, username, passwordHash, isVerified) VALUES (?, ?, ?, 1)', 'iss', [$id, 'selftest-access-' . $who, $hash]);
 }
 
@@ -599,17 +840,29 @@ if (portAnswers($port) === false) {
     refuse('the web server never answered on port ' . $port);
 }
 
-echo "Switched-off apps and own expense claims, on the real pages — self-test (#478, #570, #545)\n";
+echo "Who may see and do what, on the real pages — self-test (#478, #570, #545, roll-out package B2a)\n";
 echo 'server process ' . (int) proc_get_status($state['proc'])['pid'] . ', port ' . $port . ', PHP ' . PHP_VERSION . ', database ' . (string) one('SELECT VERSION() AS v')['v'] . ', ' . gmdate('Y-m-d H:i:s') . " UTC\n";
 
-$jar = [];
-foreach (['lead', 'appr', 'adm', 'trs', 'mem'] as $who) {
-    $jar[$who] = $child . $sep . 'jar-' . $who . '.txt';
-    $tok       = token(req($jar[$who], 'GET', ADDR_A . '/login')['body']);
-    $in        = req($jar[$who], 'POST', ADDR_A . '/login', ['csrf_token' => $tok, 'username' => 'selftest-access-' . $who, 'password' => $password]);
+/** Sign one account in through the real sign-in page of one organisation's address; returns its cookie jar. */
+function signIn(string $who, string $address): string
+{
+    global $child, $sep, $password;
+    $file = $child . $sep . 'jar-' . $who . '-' . bin2hex(random_bytes(3)) . '.txt';
+    $tok  = token(req($file, 'GET', $address . '/login')['body']);
+    $in   = req($file, 'POST', $address . '/login', ['csrf_token' => $tok, 'username' => 'selftest-access-' . $who, 'password' => $password]);
     if ($in['status'] !== 302 || str_contains($in['location'], 'login') === true) {
         refuse("signing in as selftest-access-{$who} did not work (HTTP {$in['status']} {$in['location']})");
     }
+
+    return $file;
+}
+$jar = [];
+foreach (['lead', 'appr', 'adm', 'trs', 'mem', 'gadm', 'nomem'] as $who) {
+    $jar[$who] = signIn($who, ADDR_A);
+}
+// B's two people sign in on B's own address, and are then sent to A's.
+foreach (['bmem', 'badm'] as $who) {
+    $jar[$who] = signIn($who, ADDR_B);
 }
 $nobody = $child . $sep . 'jar-nobody.txt';
 
@@ -800,6 +1053,738 @@ $plain = req($jar['mem'], 'GET', ADDR_A . '/expenses/view?id=916306')['body'];
 ok('an ordinary claimant, who never had the button, is shown neither the button nor the sentence', str_contains($plain, 'ACCESS member second claim') === true && str_contains($plain, 'Go to Approvals') === false && str_contains($plain, 'This is your own claim') === false);
 
 // =============================================================================
+// F to L — roll-out package B2a (12 October 2026): access gaps
+// =============================================================================
+// The pattern in F, G and H is the same: the page asked "is somebody signed
+// in?" (or "is this person an administrator HERE?") and never "does the row
+// they named belong to the organisation in the address?". Each part sends
+// the request an outsider would send, then the one an insider would.
+
+// -----------------------------------------------------------------------------
+head('F. Registrations: an administrator of one organisation cannot decide another organisation\'s registration');
+// -----------------------------------------------------------------------------
+/** A registration's status and who reviewed it. */
+$regState = static function (int $id): string {
+    $row = one('SELECT status, reviewedByID, reviewedAt FROM tblEventRegistrations WHERE registrationID = ?', 'i', [$id]);
+
+    return $row === null ? 'missing' : $row['status'] . ', reviewer ' . ($row['reviewedByID'] ?? 'none') . ', reviewed ' . ($row['reviewedAt'] === null ? 'never' : 'yes');
+};
+$actA = ADDR_A . '/admin/calendar/registrations/act';
+$actB = ADDR_B . '/admin/calendar/registrations/act';
+$answer = post($jar['badm'], ADDR_B . '/account', $actB, ['registrationID' => 916501, 'eventID' => EV_INT, 'action' => 'approve']);
+ok(
+    'B\'s administrator, on B\'s address, posts the numbers of A\'s event and its registration: 404 "Registration not found", and the row is untouched',
+    $answer['status'] === 404 && trim($answer['body']) === 'Registration not found' && $regState(916501) === 'pending, reviewer none, reviewed never',
+    'HTTP ' . $answer['status'] . ' "' . mb_substr(trim($answer['body']), 0, 60) . '"; row: ' . $regState(916501)
+);
+$madeUp = post($jar['badm'], ADDR_B . '/account', $actB, ['registrationID' => 916599, 'eventID' => EV_NONE, 'action' => 'approve']);
+ok('…which is exactly the answer for an event and a registration that do not exist', $madeUp['status'] === $answer['status'] && $madeUp['body'] === $answer['body'], 'HTTP ' . $madeUp['status'] . ' "' . mb_substr(trim($madeUp['body']), 0, 60) . '"');
+$answer = post($jar['badm'], ADDR_A . '/account', $actA, ['registrationID' => 916501, 'eventID' => EV_INT, 'action' => 'reject']);
+ok('the same person on A\'s address is no administrator there: 403, row untouched', $answer['status'] === 403 && $regState(916501) === 'pending, reviewer none, reviewed never', 'HTTP ' . $answer['status'] . '; row: ' . $regState(916501));
+$answer = post($jar['adm'], ADDR_A . '/account', $actA, ['registrationID' => 916501, 'eventID' => EV_B, 'action' => 'approve']);
+ok('A\'s own administrator naming B\'s event beside A\'s registration: 404, row untouched', $answer['status'] === 404 && $regState(916501) === 'pending, reviewer none, reviewed never', 'HTTP ' . $answer['status'] . '; row: ' . $regState(916501));
+$answer = post($jar['adm'], ADDR_A . '/account', $actA, ['registrationID' => 916501, 'eventID' => EV_INT, 'action' => 'approve']);
+ok('control: A\'s own administrator approves it, and it is recorded as theirs', $answer['status'] === 302 && $regState(916501) === 'approved, reviewer ' . ADM . ', reviewed yes', 'HTTP ' . $answer['status'] . '; row: ' . $regState(916501));
+ok('…and is sent back to the list inside A\'s own address', $answer['location'] === ADDR_A . '/admin/calendar/registrations?eventID=' . EV_INT . '&status=pending', 'Location: ' . $answer['location']);
+$answer = post($jar['badm'], ADDR_B . '/account', $actB, ['registrationID' => 916502, 'eventID' => EV_B, 'action' => 'waitlist']);
+ok('control: B\'s administrator still decides B\'s own registration, on B\'s address', $answer['status'] === 302 && $regState(916502) === 'waitlisted, reviewer ' . BADM . ', reviewed yes' && str_starts_with($answer['location'], ADDR_B . '/admin/calendar/registrations?') === true, 'HTTP ' . $answer['status'] . ' ' . $answer['location'] . '; row: ' . $regState(916502));
+
+// -----------------------------------------------------------------------------
+head('G. Attendance: only the organisation\'s own people record or delete a head count');
+// -----------------------------------------------------------------------------
+$record = ADDR_A . '/attendance/record';
+/** How many of A's sessions carry this note. */
+$sessionsNoted = static fn (string $note): int => (int) one('SELECT COUNT(*) AS n FROM tblAttendanceSessions WHERE siteID = ? AND notes = ?', 'is', [ORG_A, $note])['n'];
+$deleted       = static fn (int $id): int => (int) one('SELECT isDeleted FROM tblAttendanceSessions WHERE sessionID = ?', 'i', [$id])['isDeleted'];
+$newSession    = static fn (string $note): array => ['action' => 'create', 'serviceTypeID' => 916601, 'sessionDate' => date('Y-m-d'), 'groups' => ['Adults'], 'counts' => [7], 'notes' => $note];
+$answer = req($jar['bmem'], 'GET', $record);
+ok('a member of B opens A\'s "record attendance" form: 403', $answer['status'] === 403, 'HTTP ' . $answer['status']);
+$answer = post($jar['bmem'], ADDR_A . '/account', $record . '/save', $newSession('ACCESS-ATT outsider'));
+ok('…posts a new head count to A\'s save address: 403, and no session is written', $answer['status'] === 403 && $sessionsNoted('ACCESS-ATT outsider') === 0, 'HTTP ' . $answer['status'] . '; sessions written: ' . $sessionsNoted('ACCESS-ATT outsider'));
+$answer = post($jar['bmem'], ADDR_A . '/account', $record . '/delete', ['sessionID' => 916611]);
+ok('…posts A\'s session number to A\'s delete address: 403, and the session is not deleted', $answer['status'] === 403 && $deleted(916611) === 0, 'HTTP ' . $answer['status'] . '; isDeleted: ' . $deleted(916611));
+$answer = req($jar['mem'], 'GET', $record);
+ok('control: a member of A opens the form (200)', $answer['status'] === 200, 'HTTP ' . $answer['status']);
+$answer = post($jar['mem'], $record, $record . '/save', $newSession('ACCESS-ATT member'));
+ok('control: …records a head count (any active member may)', $answer['status'] === 302 && $sessionsNoted('ACCESS-ATT member') === 1, 'HTTP ' . $answer['status'] . '; sessions written: ' . $sessionsNoted('ACCESS-ATT member'));
+$answer = post($jar['mem'], $record, $record . '/delete', ['sessionID' => 916611]);
+ok('control: …and deletes a session', $answer['status'] === 302 && $deleted(916611) === 1, 'HTTP ' . $answer['status'] . '; isDeleted: ' . $deleted(916611));
+$answer = post($jar['gadm'], $record, $record . '/save', $newSession('ACCESS-ATT global'));
+ok('control: a global administrator, a member of no organisation, records one too', $answer['status'] === 302 && $sessionsNoted('ACCESS-ATT global') === 1, 'HTTP ' . $answer['status'] . '; sessions written: ' . $sessionsNoted('ACCESS-ATT global'));
+$answer = post($jar['gadm'], $record, $record . '/delete', ['sessionID' => 916612]);
+ok('control: …and deletes one', $answer['status'] === 302 && $deleted(916612) === 1, 'HTTP ' . $answer['status'] . '; isDeleted: ' . $deleted(916612));
+
+// -----------------------------------------------------------------------------
+head('H. Venue bookings: all six viewer addresses are closed to another organisation\'s member');
+// -----------------------------------------------------------------------------
+$year       = substr($today, 0, 4);
+$venuePages = [
+    'one booking'            => '/venues/booking?id=' . BOOKING,
+    'the year schedule'      => '/venues?venue=' . VENUE . '&year=' . $year,
+    'the CSV export'         => '/venues/export?venue=' . VENUE . '&year=' . $year,
+    'the printable schedule' => '/venues/schedule-pdf?venue=' . VENUE . '&year=' . $year,
+];
+foreach ($venuePages as $what => $path) {
+    $outsider = req($jar['bmem'], 'GET', ADDR_A . $path);
+    $insider  = req($jar['mem'], 'GET', ADDR_A . $path);
+    ok(
+        sprintf('%s: a member of B is answered "page not found" (404) with none of A\'s venue data in it', $what),
+        $outsider['status'] === 404 && str_contains($outsider['body'], VENUE_MARK) === false,
+        'HTTP ' . $outsider['status'] . (str_contains($outsider['body'], VENUE_MARK) === true ? ', and the answer carries A\'s venue data' : '')
+    );
+    ok(sprintf('control, %s: a member of A still sees it', $what), $insider['status'] === 200 && str_contains($insider['body'], VENUE_MARK) === true, 'HTTP ' . $insider['status']);
+}
+$range        = '?from=' . $today . '&to=' . $today;
+$availability = ADDR_A . '/api/venues/availability' . $range;
+$unknownVenue = req($jar['mem'], 'GET', $availability . '&venueID=916799');
+foreach (['naming A\'s venue' => '&venueID=' . VENUE, 'naming no venue (every venue of A)' => ''] as $what => $extra) {
+    $outsider = req($jar['bmem'], 'GET', $availability . $extra);
+    ok(
+        sprintf('the availability endpoint, %s: a member of B gets the answer an unknown venue gets (400 "invalid-range") and no data', $what),
+        said($outsider) === '400: invalid-range' && stable($outsider) === stable($unknownVenue) && str_contains($outsider['body'], VENUE_MARK) === false,
+        said($outsider) . ' (an unknown venue: ' . said($unknownVenue) . ')'
+    );
+}
+$insider = req($jar['mem'], 'GET', $availability . '&venueID=' . VENUE);
+ok('control: a member of A is answered with the booking', $insider['status'] === 200 && str_contains($insider['body'], VENUE_MARK) === true, said($insider));
+$check        = ADDR_A . '/api/venues/check?start=' . $today . 'T09:30&end=' . $today . 'T10:30&tz=UTC&venueID=';
+$outsider     = req($jar['bmem'], 'GET', $check . VENUE);
+$unknownVenue = req($jar['mem'], 'GET', $check . '916799');
+$insider      = req($jar['mem'], 'GET', $check . VENUE);
+ok(
+    'the "is it booked?" endpoint: a member of B gets exactly the answer an unknown venue gets ("venue-missing")',
+    $outsider['status'] === 200 && (data($outsider)['classification'] ?? '') === 'venue-missing' && stable($outsider) === stable($unknownVenue),
+    $outsider['status'] . ' ' . (data($outsider)['classification'] ?? '(none)') . ' (an unknown venue: ' . (data($unknownVenue)['classification'] ?? '(none)') . ')'
+);
+ok('control: a member of A gets a real answer about the venue', $insider['status'] === 200 && in_array(data($insider)['classification'] ?? 'venue-missing', ['venue-missing', ''], true) === false, $insider['status'] . ' ' . (data($insider)['classification'] ?? '(none)'));
+$answer = req($jar['adm'], 'GET', ADDR_A . '/venues/booking?id=' . BOOKING);
+ok('control: somebody who manages venues still gets the form to change the booking', $answer['status'] === 200 && str_contains($answer['body'], 'venues/booking-save') === true, 'HTTP ' . $answer['status']);
+$answer = req($jar['gadm'], 'GET', ADDR_A . '/venues/booking?id=' . BOOKING);
+ok('control: a global administrator, a member of no organisation, sees the booking too', $answer['status'] === 200 && str_contains($answer['body'], VENUE_MARK) === true, 'HTTP ' . $answer['status']);
+
+// The two places the first round missed (found by the independent check,
+// 12 October 2026): the page for ONE VENUE, and the strip of booked days on
+// the CALENDAR page, which is a public address.
+/** Was this answer a redirect to the sign-in page? */
+$toSignIn = static fn (array $answer): bool => $answer['status'] === 302 && str_contains($answer['location'], 'login') === true;
+/**
+ * A page with everything that differs from one request to the next taken
+ * out: form tokens and other long random values, and the venue number that
+ * was asked for. Two pages that are the same after this are the same page.
+ */
+$samePage = static fn (array $answer): string => $answer['status'] . ' ' . (string) preg_replace(['/[0-9a-f]{32,}/', '/[A-Za-z0-9+\/]{20,}={0,2}/', '/9167\d\d/'], ['#', '#', 'N'], $answer['body']);
+$venuePage = ADDR_A . '/venues/venue?id=';
+foreach (['a member of B' => $jar['bmem'], 'an account with no membership anywhere' => $jar['nomem']] as $who => $file) {
+    $outsider = req($file, 'GET', $venuePage . VENUE);
+    $unknown  = req($file, 'GET', $venuePage . '916799');
+    ok(
+        sprintf('the page for one venue: %s gets exactly the page an unknown venue number gets (404), with none of A\'s venue data', $who),
+        $outsider['status'] === 404 && $samePage($outsider) === $samePage($unknown) && str_contains($outsider['body'], VENUE_MARK) === false,
+        'HTTP ' . $outsider['status'] . ' (an unknown venue: HTTP ' . $unknown['status'] . ')' . ($samePage($outsider) === $samePage($unknown) ? '' : ', and the two pages differ') . (str_contains($outsider['body'], VENUE_MARK) === true ? ', and the answer carries A\'s venue data' : '')
+    );
+}
+$outsider = req($nobody, 'GET', $venuePage . VENUE);
+ok('…and nobody at all is sent to sign-in, with no venue data (a control: this page always asked for a sign-in)', $toSignIn($outsider) === true && str_contains($outsider['body'], VENUE_MARK) === false, 'HTTP ' . $outsider['status'] . ' ' . $outsider['location']);
+$insider = req($jar['mem'], 'GET', $venuePage . VENUE);
+ok('control: a member of A still opens the venue\'s page, with its coming bookings', $insider['status'] === 200 && str_contains($insider['body'], VENUE_MARK . ' hall') === true && str_contains($insider['body'], VENUE_MARK . ' use') === true, 'HTTP ' . $insider['status']);
+// Each view that holds both an event and a venue booking: the month, week,
+// day and year of the events' day (worked out from today, like every date
+// here).
+//
+// The list used to be month and week only. With the strip left on for
+// everybody on the day view alone, or on the year view alone, every check
+// still passed (two faults planted by the independent check, 12 October
+// 2026). The year view also needed its own sign: it writes no venue name,
+// only the key above the calendar and a coloured edge on each booked day.
+/** What a page shows of the bookings: the venue's name, the key or a day's chips, a booked day's coloured edge. */
+$venueSigns = static fn (string $body): array => array_keys(array_filter([
+    'the venue\'s name'              => str_contains($body, VENUE_MARK),
+    'the key or a day\'s chips'      => str_contains($body, 'portal-venue-'),
+    'a booked day\'s coloured edge' => str_contains($body, 'box-shadow: inset 3px 0 0'),
+]));
+foreach (['month', 'week', 'day', 'year'] as $calendarView) {
+    $calendar = ADDR_A . '/calendar?view=' . $calendarView . '&date=' . $eventDay;
+    foreach (['nobody at all' => $nobody, 'a member of B' => $jar['bmem'], 'an account with no membership anywhere' => $jar['nomem']] as $who => $file) {
+        $page = req($file, 'GET', $calendar);
+        ok(
+            sprintf('the calendar page, %s view, %s: opens (200) with the public event listed, and with none of A\'s venue bookings on it', $calendarView, $who),
+            $page['status'] === 200 && str_contains($page['body'], 'ACCESS public event') === true && $venueSigns($page['body']) === [],
+            'HTTP ' . $page['status'] . '; the public event ' . (str_contains($page['body'], 'ACCESS public event') === true ? 'is' : 'is NOT') . ' listed; on the page: ' . ($venueSigns($page['body']) === [] ? 'no sign of a booking' : implode(', ', $venueSigns($page['body'])))
+        );
+    }
+    $page = req($jar['mem'], 'GET', $calendar);
+    // A control that could not fail would prove nothing about the rows
+    // above, so it names the sign each view must show.
+    $expectedSign = $calendarView === 'year' ? 'a booked day\'s coloured edge' : 'the venue\'s name';
+    ok(
+        sprintf('control, %s view: a member of A still sees the booked days (%s, and the key), and both events', $calendarView, $expectedSign),
+        $page['status'] === 200 && in_array($expectedSign, $venueSigns($page['body']), true) === true && str_contains($page['body'], 'portal-venue-legend') === true
+            && str_contains($page['body'], 'ACCESS public event') === true && str_contains($page['body'], 'ACCESS internal event') === true,
+        'HTTP ' . $page['status'] . '; on the page: ' . ($venueSigns($page['body']) === [] ? 'no sign of a booking' : implode(', ', $venueSigns($page['body'])))
+    );
+}
+// "The rest of the calendar page is unchanged": for somebody who may not see
+// the bookings, the page must be the very page they get when the Venues app
+// is switched off for the organisation.
+$calendar = ADDR_A . '/calendar?view=month&date=' . $eventDay;
+$withApp  = req($nobody, 'GET', $calendar);
+siteSetting(ORG_A, $switchable['venues'], 'false');
+$withoutApp = req($nobody, 'GET', $calendar);
+siteSetting(ORG_A, $switchable['venues'], 'true');
+ok('…and for a signed-out visitor the calendar page is exactly the page they get with the Venues app switched off', $withApp['status'] === 200 && $samePage($withApp) === $samePage($withoutApp), 'HTTP ' . $withApp['status'] . ' and ' . $withoutApp['status'] . '; ' . strlen($withApp['body']) . ' and ' . strlen($withoutApp['body']) . ' bytes');
+
+// -----------------------------------------------------------------------------
+head('I. Live chat and livestream: an internal event\'s chat only for people who may see the event (#548)');
+// -----------------------------------------------------------------------------
+// "Nobody" below is a request with NO cookie at all: what a program, or a
+// page written to call the portal from somewhere else, sends when nobody is
+// signed in. (The portal's own chat box script never does that: on another
+// website it asks that website, not the portal.)
+$chat   = ADDR_A . '/api/livechat';
+$ping   = ADDR_A . '/api/livestream/ping';
+$newTok = static fn (): string => bin2hex(random_bytes(16));
+$viewerSessions = static fn (int $event): int => (int) one('SELECT COUNT(*) AS n FROM tblLivestreamSessions WHERE eventID = ?', 'i', [$event])['n'];
+$sentBy = static fn (string $name): int => (int) one('SELECT COUNT(*) AS n FROM tblLiveChatMessages WHERE displayName = ?', 's', [$name])['n'];
+$list    = req('', 'GET', $chat . '/list?eventID=' . EV_INT . '&sinceID=0');
+$nothing = req('', 'GET', $chat . '/list?eventID=' . EV_NONE . '&sinceID=0');
+ok(
+    'nobody asks for the approved messages of A\'s INTERNAL event: no message, and the same answer as a made-up event number',
+    $list['status'] === 200 && data($list) === ['messages' => [], 'lastID' => 0, 'count' => 0] && stable($list) === stable($nothing) && str_contains($list['body'], 'ACCESS-CHAT') === false,
+    mb_substr(stable($list), 0, 200)
+);
+$prompts = req('', 'GET', $chat . '/prompts?eventID=' . EV_INT);
+$nothing = req('', 'GET', $chat . '/prompts?eventID=' . EV_NONE);
+ok(
+    'nobody asks for its prompts: none, and the same answer as a made-up event number',
+    $prompts['status'] === 200 && data($prompts) === ['prompts' => [], 'count' => 0] && stable($prompts) === stable($nothing) && str_contains($prompts['body'], 'ACCESS-CHAT') === false,
+    mb_substr(stable($prompts), 0, 200)
+);
+// The four numbers nobody may start a viewer session for, or post into.
+$closed = ['A\'s internal event' => EV_INT, 'A\'s draft' => EV_DRAFT, 'B\'s event, on A\'s address' => EV_B, 'a made-up number' => EV_NONE];
+$pingAnswers = [];
+$sendAnswers = [];
+foreach ($closed as $what => $event) {
+    $tok      = $newTok();
+    $pinged   = postJson('', $ping, ['sessionToken' => $tok, 'eventID' => $event]);
+    $sent     = postJson('', $chat . '/send', ['sessionToken' => $tok, 'eventID' => $event, 'displayName' => 'ACCESS outsider', 'body' => 'should never be stored']);
+    $pingAnswers[] = $pinged['status'] . ' ' . trim($pinged['body']);
+    $sendAnswers[] = said($sent);
+    ok(
+        sprintf('nobody pings %s, then sends: 404 and no viewer session; "Unknown session" (401) and no message', $what),
+        $pinged['status'] === 404 && trim($pinged['body']) === '{"error":"event"}' && $viewerSessions($event) === 0 && said($sent) === '401: Unknown session' && $sentBy('ACCESS outsider') === 0,
+        'ping: ' . $pinged['status'] . ' ' . trim($pinged['body']) . ', sessions ' . $viewerSessions($event) . '; send: ' . said($sent) . ', messages ' . $sentBy('ACCESS outsider')
+    );
+}
+ok('…and all four got one and the same pair of answers, so the reply never says which kind of number it was', count(array_unique($pingAnswers)) === 1 && count(array_unique($sendAnswers)) === 1, implode(' | ', array_unique(array_merge($pingAnswers, $sendAnswers))));
+// A viewer session made BEFORE this rule existed (the ping used to store any number it was sent).
+$oldTok = $newTok();
+q('INSERT INTO tblLivestreamSessions (siteID, eventID, sessionToken) VALUES (?, ?, ?)', 'iis', [ORG_A, EV_INT, $oldTok]);
+$sent = postJson('', $chat . '/send', ['sessionToken' => $oldTok, 'eventID' => EV_INT, 'displayName' => 'ACCESS old session', 'body' => 'should never be stored']);
+ok('a viewer session for the internal event that already exists does not keep the door open: "Unknown session", no message', said($sent) === '401: Unknown session' && $sentBy('ACCESS old session') === 0, said($sent) . ', messages ' . $sentBy('ACCESS old session'));
+// The PUBLIC event: everything still works with no cookie, as on the public website.
+$tok    = $newTok();
+$pinged = postJson('', $ping, ['sessionToken' => $tok, 'eventID' => EV_PUB]);
+$sent   = postJson('', $chat . '/send', ['sessionToken' => $tok, 'eventID' => EV_PUB, 'displayName' => 'ACCESS public viewer', 'body' => 'hello from the website']);
+ok('control, the PUBLIC event with no cookie: the ping is recorded and a message is accepted', $pinged['status'] === 200 && trim($pinged['body']) === '{"ok":true}' && $viewerSessions(EV_PUB) === 1 && $sent['status'] === 200 && $sentBy('ACCESS public viewer') === 1, 'ping: ' . $pinged['status'] . ' ' . trim($pinged['body']) . '; send: ' . said($sent));
+$list    = req('', 'GET', $chat . '/list?eventID=' . EV_PUB . '&sinceID=0');
+$prompts = req('', 'GET', $chat . '/prompts?eventID=' . EV_PUB);
+ok('control: …and its approved messages and its prompts are answered', str_contains($list['body'], 'ACCESS-CHAT public message') === true && str_contains($prompts['body'], 'ACCESS-CHAT public prompt') === true && str_contains($list['body'] . $prompts['body'], 'internal') === false, $list['status'] . ' / ' . $prompts['status']);
+// A NAME LONGER THAN ITS COLUMN. The server used to cut a name at 60
+// characters; the column holds 40. The chat box stops at 40, so only a
+// direct caller met it: a name of more than 40 characters got a bare 500 and
+// the message was lost (found by the independent check, 12 October 2026).
+q('DELETE FROM tblLiveRateLimits WHERE siteID = ?', 'i', [ORG_A]);
+$longNames = [];
+foreach ([41, 60] as $length) {
+    $name        = mb_substr('ACCESS name of ' . $length . ' ' . str_repeat('n', 60), 0, $length);
+    $sent        = postJson('', $chat . '/send', ['sessionToken' => $tok, 'eventID' => EV_PUB, 'displayName' => $name, 'body' => 'a long name']);
+    $longNames[] = $length . ' characters: ' . $sent['status'] . ', stored under its first 40: ' . $sentBy(mb_substr($name, 0, 40));
+}
+ok(
+    'a chat name of 41 characters, and one of 60, is cut to the 40 the column holds and the message is stored (each used to answer 500)',
+    $longNames === ['41 characters: 200, stored under its first 40: 1', '60 characters: 200, stored under its first 40: 1'],
+    implode(' | ', $longNames)
+);
+$pinged = postJson('', $ping, ['sessionToken' => $newTok()]);
+ok('control: a ping that names no event is still recorded, as a viewer of no particular event', $pinged['status'] === 200 && trim($pinged['body']) === '{"ok":true}', $pinged['status'] . ' ' . trim($pinged['body']));
+// Signed in, inside the portal: a member of A may use the internal event's chat; a member of B may not.
+// "Inside the portal" is something the BROWSER says: `Sec-Fetch-Site:
+// same-origin` when the page was served from the address being asked. A
+// browser sends that header only to an https address or to its own machine
+// (which 127.0.0.1 is); to a portal on plain http it sends none, and `Origin`
+// or `Referer` decides, as in the "older browser" rows further down. The
+// test writes the header itself here.
+$fromPortal = ['Sec-Fetch-Site: same-origin'];
+$tok    = $newTok();
+$list   = req($jar['mem'], 'GET', $chat . '/list?eventID=' . EV_INT . '&sinceID=0', null, '', null, $fromPortal);
+$pinged = postJson($jar['mem'], $ping, ['sessionToken' => $tok, 'eventID' => EV_INT], $fromPortal);
+$sent   = postJson($jar['mem'], $chat . '/send', ['sessionToken' => $tok, 'eventID' => EV_INT, 'displayName' => 'ACCESS member viewer', 'body' => 'hello from inside'], $fromPortal);
+ok(
+    'a signed-in member of A reads, joins and posts in the INTERNAL event\'s chat (inside the portal it works)',
+    str_contains($list['body'], 'ACCESS-CHAT internal message') === true && $pinged['status'] === 200 && $sent['status'] === 200 && $sentBy('ACCESS member viewer') === 1,
+    'list ' . $list['status'] . '; ping ' . $pinged['status'] . ' ' . trim($pinged['body']) . '; send ' . said($sent)
+);
+$tok    = $newTok();
+$list   = req($jar['bmem'], 'GET', $chat . '/list?eventID=' . EV_INT . '&sinceID=0', null, '', null, $fromPortal);
+$pinged = postJson($jar['bmem'], $ping, ['sessionToken' => $tok, 'eventID' => EV_INT], $fromPortal);
+$sent   = postJson($jar['bmem'], $chat . '/send', ['sessionToken' => $tok, 'eventID' => EV_INT, 'displayName' => 'ACCESS other-org viewer', 'body' => 'should never be stored'], $fromPortal);
+ok(
+    'a signed-in member of B, on A\'s address and from the portal\'s own page, gets what nobody gets: no message, 404, "Unknown session", nothing stored',
+    data($list) === ['messages' => [], 'lastID' => 0, 'count' => 0] && $pinged['status'] === 404 && said($sent) === '401: Unknown session' && $sentBy('ACCESS other-org viewer') === 0,
+    'list ' . mb_substr(stable($list), 0, 80) . '; ping ' . $pinged['status'] . '; send ' . said($sent)
+);
+
+// ---- WHERE THE REQUEST CAME FROM (the fix round of 12 October 2026) ----------
+// The first version of the rule rested on the sign-in cookie alone. A browser
+// sends that cookie to the portal from ANY page under the same registered
+// name, and these endpoints ask for no form token, so a page on another
+// address of the same site could post into an internal event's chat through
+// a signed-in member who merely opened it (proved in a real browser by the
+// independent check). Now the sign-in counts, for the four endpoints, only
+// when the browser says one of the portal's own pages made the request:
+// `Sec-Fetch-Site`, or for an older browser `Origin`, or failing that
+// `Referer`. Each row below is one way a request can arrive, with a MEMBER
+// OF A's cookie attached every time.
+$ownAddress = 'http://127.0.0.1:' . $port;
+$livePage   = $ownAddress . ADDR_A . '/live?eventID=' . EV_INT;
+$round      = 0;
+/**
+ * The four endpoints, asked once each with one cookie and one set of
+ * headers: what each answered, and how many messages were stored.
+ */
+$ask = static function (string $file, int $event, string $kind, array $headers) use ($chat, $ping, $newTok, $sentBy, &$round): string {
+    // The chat's own limit on sends (five a minute from one address) is not
+    // what is being tested, so each round starts with none counted.
+    q('DELETE FROM tblLiveRateLimits WHERE siteID = ?', 'i', [ORG_A]);
+    $round++;
+    $name    = 'ACCESS origin ' . $round;
+    $tok     = $newTok();
+    $list    = req($file, 'GET', $chat . '/list?eventID=' . $event . '&sinceID=0', null, '', null, $headers);
+    $prompts = req($file, 'GET', $chat . '/prompts?eventID=' . $event, null, '', null, $headers);
+    $pinged  = postJson($file, $ping, ['sessionToken' => $tok, 'eventID' => $event], $headers);
+    $sent    = postJson($file, $chat . '/send', ['sessionToken' => $tok, 'eventID' => $event, 'displayName' => $name, 'body' => 'round ' . $round], $headers);
+    $empty   = data($list) === ['messages' => [], 'lastID' => 0, 'count' => 0] && data($prompts) === ['prompts' => [], 'count' => 0];
+    $full    = str_contains($list['body'], 'ACCESS-CHAT ' . $kind . ' message') === true && str_contains($prompts['body'], 'ACCESS-CHAT ' . $kind . ' prompt') === true;
+
+    return 'messages and prompts ' . ($full === true ? 'answered' : ($empty === true ? 'empty' : 'MIXED')) . ', ping ' . $pinged['status'] . ', send ' . $sent['status'] . ', stored ' . $sentBy($name);
+};
+$answered = 'messages and prompts answered, ping 200, send 200, stored 1';
+$refused  = 'messages and prompts empty, ping 404, send 401, stored 0';
+// [what the browser sent, the headers, what must happen for the INTERNAL event]
+$arrivals = [
+    ['the portal\'s own page (Sec-Fetch-Site: same-origin)', ['Sec-Fetch-Site: same-origin'], $answered],
+    ['a page on another address of the SAME site (Sec-Fetch-Site: same-site)', ['Sec-Fetch-Site: same-site'], $refused],
+    ['the same, sent as plain text so the browser asks no permission first', ['Sec-Fetch-Site: same-site', 'Content-Type: text/plain;charset=UTF-8'], $refused],
+    ['a page on a different website (Sec-Fetch-Site: cross-site)', ['Sec-Fetch-Site: cross-site'], $refused],
+    ['an address typed by hand (Sec-Fetch-Site: none)', ['Sec-Fetch-Site: none'], $refused],
+    ['a browser that says "same-site" but whose Origin and Referer both name the portal: the first header decides', ['Sec-Fetch-Site: same-site', 'Origin: ' . $ownAddress, 'Referer: ' . $livePage], $refused],
+    // The next row, and the "null" and X-Forwarded-Host rows below, were
+    // added after three faults planted by the independent check (12 October
+    // 2026) passed every row there was: a value the code does not know
+    // skipped instead of refused, `Origin: null` skipped so that `Referer`
+    // decided, and the address compared against taken from a header any
+    // sender can write.
+    ['a Sec-Fetch-Site value that is not one of the four (same-origin-x), with the portal\'s own address as Origin: an unknown value is a no, not a reason to look further', ['Sec-Fetch-Site: same-origin-x', 'Origin: ' . $ownAddress], $refused],
+    ['NO header that says where it came from: unsure means no', [], $refused],
+    ['an older browser, Origin is the portal\'s own address', ['Origin: ' . $ownAddress], $answered],
+    ['an older browser, Origin is another port of the same name', ['Origin: http://127.0.0.1:1'], $refused],
+    ['an older browser, Origin is the same name over https', ['Origin: https://127.0.0.1:' . $port], $refused],
+    ['an older browser, Origin is another website', ['Origin: http://elsewhere.invalid'], $refused],
+    ['an older browser, Origin is "null" (a boxed-in frame)', ['Origin: null'], $refused],
+    ['an older browser, Origin is "null" but Referer names the portal\'s own /live page: Origin decides', ['Origin: null', 'Referer: ' . $livePage], $refused],
+    ['an older browser, Origin is another website, which the request also names in X-Forwarded-Host: only the address really asked counts', ['X-Forwarded-Host: elsewhere.invalid', 'Origin: http://elsewhere.invalid'], $refused],
+    ['an older browser, Origin is another website but Referer names the portal: Origin decides', ['Origin: http://elsewhere.invalid', 'Referer: ' . $livePage], $refused],
+    ['an older browser, no Origin, Referer is the portal\'s own /live page', ['Referer: ' . $livePage], $answered],
+    ['an older browser, no Origin, Referer is a page somewhere else', ['Referer: http://elsewhere.invalid/watch'], $refused],
+    ['an older browser, no Origin, Referer has the portal\'s name in front of another website\'s', ['Referer: http://127.0.0.1:' . $port . '@elsewhere.invalid/live'], $refused],
+];
+foreach ($arrivals as [$what, $headers, $expected]) {
+    $got = $ask($jar['mem'], EV_INT, 'internal', $headers);
+    ok(sprintf('a member of A\'s cookie, the INTERNAL event, from %s: %s', $what, $expected === $answered ? 'answered' : 'treated as nobody'), $got === $expected, $got);
+}
+// TWO PROMISES NO REQUEST HERE CAN SHOW, so they are read from the class
+// itself (the file the server's copy was made from).
+require_once PORTAL_CORE . DIRECTORY_SEPARATOR . 'LiveChat.php';
+// 1. The comment above LiveChat::eventOpenToViewer() says its fourth argument
+//    has no default on purpose. Given a default of false, every endpoint
+//    here still passes true and every row above still passes, while the next
+//    endpoint written without it would be an open door.
+$fourth = (new ReflectionMethod(Portal\Core\LiveChat::class, 'eventOpenToViewer'))->getParameters()[3] ?? null;
+ok(
+    'LiveChat::eventOpenToViewer() takes "own pages only" as its fourth argument with NO default, so a caller that forgets it gets an error, not an open door',
+    $fourth !== null && $fourth->getName() === 'ownPagesOnly' && $fourth->isOptional() === false && $fourth->isDefaultValueAvailable() === false,
+    $fourth === null ? 'there is no fourth argument' : '$' . $fourth->getName() . ($fourth->isOptional() === true ? ' is optional' : ' must be given')
+);
+// 2. Three addresses the comparison used to read as the portal's own. The
+//    test's server has a port in its address, so a port written as 0 cannot
+//    be tried against it; the rule is asked directly instead, as a portal at
+//    https://portal.example.org would hear it.
+$cameFromOwnPages = new ReflectionMethod(Portal\Core\LiveChat::class, 'requestCameFromOwnPages');
+$heard            = static function (array $headers) use ($cameFromOwnPages): string {
+    $kept = $_SERVER;
+    foreach (['HTTP_SEC_FETCH_SITE', 'HTTP_ORIGIN', 'HTTP_REFERER', 'HTTP_X_FORWARDED_PROTO'] as $key) {
+        unset($_SERVER[$key]);
+    }
+    $_SERVER = ['HTTP_HOST' => 'portal.example.org', 'HTTPS' => 'on'] + $headers + $_SERVER;
+    $answer  = $cameFromOwnPages->invoke(null) === true ? 'own page' : 'no';
+    $_SERVER = $kept;
+
+    return $answer;
+};
+$oddAddresses = [
+    'control, Origin is the portal\'s own address'                    => $heard(['HTTP_ORIGIN' => 'https://portal.example.org']),
+    'control, Referer is a page at the portal\'s own address'         => $heard(['HTTP_REFERER' => 'https://portal.example.org/live']),
+    'Origin with the portal\'s name after "another website\\@"'       => $heard(['HTTP_ORIGIN' => 'https://elsewhere.invalid\\@portal.example.org']),
+    'Referer with the portal\'s name after "another website\\@"'      => $heard(['HTTP_REFERER' => 'https://elsewhere.invalid\\@portal.example.org/live']),
+    'Referer at the portal\'s own name with the port written as 0'    => $heard(['HTTP_REFERER' => 'https://portal.example.org:0/live']),
+];
+// What the function underneath hands back for the two odd ones: '' (its own
+// word for "not an address"), not an address that merely fails to match.
+$spelling = new ReflectionMethod(Portal\Core\LiveChat::class, 'schemeNameAndPort');
+$spelt    = [$spelling->invoke(null, 'https://elsewhere.invalid\\@portal.example.org'), $spelling->invoke(null, 'https://portal.example.org:0/live'), $spelling->invoke(null, 'https://portal.example.org:443/live')];
+ok(
+    'the address comparison refuses an address with a user part ("name@") and one whose port is written as 0; each of the three used to count as the portal\'s own page',
+    array_values($oddAddresses) === ['own page', 'own page', 'no', 'no', 'no'] && $spelt === ['', '', 'https://portal.example.org'],
+    implode('; ', array_map(static fn (string $what, string $answer): string => $what . ': ' . $answer, array_keys($oddAddresses), $oddAddresses)) . '; read as: ' . json_encode($spelt, JSON_UNESCAPED_SLASHES)
+);
+// The "send" endpoint's OWN test. In every refused row above the ping is
+// refused first, so no viewer session exists and "send" would say no for
+// that reason alone: with the rule taken out of "send" only, every row
+// still passed (found by planting exactly that). Here the viewer session
+// already exists, as one made before the rule did, so only the rule can
+// refuse.
+$heldTok = $newTok();
+q('INSERT INTO tblLivestreamSessions (siteID, eventID, sessionToken) VALUES (?, ?, ?)', 'iis', [ORG_A, EV_INT, $heldTok]);
+$sends = [];
+foreach ([['Sec-Fetch-Site: same-site'], [], ['Sec-Fetch-Site: same-origin']] as $headers) {
+    q('DELETE FROM tblLiveRateLimits WHERE siteID = ?', 'i', [ORG_A]);
+    $sends[] = postJson($jar['mem'], $chat . '/send', ['sessionToken' => $heldTok, 'eventID' => EV_INT, 'displayName' => 'ACCESS held session', 'body' => 'held'], $headers)['status'];
+}
+ok(
+    'a member of A\'s cookie and a viewer session that ALREADY exists: "send" itself refuses another address of the same site and a request with no header (401, 401), and accepts the portal\'s own page (200); one message stored',
+    $sends === [401, 401, 200] && $sentBy('ACCESS held session') === 1,
+    implode(', ', $sends) . '; stored ' . $sentBy('ACCESS held session')
+);
+// A PUBLIC event answers as before, wherever the request came from.
+foreach ([['a different website', ['Sec-Fetch-Site: cross-site']], ['another address of the same site', ['Sec-Fetch-Site: same-site']], ['nowhere it can name', []]] as [$what, $headers]) {
+    $got = $ask($jar['mem'], EV_PUB, 'public', $headers);
+    ok(sprintf('control: the PUBLIC event still answers a request from %s', $what), $got === $answered, $got);
+}
+// The "can manage events" half of the rule: an administrator's own DRAFT.
+$drafts = [];
+foreach ([['Sec-Fetch-Site: same-origin'], ['Sec-Fetch-Site: same-site'], []] as $headers) {
+    $drafts[] = postJson($jar['adm'], $ping, ['sessionToken' => $newTok(), 'eventID' => EV_DRAFT], $headers)['status'];
+}
+ok('an administrator of A pings their own DRAFT: recorded from the portal\'s own page (200), refused from another address of the same site and with no header (404, 404)', $drafts === [200, 404, 404], implode(', ', $drafts));
+q('DELETE FROM tblLiveRateLimits WHERE siteID = ?', 'i', [ORG_A]);
+
+/** Is the chat box on the /live page for this event? `$extra` is a list of header lines, as for req(). */
+$box = static fn (string $who, int $event, array $extra = []): string => (static function (array $page): string {
+    return $page['status'] . (str_contains($page['body'], 'data-livechat-widget') === true ? '+box' : '');
+})(req($who, 'GET', ADDR_A . '/live?eventID=' . $event, null, '', null, $extra));
+$boxes = [$box($jar['bmem'], EV_INT), $box($jar['bmem'], EV_DRAFT), $box($jar['bmem'], EV_NONE), $box($jar['bmem'], EV_PUB)];
+ok('the /live page, for a member of B: no chat box for A\'s internal event, its draft or a made-up number (all the same); a box for the public event', $boxes === ['200', '200', '200', '200+box'], 'internal, draft, made-up, public: ' . implode(', ', $boxes));
+$boxes = [$box($jar['mem'], EV_INT), $box($jar['mem'], EV_DRAFT), $box($jar['mem'], EV_PUB)];
+ok('control: a member of A gets the box for the internal and the public event, and not for the draft', $boxes === ['200+box', '200', '200+box'], 'internal, draft, public: ' . implode(', ', $boxes));
+ok('control: an administrator of A gets the box for the draft too (the #503 rule is kept)', $box($jar['adm'], EV_DRAFT) === '200+box', $box($jar['adm'], EV_DRAFT));
+// /live is a page a person OPENS, so where they came from must not matter to it.
+$boxes = [$box($jar['mem'], EV_INT, ['Sec-Fetch-Site: cross-site']), $box($jar['mem'], EV_INT, ['Sec-Fetch-Site: none']), $box($jar['mem'], EV_INT, ['Sec-Fetch-Site: same-site'])];
+ok('control: /live still draws the box for a member of A who arrives from a link on another website, from a bookmark, or from another address of the same site', $boxes === ['200+box', '200+box', '200+box'], implode(', ', $boxes));
+// The old copy of the ping handler (web/_apps/api/livestream-ping.php, deleted
+// by package B2a) could only ever have been asked for at one of these two
+// addresses. Neither reaches a handler, before the deletion or after it: the
+// first is "no such endpoint", the second is not a whole API address.
+foreach (['/api/api/livestream-ping' => '404: API endpoint not found', '/api/livestream-ping' => '400: Invalid API path'] as $oldAddress => $refusal) {
+    $tok    = $newTok();
+    $answer = postJson('', ADDR_A . $oldAddress, ['sessionToken' => $tok, 'token' => $tok, 'eventID' => EV_PUB]);
+    ok(
+        sprintf('the deleted old ping handler was never reachable: %s answers "%s" and records no viewer', $oldAddress, $refusal),
+        said($answer) === $refusal && one('SELECT COUNT(*) AS n FROM tblLivestreamSessions WHERE sessionToken = ?', 's', [$tok])['n'] === 0,
+        said($answer)
+    );
+}
+
+// -----------------------------------------------------------------------------
+head('J. A child\'s check-in and a decision card are never lost over a bad event number');
+// -----------------------------------------------------------------------------
+/** What was stored for a child: "no row", or the event number kept on the check-in. */
+$checkin = static function (int $childId): string {
+    $rows = q('SELECT eventID FROM tblKidCheckins WHERE childID = ?', 'i', [$childId]);
+
+    return count($rows) === 0 ? 'no row' : count($rows) . ' row(s), event ' . ($rows[0]['eventID'] ?? 'none');
+};
+$card = static function (string $name): string {
+    $rows = q('SELECT eventID FROM tblSalvationCards WHERE siteID = ? AND fullName = ?', 'is', [ORG_A, $name]);
+
+    return count($rows) === 0 ? 'no row' : count($rows) . ' row(s), event ' . ($rows[0]['eventID'] ?? 'none');
+};
+$kids = ADDR_A . '/kids/checkin';
+// The deleted and the imported event are this organisation's OWN rows, so only
+// the "not deleted, not imported" half of the look-up refuses them. A fault
+// planted by the independent check (that half taken out) passed every check
+// here until these two rows were added.
+foreach ([[916801, EV_B, 'another organisation\'s event number', 'none'], [916802, EV_NONE, 'a number that matches no event', 'none'], [916804, EV_GONE, 'this organisation\'s own DELETED event', 'none'], [916805, EV_IMPORTED, 'this organisation\'s own event that was copied in from an outside calendar', 'none'], [916803, EV_INT, 'this organisation\'s own event', (string) EV_INT]] as [$childId, $event, $what, $kept]) {
+    $answer = post($jar['adm'], $kids, $kids . '/do', ['childID' => $childId, 'eventID' => $event]);
+    ok(
+        sprintf('a child is checked in with %s: the check-in IS saved, with event "%s"', $what, $kept),
+        $answer['status'] === 302 && $checkin($childId) === '1 row(s), event ' . $kept,
+        'HTTP ' . $answer['status'] . '; stored: ' . $checkin($childId)
+    );
+}
+$cardPage = ADDR_A . '/decision-card';
+foreach ([['ACCESS card other organisation', EV_B, 'another organisation\'s event number', 'none'], ['ACCESS card made-up', EV_NONE, 'a number that matches no event', 'none'], ['ACCESS card deleted event', EV_GONE, 'this organisation\'s own DELETED event', 'none'], ['ACCESS card imported event', EV_IMPORTED, 'this organisation\'s own event that was copied in from an outside calendar', 'none'], ['ACCESS card own event', EV_INT, 'this organisation\'s own event', (string) EV_INT]] as [$name, $event, $what, $kept]) {
+    $answer = post($nobody, $cardPage, $cardPage . '/save', ['fullName' => $name, 'eventID' => $event, 'decision' => 'first-time']);
+    ok(
+        sprintf('a visitor sends a decision card with %s: the card IS saved, with event "%s"', $what, $kept),
+        $answer['status'] === 200 && str_contains($answer['body'], 'Thank you') === true && $card($name) === '1 row(s), event ' . $kept,
+        'HTTP ' . $answer['status'] . '; stored: ' . $card($name)
+    );
+}
+
+// -----------------------------------------------------------------------------
+head('K. A switched-off or erased account: its open session is ended on its next request');
+// -----------------------------------------------------------------------------
+// Auth::ensureSession() asks, once for each request that carries a signed-in
+// session, whether the account is still switched on, and ENDS the session
+// when it is not. Everything below is a real sign-in through the real
+// sign-in page, with real cookies.
+$account = ADDR_A . '/account';
+/** Was this answer a redirect to the sign-in page? */
+$sentToSignIn = static fn (array $answer): bool => $answer['status'] === 302 && str_contains($answer['location'], 'login') === true;
+/** The session identifier a cookie jar holds ('' when none). */
+$sessionId = static function (string $file): string {
+    foreach ((array) @file($file) as $line) {
+        $columns = explode("\t", rtrim((string) $line, "\r\n"));
+        if (count($columns) === 7 && $columns[5] === 'PHPSESSID') {
+            return $columns[6];
+        }
+    }
+
+    return '';
+};
+/** Is a session's stored data still on disk? (This run's server keeps its sessions in the scratch folder.) */
+$sessionStored = static function (string $id) use ($child, $sep): bool {
+    // PHP remembers what it last learnt about a file. Without this, a file
+    // the SERVER has since deleted would still be reported as there.
+    clearstatcache();
+
+    return $id !== '' && is_file($child . $sep . 'sessions' . $sep . 'sess_' . $id) === true;
+};
+$setActive     = static function (int $userId, int $flag): void {
+    q('UPDATE tblUsers SET isActive = ? WHERE userID = ?', 'ii', [$flag, $userId]);
+};
+$endedRows = static fn (int $userId): int => (int) one("SELECT COUNT(*) AS n FROM tblActivityLogs WHERE userID = ? AND activityType = 'SessionEndedInactiveAccount'", 'i', [$userId])['n'];
+
+// 📜 The database's own query log, switched on for this part: it is how "one
+//    look-up for a signed-in request, none for anybody else" is COUNTED
+//    rather than assumed. Put back by the clean-up.
+$logBefore = one('SELECT @@GLOBAL.general_log AS general_log, @@GLOBAL.log_output AS log_output');
+if ($logBefore === null || in_array((int) $logBefore['general_log'], [0, 1], true) === false || preg_match('/^[A-Z,]+$/', (string) $logBefore['log_output']) !== 1) {
+    refuse('the database would not say how its query log is set');
+}
+$state['queryLog'] = ['general_log' => (int) $logBefore['general_log'], 'log_output' => (string) $logBefore['log_output']];
+q("SET GLOBAL log_output = 'TABLE'");
+q('SET GLOBAL general_log = 1');
+$logEmpty = static function (): void {
+    q('TRUNCATE TABLE mysql.general_log');
+};
+/** How many times the portal ran the look-up since the log was last emptied. */
+$lookups = static fn (): int => (int) one("SELECT COUNT(*) AS n FROM mysql.general_log WHERE command_type = 'Execute' AND thread_id <> CONNECTION_ID() AND CONVERT(argument USING utf8mb4) LIKE ?", 's', [LOOKUP_LIKE])['n'];
+/** Every statement the portal sent since then, and how many of them name the accounts table. */
+$sent = static fn (): array => array_map('intval', (array) one(
+    "SELECT COUNT(*) AS commands, COALESCE(SUM(CONVERT(argument USING utf8mb4) LIKE '%tblUsers%'), 0) AS namingAccounts FROM mysql.general_log "
+    . "WHERE command_type IN ('Query', 'Execute') AND thread_id <> CONNECTION_ID()"
+));
+
+head('K1. Switched off while signed in: three open sessions, three kinds of address');
+$open = [signIn('px', ADDR_A), signIn('px', ADDR_A), signIn('px', ADDR_A)];
+// "Anybody may send in an event" is switched off for A, so the public
+// submission page shows its form only to somebody signed in. That page
+// decides "signed in or not" by reading the session itself; it never asks
+// Auth::check().
+siteSetting(ORG_A, 'calendar.publicSubmit.allowAnonymous', 'false');
+$submit   = ADDR_A . '/calendar/submit';
+$statuses = [req($open[0], 'GET', $account)['status'], req($open[1], 'GET', ADDR_A . '/api/assets/list')['status'], req($open[2], 'GET', $submit)['status']];
+$oldId    = $sessionId($open[0]);
+$savedCookie = $open[0] . '.saved-before';
+copy($open[0], $savedCookie);
+ok('control: while the account is on, its three sessions open a protected page, a data endpoint and the submission form (200 each)', $statuses === [200, 200, 200] && $sessionStored($oldId) === true, implode(', ', $statuses) . '; session stored: ' . ($sessionStored($oldId) === true ? 'yes' : 'no'));
+$setActive(PX, 0);
+$answer = req($open[0], 'GET', $account);
+ok('the account is switched off: its next request to a protected page is sent to sign-in', $sentToSignIn($answer) === true, 'HTTP ' . $answer['status'] . ' ' . $answer['location']);
+ok(
+    '…and the session was ENDED, not just refused: its stored data is deleted and the browser was handed a new, empty session',
+    $sessionStored($oldId) === false && $sessionId($open[0]) !== '' && $sessionId($open[0]) !== $oldId,
+    'old session stored: ' . ($sessionStored($oldId) === true ? 'yes' : 'no') . '; the cookie ' . ($sessionId($open[0]) === $oldId ? 'did not change' : 'changed')
+);
+$answer = req($open[1], 'GET', ADDR_A . '/api/assets/list');
+ok('its second session asks a data endpoint: 401 "Authentication required"', said($answer) === '401: Authentication required', said($answer));
+$answer = req($open[2], 'GET', $submit);
+ok('its third session opens the page that reads the session directly: treated as signed out (sent to sign-in)', $sentToSignIn($answer) === true, 'HTTP ' . $answer['status'] . ' ' . $answer['location']);
+ok('each of the three endings is written to the activity log, once, against the account', $endedRows(PX) === 3, $endedRows(PX) . ' row(s)');
+
+head('K2. Switching the account back on does not bring an old session back');
+$setActive(PX, 1);
+$answer = req($savedCookie, 'GET', $account);
+ok('the cookie saved before the switch-off, used again after the account is back on: still signed out', $sentToSignIn($answer) === true, 'HTTP ' . $answer['status'] . ' ' . $answer['location']);
+$answer = req($open[1], 'GET', $account);
+ok('…and so is another of its old sessions', $sentToSignIn($answer) === true, 'HTTP ' . $answer['status'] . ' ' . $answer['location']);
+// Signing in again, in the SAME browser whose session was ended: the new, empty session must carry a working form token.
+$tok    = token(req($open[0], 'GET', ADDR_A . '/login')['body']);
+$in     = req($open[0], 'POST', ADDR_A . '/login', ['csrf_token' => $tok, 'username' => 'selftest-access-px', 'password' => $password]);
+$answer = req($open[0], 'GET', $account);
+ok('the person signs in again in the same browser, and is in (the ended session left a working form token behind)', $in['status'] === 302 && str_contains($in['location'], 'login') === false && $answer['status'] === 200, 'sign-in: HTTP ' . $in['status'] . ' ' . $in['location'] . '; page: HTTP ' . $answer['status']);
+req($open[0], 'GET', ADDR_A . '/logout');
+$answer = req($open[0], 'GET', $account);
+ok('control: signing out still works', $sentToSignIn($answer) === true, 'HTTP ' . $answer['status'] . ' ' . $answer['location']);
+siteSetting(ORG_A, 'calendar.publicSubmit.allowAnonymous', 'true');
+
+head('K3. Erased while signed in, through the real erasure pages');
+$erased  = signIn('qx', ADDR_A);
+$erasedId = $sessionId($erased);
+post($erased, ADDR_A . '/account/delete', ADDR_A . '/account/delete/confirm', ['confirm_phrase' => 'DELETE MY ACCOUNT']);
+$request = one('SELECT requestID, status FROM tblErasureRequest WHERE userID = ? ORDER BY requestID DESC LIMIT 1', 'i', [QX]);
+$answer  = req($erased, 'GET', $account);
+ok('the person asks for their account to be deleted on the real page: the request waits for an administrator, and they are still signed in', ($request['status'] ?? '') === 'pending_review' && $answer['status'] === 200, 'request: ' . ($request['status'] ?? 'none') . '; page: HTTP ' . $answer['status']);
+post($jar['adm'], ADDR_A . '/admin/erasure-requests', ADDR_A . '/admin/erasure-requests/process', ['requestID' => (int) ($request['requestID'] ?? 0), 'action' => 'execute']);
+$after = one(
+    'SELECT (SELECT status FROM tblErasureRequest WHERE requestID = ?) AS status, u.isActive, (SELECT COUNT(*) FROM tblLocalAccounts l WHERE l.userID = u.userID) AS signIns FROM tblUsers u WHERE u.userID = ?',
+    'ii', [(int) ($request['requestID'] ?? 0), QX]
+);
+ok('an administrator carries it out on the real page: the erasure completes, the account is switched off and nothing is left to sign in with', $after === ['status' => 'completed', 'isActive' => 0, 'signIns' => 0], json_encode($after));
+$answer = req($erased, 'GET', $account);
+ok('the erased person\'s next click is signed out, and their session\'s stored data is deleted', $sentToSignIn($answer) === true && $sessionStored($erasedId) === false, 'HTTP ' . $answer['status'] . ' ' . $answer['location'] . '; old session stored: ' . ($sessionStored($erasedId) === true ? 'yes' : 'no'));
+
+head('K4. Maintenance mode: a switched-off global administrator no longer walks in; the upgrade page still works');
+$global  = signIn('gx', ADDR_A);
+$upgrade = ADDR_A . '/admin/upgrade';
+$row     = one("SELECT settingID, settingValue FROM tblSettings WHERE settingKey = 'portal.maintenance.active' AND siteID IS NULL");
+if ($row === null) {
+    refuse('the portal-wide setting portal.maintenance.active is not in this database');
+}
+$state['settings']['portal.maintenance.active'] = $row; // the clean-up puts it back even if this part stops early
+q("UPDATE tblSettings SET settingValue = '1' WHERE settingID = ?", 'i', [(int) $row['settingID']]);
+$closed = [req('', 'GET', $account)['status'], req('', 'GET', ADDR_A . '/login')['status']];
+ok('control, maintenance on: a signed-out visitor gets the holding page (503); the sign-in page still opens (200)', $closed === [503, 200], implode(', ', $closed));
+$walksIn = [req($global, 'GET', $account)['status'], req($global, 'GET', $upgrade)['status']];
+ok('control: a global administrator who is switched ON walks in (200), and the upgrade page opens for them (200)', $walksIn === [200, 200], implode(', ', $walksIn));
+$setActive(GX, 0);
+$answer = req($global, 'GET', $account);
+ok('the global administrator is switched off: their open session now gets the holding page (503) like anybody else', $answer['status'] === 503, 'HTTP ' . $answer['status']);
+$answer = req($global, 'GET', $upgrade);
+ok('…and the upgrade address sends them to sign-in instead of opening', $sentToSignIn($answer) === true, 'HTTP ' . $answer['status'] . ' ' . $answer['location']);
+q('UPDATE tblSettings SET settingValue = ? WHERE settingID = ?', 'si', [(string) $row['settingValue'], (int) $row['settingID']]);
+$answer = req($jar['gadm'], 'GET', $upgrade);
+ok('control, maintenance off again: the upgrade page opens for a global administrator', $answer['status'] === 200, 'HTTP ' . $answer['status']);
+
+head('K5. What it costs, and what it must leave alone');
+$logEmpty();
+$statuses = [];
+for ($i = 0; $i < 20; $i++) {
+    $statuses[] = req($jar['mem'], 'GET', $account)['status'];
+}
+$cost = $sent();
+ok('an active member opens a protected page 20 times: 200 every time, and exactly 20 look-ups (one for each signed-in request, never more)', array_unique($statuses) === [200] && $lookups() === 20, 'statuses: ' . implode(',', array_unique($statuses)) . '; look-ups: ' . $lookups());
+// Not a check: the measured cost, printed so a later run can be compared with it.
+echo '        for the record: ' . round($cost['commands'] / 20, 1) . ' statements for each of those requests in all, ' . round($lookups() / 20, 1) . ' of them the look-up ("' . str_replace('%', '<account number> LIMIT 1', LOOKUP_LIKE) . '").' . "\n";
+$logEmpty();
+$public = [req('', 'GET', ADDR_A . '/login'), req('', 'GET', $submit), req('', 'GET', ADDR_A . '/decision-card')];
+$cost   = $sent();
+ok(
+    'a signed-out visitor opens three public pages: 200 each, NO look-up, and not one statement that names the accounts table',
+    array_column($public, 'status') === [200, 200, 200] && $lookups() === 0 && $cost['namingAccounts'] === 0 && $cost['commands'] > 0,
+    'statuses: ' . implode(',', array_column($public, 'status')) . '; look-ups: ' . $lookups() . '; statements naming tblUsers: ' . $cost['namingAccounts'] . ' of ' . $cost['commands']
+);
+ok('#507 is not disturbed: the signed-out sign-in page may be kept offline, a signed-in page is not marked', preg_match('/^X-Offline-Copy:\s*allow\s*$/mi', $public[0]['head']) === 1 && preg_match('/^X-Offline-Copy:/mi', req($jar['mem'], 'GET', $account)['head']) === 0);
+$logEmpty();
+$answer = req('', 'GET', ADDR_A . '/api/assets/list', null, $keyA);
+ok('an API key is answered as before (200), with no look-up: a key is not a person and uses no session', $answer['status'] === 200 && $lookups() === 0, said($answer) . '; look-ups: ' . $lookups());
+// Two-step sign-in.
+$twoStep = $child . $sep . 'jar-tf.txt';
+$tok     = token(req($twoStep, 'GET', ADDR_A . '/login')['body']);
+$logEmpty();
+$in      = req($twoStep, 'POST', ADDR_A . '/login', ['csrf_token' => $tok, 'username' => 'selftest-access-tf', 'password' => $password]);
+$form    = req($twoStep, 'GET', ADDR_A . '/auth/2fa/verify');
+ok('two-step sign-in: after the password the person waits at the code page, with no look-up made about them', $in['status'] === 302 && str_contains($in['location'], '2fa/verify') === true && $form['status'] === 200 && $lookups() === 0, 'sign-in: HTTP ' . $in['status'] . ' ' . $in['location'] . '; code page: HTTP ' . $form['status'] . '; look-ups: ' . $lookups());
+$done   = req($twoStep, 'POST', ADDR_A . '/auth/2fa/verify', ['csrf_token' => token($form['body']), 'code' => $backupCode, 'use_backup' => '1']);
+$answer = req($twoStep, 'GET', $account);
+ok('…they give their code and are signed in (two-step sign-in still works)', $done['status'] === 302 && str_contains($done['location'], '2fa') === false && $answer['status'] === 200, 'code: HTTP ' . $done['status'] . ' ' . $done['location'] . '; page: HTTP ' . $answer['status']);
+$twoStepOff = $child . $sep . 'jar-tf2.txt';
+$tok        = token(req($twoStepOff, 'GET', ADDR_A . '/login')['body']);
+req($twoStepOff, 'POST', ADDR_A . '/login', ['csrf_token' => $tok, 'username' => 'selftest-access-tf2', 'password' => $password]);
+$form = req($twoStepOff, 'GET', ADDR_A . '/auth/2fa/verify');
+$setActive(TF2, 0); // switched off in the minute between the password and the code
+req($twoStepOff, 'POST', ADDR_A . '/auth/2fa/verify', ['csrf_token' => token($form['body']), 'code' => $backupCode, 'use_backup' => '1']);
+$answer = req($twoStepOff, 'GET', $account);
+ok('somebody switched off between their password and their code gets no further than their next request', $form['status'] === 200 && $sentToSignIn($answer) === true && $endedRows(TF2) === 1, 'code page: HTTP ' . $form['status'] . '; next page: HTTP ' . $answer['status'] . ' ' . $answer['location'] . '; endings logged: ' . $endedRows(TF2));
+// The invitation page signs a NEW person in part way through a request.
+$invited = $child . $sep . 'jar-invited.txt';
+$page    = req($invited, 'GET', ADDR_A . '/auth/invite?token=' . $inviteToken);
+$accept  = req($invited, 'POST', ADDR_A . '/auth/invite', ['csrf_token' => token($page['body']), 'token' => $inviteToken, 'fullName' => 'Selftest access Invited', 'username' => 'selftest-access-invited', 'password' => $password, 'passwordConfirm' => $password]);
+$answer  = req($invited, 'GET', $account);
+ok('the invitation page still signs a new person in: they accept, and their next page opens', $page['status'] === 200 && $accept['status'] === 302 && $answer['status'] === 200, 'invitation: HTTP ' . $page['status'] . '; accept: HTTP ' . $accept['status'] . '; page: HTTP ' . $answer['status']);
+
+head('K6. Switched off, and the next request is not a plain GET');
+// Every request K1 to K4 make from a switched-off account is a GET with no
+// "Authorization" header. Two faults planted by the independent check passed
+// all of them: the look-up made only for GET requests, and the look-up
+// skipped whenever a request carried such a header. These checks are what
+// fail then.
+$poster  = signIn('py', ADDR_A);
+$header  = signIn('py', ADDR_A);
+$formTok = token(req($poster, 'GET', $record)['body']); // the form and its token, read while the account is still on
+$warm    = req($header, 'GET', $account)['status'];
+$setActive(PY, 0);
+$fields  = $newSession('ACCESS-ATT switched-off poster') + ['csrf_token' => $formTok];
+$answer  = req($poster, 'POST', $record . '/save', $fields);
+ok(
+    'a switched-off account\'s FIRST request is a POST, carrying a form token it read beforehand: sent to sign-in, and nothing is written',
+    $formTok !== '' && $sentToSignIn($answer) === true && $sessionsNoted('ACCESS-ATT switched-off poster') === 0,
+    'token read: ' . ($formTok !== '' ? 'yes' : 'no') . '; HTTP ' . $answer['status'] . ' ' . $answer['location'] . '; sessions written: ' . $sessionsNoted('ACCESS-ATT switched-off poster')
+);
+$answer = req($header, 'GET', $account, null, 'not-a-key');
+ok(
+    'its other session asks for a protected page with an "Authorization" header added to its cookie: sent to sign-in all the same',
+    $warm === 200 && $sentToSignIn($answer) === true,
+    'before the switch-off: HTTP ' . $warm . '; after: HTTP ' . $answer['status'] . ' ' . $answer['location']
+);
+ok('…and both endings are in the activity log', $endedRows(PY) === 2, $endedRows(PY) . ' row(s)');
+// The log goes back to how it was straight away (the clean-up would do it too).
+q('SET GLOBAL general_log = ' . (int) $state['queryLog']['general_log']);
+q("SET GLOBAL log_output = '" . $state['queryLog']['log_output'] . "'");
+q('TRUNCATE TABLE mysql.general_log');
+$state['queryLog'] = null;
+
+// -----------------------------------------------------------------------------
+head('L. Expenses: the treasurer\'s own approved claim, and addresses that stay inside the organisation');
+// -----------------------------------------------------------------------------
+// The sentence, written out by hand (not read from ExpenseRules).
+$ownPayPageNote = 'This is your own claim, so you cannot record its payment yourself. Another treasurer or an administrator must pay it.';
+$view  = static fn (string $who, int $claimId): string => req($who, 'GET', ADDR_A . '/expenses/view?id=' . $claimId)['body'];
+$page  = $view($jar['trs'], 916307);
+ok('a treasurer opens their OWN approved claim: no "Go to Treasury" button, and one sentence saying who pays it', str_contains($page, 'ACCESS treasurer approved claim') === true && str_contains($page, 'Go to Treasury') === false && str_contains($page, $ownPayPageNote) === true);
+$page = $view($jar['adm'], 916309);
+ok('an administrator opening their own approved claim is told the same', str_contains($page, 'ACCESS admin approved claim') === true && str_contains($page, 'Go to Treasury') === false && str_contains($page, $ownPayPageNote) === true);
+$page = $view($jar['mem'], 916308);
+ok('an ordinary claimant, who never had the button, is shown neither the button nor the sentence', str_contains($page, 'ACCESS member approved claim') === true && str_contains($page, 'Go to Treasury') === false && str_contains($page, 'This is your own claim') === false);
+$page = $view($jar['trs'], 916308);
+ok('the treasurer on SOMEBODY ELSE\'S approved claim: the button, and no "your own claim" sentence', str_contains($page, 'ACCESS member approved claim') === true && str_contains($page, 'Go to Treasury') === true && str_contains($page, 'This is your own claim') === false);
+ok('…and that button points inside A\'s own address', str_contains($page, 'href="' . ADDR_A . '/expenses/treasury"') === true);
+// Organisations are told apart by the first part of the address in this run,
+// so a bare "/expenses/…" would land on the DEFAULT organisation.
+$answer = post($jar['appr'], $approve, $approve . '/save', ['claimID' => 916305, 'decision' => 'Approved', 'comments' => 'ok']);
+ok('approving a claim on A\'s address lands back on A\'s own approvals page', $answer['status'] === 302 && $answer['location'] === $approve, 'HTTP ' . $answer['status'] . ' Location: ' . $answer['location']);
+$page = req($jar['appr'], 'GET', $approve)['body'];
+ok('the approvals page lists a claim to decide, and posts its form inside A\'s own address', str_contains($page, 'ACCESS member second claim') === true && str_contains($page, 'action="' . $approve . '/save"') === true, 'the claim was ' . (str_contains($page, 'ACCESS member second claim') === true ? '' : 'NOT ') . 'listed; the form target was ' . (str_contains($page, 'action="' . $approve . '/save"') === true ? '' : 'NOT ') . $approve . '/save');
+$page = req($jar['mem'], 'GET', ADDR_A . '/expenses/submit')['body'];
+ok('the submit page posts its form inside A\'s own address', str_contains($page, 'action="' . ADDR_A . '/expenses/submit/save"') === true);
+$answer = post($jar['trs'], $treasury, $treasury . '/save', ['claimID' => 916308, 'payRef' => ['BACS-L'], 'comments' => '']);
+ok('recording a payment on A\'s address lands back on A\'s own treasury page', $answer['status'] === 302 && $answer['location'] === $treasury && claimState(916308) === 'Reimbursed, 0 approval(s), 1 payment(s)', 'HTTP ' . $answer['status'] . ' Location: ' . $answer['location'] . '; claim: ' . claimState(916308));
+claim(916310, MEM, 'ACCESS claim to withdraw');
+$answer = post($jar['mem'], ADDR_A . '/expenses/view?id=916310', ADDR_A . '/expenses/withdraw/save', ['claimID' => 916310]);
+ok('withdrawing a claim on A\'s address lands inside A\'s own address', $answer['status'] === 302 && str_starts_with($answer['location'], ADDR_A . '/expenses/') === true, 'HTTP ' . $answer['status'] . ' Location: ' . $answer['location']);
+
+// =============================================================================
 head('Nothing went wrong behind the pages, and everything is put back');
 // =============================================================================
 $log = (string) @file_get_contents($child . $sep . 'php-errors.log');
@@ -810,7 +1795,10 @@ $before = $state['settings'];
 cleanup();
 $left = (int) (one(
     'SELECT (SELECT COUNT(*) FROM tblSites WHERE siteID IN (?, ?)) + (SELECT COUNT(*) FROM tblUsers WHERE userID BETWEEN 916000 AND 916999) '
-    . "+ (SELECT COUNT(*) FROM tblExpenseClaims WHERE claimID BETWEEN 916000 AND 916999) + (SELECT COUNT(*) FROM tblSettings WHERE settingKey LIKE '%zz-selftest%') AS n",
+    . "+ (SELECT COUNT(*) FROM tblExpenseClaims WHERE claimID BETWEEN 916000 AND 916999) + (SELECT COUNT(*) FROM tblSettings WHERE settingKey LIKE '%zz-selftest%') "
+    . '+ (SELECT COUNT(*) FROM tblEvents WHERE eventID BETWEEN 916000 AND 916999) + (SELECT COUNT(*) FROM tblVenues WHERE venueID BETWEEN 916000 AND 916999) '
+    . '+ (SELECT COUNT(*) FROM tblKidProfiles WHERE childID BETWEEN 916000 AND 916999) + (SELECT COUNT(*) FROM tblAttendanceServiceTypes WHERE serviceTypeID BETWEEN 916000 AND 916999) '
+    . "+ (SELECT COUNT(*) FROM tblSalvationCards WHERE fullName LIKE 'ACCESS card%') + (SELECT COUNT(*) FROM tblLiveChatMessages WHERE displayName LIKE 'ACCESS%' OR body LIKE 'ACCESS-CHAT%') AS n",
     'ii', [ORG_A, ORG_B]
 )['n'] ?? -1);
 $settingsBack = true;

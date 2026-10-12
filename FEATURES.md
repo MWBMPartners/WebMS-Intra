@@ -398,6 +398,9 @@ seeded `'0'` stub for a future auto-purge cron — see DEV_NOTES).
 
 ### 📋 Attendance — `/attendance/` ✅
 
+**Who may record (12 October 2026).** Recording, changing and deleting a head count: any active member of the
+organisation, or an administrator. Nobody from another organisation. Viewing the counts is not yet limited the same way (#511).
+
 Service-type-aware headcount tracker.
 
 - Sessions with date / time / event linkage / notes.
@@ -614,7 +617,7 @@ Read-only JSON list endpoints over `Portal\Core\ApiRouter`.
 - `/api/announcements/list`
 - `/api/users/list`
 - `/api/events/list`, `/api/events/detail`
-- `/api/calendar/hub-resources`, `/api/calendar/hub-videos` — Event Team Hub read endpoints, scope `eventhub:read` (#387). A signed-in person is answered only for an event they may see (#534); they follow the Calendar app's switch (#478)
+- `/api/calendar/hub-resources`, `/api/calendar/hub-videos` — Event Team Hub read endpoints, scope `eventhub:read` (#387). A signed-in person is answered only for an event they may see (#534) and only when they are on the event's own team (12 October 2026); they follow the Calendar app's switch (#478)
 
 **Gaps:** #95 was closed as "REST API expansion — CRUD for all modules" but only list endpoints exist. Full CRUD would still be additional work.
 
@@ -886,7 +889,7 @@ setting seeds.
 | Reading Plans (Bible-in-a-year, chronological, streak counter) | #265 | 084 | ✅ |
 | QR generator + CueRCode adapter slot | #275 | 085 | ✅ (CueRCode hash empty pending its public API) |
 | Invite-based onboarding (SHA-256 hashed tokens, public acceptance route) | #239 | 086 | ✅ |
-| One-click offboarding (7-step atomic revocation + 7-day rehire window) | #240 | 087 | ✅ |
+| One-click offboarding (7-step atomic revocation + 7-day rehire window). Switching an account off, offboarding it or erasing it ends its open sessions on the person's next request (12 October 2026) | #240 | 087 | ✅ |
 
 ### Wave 4 (#284) — PR landed 2026-06-02
 
@@ -1071,6 +1074,16 @@ Extends the calendar app (Calendar/Events/Preaching Plan is ONE app per `.claude
 
 ---
 
+### Live chat and the viewer count: who is answered (#548, 12 October 2026)
+
+- The chat box works on the portal's own `/live` page. A public event's chat needs no sign-in.
+- An internal event's chat is for signed-in people who may see the event, and only when the request comes from one of the
+  portal's own pages. A page on another website, or on another address of the same site, can no longer read, join or post
+  through a signed-in member who happens to open it.
+- The chat box does NOT work on another website: there it asks that website, not the portal.
+- A public event's chat can still be read and posted to by a program that calls the portal's chat addresses directly.
+- A chat name is kept to 40 characters.
+
 ### Event Team Hub REST API read endpoints — projectBookIT Phase 3 integration (#387, 2026-08-12)
 
 Exposes the Event Team Hub tables shipped in #386 (migration 155) to external integrations, built for the projectBookIT Event Team Hub Phase 3 consumer (projectbookit#347). Read-only; no schema changes.
@@ -1080,7 +1093,7 @@ Exposes the Event Team Hub tables shipped in #386 (migration 155) to external in
 | `_apps/calendar/api/hub-resources.php` — `GET /api/calendar/hub-resources?eventID=`, returns that event's `tblEventHubResources` rows (`resourceID, section, resourceType, title, url, body, sortOrder`), ordered `section, sortOrder, resourceID` | #387 | 157 | ✅ |
 | `_apps/calendar/api/hub-videos.php` — `GET /api/calendar/hub-videos?eventID=`, returns that event's `tblEventHubVideos` rows (`videoID, provider, videoRef, title, requiresSignedUrl, allowedOrigins, uploadStatus, sortOrder`), ordered `sortOrder, videoID`. Never emits a signing key, playback token, or any `cfstream.*` credential — `videoRef` is the public provider ID/UID a player embeds against | #387 | 157 | ✅ |
 | Both mirror the `events/list.php`/`detail.php` dual-mode-auth pattern (`ApiAuth::requireRead('eventhub:read')`) with an explicit tenant guard — the requested event must belong to `Site::id()` or the endpoint 404s, never leaking another tenant's event | #387 | — | ✅ |
-| Who is answered (#534): the event lookup carries the shared rule (`EventVisibility::where()`), as `events/api/detail.php` does. A signed-in person is answered only for a public event or an internal one of an organisation they are an active member of or administer; anything else is the same 404 as a missing event. An API key is answered as before. Until #534 any signed-in account from any organisation was answered. Still wider than the Team Hub page, which lets in only the event's team | #534 | — | ✅ |
+| Who is answered (#534): the event lookup carries the shared rule (`EventVisibility::where()`), as `events/api/detail.php` does. A signed-in person is answered only for a public event or an internal one of an organisation they are an active member of or administer; anything else is the same 404 as a missing event. An API key is answered as before. Until #534 any signed-in account from any organisation was answered. Since 12 October 2026 a signed-in person must also be on the event's own team (an administrator, a coordinator of the event, a crew member, somebody with a job on it, or somebody named on the event), as the Team Hub page always required | #534 | — | ✅ |
 | New bearer scope `eventhub:read` added to `ApiKey::SCOPES` — mintable immediately, surfaces in the Admin → Integrations → API Keys checkbox grid with no other UI changes needed | #387 | — | ✅ |
 | Settings-only migration — `api.calendar.hub-resources.enabled` / `api.calendar.hub-videos.enabled` seeded `'true'`; NO `tblRoutes` rows (`api/*` paths are dispatched directly by `ApiRouter`, never via `tblRoutes` — see .claude/CLAUDE.md → "ApiRouter routing trap") | #387 | 157 | ✅ |
 | OpenAPI — new `Event Team Hub` tag, `EventHubResource`/`EventHubVideo` schemas, both `GET /api/calendar/hub-*` paths documented in `_core/api-spec.json` | #387 | — | ✅ |
@@ -1174,6 +1187,11 @@ Tenant-side register for congregations that RENT their building from another
 organisation — the mirror-image of Resources (rooms you own) and Assets
 (things you own). Records the agreed hire schedule so leaders never plan an
 event into an unbooked or unavailable slot.
+
+**Who may see it (12 October 2026).** The schedule, a venue, a booking, the
+exports and the booked days on the calendar: members of the organisation and
+venue managers. Nobody else, and nobody signed out. Costs: venue managers and
+administrators only.
 
 - **Year schedule** — one row per hire date (matches the source spreadsheet
   1:1), month-grouped, with status colours, "times needed" flags and a Today

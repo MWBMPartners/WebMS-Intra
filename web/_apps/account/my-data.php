@@ -4,6 +4,13 @@
  * Account — "What we hold about you" inventory + JSON download +
  * erasure-request kickoff.
  *
+ * ADDRESSES: every redirect, link and form target here is built by
+ * Router::url(), so it stays inside the organisation's own address. They
+ * used to be written out ("/account/my-data"), which lands on the DEFAULT
+ * organisation when organisations are told apart by the first part of the
+ * address (roll-out package B2b, 12 October 2026; part of #536).
+ * tools/audit-checks/check_site_aware_addresses.py holds this file to it.
+ *
  * @package   Portal\Account
  * @link      https://github.com/MWBMPartners/webMS-Intra/issues/235
  */
@@ -13,6 +20,7 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\GdprEraser;
+use Portal\Core\Router;
 
 Auth::ensureSession();
 Auth::requireLogin();
@@ -38,7 +46,7 @@ $csrf = Auth::csrfToken();
 
 $pageTitle   = 'My data';
 $pageSection = 'account';
-$breadcrumbs = ['Dashboard' => '/', 'My Account' => '/account', 'My data' => ''];
+$breadcrumbs = ['Dashboard' => Router::url(''), 'My Account' => Router::url('account'), 'My data' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 
@@ -70,8 +78,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 </div>
 
 <div class="d-flex gap-2">
-    <a class="btn btn-outline-primary" href="/account/my-data?download=1"><i class="fa-solid fa-download me-1"></i>Download as JSON</a>
-    <a class="btn btn-outline-danger" href="/account/erasure-request"><i class="fa-solid fa-trash me-1"></i>Request erasure</a>
+    <a class="btn btn-outline-primary" href="<?php echo htmlspecialchars(Router::url('account/my-data'), ENT_QUOTES, 'UTF-8'); ?>?download=1"><i class="fa-solid fa-download me-1"></i>Download as JSON</a>
+    <a class="btn btn-outline-danger" href="<?php echo htmlspecialchars(Router::url('account/erasure-request'), ENT_QUOTES, 'UTF-8'); ?>"><i class="fa-solid fa-trash me-1"></i>Request erasure</a>
 </div>
 
 <?php require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'footer.php'; ?>

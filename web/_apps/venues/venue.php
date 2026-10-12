@@ -10,6 +10,10 @@
  * Viewers see everything except the agreements summary and cost figures;
  * managers additionally see action links into the config/agreement screens.
  *
+ * WHO MAY OPEN IT: this organisation's own people only (Venues::canView()):
+ * an active member, a venue manager or an administrator. Anybody else is
+ * shown "page not found", exactly as for a venue number that does not exist.
+ *
  * @package   Portal\Venues
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2026-present MWBM Partners Ltd (t/a MWservices)
@@ -31,6 +35,21 @@ require_once PORTAL_CORE . DIRECTORY_SEPARATOR . 'partials' . DIRECTORY_SEPARATO
 
 Auth::ensureSession();
 Auth::requireLogin();
+
+// 🛡️ Only this organisation's own people may see its venues and bookings:
+//    Venues::canView() says why. A refusal is the same "page not found" an
+//    unknown venue number gets below, so nothing here tells an outsider
+//    which venue numbers exist.
+//
+//    WHAT WAS WRONG (found by the independent check, 12 October 2026): this
+//    page asked only for a sign-in. The six other venue addresses were
+//    closed that day and this one was missed, so any signed-in account, a
+//    member of another organisation included, could still read a venue's
+//    name, address, landlord, caretaker, rooms and next ten bookings here.
+if (Venues::canView() === false) {
+    Router::renderError(404);
+    return;
+}
 
 $siteId = Site::id();
 $isMgr  = Venues::canManage();

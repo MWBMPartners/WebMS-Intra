@@ -47,10 +47,10 @@ $stmt->close();
 //    event of an administrator's OWN organisation appearing in their own
 //    dashboard is not a leak, and quietly changing what administrators see
 //    today, for a reason nobody asked for, is not part of this fix.
-//    👁️ EventVisibility (#514 D5, fix round 1: checker finding 2b). `api/livestream/ping.php`
-//    accepts a session for ANY event number from a signed-out visitor (a separate, pre-existing
-//    gap not fixed inside P3 — see the follow-up issue this fix round raises), so a session row
-//    can already point at a HIDDEN imported event. The two totals just above this query are left
+//    👁️ EventVisibility (#514 D5, fix round 1: checker finding 2b). Until 12 October 2026 the
+//    viewer ping (`api/livestream/ping.php`) stored a session for ANY event number it was sent,
+//    from a signed-out visitor too (#548). It now refuses an event the viewer may not see, but
+//    rows written before then can still point at a HIDDEN imported event. The two totals just above this query are left
 //    alone — they still count every session, imported or not — but this per-event breakdown must
 //    not print an imported event's name to an administrator the visibility rule may refuse that
 //    event to (an old-flag-only administrator counts as a plain member under the rule).

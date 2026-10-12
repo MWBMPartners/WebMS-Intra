@@ -190,6 +190,46 @@ class Venues
     }
 
     /**
+     * The ONE "may this person see this organisation's venue bookings at
+     * all?" test, for the read-only pages and data endpoints.
+     *
+     * WHY IT EXISTS (12 October 2026): the viewer pages (the year schedule,
+     * one booking, the CSV and PDF exports, and the two data endpoints)
+     * asked only for a sign-in. The bookings they show belong to the
+     * organisation in the ADDRESS, so any signed-in account, a member of a
+     * different organisation included, could read this organisation's
+     * dates, rooms, times, statuses and notes.
+     *
+     * The answer is yes for somebody who may manage venues here
+     * (`canManage()`), and for an active member of the organisation that is
+     * open right now. A global administrator counts as a member everywhere
+     * (`Site::userBelongsTo()` says so itself).
+     *
+     * Two more places were found showing the same details and now ask it
+     * too (the fix round of 12 October 2026): the page for one venue
+     * (venues/venue.php), and the strip of booked days on the calendar
+     * page, which a signed-out visitor could see (calendar/index.php).
+     *
+     * WHAT THIS CANNOT DO: it is a yes or no about the organisation, not
+     * about one venue or one booking; each page still looks its venue or
+     * booking up by organisation as before. It also answers no for a
+     * request that carries no signed-in session, so it is not a test for an
+     * API key (none of the pages that call it accept one).
+     */
+    public static function canView(): bool
+    {
+        if (self::canManage() === true) {
+            return true;
+        }
+        $user = App::user();
+        if ($user === null) {
+            return false;
+        }
+
+        return Site::userBelongsTo((int) $user['userID'], Site::id(), self::db());
+    }
+
+    /**
      * Idempotent per-site seed of the six DEFAULT_STATUSES. Cheap short-
      * circuit: a single indexed probe on the hot "already seeded" path.
      * No audit rows — this is system bootstrap, not a user mutation.

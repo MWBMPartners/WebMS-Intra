@@ -14,12 +14,13 @@ declare(strict_types=1);
 
 use Portal\Core\Auth;
 use Portal\Core\Captcha;
+use Portal\Core\Router;
 use Portal\Core\Site;
 
 // 📌 Page metadata for the template system
 $pageTitle   = 'Submit Expense Claim';
 $pageSection = 'expenses';
-$breadcrumbs = ['Dashboard' => '/', 'Expenses' => '/expenses/submit', 'Submit Claim' => ''];
+$breadcrumbs = ['Dashboard' => Router::url(''), 'Expenses' => Router::url('expenses/submit'), 'Submit Claim' => ''];
 
 /* -------------------------------------------------------------------------- */
 /* 🏢 Active departments                                                      */
@@ -44,7 +45,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <!-- 💸 Expense Claim Submission Form -->
 <h1 class="mb-4">Submit Expense Claim</h1>
 
-<form method="post" action="/expenses/submit/save" enctype="multipart/form-data" novalidate>
+<form method="post" action="<?php echo htmlspecialchars(Router::url('expenses/submit/save'), ENT_QUOTES, 'UTF-8'); ?>" enctype="multipart/form-data" novalidate>
     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
 
     <div class="mb-3">

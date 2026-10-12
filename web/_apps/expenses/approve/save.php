@@ -39,6 +39,7 @@ use Portal\Core\ExpenseRules;
 use Portal\Core\Logger;
 use Portal\Core\ExpensePdf;
 use Portal\Core\ExpenseMailer;
+use Portal\Core\Router;
 use Portal\Core\Site;
 
 // 🛡️ Session and CSRF checks
@@ -48,7 +49,7 @@ Auth::requireLogin();
 if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
     $_SESSION['flash_msg']  = 'Invalid CSRF token.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /expenses/approve');
+    header('Location: ' . Router::url('expenses/approve'));
     exit();
 }
 
@@ -91,7 +92,7 @@ if ($isAdmin === false && App::hasRole('Approver') === false) {
     if (count($approverDepts) === 0) {
         $_SESSION['flash_msg']  = 'Access denied — Approver or Admin role required.';
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /expenses/approve');
+        header('Location: ' . Router::url('expenses/approve'));
         exit();
     }
 }
@@ -104,7 +105,7 @@ $comment  = trim($_POST['comments'] ?? '');
 if ($claimID === 0) {
     $_SESSION['flash_msg']  = 'Invalid claim ID.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /expenses/approve');
+    header('Location: ' . Router::url('expenses/approve'));
     exit();
 }
 
@@ -129,7 +130,7 @@ if ($stmt !== false) {
 if ($claim === null) {
     $_SESSION['flash_msg']  = 'Claim not found or not in Pending status.';
     $_SESSION['flash_type'] = 'warning';
-    header('Location: /expenses/approve');
+    header('Location: ' . Router::url('expenses/approve'));
     exit();
 }
 
@@ -156,7 +157,7 @@ if ($claim === null) {
 if (ExpenseRules::isOwnClaim((int) $claim['userID'], $userId) === true) {
     $_SESSION['flash_msg']  = ExpenseRules::MSG_OWN_DECISION;
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /expenses/approve');
+    header('Location: ' . Router::url('expenses/approve'));
     exit();
 }
 
@@ -219,7 +220,7 @@ try {
         $mysqli->rollback();
         $_SESSION['flash_msg']  = 'This claim has already been decided by another approver.';
         $_SESSION['flash_type'] = 'warning';
-        header('Location: /expenses/approve');
+        header('Location: ' . Router::url('expenses/approve'));
         exit();
     }
 
@@ -350,7 +351,7 @@ try {
         $_SESSION['flash_type'] = 'info';
     }
 
-    header('Location: /expenses/approve');
+    header('Location: ' . Router::url('expenses/approve'));
     exit();
 
 } catch (\Throwable $ex) {
@@ -358,6 +359,6 @@ try {
     Logger::exception($ex);
     $_SESSION['flash_msg']  = 'Error processing decision. Please try again.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /expenses/approve');
+    header('Location: ' . Router::url('expenses/approve'));
     exit();
 }
