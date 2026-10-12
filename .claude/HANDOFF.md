@@ -31,12 +31,28 @@ script loads Babel with no fingerprint) and #576 (small follow-ups).
 | D | recovery runbook and backup documents (#488) — build | MAIN folder (documents and one new check script) | `rollout-D--build.md` |
 | B2a | access gaps, plan items 1-9, 11, 12 — build | its own checkout `.claude-work/worktrees/b2a`, branch `ro-b2a-build` | `rollout-B2a--build.md` |
 | E | older databases that stop part-way through upgrading (#553, #555, #554) — build | its own checkout `.claude-work/worktrees/e`, branch `ro-e-build` | `rollout-E--build.md` |
-| F (plan only) | the next block: several organisations in one installation (#502, all three ways), no built-in address (#500), the zip package (#499), and how much of the link sweep (#536) and #515 belongs with them | reads the MAIN folder; changes nothing | `rollout-F--plan.md` |
+| F6 part 1 | the zip package's build script and guards (#499); the workflow is PROPOSED only, in its evidence folder | its own checkout `.claude-work/worktrees/f6`, branch `ro-f6-build` | `rollout-F6--build.md` |
+| F7 | the deploy's settings logic and its test (#500); the replacement `deploy.yml` is PROPOSED only | its own checkout `.claude-work/worktrees/f7`, branch `ro-f7-build` | `rollout-F7--build.md` |
 
 B2a and E each make ONE commit on their own branch and do not push. Bring each across with `git cherry-pick <hash>` onto
 `claude/alpha-wip` after its one check, then remove the checkout (`git worktree remove`) and delete its branch. B2b (plan item 10, the
 erasure pages' addresses) starts after B2a. Each builder's document lines wait in its `…--build-evidence/DOC-ENTRIES.md`; add them at
 its commit.
+
+**The plan for the next block is written: `.claude-work/resume/rollout-F--plan.md`** (422 lines; nine packages F1 to F9; read its
+summary and its section 4.1, "what runs beside what"). The short of it:
+
+- F1 several organisations (#502, migration 211), then F2 a members-only gate (#511's main hole), then F3 the channel read from a
+  file, then F4 no built-in address (migration 212) beside F8 link sweep part 1, then F5 the installer beside F9 link sweep part 2
+  (four slices). **F1 waits for B2a, B2b and E to be committed**: it shares `Auth.php` and `full_schema.sql` with them.
+- F6 and F7 share no file with anything, so they were started at once (07:15). F6's guide (`docs/INSTALL.md`) and its
+  install-from-the-zip proof are a part 2, after F3 and F5.
+- The planner ran it: session mode puts everybody on organisation 1 (#502 is real); in the two address ways a member of one
+  organisation could open another's dashboard (#511); the installer has no proof of ownership; the bare addresses number about
+  2,000 in 495 files, not 905.
+- **Eight decisions are with the owner** (the plan's section 8), asked on 12 October at about 07:15. Until answered, builders follow
+  the plan's recommendation. **No file under `.github/workflows/` is created, changed or deleted without the owner's yes**: F6 and
+  F7 write their proposed workflow text into their evidence folders only.
 
 **Trap, learned the hard way today:** the Agent tool's own "separate checkout" option (`isolation: worktree`) cuts the checkout from
 `main`, which is about 400 commits behind the working branch, and refuses writes to the main folder. A builder started that way found
