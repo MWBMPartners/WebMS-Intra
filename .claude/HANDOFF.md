@@ -30,7 +30,7 @@ script loads Babel with no fingerprint) and #576 (small follow-ups).
 | --- | --- | --- | --- |
 | D | recovery runbook and backup documents (#488) — first check NOT CLEAN; fix round DONE (it wrote its own design for the script, not the checker's); a NARROW check of the fix round is running | MAIN folder: the same five uncommitted files | `rollout-D--fix.md`, `rollout-D--check2.md` |
 | B2a + B2b | access gaps — B2a's one check came back NOT CLEAN (none HIGH); ONE FIX ROUND is running in the same checkout, and it also builds B2b (plan item 10), so one narrow check covers both. It makes two more commits on `ro-b2a-build` after `1953360` | its own checkout `.claude-work/worktrees/b2a` | `rollout-B2a--check.md` (the work list), `rollout-B2a--fix.md` |
-| E | older databases (#553, #555, #554) — BUILT as commit `28ff8f3` on `ro-e-build` (six files, migration 210), in its ONE check | its own checkout `.claude-work/worktrees/e` | `rollout-E--build.md`, `rollout-E--check.md` |
+| E | older databases (#553, #555, #554) — check NOT CLEAN (the migrations held on every shape tried; one HIGH side effect on backups, routed to G; three MEDIUM about what the new test cannot see and the install script missing the link). ONE FIX ROUND is running; it adds a commit after `28ff8f3` | its own checkout `.claude-work/worktrees/e` | `rollout-E--check.md` (the work list), `rollout-E--fix.md` |
 | G | the backup faults (#577, #578, #579, plus prune and freshness) — plan written (`rollout-G--plan.md`, 236 lines); BUILD running | its own checkout `.claude-work/worktrees/g`, branch `ro-g-build` | `rollout-G--build.md` |
 | F6 part 1 | the zip package's build script and guards (#499) — BUILT as commit `84c6180` on `ro-f6-build` (six files), in its ONE check. The workflow is PROPOSED only, in `rollout-F6--build-evidence/package.yml` | its own checkout `.claude-work/worktrees/f6` | `rollout-F6--build.md`, `rollout-F6--check.md` |
 | F7 | the deploy's settings logic (#500) — check NOT CLEAN: nothing HIGH in the two committed files, one HIGH in the PROPOSED workflow (a dry run prints the password). ONE FIX ROUND is running; it adds a commit after `425ca9c` and writes a corrected proposal to `rollout-F7--fix-evidence/` | its own checkout `.claude-work/worktrees/f7` | `rollout-F7--check.md` (the work list), `rollout-F7--fix.md` |
@@ -144,6 +144,20 @@ summary and its section 4.1, "what runs beside what"). The short of it:
 - **F7's check**: 328 hostile settings and all 576 login combinations gave a right answer or a refusal. Faults: `remote` calls
   an occupied folder "no portal yet"; six planted faults pass the self-test; in the PROPOSAL a dry run prints the password and
   signing in with a key cannot work (both proved with the real `lftp` in a container, with tried fixes).
+
+**E's check, 12 October, about 08:55:**
+
+- **HIGH, routed to G (told by message):** after migration 210 adds the link from attendance sessions to events, the snapshot the
+  upgrade page took just BEFORE it can no longer be fully restored if it holds one pointer at a deleted event (error 1452), and
+  today's check-only run says it can. G's restore is to empty such a pointer, count it and report it, ONLY where the link's own
+  rule says "empty the pointer when the parent is deleted"; any other link still refuses. **E must not be released without G.**
+- E's own fix round: the install script gains the link (a database built from it alone recorded 210 as run but never got it);
+  the migration test keeps the install-script-alone lists so a wrong address target can no longer pass; three planted sessions
+  test the one statement that changes stored data; a leftover address fails; the frozen fixture gets a checksum.
+- The 25 empty stored defaults on an upgraded database are NOT a fault today: nothing reads a stored default while the portal runs.
+- **The machine is at its limit.** Six agents, most with their own database containers, pushed the load average past 200, and
+  one checker's container stopped by itself (it believes Docker ran out of memory; its results were already saved). Do not add
+  another database-heavy job while six are running, and treat a container that vanishes mid-run as "run it again", not as a result.
 
 **Trap, learned the hard way today:** the Agent tool's own "separate checkout" option (`isolation: worktree`) cuts the checkout from
 `main`, which is about 400 commits behind the working branch, and refuses writes to the main folder. A builder started that way found
