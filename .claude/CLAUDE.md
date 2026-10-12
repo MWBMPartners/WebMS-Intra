@@ -65,6 +65,7 @@ Internal portal platform (PHP 8.5, backward-compatible with 8.4, Bootstrap 5.3.3
 - **Living feature inventory:** [FEATURES.md](../FEATURES.md) (always check this first)
 - **Chronological history:** [CHANGELOG.md](../CHANGELOG.md)
 - **Dev-facing technical notes:** [DEV_NOTES.md](../DEV_NOTES.md)
+- **The mail library** lives in `web/_core/maillib/` (#592) and must reach for nothing of the portal; `php tools/maillib/tests/stands-alone.php` enforces that from a list of what the library may use (`check_maillib_stands_alone.py` only starts it). Its test is `php tools/maillib/tests/run.php`. Nothing calls it yet.
 - **Content translation is NOT reachable (#485) — never describe it as working.** The engine, its admin page and the member opt-in exist, but nothing a user can reach calls it. Interface translation (`I18n` / `t()`) is a separate system and works normally.
 - **Calendar, Events and the Preaching Plan are ONE app ("Events").** `/calendar` covers viewing, listing and subscribing; the manage pages handle preaching-plan and worship event types and series.
 - **Counts are not kept in this file** (apps, classes, tables, checks): they went stale within days. Count from the code; when any document disagrees with the code, the code is right. Migration numbers 168, 169 and 195 were never used, and nothing depends on the numbering being unbroken.

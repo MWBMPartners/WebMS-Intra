@@ -344,6 +344,12 @@ in `.claude/CLAUDE.md` under the heading named in brackets.
     anywhere else under `web/`; `tools/db-strict-mode-selftest.php` fails if it
     finds one. Send NULL, not an empty text, to a date or number column.
 
+    **The mail library** lives in `web/_core/maillib/` (#592) and must reach for
+    nothing of the portal; `php tools/maillib/tests/stands-alone.php` enforces
+    that from a list of what the library may use
+    (`check_maillib_stands_alone.py` only starts it). Its test is `php
+    tools/maillib/tests/run.php`. Nothing calls it yet.
+
 15. **The ApiRouter trap.** Any address starting `api/` is intercepted
     before the normal routing table is ever consulted, and resolved purely
     by naming convention to `_apps/{appName}/api/{action}.php`. A handler

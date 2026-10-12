@@ -1,0 +1,1 @@
+A PLANTED FILE for stands-alone.php: the library folder holds only PHP, so a document like this one must be reported.
