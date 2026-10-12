@@ -43,7 +43,11 @@ Internal portal platform (PHP 8.5, backward-compatible with 8.4, Bootstrap 5.3.3
 > and the installation wizard all call it, so they agree. The installer refuses
 > to install onto a database too old to run the schema, and warns without
 > blocking on anything else. **Do not write a second version check** — change
-> the constants at the top of that file instead. Second, **MariaDB is not
+> the constants at the top of that file instead. **`DbServer::connect()` is also
+> the ONE place under `web/` that opens a database connection (#593, 12 October
+> 2026): it makes the connection strict, so a value that does not fit is an
+> error on every installation. Never write `new mysqli` anywhere else under
+> `web/`; `tools/db-strict-mode-selftest.php` fails if it finds one.** Second, **MariaDB is not
 > covered by any automated test here**, so its compatibility is unverified —
 > which is not the same as saying it does not work.
 >

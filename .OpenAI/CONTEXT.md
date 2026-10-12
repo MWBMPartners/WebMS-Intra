@@ -337,6 +337,13 @@ in `.claude/CLAUDE.md` under the heading named in brackets.
     are standard MySQL and are fine as they stand. *(`.claude/rules/database.md` →
     "SQL dialect trap".)*
 
+    **One place opens every database connection (#593, 12 October 2026):**
+    `Portal\Core\DbServer::connect()` (`web/_core/DbServer.php`). It makes the
+    connection strict, so a value that does not fit is an error on every
+    installation, not only on the test servers. Never write `new mysqli`
+    anywhere else under `web/`; `tools/db-strict-mode-selftest.php` fails if it
+    finds one. Send NULL, not an empty text, to a date or number column.
+
 15. **The ApiRouter trap.** Any address starting `api/` is intercepted
     before the normal routing table is ever consulted, and resolved purely
     by naming convention to `_apps/{appName}/api/{action}.php`. A handler
