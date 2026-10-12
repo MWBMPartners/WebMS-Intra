@@ -50,7 +50,7 @@ if (isset($_GET['render']) === true) {
     // Sample vars per template — extend as more templates ship.
     $samples = [
         'password-reset'  => ['name' => 'Jane Volunteer', 'resetUrl' => 'https://example.invalid/auth/reset/TOKEN', 'expiresInMinutes' => 60],
-        'invite'          => ['inviterName' => 'Lance', 'portalName' => (string) (App::settings()['site']['name'] ?? 'WebMS Intra'), 'inviteUrl' => 'https://example.invalid/auth/invite/TOKEN', 'expiresAt' => '7 days from now', 'message' => 'Welcome aboard!'],
+        'invite'          => ['inviterName' => 'Alex', 'portalName' => (string) (App::settings()['site']['name'] ?? 'WebMS Intra'), 'inviteUrl' => 'https://example.invalid/auth/invite/TOKEN', 'expiresAt' => '7 days from now', 'message' => 'Welcome aboard!'],
         'critical-alert'  => ['severity' => 'Critical', 'platform' => 'PHP', 'code' => '500', 'title' => 'Uncaught Error: Call to undefined function foo()', 'detail' => '#0 /var/www/portal/file.php(42): bar()\n#1 {main}', 'url' => '/dashboard'],
     ];
     $vars = $samples[$tpl] ?? [];

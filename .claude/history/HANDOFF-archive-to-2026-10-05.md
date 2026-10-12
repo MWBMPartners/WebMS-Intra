@@ -3914,7 +3914,7 @@ Workflow `maintenance-498` (run `wf_f9900c13-181`) finished; 6 agents.
 - **Side note from the builder:** local testing with `PORTAL_ENV=dev` sends non-admins to the pre-release gate, so
   test role-based pages with the channel detected as prod (or give the test users a gate role).
 - **A reusable Workflow `interim-review` was created and launched for these 2 files** (Fable reviewer, Sonnet fixer).
-  Script (exact): `~/.claude/projects/-Users-lance-manasse-Projects-Coding---Development-MWBM-Partners-Ltd-GitHub-WebMS-Intra/19f94bec-c3e9-4f58-b234-28317b147f87/workflows/scripts/interim-review-wf_e65fa51c-c04.js` (run `wf_e65fa51c-c04`). Relaunch it for any package with args
+  Script (exact): `~/.claude/projects/-Users-<user>-Projects-Coding---Development-MWBM-Partners-Ltd-GitHub-WebMS-Intra/19f94bec-c3e9-4f58-b234-28317b147f87/workflows/scripts/interim-review-wf_e65fa51c-c04.js` (run `wf_e65fa51c-c04`). Relaunch it for any package with args
   `{name, files, purpose, questions, fixerType}`.
 - When clean: commit and push those 2 files as a #501 commit, noting the INTERIM Fable review and that a Codex
   catch-up is owed; comment on #501.

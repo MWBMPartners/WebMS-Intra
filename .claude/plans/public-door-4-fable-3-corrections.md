@@ -6,7 +6,7 @@
   /tmp clean-out, which lost an unread review on 11-13 September.
 -->
 
-# Corrections to `/Users/lance.manasse/Projects/Coding & Development/MWBM Partners Ltd/GitHub/WebMS-Intra/.claude/plans/public-door-3-build-plan.md`
+# Corrections to `~/Projects/Coding & Development/MWBM Partners Ltd/GitHub/WebMS-Intra/.claude/plans/public-door-3-build-plan.md`
 
 Every correction below rests on a point the challenge marked SURVIVED, PARTLY, or MISSED-and-verified. Where I checked something further against the working tree myself, I say so. Ordered by how much harm each prevents. The file was not edited.
 

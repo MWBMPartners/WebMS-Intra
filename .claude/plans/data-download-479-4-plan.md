@@ -2,7 +2,7 @@
 
 Date: 13 September 2026. Branch: `claude/alpha-wip`. Design and plan only — no repository file was edited.
 
-Written to: `/Users/lance.manasse/Projects/Coding & Development/MWBM Partners Ltd/GitHub/WebMS-Intra/.claude-work/reviews/design-479-4-plan.md`
+Written to: `~/Projects/Coding & Development/MWBM Partners Ltd/GitHub/WebMS-Intra/.claude-work/reviews/design-479-4-plan.md`
 
 This is the last of four sequential stages. It folds every sound point from the challenge (`design-479-3-challenge.md`) into the design from Stage 2 (`design-479-2-design.md`), on the facts the survey established (`design-479-1-survey.md`). Where this document repeats an earlier stage's evidence it says which stage proved it. Where it says PROVEN with no stage named, I read or ran it myself in this stage.
 

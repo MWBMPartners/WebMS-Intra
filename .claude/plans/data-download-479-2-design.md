@@ -2,7 +2,7 @@
 
 Date: 13 September 2026. Branch: `claude/alpha-wip`. Design only — no repository file was edited.
 
-Written to: `/Users/lance.manasse/Projects/Coding & Development/MWBM Partners Ltd/GitHub/WebMS-Intra/.claude-work/reviews/design-479-2-design.md`
+Written to: `~/Projects/Coding & Development/MWBM Partners Ltd/GitHub/WebMS-Intra/.claude-work/reviews/design-479-2-design.md`
 
 Builds on Stage 1 (the survey, `design-479-1-survey.md`). Where this document repeats a survey figure it says "(survey)"; where it says PROVEN without that, I read or ran it myself in this stage.
 

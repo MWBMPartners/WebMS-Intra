@@ -304,7 +304,7 @@ if ($hour < 12) {
     $greeting = 'Hello';
 }
 $userFirstName = $_SESSION['user_name'] ?? 'there';
-// First word of the full name — friendlier than "Lance Manasse" in a greeting
+// First word of the full name — friendlier than "Alex Example" in a greeting
 $userFirstName = preg_split('/\s+/', trim($userFirstName), 2)[0] ?? 'there';
 $heroSiteName  = Site::branding('name') ?? ($SETTINGS['site']['name'] ?? 'Portal');
 $todayDate     = date('l, j F Y');

@@ -2,7 +2,7 @@
 
 Date: 13 September 2026. Branch: `claude/alpha-wip`. Challenge only — no repository file was edited.
 
-Written to: `/Users/lance.manasse/Projects/Coding & Development/MWBM Partners Ltd/GitHub/WebMS-Intra/.claude-work/reviews/design-479-3-challenge.md`
+Written to: `~/Projects/Coding & Development/MWBM Partners Ltd/GitHub/WebMS-Intra/.claude-work/reviews/design-479-3-challenge.md`
 
 This stage tries to break the design in `design-479-2-design.md`, assuming a motivated attacker and ordinary human error. It builds on the survey (`design-479-1-survey.md`) and re-read the brief, the four files it names, the schema blocks the design leans on, both GitHub issues and the latest handoff sections.
 
