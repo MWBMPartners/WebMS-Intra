@@ -36,7 +36,31 @@ with a longer allowance). **So H1 and F1 now wait only for E.**
    queued, and the administrator may send a queued message with the check skipped, one at a time, or switch checking off behind
    a clear warning. No unencrypted choice.
 4. A mail queue is built now, not after roll-out.
-Not yet asked: whether the new mail self-tests run on GitHub.
+
+**The second mail plan is written: `.claude-work/resume/rollout-S--plan-r2.md`** (450 lines; six packages M1 to M6; the first
+plan `rollout-S--plan.md` is superseded where they differ). M1 the library core and SMTP route (started 14:00, beside anything);
+M2 SMTP wired into the portal (settings, the e-mail page, "Send test", the hourly limit; one migration): **the smallest package
+that gives a working SMTP route**; M3 the queue (one migration); M4 the queue page and the certificate flow; M5 Microsoft 365
+and Google moved onto the same client; M6 PHPMailer as a second SMTP engine. **Order: H2, then M2, then F1 to F4, then M3, then
+M4.** M2, M4, M5 and M6 change pages under `admin`, `dashboard` and `help`, so none runs beside link-sweep slices S1 or S2; M3
+not beside F8, S1 or S3; M3 and the calendar's part 9 share `GdprEraser.php`, `personal-data-catalogue.php` and
+`auth/account/data-export.php`; M2 and part 9 share `dashboard/index.php`.
+
+**The owner's answers to the second plan's decisions, 12 October, about 14:05 (final):**
+1. PHPMailer is NOT shipped. A GLOBAL administrator puts it on the server and chooses it as the SMTP engine. It is used only when
+   chosen, never tried automatically. Mail that cannot be sent is queued, as with our own client.
+2. The certificate page offers "accept only this server's present certificate" FIRST, above "send this one with the check
+   skipped" and "switch checking off".
+3. When checking is off and the certificate becomes good again, checking switches itself back on, with an activity-log line.
+4. Waiting mail: retried for about a day; kept 7 days, then deleted; never sent when older than 48 HOURS (the owner typed "48
+   days" and confirmed 48 hours when asked). **Each of the three numbers is configurable per organisation**, by that
+   organisation's administrator or the installation's global administrator, with installation defaults. The plan had them as
+   installation settings only: M3's brief must add this.
+5. **M5 and M6 are built AFTER the first roll-out.** Before roll-out: M1, M2, M3, M4.
+6. Quiet hours: nothing is held automatically for now; the preferences page's sentence that says non-urgent e-mail waits is
+   corrected in M3; the rule is decided later, with the calendar's part 9.
+7. The mail self-tests may run on GitHub: one new workflow file, `mail-selftests.yml`, as the plan's section 6 writes it; placed
+   after M1 has passed its check. No `continue-on-error`.
 
 **Package F7 is committed and pushed as `a9d8569`** (#500; `tools/deploy/resolve-settings.sh` and its self-test, 366 checks; no
 workflow uses it yet). Its fix round was not given a second check (refuse-side changes, nothing calls it, and the workflow is
@@ -90,7 +114,7 @@ script loads Babel with no fingerprint) and #576 (small follow-ups).
 | E | older databases (#553, #555, #554) — the narrow check found three MEDIUM (with the events table missing the install script emptied every session's pointer, silently; the test passed when the install script's own guard was broken; the data check passed an UPDATE that also soft-deleted sessions). SECOND fix round running: one more commit after `917382c`. **No further check: commit on its proofs**, after reading the install script's block myself. Release only together with G | its own checkout `.claude-work/worktrees/e` | `rollout-E--check2.md`, `rollout-E--fix2.md` |
 | G | the backup faults (#577, #578, #579 and more) — fix round DONE: commit `23b5440` on `ro-g-build`, after `daeb31e` (11 files). A NARROW check of that commit is running, because the fix changed how every restore talks to the database (it replaces the session's strictness setting and treats any warning as a failure). Corrected notes to place are in `rollout-G--fix-evidence/` | its own checkout `.claude-work/worktrees/g` | `rollout-G--fix.md`, `rollout-G--check2.md` |
 | F6 part 1 | the zip package's guards (#499) — the narrow check found two HIGH (a secret inside an `.svg`, `.gif` or `.woff2`, or after a picture's first bytes, still shipped, because the secrets search skips those kinds; PHP could reach the web folder under a double ending or through a planted `.htaccess`). SECOND fix round running: one more commit after `0089a78`. **No further check for part 1**: nothing can be published until part 2 (the guide, after F5), and part 2's check looks at the whole guard again | its own checkout `.claude-work/worktrees/f6` | `rollout-F6--check2.md`, `rollout-F6--fix2.md` |
-| S (second plan) | the portal's mail: one client with several routes (our own SMTP, Microsoft 365, Google, PHPMailer as a fallback), a queue, and a certificate-failure flow, as the owner asked on 12 October | reads the MAIN folder; changes nothing | `rollout-S--plan-r2.md` (the first plan, `rollout-S--plan.md`, is superseded where they differ) |
+| M1 | the mail library's core and its own SMTP route (new files only: `web/_core/maillib/`, namespace `MWBM\Mail`, tests and README in `tools/maillib/`); nothing in the portal calls it yet | its own checkout `.claude-work/worktrees/m1`, branch `ro-m1-build` | `rollout-M1--build.md` |
 
 B2a and E each make ONE commit on their own branch and do not push. Bring each across with `git cherry-pick <hash>` onto
 `claude/alpha-wip` after its one check, then remove the checkout (`git worktree remove`) and delete its branch. B2b (plan item 10, the
