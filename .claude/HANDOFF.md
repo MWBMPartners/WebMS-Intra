@@ -143,8 +143,8 @@ script loads Babel with no fingerprint) and #576 (small follow-ups).
 
 | Package | What | Where it works | Report |
 | --- | --- | --- | --- |
-| H1 | expense withdraw (#587) — BUILT as `b45463f` on `ro-h1-build` (ten files; migration 211); placed on today's branch as `654bf98` on `ro-h1-merged` (checkout `.claude-work/worktrees/h1m`), and its ONE check is running against THAT. Bring `654bf98` across | `.claude-work/worktrees/h1m` | `rollout-H1--build.md`, `rollout-H1--check.md` |
-| H2 | sign-in lockout and "Forgot password" (#580): one failure row per wrong password, the block fixed at the fifth, reset with its own limit, new `Mailer::canSend()`. No database change. ONE check when built | its own checkout `.claude-work/worktrees/h2`, branch `ro-h2-build` | `rollout-H2--build.md` |
+| H1 | expense withdraw (#587) — its ONE check found NOTHING wrong with what the code does (migration, page, every reader, the money figures; both MySQL versions), one test gap (the form-token test could be removed unnoticed) and a few untrue sentences. A small fix round is running in the same checkout: one more commit after `654bf98` on `ro-h1-merged`. **No further check: commit on its proofs.** Bring both commits across as one | `.claude-work/worktrees/h1m` | `rollout-H1--check.md`, `rollout-H1--fix.md` |
+| H2 | sign-in lockout and "Forgot password" (#580) — BUILT as `2cfacbc` on `ro-h2-build` (ten files; no database change), and its ONE check is running. It changes `web/_apps/cron/_health-probes.php`, and so does K: whichever is brought across second may need the two changes joined by hand | its own checkout `.claude-work/worktrees/h2` | `rollout-H2--build.md`, `rollout-H2--check.md` |
 | M1 | the mail library's core and its own SMTP route (#592) — BUILT as `ddb2af2` on `ro-m1-build` (32 new files; 64 proofs; nothing in the portal calls it); placed on today's branch as `f34d677` on `ro-m1-merged` (checkout `.claude-work/worktrees/m1m`), and its ONE check is running against THAT. Bring `f34d677` across. Its proposed workflow file is `rollout-M1--build-evidence/workflow-proposal-mail-selftests.yml.txt` | `.claude-work/worktrees/m1m` | `rollout-M1--build.md`, `rollout-M1--check.md` |
 | F1 + F2 | several organisations in one installation (#502; migration 212) and then the members-only gate (the biggest hole of #511), by ONE builder as TWO commits, with ONE check covering both. It was started from `528eb22`, before H1 and K are committed: it was told to take 212, to leave the connection lines of `bootstrap.php` and all of `DbServer.php` alone, and that `/api/attendance/list` and `/attendance` are named tests for the gate | its own checkout `.claude-work/worktrees/f1`, branch `ro-f1-build` | `rollout-F1--build.md` |
 | K | strict database mode (#593) — BUILT as `258dbc5` on `ro-k-build`; placed cleanly on top of today's branch as `f110f89` on `ro-k-merged` (checkout `.claude-work/worktrees/k2`), and its ONE check is running against THAT. Seven files: `DbServer.php` (the one opener), `bootstrap.php`, the installer, the health page, the admin dashboard, Server Information, and `tools/db-strict-mode-selftest.php`. It REPLACES the connection's mode with one fixed list per product (MySQL 8's default for MySQL; the same without `ONLY_FULL_GROUP_BY` for MariaDB). Bring `f110f89` across, not `258dbc5`. It must be committed before F1 and F3 take `bootstrap.php` and before F5 takes the installer | `.claude-work/worktrees/k2` | `rollout-K--build.md`, `rollout-K--check.md` |
@@ -338,6 +338,19 @@ check covers the combination, and the commit that is brought across is the one t
 
 **A trap in this session's own tooling:** a guard refuses any single command that both mentions the default branch's name
 anywhere in its text and sends commits to GitHub. Keep the sending command on its own.
+
+**From H2's build, 12 October, about 17:40:**
+
+- **The owner was asked and chose (final): the sign-in block stays as built.** No more than 5 wrong tries in any 15 minutes: a
+  block ends when the OLDEST of the five is 15 minutes old. For five in a row that is "15 minutes after the fifth"; five spread
+  over 14 minutes block for 1 minute. The screen tells the person the real time left. The limiter's blocking rule, which
+  Microsoft and Google sign-in also read, is NOT changed.
+- The builder changed `web/_core/RateLimiter.php` (not in the plan): the minutes left are now asked of the database, because the
+  page's clock and the database's differed and the page said "try again in 0 minutes" with 15 to go.
+- **To be settled by H2's check, by running it:** whether a mail secret saved through the portal's own settings page reaches
+  the mail service intact. Start-up never decrypts settings marked encrypted (#497: a flag is compared with the text `'1'` and
+  the database hands back the number 1). If the page encrypts on save and nothing decrypts, Microsoft 365 mail cannot work for
+  anybody who sets it up through the page. If so, #497 (or the smallest part of it) has to join the roll-out set: ask the owner.
 
 **Trap, learned the hard way today:** the Agent tool's own "separate checkout" option (`isolation: worktree`) cuts the checkout from
 `main`, which is about 400 commits behind the working branch, and refuses writes to the main folder. A builder started that way found
