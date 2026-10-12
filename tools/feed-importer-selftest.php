@@ -250,6 +250,7 @@ foreach ([
     'SafeFetch.php',
     'EventVisibility.php',
     'FeedResolver.php',
+    'TimeLimit.php',
     'FeedImporter.php',
 ] as $classFile) {
     require_once $coreDir . $classFile;
@@ -1759,7 +1760,7 @@ function fi_runJob(string $token = 'p6-selftest-token'): string
         . "declare(strict_types=1);\n"
         . '$c = ' . var_export($config, true) . ";\n"
         . "foreach (['WindowsTimeZones.php','IcsReader.php','App.php','Settings.php','Site.php','ErrorMonitor.php',"
-        . "'Logger.php','SafeFetch.php','EventVisibility.php','FeedResolver.php','FeedImporter.php'] as \$f)"
+        . "'Logger.php','SafeFetch.php','EventVisibility.php','FeedResolver.php','TimeLimit.php','FeedImporter.php'] as \$f)"
         . " { require_once \$c['core'] . \$f; }\n"
         . "\\Portal\\Core\\SafeFetch::\$testResolverOverride = ['calendar.test' => ['ips' => ['127.0.0.1'], 'port' => \$c['feedPort']]];\n"
         . "mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);\n"

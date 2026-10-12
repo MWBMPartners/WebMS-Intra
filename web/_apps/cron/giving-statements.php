@@ -49,6 +49,7 @@ use Portal\Core\Giving;
 use Portal\Core\Logger;
 use Portal\Core\Settings;
 use Portal\Core\Site;
+use Portal\Core\TimeLimit;
 
 // -----------------------------------------------------------------------------
 // 🔑 Token gate (constant-time compare). An empty stored token ALWAYS 403s
@@ -69,7 +70,7 @@ if ($cap < 1) {
     $cap = 100;
 }
 
-@set_time_limit(300);
+TimeLimit::atLeast(300);
 
 $pending = [];
 $stmt = $db->prepare(

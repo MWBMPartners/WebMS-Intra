@@ -78,6 +78,7 @@ use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Logger;
 use Portal\Core\Router;
+use Portal\Core\TimeLimit;
 
 Auth::ensureSession();
 Auth::requireLogin();
@@ -153,7 +154,7 @@ if (is_file($script) === false || is_executable($script) === false) {
 
 $adminId = (int) ($_SESSION['user_id'] ?? 0);
 $cmd = escapeshellcmd($script) . ' 2>&1';
-@set_time_limit(900);
+TimeLimit::atLeast(900);
 $start = time();
 $output = [];
 exec($cmd, $output, $exit);

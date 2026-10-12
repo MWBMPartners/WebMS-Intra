@@ -337,4 +337,74 @@ class Events
 
         return $promoted;
     }
+
+    /**
+     * The upcoming events one person is involved with, for the "My volunteering"
+     * page (/account/my-volunteering). Up to 30, soonest first.
+     *
+     * A person is "involved" in an event two ways: they are listed on its team
+     * (tblEventPeople), or they coordinate it (tblEventCoordinators, not revoked).
+     * Either is enough; an event matching both still comes back once.
+     *
+     * WHY THIS LIVES HERE AND NOT INSIDE THE PAGE (#547): the query used to sit
+     * in the page, so no test could run it without a browser, and it carried a
+     * fault nobody saw. It grouped by event but also picked a column that was
+     * neither grouped nor wrapped in a function (the "is a coordinator" flag).
+     * MySQL 8 refuses that by default (its ONLY_FULL_GROUP_BY mode, error 1055),
+     * so the page crashed for everyone. `MAX(...)` below fixes it: an event has
+     * at most one coordinator row per person, so MAX gives the same answer the
+     * bare column did. Tried and rejected: adding the column to GROUP BY (it
+     * would split one event into several rows) and switching the strict mode
+     * off (the host decides that, not this code).
+     *
+     * `externalFeedID IS NULL` keeps copied-in calendar events out: they are
+     * read-only (#514 D5), and this makes one exactly as "not found" as a
+     * missing event. check_event_visibility.py looks for that condition.
+     *
+     * Each row holds: eventID, eventName, eventSlug, startDateTime, endDateTime,
+     * locationName, status, description, myRoles (the person's roles, comma
+     * separated, or empty) and amCoordinator (1 or 0).
+     *
+     * @param mysqli $db     The portal's database connection (passed in because
+     *                       a page cannot rely on any global but $mysqli).
+     * @param int    $userId The person.
+     * @param int    $siteId The organisation (site) whose events to list.
+     *
+     * @return list<array<string, mixed>> Empty when there is nothing, or when
+     *                                    the query could not be prepared.
+     */
+    public static function volunteeringFor(mysqli $db, int $userId, int $siteId): array
+    {
+        $stmt = $db->prepare(
+            'SELECT e.eventID, e.eventName, e.eventSlug, e.startDateTime, e.endDateTime, '
+            . '       e.locationName, e.status, e.description, '
+            . '       GROUP_CONCAT(DISTINCT ep.role ORDER BY ep.role SEPARATOR ", ") AS myRoles, '
+            . '       MAX(CASE WHEN ec.coordinatorID IS NOT NULL THEN 1 ELSE 0 END) AS amCoordinator '
+            . 'FROM tblEvents e '
+            . 'LEFT JOIN tblEventPeople ep '
+            . '       ON ep.eventID = e.eventID AND ep.userID = ? '
+            . 'LEFT JOIN tblEventCoordinators ec '
+            . '       ON ec.eventID = e.eventID AND ec.userID = ? AND ec.revokedAt IS NULL '
+            // Imported events are read-only (#514 D5); this makes an imported event exactly as "not found" as a missing one.
+            . 'WHERE e.siteID = ? AND e.isDeleted = 0 AND e.externalFeedID IS NULL '
+            . '  AND e.startDateTime >= DATE_SUB(NOW(), INTERVAL 1 DAY) '
+            . '  AND (ep.eventPersonID IS NOT NULL OR ec.coordinatorID IS NOT NULL) '
+            . 'GROUP BY e.eventID '
+            . 'ORDER BY e.startDateTime ASC LIMIT 30'
+        );
+        if ($stmt === false) {
+            return [];
+        }
+
+        $stmt->bind_param('iii', $userId, $userId, $siteId);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        $rows = [];
+        while ($r = $result->fetch_assoc()) {
+            $rows[] = $r;
+        }
+        $stmt->close();
+
+        return $rows;
+    }
 }

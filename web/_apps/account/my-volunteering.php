@@ -19,7 +19,7 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.0.1
+ * @version   1.0.2
  * @link      https://github.com/MWBMPartners/webMS-Intra/issues/342
  * -----------------------------------------------------------------------------
  */
@@ -27,6 +27,7 @@
 declare(strict_types=1);
 
 use Portal\Core\Auth;
+use Portal\Core\Events;
 use Portal\Core\Site;
 
 Auth::ensureSession();
@@ -43,34 +44,9 @@ $siteId = Site::id();
 //    (a) tblEventPeople — they're listed as a host/speaker/musician/etc.
 //    (b) tblEventCoordinators — they own the event end-to-end.
 // Union, dedupe by eventID, return future events only.
-$events = [];
-
-$stmt = $mysqli->prepare(
-    'SELECT e.eventID, e.eventName, e.eventSlug, e.startDateTime, e.endDateTime, '
-    . '       e.locationName, e.status, e.description, '
-    . '       GROUP_CONCAT(DISTINCT ep.role ORDER BY ep.role SEPARATOR ", ") AS myRoles, '
-    . '       CASE WHEN ec.coordinatorID IS NOT NULL THEN 1 ELSE 0 END AS amCoordinator '
-    . 'FROM tblEvents e '
-    . 'LEFT JOIN tblEventPeople ep '
-    . '       ON ep.eventID = e.eventID AND ep.userID = ? '
-    . 'LEFT JOIN tblEventCoordinators ec '
-    . '       ON ec.eventID = e.eventID AND ec.userID = ? AND ec.revokedAt IS NULL '
-    // Imported events are read-only (#514 D5); this makes an imported event exactly as "not found" as a missing one.
-    . 'WHERE e.siteID = ? AND e.isDeleted = 0 AND e.externalFeedID IS NULL '
-    . '  AND e.startDateTime >= DATE_SUB(NOW(), INTERVAL 1 DAY) '
-    . '  AND (ep.eventPersonID IS NOT NULL OR ec.coordinatorID IS NOT NULL) '
-    . 'GROUP BY e.eventID '
-    . 'ORDER BY e.startDateTime ASC LIMIT 30'
-);
-if ($stmt !== false) {
-    $stmt->bind_param('iii', $userId, $userId, $siteId);
-    $stmt->execute();
-    $result = $stmt->get_result();
-    while ($r = $result->fetch_assoc()) {
-        $events[] = $r;
-    }
-    $stmt->close();
-}
+// 🛠️ The query lives in Events::volunteeringFor() (#547): it used to sit here, where no test
+//    could run it, and it broke MySQL 8's strict grouping rule on every visit.
+$events = Events::volunteeringFor($mysqli, $userId, $siteId);
 
 // 📚 Per-event: documents + team. Done as separate queries (one per event)
 //     because the list is small (≤30 events) and MySQL doesn't have a

@@ -1283,7 +1283,7 @@ $pageTitle = 'Install — ' . ($stepTitles[$step] ?? $INSTALL_PRODUCT_NAME);
     <link rel="apple-touch-icon" sizes="512x512"                 href="<?php echo $faviconBase; ?>/icon-512.png">
     <link rel="alternate icon"   type="image/x-icon"             href="<?php echo $faviconBase; ?>/favicon.ico">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet"
-          integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YcnS/NPqOGZ2eLNphkfv02LPMoJiDFhNSz7K" crossorigin="anonymous">
+          integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous">
     <style>
         /* =====================================================================
          * Installer styles — comprehensive across all 6 step layouts.

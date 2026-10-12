@@ -14,6 +14,10 @@ Catches the #161 class of bug — a contributor drops in a new CDN tag and
 forgets the SRI attribute, leaving the portal vulnerable to a CDN
 compromise replaying malware to every visitor.
 
+This only proves a fingerprint is PRESENT, never that it is RIGHT (#568: three
+pinned values were wrong and nothing noticed). tools/cdn-sri-selftest.php
+downloads each file and works the fingerprint out again; it needs internet.
+
 Exit code:
   0 — no findings.
   1 — at least one CDN tag lacks integrity.
@@ -29,7 +33,14 @@ import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-SCAN_DIRS = [REPO_ROOT / "web" / "_apps", REPO_ROOT / "web" / "public_html", REPO_ROOT / "web" / "_core"]
+# web/_install is scanned too (#568): the installation wizard is the first page a
+# new customer sees, and its own Bootstrap tag was never audited before.
+SCAN_DIRS = [
+    REPO_ROOT / "web" / "_apps",
+    REPO_ROOT / "web" / "public_html",
+    REPO_ROOT / "web" / "_core",
+    REPO_ROOT / "web" / "_install",
+]
 
 CDN_HOSTS = (
     "cdn.jsdelivr.net",
@@ -101,7 +112,7 @@ def main(argv: list[str]) -> int:
                 all_findings[path] = findings
 
     total = sum(len(v) for v in all_findings.values())
-    print(f"CDN tag audit — scanned {sum(1 for _ in (SCAN_DIRS[0].rglob('*')))} files")
+    print(f"CDN tag audit — scanned {sum(1 for d in SCAN_DIRS if d.is_dir() for _ in d.rglob('*'))} files")
     if total == 0:
         print("No CDN tags missing integrity= attribute. ✅")
         return 0

@@ -2778,24 +2778,24 @@ final class FeedAdmin
      * catch — the database then rolls the open transaction back, so
      * nothing is half-written, but the person sees a raw error page.
      *
-     * The same rules as `FeedImporter::refresh()` (FeedImporter.php
-     * :219-236): only RAISED when it is genuinely too low, never lowered,
-     * and zero ("no limit", what a command line gives) left alone. Raising
+     * The same rules as `FeedImporter::refresh()`, which now gets them from
+     * `TimeLimit::atLeast()` (#563): only RAISED when it is genuinely too low,
+     * never lowered, and zero ("no limit", what a command line gives) left
+     * alone. Raising
      * only when too low matters, because `set_time_limit()` RESTARTS the
      * count: calling it on every lock of a bulk decision would mean the
      * limit never fired at all.
      *
-     * ONE DIFFERENCE from `refresh()`, on purpose: `function_exists()` is
-     * asked first. A host that switches `set_time_limit` off (some shared
-     * hosts list it in `disable_functions`) makes it, on PHP 8, a function
-     * that does not exist — calling it throws an `Error`, which the `@` in
-     * front does NOT silence (tested on PHP 8.5.10 with
-     * `-d disable_functions=set_time_limit`). `refresh()`'s bare
-     * `@set_time_limit()` would therefore stop with that error on such a
-     * host; that is recorded for the importer's owner rather than changed
-     * here. (Part 8 changes the importer in one way only: its three
-     * `lastFetchedAt` writes now use `UTC_TIMESTAMP()` instead of `NOW()`,
-     * chunk P8-2, challenge M4. Its time limit is untouched.)
+     * `function_exists()` is asked first here, as `TimeLimit::atLeast()` does.
+     * A host that switches `set_time_limit` off (some shared hosts list it in
+     * `disable_functions`) makes it, on PHP 8, a function that does not
+     * exist — calling it throws an `Error`, which the `@` in front does NOT
+     * silence (tested on PHP 8.5.10 with
+     * `-d disable_functions=set_time_limit`). `refresh()` used to call it
+     * bare and would have stopped with that error on such a host; since
+     * #563 it goes through `TimeLimit::atLeast()` and no longer does. This
+     * method is deliberately left calling `set_time_limit()` itself, because
+     * test D21 counts its calls through `$timeLimitRaises`.
      *
      * WHAT THIS CANNOT DO: on such a host nothing can raise the limit, and
      * a very large resolve can still be cut off at the host's own limit.

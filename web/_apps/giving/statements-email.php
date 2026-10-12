@@ -33,6 +33,7 @@ use Portal\Core\Giving;
 use Portal\Core\Logger;
 use Portal\Core\Router;
 use Portal\Core\Site;
+use Portal\Core\TimeLimit;
 
 Auth::ensureSession();
 Auth::requireLogin();
@@ -110,7 +111,7 @@ if ($cap < 1) {
 
 // 🕰️ Defensive backstop only — batching is the actual mechanism that keeps
 // this inside DreamHost's FastCGI limits (offsite-backup-run.php precedent).
-@set_time_limit(300);
+TimeLimit::atLeast(300);
 
 $pending = [];
 $stmt = $db->prepare(

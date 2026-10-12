@@ -35,6 +35,7 @@ use Portal\Core\Giving;
 use Portal\Core\Logger;
 use Portal\Core\Router;
 use Portal\Core\Site;
+use Portal\Core\TimeLimit;
 
 Auth::ensureSession();
 Auth::requireLogin();
@@ -106,7 +107,7 @@ if ($cap < 1) {
 // 🕰️ DreamHost shared FastCGI can still kill a long request regardless of
 // this — batching (not a raised time limit) is the actual mechanism, this
 // is only a defensive backstop (offsite-backup-run.php precedent).
-@set_time_limit(300);
+TimeLimit::atLeast(300);
 
 $upserted = Giving::upsertStatementLogRows($siteId, $from, $to, $userId > 0 ? $userId : null);
 $result   = Giving::renderStatementBatch($siteId, $from, $to, $cap, $regenerate);

@@ -3114,12 +3114,44 @@ It runs in CI and locally — drop a tag without SRI and the check fails.
    ```
    Should report `No CDN tags missing integrity= attribute.` ✅
 
-### Currently-unfilled hashes
+### Checking that the fingerprints are right (#568)
 
-The Sortable + Swagger UI helpers ship with empty integrity constants
-(TODO markers in `Asset.php`). The tags still render, but without
-integrity verification. To fill them, run the curl/openssl command
-above and update the four `*_INTEGRITY` constants in `Asset.php`.
+`check_cdn_sri.py` only proves a fingerprint is PRESENT. Whether it is RIGHT is
+checked by `php tools/cdn-sri-selftest.php`, which needs the internet. It
+downloads every pinned library and compares: the nine in `Asset.php`, the
+installer's own tag, the two Leaflet tags in the map partial, and React and
+React DOM in the noticeboard script. A fingerprint written anywhere in a PHP,
+HTML or JavaScript file under `web/` that it cannot match to a file to download
+is a failure too, so a new way of writing a tag cannot slip past it.
+
+After any version bump, work each value out again and then run the self-test:
+
+```bash
+curl -sL <address> | openssl dgst -sha384 -binary | openssl base64 -A   # then put "sha384-" in front
+```
+
+---
+
+## Asking PHP for more time (#563)
+
+Never call `set_time_limit()` directly. Some shared hosts switch that function
+off, and on PHP 8 a switched-off function does not exist, so the call ends the
+request with "Call to undefined function". Use
+`Portal\Core\TimeLimit::atLeast($seconds)` instead. It never lowers a limit,
+leaves "no limit" alone, and does nothing when the limit is already enough, so
+calling it inside a loop does not keep restarting PHP's clock.
+
+`tools/audit-checks/check_time_limit_calls.py` fails any other call. The one
+exception is `FeedAdmin::allowTimeForLockedWork()`, which asks
+`function_exists()` itself. `tools/time-limit-selftest.php` proves the helper's
+behaviour, including on a host with the function switched off.
+
+**The calendar importer's self-test loads core classes from a written list**,
+not through the autoloader. When a core class gains a new dependency, add its
+file to BOTH lists in `tools/feed-importer-selftest.php` (the top of the file,
+and the scratch runner it writes). A missing one shows up as "Class ... not
+found" inside a refresh, not as a loud failure. `TimeLimit.php` was added there
+for #563.
 
 ---
 

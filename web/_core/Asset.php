@@ -64,12 +64,16 @@ class Asset
     //   then prefix the result with "sha384-"
     //
     // The check_cdn_sri.py audit fails any CDN tag missing integrity= so
-    // new contributors won't accidentally drop a tag without one.
+    // new contributors won't accidentally drop a tag without one. That only
+    // proves a hash is PRESENT. tools/cdn-sri-selftest.php downloads each file
+    // and works the hash out again, so a WRONG value fails too (#568: three of
+    // these were wrong, so browsers refused the file and every page lost its
+    // styling and logged a console error).
     // -----------------------------------------------------------------------------
 
     /** @var string SRI hash for Bootstrap 5.3.3 CSS (jsdelivr CDN) */
     private const BOOTSTRAP_CSS_INTEGRITY =
-        'sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YcnS/NPqOGZ2eLNphkfv02LPMoJiDFhNSz7K';
+        'sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH';
 
     /** @var string SRI hash for Bootstrap 5.3.3 RTL CSS (jsdelivr CDN) */
     private const BOOTSTRAP_RTL_CSS_INTEGRITY =
@@ -77,11 +81,11 @@ class Asset
 
     /** @var string SRI hash for Bootstrap 5.3.3 JS bundle (jsdelivr CDN) */
     private const BOOTSTRAP_JS_INTEGRITY =
-        'sha384-0pUGZvbkm6XF6gxjEnlmuGrJXVbNuzT9qBBavbLwCsOGabYfZo0T0to5eqruptLy';
+        'sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz';
 
     /** @var string SRI hash for Font Awesome 6.5.1 all.min.css (cdnjs CDN) */
     private const FONTAWESOME_CSS_INTEGRITY =
-        'sha384-t1nt8BQoYMLFN5p42tRAtuAAFQaCQDDkGnRm3LqTMXRg5r4EbSJz7GZBG0NqXKOF';
+        'sha384-t1nt8BQoYMLFN5p42tRAtuAAFQaCQODekUVeKKZrEnEyp4H2R0RHFz0KWpmj7i8g';
 
     /** @var string SRI hash for SortableJS 1.15.2 (jsdelivr CDN) */
     private const SORTABLE_JS_INTEGRITY =

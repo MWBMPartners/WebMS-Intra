@@ -229,11 +229,9 @@ final class FeedImporter
         //    fired at all. The scheduled job sets a bigger limit for the whole
         //    job before it starts, so this line does nothing there. A limit of
         //    zero means "no limit", which is what a command line gives.
-        $currentLimit = (int) ini_get('max_execution_time');
-        $needed       = self::PER_FEED_SECONDS + 20;
-        if ($currentLimit !== 0 && $currentLimit < $needed) {
-            @set_time_limit($needed);
-        }
+        //    The "only when too low, never lowered, and not on a host that
+        //    has switched the function off" logic now lives in TimeLimit (#563).
+        TimeLimit::atLeast(self::PER_FEED_SECONDS + 20);
 
         $feed = self::feedRow($db, $feedId);
         if ($feed === null) {

@@ -86,6 +86,7 @@ Foundational classes loaded by every request via `bootstrap.php`. All ✅.
 | `Migrator` | Web-based SQL migration runner |
 | `Validator` | Pipe-separated rule validator (`required|email|min:8|…`) |
 | `Asset` | CDN-with-local-fallback loader with SRI |
+| `TimeLimit` | Asks PHP for more time safely: never lowers a limit, and copes with hosts that switch the function off (#563) |
 | `Avatar` | Cascade: MS365 → local → Gravatar → generated SVG |
 | `Gatekeeper` | Dev/beta channel access control |
 | `RateLimiter` | IP-based login + form rate limiting |
@@ -697,7 +698,7 @@ Self-contained 6-step setup wizard (bootstrap-free).
 | Sensitive settings encrypted at rest (libsodium) | ✅ |
 | RS256 JWT verification with JWKS (MS365) | ✅ |
 | Session cookies: `HttpOnly`, `Secure`, `SameSite=Lax` | ✅ |
-| SRI integrity hashes on CDN resources | ✅ |
+| SRI integrity hashes on CDN resources (each compared with the real file by `tools/cdn-sri-selftest.php`) | ✅ |
 | Security headers (CSP, X-Frame-Options, Referrer-Policy, Permissions-Policy, X-Content-Type-Options) | ✅ |
 | Password policy hardened (min 12, independent complexity, max length, full-flow validation) | ✅ (#132) |
 | Multi-provider Captcha with admin priority | ✅ (#130) |

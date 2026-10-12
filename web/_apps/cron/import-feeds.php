@@ -69,6 +69,7 @@ declare(strict_types=1);
 use Portal\Core\FeedImporter;
 use Portal\Core\Logger;
 use Portal\Core\Settings;
+use Portal\Core\TimeLimit;
 
 // -----------------------------------------------------------------------------
 // 🔑 Token gate (unchanged from #327). An empty stored token ALWAYS refuses,
@@ -89,7 +90,7 @@ header('Content-Type: text/plain; charset=utf-8');
 //    job's own budget, because the budget decides when to stop STARTING
 //    calendars and the last one started may still take its full forty
 //    seconds after that.
-@set_time_limit(FeedImporter::JOB_BUDGET_SECONDS * 3 + 30);
+TimeLimit::atLeast(FeedImporter::JOB_BUDGET_SECONDS * 3 + 30);
 
 $jobStart = microtime(true);
 

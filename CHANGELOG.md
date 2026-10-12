@@ -2,6 +2,35 @@
 
 
 ## [Unreleased] (alpha)
+- fix(account): **the "My volunteering" page no longer crashes for everyone**
+  (#547). Its list of events asked MySQL 8 for a column it had not grouped,
+  which MySQL 8 refuses by default (error 1055), so every member saw an error
+  page. The list now comes from `Events::volunteeringFor()`, and the
+  coordinator flag is wrapped in `MAX(...)`, which gives the same answer. New
+  `tools/my-volunteering-selftest.php` runs it on a real database and runs the
+  page itself for each kind of member.
+- fix(core): **three wrong library fingerprints corrected** (#568). A page can
+  pin a library to a fingerprint, and the browser refuses the file when the two
+  differ. Bootstrap's stylesheet, Bootstrap's script and Font Awesome were
+  pinned to wrong values in `Asset.php`, so pages lost their styling and logged
+  a console error. A fourth wrong copy was in the installer
+  (`web/_install/index.php`), the first screen a new customer sees. Each value
+  was worked out again from the real file. New `tools/cdn-sri-selftest.php`
+  downloads every library pinned in a PHP, HTML or JavaScript file under
+  `web/` (14 today) and works its fingerprint out again, so a wrong value now
+  FAILS. A fingerprint it cannot match to a file to download also fails, so
+  nothing is stepped past quietly. It needs the internet, and reports
+  "NOT CHECKED" and exits 1 for any file it cannot download.
+  `check_cdn_sri.py` now reads the installer as well.
+- fix(core): **asking PHP for more time no longer crashes on hosts that switch
+  `set_time_limit` off** (#563). Six places called it bare, which on such a
+  host ends the request with "Call to undefined function" (the `@` does not
+  help). They now call `TimeLimit::atLeast()` (new, `web/_core/TimeLimit.php`),
+  which checks the function exists, never lowers a limit, leaves "no limit"
+  alone and does not restart the clock when the limit is already enough. A
+  side effect: the four jobs that set 300 seconds without looking can no longer
+  shorten a longer limit. New `tools/time-limit-selftest.php` and
+  `tools/audit-checks/check_time_limit_calls.py`.
 - feat(erasure): giving records keep a donor's name for a set time, then
   clear it by themselves (roll-out package A2b; the owner's decisions of
   11 October 2026). **Until this change an erasure took the donor off every
