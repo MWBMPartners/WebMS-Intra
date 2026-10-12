@@ -36,7 +36,7 @@ script loads Babel with no fingerprint) and #576 (small follow-ups).
 | --- | --- | --- | --- |
 | B2a + B2b | access gaps — B2a's one check came back NOT CLEAN (none HIGH); ONE FIX ROUND is running in the same checkout, and it also builds B2b (plan item 10), so one narrow check covers both. It makes two more commits on `ro-b2a-build` after `1953360` | its own checkout `.claude-work/worktrees/b2a` | `rollout-B2a--check.md` (the work list), `rollout-B2a--fix.md` |
 | E | older databases (#553, #555, #554) — check NOT CLEAN (the migrations held on every shape tried; one HIGH side effect on backups, routed to G; three MEDIUM about what the new test cannot see and the install script missing the link). ONE FIX ROUND is running; it adds a commit after `28ff8f3` | its own checkout `.claude-work/worktrees/e` | `rollout-E--check.md` (the work list), `rollout-E--fix.md` |
-| G | the backup faults (#577, #578, #579, plus prune and freshness) — plan written (`rollout-G--plan.md`, 236 lines); BUILD running | its own checkout `.claude-work/worktrees/g`, branch `ro-g-build` | `rollout-G--build.md` |
+| G | the backup faults (#577, #578, #579, the clean-up, the freshness report, a link added after a snapshot, and the "Check this snapshot" button) — BUILT as commit `daeb31e` on `ro-g-build` (21 files, no database change), in its ONE check | its own checkout `.claude-work/worktrees/g` | `rollout-G--build.md`, `rollout-G--check.md` |
 | F6 part 1 | the zip package's build script and guards (#499) — check NOT CLEAN (the core held; the list of what must never ship was too narrow, and the PDF library's folder was accepted unseen). ONE FIX ROUND is running; it adds a commit after `84c6180` and writes a corrected `package.yml` to `rollout-F6--fix-evidence/`. Then a NARROW check of the fix round, because these guards protect a public download | its own checkout `.claude-work/worktrees/f6` | `rollout-F6--check-FINAL-REPORT.md` (the work list; the checker could not write its own report file, so it was saved by hand), `rollout-F6--fix.md` |
 | #514 parts 9 to 11 (plan only) | notifications; roles, groups and departments as audiences; documents | reads the MAIN folder; changes nothing | `p514-p9-11--plan.md` |
 | F7 | the deploy's settings logic (#500) — check NOT CLEAN: nothing HIGH in the two committed files, one HIGH in the PROPOSED workflow (a dry run prints the password). ONE FIX ROUND is running; it adds a commit after `425ca9c` and writes a corrected proposal to `rollout-F7--fix-evidence/` | its own checkout `.claude-work/worktrees/f7` | `rollout-F7--check.md` (the work list), `rollout-F7--fix.md` |
@@ -164,6 +164,23 @@ summary and its section 4.1, "what runs beside what"). The short of it:
 - **The machine is at its limit.** Six agents, most with their own database containers, pushed the load average past 200, and
   one checker's container stopped by itself (it believes Docker ran out of memory; its results were already saved). Do not add
   another database-heavy job while six are running, and treat a container that vanishes mid-run as "run it again", not as a result.
+
+**From G's build, 12 October, about 10:00:**
+
+- New snapshot form: one file per table, one row per line (`.jsonl`), read and written a row at a time; raw bytes as base64.
+  60,000 rows snapshot and restore inside a 32 MB limit. An old-form snapshot still restores; the OLD code refuses a new-form one.
+- "Check only" is a full rehearsal behind one constant, `CHECK_ONLY_IS_REHEARSAL`. A rehearsal that does not undo IS a restore,
+  so the checker is told to attack that first after exactness.
+- A dead pointer is emptied on restore ONLY where the link's own rule is SET NULL and the column may be empty; it is counted in
+  `pointers_emptied`. This is what makes E safe to release: **E and G go out together.**
+- **To place after G's check, all in `rollout-G--build-evidence/`:** `RUNBOOK-CORRECTIONS.md` (every old and new sentence for
+  the two documents D committed; section 2.1's heading changes, so its anchor changes in five places), `DOC-ENTRIES.md`,
+  `proposed-backup-selftest.yml`, and `proposed-pr-security-step.md` (a fragment; it also needs four small lines in "Post
+  findings" that are described, not written as a patch). The workflow pieces are approved by the owner.
+- **One small fix is owed straight after the check (my call, told to the owner):** the upgrade page stores "Backup failed" and
+  "Invalid or expired form token" and never shows them, so an administrator sees the page come back with nothing said. About six
+  lines in `web/_install/upgrade.php`, a file G already changes. The checker is asked for the exact fix and its check.
+- The builder did NOT run the by-hand page checklist (how the changed pages look in a browser). It is owed before the push.
 
 **Trap, learned the hard way today:** the Agent tool's own "separate checkout" option (`isolation: worktree`) cuts the checkout from
 `main`, which is about 400 commits behind the working branch, and refuses writes to the main folder. A builder started that way found
