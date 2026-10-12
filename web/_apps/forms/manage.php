@@ -22,6 +22,7 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\PortalAddress;
 use Portal\Core\Site;
 
 $pageTitle   = 'Manage Forms';
@@ -64,7 +65,6 @@ if ($stmt !== false) {
 }
 
 $allowPublicSite = (string) (App::settings('forms.allowPublic') ?? 'false') === 'true';
-$siteBaseUrl = rtrim((string) (App::settings('site.url') ?? ('https://' . ($_SERVER['HTTP_HOST'] ?? ''))), '/');
 
 $csrf = Auth::csrfToken();
 
@@ -115,7 +115,11 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             };
             $token = (string) ($form['publicToken'] ?? '');
             $showPublicLink = $token !== '' && in_array($audience, ['public', 'both'], true) && $allowPublicSite === true;
-            $publicUrl = $showPublicLink === true ? ($siteBaseUrl . '/f/' . $token) : '';
+            // 🔗 The whole address, for copying and for the QR code, from
+            //    PortalAddress (#500). It used to read a `site.url` setting
+            //    that nothing seeded and fall back to "https://" plus the
+            //    request's host name.
+            $publicUrl = $showPublicLink === true ? PortalAddress::forPage('f/' . $token) : '';
         ?>
             <div class="portal-data-row flex-wrap">
                 <div class="col-12 col-md-3">
@@ -167,7 +171,11 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 <?php if ($showPublicLink === true): ?>
                     <div class="col-12 mt-2">
                         <div class="d-flex align-items-center gap-2 flex-wrap">
-                            <img src="/qr.php?content=<?php echo urlencode($publicUrl); ?>&amp;size=64" width="64" height="64" alt="QR code for the public form link" class="border rounded">
+                            <?php // The picture's address is the registered one, /qr, from Site::url() so that it carries the
+                                  // organisation's key where organisations are told apart by the first part of the address.
+                                  // It was written "/qr.php?…": every address ending in .php answers "page not found" here
+                                  // (.htaccess), so this picture was broken on every installation (found 12 October 2026, #500). ?>
+                            <img src="<?php echo htmlspecialchars(Site::url('qr'), ENT_QUOTES, 'UTF-8'); ?>?content=<?php echo urlencode($publicUrl); ?>&amp;size=64" width="64" height="64" alt="QR code for the public form link" class="border rounded">
                             <input type="text" class="form-control form-control-sm" style="max-width:360px;" readonly value="<?php echo htmlspecialchars($publicUrl, ENT_QUOTES, 'UTF-8'); ?>" onclick="this.select();">
                             <form method="post" action="/forms/publish" class="d-inline">
                                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">

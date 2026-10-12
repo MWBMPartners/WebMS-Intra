@@ -53,6 +53,7 @@ use Portal\Core\Asset;
 use Portal\Core\Auth;
 use Portal\Core\Captcha;
 use Portal\Core\FormEngine;
+use Portal\Core\PortalAddress;
 use Portal\Core\Router;
 
 // 🔍 Defensive re-validation — the Router already checked this shape.
@@ -109,7 +110,11 @@ if ($flashToken !== $token) {
     $flashErrors = [];
 }
 
-$siteBaseUrl = rtrim((string) (App::settingForSite('site.url', $formSiteId) ?? ('https://' . ($_SERVER['HTTP_HOST'] ?? ''))), '/');
+// 🔗 Where "Back to Home" goes: the front page of the organisation the FORM
+//    belongs to, from PortalAddress (#500). A public route must never go by
+//    the organisation of the request, which is why the form's own number is
+//    passed. This used to read a `site.url` setting that nothing seeded.
+$homeUrl = PortalAddress::forPage('', $formSiteId);
 $siteNameRaw = (string) (App::settingForSite('site.name', $formSiteId) ?? 'this organisation');
 
 $titleSafe = htmlspecialchars((string) $form['title'], ENT_QUOTES, 'UTF-8');
@@ -161,7 +166,7 @@ $csrf = Auth::csrfToken();
             <i class="fa-solid fa-circle-check me-1"></i>
             <?php echo $confirmationSafe; ?>
         </div>
-        <a href="<?php echo htmlspecialchars($siteBaseUrl, ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary w-100">
+        <a href="<?php echo htmlspecialchars($homeUrl, ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary w-100">
             <i class="fa-solid fa-arrow-left me-1"></i> Back to Home
         </a>
     <?php else: ?>

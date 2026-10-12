@@ -66,8 +66,11 @@ if ($expectedToken === '' || hash_equals($expectedToken, $incomingToken) === fal
 $db = App::db();
 
 // -----------------------------------------------------------------------------
-// 🌐 Scheme + host resolution — same pattern as recordings/feed.php and
-// cron/asset-reminders.php's assetReminderUrl(). $_SERVER values here are
+// 🌐 Scheme + host resolution — same pattern as recordings/feed.php.
+// (The reminder jobs used to do the same; their links now come from
+// Portal\Core\PortalAddress, #500. A feed is read by a program at the
+// address it was fetched from, so it still uses the request's own.)
+// $_SERVER values here are
 // set by the webserver from the connection itself, never from a request
 // body.
 // -----------------------------------------------------------------------------

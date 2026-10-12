@@ -251,10 +251,10 @@
  *      simply absent from the result rather than erroring. `labelPublicUrl()`
  *      builds the QR payload — ALWAYS `https://{our own request host}/a/
  *      {this asset's own stored publicToken}`, via the private
- *      `siteBaseUrl()` helper, which mirrors the existing house convention
- *      for absolute outbound links (`Newsletter::baseUrl()`, `PrayerChain`'s
- *      own inline scheme+host resolution, `calendar/export.php`,
- *      `account-feed.php`) — `$_SERVER['HTTP_HOST']`/`['HTTPS']` are set by
+ *      `siteBaseUrl()` helper, which builds the address the same way
+ *      `calendar/export.php` and `account-feed.php` do (links in E-MAILS
+ *      no longer do: they come from `PortalAddress`, #500) —
+ *      `$_SERVER['HTTP_HOST']`/`['HTTPS']` are set by
  *      the webserver/vhost from the connection itself, never from a
  *      request BODY, and the token component is re-validated against the
  *      same `^[a-f0-9]{32}$` shape `tag.php`/`Router` already enforce
@@ -7118,10 +7118,12 @@ class AssetRegister
     }
 
     /**
-     * Absolute scheme+host for the CURRENT request — mirrors the existing
-     * house convention for building absolute outbound links
-     * (`Newsletter::baseUrl()`, `PrayerChain`'s own inline resolution,
-     * `_apps/calendar/export.php`, `_apps/calendar/account-feed.php`).
+     * Absolute scheme+host for the CURRENT request — built the same way as
+     * in `_apps/calendar/export.php` and `_apps/calendar/account-feed.php`.
+     * (Links in E-MAILS are no longer built like this: they come from
+     * `PortalAddress`, #500. A printed label still carries whatever address
+     * the person printing it was using; moving it to `PortalAddress` is
+     * part of the wider sweep of request-host readers, not done here.)
      * `$_SERVER['HTTP_HOST']`/`['HTTPS']` are populated by the webserver/
      * vhost from the connection itself — never from a request BODY — so
      * this can't be steered by anything a POST/GET parameter supplies;

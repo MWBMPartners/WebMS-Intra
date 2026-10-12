@@ -192,10 +192,17 @@ class PrayerChain
                 return;
             }
 
-            // 🔗 Absolute link (relative paths don't render usefully in email/SMS clients)
-            $protocol = (isset($_SERVER['HTTPS']) === true && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
-            $host     = (string) ($_SERVER['HTTP_HOST'] ?? 'localhost');
-            $link     = $protocol . '://' . $host . Site::url('account/my-prayer-list');
+            // 🔗 A whole link, for the e-mail and the text message: a bare
+            //    "/page" opens nothing in a mail program. PortalAddress is the
+            //    one place that decides the address (#500). It is asked for
+            //    the organisation the prayer request belongs to, by number,
+            //    so the link does not depend on which web request happens to
+            //    be running. This used to take the host name from the request
+            //    ($_SERVER['HTTP_HOST'], or "localhost" when there was none).
+            //    '' means there is no address to give: the message still
+            //    goes, without a link. ($link is for the text message; the
+            //    e-mail's line below is the same address, as HTML.)
+            $link = PortalAddress::absolute('account/my-prayer-list', $siteId);
 
             // 📧 Email — best-effort, never throws past this method
             $email = (string) $partner['emailAddress'];
@@ -203,7 +210,7 @@ class PrayerChain
                 $siteName = (string) (App::settings('site.name') ?? Site::productName());
                 $html = '<p>You have been assigned a new prayer request:</p>'
                     . '<p><strong>' . htmlspecialchars($subject, ENT_QUOTES, 'UTF-8') . '</strong></p>'
-                    . '<p><a href="' . htmlspecialchars($link, ENT_QUOTES, 'UTF-8') . '">View on My Prayer List</a></p>';
+                    . PortalAddress::linkHtml('account/my-prayer-list', 'View on My Prayer List', $siteId);
                 try {
                     Mailer::send($email, '[' . $siteName . '] New prayer assignment', $html);
                 } catch (\Throwable $e) {
@@ -225,7 +232,7 @@ class PrayerChain
                 $pref = $stmt->get_result()->fetch_assoc();
                 $stmt->close();
                 if ($pref !== null) {
-                    $body = 'New prayer assignment: ' . $subject . '. ' . $link;
+                    $body = rtrim('New prayer assignment: ' . $subject . '. ' . $link);
                     Sms::send($siteId, (string) $pref['phoneNumber'], $body, 'prayer_assignment', $partnerUserId);
                 }
             }

@@ -10,6 +10,14 @@
  * any text stored here decided whether the accepted invitation carried
  * administrator rights.
  *
+ * #500 (12 October 2026): the link in the e-mail comes from
+ * Portal\Core\PortalAddress, the one place that decides the address in a
+ * link the portal sends out. It used to read a `site.url` setting that
+ * nothing seeded and fall back to the request's own Host header, which the
+ * sender's browser chooses. When there is no address to give, NOTHING is
+ * issued: only a fingerprint of each link is stored, so an invitation whose
+ * e-mail cannot carry a working link could never be used by anybody.
+ *
  * @package   Portal\Invites
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/239
  */
@@ -18,6 +26,7 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\PortalAddress;
 use Portal\Core\Site;
 
 Auth::ensureSession();
@@ -58,9 +67,17 @@ if (count($emails) === 0) {
 }
 
 $expiresAt = date('Y-m-d H:i:s', strtotime('+' . $days . ' days'));
-$host      = $_SERVER['HTTP_HOST'] ?? 'portal';
 $portalName = (string) (App::settings()['site']['name'] ?? 'the portal');
-$siteUrl    = (string) (App::settings()['site']['url'] ?? ('https://' . $host));
+
+// 🔗 No address, no invitations (see the file header). Asked once, before
+//    anything is stored, so a refusal leaves nothing behind. The form page
+//    asks the same question and says why in words, so sending the person
+//    back there is the message. (A message carried in the session would be
+//    lost: neither invitations page shows one.)
+if (PortalAddress::absolute('auth/invite', $siteId) === '') {
+    header('Location: /invites/new');
+    exit();
+}
 
 $issued = 0;
 foreach (array_unique($emails) as $email) {
@@ -110,7 +127,7 @@ foreach (array_unique($emails) as $email) {
                 [
                     'inviterName' => '',
                     'portalName'  => $portalName,
-                    'inviteUrl'   => rtrim($siteUrl, '/') . '/auth/invite?token=' . $plaintext,
+                    'inviteUrl'   => PortalAddress::absolute('auth/invite?token=' . $plaintext, $siteId),
                     'expiresAt'   => $days . ' days',
                     'message'     => $message,
                 ]

@@ -45,7 +45,23 @@ if ($news === null) {
     exit('Newsletter not found');
 }
 
-if (in_array((string) $news['status'], ['draft','scheduled'], true) === true) {
+// 🔗 Can it be sent at all (#500)? Asked BEFORE anybody is locked in or the
+//    newsletter is marked as "sending". A newsletter is not sent without the
+//    portal's address, because every copy must carry a whole "unsubscribe"
+//    link. This page used to lock the recipients in and mark the newsletter
+//    "sending" first, and only then call dispatch(), which answered "sent 0,
+//    failed 0". The sender saw "Sending in progress" and a "Continue
+//    sending" button that could never finish, and no reason (independent
+//    check, 12 October 2026). Now, when it cannot be sent, nothing is locked
+//    in and nothing is marked.
+//
+//    dispatch() is still called either way. It is the one that refuses: it
+//    writes the entry in Admin, Errors and gives the reason back in
+//    `notSent`, and the message below is shown on that reason. It cannot
+//    answer differently from the question asked here, because PortalAddress
+//    reads the setting once a request.
+$canStart = Newsletter::cannotSendBecause($siteId) === '';
+if ($canStart === true && in_array((string) $news['status'], ['draft','scheduled'], true) === true) {
     $segmentId = $news['segmentID'] !== null ? (int) $news['segmentID'] : null;
     $recipients = Newsletter::resolveSegment($siteId, $segmentId);
     Newsletter::lockInRecipients($id, $recipients);
@@ -59,6 +75,18 @@ if (in_array((string) $news['status'], ['draft','scheduled'], true) === true) {
 }
 
 $result = Newsletter::dispatch($id, $siteId);
+
+if ((string) ($result['notSent'] ?? '') !== '') {
+    // One reason exists today (Newsletter::NOT_SENT_NO_ADDRESS), and these
+    // are its words. Only a global administrator can save the address, so
+    // the sentence says whom to ask as well as where it is set.
+    $_SESSION['flash_msg']  = 'This newsletter was not sent, and nobody was sent a copy just now. The portal does not know its '
+        . 'own web address, so the unsubscribe link that every copy must carry could not be written. Ask a global '
+        . 'administrator to set the portal\'s address at Admin, Settings, Organisation, then send it again.';
+    $_SESSION['flash_type'] = 'danger';
+    header('Location: /newsletter/recipients?id=' . $id);
+    exit();
+}
 
 // Mark complete when no rows are still pending.
 $stmt = $db->prepare(

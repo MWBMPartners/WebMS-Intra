@@ -207,6 +207,15 @@ rather than a destination.
 3. Review and run any pending SQL migrations
 4. Verify the portal is working correctly
 
+### After upgrading to the next release
+
+- **Set the portal's web address.** Sign in as a global administrator and open Admin: a notice shows the address you
+  are on and a **Use this address** button. Until it is set, a password-reset link follows whatever host name the
+  request named, which matters on hosting where the portal answers for any name.
+- **Type your support e-mail address again** at Admin → Settings → Organisation, "Web addresses". The one that used to
+  be built in is blanked by the upgrade.
+- The full list, including what is not sent when the portal has no usable address, is in `CHANGELOG.md`.
+
 ### Say which copy it is (recommended)
 
 The portal needs to know whether it is the live site or a pre-release copy. It asks, in order: the `PORTAL_ENV`

@@ -67,6 +67,7 @@ use Portal\Core\App;
 use Portal\Core\I18n;
 use Portal\Core\Logger;
 use Portal\Core\Mailer;
+use Portal\Core\PortalAddress;
 use Portal\Core\Settings;
 use Portal\Core\Site;
 use Portal\Core\Venues;
@@ -87,18 +88,15 @@ header('Content-Type: text/plain; charset=utf-8');
 $db = App::db();
 
 // -----------------------------------------------------------------------------
-// 🔗 Absolute link builder for reminder emails — scheme+host resolution
-// mirrors `assetReminderUrl()` in cron/asset-reminders.php l.110-116.
-// $_SERVER values come from the webserver/connection itself, never a
-// request body.
+// 🔗 The link in each reminder comes from PortalAddress::linkHtml(), for the
+// organisation whose reminder it is (#500). This file used to hold a helper
+// of its own that put the request's host name in front of the page
+// ($_SERVER['HTTP_HOST'], or "localhost" when there was none). This job is
+// started by ONE request and works through EVERY organisation, so that gave
+// organisation B the address of whoever started the job, and no "/<B's
+// key>/" where organisations are told apart by the first part of the
+// address. With no address to give, the reminder still goes, without a link.
 // -----------------------------------------------------------------------------
-function venueReminderUrl(string $path): string
-{
-    $https  = (string) ($_SERVER['HTTPS'] ?? '');
-    $scheme = ($https !== '' && $https !== 'off') ? 'https' : 'http';
-    $host   = (string) ($_SERVER['HTTP_HOST'] ?? 'localhost');
-    return $scheme . '://' . $host . $path;
-}
 
 /**
  * Send one reminder email to every valid address in $recipients, UNLESS
@@ -204,11 +202,10 @@ foreach ($siteIds as $siteId) {
         $venueName = (string) $b['venueName'];
 
         $subject = I18n::t('venues.reminder.unagreed_subject', ['venue' => $venueName, 'date' => $dueDate]);
-        $url     = venueReminderUrl('/venues/booking?id=' . $refId);
         $body = '<p><strong>' . htmlspecialchars($venueName, ENT_QUOTES, 'UTF-8') . '</strong> on '
               . htmlspecialchars($dueDate, ENT_QUOTES, 'UTF-8') . ' is still awaiting agreement — '
               . 'it does not yet count as confirmed.</p>'
-              . '<p><a href="' . htmlspecialchars($url, ENT_QUOTES, 'UTF-8') . '">Review this booking</a></p>';
+              . PortalAddress::linkHtml('venues/booking?id=' . $refId, 'Review this booking', $siteId);
 
         $sent = sendVenueReminder($siteId, 'booking-unagreed', $refId, $dueDate, $subject, $body, $recipients);
         if ($sent === null) {
@@ -232,11 +229,10 @@ foreach ($siteIds as $siteId) {
         $triggerText = (string) $a['trigger'] === 'renewal' ? 'renewal is due' : 'its notice period begins';
 
         $subject = I18n::t('venues.reminder.renewal_subject', ['title' => $title]);
-        $url     = venueReminderUrl('/venues/agreements?edit=' . $refId);
         $body = '<p><strong>' . htmlspecialchars($title, ENT_QUOTES, 'UTF-8') . '</strong> for '
               . htmlspecialchars($venueName, ENT_QUOTES, 'UTF-8') . ': ' . htmlspecialchars($triggerText, ENT_QUOTES, 'UTF-8')
               . ' on ' . htmlspecialchars($dueDate, ENT_QUOTES, 'UTF-8') . '.</p>'
-              . '<p><a href="' . htmlspecialchars($url, ENT_QUOTES, 'UTF-8') . '">Review this agreement</a></p>';
+              . PortalAddress::linkHtml('venues/agreements?edit=' . $refId, 'Review this agreement', $siteId);
 
         $sent = sendVenueReminder($siteId, 'agreement-renewal', $refId, $dueDate, $subject, $body, $recipients);
         if ($sent === null) {
@@ -267,11 +263,10 @@ foreach ($siteIds as $siteId) {
             : '';
 
         $subject = I18n::t('venues.reminder.invoice_subject', ['ref' => $ref]);
-        $url     = venueReminderUrl('/venues/invoice?id=' . $refId);
         $body = '<p>Invoice <strong>' . htmlspecialchars($ref, ENT_QUOTES, 'UTF-8') . '</strong> for '
               . htmlspecialchars($venueName, ENT_QUOTES, 'UTF-8') . ' — £' . $amountStr . ', due '
               . htmlspecialchars($dueDate, ENT_QUOTES, 'UTF-8') . htmlspecialchars($overdueNote, ENT_QUOTES, 'UTF-8') . '.</p>'
-              . '<p><a href="' . htmlspecialchars($url, ENT_QUOTES, 'UTF-8') . '">Review this invoice</a></p>';
+              . PortalAddress::linkHtml('venues/invoice?id=' . $refId, 'Review this invoice', $siteId);
 
         $sent = sendVenueReminder($siteId, 'invoice-due', $refId, $dueDate, $subject, $body, $recipients);
         if ($sent === null) {

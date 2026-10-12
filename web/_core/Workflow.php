@@ -1239,6 +1239,14 @@ class Workflow
 
     /**
      * "You have an approval waiting" email to a step's eligible assignees.
+     *
+     * Its "Review in Approvals" line, and the overdue e-mail's below, come
+     * from PortalAddress::linkHtml(), for the instance's own organisation
+     * (#500). They used to be built by a private helper from the request's
+     * host name ($_SERVER['HTTP_HOST'], or "localhost" when there was none);
+     * the overdue sweep runs on a timer for every organisation, so that gave
+     * every organisation the address of whatever request started the job.
+     * With no address to give, the line is left out.
      */
     private static function notifyStepAssignees(array $instance, array $step): void
     {
@@ -1254,12 +1262,10 @@ class Workflow
         $label = htmlspecialchars((string) ($instance['subjectLabel'] ?? ''), ENT_QUOTES, 'UTF-8');
         $workflowName = htmlspecialchars((string) ($instance['workflowName'] ?? ''), ENT_QUOTES, 'UTF-8');
         $stepName = htmlspecialchars((string) $step['stepName'], ENT_QUOTES, 'UTF-8');
-        $url = htmlspecialchars(self::absoluteUrl('/approvals'), ENT_QUOTES, 'UTF-8');
-
         $subject = 'Approval needed: ' . (string) ($instance['subjectLabel'] ?? $workflowName);
         $body = '<p><strong>' . $workflowName . '</strong> — ' . $stepName . '</p>'
               . '<p>' . $label . '</p>'
-              . '<p><a href="' . $url . '">Review in Approvals</a></p>';
+              . PortalAddress::linkHtml('approvals', 'Review in Approvals', $siteId);
 
         foreach ($assignees as $info) {
             if (filter_var($info['email'], FILTER_VALIDATE_EMAIL) === false) {
@@ -1395,11 +1401,10 @@ class Workflow
         $label = htmlspecialchars((string) ($instance['subjectLabel'] ?? ''), ENT_QUOTES, 'UTF-8');
         $workflowName = htmlspecialchars((string) ($instance['workflowName'] ?? ''), ENT_QUOTES, 'UTF-8');
         $stepName = htmlspecialchars((string) $step['stepName'], ENT_QUOTES, 'UTF-8');
-        $url = htmlspecialchars(self::absoluteUrl('/approvals'), ENT_QUOTES, 'UTF-8');
         $subject = 'Approval overdue: ' . $workflowName;
         $body = '<p><strong>' . $workflowName . '</strong> — ' . $stepName . ' has been waiting longer than the configured timeout.</p>'
               . '<p>' . $label . '</p>'
-              . '<p><a href="' . $url . '">Review in Approvals</a></p>';
+              . PortalAddress::linkHtml('approvals', 'Review in Approvals', $siteId);
 
         foreach ($recipients as $email) {
             try {
@@ -1425,18 +1430,6 @@ class Workflow
             ]);
         } catch (Throwable $ignored) {
         }
-    }
-
-    /**
-     * Absolute link builder for reminder/approval emails — mirrors
-     * userReminderUrl() in cron/user-reminders.php.
-     */
-    private static function absoluteUrl(string $path): string
-    {
-        $https = (string) ($_SERVER['HTTPS'] ?? '');
-        $scheme = ($https !== '' && $https !== 'off') ? 'https' : 'http';
-        $host = (string) ($_SERVER['HTTP_HOST'] ?? 'localhost');
-        return $scheme . '://' . $host . $path;
     }
 
     /* ========================================================================= */

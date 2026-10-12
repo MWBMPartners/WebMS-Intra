@@ -1945,14 +1945,16 @@ class GdprEraser
             return ['requestID' => $requestId, 'email' => $email, 'mailed' => false, 'confirmed' => true];
         }
 
-        // The link goes back to the address the person is using right now.
-        // No address is built in: with no host to go by, no link is sent.
-        $mailed = false;
-        $host   = (string) ($_SERVER['HTTP_HOST'] ?? '');
-        if ($host !== '') {
-            $https      = (string) ($_SERVER['HTTPS'] ?? '');
-            $scheme     = ($https !== '' && $https !== 'off') ? 'https' : 'http';
-            $confirmUrl = $scheme . '://' . $host . '/account/erasure-confirm?token=' . $token;
+        // The confirmation link, from PortalAddress, the one place that
+        // decides the address in a link the portal sends out (#500): the
+        // address an administrator set, and only while none is set the
+        // address the person is using right now. It used to be built from
+        // the request's host name alone, which the browser chooses, and this
+        // link carries a secret. No address is built in: with none to give,
+        // no e-mail is sent, and the caller tells the person so.
+        $mailed     = false;
+        $confirmUrl = PortalAddress::absolute('account/erasure-confirm?token=' . $token, $siteId);
+        if ($confirmUrl !== '') {
             $body = '<p>Hi ' . htmlspecialchars($name, ENT_QUOTES, 'UTF-8') . ',</p>'
                 . '<p>We received a request to erase your personal data on the portal.</p>'
                 . '<p>If this was you, click below to confirm. The link expires in 24 hours.</p>'

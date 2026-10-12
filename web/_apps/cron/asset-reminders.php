@@ -74,6 +74,7 @@ use Portal\Core\App;
 use Portal\Core\AssetRegister;
 use Portal\Core\Logger;
 use Portal\Core\Mailer;
+use Portal\Core\PortalAddress;
 use Portal\Core\Settings;
 use Portal\Core\Site;
 
@@ -99,21 +100,15 @@ if ((string) Settings::get('assets.reminders_enabled', '1') !== '1') {
 $db = App::db();
 
 // -----------------------------------------------------------------------------
-// 🔗 Absolute /assets/item?id=… link for a reminder email. Same
-// scheme+host resolution as AssetRegister::siteBaseUrl() (private to that
-// class) — duplicated here rather than exposed, matching the existing
-// house convention of small per-call-site scheme+host resolution (see
-// Newsletter::baseUrl(), PrayerChain's own inline resolution). $_SERVER
-// values are set by the webserver from the connection itself, never from
-// a request body.
+// 🔗 The link in each reminder comes from PortalAddress::linkHtml(), for the
+// organisation whose reminder it is (#500). This file used to hold a helper
+// of its own that put the request's host name in front of the page
+// ($_SERVER['HTTP_HOST'], or "localhost" when there was none). This job is
+// started by ONE request and works through EVERY organisation, so that gave
+// organisation B the address of whoever started the job, and no "/<B's
+// key>/" where organisations are told apart by the first part of the
+// address. With no address to give, the reminder still goes, without a link.
 // -----------------------------------------------------------------------------
-function assetReminderUrl(int $assetId): string
-{
-    $https  = (string) ($_SERVER['HTTPS'] ?? '');
-    $scheme = ($https !== '' && $https !== 'off') ? 'https' : 'http';
-    $host   = (string) ($_SERVER['HTTP_HOST'] ?? 'localhost');
-    return $scheme . '://' . $host . '/assets/item?id=' . $assetId;
-}
 
 /**
  * Send one reminder email to every valid address in $recipients, UNLESS
@@ -297,7 +292,7 @@ foreach ($siteIds as $siteId) {
               . ' has ' . htmlspecialchars(ucfirst((string) $m['maintType']), ENT_QUOTES, 'UTF-8') . ' due on '
               . htmlspecialchars($dueDate, ENT_QUOTES, 'UTF-8') . '.</p>'
               . '<p>' . htmlspecialchars((string) $m['title'], ENT_QUOTES, 'UTF-8') . '</p>'
-              . '<p><a href="' . htmlspecialchars(assetReminderUrl($assetId), ENT_QUOTES, 'UTF-8') . '">View this asset</a></p>';
+              . PortalAddress::linkHtml('assets/item?id=' . $assetId, 'View this asset', $siteId);
 
         $sent = sendAssetReminder($db, $siteId, 'maintenance', (int) $m['maintID'], $assetId, $dueDate, 'maintenance', $subject, $body, $recipients);
         if ($sent === null) {
@@ -324,7 +319,7 @@ foreach ($siteIds as $siteId) {
         $body = '<p><strong>' . htmlspecialchars($assetName, ENT_QUOTES, 'UTF-8') . '</strong>'
               . ($w['assetTagCode'] !== null ? ' (' . htmlspecialchars((string) $w['assetTagCode'], ENT_QUOTES, 'UTF-8') . ')' : '')
               . '&#39;s warranty expires on ' . htmlspecialchars($dueDate, ENT_QUOTES, 'UTF-8') . '.</p>'
-              . '<p><a href="' . htmlspecialchars(assetReminderUrl($assetId), ENT_QUOTES, 'UTF-8') . '">View this asset</a></p>';
+              . PortalAddress::linkHtml('assets/item?id=' . $assetId, 'View this asset', $siteId);
 
         $sent = sendAssetReminder($db, $siteId, 'warranty', $assetId, $assetId, $dueDate, 'asset', $subject, $body, $recipients);
         if ($sent === null) {
@@ -361,7 +356,7 @@ foreach ($siteIds as $siteId) {
               // 🔐 insurancePolicyNumber is deliberately NEVER interpolated
               // into this body — a reference number is exactly the kind of
               // quasi-secret this codebase avoids putting in outbound mail.
-              . '<p><a href="' . htmlspecialchars(assetReminderUrl($assetId), ENT_QUOTES, 'UTF-8') . '">View this asset</a></p>';
+              . PortalAddress::linkHtml('assets/item?id=' . $assetId, 'View this asset', $siteId);
 
         $sent = sendAssetReminder($db, $siteId, 'insurance', $assetId, $assetId, $dueDate, 'asset', $subject, $body, $recipients);
         if ($sent === null) {
@@ -396,7 +391,7 @@ foreach ($siteIds as $siteId) {
               . htmlspecialchars($direction, ENT_QUOTES, 'UTF-8') . ') was due back on '
               . htmlspecialchars($dueDate, ENT_QUOTES, 'UTF-8') . ' and is now overdue.</p>'
               . '<p>Counterparty: ' . htmlspecialchars((string) $loan['counterpartyDisplayName'], ENT_QUOTES, 'UTF-8') . '</p>'
-              . '<p><a href="' . htmlspecialchars(assetReminderUrl($assetId), ENT_QUOTES, 'UTF-8') . '">View this asset</a></p>';
+              . PortalAddress::linkHtml('assets/item?id=' . $assetId, 'View this asset', $siteId);
 
         $sent = sendAssetReminder($db, $siteId, 'loan-overdue', $loanId, $assetId, $dueDate, 'loan', $subject, $body, $recipients);
         if ($sent === null) {

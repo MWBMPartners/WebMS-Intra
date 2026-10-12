@@ -11,6 +11,8 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\PortalAddress;
+use Portal\Core\Site;
 
 Auth::ensureSession();
 Auth::requireLogin();
@@ -23,6 +25,11 @@ $settings = App::settings();
 $defaultExpiry = (int) ($settings['invites']['default_expiry_days'] ?? 7);
 $defaultRole   = (string) ($settings['invites']['default_role'] ?? 'user');
 
+// 🔗 Can an invitation's e-mail carry a working link (#500)? Asked here as
+//    well as in the save handler, which refuses on the same answer, so the
+//    reason is on screen before anybody types a list of addresses.
+$canLink = PortalAddress::absolute('auth/invite') !== '';
+
 $pageTitle   = 'New invitation';
 $pageSection = 'invites';
 $breadcrumbs = ['Dashboard' => '/', 'Invitations' => '/invites', 'New' => ''];
@@ -32,6 +39,15 @@ $csrf = Auth::csrfToken();
 
 <h1 class="mb-3"><i class="fa-solid fa-envelope-open-text me-2"></i>New invitation</h1>
 <p class="text-muted">Generate one or more single-use invite links. Recipients self-register with the assigned role pre-set.</p>
+
+<?php if ($canLink === false): ?>
+<div class="alert alert-danger" role="alert">
+    <strong>Invitations cannot be sent yet.</strong>
+    The portal does not know its own web address, so an invitation's e-mail could not carry a working link.
+    A global administrator can set the address at Admin, Settings, Organisation
+    (<a href="<?php echo htmlspecialchars(Site::url('admin/settings/organisation'), ENT_QUOTES, 'UTF-8'); ?>" class="alert-link">open that page</a>). Nothing is issued until then.
+</div>
+<?php endif; ?>
 
 <div class="card">
     <div class="card-body">
@@ -69,7 +85,7 @@ $csrf = Auth::csrfToken();
                 </div>
             </div>
             <div class="mt-3">
-                <button type="submit" class="btn btn-primary">Generate invitations</button>
+                <button type="submit" class="btn btn-primary"<?php echo $canLink === false ? ' disabled' : ''; ?>>Generate invitations</button>
                 <a href="/invites" class="btn btn-outline-secondary">Cancel</a>
             </div>
         </form>

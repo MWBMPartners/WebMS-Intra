@@ -836,6 +836,10 @@ another repo, ever**.
 - API documentation (`/api-docs/`) is reachable (it was a fatal error on every installation); behind the staff gate on a
   pre-release copy.
 
+### 🔗 The portal's own web address (#500) ✅
+
+- **The portal's own web address** (#500) — set at Admin → Settings → Organisation, "Web addresses" (global administrators), or in one press from the Admin dashboard's notice ("Use this address") while it is not set. Used for every link in an e-mail. The dashboard shows a notice while it is not set or not usable, and another when it is not the address the page was reached at. The same card holds the support e-mail address shown on Help → Getting Support.
+
 ### 🌐 Internationalisation (Phase 8) ✅
 
 - `I18n` framework, translations under `web/_lang/{xx}.php`.

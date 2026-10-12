@@ -5708,6 +5708,28 @@ philosophy, same "no oracle" security reasoning:
 
 ---
 
+## The portal's own web address (#500)
+
+`Portal\Core\PortalAddress` is the ONE place that decides the address in a link the portal sends out.
+
+- `PortalAddress::absolute('page?x=1', $siteId)` — a whole link, or `''` when there is no address to give. The caller must then leave the link out or not send. Never build one from `$_SERVER['HTTP_HOST']`.
+- `PortalAddress::linkHtml($route, $label, $siteId)` — the same as a ready `<p><a>` line for an e-mail, or `''`.
+- `PortalAddress::forPage($route, $siteId)` — for a link SHOWN on a page (copy this link, a QR code); falls back to the address without a host name.
+- `PortalAddress::saved()` — the set address only, never the request's (used for the name given to a mail server).
+- `PortalAddress::check($typed)` uses nothing but PHP, so the installer can load that one file.
+- `PortalAddress::visitorCanChooseHost()` — whether a request can still choose the host name of an e-mailed link. Yes while nothing usable is set, except in "own address each" mode when the DEFAULT organisation has an address of its own. The dashboard's warning goes by this; do not work it out again on a page.
+- Order: the installation-wide `site.url` row when it holds a usable address; else the request's address; else nothing. A stored value that is not usable is ignored (links follow the request again, and the dashboard says so). A value that cannot be read gives nothing, not the request's.
+- Only the installation-wide row is read. An organisation's own `site.url` row is ignored on purpose: an administrator of one organisation could otherwise point reset links at a site of their choosing.
+- Several organisations: "own address each" uses the organisation's own host name with the set address's scheme and port; "first part of the address" adds the organisation's key; "sign-in session" adds nothing. An organisation that cannot be found, or is switched off, gets no link.
+- Pass the organisation's number in any job that works through several organisations.
+- The dashboard's "Use this address" button posts to the card's own save handler (`admin/settings/organisation/save`, `form=web-addresses`) with the address alone. That handler leaves the support address untouched when its box was not sent.
+- `Newsletter::dispatch()` returns a third value, `notSent`: `''` when a pass was made, a `Newsletter::NOT_SENT_*` reason when nothing was tried. A caller must show that reason and not report "sent 0". `Newsletter::cannotSendBecause($siteId)` asks the same question before anybody is locked in.
+- Test: `tools/portal-address-selftest.php`. Check: `tools/audit-checks/check_no_hardcoded_domains.py` (its pending list must be empty before a release: `--strict`).
+- `tools/audit-checks/check_no_php_in_urls.py` does not read the address of a picture (`src=`). Three QR pictures pointed at an address ending `.php` for that reason; part Q of the self-test now holds them.
+- Not converted: readers of the request's host name that are NOT e-mails (feeds, the sitemap, QR labels, payment return addresses, the webhook addresses shown to administrators). See "Found" in the build report.
+
+---
+
 ## Sign-in limits and password reset (#580)
 
 - **`Mailer::canSend()` is the one place that answers "can the portal send e-mail?"** `Mailer::sendingRoute()` beside it gives the route's name and what is still missing. A page must never test a provider's settings itself. A new mail route is added in `Mailer::route()` and `Mailer::sendingRoute()` and nowhere else. "Yes" is not proof of delivery.

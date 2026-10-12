@@ -166,7 +166,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <div class="col-md-6">
                 <label class="form-label">Allowed origins</label>
                 <input type="text" name="allowedOrigins" class="form-control font-monospace"
-                       value="<?php echo htmlspecialchars($allowedOrigins, ENT_QUOTES, 'UTF-8'); ?>" placeholder="portal.millrdsdacambridge.uk (blank = any)">
+                       value="<?php echo htmlspecialchars($allowedOrigins, ENT_QUOTES, 'UTF-8'); ?>" placeholder="for example portal.example.org (blank = any)">
                 <small class="text-muted">Comma-separated hostnames, no scheme. Reserved for the direct-upload feature.</small>
             </div>
 

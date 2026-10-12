@@ -1,0 +1,35 @@
+# Path: tools/audit-checks/check_no_hardcoded_domains.pending.txt
+#
+# Lines that still name a domain of ours and are WAITING for a change that
+# package F4 (#500) was not allowed to make. Read by
+# tools/audit-checks/check_no_hardcoded_domains.py, which explains the rules.
+#
+# One entry per line:   <file>  <fingerprint>  <why it is waiting>
+#
+# The fingerprint is the SHA-256 of the line's text with the spaces at either
+# end taken off. The text itself is not written here, so that our domain's
+# name appears nowhere under tools/. To work one out:
+#   python3 -c "import hashlib,sys; print(hashlib.sha256(sys.argv[1].strip().encode()).hexdigest())" 'the line'
+#
+# HOW AN ENTRY LEAVES THIS LIST: the line is changed in its own file, the
+# check then FAILS saying this entry is stale, and the entry is deleted in the
+# same commit. Never add an entry to make a failure go away: an entry is for a
+# line somebody has decided on and cannot change yet, and it says who decides.
+#
+# Package:   Portal\Tools
+# Author:    MWBM Partners Ltd (t/a MWservices)
+# Copyright: 2026-present MWBM Partners Ltd (t/a MWservices). All Rights Reserved.
+
+# The deploy workflow. Workflow files need the owner's yes before they are
+# changed; these four lines go with the approved rewrite of the deploy (#500).
+# The first three are examples in the file's heading; the fourth is the live
+# health check, which calls our own installation's address.
+.github/workflows/deploy.yml  4f43ac94f48f28da5a4df2ebdd44d0a0beb6f062fa5f3127cefbc41e251c1309  heading example (live folder); waits for the approved deploy rewrite
+.github/workflows/deploy.yml  40a1f96ef0d1bbcfb514f68c970827d2d8edd1d3d2ee911d9498f6c7ee9158c2  heading example (beta folder); waits for the approved deploy rewrite
+.github/workflows/deploy.yml  ec5b29735d29bbaf436c7b90573f53a74e62fb1ba9226454ce0d6dc8980fc399  heading example (dev folder); waits for the approved deploy rewrite
+.github/workflows/deploy.yml  4eefb1a2e12dc2061c23c121fae9cf3037a57e7ed2d093112a8ea8e44c75030e  the live health check's address; waits for the approved deploy rewrite
+
+# One comment in the portal's start-up file. Another package was changing
+# that file while F4 was built, so the new wording was handed to the
+# coordinator (rollout-F4 DOC-ENTRIES) to put in when that package lands.
+web/_core/bootstrap.php  70408c539ccdbe34d5a17101ccfd4f7ca55bf61f626bbf516da530dcef8abfc3  a comment naming our installation; new wording is with the coordinator

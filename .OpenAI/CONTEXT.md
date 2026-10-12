@@ -375,6 +375,17 @@ in `.claude/CLAUDE.md` under the heading named in brackets.
     web folder: never build a path with `public_html` typed in. Test:
     `tools/channel-selftest.php`.
 
+    **`Portal\Core\PortalAddress` is the ONE place that decides the address in a
+    link the portal sends out** (#500): the `site.url` setting (installation-
+    wide row only), else the request's address, else nothing. Never build an
+    e-mailed link from `$_SERVER['HTTP_HOST']`, and never read `site.url`
+    anywhere else. Whether a visitor can still choose the host name of a link is
+    `PortalAddress::visitorCanChooseHost()`; do not work it out on a page. Test:
+    `tools/portal-address-selftest.php`. The check is `python3 tools/audit-
+    checks/check_no_hardcoded_domains.py` (it replaces the hand search below).
+    Lines waiting for a change that needs approval are on the pending list
+    beside it; `--strict` fails while that list holds anything.
+
 15. **The ApiRouter trap.** Any address starting `api/` is intercepted
     before the normal routing table is ever consulted, and resolved purely
     by naming convention to `_apps/{appName}/api/{action}.php`. A handler

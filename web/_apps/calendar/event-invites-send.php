@@ -19,6 +19,7 @@ use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Logger;
 use Portal\Core\Mailer;
+use Portal\Core\PortalAddress;
 use Portal\Core\Site;
 
 // #512 — every Site::url() call in this file adds the organisation's own
@@ -71,17 +72,15 @@ $stmt->execute();
 $stmt->close();
 
 // 📧 Build the email.
-// Scheme and host still come from the CONNECTION ($_SERVER), not
-// Site::url() — WebMS-Intra is installed at many different addresses by
-// many different customers (#500), and there is no setting anywhere that
-// records "this portal's own web address" for a background job to read
-// (a cron-triggered send would have no $_SERVER['HTTP_HOST'] at all). That
-// gap is real but belongs to #500, not to this fix — noted here so nobody
-// mistakes the omission for an oversight of THIS issue. The PATH still
-// goes through Site::url(), which is the part #512 is actually about.
-$scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
-$host   = (string) ($_SERVER['HTTP_HOST'] ?? 'localhost');
-$rsvpUrl = $scheme . '://' . $host . Site::url('calendar/rsvp-by-link') . '?t=' . $token;
+// The link comes from PortalAddress, the one place that decides the address
+// in a link the portal sends out (#500): the address an administrator set,
+// else this request's, with this organisation's own host name or address
+// prefix where the installation uses one. It used to take the host name
+// straight from the request ($_SERVER['HTTP_HOST']), which the sender's
+// browser chooses, because there was then no setting to read. '' means
+// there is no address to give: no e-mail is sent then (below), because an
+// invitation whose button opens nothing is worse than none.
+$rsvpUrl = PortalAddress::absolute('calendar/rsvp-by-link?t=' . $token, $siteId);
 $when    = date('l j M Y, H:i', strtotime((string) $event['startDateTime']));
 
 $subject = 'You\'re invited: ' . (string) $event['eventName'];
@@ -104,7 +103,7 @@ $bodyHtml = '<p>Hi' . ($display !== '' ? ' ' . htmlspecialchars($display, ENT_QU
 // shapes land on the same ordinary flash message rather than one of them
 // crashing the request.
 $sent = false;
-if (class_exists(Mailer::class) === true && method_exists(Mailer::class, 'send') === true) {
+if ($rsvpUrl !== '' && class_exists(Mailer::class) === true && method_exists(Mailer::class, 'send') === true) {
     try {
         $sent = (bool) Mailer::send($email, $subject, $bodyHtml);
     } catch (\Throwable $e) {
@@ -113,9 +112,14 @@ if (class_exists(Mailer::class) === true && method_exists(Mailer::class, 'send')
     }
 }
 
-Logger::activity('EventInviteSent', 'Event #' . $eventId . ' → ' . $email . ($sent === true ? ' [delivered]' : ' [mailer failed]'));
+Logger::activity('EventInviteSent', 'Event #' . $eventId . ' → ' . $email . ($sent === true ? ' [delivered]' : ($rsvpUrl === '' ? ' [not sent: the portal\'s web address is not known]' : ' [mailer failed]')));
 
-$_SESSION['flash_msg']  = $sent === true ? 'Invite emailed.' : 'Token created, but mailer reported a failure — share the link manually.';
+if ($rsvpUrl === '') {
+    $_SESSION['flash_msg'] = 'The invitation was saved, but no e-mail was sent: the portal does not know its own web address, '
+        . 'so the e-mail could not carry a working link. A global administrator can set the address at Admin, Settings, Organisation.';
+} else {
+    $_SESSION['flash_msg'] = $sent === true ? 'Invite emailed.' : 'Token created, but mailer reported a failure — share the link manually.';
+}
 $_SESSION['flash_type'] = $sent === true ? 'success' : 'warning';
 header('Location: ' . $redirect, true, 302);
 exit();

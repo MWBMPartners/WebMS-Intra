@@ -345,6 +345,9 @@ workflows, settings seeds, templates, emails or the API specification. The owner
 - **Customers will install from a downloadable zip package** (#499), so installing and upgrading must work for
   someone with only a hosting panel.
 
+- **`Portal\Core\PortalAddress` is the ONE place that decides the address in a link the portal sends out** (#500): the `site.url` setting (installation-wide row only), else the request's address, else nothing. Never build an e-mailed link from `$_SERVER['HTTP_HOST']`, and never read `site.url` anywhere else. Whether a visitor can still choose the host name of a link is `PortalAddress::visitorCanChooseHost()`; do not work it out on a page. Test: `tools/portal-address-selftest.php`.
+- The check is `python3 tools/audit-checks/check_no_hardcoded_domains.py` (it replaces the hand search below). Lines waiting for a change that needs approval are on the pending list beside it; `--strict` fails while that list holds anything.
+
 Before committing, check: `grep -rn millrdsdacambridge web .github tools` should find nothing except clearly
 labelled examples. Known offender to remove: the live health-check address in `.github/workflows/deploy.yml`.
 Tracked in #500.

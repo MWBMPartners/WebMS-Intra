@@ -13,6 +13,7 @@ use Portal\Core\App;
 use Portal\Core\AppRegistry;
 use Portal\Core\Auth;
 use Portal\Core\Markdown;
+use Portal\Core\PortalAddress;
 use Portal\Core\ServicePlanLink;
 use Portal\Core\Site;
 
@@ -120,10 +121,12 @@ unset($_SESSION['flash_msg'], $_SESSION['flash_type']);
 $publicShareSiteOn = (string) (App::settings('service_plans.public_share.enabled') ?? 'false') === 'true';
 $isPlanShared      = (int) ($plan['isPublicShared'] ?? 0) === 1;
 $publicToken       = (string) ($plan['publicToken'] ?? '');
-// 🔗 Absolute-URL convention (invites/save.php precedent) — site.url with a
-// scheme+host fallback, since a QR code needs an absolute address.
-$siteBaseUrl = rtrim((string) (App::settings('site.url') ?? ('https://' . ($_SERVER['HTTP_HOST'] ?? ''))), '/');
-$publicUrl   = $publicToken !== '' ? ($siteBaseUrl . '/os/' . $publicToken) : '';
+// 🔗 The whole address, for copying and for the QR code, from PortalAddress
+// (#500): the address an administrator set, else the one this page was
+// reached at. This used to read a `site.url` setting that nothing seeded
+// and fall back to "https://" plus the request's host name, so the scheme
+// was wrong on plain http and an organisation's address prefix was missing.
+$publicUrl   = $publicToken !== '' ? PortalAddress::forPage('os/' . $publicToken) : '';
 
 $sectionTypes = [
     'greeting'       => 'Greeting / Welcome',
@@ -209,7 +212,11 @@ $sectionTypes = [
                 <input type="text" class="form-control" readonly value="<?php echo htmlspecialchars($publicUrl, ENT_QUOTES, 'UTF-8'); ?>" onclick="this.select();">
                 <a href="<?php echo htmlspecialchars($publicUrl, ENT_QUOTES, 'UTF-8'); ?>" target="_blank" rel="noopener noreferrer" class="btn btn-outline-secondary"><i class="fa-solid fa-arrow-up-right-from-square"></i></a>
             </div>
-            <img src="/qr.php?content=<?php echo urlencode($publicUrl); ?>&amp;size=160" width="160" height="160" alt="QR code for the public Order of Service" class="mb-2 border rounded">
+            <?php // The picture's address is the registered one, /qr, from Site::url() so that it carries the
+                  // organisation's key where organisations are told apart by the first part of the address.
+                  // It was written "/qr.php?…": every address ending in .php answers "page not found" here
+                  // (.htaccess), so this picture was broken on every installation (found 12 October 2026, #500). ?>
+            <img src="<?php echo htmlspecialchars(Site::url('qr'), ENT_QUOTES, 'UTF-8'); ?>?content=<?php echo urlencode($publicUrl); ?>&amp;size=160" width="160" height="160" alt="QR code for the public Order of Service" class="mb-2 border rounded">
             <div class="d-flex gap-2">
                 <form method="post" action="/service-plans/share">
                     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">

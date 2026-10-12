@@ -53,7 +53,9 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Logger;
+use Portal\Core\PortalAddress;
 use Portal\Core\Qr;
+use Portal\Core\Site;
 
 Auth::ensureSession();
 Auth::requireLogin();
@@ -218,8 +220,12 @@ $breadcrumbs = ['Dashboard' => '/', 'Admin' => '/admin', 'Settings' => '/admin/s
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 $csrf = Auth::csrfToken();
 
-// Sample QR for preview.
-$portalUrl = (string) ($settings['site']['url'] ?? 'https://example.invalid/');
+// Sample QR for preview: this portal's own front page, from PortalAddress
+// (#500). It used to read a `site.url` setting that nothing seeded, so the
+// sample was always a QR code for a made-up address that opens nothing.
+// '' means the portal has no address to give; the card below then says
+// where to set one and draws no code.
+$portalUrl = PortalAddress::absolute('');
 ?>
 
 <h1 class="mb-3"><i class="fa-solid fa-qrcode me-2"></i>QR Codes</h1>
@@ -297,9 +303,17 @@ $readOnlyAttr = $mayChangePortalWideSettings === false ? ' disabled' : '';
     <div class="col-md-4">
         <div class="card">
             <div class="card-body text-center">
-                <h2 class="h6">Sample QR (your portal URL)</h2>
+                <h2 class="h6">Sample QR (your portal's address)</h2>
+                <?php if ($portalUrl !== ''): ?>
                 <object data="/qr?content=<?php echo urlencode($portalUrl); ?>&size=200" type="image/svg+xml" style="max-width:200px"></object>
-                <p class="small text-muted mt-2 mb-0"><code><?php echo htmlspecialchars($portalUrl, ENT_QUOTES, 'UTF-8'); ?></code></p>
+                <p class="small text-muted mt-2 mb-0"><code class="text-break"><?php echo htmlspecialchars($portalUrl, ENT_QUOTES, 'UTF-8'); ?></code></p>
+                <?php else: ?>
+                <p class="small text-muted mb-0">
+                    There is no sample yet, because the portal does not know its own web address.
+                    A global administrator can set it at
+                    <a href="<?php echo htmlspecialchars(Site::url('admin/settings/organisation'), ENT_QUOTES, 'UTF-8'); ?>">Admin, Settings, Organisation</a>.
+                </p>
+                <?php endif; ?>
             </div>
         </div>
         <div class="card mt-3">

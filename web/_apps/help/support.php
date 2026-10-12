@@ -7,6 +7,13 @@
  * User-facing summary of the day-2 support contract (docs/day2-support.md).
  * Tells users where to report problems and what to expect.
  *
+ * THE SUPPORT ADDRESS IS A SETTING, AND MAY BE EMPTY (#500). This page used
+ * to fall back to the support address of the product's first customer when
+ * the setting was missing, and the database seeded that same address. So
+ * every other customer's members were told to write to somebody else's
+ * mailbox. Now the setting is seeded empty (migration 215) and there is no
+ * fallback: with no address set, the page says so and says who can set one.
+ *
  * @package    Portal\Help
  * @author     MWBM Partners Ltd (t/a MWservices)
  * @copyright  2025-present MWBM Partners Ltd (t/a MWservices)
@@ -25,7 +32,7 @@ $breadcrumbs = ['Dashboard' => '/', 'Help' => '/help', 'Support' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 
 $supportEmail = htmlspecialchars(
-    (string) ($SETTINGS['portal']['support']['email'] ?? 'portal-support@millrdsdacambridge.uk'),
+    trim((string) ($SETTINGS['portal']['support']['email'] ?? '')),
     ENT_QUOTES,
     'UTF-8'
 );
@@ -46,7 +53,11 @@ $supportEmail = htmlspecialchars(
         <h2 class="h5"><i class="fa-solid fa-bullhorn me-1"></i>How to report a problem</h2>
         <ol class="mb-0">
             <li><strong>Use the "Report a problem" link in the footer of any page</strong> — preferred. It captures what you were looking at, which browser you're using, and a screenshot automatically.</li>
+            <?php if ($supportEmail !== ''): ?>
             <li><strong>Email <a href="mailto:<?php echo $supportEmail; ?>"><?php echo $supportEmail; ?></a></strong> for account issues, password reset failures, or anything blocking you from signing in.</li>
+            <?php else: ?>
+            <li id="no-support-address"><strong>Ask a portal administrator</strong> about account issues, password reset failures, or anything blocking you from signing in. No support e-mail address has been set up for this portal yet; a global administrator can set one at Admin, Settings, Organisation.</li>
+            <?php endif; ?>
             <li><strong>Direct message a portal administrator</strong> for true emergencies only — data loss, suspected security issue, or login broken for everyone.</li>
         </ol>
     </div>

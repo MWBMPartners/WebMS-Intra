@@ -153,10 +153,43 @@ class Newsletter
         return $count;
     }
 
+    /** Why a newsletter cannot be sent: the portal has no address to write its links with. See cannotSendBecause(). */
+    public const NOT_SENT_NO_ADDRESS = 'no-address';
+
+    /**
+     * 🔗 Why a newsletter for this organisation cannot be sent right now, or
+     * '' when it can (#500).
+     *
+     * A newsletter is not sent without the portal's address: every copy must
+     * carry a working "unsubscribe" link, and that link is a whole address.
+     * The one reason today is NOT_SENT_NO_ADDRESS.
+     *
+     * WHY IT IS A QUESTION OF ITS OWN. dispatch() used to find this out
+     * alone and answer "sent 0, failed 0", exactly what it answers for an
+     * empty list. The page that called it had already marked the newsletter
+     * as "sending", so the sender was shown "Sending in progress" and a
+     * "Continue sending" button that could never finish, with no reason
+     * (independent check, 12 October 2026). The page now asks this BEFORE
+     * it locks anybody in or marks anything, and dispatch() gives the same
+     * answer to any caller that did not ask.
+     *
+     * WHAT IT CANNOT SAY: that the mail will be accepted. It answers only
+     * whether the links can be written.
+     */
+    public static function cannotSendBecause(int $siteId): string
+    {
+        return PortalAddress::absolute('unsubscribe', $siteId) === '' ? self::NOT_SENT_NO_ADDRESS : '';
+    }
+
     /**
      * Dispatch a newsletter via the configured provider. Returns
-     * ['sent' => N, 'failed' => N]. Caller is responsible for the
-     * status transition (sending → sent) afterwards.
+     * ['sent' => N, 'failed' => N, 'notSent' => why]. `notSent` is '' when a
+     * pass was made (even one that found nobody waiting), and one of the
+     * NOT_SENT_* reasons when nothing was tried at all; a caller must tell
+     * the sender that reason and not report it as "sent 0". Caller is
+     * responsible for the status transition (sending → sent) afterwards.
+     *
+     * @return array{sent: int, failed: int, notSent: string}
      */
     public static function dispatch(int $newsletterId, int $siteId): array
     {
@@ -174,7 +207,17 @@ class Newsletter
             $stmt->close();
         }
         if ($news === null) {
-            return ['sent' => 0, 'failed' => 0];
+            return ['sent' => 0, 'failed' => 0, 'notSent' => ''];
+        }
+        // 🔗 Not sent without the portal's address (#500): see
+        //    cannotSendBecause(). Nothing is sent and no recipient is
+        //    marked, so the same newsletter can be sent once the address is
+        //    set. The reason goes back to the caller AND into Admin, Errors.
+        $notSent = self::cannotSendBecause($siteId);
+        if ($notSent !== '') {
+            Logger::errorPlatform('Newsletter', 'Error', 'NO_PORTAL_ADDRESS', 'A newsletter was not sent, because the portal does not know its own web address, so its unsubscribe link could not be written. Set the address at Admin, Settings, Organisation.', 'newsletter #' . $newsletterId);
+
+            return ['sent' => 0, 'failed' => 0, 'notSent' => $notSent];
         }
         $subject = (string) ($news['subject'] ?? '') !== '' ? (string) $news['subject'] : (string) $news['title'];
         $html    = self::renderHtml($newsletterId, $siteId);
@@ -185,7 +228,7 @@ class Newsletter
             . 'LIMIT ?'
         );
         if ($rs === false) {
-            return ['sent' => 0, 'failed' => 0];
+            return ['sent' => 0, 'failed' => 0, 'notSent' => ''];
         }
         $rs->bind_param('ii', $newsletterId, $cap);
         $rs->execute();
@@ -231,7 +274,7 @@ class Newsletter
             $bump->close();
         }
 
-        return ['sent' => $sent, 'failed' => $failed];
+        return ['sent' => $sent, 'failed' => $failed, 'notSent' => ''];
     }
 
     /**
@@ -265,25 +308,35 @@ class Newsletter
     /**
      * Inject per-recipient tokens into the rendered HTML — unsubscribe URL,
      * open-tracking pixel (when enabled), click-tracking URL rewrites.
+     *
+     * Each of the three is a whole address from PortalAddress, for the
+     * newsletter's own organisation (#500). They used to be built on a
+     * private baseUrl() that took the host name from the request, so a
+     * newsletter sent in "first part of the address" mode lost its
+     * organisation's prefix. dispatch() refuses to send at all when there is
+     * no address, so the links here are never empty on that path; called any
+     * other way with no address, this returns the HTML untouched.
      */
     public static function personalise(string $html, int $newsletterId, int $recipientId, string $token, int $siteId): string
     {
         $settings = App::settings()['newsletter'] ?? [];
-        $base = self::baseUrl();
-        $unsub = $base . '/unsubscribe?token=' . urlencode($token);
+        $unsub = PortalAddress::absolute('unsubscribe?token=' . urlencode($token), $siteId);
+        if ($unsub === '') {
+            return $html;
+        }
 
         $html = str_replace('{{UNSUB_URL}}', htmlspecialchars($unsub, ENT_QUOTES, 'UTF-8'), $html);
 
         if ((string) ($settings['trackClicks'] ?? '0') === '1') {
             $html = preg_replace_callback(
                 '/href="(https?:[^"]+)"/i',
-                static function (array $m) use ($base, $newsletterId, $recipientId): string {
+                static function (array $m) use ($siteId, $newsletterId, $recipientId): string {
                     $target = $m[1];
                     if (strpos($target, '/unsubscribe') !== false) {
                         return $m[0];
                     }
-                    $wrapped = $base . '/newsletter/track/click?n=' . $newsletterId
-                        . '&r=' . $recipientId . '&u=' . urlencode($target);
+                    $wrapped = PortalAddress::absolute('newsletter/track/click?n=' . $newsletterId
+                        . '&r=' . $recipientId . '&u=' . urlencode($target), $siteId);
                     return 'href="' . htmlspecialchars($wrapped, ENT_QUOTES, 'UTF-8') . '"';
                 },
                 $html
@@ -291,7 +344,7 @@ class Newsletter
         }
 
         if ((string) ($settings['trackOpens'] ?? '0') === '1') {
-            $pixel = $base . '/newsletter/track/open?n=' . $newsletterId . '&r=' . $recipientId;
+            $pixel = PortalAddress::absolute('newsletter/track/open?n=' . $newsletterId . '&r=' . $recipientId, $siteId);
             $html .= '<img src="' . htmlspecialchars($pixel, ENT_QUOTES, 'UTF-8') . '" width="1" height="1" alt="" style="border:0;display:block;">';
         }
 
@@ -300,15 +353,6 @@ class Newsletter
             . '<a href="' . htmlspecialchars($unsub, ENT_QUOTES, 'UTF-8') . '" style="color:#888;">Unsubscribe</a>.</p>';
 
         return $html;
-    }
-
-    /**
-     * Resolve absolute URL base for outbound links (open / click / unsub).
-     */
-    public static function baseUrl(): string
-    {
-        $scheme = (($_SERVER['HTTPS'] ?? '') !== '' && (string) ($_SERVER['HTTPS'] ?? '') !== 'off') ? 'https' : 'http';
-        return $scheme . '://' . ((string) ($_SERVER['HTTP_HOST'] ?? 'localhost'));
     }
 
     /**
@@ -573,11 +617,12 @@ class Newsletter
                         $r = $stmt->get_result()->fetch_assoc();
                         $stmt->close();
                         if ($r !== null) {
-                            $url = self::baseUrl() . '/recordings/view?id=' . (int) $r['recordingID'];
+                            // A whole link for this organisation (#500); left out when there is no address to give.
+                            $url = PortalAddress::absolute('recordings/view?id=' . (int) $r['recordingID'], $siteId);
                             return '<h3 style="font-family:Arial,sans-serif;color:#1b2330;margin:24px 0 8px;">Latest sermon</h3>'
                                 . '<p><strong>' . $esc((string) $r['title']) . '</strong>'
                                 . ($r['presenterText'] !== null ? ' — ' . $esc((string) $r['presenterText']) : '')
-                                . '<br><a href="' . $esc($url) . '">Listen online</a></p>';
+                                . ($url === '' ? '' : '<br><a href="' . $esc($url) . '">Listen online</a>') . '</p>';
                         }
                     }
                 } catch (\Throwable $ignored) {

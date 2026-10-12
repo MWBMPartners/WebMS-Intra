@@ -503,7 +503,13 @@ class Mailer
                  . '</body></html>';
         }
         $portalName    = (string) ($SETTINGS['site']['name'] ?? 'WebMS Intra');
-        $portalUrl     = (string) ($SETTINGS['site']['url']  ?? '');
+        // 🔗 The footer's "Visit the portal" link. PortalAddress is the one
+        //    place that decides the address in a link the portal sends out
+        //    (#500). This used to read the `site.url` setting itself; nothing
+        //    seeded that setting, so the link was never shown. When there is
+        //    no address to give this is '', and the template leaves the link
+        //    out.
+        $portalUrl     = PortalAddress::absolute('');
         $supportEmail  = (string) ($SETTINGS['portal']['support']['email'] ?? '');
         // 🪞 Auto-wrap plain text in <p> tags so paragraphs render.
         $contentHtml = preg_match('/<[a-zA-Z][^>]*>/', $content) === 1

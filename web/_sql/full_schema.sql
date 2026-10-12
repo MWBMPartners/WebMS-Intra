@@ -3417,9 +3417,15 @@ INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
     ('help/support', 'help/support.php', 1)
 ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 
+-- The support address is seeded EMPTY (#500, migration 215). It used to be seeded
+-- with the address of the product's first customer, so every other customer's
+-- Help page told their members to write to somebody else's mailbox. It is typed
+-- at Admin, Settings, Organisation. The clause after ON DUPLICATE KEY writes
+-- nothing, on purpose: when the installer runs this file over a database that
+-- already exists, an address an administrator has saved must not be touched.
 INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
-    (NULL, 'portal.support.email', 'portal-support@millrdsdacambridge.uk', 'portal-support@millrdsdacambridge.uk', 0)
-ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+    (NULL, 'portal.support.email', '', '', 0)
+ON DUPLICATE KEY UPDATE `settingKey` = `settingKey`;
 
 -- 🛡️ Baseline security response headers (matches migration 061 / issue #160).
 INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
@@ -9937,4 +9943,27 @@ ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
 DELETE FROM `tblSettings` WHERE `settingKey` IN ('email.provider', 'email.from');
 
 INSERT INTO `tblMigrations` (`filename`) VALUES ('213_smtp_mail_route.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- ── from 215_portal_address.sql (roll-out package F4, #500) ──────────────────
+-- The portal's own web address: one installation-wide row, seeded EMPTY. Empty
+-- means "not set": links in e-mails then use the address of the request, and
+-- the admin dashboard asks for the address to be set (Admin, Settings,
+-- Organisation). web/_core/PortalAddress.php is the one place that reads it.
+-- The clause after ON DUPLICATE KEY writes nothing, on purpose: this row holds
+-- an address an administrator chose, and a seed must never change any part of
+-- it. Since migration 187 a unique key covers installation-wide rows, so
+-- loading this file again cannot add a second row.
+--
+-- The migration's other part, blanking the first customer's support address
+-- where a database still holds it, has nothing to do on a new database: the
+-- support address is seeded empty above (see the block copied from migration
+-- 062). On a database that already exists the installer replays migration 215
+-- after this file, and that is what blanks it there.
+
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'site.url', '', '', 0)
+ON DUPLICATE KEY UPDATE `settingKey` = `settingKey`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('215_portal_address.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;

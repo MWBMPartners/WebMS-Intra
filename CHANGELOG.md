@@ -2,6 +2,48 @@
 
 
 ## [Unreleased] (alpha)
+- **No web address is built in, and e-mailed links use the portal's set address (#500).** The portal's own address is now a setting (`site.url`), typed on a new "Web addresses" card at Admin → Settings → Organisation (global administrators only). Every link the portal sends out is built in one place, `Portal\Core\PortalAddress`: the set address, else the address of the request, else no link. Before this, a password reset asked for with a made-up host name mailed a working reset link pointing at that host; with the address set, that can no longer happen. **Until an administrator sets it, links still follow the request.** The admin dashboard says so, and gives a global administrator a **Use this address** button that sets it in one press.
+- A reminder for one organisation carries that organisation's own address ("own address each") or its own key ("first part of the address"), not the address of whoever started the job.
+- Expense e-mails now carry whole links. Their buttons used to be bare `/expenses/…` addresses, which open nothing from a mail program.
+- The support e-mail address is no longer seeded with the first customer's. It is typed on the same card; with none set, Help → Getting Support says so.
+- A newsletter that cannot be sent because the portal has no address now says so, with what to do, and is left as it was. It used to show "Sending in progress" and a "Continue sending" button that could never finish. The Recipients page now shows the result of every send ("Sent 12, failed 0"), which it never did.
+- The QR pictures on the forms list, the form page and the order-of-service page were broken on every installation: their address ended in `.php`, which the portal answers with "page not found". They now use the registered address `/qr`.
+- Migration 215 seeds `site.url` (empty) and blanks the old seeded support address wherever a database still holds it. **Type the support address again on the card after upgrading.**
+- `docs/openapi.yaml` is deleted (nothing read it; the served description is `web/_core/api-spec.json`).
+- `docs/day2-support.md` names the maintainer by GitHub username only.
+- `tools/audit-checks/check_no_hardcoded_domains.py`, with a pending list beside it, and `tools/portal-address-selftest.php` (93 checks).
+- **After upgrading: three things to do, and one thing to know (#500)**
+  1. **Set the portal's web address.** Sign in as a global administrator and open Admin. A notice says the
+     address has not been set and shows the address you reached the page at. If that is the address people
+     should use, press **Use this address**: one press saves it. Otherwise type it at Admin → Settings →
+     Organisation, "Web addresses".
+  2. **Until you do, a password-reset link follows whatever host name the request named.** Somebody can ask
+     "Forgot password" for another person's e-mail address while naming a host of their own, and that person
+     receives a genuine portal e-mail whose link points at the stranger's site. On ordinary shared hosting
+     the web server only passes on requests for names the account serves, so this cannot be reached. It CAN
+     be reached where the portal answers for any name: it is the server's default site, the account has a
+     wildcard alias, or something in front of it passes the name through. Setting the address closes it on
+     every kind of hosting. The same goes for invitation and erasure-confirmation links.
+  3. **Type your support e-mail address again**, on the same card. The address that used to be built in
+     belonged to the product's first customer, and this upgrade blanks it wherever a database still holds
+     it. Until one is typed, Help → Getting Support says none has been set, and e-mails carry no Support
+     link. An address you saved yourself is kept.
+  **With no usable address at all** (none set, and the request has no host name the portal can use: a job
+  started from a command line, or a Host header that is not a plain host name; or the setting cannot be
+  read from the database):
+  - NOT SENT, because the e-mail is nothing without its link: a password reset (the person is answered as
+    always; Admin → Errors records `RESET_NO_ADDRESS`), an invitation (the form says why and its button is
+    off), an erasure confirmation (the request is recorded and the page tells the person to ask an
+    administrator), an event invitation (the page says why), a giving statement (shown as a failed send),
+    and a newsletter (the page says why, and the newsletter stays as it was, not marked as sending;
+    Admin → Errors records `NO_PORTAL_ADDRESS`).
+  - SENT WITHOUT ITS LINK: task, venue and asset reminders, expense e-mails, approval requests and overdue
+    approvals, the prayer chain, the found-item report, the backup alert, and the "Visit the portal" link
+    at the foot of templated e-mails.
+  - Nothing is recorded as sent that was not. On an installation whose timed jobs are web requests
+    (`curl …/cron/…`), those jobs do have a request, so this state needs an unusual Host header or a
+    database fault to arise.
+  - Review of the built-in-address work (#500): one independent check by a fresh Claude agent standing in for Codex (with the address set, no trick made a secret-carrying link point elsewhere; one medium and three small faults), then one round of fixes with no second check. Run on MySQL 8.0.36 and 8.4.11; not on MariaDB, Apache or a real mail server. Not reviewed by Codex yet. Follow-ups: #600.
 - **Added: the portal can send its e-mail through an ordinary SMTP mailbox (#592, M2 of six).** A third route beside Microsoft 365 and Google, through the portal's own mail library. A global administrator types the mail server's name, port, kind of encryption, the mailbox's user name and password, the "from" details and an optional hourly limit at Admin, Integrations, Email, and chooses the route there. One route serves every organisation on the installation.
   - **The password** is stored encrypted and is never shown again. Leaving its box empty keeps it; a tick box removes it. Type it on that page: a password typed into the general Settings page's Edit box is stored there in plain text (#597) and is **not used**; the e-mail page then asks for it again.
   - **The mail server's certificate is always checked**, and there is no way to switch that off yet. If it fails, nothing is sent, the reason is in the send log in plain words, and the e-mail page shows a notice. The notice shows what the last attempt to reach the mail server found: it goes when a later attempt ends another way (a message is accepted, or it fails for a different reason). A message stopped before the mail server is tried (the hourly limit, a missing setting, a message that cannot be made into an e-mail) leaves it showing.

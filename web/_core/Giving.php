@@ -831,6 +831,23 @@ class Giving
         $charityNo   = (string) (App::settingForSite('giving.charityNumber', $siteId) ?? '');
         $subjectTpl  = (string) (App::settingForSite('giving.statements.emailSubject', $siteId) ?? 'Your {year} giving statement');
 
+        // 🔗 The "View Giving" button's address (#500), from PortalAddress,
+        //    the one place that decides the address in a link the portal
+        //    sends out, asked for THIS organisation (the sweep works through
+        //    every organisation in one run). It used to be built from the
+        //    request's host name ($_SERVER['HTTP_HOST'], or "localhost").
+        //    With no address to give the statement is NOT sent: the
+        //    template always shows the button, and a button that opens
+        //    nothing does not belong in a letter about somebody's money. It
+        //    is handled exactly like a send that failed, so the row can be
+        //    tried again once the address is set.
+        $portalUrl = PortalAddress::absolute('giving', $siteId);
+        if ($portalUrl === '') {
+            Logger::errorPlatform('GivingStatements', 'Error', 'NO_PORTAL_ADDRESS', 'A giving statement was not e-mailed, because the portal does not know its own web address. Set it at Admin, Settings, Organisation.', '');
+            self::rollbackStatementClaim($logId, 'no-portal-address');
+            return false;
+        }
+
         $periodLabel = self::periodLabel((string) $logRow['fromDate'], (string) $logRow['toDate']);
         $year        = date('Y', (int) strtotime((string) $logRow['toDate']));
         $subject     = str_replace(['{year}', '{period}', '{charity}'], [$year, $periodLabel, $charityName], $subjectTpl);
@@ -844,7 +861,7 @@ class Giving
             'periodLabel'   => $periodLabel,
             'charityName'   => $charityName,
             'charityNumber' => $charityNo,
-            'portalUrl'     => self::absoluteUrl('/giving'),
+            'portalUrl'     => $portalUrl,
         ];
 
         try {
@@ -902,20 +919,6 @@ class Giving
             $stmt->execute();
             $stmt->close();
         }
-    }
-
-    /**
-     * Absolute URL builder for statement emails — scheme+host resolution
-     * mirrors `venueReminderUrl()` in cron/venue-reminders.php. $_SERVER
-     * values come from the webserver/connection itself, never a request
-     * body.
-     */
-    private static function absoluteUrl(string $path): string
-    {
-        $https  = (string) ($_SERVER['HTTPS'] ?? '');
-        $scheme = ($https !== '' && $https !== 'off') ? 'https' : 'http';
-        $host   = (string) ($_SERVER['HTTP_HOST'] ?? 'localhost');
-        return $scheme . '://' . $host . $path;
     }
 
     /**

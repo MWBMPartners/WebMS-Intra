@@ -58,6 +58,7 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Mailer;
+use Portal\Core\PortalAddress;
 
 require_once __DIR__ . DIRECTORY_SEPARATOR . '_backup-freshness.php';
 
@@ -91,11 +92,15 @@ $alertsSent = 0;
 if ($state !== 'ok' && count($recipients) > 0) {
     $portalName = (string) (App::settings()['site']['name'] ?? 'WebMS Intra');
     $subject    = sprintf('[%s] Backup freshness alert: %s', $portalName, $state);
+    // 🔗 The "Review:" line is a whole link from PortalAddress (#500). It
+    //    used to read a `site.url` setting that nothing seeded, so the line
+    //    read "Review: /admin/maintenance/backup-check", which opens nothing
+    //    from a mail program. Left out when there is no address to give.
+    $reviewUrl  = PortalAddress::absolute('admin/maintenance/backup-check');
     $body       = $message . "\n\n"
                 . sprintf("Snapshot count: %d\n", count($snapshots))
                 . sprintf("Threshold: %d hours\n", $thresholdHours)
-                . "\nReview: " . (string) (App::settings()['site']['url'] ?? '')
-                . "/admin/maintenance/backup-check\n";
+                . ($reviewUrl === '' ? '' : "\nReview: " . $reviewUrl . "\n");
     foreach ($recipients as $to) {
         try {
             if (Mailer::send($to, $subject, $body) === true) {

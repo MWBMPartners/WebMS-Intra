@@ -57,6 +57,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <a href="#giving-records" class="badge text-bg-secondary text-decoration-none">Giving Records and Erasure</a>
             <a href="#logs" class="badge text-bg-secondary text-decoration-none">Viewing Logs</a>
             <a href="#csv-export" class="badge text-bg-secondary text-decoration-none">CSV Export</a>
+            <a href="#web-addresses" class="badge text-bg-secondary text-decoration-none">The Portal&rsquo;s Web Address</a>
             <a href="#smtp-mailbox" class="badge text-bg-secondary text-decoration-none">SMTP Mailbox</a>
             <a href="#ms365-shared-mailbox" class="badge text-bg-secondary text-decoration-none">MS365 Shared Mailbox</a>
             <a href="#server-info" class="badge text-bg-secondary text-decoration-none">Server Information</a>
@@ -715,6 +716,37 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     </ul>
 
     <p>To export, click the <span class="badge text-bg-success"><i class="fa-solid fa-file-csv me-1"></i>Export CSV</span> button located near the top of the relevant list. The file will download to your browser's default downloads folder.</p>
+</div>
+
+<!-- Section: The portal's own web address (#500).
+     Every statement here is held true by tools/portal-address-selftest.php. If
+     the "Web addresses" card at Admin, Settings, Organisation changes, change
+     this with it. -->
+<div class="portal-card p-4 mb-4" id="web-addresses">
+    <h2 class="h4 mb-3"><i class="fa-solid fa-globe me-2 text-primary"></i>The Portal&rsquo;s Web Address</h2>
+
+    <p>The portal needs to be told the address people type to reach it, for example <code>https://portal.example.org</code>. Every link in an e-mail it sends begins with that address: a password reset, an invitation, a reminder.</p>
+
+    <h3 class="h5 mt-4 mb-3">Setting it</h3>
+    <ol class="mb-3">
+        <li class="mb-2">Go to <a href="/admin/settings/organisation">Admin, Settings, Organisation</a> and find <strong>Web addresses</strong>. Only a global administrator can save it.</li>
+        <li class="mb-2">Type the address with nothing after the name: no folder and no page. The card shows the address you are using right now, which is usually the one to type.</li>
+        <li class="mb-2">The same card holds the <strong>support e-mail address</strong> shown on the Help page &ldquo;Getting Support&rdquo; and at the foot of e-mails. Leave it empty to show none.</li>
+    </ol>
+    <p>There is a quicker way while no address is set. The Admin dashboard then shows a notice, and a global administrator sees in it the address they reached the dashboard at and a <strong>Use this address</strong> button. One press saves that address through the same checks as the card, and leaves the support e-mail address as it is. Check the address shown is the one people should use before pressing.</p>
+
+    <h3 class="h5 mt-4 mb-3">Why it matters</h3>
+    <ul class="mb-3">
+        <li><strong>Until it is set</strong>, each link is built from the address of whatever request caused the e-mail. A visitor chooses that, so somebody could ask for a password reset for another person and have the link in that person&rsquo;s e-mail point at a site of their own. The admin dashboard shows a notice until the address is set.</li>
+        <li><strong>If the portal moves</strong> to a new address, change it here. The dashboard says when the stored address is not the one you reached it at.</li>
+        <li>Where each organisation has an address of its own, a link for an organisation uses that organisation&rsquo;s own name. The address here still decides whether links begin with <code>http</code> or <code>https</code>.</li>
+    </ul>
+
+    <h3 class="h5 mt-4 mb-3">What it does not do</h3>
+    <ul class="mb-0">
+        <li>It does not move the portal or change what address reaches it. That is set with your hosting company.</li>
+        <li>It does not check that the address works. If it is mistyped, e-mails still go and their links open nothing.</li>
+    </ul>
 </div>
 
 <!-- Section: Sending e-mail through an SMTP mailbox (#592).

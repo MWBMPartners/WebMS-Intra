@@ -97,6 +97,7 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\Logger;
 use Portal\Core\Mailer;
+use Portal\Core\PortalAddress;
 use Portal\Core\Settings;
 use Portal\Core\Site;
 
@@ -122,17 +123,15 @@ if ((string) Settings::get('user_reminders.enabled', '1') !== '1') {
 $db = App::db();
 
 // -----------------------------------------------------------------------------
-// 🔗 Absolute link builder for reminder emails — scheme+host resolution
-// mirrors `venueReminderUrl()` in cron/venue-reminders.php. $_SERVER
-// values come from the webserver/connection itself, never a request body.
+// 🔗 The link in each reminder comes from PortalAddress::linkHtml(), for the
+// organisation whose reminder it is (#500). This file used to hold a helper
+// of its own that put the request's host name in front of the page
+// ($_SERVER['HTTP_HOST'], or "localhost" when there was none). This job is
+// started by ONE request and works through EVERY organisation, so that gave
+// organisation B the address of whoever started the job, and no "/<B's
+// key>/" where organisations are told apart by the first part of the
+// address. With no address to give, the reminder still goes, without a link.
 // -----------------------------------------------------------------------------
-function userReminderUrl(string $path): string
-{
-    $https  = (string) ($_SERVER['HTTPS'] ?? '');
-    $scheme = ($https !== '' && $https !== 'off') ? 'https' : 'http';
-    $host   = (string) ($_SERVER['HTTP_HOST'] ?? 'localhost');
-    return $scheme . '://' . $host . $path;
-}
 
 /**
  * Does this user's notifyPrefs JSON allow sending under $key? Default-on:
@@ -346,13 +345,12 @@ foreach ($siteIds as $siteId) {
                     $desc = mb_substr($desc, 0, 300) . '…';
                 }
                 $descEsc = htmlspecialchars($desc, ENT_QUOTES, 'UTF-8');
-                $url     = htmlspecialchars(userReminderUrl('/tasks?edit=' . $taskId), ENT_QUOTES, 'UTF-8');
 
                 $subject = '⏰ Task reminder: ' . $title;
                 $body = '<p><strong>' . $titleEsc . '</strong> (' . $priorityEsc . ' priority)'
                       . ($dueDateEsc !== null ? ' — due ' . $dueDateEsc : '') . '</p>'
                       . ($descEsc !== '' ? '<p>' . nl2br($descEsc) . '</p>' : '')
-                      . '<p><a href="' . $url . '">View this task</a></p>';
+                      . PortalAddress::linkHtml('tasks?edit=' . $taskId, 'View this task', $siteId);
 
                 $mailed = 0;
                 $email  = (string) $t['emailAddress'];
@@ -447,10 +445,9 @@ foreach ($siteIds as $siteId) {
                 }
                 $n = count($group['slots']);
                 $subject = '📅 Rota reminder: ' . $n . ' upcoming ' . ($n === 1 ? 'duty' : 'duties');
-                $url     = htmlspecialchars(userReminderUrl('/rota'), ENT_QUOTES, 'UTF-8');
                 $body = '<p>You have ' . $n . ' upcoming ' . ($n === 1 ? 'duty' : 'duties') . ':</p>'
                       . '<ul>' . implode('', $lines) . '</ul>'
-                      . '<p><a href="' . $url . '">View the rota</a></p>';
+                      . PortalAddress::linkHtml('rota', 'View the rota', $siteId);
 
                 $mailed = 0;
                 if (filter_var($group['email'], FILTER_VALIDATE_EMAIL) !== false
@@ -540,10 +537,9 @@ foreach ($siteIds as $siteId) {
                     }
 
                     $subject = "🎂 Today's milestones — " . date('j M');
-                    $url     = htmlspecialchars(userReminderUrl('/milestones'), ENT_QUOTES, 'UTF-8');
                     $body = '<p>Today\'s milestones:</p>'
                           . '<ul>' . implode('', $lines) . '</ul>'
-                          . '<p><a href="' . $url . '">View Milestones</a></p>';
+                          . PortalAddress::linkHtml('milestones', 'View Milestones', $siteId);
 
                     $recipients = resolveMilestoneDigestRecipients($db, $siteId, $recipientsCsv);
                     $sent = 0;

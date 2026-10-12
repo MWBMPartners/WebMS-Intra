@@ -25,6 +25,11 @@
  *     blocked from signing in can still ask for a link. See section 2.
  *
  * WHAT THIS CANNOT DO
+ *   - While the portal's own web address has NOT been set (Admin, Settings,
+ *     Organisation), the link in the e-mail carries whatever host name the
+ *     request named, made-up or not. Once it is set, the link carries the
+ *     set address whatever the request says. See section 6 and
+ *     web/_core/PortalAddress.php (#500).
  *   - On a host where the answer cannot be sent early, the time it takes
  *     still gives a known address away.
  *   - "Sent" on screen is not proof of delivery. Mailer::canSend() reads
@@ -51,6 +56,7 @@ use Portal\Core\Auth;
 use Portal\Core\Captcha;
 use Portal\Core\Logger;
 use Portal\Core\Mailer;
+use Portal\Core\PortalAddress;
 use Portal\Core\RateLimiter;
 
 // -----------------------------------------------------------------------------
@@ -276,6 +282,23 @@ try {
 // 6. 📨 Send reset email (if a mail route is set up)
 // -----------------------------------------------------------------------------
 
+// 🔗 The reset link. PortalAddress is the ONE place that decides the address
+//    in a link the portal sends out (#500).
+//
+//    WHAT WAS WRONG. The link was built from the request's own Host header,
+//    which the visitor chooses. Anybody could ask for a reset for somebody
+//    else's e-mail address with a made-up host name, and the portal mailed
+//    that person a WORKING link pointing at the made-up host (shown by a
+//    check on 12 October 2026). Whoever ran that host only had to wait for
+//    the click to have the link.
+//
+//    NOW the link carries the address an administrator set (the `site.url`
+//    setting), whatever the request says. Only while none is set does it
+//    still use the request's host name; the admin dashboard asks for the
+//    address to be set until it is. Do not build this link from $_SERVER
+//    again.
+$resetLink = PortalAddress::absolute('reset-password?token=' . urlencode($plaintextToken));
+
 // 🧭 Mailer::canSend() is the one place that knows whether mail can go out.
 //
 //    WHAT WAS WRONG (#580). This page used to test for a Microsoft 365 client
@@ -283,12 +306,21 @@ try {
 //    has neither, so it was told "sent" and nothing was sent, although the
 //    Google route worked. Do not put a test of a provider's settings back
 //    here: a new mail route is taught to Mailer, and this page then follows.
-if (Mailer::canSend() === true) {
-    // 🔗 Build the reset link
-    $protocol  = (isset($_SERVER['HTTPS']) === true && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
-    $host      = $_SERVER['HTTP_HOST'] ?? 'localhost';
-    $resetLink = $protocol . '://' . $host . '/reset-password?token=' . urlencode($plaintextToken);
-
+if ($resetLink === '') {
+    // 📝 No address to give: none is set and the request named no usable
+    //    host, or the setting could not be read. A link to nowhere is worse
+    //    than no e-mail, so nothing is sent. The person has had the usual
+    //    answer; the administrator gets the reason. (The link stored in
+    //    section 5 is simply never used and runs out by itself.)
+    Logger::errorPlatform(
+        'Mailer',
+        'Error',
+        'RESET_NO_ADDRESS',
+        'A password reset e-mail was not sent, because the portal does not know its own web address. Set it at Admin, Settings, Organisation.',
+        ''
+    );
+    Logger::activity('PasswordResetMailFailed', 'Reset email not sent (the portal\'s web address is not known) for: ' . $email);
+} elseif (Mailer::canSend() === true) {
     $siteName = App::settings('site.name') ?? 'Portal';
     $userName = htmlspecialchars($user['fullName'] ?? 'User', ENT_QUOTES, 'UTF-8');
 

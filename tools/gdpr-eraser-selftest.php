@@ -443,6 +443,10 @@ $coreDir = dirname(__DIR__) . DIRECTORY_SEPARATOR . 'web' . DIRECTORY_SEPARATOR 
 require_once $coreDir . 'App.php';
 require_once $coreDir . 'GivingRetention.php';
 require_once $coreDir . 'GdprEraser.php';
+// GdprEraser::fileRequest() asks PortalAddress for the address in the
+// confirmation e-mail's link (#500). Without this line that call stops with
+// "class not found".
+require_once $coreDir . 'PortalAddress.php';
 // For sections 11 to 13: the tax claim file and the statement list
 // (Giving), the activity log the job writes to (Logger, which asks Site for
 // the organisation), and the scheduled job's own code.
@@ -2902,7 +2906,10 @@ ge_section('10', 'Filing a request, and an administrator confirming one on the p
 $mysqli->query('SET FOREIGN_KEY_CHECKS = 0');
 ge_user(P_T, 'Tam Tenth', 'tam.tenth@selftest.invalid');
 $mysqli->query('SET FOREIGN_KEY_CHECKS = 1');
-unset($_SERVER['HTTP_HOST']); // no address to build a link from, so no email is attempted here
+// No address to build a link from, so no email is attempted here: the request
+// names no host, and this throwaway database has no portal address set (the
+// install script seeds `site.url` empty). PortalAddress then gives nothing.
+unset($_SERVER['HTTP_HOST']);
 $fullRequest = static fn (int $requestId): ?array => ge_one('SELECT * FROM tblErasureRequest WHERE requestID = ?', 'i', [$requestId]);
 
 $ordinary    = GdprEraser::fileRequest(1, P_T);

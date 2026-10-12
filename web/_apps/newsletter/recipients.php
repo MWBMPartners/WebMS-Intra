@@ -82,6 +82,15 @@ if ($newsletterStatus === 'sending') {
 }
 $csrf = Auth::csrfToken();
 
+// 🚩 What the send page has to say. /newsletter/send always comes back here,
+//    and this page used to show nothing of its message: "Sent 3, failed 0"
+//    and, worse, "not sent, and why" (#500) turned up later on whichever
+//    page next happened to print a message. Read and cleared here, so it is
+//    shown once, where the sender is looking.
+$flashMsg  = (string) ($_SESSION['flash_msg'] ?? '');
+$flashType = (string) ($_SESSION['flash_type'] ?? 'info');
+unset($_SESSION['flash_msg'], $_SESSION['flash_type']);
+
 $pageTitle   = 'Recipients';
 $pageSection = 'newsletter';
 $breadcrumbs = ['Dashboard' => '/', 'Newsletter' => '/newsletter', 'Recipients' => ''];
@@ -89,6 +98,12 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 ?>
 
 <h1 class="mb-3"><i class="fa-solid fa-users me-2"></i>Recipients — <?php echo htmlspecialchars((string) $news['title'], ENT_QUOTES, 'UTF-8'); ?></h1>
+
+<?php if ($flashMsg !== ''): ?>
+    <div class="alert alert-<?php echo htmlspecialchars($flashType, ENT_QUOTES, 'UTF-8'); ?>" role="alert" id="newsletter-send-result">
+        <?php echo htmlspecialchars($flashMsg, ENT_QUOTES, 'UTF-8'); ?>
+    </div>
+<?php endif; ?>
 
 <?php if ($newsletterStatus === 'sending'): ?>
     <div class="alert alert-warning d-flex justify-content-between align-items-center flex-wrap gap-2">

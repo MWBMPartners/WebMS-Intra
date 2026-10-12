@@ -63,7 +63,9 @@ declare(strict_types=1);
 
 use Portal\Core\AccountGuard;
 use Portal\Core\App;
+use Portal\Core\Auth;
 use Portal\Core\Channel;
+use Portal\Core\PortalAddress;
 use Portal\Core\ReservedKeys;
 use Portal\Core\Router;
 use Portal\Core\Site;
@@ -370,6 +372,128 @@ $showChannelNote = ($channelSource === Channel::SOURCE_ASSUMED || $channelSource
     <?php endif; ?>
     <p class="mb-1 small">To settle it, ask whoever looks after the hosting to create a plain text file named <code>.channel</code> beside the <code>_core</code> folder, holding one word on its first line: <code>live</code>, <code>beta</code>, <code>alpha</code> or <code>dev</code>. Setting <code>PORTAL_ENV</code> to that word on the server does the same. A word the portal does not know counts as not being there.</p>
     <p class="mb-0 small"><strong>Where several copies share one <code>_core</code> folder, do not create the file:</strong> it would speak for every copy. Keep the web folders named <code>public_html</code>, <code>public_html_beta</code> and <code>public_html_dev</code>, or give each its own <code>PORTAL_ENV</code>.</p>
+</div>
+<?php endif; ?>
+<?php
+// 🌐 The portal's own web address (#500). Two notices, and at most one of
+// them at a time.
+//
+//   NOT SET (or stored as something unusable, which the portal ignores):
+//   every link in an e-mail is then built from the address of whatever
+//   request caused the e-mail. This is the notice that gets the address
+//   set; until then a password-reset link can be pointed at a stranger's
+//   site.
+//
+//   SET, BUT NOT WHERE YOU ARE: links for this organisation begin with one
+//   address and this page was reached at another. That is how a portal that
+//   has moved, or a mistyped address, shows itself: the e-mails still go and
+//   their links open nothing.
+//
+// WHO SEES THEM: everybody who can open this page (administrators only, see
+// the top of the file), because every organisation's e-mails are affected.
+// Only a global administrator can change the address, so only they are
+// offered a way to; anybody else is told whom to ask.
+//
+// WHAT THE FIRST NOTICE SAYS, AND WHY IT IS BUILT FROM PARTS. It has to read
+// true in every state, and it did not (independent check, 12 October 2026):
+//   - "a visitor can choose that" was left out in "own address each" mode
+//     whatever the default organisation held, although a visitor CAN choose
+//     the host name there when the default organisation has no address of
+//     its own. PortalAddress::visitorCanChooseHost() now decides, beside the
+//     code that builds the links.
+//   - the "not usable" wording ran straight into "Until it is, a link…",
+//     a sentence written for "has not been set". Each wording now has its
+//     own "until": set, or corrected.
+//
+// THE "USE THIS ADDRESS" BUTTON ends the risk in one press: it sends the
+// address this page was reached at to the card's own save handler
+// (admin/settings/organisation/save), which checks the form token, that the
+// sender is a global administrator and the address itself, and writes the
+// activity-log line. Nothing is saved from this page. The button is left
+// out, with the reason in words, when:
+//   - the reader is not a global administrator (the handler would refuse);
+//   - the address this page was reached at is not one PortalAddress accepts
+//     (fromRequest() gives '' for a Host header that is not a plain host
+//     name), so there is nothing that could be saved;
+//   - in "own address each" mode, the default organisation has no address of
+//     its own and this page was reached at ANOTHER organisation's own
+//     address. The default organisation uses the portal's address as its
+//     own, so saving this one would point its links at the wrong
+//     organisation, and nothing afterwards would notice.
+// WHAT THE BUTTON CANNOT KNOW: whether the address in use is the one people
+// should reach the portal at. Somebody who reached this page by an odd name
+// (a server's own name, an address from inside the building) would save
+// that. The notice shows the address beside the button for that reason, and
+// the second notice below appears afterwards for anybody who arrives by a
+// different one.
+//
+// Everything comes from PortalAddress, which reads the setting and judges
+// it. It does not throw: a read that failed is the state "unreadable", and
+// that shows no notice here (the Errors card and the log carry it).
+$addressState    = PortalAddress::state();
+$addressHere     = PortalAddress::fromRequest();
+$addressForOrg   = PortalAddress::base($siteId);
+$ownAddressEach  = Site::isMultisiteEnabled() === true && Site::detectionMode() === Site::MODE_HOST;
+$addressUnusable = ($addressState === PortalAddress::STATE_UNUSABLE);
+$addressNotSet   = ($addressState === PortalAddress::STATE_NOT_SET || $addressUnusable === true);
+$addressDiffers  = ($addressState === PortalAddress::STATE_SET && $addressHere !== '' && $addressForOrg !== $addressHere);
+$addressPage     = htmlspecialchars(Router::url('admin/settings/organisation') . '#web-addresses', ENT_QUOTES, 'UTF-8');
+$hostCanBeChosen = PortalAddress::visitorCanChooseHost();
+// "Until it is set" or "Until it is corrected": the two wordings of the first sentence each need their own.
+$addressUntil    = $addressUnusable === true ? 'Until it is corrected' : 'Until it is set';
+$addressVerb     = $addressUnusable === true ? 'correct' : 'set';
+$addressDone     = $addressUnusable === true ? 'corrected' : 'set';
+// Another organisation's own address, where saving it would be wrong (the third case above).
+$addressIsAnothers = ($ownAddressEach === true && $hostCanBeChosen === true && $siteId !== PortalAddress::DEFAULT_SITE_ID);
+$addressOffer      = ($isUmbrella === true && $addressHere !== '' && $addressIsAnothers === false);
+?>
+<?php if ($addressNotSet === true): ?>
+<?php // No <div> inside this one: tools/portal-address-selftest.php reads the notice up to its first closing </div>. ?>
+<div class="alert alert-warning small text-break" role="alert" id="portal-address-not-set">
+    <i class="fa-solid fa-triangle-exclamation me-1"></i>
+    <?php if ($addressUnusable === true): ?>
+    <strong>What is stored as the portal's web address is not a usable address, so it is being ignored.</strong>
+    <?php else: ?>
+    <strong>The portal's web address has not been set.</strong>
+    <?php endif; ?>
+    <?php if ($hostCanBeChosen === true): ?>
+    <?php echo $addressUntil; ?>, a link in an e-mail (a password reset, an invitation) is built from the address of whatever request caused the e-mail, and a visitor can choose that.
+    <?php else: ?>
+    <?php echo $addressUntil; ?>, links in e-mails carry each organisation's own address, but whether they begin with http or https, and any port, comes from whatever request caused the e-mail.
+    <?php endif; ?>
+    <?php if ($isUmbrella === false): ?>
+    Ask a global administrator to <?php echo $addressVerb; ?> it at Settings, Organisation.
+    <?php elseif ($addressOffer === true): ?>
+    You reached this page at <code><?php echo htmlspecialchars($addressHere, ENT_QUOTES, 'UTF-8'); ?></code>. If that is the address people should use, one press sets it.
+    <form method="post" action="<?php echo htmlspecialchars(Router::url('admin/settings/organisation/save'), ENT_QUOTES, 'UTF-8'); ?>" class="d-flex flex-wrap align-items-center gap-2 mt-2 mb-0" id="portal-address-use-this">
+        <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
+        <input type="hidden" name="form" value="web-addresses">
+        <input type="hidden" name="portalAddress" value="<?php echo htmlspecialchars($addressHere, ENT_QUOTES, 'UTF-8'); ?>">
+        <button type="submit" class="btn btn-warning btn-sm"><i class="fa-solid fa-check me-1"></i>Use this address</button>
+        <a href="<?php echo $addressPage; ?>" class="alert-link">or type a different one at Settings, Organisation</a>
+    </form>
+    <?php elseif ($addressHere === ''): ?>
+    It cannot be <?php echo $addressDone; ?> in one press from here, because the address you reached this page at is not a plain host name the portal can store.
+    <a href="<?php echo $addressPage; ?>" class="alert-link">Type it at Settings, Organisation</a>.
+    <?php else: ?>
+    You reached this page at <code><?php echo htmlspecialchars($addressHere, ENT_QUOTES, 'UTF-8'); ?></code>, which is this organisation's own address and not the portal's. The default organisation has no address of its own and uses the portal's, so it cannot be <?php echo $addressDone; ?> in one press from here.
+    <a href="<?php echo $addressPage; ?>" class="alert-link">Type it at Settings, Organisation</a>.
+    <?php endif; ?>
+</div>
+<?php elseif ($addressDiffers === true): ?>
+<div class="alert alert-warning small text-break" role="alert" id="portal-address-differs">
+    <i class="fa-solid fa-triangle-exclamation me-1"></i>
+    <?php if ($addressForOrg === ''): ?>
+    <strong>This organisation has no address of its own stored</strong>, so e-mails about it are sent without links.
+    <?php else: ?>
+    <strong>Links in e-mails begin with <code><?php echo htmlspecialchars($addressForOrg, ENT_QUOTES, 'UTF-8'); ?></code></strong>,
+    but you reached this page at <code><?php echo htmlspecialchars($addressHere, ENT_QUOTES, 'UTF-8'); ?></code>. If the second one is right, the first needs correcting.
+    <?php endif; ?>
+    <?php if ($isUmbrella === true): ?>
+    <a href="<?php echo $addressPage; ?>" class="alert-link">Check it at Settings, Organisation</a><?php echo $ownAddressEach === true ? ', and this organisation\'s own address at Admin, Organisations' : ''; ?>.
+    <?php else: ?>
+    Ask a global administrator to check it.
+    <?php endif; ?>
 </div>
 <?php endif; ?>
 <?php if ($dbStrictness['state'] !== 'ok'): ?>

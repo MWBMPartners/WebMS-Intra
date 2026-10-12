@@ -283,18 +283,19 @@ final class MailRoutes
      * The name this portal gives when it introduces itself to the mail server.
      *
      * Mail servers expect the client's own host name. It is taken from the
-     * portal's address (`site.url`), or failing that from the domain of the
-     * "from" address. REJECTED: the Host header of the request. A visitor
-     * chooses that, and a name the library does not accept would make every
-     * send answer "not set up". When neither gives a usable name the library's
-     * own default ("localhost") is used, which mail servers accept.
+     * portal's address as an administrator SET it (PortalAddress::saved(),
+     * the one reader of the `site.url` setting, #500), or failing that from
+     * the domain of the "from" address. REJECTED: the Host header of the
+     * request, which is why this asks for the saved address and not
+     * PortalAddress::base(). A visitor chooses that header, and a name the
+     * library does not accept would make every send answer "not set up". When
+     * neither gives a usable name the library's own default ("localhost") is
+     * used, which mail servers accept.
      */
     private static function clientName(string $fromAddress): string
     {
-        global $SETTINGS;
-
         $candidates = [
-            (string) parse_url((string) ($SETTINGS['site']['url'] ?? ''), PHP_URL_HOST),
+            (string) parse_url(PortalAddress::saved(), PHP_URL_HOST),
             (string) substr((string) strrchr($fromAddress, '@'), 1),
         ];
         foreach ($candidates as $name) {

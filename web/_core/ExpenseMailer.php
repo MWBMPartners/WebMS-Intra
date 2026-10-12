@@ -14,6 +14,12 @@
  * Uses Mailer::send() (Microsoft Graph) with graceful fallback if
  * email is not configured (logs warning, does not throw).
  *
+ * THE BUTTONS ARE WHOLE LINKS (#500). They used to be written as
+ * `href="/expenses/view?id=…"`. A mail program has no site to add in front
+ * of an address like that, so the button opened nothing. linkHtml() below
+ * now asks PortalAddress for the whole address, for the claim's own
+ * organisation, and leaves the button out when there is none to give.
+ *
  * @package   Portal\Core
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
@@ -109,7 +115,7 @@ class ExpenseMailer
                     'New Expense Claim Submitted',
                     '<p>A new expense claim has been submitted and requires your review.</p>'
                     . self::claimSummaryHtml($claimID, $claimTitle, $claimant, $dept, $total, $claimDate)
-                    . '<p><a href="/expenses/approve" style="' . self::btnStyle() . '">Review Claims</a></p>'
+                    . self::linkHtml('expenses/approve', 'Review Claims', $siteId)
                 );
                 break;
 
@@ -128,7 +134,7 @@ class ExpenseMailer
                     '<p>Your expense claim has been <strong style="color:#198754">approved</strong> by ' . $approverName . '.</p>'
                     . self::claimSummaryHtml($claimID, $claimTitle, $claimant, $dept, $total, $claimDate)
                     . (($extra['comments'] ?? '') !== '' ? '<p><strong>Comments:</strong> ' . htmlspecialchars($extra['comments'], ENT_QUOTES, 'UTF-8') . '</p>' : '')
-                    . '<p><a href="/expenses/view?id=' . $claimID . '" style="' . self::btnStyle() . '">View Claim</a></p>'
+                    . self::linkHtml('expenses/view?id=' . $claimID, 'View Claim', $siteId)
                 );
                 break;
 
@@ -142,7 +148,7 @@ class ExpenseMailer
                     '<p>Your expense claim has been <strong style="color:#dc3545">declined</strong> by ' . $approverName . '.</p>'
                     . self::claimSummaryHtml($claimID, $claimTitle, $claimant, $dept, $total, $claimDate)
                     . (($extra['comments'] ?? '') !== '' ? '<p><strong>Reason:</strong> ' . htmlspecialchars($extra['comments'], ENT_QUOTES, 'UTF-8') . '</p>' : '')
-                    . '<p><a href="/expenses/view?id=' . $claimID . '" style="' . self::btnStyle() . '">View Claim</a></p>'
+                    . self::linkHtml('expenses/view?id=' . $claimID, 'View Claim', $siteId)
                 );
                 break;
 
@@ -171,7 +177,7 @@ class ExpenseMailer
                     . self::claimSummaryHtml($claimID, $claimTitle, $claimant, $dept, $total, $claimDate)
                     . '<p>If you have not received payment within <strong>' . $followUp . ' working days</strong>, '
                     . 'please contact the treasury team.</p>'
-                    . '<p><a href="/expenses/view?id=' . $claimID . '" style="' . self::btnStyle() . '">View Claim</a></p>'
+                    . self::linkHtml('expenses/view?id=' . $claimID, 'View Claim', $siteId)
                 );
                 break;
 
@@ -201,6 +207,23 @@ class ExpenseMailer
             // 🔇 Don't let email failure break the workflow
             Logger::errorPlatform('ExpenseMailer', 'Error', 'SEND_FAIL', 'Failed to send ' . $event . ' email for claim #' . $claimID, $e->getMessage());
         }
+    }
+
+    /**
+     * 🔗 One button of an expense e-mail, as a whole link for ONE
+     * organisation, or '' when the portal has no address to give. See the
+     * file header for why a bare "/expenses/…" is never written here.
+     *
+     * @param string $route  The page, as PortalAddress::absolute() takes it.
+     * @param string $label  The button's words. Fixed text from this file, never anything typed by a person.
+     */
+    private static function linkHtml(string $route, string $label, int $siteId): string
+    {
+        $url = PortalAddress::absolute($route, $siteId);
+
+        return $url === ''
+            ? ''
+            : '<p><a href="' . htmlspecialchars($url, ENT_QUOTES, 'UTF-8') . '" style="' . self::btnStyle() . '">' . $label . '</a></p>';
     }
 
     /**

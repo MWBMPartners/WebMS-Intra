@@ -1,7 +1,7 @@
 # Day-2 Support Contract
 
 **Status:** Active from first congregation rollout.
-**Owner:** Lance Salem (Mill Rd Cambridge SDA portal admin).
+**Owner:** Salem874 (Mill Rd Cambridge SDA portal admin).
 **Last reviewed:** 2026-05-31.
 
 This is a short, deliberately realistic statement of how problems with the portal are handled in production. It is NOT a vendor SLA — it sets expectations between maintainers and users.
@@ -11,15 +11,15 @@ This is a short, deliberately realistic statement of how problems with the porta
 | Channel | What for |
 |---|---|
 | In-portal feedback link (footer → "Report a problem") | Anything: bugs, confusion, suggestions |
-| Email `portal-support@millrdsdacambridge.uk` | Account issues, password reset failures |
-| Direct message to Lance | True emergencies only (data loss, security) |
+| The support e-mail address shown at Help → Support in your portal (an administrator sets it at Admin → Settings → Organisation) | Account issues, password reset failures |
+| Direct message to Salem874 | True emergencies only (data loss, security) |
 
 In-portal reports are preferred — they include the user, page, browser, and a screenshot automatically.
 
 ## 2. Triage owner
 
-**Primary:** Lance (reads inbox at least once per weekday).
-**Backup (when Lance is unavailable):** TBD before rollout.
+**Primary:** Salem874 (reads inbox at least once per weekday).
+**Backup (when Salem874 is unavailable):** TBD before rollout.
 
 Backup needs documented contact + the ability to disable the portal (set `portal.maintenance.active = '1'`) if something goes badly wrong.
 

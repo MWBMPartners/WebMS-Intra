@@ -84,6 +84,7 @@ use Portal\Core\Auth;
 use Portal\Core\Captcha;
 use Portal\Core\Logger;
 use Portal\Core\Mailer;
+use Portal\Core\PortalAddress;
 use Portal\Core\RateLimiter;
 use Portal\Core\Router;
 use Portal\Core\Site;
@@ -290,13 +291,20 @@ try {
         $safeName      = $reporterName !== '' ? htmlspecialchars($reporterName, ENT_QUOTES, 'UTF-8') : 'Someone';
         $safeContact   = $reporterContact !== '' ? htmlspecialchars($reporterContact, ENT_QUOTES, 'UTF-8') : 'no contact details given';
         $safeMessage   = $message !== '' ? nl2br(htmlspecialchars($message, ENT_QUOTES, 'UTF-8')) : '';
-        $host          = htmlspecialchars((string) ($_SERVER['HTTP_HOST'] ?? ''), ENT_QUOTES, 'UTF-8');
 
         $body = '<p><strong>' . $safeName . '</strong> reported finding <strong>' . $safeAssetName
               . '</strong> via its public lost-and-found page.</p>'
               . '<p><strong>Contact:</strong> ' . $safeContact . '</p>'
               . ($safeMessage !== '' ? '<p><strong>Message:</strong><br>' . $safeMessage . '</p>' : '')
-              . ($host !== '' ? '<p><a href="https://' . $host . '/assets/found-reports">Review found-item reports</a></p>' : '');
+              // 🔗 A whole link for this organisation, from PortalAddress (#500).
+              //    This page is PUBLIC, and the link used to be built from the
+              //    request's own host name: a stranger could post the form with a
+              //    made-up host and have every asset manager mailed a "review"
+              //    link to a site of the stranger's choosing. Once the portal's
+              //    address is SET, the link uses that whatever the request says
+              //    (until then it still follows the request: see PortalAddress).
+              //    Left out when there is no address to give.
+              . PortalAddress::linkHtml('assets/found-reports', 'Review found-item reports', $siteIdForNotify);
 
         while ($mRow = $mResult->fetch_assoc()) {
             $recipientEmail = (string) ($mRow['email'] ?? '');
