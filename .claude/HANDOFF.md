@@ -32,7 +32,7 @@ script loads Babel with no fingerprint) and #576 (small follow-ups).
 | B2a | access gaps — BUILT as commit `1953360` on `ro-b2a-build` (41 files), in its ONE check | its own checkout `.claude-work/worktrees/b2a` | `rollout-B2a--build.md`, `rollout-B2a--check.md` |
 | E | older databases (#553, #555, #554) — BUILT as commit `28ff8f3` on `ro-e-build` (six files, migration 210), in its ONE check | its own checkout `.claude-work/worktrees/e` | `rollout-E--build.md`, `rollout-E--check.md` |
 | G (plan only) | the three backup faults (#577, #578, #579), one package | reads the MAIN folder; changes nothing | `rollout-G--plan.md` |
-| F6 part 1 | the zip package's build script and guards (#499); the workflow is PROPOSED only, in its evidence folder | its own checkout `.claude-work/worktrees/f6`, branch `ro-f6-build` | `rollout-F6--build.md` |
+| F6 part 1 | the zip package's build script and guards (#499) — BUILT as commit `84c6180` on `ro-f6-build` (six files), in its ONE check. The workflow is PROPOSED only, in `rollout-F6--build-evidence/package.yml` | its own checkout `.claude-work/worktrees/f6` | `rollout-F6--build.md`, `rollout-F6--check.md` |
 | F7 | the deploy's settings logic and its test (#500) — BUILT as commit `425ca9c` on `ro-f7-build` (two new files), in its ONE check. The replacement `deploy.yml` is PROPOSED only, in `rollout-F7--build-evidence/proposed-deploy.yml`; it cannot be placed before F3 is committed | its own checkout `.claude-work/worktrees/f7` | `rollout-F7--build.md`, `rollout-F7--check.md` |
 
 B2a and E each make ONE commit on their own branch and do not push. Bring each across with `git cherry-pick <hash>` onto
@@ -103,6 +103,20 @@ summary and its section 4.1, "what runs beside what"). The short of it:
   skipped in a dry run; two extra questions in the script). Its checker lists every difference. **Show the owner that list before
   placing `deploy.yml`**: the approval covers W1 as the plan describes it, not more.
 - #586 opened: an administrator setting a password for an account that has none is told it was saved, and nothing is stored.
+
+**From F6's build, 12 October, about 08:10:**
+
+- **The deploy has been fetching dompdf (the library that makes PDFs) in a form the portal cannot load**: the tag's source
+  archive has no `autoload.inc.php`, which `web/_core/Pdf.php` requires. The builder ran both: old download fails, the publisher's
+  release file makes a real PDF. `tools/download-dompdf.sh` now fetches the release file, pinned by SHA-256. Today's `deploy.yml`
+  calls the same script, so the next deploy uploads the new layout. Whether PDFs work on any live server today is NOT known. The
+  checker is told to prove both halves with the portal's own `Pdf` class and to confirm today's workflow still calls it correctly.
+- A build from the branch is refused until F4 removes five lines that carry the first customer's domain, and a package is not
+  installable until F3. Both are correct and are said in `tools/package/README.md`.
+- The real `gitleaks` is not installed on this machine; the secrets guard was proved with a stand-in. The checker runs the real one.
+- F6's proposed `package.yml` differs from W2 in four ways (listed in its header). As with F7: show the owner the checker's list
+  of differences before placing it.
+- F6's commit message gives a check count (94) that later grew to 103. When bringing the commit across, write the message afresh.
 
 **Trap, learned the hard way today:** the Agent tool's own "separate checkout" option (`isolation: worktree`) cuts the checkout from
 `main`, which is about 400 commits behind the working branch, and refuses writes to the main folder. A builder started that way found
