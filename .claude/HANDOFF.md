@@ -19,6 +19,17 @@ package by ITS OWN file list — never from `git status`, which now mixes packag
 
 ## WHERE THINGS ARE, 12 OCTOBER 2026, 06:47 — package C committed; three jobs running; two owner answers; one trap
 
+**F6 part 1 is committed and pushed as `bd1bfab`** (#499; nine files under `tools/` plus the documents). Two check rounds; the
+second fix round was committed on its builder's proofs with no third check, because nothing can be published until part 2. On the
+merged branch the tree check passes (all 1,201 files may be packaged). **For every package still to come:** adding or changing ANY
+`.htaccess` under `web/`, a PHP file in the web folder, an archive, or a new kind of file needs one line in
+`tools/package/check-package.py`, or `python3 tools/package/check-package.py --tree web` refuses it; the refusal prints the line
+to paste (F3 adds `.htaccess` files, so its brief must say this). The corrected `package.yml` and the table of its 19 differences
+from W2 are in `rollout-F6--fix2-evidence/`; show the owner that table before placing it. Part 2 (the guide and the
+install-from-the-zip proof) waits for F3, F4 and F5, and its check looks at the whole guard again. The self-test takes 40 to 53
+minutes on this loaded machine; measure it on a quiet one before wiring it into a workflow. The checkout
+`.claude-work/worktrees/f6` and branch `ro-f6-build` can be removed.
+
 **Packages B2a and B2b are committed and pushed as `716581f`** (60 files; #534, #548, #574, part of #511 and #536). Three check
 rounds; the last small fix round was committed on its builder's proofs. On the merged branch I ran `access-pages-selftest` (240
 of 240) and `erasure-pages-selftest` (66 of 66); evidence in `.claude-work/resume/rollout-B2a--merge-evidence/`. Runbook 7.7 is
@@ -113,7 +124,6 @@ script loads Babel with no fingerprint) and #576 (small follow-ups).
 | --- | --- | --- | --- |
 | E | older databases (#553, #555, #554) — the narrow check found three MEDIUM (with the events table missing the install script emptied every session's pointer, silently; the test passed when the install script's own guard was broken; the data check passed an UPDATE that also soft-deleted sessions). SECOND fix round running: one more commit after `917382c`. **No further check: commit on its proofs**, after reading the install script's block myself. Release only together with G | its own checkout `.claude-work/worktrees/e` | `rollout-E--check2.md`, `rollout-E--fix2.md` |
 | G | the backup faults (#577, #578, #579 and more) — fix round DONE: commit `23b5440` on `ro-g-build`, after `daeb31e` (11 files). A NARROW check of that commit is running, because the fix changed how every restore talks to the database (it replaces the session's strictness setting and treats any warning as a failure). Corrected notes to place are in `rollout-G--fix-evidence/` | its own checkout `.claude-work/worktrees/g` | `rollout-G--fix.md`, `rollout-G--check2.md` |
-| F6 part 1 | the zip package's guards (#499) — the narrow check found two HIGH (a secret inside an `.svg`, `.gif` or `.woff2`, or after a picture's first bytes, still shipped, because the secrets search skips those kinds; PHP could reach the web folder under a double ending or through a planted `.htaccess`). SECOND fix round running: one more commit after `0089a78`. **No further check for part 1**: nothing can be published until part 2 (the guide, after F5), and part 2's check looks at the whole guard again | its own checkout `.claude-work/worktrees/f6` | `rollout-F6--check2.md`, `rollout-F6--fix2.md` |
 | M1 | the mail library's core and its own SMTP route (new files only: `web/_core/maillib/`, namespace `MWBM\Mail`, tests and README in `tools/maillib/`); nothing in the portal calls it yet | its own checkout `.claude-work/worktrees/m1`, branch `ro-m1-build` | `rollout-M1--build.md` |
 
 B2a and E each make ONE commit on their own branch and do not push. Bring each across with `git cherry-pick <hash>` onto
