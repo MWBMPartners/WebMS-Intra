@@ -28,12 +28,12 @@ script loads Babel with no fingerprint) and #576 (small follow-ups).
 
 | Package | What | Where it works | Report |
 | --- | --- | --- | --- |
-| D | recovery runbook and backup documents (#488) — BUILT, in its ONE check | MAIN folder: five uncommitted files (three under `docs/`, `tools/offsite-backup/sync-offsite.sh.example`, new `tools/audit-checks/check_docs_table_refs.py`) | `rollout-D--build.md`, `rollout-D--check.md` |
+| D | recovery runbook and backup documents (#488) — its one check came back NOT CLEAN (four serious, three medium, all in what the pages do not say, one command and the example script); ONE FIX ROUND is running | MAIN folder: the same five uncommitted files, and only those | `rollout-D--check.md` (the work list), `rollout-D--fix.md` |
 | B2a | access gaps — BUILT as commit `1953360` on `ro-b2a-build` (41 files), in its ONE check | its own checkout `.claude-work/worktrees/b2a` | `rollout-B2a--build.md`, `rollout-B2a--check.md` |
 | E | older databases (#553, #555, #554) — BUILT as commit `28ff8f3` on `ro-e-build` (six files, migration 210), in its ONE check | its own checkout `.claude-work/worktrees/e` | `rollout-E--build.md`, `rollout-E--check.md` |
 | G (plan only) | the three backup faults (#577, #578, #579), one package | reads the MAIN folder; changes nothing | `rollout-G--plan.md` |
 | F6 part 1 | the zip package's build script and guards (#499); the workflow is PROPOSED only, in its evidence folder | its own checkout `.claude-work/worktrees/f6`, branch `ro-f6-build` | `rollout-F6--build.md` |
-| F7 | the deploy's settings logic and its test (#500); the replacement `deploy.yml` is PROPOSED only | its own checkout `.claude-work/worktrees/f7`, branch `ro-f7-build` | `rollout-F7--build.md` |
+| F7 | the deploy's settings logic and its test (#500) — BUILT as commit `425ca9c` on `ro-f7-build` (two new files), in its ONE check. The replacement `deploy.yml` is PROPOSED only, in `rollout-F7--build-evidence/proposed-deploy.yml`; it cannot be placed before F3 is committed | its own checkout `.claude-work/worktrees/f7` | `rollout-F7--build.md`, `rollout-F7--check.md` |
 
 B2a and E each make ONE commit on their own branch and do not push. Bring each across with `git cherry-pick <hash>` onto
 `claude/alpha-wip` after its one check, then remove the checkout (`git worktree remove`) and delete its branch. B2b (plan item 10, the
@@ -90,6 +90,19 @@ summary and its section 4.1, "what runs beside what"). The short of it:
 - **E's builder found 25 settings with an empty stored default on an upgraded 6 March database**; its checker is asked whether
   anything reads them. E's proposed workflow diff is in its evidence folder and is part of the approved test-workflow change.
 - Issues opened from the builders' "Found" lists: #577 to #585.
+
+**After D's check, 12 October, about 08:00:**
+
+- The checker tried a fix for each of the four serious findings (its evidence 19 and 20), so the fix builder starts from fixes
+  already shown to work and re-proves each. Plan: read the result, then commit D on those proofs with no further check round,
+  and say so in the commit message. The owner was told and may ask for a second check on the script, which deletes backup copies.
+- **Package G gains one fault**: `DbBackup::prune()` appears to count half-made snapshot folders when keeping "the newest N", so
+  failed snapshots can push good ones out (read, not run; the planner was told to run it). The planner also found that a
+  half-made folder is reported as a FRESH backup by the freshness job and the health page.
+- **F7's proposed workflow goes beyond W1 as the owner approved it** (a new "adopt existing folder" tick-box; the health check
+  skipped in a dry run; two extra questions in the script). Its checker lists every difference. **Show the owner that list before
+  placing `deploy.yml`**: the approval covers W1 as the plan describes it, not more.
+- #586 opened: an administrator setting a password for an account that has none is told it was saved, and nothing is stored.
 
 **Trap, learned the hard way today:** the Agent tool's own "separate checkout" option (`isolation: worktree`) cuts the checkout from
 `main`, which is about 400 commits behind the working branch, and refuses writes to the main folder. A builder started that way found
