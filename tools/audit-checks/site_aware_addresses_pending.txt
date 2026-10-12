@@ -1,0 +1,100 @@
+# Path: tools/audit-checks/site_aware_addresses_pending.txt
+#
+# Places that still hold bare addresses (#536): links, form targets,
+# redirects and script requests written as "/expenses/approve" and not built
+# by Site::url(). Read by tools/audit-checks/check_site_aware_addresses.py,
+# which does not judge a place named here (apart from any file in it that
+# the check lists as STRICT).
+#
+# One place per line, written from web/: a folder, or a single file. A line
+# that starts with "#" is a comment. A comment of the form "# [NAME] ..."
+# starts a group, and the check counts what is left in each group.
+#
+# THE LIST ONLY SHRINKS. The check fails if a place named here holds no bare
+# address any more, so a line is taken out in the same change that sweeps the
+# place, and nothing is ever added. `--strict` fails while any line is left.
+#
+# AN EMPTY LIST IS NEEDED before Site::FIRST_PART_MODE_READY is switched on.
+# IT IS NOT ENOUGH ON ITS OWN. This sentence used to say that an empty list
+# meant the switch "may be" made; that was not true, and four requests in
+# two script files showed it (the check read both files and said "OK"; see
+# rule 5 there). An empty list says only that the check finds nothing, and
+# the check reads text: the top of the check lists what it cannot see.
+# Before the switch, also: tools/site-addresses-selftest.php must pass in
+# full, and the matters written up beside #536 must each be settled (the
+# service worker, the installable app and the chat box on /live are not
+# organisation-aware, and a sign-in through Microsoft or Google comes back
+# with no organisation's part).
+#
+# The four groups S1 to S4 are the four slices of roll-out package F9. Each
+# slice sweeps its own folders and, in this file, takes out the lines of
+# those folders and no other line. No slice touches the check. (This used to
+# say that a slice does not touch this file at all; the four slices run side
+# by side, each in a checkout of its own, and a slice that leaves its lines
+# in cannot run the whole check: it fails on a place that is on the list
+# and clean.)
+#
+# Copyright 2026-present MWBM Partners Ltd (t/a MWservices). All Rights Reserved.
+
+# [S1] sign-in, account, dashboard, help and the other everyday pages
+_apps/account
+_apps/approvals
+_apps/auth
+_apps/dashboard
+_apps/directory
+_apps/help
+_apps/invites
+_apps/offboarding
+_apps/privacy
+_apps/settings
+
+# [S2] the administration pages
+_apps/admin
+
+# [S3] venues, calendar, giving, forms, payments and projects
+_apps/calendar
+_apps/forms
+_apps/giving
+_apps/payments
+_apps/projects
+_apps/venues
+
+# [S4] every other app folder
+_apps/announcements
+_apps/assets
+_apps/attendance
+_apps/care
+_apps/cron
+_apps/discipleship
+_apps/documents
+_apps/kids
+_apps/leadership
+_apps/live
+_apps/milestones
+_apps/newsletter
+_apps/noticeboard
+_apps/photos
+_apps/praise
+_apps/prayer-requests
+_apps/reading-plans
+_apps/recordings
+_apps/resources
+_apps/rota
+_apps/salvation
+_apps/service-plans
+_apps/small-groups
+_apps/tasks
+_apps/visitors
+_apps/widget
+_apps/worship
+
+# [not in a slice] one single file outside the app folders, owned by another
+# package. (There were four. `_core/Auth.php` and
+# `public_html/offline/index.php` came off on 13 October 2026: the three
+# redirects left in the first are built by Site::url(), and the second's one
+# link stays bare with its reason on the line. `_core/ExpenseMailer.php` came
+# off the same day: its four links inside e-mails are whole addresses now,
+# built by PortalAddress (#500).)
+#   _install/upgrade.php: three redirects and a breadcrumb on the database
+#     upgrade page.
+_install/upgrade.php

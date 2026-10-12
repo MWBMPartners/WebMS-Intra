@@ -8,6 +8,12 @@
  * includes JavaScript assets (Bootstrap JS + portal.js), renders the debug
  * panel (if active), and closes <body> and <html> tags.
  *
+ * The two links to the privacy page, and the address the cookie banner posts
+ * a choice to, are built by Site::url() and Router::urlForScript() (#536), so
+ * they stay inside the organisation's own address. The script files and the
+ * service worker are real files in the web folder, the same for every
+ * organisation, and keep their plain addresses.
+ *
  * @package   Portal\Core\Templates
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
@@ -22,6 +28,7 @@ use Portal\Core\App;
 use Portal\Core\Asset;
 use Portal\Core\Auth;
 use Portal\Core\Debug;
+use Portal\Core\Router;
 use Portal\Core\Site;
 
 // 📌 Copyright information — site branding overrides global setting
@@ -97,12 +104,12 @@ if ($cookieBannerEnabled === true && isset($_COOKIE['portal_consent_cookies']) =
     </h2>
     <p id="portal-cookie-banner-desc" class="small text-secondary mb-2">
         We use functionally-necessary cookies (sign-in, CSRF, theme + language preferences). No third-party tracking.
-        Read the full <a href="/privacy">Privacy &amp; Data Protection</a> page.
+        Read the full <a href="<?php echo htmlspecialchars(Site::url('privacy'), ENT_QUOTES, 'UTF-8'); ?>">Privacy &amp; Data Protection</a> page.
     </p>
     <div class="d-flex gap-2 flex-wrap">
         <button type="button" class="btn btn-sm btn-primary"   data-portal-consent="accept">Accept</button>
         <button type="button" class="btn btn-sm btn-outline-secondary" data-portal-consent="reject">Necessary only</button>
-        <a class="btn btn-sm btn-link ms-auto" href="/privacy">More info</a>
+        <a class="btn btn-sm btn-link ms-auto" href="<?php echo htmlspecialchars(Site::url('privacy'), ENT_QUOTES, 'UTF-8'); ?>">More info</a>
     </div>
 </aside>
 <script nonce="<?php echo htmlspecialchars(\Portal\Core\App::cspNonce(), ENT_QUOTES, 'UTF-8'); ?>">
@@ -116,7 +123,16 @@ if ($cookieBannerEnabled === true && isset($_COOKIE['portal_consent_cookies']) =
         fd.append('csrf_token', csrf);
         fd.append('type', 'cookies');
         fd.append('decision', decision);
-        fetch('/privacy/consent', { method: 'POST', body: fd, credentials: 'same-origin' })
+<?php
+// 🏢 The address on the next line is this organisation's own, printed by PHP
+//    (#536). It was the bare '/privacy/consent', which under "the first part
+//    of the address" sent the choice to the DEFAULT organisation.
+//    Router::urlForScript() escapes it for a script and leaves the quotes to
+//    the line itself. This note is a PHP comment on purpose: a comment
+//    written in the script would be sent to every browser, and the page
+//    would no longer be byte for byte what it was.
+?>
+        fetch('<?php echo Router::urlForScript('privacy/consent'); ?>', { method: 'POST', body: fd, credentials: 'same-origin' })
             .finally(function () {
                 banner.parentNode && banner.parentNode.removeChild(banner);
             });

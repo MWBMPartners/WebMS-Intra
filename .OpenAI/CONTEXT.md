@@ -386,6 +386,17 @@ in `.claude/CLAUDE.md` under the heading named in brackets.
     Lines waiting for a change that needs approval are on the pending list
     beside it; `--strict` fails while that list holds anything.
 
+    **Every address a page writes is built by `Site::url()`** (#536): never a
+    bare `/page`. In a script printed by PHP use `Router::urlForScript()`; in a
+    script file, `Portal.url()`. `tools/audit-
+    checks/check_site_aware_addresses.py` fails on a bare address anywhere
+    outside `site_aware_addresses_pending.txt`, which only shrinks; `tools/site-
+    addresses-selftest.php` reads the real pages. `Site::FIRST_PART_MODE_READY`
+    stays `false` until that list is empty AND the matters written up beside
+    #536 are settled (the service worker, the installable app, the chat box on
+    `/live`, the return address of a Microsoft or Google sign-in): an empty list
+    alone is not enough.
+
 15. **The ApiRouter trap.** Any address starting `api/` is intercepted
     before the normal routing table is ever consulted, and resolved purely
     by naming convention to `_apps/{appName}/api/{action}.php`. A handler

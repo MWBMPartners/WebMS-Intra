@@ -14,6 +14,22 @@
  * Included by header.php. Uses $pageSection to determine which nav item
  * is active. User information comes from App::user() and the session.
  *
+ * EVERY LINK HERE IS BUILT BY Site::url() (#536). Twenty of them used to be
+ * written out bare: the logo, the dashboard, the whole administration menu,
+ * "My account", "Sign out" and "Sign in". Where organisations are told apart
+ * by the first part of the address ("/north/calendar"), a bare "/admin" is
+ * the DEFAULT organisation's, so one click on the menu took a person out of
+ * the organisation they were working in, and nothing on the page they
+ * arrived at said so. Site::url() adds the organisation's part, and adds
+ * nothing when none is in use, so an ordinary installation gets exactly the
+ * addresses it always had.
+ *
+ * The two `href="#"` are not addresses: Bootstrap needs them on the buttons
+ * that open a drop-down menu. The logo and the placeholder picture are files
+ * in the web folder, the same for every organisation, and stay as they are.
+ * `tools/audit-checks/check_site_aware_addresses.py` fails if a bare address
+ * comes back, and `tools/site-addresses-selftest.php` reads the real menu.
+ *
  * @package   Portal\Core\Templates
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
@@ -63,7 +79,7 @@ if ($isLoggedIn === true && Site::isMultisiteEnabled() === true && $navUser !== 
 <nav class="navbar navbar-expand-lg portal-navbar bg-body-tertiary">
     <div class="container">
         <!-- 🏠 Brand / Logo -->
-        <a class="navbar-brand d-flex align-items-center gap-2" href="/">
+        <a class="navbar-brand d-flex align-items-center gap-2" href="<?php echo htmlspecialchars(Site::url(''), ENT_QUOTES, 'UTF-8'); ?>">
             <img src="<?php echo htmlspecialchars($navSiteLogo, ENT_QUOTES, 'UTF-8'); ?>" alt="" width="28" height="28">
             <span><?php echo htmlspecialchars($navSiteName, ENT_QUOTES, 'UTF-8'); ?></span>
         </a>
@@ -81,7 +97,7 @@ if ($isLoggedIn === true && Site::isMultisiteEnabled() === true && $navUser !== 
             <ul class="navbar-nav me-auto mb-2 mb-lg-0">
                 <li class="nav-item">
                     <a class="nav-link<?php echo ($navSection === 'dashboard' || $navSection === '') ? ' active' : ''; ?>"
-                       href="/"
+                       href="<?php echo htmlspecialchars(Site::url(''), ENT_QUOTES, 'UTF-8'); ?>"
                        <?php echo ($navSection === 'dashboard' || $navSection === '') ? 'aria-current="page"' : ''; ?>>
                         <i class="fa-solid fa-house-chimney me-1"></i> <?php echo htmlspecialchars(t('nav.dashboard'), ENT_QUOTES, 'UTF-8'); ?>
                     </a>
@@ -172,39 +188,39 @@ if ($isLoggedIn === true && Site::isMultisiteEnabled() === true && $navUser !== 
                     </a>
                     <ul class="dropdown-menu">
                         <li>
-                            <a class="dropdown-item" href="/admin">
+                            <a class="dropdown-item" href="<?php echo htmlspecialchars(Site::url('admin'), ENT_QUOTES, 'UTF-8'); ?>">
                                 <i class="fa-solid fa-gauge me-1"></i> <?php echo htmlspecialchars(t('nav.admin_dashboard'), ENT_QUOTES, 'UTF-8'); ?>
                             </a>
                         </li>
                         <li><hr class="dropdown-divider"></li>
                         <li>
-                            <a class="dropdown-item" href="/admin/errors">
+                            <a class="dropdown-item" href="<?php echo htmlspecialchars(Site::url('admin/errors'), ENT_QUOTES, 'UTF-8'); ?>">
                                 <i class="fa-solid fa-triangle-exclamation me-1"></i> <?php echo htmlspecialchars(t('nav.error_log'), ENT_QUOTES, 'UTF-8'); ?>
                             </a>
                         </li>
                         <li>
-                            <a class="dropdown-item" href="/admin/activity">
+                            <a class="dropdown-item" href="<?php echo htmlspecialchars(Site::url('admin/activity'), ENT_QUOTES, 'UTF-8'); ?>">
                                 <i class="fa-solid fa-clock-rotate-left me-1"></i> <?php echo htmlspecialchars(t('nav.activity_log'), ENT_QUOTES, 'UTF-8'); ?>
                             </a>
                         </li>
                         <li>
-                            <a class="dropdown-item" href="/admin/audit">
+                            <a class="dropdown-item" href="<?php echo htmlspecialchars(Site::url('admin/audit'), ENT_QUOTES, 'UTF-8'); ?>">
                                 <i class="fa-solid fa-shield-halved me-1"></i> <?php echo htmlspecialchars(t('nav.audit_trail'), ENT_QUOTES, 'UTF-8'); ?>
                             </a>
                         </li>
                         <li><hr class="dropdown-divider"></li>
                         <li>
-                            <a class="dropdown-item" href="/admin/users">
+                            <a class="dropdown-item" href="<?php echo htmlspecialchars(Site::url('admin/users'), ENT_QUOTES, 'UTF-8'); ?>">
                                 <i class="fa-solid fa-users me-1"></i> <?php echo htmlspecialchars(t('nav.user_management'), ENT_QUOTES, 'UTF-8'); ?>
                             </a>
                         </li>
                         <li>
-                            <a class="dropdown-item" href="/admin/migrations">
+                            <a class="dropdown-item" href="<?php echo htmlspecialchars(Site::url('admin/migrations'), ENT_QUOTES, 'UTF-8'); ?>">
                                 <i class="fa-solid fa-database me-1"></i> <?php echo htmlspecialchars(t('nav.migrations'), ENT_QUOTES, 'UTF-8'); ?>
                             </a>
                         </li>
                         <li>
-                            <a class="dropdown-item" href="/settings">
+                            <a class="dropdown-item" href="<?php echo htmlspecialchars(Site::url('settings'), ENT_QUOTES, 'UTF-8'); ?>">
                                 <i class="fa-solid fa-gear me-1"></i> <?php echo htmlspecialchars(t('nav.settings'), ENT_QUOTES, 'UTF-8'); ?>
                             </a>
                         </li>
@@ -212,46 +228,46 @@ if ($isLoggedIn === true && Site::isMultisiteEnabled() === true && $navUser !== 
                              reachable only by typing the URL directly). -->
                         <li><hr class="dropdown-divider"></li>
                         <li>
-                            <a class="dropdown-item" href="/admin/apps">
+                            <a class="dropdown-item" href="<?php echo htmlspecialchars(Site::url('admin/apps'), ENT_QUOTES, 'UTF-8'); ?>">
                                 <i class="fa-solid fa-cubes me-1"></i> <?php echo htmlspecialchars(t('nav.apps'), ENT_QUOTES, 'UTF-8'); ?>
                             </a>
                         </li>
                         <li>
-                            <a class="dropdown-item" href="/admin/reports">
+                            <a class="dropdown-item" href="<?php echo htmlspecialchars(Site::url('admin/reports'), ENT_QUOTES, 'UTF-8'); ?>">
                                 <i class="fa-solid fa-chart-bar me-1"></i> <?php echo htmlspecialchars(t('nav.reports'), ENT_QUOTES, 'UTF-8'); ?>
                             </a>
                         </li>
                         <li>
-                            <a class="dropdown-item" href="/admin/workflows">
+                            <a class="dropdown-item" href="<?php echo htmlspecialchars(Site::url('admin/workflows'), ENT_QUOTES, 'UTF-8'); ?>">
                                 <i class="fa-solid fa-diagram-project me-1"></i> <?php echo htmlspecialchars(t('nav.workflows'), ENT_QUOTES, 'UTF-8'); ?>
                             </a>
                         </li>
                         <!-- 📣 Notification/compliance admin screens (#gap-fix D3). -->
                         <li><hr class="dropdown-divider"></li>
                         <li>
-                            <a class="dropdown-item" href="/admin/sms">
+                            <a class="dropdown-item" href="<?php echo htmlspecialchars(Site::url('admin/sms'), ENT_QUOTES, 'UTF-8'); ?>">
                                 <i class="fa-solid fa-comment-sms me-1"></i> <?php echo htmlspecialchars(t('nav.sms'), ENT_QUOTES, 'UTF-8'); ?>
                             </a>
                         </li>
                         <li>
-                            <a class="dropdown-item" href="/admin/transcription">
+                            <a class="dropdown-item" href="<?php echo htmlspecialchars(Site::url('admin/transcription'), ENT_QUOTES, 'UTF-8'); ?>">
                                 <i class="fa-solid fa-closed-captioning me-1"></i> <?php echo htmlspecialchars(t('nav.transcription'), ENT_QUOTES, 'UTF-8'); ?>
                             </a>
                         </li>
                         <li>
-                            <a class="dropdown-item" href="/admin/safeguarding/dbs">
+                            <a class="dropdown-item" href="<?php echo htmlspecialchars(Site::url('admin/safeguarding/dbs'), ENT_QUOTES, 'UTF-8'); ?>">
                                 <i class="fa-solid fa-user-shield me-1"></i> <?php echo htmlspecialchars(t('nav.safeguarding'), ENT_QUOTES, 'UTF-8'); ?>
                             </a>
                         </li>
                         <li>
-                            <a class="dropdown-item" href="/admin/decision-cards">
+                            <a class="dropdown-item" href="<?php echo htmlspecialchars(Site::url('admin/decision-cards'), ENT_QUOTES, 'UTF-8'); ?>">
                                 <i class="fa-solid fa-hand-holding-heart me-1"></i> <?php echo htmlspecialchars(t('nav.decision_cards'), ENT_QUOTES, 'UTF-8'); ?>
                             </a>
                         </li>
                         <?php if (App::isUmbrellaAdmin() === true): ?>
                         <li><hr class="dropdown-divider"></li>
                         <li>
-                            <a class="dropdown-item" href="/admin/sites">
+                            <a class="dropdown-item" href="<?php echo htmlspecialchars(Site::url('admin/sites'), ENT_QUOTES, 'UTF-8'); ?>">
                                 <i class="fa-solid fa-sitemap me-1"></i> <?php echo htmlspecialchars(t('nav.sites'), ENT_QUOTES, 'UTF-8'); ?>
                             </a>
                         </li>
@@ -368,13 +384,13 @@ if ($isLoggedIn === true && Site::isMultisiteEnabled() === true && $navUser !== 
                         </span></li>
                         <li><hr class="dropdown-divider"></li>
                         <li>
-                            <a class="dropdown-item" href="/account">
+                            <a class="dropdown-item" href="<?php echo htmlspecialchars(Site::url('account'), ENT_QUOTES, 'UTF-8'); ?>">
                                 <i class="fa-solid fa-user-gear me-1"></i> <?php echo htmlspecialchars(t('nav.my_account'), ENT_QUOTES, 'UTF-8'); ?>
                             </a>
                         </li>
                         <li><hr class="dropdown-divider"></li>
                         <li>
-                            <a class="dropdown-item" href="/logout">
+                            <a class="dropdown-item" href="<?php echo htmlspecialchars(Site::url('logout'), ENT_QUOTES, 'UTF-8'); ?>">
                                 <i class="fa-solid fa-right-from-bracket me-1"></i> <?php echo htmlspecialchars(t('nav.sign_out'), ENT_QUOTES, 'UTF-8'); ?>
                             </a>
                         </li>
@@ -385,7 +401,7 @@ if ($isLoggedIn === true && Site::isMultisiteEnabled() === true && $navUser !== 
             <!-- 🔑 Login link for unauthenticated users -->
             <ul class="navbar-nav ms-auto">
                 <li class="nav-item">
-                    <a class="nav-link" href="/login">
+                    <a class="nav-link" href="<?php echo htmlspecialchars(Site::url('login'), ENT_QUOTES, 'UTF-8'); ?>">
                         <i class="fa-solid fa-right-to-bracket me-1"></i> <?php echo htmlspecialchars(t('nav.sign_in'), ENT_QUOTES, 'UTF-8'); ?>
                     </a>
                 </li>

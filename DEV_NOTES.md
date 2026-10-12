@@ -2997,10 +2997,16 @@ ignore rules remain the first wall; these guards are the second.
   there leaves the calendar standing with no booked days.
 - **The chat box script sends the sign-in cookie to its own address only** (`credentials: 'same-origin'`).
   It sends every request to the address of the page it is on, so it cannot work on another website.
-- **Addresses in a cleaned folder go through `Router::url()`**; add the folder, or the single file, to
-  `LISTED` in `check_site_aware_addresses.py` in the same change. A folder is listed whole only when every
-  file in it is clean. The check reads whether an address is built by the helper, not whether it is the
-  right address; only a page test that follows the redirect shows that.
+- **Every address a page writes goes through `Site::url()`** (`Router::url()` is the same thing under its older
+  name). `check_site_aware_addresses.py` reads the whole of `web/_apps`, `web/_core`, the web folder and
+  `web/_install/upgrade.php`; a place not swept yet is named in `site_aware_addresses_pending.txt`, and the check
+  fails if a place on it is in fact clean. Take a place's line out in the same change that sweeps it. Its `STRICT`
+  list (it was called `LISTED`) names the places held to the widest rule. The check reads whether an address is
+  built by the helper, not whether it is the right address; `tools/site-addresses-selftest.php` runs the portal
+  and reads the pages. **An empty pending list is needed before `Site::FIRST_PART_MODE_READY` is switched on,
+  and is not enough on its own:** the check reads text (its header lists what it cannot see), and the service
+  worker, the installable app, the chat box on `/live` and the return address of a Microsoft or Google sign-in
+  are not organisation-aware.
 
 ---
 
@@ -5682,6 +5688,37 @@ philosophy, same "no oracle" security reasoning:
   switcher, the switch handler and the gate all use it. It uses only columns that have
   existed since migration 015; keep it that way, because it runs before the upgrade page.
 - **`Site::FIRST_PART_MODE_READY`** is the one line the link-sweep package switches on.
+- **Building an address, by where it is printed** (#536):
+  - in HTML: `htmlspecialchars(Site::url('page/name'), ENT_QUOTES, 'UTF-8')`;
+  - in a redirect: `header('Location: ' . Site::url('page/name') . '?id=' . $id)`: only the page's name goes in
+    the helper, the query stays outside;
+  - in a script printed by a PHP page: `fetch('<?php echo Router::urlForScript('page/name'); ?>')`. Never
+    `htmlspecialchars()` there: a browser does not undo HTML escapes inside a script. Not between backticks.
+    Where the script is itself written inside a PHP string, the tag is printed as text and does nothing: close
+    the string and join the helper on, `' . Router::urlForScript('page/name') . '`;
+  - in a script FILE: `Portal.url('page/name')`, which reads `<meta name="portal-base">` from the page header.
+    A page that prints its own `<head>` must print that tag itself if it loads such a file. The check reports a
+    quoted address handed to any function in a script file, whatever the function is called.
+- **An address the web server answers itself takes no organisation's part**: a real file or folder in the web
+  folder (`/assets/css/…`, `/sw.js`, `/offline/`, `/api-docs`) and `/robots.txt`, `/sitemap.xml`, `/favicon.ico`.
+  `/assets`, `/assets/my` and `/assets/item` are the Asset Tracker's PAGES and do take it. The check and the
+  self-test ask the same function (`--answers`), so they cannot disagree.
+- **A note beside a line of a template must be a PHP comment**, not an HTML or script comment: the second kind is
+  sent to every browser, and the page is then no longer byte for byte what it was with no first parts in use.
+  **Never make it the last thing on a line:** PHP takes away a line break that comes straight after `?>`. For
+  `address-check: allow`, put it straight after the address's closing quote
+  (`href="/manifest.json"<?php // address-check: allow — reason ?>>`); the check stops reading a line where the
+  note starts, and the self-test excuses the address only inside the text that very line prints.
+- **The organisation's part of an address is matched whatever capitals it is typed in** (the database's rule), and
+  `Router::extractPath()` agrees since #536. Links on the page keep the spelling the person came in on.
+- **`Auth::safeRedirectUrl()` judges a "come back to" address twice**, as it was sent and once decoded, and both
+  must pass. Where first parts are in use it must start with the request's own part; from an address with no
+  part it must not start with another active organisation's (that asks the database the question
+  `Site::detectFromPath()` asks; change the two together). Its fallback is the organisation's front page.
+- **Comparing old code with new, page for page**: reading a page writes rows, so the database is saved once and
+  put back before each run; and the old code is first run against itself, to learn what differs whatever the
+  code (the clock, form tokens, a new two-step secret, free disk space, the order of two log rows written in
+  the same second). The script that does this for F8 is kept with that package's evidence, not in the repository.
 - A failed organisation look-up shows a "try again" page (HTTP 503) instead of
   organisation 1, and reaches PHP's error log in all three ways. A database older than
   migration 015 (no organisation column in the settings table) is treated as

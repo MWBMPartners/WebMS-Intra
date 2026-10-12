@@ -8,6 +8,26 @@
  * page is not cached. Uses a self-contained layout (no DB-dependent templates)
  * to ensure it works without network access.
  *
+ * WHY ITS ONE ADDRESS STAYS BARE (#536). Everywhere else a link is built by
+ * Site::url(), which adds the organisation's part of the address where
+ * organisations are told apart that way. This page cannot do that, and must
+ * not:
+ *   - on Apache the web server answers "/offline/" itself, as a real file,
+ *     with none of the portal loaded, so there is no Site::url() to ask.
+ *     (A server that hands every request to the portal has the router
+ *     include this same file. It has to work both ways, so it may not lean
+ *     on the portal, and it is kept self-contained on purpose: see above.)
+ *   - the service worker keeps ONE copy of this page and shows it to
+ *     everybody, whichever organisation they were in. An organisation's
+ *     part written into it would be whoever fetched it first;
+ *   - the installable-app description is one file for the whole
+ *     installation, kept under this exact name by sw.js and by the shared
+ *     page header.
+ * So the link below carries the check's marker and its reason. The marker
+ * sits INSIDE the tag, before the closing ">", on purpose: PHP takes away a
+ * line break that comes straight after "?>", so at the end of the line it
+ * would have changed what this page sends.
+ *
  * @package   Portal
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
@@ -24,7 +44,7 @@ declare(strict_types=1);
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Offline — Portal</title>
-    <link rel="manifest" href="/manifest.json">
+    <link rel="manifest" href="/manifest.json"<?php // address-check: allow — one stored copy of this page is shown offline to every organisation, and the web server answers it with none of the portal loaded; the installable-app description is one file for the whole installation (#536) ?>>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {

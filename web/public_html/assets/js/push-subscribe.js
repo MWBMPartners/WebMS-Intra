@@ -26,6 +26,17 @@
  *   • Unsubscribe = subscription.unsubscribe() then POST the endpoint to
  *     /api/push/unsubscribe.
  *
+ * Both addresses are built by Portal.url() (portal.js), so that where
+ * organisations are told apart by the first part of the address the
+ * subscription is saved in, and removed from, the organisation being
+ * looked at (#536). They were written bare, which asked the DEFAULT
+ * organisation: a member of another one was refused ("not a member").
+ * This file is loaded BEFORE the page footer, so it runs before portal.js
+ * does. That is safe only because neither request is made until somebody
+ * presses the button, long after every deferred script has run. Do not
+ * make a request from this file while it is loading, and do not load it
+ * on a page without the shared footer.
+ *
  * @see https://github.com/MWBMPartners/WebMS-Intra/issues/322
  */
 (function () {
@@ -148,7 +159,7 @@
                                 applicationServerKey: urlBase64ToUint8Array(vapidKey)
                             }).then(function (newSub) {
                                 var json = newSub.toJSON();
-                                return postJson('/api/push/subscribe', {
+                                return postJson(window.Portal.url('api/push/subscribe'), {
                                     endpoint: json.endpoint,
                                     keys: json.keys,
                                     channels: channels
@@ -171,7 +182,7 @@
                             }
                             var endpoint = existing.endpoint;
                             existing.unsubscribe().finally(function () {
-                                postJson('/api/push/unsubscribe', { endpoint: endpoint }).finally(function () {
+                                postJson(window.Portal.url('api/push/unsubscribe'), { endpoint: endpoint }).finally(function () {
                                     renderState(container, 'unsubscribed', 'Notifications disabled on this device.');
                                 });
                             });

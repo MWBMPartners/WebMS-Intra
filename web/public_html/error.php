@@ -26,7 +26,8 @@
  *
  * WHAT IT CANNOT DO: tell that person WHY the page is plain, or offer them
  * their own organisations. The gate's refusal page does that, on the next
- * address they open that goes through index.php.
+ * address they open that goes through index.php. The plain page's one link
+ * leads there: it keeps the organisation's part of the address (#536).
  *
  * @package   Portal
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/243
@@ -85,6 +86,17 @@ if ($rendered === false) {
         503 => 'Service Unavailable',
     ];
     $title = $titles[$code] ?? 'Error ' . $code;
+    // 🏢 "Return to Portal" goes to the front page of the organisation the
+    //    address belongs to (#536); it was the bare "/". For somebody the
+    //    organisation gate stopped, that front page is where the gate then
+    //    says why and offers their own organisations. When start-up itself
+    //    failed, nothing can say which organisation this is, and "/" is the
+    //    one address sure to exist: so the class is asked for only if it is
+    //    already loaded, never loaded from here.
+    $homeAddress = '/';
+    if (class_exists('Portal\\Core\\Site', false) === true) {
+        $homeAddress = \Portal\Core\Site::url('');
+    }
     echo '<!doctype html><html lang="en"><head><title>' . htmlspecialchars($title, ENT_QUOTES, 'UTF-8') . '</title>'
        . '<meta charset="utf-8">'
        . '<meta name="viewport" content="width=device-width,initial-scale=1">'
@@ -100,6 +112,6 @@ if ($rendered === false) {
        . '<h1 style="font-weight:600;margin:0 0 1rem">' . htmlspecialchars($title, ENT_QUOTES, 'UTF-8') . '</h1>'
        . '<p style="color:var(--muted);">'
        . ($code === 503 ? 'The portal is temporarily unavailable. Please try again shortly.' : 'Something went wrong.')
-       . '</p><p style="margin-top:1.5rem"><a href="/">&larr; Return to Portal</a></p>'
+       . '</p><p style="margin-top:1.5rem"><a href="' . htmlspecialchars($homeAddress, ENT_QUOTES, 'UTF-8') . '">&larr; Return to Portal</a></p>'
        . '</div></body></html>';
 }

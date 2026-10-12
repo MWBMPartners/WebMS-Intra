@@ -216,7 +216,18 @@ class Router
 
         // 🌐 In path-prefix multisite mode, strip the site key from the URL
         // E.g. /cambridge/expenses → expenses (Site::preDetect already stored the prefix)
-        $sitePrefix = Site::pathPrefix();
+        //
+        // The prefix is lower-cased here because the path was, two lines up.
+        // Site::pathPrefix() gives the part AS IT WAS TYPED, and the database
+        // finds the organisation whatever capitals were used. So
+        // "/CAMBRIDGE/expenses" was taken for Cambridge, and then compared
+        // "cambridge/expenses" with "CAMBRIDGE/": no match, the part stayed
+        // on the path, and every page answered "not found" (#536). With no
+        // first part in use the prefix is '' and this changes nothing.
+        // WHAT IT DOES NOT DO: it does not change the part the links on the
+        // page are built with. Site::url() still uses it as typed, so the
+        // person stays at the spelling they came in on.
+        $sitePrefix = strtolower(Site::pathPrefix());
         if ($sitePrefix !== '' && str_starts_with($path, $sitePrefix . '/') === true) {
             $path = substr($path, strlen($sitePrefix) + 1);
         } elseif ($sitePrefix !== '' && $path === $sitePrefix) {
@@ -615,7 +626,12 @@ class Router
                . '<head><meta charset="utf-8"><title>' . htmlspecialchars($title, ENT_QUOTES, 'UTF-8') . '</title></head>';
             echo '<body style="font-family:system-ui;text-align:center;padding:4rem;">';
             echo '<h1>' . $code . '</h1><p>' . htmlspecialchars($title, ENT_QUOTES, 'UTF-8') . '</p>';
-            echo '<a href="/">Return to Portal</a></body></html>';
+            // 🏢 The organisation's own front page, built like every other
+            //    link (#536). This was the bare "/", which under "the first
+            //    part of the address" is the DEFAULT organisation's front
+            //    page, so the one link on this page led out of the
+            //    organisation the person was in.
+            echo '<a href="' . htmlspecialchars(self::url(''), ENT_QUOTES, 'UTF-8') . '">Return to Portal</a></body></html>';
         }
     }
 
@@ -694,8 +710,25 @@ class Router
     }
 
     /**
-     * Generate a clean URL for a given route key.
-     * Useful for building links in templates without hardcoding paths.
+     * 🔗 The address of a page, inside the organisation being looked at.
+     *
+     * THIS IS NOW ONE LINE THAT ASKS Site::url() (#536). The two used to be
+     * two copies of one rule. They agreed on every page, but nothing made
+     * them agree, and the next change to how an organisation's part of the
+     * address is added would have had to be made twice. Site::url() is the
+     * rule; this is the older name for it, kept because more than a
+     * hundred calls already use it (120 on 13 October 2026; Site::url()
+     * itself is called more than twice as often).
+     *
+     * WHAT IT CANNOT DO
+     *   - It does not check that the address is a registered one;
+     *     routeExists() below does that.
+     *   - It builds an address for the organisation THIS request is in. It
+     *     cannot build one for another organisation, or a whole address with
+     *     a host name for an e-mail.
+     *   - During start-up, before Site::init() has run, it adds no
+     *     organisation's part (the old copy did). Nothing builds an address
+     *     that early.
      *
      * @param string $routeKey The route key (e.g. "expenses/submit")
      *
@@ -703,12 +736,47 @@ class Router
      */
     public static function url(string $routeKey): string
     {
-        // 🌐 In path-prefix multisite mode, prepend the site key to the URL
-        $prefix = Site::pathPrefix();
-        if ($prefix !== '') {
-            return '/' . $prefix . '/' . ltrim($routeKey, '/');
-        }
-        return '/' . ltrim($routeKey, '/');
+        return Site::url($routeKey);
+    }
+
+    /**
+     * 📜 The same address, made safe to sit INSIDE a quoted string in a
+     * script that a page prints:
+     *
+     *     fetch('<?php echo Router::urlForScript('geo/lookup'); ?>', { … })
+     *
+     * WHY NOT htmlspecialchars(). Inside a <script> element the browser does
+     * not turn "&amp;" back into "&", so an address escaped for HTML would
+     * be sent with the escapes still in it. A script needs its own escaping:
+     * a quote, "<", ">" and "&" are written as \uXXXX, and a backslash as
+     * two backslashes. A script reads each back as the character, and none
+     * of them can end the string or end the <script> element.
+     *
+     * WHY NOT json_encode() ON ITS OWN, WHICH PRINTS ITS OWN QUOTES. The
+     * pages this is used in already have quotes round the address, some
+     * single and some double. Keeping the page's own quotes means that with
+     * no organisation's part in use the page comes out byte for byte as it
+     * did before, which is how the link sweep is proved to have changed
+     * nothing for an ordinary installation (#536).
+     *
+     * WHAT IT CANNOT DO: it is not safe inside a string written between
+     * backticks (a "${" is not escaped), nor outside quotes altogether. Put
+     * it between single or double quotes only.
+     *
+     * @param string $routeKey The route key (e.g. "geo/lookup")
+     *
+     * @return string The address, with no quotes of its own
+     */
+    public static function urlForScript(string $routeKey): string
+    {
+        $quoted = json_encode(
+            Site::url($routeKey),
+            JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_INVALID_UTF8_SUBSTITUTE
+        );
+
+        // json_encode() gives the text with a double quote at each end; the
+        // page supplies its own, so both are taken off.
+        return $quoted === false ? '' : substr($quoted, 1, -1);
     }
 
     /**

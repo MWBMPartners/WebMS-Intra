@@ -476,6 +476,17 @@ class Maintenance
             'UTF-8'
         );
 
+        // 🏢 The sign-in link is the organisation's own (#536). It was the
+        //    bare "/login": where organisations are told apart by the first
+        //    part of the address, an administrator held back at
+        //    "/north/…" was sent to the DEFAULT organisation's sign-in page.
+        //    Site::url() works from what start-up already decided and asks
+        //    the database nothing, so it is safe on a half-upgraded one.
+        //    The allow list above is compared with the address AFTER the
+        //    organisation's part has been taken off, so "/north/login" is
+        //    let through exactly as "/login" is.
+        $signInAddress = htmlspecialchars(Site::url('login'), ENT_QUOTES, 'UTF-8');
+
         // 🎨 Self-contained themed page — mirrors the installer's
         //    "Already Installed" look so the user sees a consistent
         //    brand even when the rest of the framework is mid-upgrade.
@@ -518,7 +529,7 @@ class Maintenance
            . '<p><span class="dot"></span><span class="dot"></span><span class="dot"></span></p>'
            . '<p style="font-size:.85em;color:var(--muted);">'
            . 'This page will reload automatically.<br>'
-           . 'A global administrator can <a href="/login">sign in</a> to complete the upgrade.'
+           . 'A global administrator can <a href="' . $signInAddress . '">sign in</a> to complete the upgrade.'
            . '</p>'
            . '</div></body></html>';
         exit();

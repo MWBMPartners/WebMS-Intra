@@ -32,6 +32,16 @@
  * remove resource or video, Stream-settings) keep working even if the
  * coordinator submits one of them mid-poll without reloading first.
  *
+ * The two addresses it posts to are built by Portal.url() (portal.js), so
+ * that where organisations are told apart by the first part of the address
+ * the upload is asked of the organisation being looked at (#536). They were
+ * written bare, which asked the DEFAULT organisation: a member of another
+ * one was refused ("not a member"), and a member of both had the upload
+ * handled by the wrong one. Portal.url() is there by the time either
+ * request is made: event-hub.php loads this file after the page footer,
+ * which loads portal.js, and both are deferred, which keeps them in that
+ * order. Do not load this file without portal.js.
+ *
  * @see https://github.com/MWBMPartners/WebMS-Intra/issues/386
  */
 (function () {
@@ -119,7 +129,7 @@
     /* ------------------------------------------------------------------ */
 
     function pollStatus(eventId, videoId, onUpdate) {
-        postForm('/calendar/event/hub/video-status', {
+        postForm(window.Portal.url('calendar/event/hub/video-status'), {
             csrf_token: getCsrf(),
             eventID: eventId,
             videoID: videoId
@@ -252,7 +262,7 @@
             setBusy(true);
             setStatus('Requesting an upload slot…', false);
 
-            postForm('/calendar/event/hub/upload-url', {
+            postForm(window.Portal.url('calendar/event/hub/upload-url'), {
                 csrf_token: getCsrf(),
                 eventID: eventId,
                 title: titleInput !== null ? titleInput.value : '',

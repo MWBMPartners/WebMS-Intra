@@ -2,6 +2,67 @@
 
 
 ## [Unreleased] (alpha)
+- **Security — after signing in, a "come back to" address could lead to another website (every installation)**
+  - `Auth::safeRedirectUrl()` accepted `/<tab>/other.example`. A browser takes tabs and line breaks out of an
+    address before reading it, so that is `//other.example`: another site. A link to the sign-in page carrying such
+    an address sent the person there once they had signed in. Any control character in a "come back to" address
+    is now refused, written plainly or percent-encoded, and the person lands on their own front page. Found and
+    closed while sweeping links for #536; it did not depend on having several organisations.
+
+- **Fixed — links in the shared page furniture and the sign-in flow keep the organisation's part of the address (#536, part 1)**
+  - **What was wrong.** One installation can serve several organisations, and one way of telling them apart is by
+    the first part of the address (`/north/calendar`). The menu on every page had twenty links written without that
+    part (the logo, the dashboard, the whole administration menu, "My account", "Sign out", "Sign in"). So did the
+    footer, the three error pages, the "closed for maintenance" page, the sign-in redirect and the sign-out page.
+    One click took a person out of their organisation and into the default one, and nothing on the page said so.
+    This way of telling organisations apart is still marked "not ready" and cannot be chosen on the set-up page;
+    this is the first part of the work that will let it be.
+  - **The shared furniture.** `templates/nav.php`, `header.php`, `footer.php`, `error-403.php`, `error-404.php`,
+    `error-500.php`, the holding page (`Maintenance.php`), the plain error page (`public_html/error.php`), the
+    map partial and `Router::renderError()`'s fallback all build their addresses with `Site::url()`.
+  - **Signing in.** A signed-out visitor at `/north/account` is sent to `/north/login` and is back at
+    `/north/account` afterwards (it was the bare `/login`, then the bare `/`). With nowhere to go back to, a
+    sign-in ends on the organisation's own front page. Signing out ends there too. After a sign-in through
+    Microsoft or Google, the step to the two-step sign-in page keeps the organisation's part, and so does the
+    way back to the sign-in page when such a sign-in fails.
+  - **A "come back to" address may not lead out of the organisation.** `Auth::safeRedirectUrl()` now refuses an
+    address with another organisation's first part, with none, or with `..` in it, and sends the person to their
+    organisation's own front page. From the default organisation's sign-in page an address with another
+    organisation's part is refused as well.
+  - **An organisation's part typed in capitals works.** `/NORTH/account` was taken for the North organisation and
+    then answered "page not found" on every page, because the page router compared a lower-cased path with the
+    part as typed. The two now agree.
+  - **For scripts.** A script file is the same for every organisation and has no PHP in it. The header prints the
+    organisation's front address once (`<meta name="portal-base">`, only when a first part is in use) and
+    `Portal.url('page/name')` in `portal.js` reads it. Four script files use it: `portal-tour.js`,
+    `report-builder.js`, `event-hub-upload.js` and `push-subscribe.js` (the last two posted to bare addresses, so
+    an upload to an event and switching notifications on or off were refused outside the default organisation).
+    A fifth, `livechat-widget.js`, does not yet: see "Not done here". `Portal.url()` does not believe a tag, or take a page name, that a browser would read
+    as another site. A script printed by a PHP page uses the new `Router::urlForScript()`. `Router::url()` is
+    now one line that asks `Site::url()`, so there is one rule, not two copies of it.
+  - **Nothing changes for an installation that does not use first parts.** Shown, not assumed: the code before
+    and after the first commit was run against the same database and asked for 1,869 addresses, signed in and
+    signed out, in the three set-ups with no first parts; every answer was the same in status, redirect and every
+    byte of the page. The fixes that followed were compared the same way on a sample of 40 addresses (282
+    answers): none differs.
+  - **A check that stops bare addresses coming back.** `tools/audit-checks/check_site_aware_addresses.py` now
+    reads every PHP and script file under `web/_apps`, `web/_core`, the web folder and `web/_install/upgrade.php`,
+    not a short list. It sees an address after an opening bracket (`$ok ? '/a' : ('/b?id=' . $id)`), and, in a
+    script file, an address handed to any function (`postForm('/x', …)`). Places not swept yet are named in
+    `tools/audit-checks/site_aware_addresses_pending.txt` (45 places, 2,700 bare addresses on this branch: 2,696 in four groups
+    for the four slices of the next package, 4 in one single file); the check fails if a place on that list
+    turns out to be clean, so the list can only shrink. `--only <places>` judges one set of folders; a line that
+    must stay bare says why with `// address-check: allow — reason`.
+  - Self-test: `tools/site-addresses-selftest.php` (101 checks). It runs the portal with two organisations and
+    reads every link, form target, picture or script address and redirect on all 585 registered page addresses,
+    with first parts and without. It also puts an organisation key holding quotes, an angle bracket, an ampersand
+    and a backtick straight into the database and requires every copy a page prints to be escaped for where it
+    sits. `--only <places>` runs the crawl for one set of folders.
+  - **Not done here:** the app folders (2,696 addresses; the next package), the database upgrade page, the installable app (`manifest.php` starts it at the top
+    address), the service worker (it knows `/api/` only at the top of an address), the chat box on `/live`
+    (`livechat-widget.js` asks four addresses with no organisation's part) and the return address of a sign-in
+    through Microsoft or Google (it comes back with no organisation's part).
+  - Review: one independent check by a fresh Claude agent standing in for Codex (525 tries at the sign-in redirects: none left the portal or reached another organisation; one medium and three small faults elsewhere), then one round of fixes with no second check. Run on MySQL 8.0.36 and 8.4.11; not on Apache, in a real browser, or with a real Microsoft or Google sign-in. Not reviewed by Codex yet.
 - **No web address is built in, and e-mailed links use the portal's set address (#500).** The portal's own address is now a setting (`site.url`), typed on a new "Web addresses" card at Admin → Settings → Organisation (global administrators only). Every link the portal sends out is built in one place, `Portal\Core\PortalAddress`: the set address, else the address of the request, else no link. Before this, a password reset asked for with a made-up host name mailed a working reset link pointing at that host; with the address set, that can no longer happen. **Until an administrator sets it, links still follow the request.** The admin dashboard says so, and gives a global administrator a **Use this address** button that sets it in one press.
 - A reminder for one organisation carries that organisation's own address ("own address each") or its own key ("first part of the address"), not the address of whoever started the job.
 - Expense e-mails now carry whole links. Their buttons used to be bare `/expenses/…` addresses, which open nothing from a mail program.

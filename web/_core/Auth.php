@@ -859,13 +859,27 @@ class Auth
      * Require authentication or redirect to login page.
      * Saves the current URL so the user can be redirected back after login.
      *
+     * THE SIGN-IN PAGE IS THE ORGANISATION'S OWN (#536). This used to send
+     * everybody to the bare "/login". Where organisations are told apart by
+     * the first part of the address, that is the DEFAULT organisation's
+     * sign-in page: somebody who asked for "/north/account" signed in under
+     * the wrong organisation's name and colours, and every link on that
+     * page led further away from their own. Site::url() puts the
+     * organisation's part on, and adds nothing when none is in use, so an
+     * ordinary installation still gets exactly "/login?redirect=…".
+     *
+     * The address to come back to is the one the visitor asked for, as they
+     * typed it, so it already carries the organisation's part.
+     * safeRedirectUrl() judges it again after sign-in; nothing here is
+     * trusted for that.
+     *
      * @return void (terminates with redirect if not authenticated)
      */
     public static function requireLogin(): void
     {
         if (self::check() === false) {
             $redirect = urlencode($_SERVER['REQUEST_URI'] ?? '/');
-            header('Location: /login?redirect=' . $redirect, true, 302);
+            header('Location: ' . Site::url('login') . '?redirect=' . $redirect, true, 302);
             exit();
         }
     }
@@ -1063,17 +1077,60 @@ class Auth
     /**
      * 🛡️ Validate and sanitize a redirect URL to prevent open redirect attacks.
      * Only allows relative paths on the same origin. Rejects protocol-relative
-     * URLs, encoded traversals, backslash tricks, and external hosts.
+     * URLs, backslash tricks, anything with a scheme and external hosts.
+     *
+     * TWO RULES WERE ADDED BY THE LINK SWEEP (#536). Every older rule is
+     * still here, in the same order, unchanged.
+     *
+     * 1. NO TAB OR OTHER CONTROL CHARACTER, in any installation. A browser
+     *    takes tabs and line breaks OUT of an address before reading it, so
+     *    "/<tab>/other.example" is read as "//other.example", which is
+     *    another site. None of the older rules saw that: the text does not
+     *    start with "//" until the browser has removed the tab. A real
+     *    address of this portal never holds such a character.
+     *
+     * 2. IT MUST STAY IN THE ORGANISATION THIS REQUEST IS IN, where
+     *    organisations are told apart by the first part of the address. See
+     *    staysInThisOrganisation(). Without it, a link to an organisation's
+     *    sign-in page could carry "come back to /another-organisation/…",
+     *    and a person who belongs to both would be working in the wrong one
+     *    straight after signing in, with nothing on the page to say so.
+     *
+     * THE FALLBACK IS THE ORGANISATION'S OWN FRONT PAGE. It used to be the
+     * bare "/", which under "the first part of the address" is the DEFAULT
+     * organisation's front page. Callers that have no address to come back
+     * to pass "/" as the address; under an organisation's part that is now
+     * refused by rule 2 and so becomes that organisation's front page too.
+     * With no organisation's part in use both are still exactly "/".
+     *
+     * WHAT IT CANNOT DO
+     *   - It does not know whether the address is a real page. A made-up
+     *     address inside the organisation is accepted, and answers "page not
+     *     found" there.
+     *   - It does not ask whether the PERSON belongs to the organisation.
+     *     SiteGate does that on the next request, for every address.
+     *   - In the other two ways of telling organisations apart (the sign-in
+     *     session, or an address of its own each) the path does not say
+     *     which organisation, so rule 2 has nothing to judge and does not
+     *     run. An address with another host name is refused by the older
+     *     rules in every way.
      *
      * @see https://cheatsheetseries.owasp.org/cheatsheets/Unvalidated_Redirects_and_Forwards_Cheat_Sheet.html
+     * @see https://url.spec.whatwg.org/#concept-basic-url-parser  (tabs and line breaks are removed)
      *
-     * @param string $url The raw redirect URL (typically from $_GET['redirect'])
-     * @param string $fallback Fallback URL if validation fails (default '/')
+     * @param string      $url      The raw redirect URL (typically from $_GET['redirect'])
+     * @param string|null $fallback Where to go when the address is refused.
+     *                              Null (the usual case) means this
+     *                              organisation's own front page.
      *
      * @return string A safe redirect URL
      */
-    public static function safeRedirectUrl(string $url, string $fallback = '/'): string
+    public static function safeRedirectUrl(string $url, ?string $fallback = null): string
     {
+        // 🏠 A default value in the list of parameters must be fixed text, so
+        //    the organisation's front page is worked out here instead.
+        $fallback ??= Site::url('');
+
         // 🔍 Decode the URL to catch encoded bypass attempts (%2F, %5C, etc.)
         $decoded = rawurldecode($url);
 
@@ -1092,6 +1149,12 @@ class Auth
             return $fallback;
         }
 
+        // 🚫 Reject tabs, line breaks and every other control character
+        //    (rule 1 above), both as sent and once decoded.
+        if (preg_match('/[\x00-\x1F\x7F]/', $url . $decoded) === 1) {
+            return $fallback;
+        }
+
         // 🚫 Reject URLs containing a scheme (javascript:, data:, etc.)
         if (preg_match('#[a-zA-Z][a-zA-Z0-9+\-.]*:#', $decoded) === 1) {
             return $fallback;
@@ -1103,8 +1166,99 @@ class Auth
             return $fallback;
         }
 
+        // 🏢 Reject an address that leaves this organisation (rule 2 above)
+        if (self::staysInThisOrganisation($url, $decoded) === false) {
+            return $fallback;
+        }
+
         // ✅ URL is a safe relative path
         return $url;
+    }
+
+    /**
+     * 🏢 Would this address keep the visitor in the organisation the request
+     * is in? Only asked where organisations are told apart by the first part
+     * of the address; in every other set-up the answer is yes, because the
+     * path says nothing about the organisation.
+     *
+     * Both forms of the address are judged, as it was sent and once decoded,
+     * and BOTH must pass. The browser is handed the first; a server in
+     * between may see the second.
+     *
+     *   - A "." or ".." part is refused. A browser works those out before it
+     *     asks, so "/north/../south/x" arrives as "/south/x".
+     *   - The request is under an organisation's part ("/north/login"): the
+     *     address must start with that same part, spelt the same way.
+     *     Anything else is refused, another organisation's part and an
+     *     address with no part at all alike.
+     *   - The request has no organisation's part ("/login", which is the
+     *     default organisation): the address must not start with the part of
+     *     another active organisation. That needs the database, and asks it
+     *     the same question Site::detectFromPath() asks about a request, so
+     *     the two agree on what counts as an organisation's part (capital
+     *     letters included; the database compares them its own way). If the
+     *     question cannot be asked, the address is refused.
+     *
+     * WHY THE QUESTION IS WRITTEN OUT HERE and not shared with Site: Site.php
+     * was outside the package that added this (roll-out F8). If the question
+     * in Site::detectFromPath() ever changes, change this one with it.
+     *
+     * WHAT IT CANNOT DO: it judges the first part only. Whether the rest is
+     * a real page, and whether the person may open it, are other checks.
+     */
+    private static function staysInThisOrganisation(string $url, string $decoded): bool
+    {
+        if (Site::isMultisiteEnabled() === false || Site::detectionMode() !== Site::MODE_PATH) {
+            return true;
+        }
+
+        $prefix = Site::pathPrefix();
+        $firsts = [];
+        foreach ([$url, $decoded] as $form) {
+            // The path only: nothing after "?" or "#" chooses the organisation.
+            $parts = explode('/', ltrim(substr($form, 0, strcspn($form, '?#')), '/'));
+            if (in_array('.', $parts, true) === true || in_array('..', $parts, true) === true) {
+                return false;
+            }
+            if ($prefix !== '' && $parts[0] !== $prefix) {
+                return false;
+            }
+            $firsts[$parts[0]] = true;
+        }
+        if ($prefix !== '') {
+            return true;
+        }
+
+        try {
+            $stmt = App::db()->prepare('SELECT siteID FROM tblSites WHERE siteKey = ? AND isActive = 1 LIMIT 1');
+            if ($stmt === false) {
+                return false;
+            }
+            foreach (array_keys($firsts) as $first) {
+                $first = (string) $first; // PHP turns a key of digits into a number
+                if ($first === '') {
+                    continue;
+                }
+                $stmt->bind_param('s', $first);
+                $stmt->execute();
+                $row = $stmt->get_result()->fetch_assoc();
+                // 🔢 A number from a prepared statement, never text.
+                if ($row !== null && (int) $row['siteID'] !== Site::id()) {
+                    $stmt->close();
+
+                    return false;
+                }
+            }
+            $stmt->close();
+        } catch (\Throwable $e) {
+            // Refused, and said once in PHP's error log: a sign-in that lands
+            // on the front page for no visible reason should be findable.
+            error_log('[WebMS-Intra] Auth::safeRedirectUrl could not ask which organisation an address belongs to, so it was refused: ' . $e->getMessage());
+
+            return false;
+        }
+
+        return true;
     }
 
     /* ====================================================================== */
@@ -1320,7 +1474,7 @@ class Auth
             $_SESSION['login_redirect'] = self::safeRedirectUrl($_GET['redirect'] ?? '/');
             unset($_SESSION['user_id'], $_SESSION['2fa_passed']);
             Logger::activity('LoginMS365Pending2fa', 'MS365 login pending 2FA challenge', $userId);
-            header('Location: /auth/2fa/verify', true, 302);
+            header('Location: ' . Site::url('auth/2fa/verify'), true, 302);
             exit();
         }
 
@@ -1548,7 +1702,7 @@ class Auth
             $_SESSION['login_redirect'] = self::safeRedirectUrl($_GET['redirect'] ?? '/');
             unset($_SESSION['user_id'], $_SESSION['2fa_passed']);
             Logger::activity('LoginGooglePending2fa', 'Google login pending 2FA challenge', $userId);
-            header('Location: /auth/2fa/verify', true, 302);
+            header('Location: ' . Site::url('auth/2fa/verify'), true, 302);
             exit();
         }
 
@@ -2479,7 +2633,9 @@ class Auth
      *      keeping only static files, the offline page and manifest (except in
      *      a store written by a worker from before #507 — see the comment
      *      above the echo below), and pages the portal marked as built for a
-     *      signed-out visitor. Then it goes to '/'.
+     *      signed-out visitor. Then it goes to the front page of the
+     *      organisation the person signed out of (see "WHERE IT GOES
+     *      AFTERWARDS" below).
      *
      * WHY BOTH 2 AND 3: tested on 14 September 2026 in Edge 153 and in
      * Playwright's Firefox 155 and WebKit 26.6 builds, `Clear-Site-Data:
@@ -2522,6 +2678,17 @@ class Auth
      *     putting the new worker in charge cut off the other tab's download.
      *   - Deleting again after a fixed wait. A page cannot see another tab's
      *     downloads, so any wait is a guess, and it slows every sign-out.
+     *
+     * WHERE IT GOES AFTERWARDS (#536). The page used to end at the bare "/"
+     * in all three of its ways out: the script, the fallback for a browser
+     * with scripts switched off, and the "Continue" link. Where organisations
+     * are told apart by the first part of the address, "/" is the DEFAULT
+     * organisation, so somebody signing out of "/north/…" was handed the
+     * wrong organisation's sign-in page. All three now go to Site::url(''),
+     * the front page of the organisation the sign-out was asked for, which is
+     * still exactly "/" when no organisation's part is in use. It is worked
+     * out from the address of this request, not from the session, which no
+     * longer exists by then.
      *
      * WHAT IT CANNOT DO
      *   - It cannot reach a browser that never loads this page: a session that
@@ -2588,6 +2755,14 @@ class Auth
         header('Content-Type: text/html; charset=UTF-8');
 
         $nonceAttr = htmlspecialchars($nonce, ENT_QUOTES, 'UTF-8');
+
+        // 🏢 Where the page goes when it has finished: see "WHERE IT GOES
+        //    AFTERWARDS" above. Two forms of the one address, because it is
+        //    printed in two kinds of place: inside HTML (escaped for HTML),
+        //    and inside the script's own double quotes (escaped for a
+        //    script; Router::urlForScript() says why those differ).
+        $homeAttr = htmlspecialchars(Site::url(''), ENT_QUOTES, 'UTF-8');
+        $homeJs   = Router::urlForScript('');
 
         // 📄 The script below decides what to delete from Cache Storage.
         //    KEPT: the addresses in ALWAYS_KEEP, which are the non-personal
@@ -2715,7 +2890,7 @@ class Auth
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Signed out</title>
-<noscript><meta http-equiv="refresh" content="0;url=/"></noscript>
+<noscript><meta http-equiv="refresh" content="0;url=' . $homeAttr . '"></noscript>
 <script nonce="' . $nonceAttr . '">
 (function () {
     "use strict";
@@ -2727,7 +2902,7 @@ class Auth
     var PRE_507_STORES = ["portal-v1", "portal-v2"];
     var MARKER = "' . self::OFFLINE_COPY_HEADER . '";
     var STATIC_FILE = /\.(css|js|png|jpg|jpeg|gif|svg|ico|woff2?|ttf|eot|webp)$/i;
-    function goHome() { window.location.replace("/"); }
+    function goHome() { window.location.replace("' . $homeJs . '"); }
     // 🛡️ Codex catch-up C2: turns ANY promise into one that always
     //    resolves, whichever way the original one went, so wrapping every
     //    per-store and per-request deletion in this means Promise.all()
@@ -2764,7 +2939,7 @@ class Auth
 </script>
 </head>
 <body>
-<p>You have been signed out. <a href="/">Continue</a></p>
+<p>You have been signed out. <a href="' . $homeAttr . '">Continue</a></p>
 </body>
 </html>';
         exit();
@@ -2911,7 +3086,7 @@ class Auth
         http_response_code($httpCode);
         $_SESSION['flash_msg']  = $message;
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /login');
+        header('Location: ' . Site::url('login'));
         exit();
     }
 

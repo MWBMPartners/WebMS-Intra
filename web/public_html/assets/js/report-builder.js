@@ -525,7 +525,12 @@
         body.set('csrf_token', getCsrf());
         body.set('definition', JSON.stringify(buildDefinition()));
 
-        fetch('/admin/reports/builder/preview', {
+        // The preview comes from the organisation being looked at (#536).
+        // This was the bare '/admin/reports/builder/preview', which under
+        // "the first part of the address" asked the default organisation.
+        // Portal.url() is defined in portal.js, which the page footer
+        // loads; it has run long before anybody can press Preview.
+        fetch(window.Portal.url('admin/reports/builder/preview'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-Requested-With': 'XMLHttpRequest' },
             body: body.toString()

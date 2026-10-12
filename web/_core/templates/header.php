@@ -71,6 +71,26 @@ foreach ($breadcrumbs as $crumbUrl) {
     }
 }
 
+// 🧭 The front address of the organisation this page belongs to: "/" on an
+// ordinary installation, "/north/" where organisations are told apart by the
+// first part of the address (#536). It is printed further down, ONCE, as
+// <meta name="portal-base">, for the portal's script FILES: a file under
+// /assets/js/ is the same for every organisation and has no PHP in it, so
+// it cannot ask Site::url(). `Portal.url()` in portal.js reads the tag
+// instead. A script written inside a PHP page does not need the tag: it
+// prints Router::urlForScript() directly.
+//
+// The tag is left out altogether when no organisation's part is in use (the
+// address is then plain "/"). That keeps every page of an ordinary
+// installation byte for byte as it was before the tag existed, which is how
+// the link sweep is shown to have changed nothing there; Portal.url() takes
+// a missing tag to mean "/".
+//
+// WHAT IT CANNOT DO: reach a page that prints its own <head> without this
+// file. Such a page must print the same tag if it loads a script file that
+// calls Portal.url().
+$portalBaseAddress = Site::url('');
+
 // 🌐 Site branding — use Site::branding() for multi-site, fallback to settings.
 // $siteColor is injected as --portal-primary on the <html> element below so
 // portal.css's design tokens shift to the site's brand colour automatically.
@@ -86,7 +106,7 @@ $activeAssetFolder = (function (): string {
     $preset   = $presets[$industry] ?? $presets[''] ?? [];
     return (string) ($preset['assetFolder'] ?? 'webms-intra');
 })();
-$brandIconPath = '/assets/images/brandkit/assets/' . $activeAssetFolder . '/icon.svg';
+$brandIconPath = '/assets/images/brandkit/assets/' . $activeAssetFolder . '/icon.svg'; // address-check: allow — the end of a file name under /assets/, which the web server answers itself; not a page
 $siteFavicon   = Site::branding('favicon') ?? $brandIconPath;
 
 // 🏷️ "Powered by <product>" attribution — same rule as the footer span.
@@ -207,6 +227,9 @@ header("Content-Security-Policy: default-src 'self'; "
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="csrf-token" content="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
+<?php if (Site::pathPrefix() !== ''): ?>
+    <meta name="portal-base" content="<?php echo htmlspecialchars($portalBaseAddress, ENT_QUOTES, 'UTF-8'); ?>">
+<?php endif; ?>
     <meta name="theme-color" content="<?php echo htmlspecialchars($siteColor, ENT_QUOTES, 'UTF-8'); ?>">
 
     <!-- 🤖 Robots / AI-crawler policy (defaults to deny; admin opt-in) -->
@@ -237,7 +260,7 @@ header("Content-Security-Policy: default-src 'self'; "
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="<?php echo htmlspecialchars($productName, ENT_QUOTES, 'UTF-8'); ?>">
-    <link rel="manifest" href="/manifest.json">
+    <link rel="manifest" href="<?php echo '/manifest.json'; // address-check: allow — one description of the installable app for the whole installation: manifest.php starts the app at the top address, and sw.js and the sign-out page keep it under this exact name (#536) ?>">
     <link rel="icon" type="image/svg+xml" href="<?php echo htmlspecialchars($siteFavicon, ENT_QUOTES, 'UTF-8'); ?>">
     <link rel="apple-touch-icon" href="<?php echo htmlspecialchars($brandIconPath, ENT_QUOTES, 'UTF-8'); ?>">
     <link rel="apple-touch-icon" href="/assets/images/icon-192.svg">

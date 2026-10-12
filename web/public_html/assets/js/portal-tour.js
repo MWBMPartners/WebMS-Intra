@@ -17,6 +17,14 @@
  * No framework — vanilla JS + Bootstrap modal markup (Bootstrap JS optional;
  * falls back to a manually-toggled overlay if bootstrap.Modal is absent).
  *
+ * The two addresses it asks are built by Portal.url() (portal.js), so that
+ * where organisations are told apart by the first part of the address the
+ * tour is fetched from, and marked as seen in, the organisation being
+ * looked at (#536). They were written bare, which asked the default
+ * organisation. Portal.url() is there by the time this file runs because
+ * Asset::portalJs() loads portal.js first, and both are deferred, which
+ * keeps them in that order. Do not load this file without portal.js.
+ *
  * @see   https://github.com/MWBMPartners/WebMS-Intra/issues/253
  * ============================================================================= */
 (function () {
@@ -235,7 +243,7 @@
         var fd = new FormData();
         fd.append('csrf_token', csrfToken());
         fd.append('tourID', String(tour.tourID));
-        fetch('/api/tours/complete', { method: 'POST', body: fd, credentials: 'same-origin' })
+        fetch(window.Portal.url('api/tours/complete'), { method: 'POST', body: fd, credentials: 'same-origin' })
             .catch(function () { /* best-effort */ });
     }
 
@@ -255,7 +263,7 @@
     };
 
     function fetchActive() {
-        fetch('/api/tours/active', { credentials: 'same-origin', headers: { 'Accept': 'application/json' } })
+        fetch(window.Portal.url('api/tours/active'), { credentials: 'same-origin', headers: { 'Accept': 'application/json' } })
             .then(function (r) { return r.ok ? r.json() : null; })
             .then(function (json) {
                 // ApiResponse wraps payload as { success, data }.

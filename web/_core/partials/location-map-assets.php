@@ -19,6 +19,13 @@
  * SVG `L.divIcon` marker instead of loading Leaflet's default PNG icons —
  * zero extra CSP surface, no header.php change required.
  *
+ * THE TWO ADDRESSES THE SCRIPT ASKS (`geo/lookup`, `geo/w3w-suggest`) are
+ * printed by Router::urlForScript() (#536), so a page of one organisation
+ * asks that organisation. They were written bare, which under "the first
+ * part of the address" asked the DEFAULT organisation, with its settings and
+ * its look-up allowance. The explanation is here and not beside the two
+ * lines because a comment inside the script would be sent to every browser.
+ *
  * @package   Portal\Core\Partials
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2026-present MWBM Partners Ltd (t/a MWservices)
@@ -29,6 +36,8 @@
  */
 
 declare(strict_types=1);
+
+use Portal\Core\Router;
 
 if (function_exists('portal_location_map_assets') === false) {
     function portal_location_map_assets(string $cspNonce): void
@@ -124,7 +133,7 @@ if (function_exists('portal_location_map_assets') === false) {
                 btn.disabled = true;
                 if (statusEl) { statusEl.textContent = '…'; }
 
-                fetch('/geo/lookup', {
+                fetch('<?php echo Router::urlForScript('geo/lookup'); ?>', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-Requested-With': 'XMLHttpRequest' },
                     body: body.toString()
@@ -164,7 +173,7 @@ if (function_exists('portal_location_map_assets') === false) {
                     var body = new URLSearchParams();
                     body.set('csrf_token', csrfToken());
                     body.set('q', q);
-                    fetch('/geo/w3w-suggest', {
+                    fetch('<?php echo Router::urlForScript('geo/w3w-suggest'); ?>', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-Requested-With': 'XMLHttpRequest' },
                         body: body.toString()

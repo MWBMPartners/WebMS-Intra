@@ -818,6 +818,11 @@ another repo, ever**.
   but cannot be chosen yet (#536).
 - A person with several organisations chooses one after signing in (`/site/choose`) and can switch later; a person
   with one is put straight into it.
+- **Links stay inside the organisation (#536, part 1 of 2).** Where organisations are told apart by the first
+  part of the address, the menu, page header, footer, error pages, "closed for maintenance" page, sign-in
+  redirects (Microsoft and Google included), sign-out page and the portal's own script files all keep that part.
+  A "come back to" address after sign-in cannot lead to another organisation or another site. The app pages
+  themselves are part 2; until then this way stays marked "not ready" on the set-up page.
 - **Only an organisation's own members get in (#511):** one gate before every page refuses a signed-in person who
   is not a member of the organisation the address opens, in every way of telling organisations apart. A global
   administrator is let in everywhere. Still open in #511: coordinator grants across organisations, and the older

@@ -7,6 +7,8 @@
  *
  * Features:
  *   - Dark mode toggle with localStorage persistence
+ *   - Portal.url(): the address of a portal page, inside the organisation
+ *     being looked at (#536)
  *   - AJAX helper for JSON API requests with CSRF token
  *   - File upload dropzone interactivity
  *   - Toast notification display
@@ -496,8 +498,82 @@
         initPasswordMeters();
     }
 
+    /* ========================================================================
+       5a. Portal.url() — an address inside the organisation being looked at
+       ======================================================================== */
+
+    /**
+     * The address of a portal page, for a script FILE to ask for.
+     *
+     *     fetch(Portal.url('api/tours/active'))
+     *
+     * WHY IT EXISTS (#536). One installation can serve several
+     * organisations, told apart by the first part of the address:
+     * "/north/calendar" is the North organisation's calendar. A script file
+     * is the same file for every organisation and has no PHP in it, so it
+     * cannot know that part. An address written out bare in a script
+     * ("/api/tours/active") therefore asked the DEFAULT organisation,
+     * whichever one the person was looking at.
+     *
+     * HOW IT KNOWS. The page header prints the organisation's front address
+     * once, as <meta name="portal-base" content="/north/">. This puts the
+     * page's name after it. On an ordinary installation the tag is not
+     * printed at all, and a missing tag means "/", so the answer there is
+     * the plain address, exactly as before.
+     *
+     * The tag is read each time, not once when this file loads: it costs
+     * nothing, and a script that runs before the header has been read in
+     * full cannot be left holding the wrong answer.
+     *
+     * WHAT IT CANNOT DO
+     *   - It does not check that the page exists.
+     *   - On a page that prints its own <head> without the shared header
+     *     there is no tag, so it gives the plain address. Such a page must
+     *     print the tag itself.
+     *   - It is for the portal's own pages only. Do not use it for a file
+     *     under /assets/, or any other real file in the web folder: the web
+     *     server answers those itself and an organisation's part in front
+     *     would break them.
+     *   - It is not a filter for text a visitor typed. It refuses the two
+     *     shapes below; it does not judge anything else about a route.
+     *
+     * WHAT IT REFUSES, AND WHY. The answer always starts with one "/", so
+     * that it is an address on THIS site. Three kinds of character straight
+     * after that "/" would make a browser read it as ANOTHER site: a second
+     * "/" ("//host"), a backslash (browsers read "\" as "/"), and a tab,
+     * line break or other control character (browsers drop those, so
+     * "/<tab>/host" is "//host" too). So:
+     *   - a tag whose content does not start with exactly one "/" followed
+     *     by something harmless is not believed, and the answer is built as
+     *     if there were no tag;
+     *   - a route that starts that way (once its leading "/" are taken
+     *     off) is refused, and the answer is the organisation's front page.
+     * This used to believe both. No caller passes a visitor's text today,
+     * and the page's own policy blocks requests to other sites, so nothing
+     * could use it; the refusal is here so that it stays that way.
+     *
+     * @param {string} route  The page's address, with or without a leading
+     *                        "/", and with any "?…" it needs.
+     * @returns {string}      The address to ask for.
+     */
+    function portalUrl(route) {
+        var tag  = document.querySelector('meta[name="portal-base"]');
+        var base = tag !== null ? (tag.getAttribute('content') || '/') : '/';
+        if (/^\/(?![\/\\\u0000-\u001f\u007f])/.test(base) === false) {
+            base = '/';
+        }
+        var page = String(route).replace(/^\/+/, '');
+        if (/^[\\\u0000-\u001f\u007f]/.test(page) === true) {
+            page = '';
+        }
+
+        // Exactly one "/" between the two, however either was written.
+        return base.replace(/\/+$/, '') + '/' + page;
+    }
+
     // Expose public API on window.Portal
     window.Portal = window.Portal || {};
+    window.Portal.url = portalUrl;
     window.Portal.fetch = portalFetch;
     window.Portal.toast = showToast;
 })();
