@@ -2,6 +2,19 @@
 
 
 ## [Unreleased] (alpha)
+- tooling: **the rules for where a deploy puts files are now a tested script**
+  (#500, roll-out package F7). `tools/deploy/resolve-settings.sh` decides, from
+  the settings, which hosting login a deploy uses and which folder each release
+  channel (live, beta, alpha) goes to, and refuses whenever it cannot be sure.
+  Each channel is a complete, separate installation in its own folder; hosting
+  may differ per channel; no web address is built in. It also judges whether
+  the folder found on the server may be written to: one marked as this
+  channel's, an empty one, or (only when a person ticks "adopt existing
+  folder") a portal and nothing else. It never prints a setting's value.
+  `tools/deploy/resolve-settings-selftest.sh` proves every rule and refusal
+  (366 checks). **No workflow uses the script yet**: the replacement
+  `deploy.yml` is written and proved against a real upload tool in a
+  container, and is placed once the code can read its channel from a file.
 - docs: **the disaster-recovery runbook now works** (#488). The old one told
   an administrator to restore from a folder name the portal has never used, to
   delete from a sessions table that does not exist, and to replace the
