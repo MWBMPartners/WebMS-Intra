@@ -19,6 +19,24 @@ package by ITS OWN file list — never from `git status`, which now mixes packag
 
 ## WHERE THINGS ARE, 12 OCTOBER 2026, 06:47 — package C committed; three jobs running; two owner answers; one trap
 
+**Package F7 is committed and pushed as `a9d8569`** (#500; `tools/deploy/resolve-settings.sh` and its self-test, 366 checks; no
+workflow uses it yet). Its fix round was not given a second check (refuse-side changes, nothing calls it, and the workflow is
+checked again before placing). The corrected proposal is `rollout-F7--fix-evidence/proposed-deploy.yml`, with
+`WHAT-CHANGED-IN-THE-PROPOSAL.md` ending in the table of 23 differences from W1 to show the owner. It cannot be placed before F3,
+and F3's code must name the channel file in a way F7's `tree` rule sees (not yet proved against real F3 code). The checkout
+`.claude-work/worktrees/f7` and branch `ro-f7-build` can be removed.
+
+**The plan for #514 parts 9, 10 and 11 is written: `.claude-work/resume/p514-p9-11--plan.md`** (487 lines; packages P9
+notifications, P10 audiences, P11 documents). P9 and P10 share no file. Both start after B2a, B2b, E, G, F1, F2, F4, F8 and the F9
+slices they name. **The owner overruled the plan on one point (12 October): the daily e-mail to administrators also carries each
+waiting event's TITLE AND TIME**, not only numbers and calendar names. So P9's brief must add what the plan's recommendation
+avoided: a time shown in the event's own zone with the zone named, and tested on both clock-change nights; only events that
+administrator may see; a line saying when the list was made, since an event can change or be hidden before the e-mail is read;
+and no title in any log. The owner said yes to adding P9's self-test to `calendar-selftests.yml` (the exact step is in the plan's
+section 6).
+
+**The owner added two faults to the roll-out set (12 October): #587 and #580.** Their plan is being written (H).
+
 **Package D is committed and pushed as `ce66fc1`** (#488; eight files). It had a full check, a fix round, a narrow check of the
 fix round, and four last small fixes made on proofs in `.claude-work/resume/rollout-D--fix2-evidence/` (run them again with the two
 scripts there). Small follow-ups are #590. **Two corrections to the runbook are still owed:** G's `RUNBOOK-CORRECTIONS.md` when G
@@ -34,12 +52,11 @@ script loads Babel with no fingerprint) and #576 (small follow-ups).
 
 | Package | What | Where it works | Report |
 | --- | --- | --- | --- |
-| B2a + B2b | access gaps — B2a's one check came back NOT CLEAN (none HIGH); ONE FIX ROUND is running in the same checkout, and it also builds B2b (plan item 10), so one narrow check covers both. It makes two more commits on `ro-b2a-build` after `1953360` | its own checkout `.claude-work/worktrees/b2a` | `rollout-B2a--check.md` (the work list), `rollout-B2a--fix.md` |
-| E | older databases (#553, #555, #554) — check NOT CLEAN (the migrations held on every shape tried; one HIGH side effect on backups, routed to G; three MEDIUM about what the new test cannot see and the install script missing the link). ONE FIX ROUND is running; it adds a commit after `28ff8f3` | its own checkout `.claude-work/worktrees/e` | `rollout-E--check.md` (the work list), `rollout-E--fix.md` |
+| B2a + B2b | access gaps — fix round DONE and B2b built: commits `9cdf50e` (fixes, 19 files) and `b6c1b67` (B2b, 11 files) on `ro-b2a-build`, after `1953360`. A NARROW check of those two commits is running. Bring all three across together | its own checkout `.claude-work/worktrees/b2a` | `rollout-B2a--fix.md`, `rollout-B2a--check2.md` |
+| E | older databases (#553, #555, #554) — fix round DONE: commit `917382c` on `ro-e-build`, after `28ff8f3` (the install script now carries 210's UPDATE and ALTER; the migration test gained five rules). A NARROW check of that commit is running. **Release only together with G** | its own checkout `.claude-work/worktrees/e` | `rollout-E--fix.md`, `rollout-E--check2.md` |
 | G | the backup faults (#577, #578, #579, the clean-up, the freshness report, a link added after a snapshot, and the "Check this snapshot" button) — BUILT as commit `daeb31e` on `ro-g-build` (21 files, no database change), in its ONE check | its own checkout `.claude-work/worktrees/g` | `rollout-G--build.md`, `rollout-G--check.md` |
-| F6 part 1 | the zip package's build script and guards (#499) — check NOT CLEAN (the core held; the list of what must never ship was too narrow, and the PDF library's folder was accepted unseen). ONE FIX ROUND is running; it adds a commit after `84c6180` and writes a corrected `package.yml` to `rollout-F6--fix-evidence/`. Then a NARROW check of the fix round, because these guards protect a public download | its own checkout `.claude-work/worktrees/f6` | `rollout-F6--check-FINAL-REPORT.md` (the work list; the checker could not write its own report file, so it was saved by hand), `rollout-F6--fix.md` |
-| #514 parts 9 to 11 (plan only) | notifications; roles, groups and departments as audiences; documents | reads the MAIN folder; changes nothing | `p514-p9-11--plan.md` |
-| F7 | the deploy's settings logic (#500) — check NOT CLEAN: nothing HIGH in the two committed files, one HIGH in the PROPOSED workflow (a dry run prints the password). ONE FIX ROUND is running; it adds a commit after `425ca9c` and writes a corrected proposal to `rollout-F7--fix-evidence/` | its own checkout `.claude-work/worktrees/f7` | `rollout-F7--check.md` (the work list), `rollout-F7--fix.md` |
+| F6 part 1 | the zip package's build script and guards (#499) — fix round DONE: commit `0089a78` on `ro-f6-build`, after `84c6180` (the guard turned round into an allow list of 17 kinds tied to places; the PDF library compared file by file; a committed self-test, 128 checks). A NARROW check of that commit is running. Corrected `package.yml` is in `rollout-F6--fix-evidence/` | its own checkout `.claude-work/worktrees/f6` | `rollout-F6--fix.md`, `rollout-F6--check2.md` |
+| H (plan only) | the two faults the owner added: #587 expense withdraw, #580 sign-in lockout and reset e-mails | reads the MAIN folder and the b2a checkout; changes nothing | `rollout-H--plan.md` |
 
 B2a and E each make ONE commit on their own branch and do not push. Bring each across with `git cherry-pick <hash>` onto
 `claude/alpha-wip` after its one check, then remove the checkout (`git worktree remove`) and delete its branch. B2b (plan item 10, the
