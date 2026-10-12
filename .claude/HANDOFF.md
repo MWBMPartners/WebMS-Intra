@@ -28,9 +28,10 @@ script loads Babel with no fingerprint) and #576 (small follow-ups).
 
 | Package | What | Where it works | Report |
 | --- | --- | --- | --- |
-| D | recovery runbook and backup documents (#488) — build | MAIN folder (documents and one new check script) | `rollout-D--build.md` |
-| B2a | access gaps, plan items 1-9, 11, 12 — build | its own checkout `.claude-work/worktrees/b2a`, branch `ro-b2a-build` | `rollout-B2a--build.md` |
-| E | older databases that stop part-way through upgrading (#553, #555, #554) — build | its own checkout `.claude-work/worktrees/e`, branch `ro-e-build` | `rollout-E--build.md` |
+| D | recovery runbook and backup documents (#488) — BUILT, in its ONE check | MAIN folder: five uncommitted files (three under `docs/`, `tools/offsite-backup/sync-offsite.sh.example`, new `tools/audit-checks/check_docs_table_refs.py`) | `rollout-D--build.md`, `rollout-D--check.md` |
+| B2a | access gaps — BUILT as commit `1953360` on `ro-b2a-build` (41 files), in its ONE check | its own checkout `.claude-work/worktrees/b2a` | `rollout-B2a--build.md`, `rollout-B2a--check.md` |
+| E | older databases (#553, #555, #554) — BUILT as commit `28ff8f3` on `ro-e-build` (six files, migration 210), in its ONE check | its own checkout `.claude-work/worktrees/e` | `rollout-E--build.md`, `rollout-E--check.md` |
+| G (plan only) | the three backup faults (#577, #578, #579), one package | reads the MAIN folder; changes nothing | `rollout-G--plan.md` |
 | F6 part 1 | the zip package's build script and guards (#499); the workflow is PROPOSED only, in its evidence folder | its own checkout `.claude-work/worktrees/f6`, branch `ro-f6-build` | `rollout-F6--build.md` |
 | F7 | the deploy's settings logic and its test (#500); the replacement `deploy.yml` is PROPOSED only | its own checkout `.claude-work/worktrees/f7`, branch `ro-f7-build` | `rollout-F7--build.md` |
 
@@ -65,6 +66,30 @@ summary and its section 4.1, "what runs beside what"). The short of it:
   6. **Session mode and signed-out visitors: accepted.** They see the default organisation's sign-in and public pages; the set-up
      page and the help say so. Two organisations that both need public pages use one of the address ways.
   Still with the owner, not a decision: the live address shows the installer to anyone until it is restricted in the hosting panel.
+
+**Learned from the three builds, 12 October, about 07:30 (act on these):**
+
+- **Package D found three faults in the portal's own backup, and the owner added all three to the roll-out set as ONE package, G**
+  (owner, 12 October): #577 no snapshot can be made once one imported calendar event exists, so the upgrade page refuses (our own
+  calendar import introduced it; it must not be released); #578 a snapshot holding a record that points at a later record of the
+  same table can never be restored, and the check-only run says it can; #579 snapshot and restore run out of memory at 128 MB.
+  All in `web/_core/DbBackup.php`. The plan is being written. The runbook says what is true TODAY; G corrects it in its own commit.
+- **The owner also said yes to one more workflow line**: `check_docs_table_refs.py` as a report-only block in `pr-security.yml`,
+  placed with the three blocks approved earlier today (W3). Nothing else in that file changes.
+- **D waits on B2a in one sentence**: runbook 7.7 says switching an account off does not end an open session. B2a makes that
+  untrue. Correct the sentence, and row 17 of the runbook's "What was tested" table, when both are on the branch.
+- **B2a put two files in its commit that the plan did not list**: `web/public_html/assets/js/livechat-widget.js` (the chat box now
+  sends the sign-in cookie to the portal's own site, so internal chat works for members inside the portal; NOT proved in a
+  browser; its checker is told to attack it) and `tools/expense-rules-selftest.php` (it pinned five redirect lines).
+- **B2a found two more places that show venue bookings to any signed-in account**, outside its file list:
+  `web/_apps/venues/venue.php` and the venue strip in `web/_apps/calendar/index.php` (about line 448). The owner's decision was to
+  close all venue pages, so these are fixed straight after B2a's check, with whatever the check finds, in one fix round.
+- **Four comments in other files are now untrue** (`GdprEraser.php:66-76`, `admin/livestream/dashboard.php:50-52`,
+  `check_event_visibility.py:236-243`, `help/venues.php:90`); wording is in B2a's `DOC-ENTRIES.md`. B2b takes the first; the
+  fix round takes the rest.
+- **E's builder found 25 settings with an empty stored default on an upgraded 6 March database**; its checker is asked whether
+  anything reads them. E's proposed workflow diff is in its evidence folder and is part of the approved test-workflow change.
+- Issues opened from the builders' "Found" lists: #577 to #585.
 
 **Trap, learned the hard way today:** the Agent tool's own "separate checkout" option (`isolation: worktree`) cuts the checkout from
 `main`, which is about 400 commits behind the working branch, and refuses writes to the main folder. A builder started that way found
