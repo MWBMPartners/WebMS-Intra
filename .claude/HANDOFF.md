@@ -181,7 +181,29 @@ inside the lock; files deleted after), C2-3, plus: refuse to cancel whenever an 
 member lost their membership row), and behaviour tests for the two key details. **THEN the same checker (`a6aac53c844c9c476`)
 re-runs its own two proofs against the fix — minutes, not a round — and A2b is committed.**
 
-**RUNNING SIDE BY SIDE since 12 Oct ~06:15 (owner's decision above):**
+**PACKAGE A2b IS COMMITTED: `fd08b7f` (12 Oct ~07:45), pushed; #574 commented.** 33 files; migration 209; 223 + 60 + 57 + 54 checks on
+8.0.36 and 8.4.11; 110 faults. Reviewed by one full check, a narrow check of the F1 fix (found C2-1, which the fix had introduced),
+that checker's re-run (found C2-4, a small mirror), all fixed; the checker's last probe line compares two different people's numbers
+and cannot pass as written — I read it and confirmed (his gift now carries his number; 3 kept gifts, was 2).
+**THE PLAN FOR B2, D AND E IS IN: `.claude-work/resume/rollout-B2-D-E--plan.md`** (481 lines; a table of files per package and what
+each can run beside; ten owner decisions, each with a recommendation the builders follow). Its coordinator's point: "shares no
+files" is not enough in ONE folder — the page tests copy all of `web/` and the migration test replays all of `web/_sql/` — so
+**side-by-side builders now work in their OWN checkouts (the Agent tool's `isolation: worktree`), commit there, and the
+commissioning session brings each commit across** (cherry-pick onto `claude/alpha-wip`; never pushed from the worktree).
+**RUNNING NOW (12 Oct ~08:00), each with a watchdog:**
+- **C's one check** (Opus; `.claude-work/resume/rollout-C--check.md`). C = exactly the 18 files in
+  `.claude-work/resume/rollout-C-FILES.txt` (uncommitted in the MAIN folder); its document entries are in
+  `…/rollout-C--build-evidence/DOC-ENTRIES.md` — add them at commit.
+- **B2a build** (Opus, own worktree; items 1-9, 11, 12 incl. ending an erased or switched-off account's session in
+  `Auth::ensureSession()`; report `…/rollout-B2a--build.md`; container `roB2a-mysql`, ports 33430-39).
+- **E build** (Opus, own worktree; migration 124 corrected, new 210, new migration-test phases from `origin/main` and from a frozen
+  6 March install script; workflow changes written as a diff, NOT applied; report `…/rollout-E--build.md`; ports 33440-49).
+- **D build** (Opus, MAIN folder, documents only; every runbook command run, a real backup and restore; report
+  `…/rollout-D--build.md`; ports 33450-59). One sentence ("lock one account out") waits for B2a.
+**Then:** B2b (the erasure pages' addresses; after B2a) → #499/#500/#502 → #514 parts 9-11 → the one workflow change → documentation
+sweep → Codex pass → pull request when the owner says.
+
+**(earlier)** RUNNING SIDE BY SIDE since 12 Oct ~06:15 (owner's decision above):
 - **A2b fix round 2** (Opus builder `a25b4240c3ddf008d`; report `.claude-work/resume/rollout-A2b--build.md`; watchdog) — at 05:56 its
   fixes passed on both versions (220 + 57 + 54 + 60); planting faults. Then the checker `a6aac53c844c9c476` re-runs `c2-scenario.php`
   and `c2-race.php`; then commit. **A2b's file list for staging: `.claude-work/resume/rollout-A2b-snapshot2/FINGERPRINTS.txt` plus
