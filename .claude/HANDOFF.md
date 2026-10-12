@@ -17,20 +17,25 @@ How it is run: each builder gets its exact file list; `CHANGELOG.md`, `DEV_NOTES
 packages at once (a builder working alongside another writes its entries to `<evidence>/DOC-ENTRIES.md`, added at commit); **stage each
 package by ITS OWN file list — never from `git status`, which now mixes packages**; own named containers and ports.
 
-## WHERE THINGS ARE, 12 OCTOBER 2026, 06:40 — four jobs running; two owner answers; one trap
+## WHERE THINGS ARE, 12 OCTOBER 2026, 06:47 — package C committed; three jobs running; two owner answers; one trap
+
+**Package C is committed and pushed as `a34bb77`** (#547, #568, #563; issues commented, kept open until the merge). Its one check
+found the three fixes right and two faults in the NEW TESTS; both were fixed in the same commit on planted-fault proofs, with no
+further round (evidence `.claude-work/resume/rollout-C--fix-evidence/`). What it found and did not fix is in #575 (the noticeboard
+script loads Babel with no fingerprint) and #576 (small follow-ups).
 
 **Running now (each with a watchdog on its report in `.claude-work/resume/`):**
 
 | Package | What | Where it works | Report |
 | --- | --- | --- | --- |
-| C | three broken pages (#547, #568, #563) — in its ONE check | MAIN folder, 18 uncommitted files, list in `rollout-C-FILES.txt` | `rollout-C--check.md` |
 | D | recovery runbook and backup documents (#488) — build | MAIN folder (documents and one new check script) | `rollout-D--build.md` |
 | B2a | access gaps, plan items 1-9, 11, 12 — build | its own checkout `.claude-work/worktrees/b2a`, branch `ro-b2a-build` | `rollout-B2a--build.md` |
 | E | older databases that stop part-way through upgrading (#553, #555, #554) — build | its own checkout `.claude-work/worktrees/e`, branch `ro-e-build` | `rollout-E--build.md` |
 
 B2a and E each make ONE commit on their own branch and do not push. Bring each across with `git cherry-pick <hash>` onto
 `claude/alpha-wip` after its one check, then remove the checkout (`git worktree remove`) and delete its branch. B2b (plan item 10, the
-erasure pages' addresses) starts after B2a. C's document lines wait in `rollout-C--build-evidence/DOC-ENTRIES.md`.
+erasure pages' addresses) starts after B2a. Each builder's document lines wait in its `…--build-evidence/DOC-ENTRIES.md`; add them at
+its commit.
 
 **Trap, learned the hard way today:** the Agent tool's own "separate checkout" option (`isolation: worktree`) cuts the checkout from
 `main`, which is about 400 commits behind the working branch, and refuses writes to the main folder. A builder started that way found
