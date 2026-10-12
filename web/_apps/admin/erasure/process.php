@@ -1,17 +1,26 @@
 <?php
 // Path: _apps/admin/erasure/process.php
 /**
- * Admin — execute or cancel an erasure request.
+ * Admin — execute or cancel an erasure request, or put back one whose run
+ * stopped part way.
  *
  * After a run this page tells the administrator what actually happened, in
  * one of three plain messages (#510). It used to say "Erasure completed"
  * whatever had happened, and a run that crashed showed a server error.
  *
+ * Four actions, each only for a request of the organisation being looked at:
+ *   execute  run a request that is at "pending review";
+ *   cancel   cancel one that has not been run yet;
+ *   putback  put one stuck at "processing" back to "pending review", when its
+ *            run stopped without finishing (roll-out package A2a);
+ *   confirm  confirm, on the person's behalf, one still waiting for them to
+ *            click the emailed link (roll-out package A2a).
+ *
  * @package   Portal\Admin
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2026-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.1.0
+ * @version   1.3.0
  * @link      https://github.com/MWBMPartners/webMS-Intra/issues/235
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/510
  */
@@ -58,15 +67,108 @@ if ($row === null) {
 }
 
 if ($action === 'cancel') {
-    $u = $db->prepare('UPDATE tblErasureRequest SET status = "cancelled", processedAt = NOW(), processedByID = ? WHERE requestID = ?');
+    // Only a request that has NOT been run can be cancelled. The statement
+    // used to have no test of the status at all, so a hand-made form post
+    // could "cancel" a request that was already completed: its status then
+    // said the erasure had not happened, when it had. The test is in the
+    // UPDATE itself, so a request that changes state between the page being
+    // read and the button being pressed is still refused.
+    $cancelled = false;
+    $u = $db->prepare(
+        'UPDATE tblErasureRequest SET status = "cancelled", processedAt = NOW(), processedByID = ? '
+        . 'WHERE requestID = ? AND siteID = ? AND status IN ("pending_confirmation", "pending_review")'
+    );
     if ($u !== false) {
-        $u->bind_param('ii', $adminId, $requestId);
+        $u->bind_param('iii', $adminId, $requestId, $siteId);
         $u->execute();
+        $cancelled = $u->affected_rows > 0;
         $u->close();
+    }
+    if ($cancelled === false) {
+        $_SESSION['flash_msg']  = 'This request can no longer be cancelled: it is "'
+            . str_replace('_', ' ', (string) $row['status']) . '". Only a request that has not been run yet can be '
+            . 'cancelled. Nothing was changed.';
+        $_SESSION['flash_type'] = 'warning';
+        header('Location: /admin/erasure-requests');
+        exit();
     }
     Logger::activity('GdprErasureCancelled', 'Cancelled erasure request #' . $requestId, $adminId);
     $_SESSION['flash_msg']  = 'Erasure request cancelled.';
     $_SESSION['flash_type'] = 'info';
+    header('Location: /admin/erasure-requests');
+    exit();
+}
+
+if ($action === 'confirm') {
+    // ✅ A request waiting at "pending confirmation" because the person never
+    //    clicked the emailed link - usually because the email could not be
+    //    sent. Nobody could move it on before this. The administrator is
+    //    stating that THEY have checked the request is the person's; the
+    //    prompt on the button says so, and GdprEraser writes that claim, and
+    //    this administrator's account number, into the request's audit trail.
+    try {
+        $result = GdprEraser::confirmOnBehalf($requestId, $siteId, $adminId);
+    } catch (\Throwable $e) {
+        Logger::exception($e);
+        $_SESSION['flash_msg']  = 'Erasure request #' . $requestId . ' could not be confirmed, and nothing was changed. '
+            . 'Try again in a minute; if it keeps happening, tell whoever looks after the portal.';
+        $_SESSION['flash_type'] = 'danger';
+        header('Location: /admin/erasure-requests');
+        exit();
+    }
+    if ($result === 'confirmed') {
+        Logger::activity('GdprErasureConfirmedOnBehalf', 'Confirmed erasure request #' . $requestId . ' on the person\'s behalf', $adminId);
+        $_SESSION['flash_msg']  = 'Erasure request #' . $requestId . ' is confirmed and is now at pending review. Its '
+            . 'report records that you confirmed it on the person\'s behalf. Nothing has been erased: press Execute '
+            . 'when you are ready to carry it out.';
+        $_SESSION['flash_type'] = 'success';
+    } else {
+        // 'not-waiting': the person clicked their link, or the request was
+        // cancelled, while this page was open. ('not-found' cannot happen
+        // here: the request was read for this organisation a moment ago.)
+        $_SESSION['flash_msg']  = 'Erasure request #' . $requestId . ' is no longer waiting to be confirmed (it is "'
+            . str_replace('_', ' ', (string) $row['status']) . '" or has just changed), so there was nothing to do. '
+            . 'Nothing was changed.';
+        $_SESSION['flash_type'] = 'info';
+    }
+    header('Location: /admin/erasure-requests');
+    exit();
+}
+
+if ($action === 'putback') {
+    // ↩️ A request left at "processing" by a run that stopped part way (the
+    //    web host killed the page, for example). Nothing could put one back
+    //    before this, so it stayed stuck until somebody edited the database.
+    //    GdprEraser decides whether it is safe, and says why when it is not.
+    try {
+        $result = GdprEraser::putBackStuckRequest($requestId, $siteId);
+    } catch (\Throwable $e) {
+        Logger::exception($e);
+        $_SESSION['flash_msg']  = 'Erasure request #' . $requestId . ' could not be put back, and nothing was changed. '
+            . 'If this portal has just been updated, run the database upgrade (Admin, Upgrade) and try again.';
+        $_SESSION['flash_type'] = 'danger';
+        header('Location: /admin/erasure-requests');
+        exit();
+    }
+    if ($result === 'put-back') {
+        Logger::activity('GdprErasurePutBack', 'Put erasure request #' . $requestId . ' back from processing to pending review', $adminId);
+        $_SESSION['flash_msg']  = 'Erasure request #' . $requestId . ' is back at pending review. Its earlier run stopped '
+            . 'before it finished. Every step is safe to repeat, so press Execute to run it again: it does whatever '
+            . 'is left.';
+        $_SESSION['flash_type'] = 'success';
+    } elseif ($result === 'still-going') {
+        $_SESSION['flash_msg']  = 'Erasure request #' . $requestId . ' was not put back: a run of it showed signs of '
+            . 'life in the last ' . GdprEraser::STUCK_AFTER_MINUTES . ' minutes, so it may still be going. Wait '
+            . GdprEraser::STUCK_AFTER_MINUTES . ' minutes and try again. Nothing was changed.';
+        $_SESSION['flash_type'] = 'warning';
+    } else {
+        // 'not-processing': it finished, or was put back, while this page
+        // was open. ('not-found' cannot happen here: the request was read
+        // for this organisation a moment ago.)
+        $_SESSION['flash_msg']  = 'Erasure request #' . $requestId . ' is no longer at "processing", so there was '
+            . 'nothing to put back. Nothing was changed.';
+        $_SESSION['flash_type'] = 'info';
+    }
     header('Location: /admin/erasure-requests');
     exit();
 }
@@ -78,14 +180,36 @@ if ($action !== 'execute' || (string) $row['status'] !== 'pending_review') {
     exit();
 }
 
-// Flip to processing first so a concurrent click can't double-run.
-$lock = $db->prepare('UPDATE tblErasureRequest SET status = "processing" WHERE requestID = ? AND status = "pending_review"');
+// Flip to processing first so a concurrent click can't double-run, and note
+// the moment (in UTC; see GdprEraser::stillGoing() for why not the server's
+// clock). That moment is what later lets a request whose run was killed be
+// told apart from one still running.
+//
+// A database that has not had migration 208 has no `claimedAt` column. The
+// run is refused there with a plain message, rather than started with no way
+// of telling later whether it is still going. Nothing has been changed at
+// that point, so the request is still at pending review.
 $claimed = false;
-if ($lock !== false) {
-    $lock->bind_param('i', $requestId);
-    $lock->execute();
-    $claimed = $lock->affected_rows > 0;
-    $lock->close();
+try {
+    $lock = $db->prepare('UPDATE tblErasureRequest SET status = "processing", claimedAt = UTC_TIMESTAMP() WHERE requestID = ? AND status = "pending_review"');
+    if ($lock !== false) {
+        $lock->bind_param('i', $requestId);
+        $lock->execute();
+        $claimed = $lock->affected_rows > 0;
+        $lock->close();
+    }
+} catch (\mysqli_sql_exception $e) {
+    Logger::exception($e);
+    // MySQL error 1054 is "no such column": the upgrade has not been run.
+    // Anything else is said plainly as what it is, not guessed at.
+    $_SESSION['flash_msg']  = 'Erasure request #' . $requestId . ' was not started, and nothing was changed. '
+        . ((int) $e->getCode() === 1054
+            ? 'This portal\'s database needs its upgrade first (Admin, Upgrade). Run that, then press Execute again.'
+            : 'The database refused to start it. Try again in a minute; if it keeps happening, tell whoever looks '
+                . 'after the portal.');
+    $_SESSION['flash_type'] = 'danger';
+    header('Location: /admin/erasure-requests');
+    exit();
 }
 if ($claimed === false) {
     $_SESSION['flash_msg']  = 'Another admin is processing this request.';

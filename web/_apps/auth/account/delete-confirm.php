@@ -1,28 +1,54 @@
 <?php
-// Path: public_html/auth/account/delete-confirm.php
+// Path: _apps/auth/account/delete-confirm.php
 /**
  * -----------------------------------------------------------------------------
- * Account — Self-deletion confirm handler 🗑️
+ * Account — "Delete my account": files an erasure request 🗑️
  * -----------------------------------------------------------------------------
- * POST-only. Executes the actual deletion across every table that holds
- * personal data, then logs the user out.
+ * POST-only. Checks the typed confirmation, then FILES AN ORDINARY ERASURE
+ * REQUEST for the signed-in person and tells them what happens next.
  *
- * Anonymisation strategy: where another record depends on this user (e.g.
- * an expense approval, an attendance count recorded by them), the row
- * stays but its userID FK is set to NULL via the existing ON DELETE SET NULL
- * constraints — preserving the audit trail without identifying the
- * deleted person.
+ * IT DOES NOT EMPTY THE ACCOUNT. Nothing is erased by this page.
  *
- * Hard-delete tables (where the rows ARE the user's data):
- *   tblLocalAccounts, tblLinkedAccounts, tblWebAuthnCredentials,
- *   tblPasswordResets, tblTrustedDevices, tblConsentLog (their own),
- *   tblPrayerRequests where submitterID = $userId AND visibility = 'leadership'
- *     (congregation-visible prayer requests are kept, anonymised — the
- *      request still helps the church if it's been answered).
+ * 🛑 WHAT THIS PAGE USED TO DO, so that nobody puts it back.
+ *    Until 11 October 2026 it emptied the account itself, on the spot, with
+ *    its own short list of statements, and signed the person out. That was a
+ *    second way to erase somebody, and it went round everything the real
+ *    erasure does:
+ *      - it never called the erasure engine (Portal\Core\GdprEraser), so it
+ *        cleared about a dozen columns and five tables and left the person's
+ *        number on everything else the engine deals with;
+ *      - no administrator saw it, and no audit trail was written;
+ *      - it kept nothing the organisation is obliged to keep, such as the
+ *        name behind a tax declaration, and started no keep-until date;
+ *      - it used a different made-up name and address from the engine's, so
+ *        a later, proper erasure of the same account did not recognise them.
+ *    Salem874 decided that day that there is ONE ROUTE ONLY: this page files
+ *    a request exactly as "Request data erasure" (/account/erasure-request)
+ *    does, through the same function, and an administrator's run of that
+ *    request is the only thing that ever empties an account.
+ *
+ * One difference from the old page that people may notice: leadership-only
+ * prayer requests used to be deleted here. The erasure engine keeps the text
+ * of every prayer request and removes the name, email address and sender
+ * address from it.
+ *
+ * THE TYPED PHRASE IS THE CONFIRMATION (Salem874, 11 October 2026). The
+ * person is signed in and has typed DELETE MY ACCOUNT, so the request is filed
+ * as already confirmed: it goes straight to "pending review", and no
+ * confirmation email is sent. (The first version of this rewrite filed it
+ * unconfirmed and emailed a link, like the other page. That asked somebody
+ * who had just typed the words to confirm a second time, and left them stuck
+ * whenever the email could not be sent.) "Request data erasure" has no typed
+ * phrase and keeps its email step.
+ *
+ * What this page cannot do: carry the request out. An administrator does
+ * that, and the page says so.
  *
  * @package   Portal\Auth
+ * @author    MWBM Partners Ltd (t/a MWservices)
+ * @copyright 2026-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.0.0
+ * @version   2.2.0
  * -----------------------------------------------------------------------------
  */
 
@@ -30,8 +56,10 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\GdprEraser;
 use Portal\Core\Logger;
 use Portal\Core\Router;
+use Portal\Core\Site;
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     header('Location: /account/delete', true, 302);
@@ -46,15 +74,33 @@ if ((App::settings('privacy.allowAccountDelete') ?? 'true') !== 'true') {
     return;
 }
 
+// 🔁 Already asked? Looked at BEFORE the form token, on purpose. A double-click
+//    sends the form twice. The first press files the request and uses the
+//    token up, so the second fails the token test below, and this page used to
+//    answer it with "Nothing was changed. Please try again." - untrue, a
+//    moment after the request had been filed, and an invitation to file
+//    another. Now a second press, however it arrives, is told the truth and
+//    files nothing. Nothing is changed by looking: it reads the signed-in
+//    person's own request and no more.
+$alreadyAsked = GdprEraser::openRequestFor(Site::id(), (int) ($_SESSION['user_id'] ?? 0));
+if ($alreadyAsked !== null) {
+    $_SESSION['flash_msg']  = 'Your request is already recorded: erasure request #' . $alreadyAsked . ' is with the '
+        . 'administrators. Nothing more was sent just now, and nothing has been erased yet. Until the request is '
+        . 'carried out your account works exactly as it does now.';
+    $_SESSION['flash_type'] = 'info';
+    header('Location: /account/my-data', true, 302);
+    exit();
+}
+
 if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
-    $_SESSION['flash_msg']  = 'Invalid or expired form token.';
+    $_SESSION['flash_msg']  = 'This form had been open too long, so it was not sent. Nothing was changed. Please try again.';
     $_SESSION['flash_type'] = 'danger';
     header('Location: /account/delete', true, 302);
     exit();
 }
 
 if (trim((string) ($_POST['confirm_phrase'] ?? '')) !== 'DELETE MY ACCOUNT') {
-    $_SESSION['flash_msg']  = 'Confirmation phrase did not match.';
+    $_SESSION['flash_msg']  = 'The words you typed did not match DELETE MY ACCOUNT, so nothing was sent. Nothing was changed.';
     $_SESSION['flash_type'] = 'danger';
     header('Location: /account/delete', true, 302);
     exit();
@@ -67,8 +113,10 @@ if ($userId <= 0) {
     exit();
 }
 
-// 🛡️ Block root admins from deleting themselves — they'd lock the umbrella.
-// They can ask another root admin to do it, OR demote first.
+// 🛡️ A root administrator cannot ask for their own account to be deleted from
+//    here: carried out, it would leave the installation with nobody able to
+//    look after it. Kept from the old page unchanged. They can ask another
+//    root administrator, or step down first.
 if ((string) ($user['isRootAdmin'] ?? '0') === '1') {
     $_SESSION['flash_msg']  = 'Root admins cannot delete their own account. Demote yourself first or ask another root admin.';
     $_SESSION['flash_type'] = 'danger';
@@ -76,98 +124,31 @@ if ((string) ($user['isRootAdmin'] ?? '0') === '1') {
     exit();
 }
 
-App::beginTransaction();
+// 📨 File the request: the same function and the same kind of request as
+//    "Request data erasure". The `true` says it is already confirmed, which
+//    is only right because this page has just checked the typed phrase a few
+//    lines up. Nothing else happens here.
 try {
-    // 🧹 Hard-delete tables where the rows ARE the user's identity / secrets
-    $deletes = [
-        'DELETE FROM tblTrustedDevices       WHERE userID = ?',
-        'DELETE FROM tblWebAuthnCredentials  WHERE userID = ?',
-        'DELETE FROM tblPasswordResets       WHERE userID = ?',
-        'DELETE FROM tblLinkedAccounts       WHERE userID = ?',
-        'DELETE FROM tblLocalAccounts        WHERE userID = ?',
-    ];
-    foreach ($deletes as $sql) {
-        $stmt = $mysqli->prepare($sql);
-        if ($stmt !== false) {
-            $stmt->bind_param('i', $userId);
-            $stmt->execute();
-            $stmt->close();
-        }
-    }
-
-    // 🙏 Prayer requests: keep the congregation-visible answered ones (they
-    // still help the wider church), delete leadership-only ones outright.
-    $stmt = $mysqli->prepare(
-        "DELETE FROM tblPrayerRequests WHERE submitterID = ? AND visibility = 'leadership'"
-    );
-    if ($stmt !== false) {
-        $stmt->bind_param('i', $userId);
-        $stmt->execute();
-        $stmt->close();
-    }
-    // Anonymise remaining prayer requests authored by this user
-    $stmt = $mysqli->prepare(
-        'UPDATE tblPrayerRequests SET submitterID = NULL, isAnonymous = 1, '
-        . "submitterName = 'Former member', submitterEmail = NULL "
-        . 'WHERE submitterID = ?'
-    );
-    if ($stmt !== false) {
-        $stmt->bind_param('i', $userId);
-        $stmt->execute();
-        $stmt->close();
-    }
-
-    // 👤 Finally, anonymise the user row itself. We keep the row so FKs
-    // elsewhere don't break, but every identifying field is cleared.
-    // The email is replaced with a hash-based placeholder so the unique
-    // index doesn't conflict, and the row is marked inactive.
-    $placeholderEmail = 'deleted+' . substr(hash('sha256', (string) $userId . (string) random_int(0, PHP_INT_MAX)), 0, 16) . '@deleted.local';
-    $stmt = $mysqli->prepare(
-        'UPDATE tblUsers SET '
-        . "fullName = 'Deleted user', emailAddress = ?, phoneNumber = NULL, "
-        . 'avatarPath = NULL, isActive = 0, '
-        . 'isAdmin = 0, isRootAdmin = 0, '
-        . 'totpEnabled = 0, totpSecret = NULL, '
-        // 📍 #456 Chunk B — fixes a pre-existing miss (this UPDATE never
-        // nulled the free-text address/phone fields at all) and clears the
-        // new location PII columns (migration 181) in the same statement:
-        // displayAddress/displayPhone were captured on the Directory
-        // profile (#261) but never cleared here; latitude/longitude/
-        // what3words are the member's own map pin; visibilityCoords resets
-        // to 'private' defensively even though the coords themselves are
-        // now NULL (nothing left to gate).
-        . 'displayAddress = NULL, displayPhone = NULL, '
-        . 'latitude = NULL, longitude = NULL, what3words = NULL, visibilityCoords = \'private\' '
-        . 'WHERE userID = ?'
-    );
-    if ($stmt !== false) {
-        $stmt->bind_param('si', $placeholderEmail, $userId);
-        $stmt->execute();
-        $stmt->close();
-    }
-
-    App::commit();
+    $filed = GdprEraser::fileRequest(Site::id(), $userId, true);
 } catch (\Throwable $ex) {
-    App::rollback();
     Logger::exception($ex);
-    $_SESSION['flash_msg']  = 'Failed to complete deletion. Please contact an admin.';
+    $_SESSION['flash_msg']  = 'Your request could not be recorded, and nothing was changed. Please try again; if it '
+        . 'keeps happening, ask an administrator for help.';
     $_SESSION['flash_type'] = 'danger';
     header('Location: /account/delete', true, 302);
     exit();
 }
 
-Logger::activity('AccountDeleted', 'Self-deletion completed for user #' . $userId);
+Logger::activity(
+    'GdprErasureRequested',
+    'Erasure request #' . $filed['requestID'] . ' filed from "Delete my account", confirmed by the typed phrase',
+    $userId
+);
 
-// 🔚 Log the user out
-$_SESSION = [];
-if (session_id() !== '') {
-    session_destroy();
-}
-setcookie('PHPSESSID', '', time() - 3600, '/');
-
-// 🏠 Redirect to home with a goodbye message via a fresh session
-session_start();
-$_SESSION['flash_msg']  = 'Your account has been deleted. Goodbye.';
-$_SESSION['flash_type'] = 'info';
-header('Location: /', true, 302);
+// The person stays signed in: their account has not been touched. They land
+// on "My data", which shows the message and lists the request as waiting.
+$next = GdprEraser::whatHappensNext($filed);
+$_SESSION['flash_msg']  = $next['message'];
+$_SESSION['flash_type'] = $next['type'];
+header('Location: /account/my-data', true, 302);
 exit();

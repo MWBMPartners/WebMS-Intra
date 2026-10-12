@@ -70,9 +70,12 @@ class ExpensePdf
         // ✅ Load approval history (if any approvals exist)
         $approvals = [];
         $apStmt = $mysqli->prepare(
+            // LEFT JOIN, not JOIN: an approver who has been forgotten has
+            // their number emptied on the approval (migration 192), and a
+            // plain JOIN then dropped the approval from the printed claim.
             'SELECT A.decision, A.comments, A.approverRole, A.decidedAt, U.fullName AS approverName '
             . 'FROM tblExpenseClaimApprovals A '
-            . 'JOIN tblUsers U ON U.userID = A.userID '
+            . 'LEFT JOIN tblUsers U ON U.userID = A.userID '
             . 'WHERE A.claimID = ? '
             . 'ORDER BY A.decidedAt ASC'
         );
@@ -171,7 +174,7 @@ body{font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#000;margin:0;p
     <tbody>
     <?php foreach ($approvals as $ap): ?>
         <tr>
-            <td><?php echo htmlspecialchars($ap['approverName'], ENT_QUOTES, 'UTF-8'); ?></td>
+            <td><?php echo htmlspecialchars((string) ($ap['approverName'] ?? 'Approver\'s details removed'), ENT_QUOTES, 'UTF-8'); ?></td>
             <td><?php echo htmlspecialchars(self::formatRole($ap['approverRole'] ?? 'approver'), ENT_QUOTES, 'UTF-8'); ?></td>
             <td>
                 <span class="badge badge-<?php echo strtolower($ap['decision']) === 'approved' ? 'approved' : 'rejected'; ?>">

@@ -106,6 +106,47 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                 <input type="hidden" name="action" value="cancel">
                                 <button class="btn btn-outline-secondary btn-sm" type="submit" data-confirm="Cancel this request?">Cancel</button>
                             </form>
+                        <?php elseif ((string) $r['status'] === 'pending_confirmation'): ?>
+                            <?php
+                            // ✅ Waiting for the person to click the link that
+                            //    was emailed to them. If that email could not
+                            //    be sent, they are told to ask an
+                            //    administrator, and this is what the
+                            //    administrator presses. The prompt makes the
+                            //    administrator say they have checked the
+                            //    request is the person's, because that is
+                            //    what the email step was for.
+                            ?>
+                            <form method="post" action="/admin/erasure-requests/process" class="d-inline">
+                                <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
+                                <input type="hidden" name="requestID" value="<?php echo (int) $r['requestID']; ?>">
+                                <input type="hidden" name="action" value="confirm">
+                                <button class="btn btn-outline-primary btn-sm" type="submit" data-confirm="Confirm this request on the person's behalf? Only do this if you have checked, yourself, that the request really comes from them. The request's report will record that you confirmed it. Nothing is erased by this.">
+                                    <i class="fa-solid fa-user-check me-1"></i>Confirm on the person's behalf
+                                </button>
+                            </form>
+                        <?php elseif ((string) $r['status'] === 'processing'): ?>
+                            <?php
+                            // ↩️ A request stays at "processing" only while a
+                            //    run is going, which takes seconds. One still
+                            //    here when this page is opened has usually
+                            //    been left behind by a run the web host
+                            //    stopped. The button is offered on every such
+                            //    row and the server decides: it refuses, with
+                            //    a plain message, if a run showed signs of
+                            //    life in the last quarter of an hour. (The
+                            //    page does not work that out itself, so that
+                            //    it still opens on a database that has not
+                            //    had its upgrade yet.)
+                            ?>
+                            <form method="post" action="/admin/erasure-requests/process" class="d-inline">
+                                <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
+                                <input type="hidden" name="requestID" value="<?php echo (int) $r['requestID']; ?>">
+                                <input type="hidden" name="action" value="putback">
+                                <button class="btn btn-outline-secondary btn-sm" type="submit" data-confirm="Put this request back to waiting? Do this when its run stopped before it finished. Every step is safe to repeat, so nothing is lost. If a run is still going, the portal will refuse.">
+                                    <i class="fa-solid fa-rotate-left me-1"></i>Put back to waiting
+                                </button>
+                            </form>
                         <?php endif; ?>
                         <a class="btn btn-outline-primary btn-sm" href="/admin/erasure-requests/report?id=<?php echo (int) $r['requestID']; ?>">Report</a>
                     </div>

@@ -5040,7 +5040,11 @@ class AssetRegister
                 'conditionOutNotes'    => [$parentLoan['conditionOutNotes'], 's'],
                 'dueDate'              => [$parentLoan['dueDate'], 's'],
                 'parentLoanID'         => [$parentLoanId, 'i'],
-                'requestedByID'        => [(int) $parentLoan['requestedByID'], 'i'],
+                // Empty stays empty. `requestedByID` is emptied when whoever
+                // asked for the loan is forgotten (migration 208). Turned
+                // into a number, an empty value became account "0", which
+                // does not exist, and the database refused the whole loan.
+                'requestedByID'        => [$parentLoan['requestedByID'] !== null ? (int) $parentLoan['requestedByID'] : null, 'i'],
                 'notes'                => ['Auto-added as part of kit loan #' . $parentLoanId, 's'],
             ];
             ['columns' => $columns, 'types' => $types, 'params' => $params] = self::splitFields($fields);

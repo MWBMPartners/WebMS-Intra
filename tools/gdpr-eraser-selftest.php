@@ -56,19 +56,52 @@
  *     closed); one missing a whole TABLE gives a skip, because nothing can be
  *     held in a table that is not there.
  *
+ * ADDED BY ROLL-OUT PACKAGE A2a (11 October 2026)
+ * -----------------------------------------------
+ *  3b. OTHER PEOPLE'S RECORDS SURVIVE, proven with rows that really are
+ *     linked to each other: a visitor, a salvation card, a task and a rota
+ *     slot given to the erased person; a swap request aimed at them; a
+ *     child's check-in, a pastoral visit, an expense payment and a Zoom
+ *     meeting they worked on; another person's gifts, Gift Aid declaration
+ *     and pastoral case. And the erased person's OWN visitor record, pledge
+ *     and Zoom connection are gone.
+ *  4c. Every column in the whole database that can hold an account number
+ *     is given the erased person's number, and afterwards the ones that
+ *     still hold it are EXACTLY a named list. This is the check that would
+ *     have found the fourteen tables nobody had an instruction for.
+ *  5c. The send log: only an entry that IS the address is replaced, never a
+ *     longer address that contains it.
+ *  7d. The person's photo: what is deleted, and the three things that are
+ *     refused (a path outside the uploads folder, a file that is not an
+ *     image, a file that cannot be deleted).
+ *  9.  A request stuck at "processing" can be put back, a live one cannot,
+ *     and the test of "live" does not depend on the server's clock or zone.
+ *  10. Filing a request: unconfirmed from "Request data erasure", confirmed
+ *     from "Delete my account". And an administrator confirming a waiting
+ *     request on the person's behalf, with the audit line that says so.
+ *
  * WHAT IT CANNOT PROVE
  * --------------------
- * - The rows are not linked to each other the way real data is (each has its
- *   own made-up numbers), so a delete in one table cascading into ANOTHER
- *   table's rows is not exercised by the rows themselves. Section 4b checks the
- *   database's own cascade rules instead: no "delete" instruction may cascade
- *   into a table that must be kept.
- * - It runs on whatever server it is pointed at. It has only ever been run on
- *   MySQL 8.0.36.
+ * - The rows the LOOP makes are not linked to each other the way real data is
+ *   (each has its own made-up numbers). Section 3b adds a small hand-built
+ *   set that is linked, and section 4b checks the database's own cascade
+ *   rules: no "delete" instruction may cascade into a table that is kept,
+ *   apart from a short named list.
+ * - Section 9 proves the put-back does not depend on the server's time ZONE.
+ *   It does not sit through a real clock change.
+ * - It runs on whatever server it is pointed at. It has been run on MySQL
+ *   8.0.36 and 8.4.11, and never on MariaDB.
  * - It does not drive the administrator's page; it calls the class.
- * - A second person column that no instruction matches on (a row created by
- *   somebody else and last changed by P) is still not found. That is #492, and
- *   this test does not pretend otherwise.
+ * - One place still keeps an erased person's number and is pinned by name
+ *   (TEXT_THAT_CAN_HOLD_AN_ACCOUNT_NUMBER): a step of an approval route that
+ *   is given to one named person. What that step should become is a decision
+ *   nobody has taken. Everything else that keeps a number is kept on purpose
+ *   and listed in KNOWN_STILL_NAMED.
+ * - Section 4c finds a person column three ways: by GdprEraser's list of
+ *   names, by the database's own links to the account table, and by the
+ *   SHAPE of the column's name. A column that holds an account number under
+ *   a name of some other shape, with no link, would still be missed; so
+ *   would a TEXT column other than the one pinned.
  *
  * Usage:  SELFTEST_DB_NAME=selftest_x SELFTEST_DB_PORT=<port> SELFTEST_DB_PASS=<pw> \
  *           php tools/gdpr-eraser-selftest.php
@@ -84,7 +117,7 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2026-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.0.0
+ * @version   1.1.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/510
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/535
  * -----------------------------------------------------------------------------
@@ -110,10 +143,10 @@ if (str_starts_with($dbName, 'selftest_') === false) {
 
 // 🔢 How many checks this file runs — EXACTLY. A check that never ran cannot
 //    fail, so the count is part of the result. Change it only with a check.
-const EXPECTED_CHECKS = 79;
+const EXPECTED_CHECKS = 132;
 
 // The headings that must all be reached for a pass.
-const REQUIRED_SECTIONS = ['0', '1', '2', '3', '4', '4b', '5', '5b', '6', '7', '7b', '7c', '8'];
+const REQUIRED_SECTIONS = ['0', '1', '2', '3', '3b', '4', '4b', '4c', '5', '5b', '5c', '6', '7', '7b', '7c', '7d', '8', '9', '10'];
 
 // 🗺️ The made-up people and requests. Every number is 920000 or higher, far
 //    above anything the fresh-install script seeds.
@@ -125,6 +158,9 @@ const P_B   = 920011; // erased in section 6 (a step fails, then a second run)
 const P_C   = 920021; // erased in section 7 (the audit trail fails)
 const P_E   = 920031; // erased in section 7b (a file, then the send log, cannot be dealt with)
 const P_F   = 920041; // erased in section 7c (the database is missing a column and a table)
+const P_G   = 920051; // erased in section 7d (a photo that must not, or cannot, be deleted)
+const P_S   = 920061; // section 9 (a request stuck at "processing")
+const P_T   = 920071; // section 10 (filing a request, and confirming one on the person's behalf)
 
 const REQ_A     = 940001; // P_A's request, the one that is run
 const REQ_A_DUP = 940002; // P_A pressed the button twice: still waiting
@@ -134,6 +170,15 @@ const REQ_B     = 940011;
 const REQ_PC    = 940021;
 const REQ_E     = 940031;
 const REQ_F     = 940041;
+const REQ_A_STUCK = 940005; // another request of P_A's, left at "processing" by a run that died
+const REQ_A_SITE2 = 940006; // P_A also asked at a SECOND organisation: still waiting there
+const REQ_D_DONE  = 940007; // D's request, completed long ago; P_A was the administrator who ran it
+const REQ_G       = 940051;
+const REQ_S_OLD   = 940061; // "processing", last sign of a run 20 minutes ago
+const REQ_S_LIVE  = 940062; // "processing", last sign of a run 1 minute ago
+const REQ_S_NULL  = 940063; // "processing", with no moment recorded (stuck before migration 208)
+const REQ_S_DONE  = 940064; // completed
+const SITE_2      = 2;      // a second organisation on the same installation
 
 // Details typed about the person that an instruction must EMPTY, by name.
 // Listed here, and not read from the instructions, on purpose: the rest of
@@ -152,6 +197,110 @@ const MUST_BE_EMPTIED = [
 // appearing is a decision somebody has to take (migration 192 is where the
 // others were made emptiable), not something to wave through.
 const KNOWN_LEFT_IN_PLACE = ['tblExpenseClaims.userID'];
+
+// 🧾 EVERY column in the database that still holds the erased person's account
+//    number after a complete, successful erasure, with the reason. Section 4c
+//    gives every person column in every table the person's number and then
+//    compares what is left with this list. IT IS EXACT, BOTH WAYS: a column
+//    that still names them and is not here fails, and so does a column listed
+//    here that no longer does (the list would then be out of date).
+//
+//    Adding to this list is a decision, not a tidy-up.
+const KNOWN_STILL_NAMED = [
+    'kept on purpose, with the number, by an instruction that says so' => [
+        'tblGiftAidDeclaration.donorID', 'tblGivingStatementLog.donorID', 'tblDbsChecks.userID',
+    ],
+    'the database does not allow the column to be empty' => [
+        'tblExpenseClaims.userID',
+    ],
+    // (A group of 37 columns stood here on 11 October 2026: every table's
+    // SECOND "who did it" column, #492. 31 were built that day. The last six
+    // were built on 12 October, on Salem874's decisions: five once the
+    // database allowed them to be empty, and an accepted invitation, which
+    // is now deleted with its person.)
+    'the giver on a counted envelope: part of the giving-records work (roll-out package A2b)' => [
+        'tblCountEnvelopes.giverID',
+    ],
+];
+
+// 🔤 What a person column's NAME looks like. Section 4c treats an integer
+//    column as a person column if its name is on GdprEraser's list, OR the
+//    database links it to the account table, OR its name has this shape.
+//
+//    The third way was added on 12 October 2026. Until then a column that
+//    was on no list and had no link was invisible here, and the independent
+//    check found three that an erasure never reached: who sent an event in,
+//    who marked an error as dealt with, and who ran a database upgrade.
+const PERSON_COLUMN_SHAPE = '/(?:By|To)(?:User)?ID$|[Uu]serID$|^(?:giver|donor|member|owner|approver|moderator|presenter|viewer|leader|operator|submitter|assignee|reviewer|author|creator)ID$/';
+
+// Columns whose name has that shape and which do NOT hold an account number.
+// Exact, both ways: a new look-alike has to be looked at and added here with
+// its reason, and an entry that stops being true has to come out.
+const LOOKS_LIKE_A_PERSON_COLUMN_AND_IS_NOT = [
+    'tblApiKeys.rotatedToID'             => 'the number of the KEY that replaced this one',
+    'tblAssetOwners.ownerID'             => 'this table\'s own row number',
+    'tblExternalAudienceMembers.ownerID' => 'the number of the calendar, choice or rule the list belongs to',
+    'tblVenueAgreements.supersededByID'  => 'the number of the AGREEMENT that replaced this one',
+];
+
+// 📝 TEXT that can hold an account number, which an erasure does NOT clear.
+//    Pinned here so that it is known, and so that building it changes this
+//    list. A step of an approval route can be given to a role, a group, or
+//    ONE NAMED PERSON, and then `assigneeValue` holds that person's account
+//    number as text. It does not say who did something; it says who MUST.
+//    Emptying it would leave a step that nobody can approve, so what the
+//    step should become is a decision, and none has been taken.
+const TEXT_THAT_CAN_HOLD_AN_ACCOUNT_NUMBER = [
+    'tblWorkflowSteps.assigneeValue' => 'who an approval step is given to, when it is one named person',
+];
+
+// 🧍 The account row after an erasure, column by column. EXACT, both ways:
+//    every column of tblUsers must be in one of these two lists, a column in
+//    the first must hold exactly the value given, and a column in the second
+//    must be as it was.
+//
+//    Added on 12 October 2026. The checks on the emptied account used to
+//    name fifteen columns, and the independent check took `displayPhone` out
+//    of the eraser's list and every test still passed: the person's second
+//    telephone number stayed on an "emptied" account and nothing said so.
+//    '@request' stands for that request's own made-up address.
+const ACCOUNT_AFTER_ERASURE = [
+    'fullName' => '[Deleted User]', 'emailAddress' => '@request',
+    'isActive' => 0, 'isAdmin' => 0, 'isRootAdmin' => 0, 'totpEnabled' => 0,
+    'phoneNumber' => null, 'avatarPath' => null, 'locale' => null, 'notifyPrefs' => null, 'totpSecret' => null,
+    'calendarToken' => null, 'displayBio' => null, 'displayPhoto' => null, 'displayPhone' => null,
+    'displayAddress' => null, 'latitude' => null, 'longitude' => null, 'what3words' => null,
+];
+// Not about the person: the row's own number and date, and switches that
+// have nothing left to show once the columns above are empty.
+const ACCOUNT_COLUMNS_LEFT_AS_THEY_WERE = [
+    'userID', 'createdAt', 'sabbathHonour', 'visibilityName', 'visibilityRoles', 'visibilityEmail', 'visibilityPhone',
+    'visibilityAddress', 'visibilityCoords', 'visibilityBio', 'visibilityPhoto',
+];
+
+// Person columns section 4c could not put a made-up row in, so it says nothing
+// about them. Exact, for the same reason.
+const COULD_NOT_BE_TRIED = [];
+
+// A delete that the database carries on into a table whose records are KEPT.
+// Each is here on purpose, with its reason; section 4b fails on any other.
+// "parent -> child" => why it is right.
+const CASCADES_INTO_KEPT_TABLES = [
+    'tblVisitor -> tblVisitorContact' => 'The only visitor record an erasure deletes is the erased person\'s OWN (matched on '
+        . '`convertedUserID`). The follow-up notes under it are about them, so they go with it. A note the person WROTE '
+        . 'about somebody else\'s visitor record is kept (section 3b proves both).',
+    'tblZoomAccount -> tblZoomMeeting' => 'A meeting made through the erased person\'s own Zoom connection is a room in '
+        . 'THEIR Zoom account, which the portal cannot open once the connection is gone. Salem874 decided on 11 October '
+        . '2026 that it goes with the connection. A meeting they made through somebody else\'s connection is kept.',
+];
+
+// A delete after which the database EMPTIES a link on a kept table's rows.
+// "deleted table -> kept table.column" => why it is right.
+const EMPTIED_LINKS_ON_KEPT_TABLES = [
+    'tblPledges -> tblGivingEntry.pledgeID' => 'A pledge is a promise, about the person, and is deleted. The gifts given '
+        . 'towards it are kept and lose only the link to it: each keeps its campaign, amount, date and method, so no total '
+        . 'changes (section 3b proves it on a real gift).',
+];
 
 // 📁 A scratch folder to stand in for the portal's own. The giving-statement
 //    step deletes files under PORTAL_ROOT, so it must never be the real one.
@@ -190,6 +339,7 @@ $GLOBALS['ge_fail']     = 0;
 $GLOBALS['ge_sections'] = [];
 $GLOBALS['ge_triggers'] = [];
 $GLOBALS['ge_files']    = [];
+$GLOBALS['ge_dirs']     = [];
 $GLOBALS['ge_family']   = 931000;
 
 // 🧹 Whatever happens, take the planted triggers and the scratch files away.
@@ -207,6 +357,20 @@ register_shutdown_function(static function () use ($scratch): void {
     foreach ($GLOBALS['ge_files'] as $file) {
         if (is_file($file) === true) {
             @unlink($file);
+        }
+    }
+    // Folders this run made for photos (section 7d makes one read-only, and
+    // it may still be if the run stopped there). Newest first; rmdir() only
+    // removes a folder that is empty.
+    foreach (array_reverse($GLOBALS['ge_dirs']) as $dir) {
+        if (is_dir($dir) === true) {
+            @chmod($dir, 0700);
+            foreach ($GLOBALS['ge_files'] as $file) {
+                if (is_file($file) === true) {
+                    @unlink($file);
+                }
+            }
+            @rmdir($dir);
         }
     }
     $statements = $scratch . DIRECTORY_SEPARATOR . '_uploads' . DIRECTORY_SEPARATOR . 'giving'
@@ -345,8 +509,10 @@ function ge_pk(string $table): array
 
 /**
  * The columns of a table that name a person: every name on GdprEraser's one
- * list, plus every column the database itself links to an account. The second
- * half matters: it is how this test notices a person column the list forgot.
+ * list, every column the database itself links to an account, and every
+ * integer column whose NAME has the shape of a person column. The second and
+ * third matter: they are how this test notices a person column the list
+ * forgot, linked by the database or not.
  */
 function ge_personColumns(string $table): array
 {
@@ -362,8 +528,12 @@ function ge_personColumns(string $table): array
     }
     $names = [];
     foreach (ge_columns($table) as $col) {
+        $looksLikeOne = in_array(strtolower((string) $col['type']), ['int', 'bigint', 'mediumint'], true) === true
+            && preg_match(PERSON_COLUMN_SHAPE, (string) $col['name']) === 1
+            && isset(LOOKS_LIKE_A_PERSON_COLUMN_AND_IS_NOT[$table . '.' . $col['name']]) === false;
         if (in_array($col['name'], GdprEraser::LINK_COLUMNS, true) === true
             || in_array($col['name'], $fk[$table] ?? [], true) === true
+            || $looksLikeOne === true
         ) {
             $names[] = $col['name'];
         }
@@ -626,6 +796,67 @@ function ge_unexpectedChanges(array $before, array $after, array $allowed): arra
     return $problems;
 }
 
+/**
+ * Make a file under the scratch portal folder, and remember it (and any folder
+ * made for it) so the end of the run takes it away again.
+ *
+ * @param string $relative Where, below PORTAL_ROOT, with forward slashes.
+ */
+function ge_file(string $relative, string $content = 'made-up image'): string
+{
+    $path = PORTAL_ROOT . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $relative);
+    $dir  = dirname($path);
+    $made = [];
+    while (is_dir($dir) === false) {
+        $made[] = $dir;
+        $dir    = dirname($dir);
+    }
+    foreach (array_reverse($made) as $one) {
+        mkdir($one, 0700);
+        $GLOBALS['ge_dirs'][] = $one;
+    }
+    file_put_contents($path, $content);
+    $GLOBALS['ge_files'][] = $path;
+
+    return $path;
+}
+
+/**
+ * Insert a made-up row whose links are REAL: the columns given in $fixed point
+ * at rows that exist, and every other link gets a parent made for it.
+ */
+function ge_linked(string $table, array $people, array $fixed = [], int $other = D): array
+{
+    $ref = ge_insert($table, $people, $fixed, $other);
+    ge_ensureParents($ref);
+
+    return $ref;
+}
+
+/** The first (usually only) key value of a tracked row. */
+function ge_id(array $ref): int
+{
+    return (int) array_values($ref['key'])[0];
+}
+
+/**
+ * Is a row the same as it was, apart from the columns named?
+ * `updatedAt` is stamped by the database itself and never counts.
+ */
+function ge_same(?array $was, ?array $now, array $except = []): bool
+{
+    if ($was === null || $now === null) {
+        return false;
+    }
+    foreach ($now as $name => $value) {
+        if ($name !== 'updatedAt' && in_array($name, $except, true) === false && $value !== $was[$name]) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
 /** Plant a trigger, remembering it so it is always taken away again. */
 function ge_trigger(string $name, string $sql): void
 {
@@ -677,10 +908,6 @@ function ge_buildWorld(int $person, string $email, string $name): array
     $allowed = [ge_keyText('tblUsers', ['userID' => $person]) => true];
 
     $instructions = GdprEraser::catalogue();
-    $perTable     = [];
-    foreach ($instructions as $instruction) {
-        $perTable[(string) $instruction['table']] = ($perTable[(string) $instruction['table']] ?? 0) + 1;
-    }
 
     $rows = [];
     foreach ($instructions as $i => $instruction) {
@@ -704,26 +931,47 @@ function ge_buildWorld(int $person, string $email, string $name): array
         if ($action === 'anonymise') {
             ge_ensureParents($ref);
         }
+    }
 
-        // R2: where an unlink lists more person columns to empty, a second row
-        // with the person in ALL of them. Only when the table has a single
-        // instruction, so no other instruction can find the row first. A
-        // unique key may forbid a second row for the same person; that is the
-        // one case skipped, and section 3 checks enough of them were made.
-        $listed = array_values(array_diff(
-            array_intersect(array_map('strval', (array) ($instruction['nullCols'] ?? [])), ge_personColumns($table)),
-            [$col]
-        ));
-        if ($action === 'anonymise' && $listed !== [] && $perTable[$table] === 1) {
-            try {
-                $ref2   = ge_insert($table, array_fill_keys(array_merge([$col], $listed), $person));
-                $rows[] = ['i' => $i, 'kind' => 'R2', 'ref' => $ref2];
-                $allowed[ge_keyText($table, $ref2['key'])] = true;
-                ge_ensureParents($ref2);
-            } catch (mysqli_sql_exception $e) {
-                if ((int) $e->getCode() !== 1062) {
-                    throw $e;
-                }
+    // R2: a row naming the person in EVERY column its table has an "empty it"
+    // instruction for (a task both given to them and created by them). Each
+    // instruction must empty its own column on it, and the row must stay.
+    //
+    // CHANGED on 11 October 2026 (#492). R2 used to be made only for a table
+    // with ONE instruction that emptied a second column "in passing". No
+    // instruction does that any more (tools/gdpr-coverage-selftest.php fails
+    // if one does): every person column has an instruction of its own, so R2
+    // is now made for every table with two or more of them. Tables that also
+    // delete or keep on a column are left out: the row would be deleted, or
+    // would have to stay untouched, before the others ever looked at it.
+    // A unique key may forbid the extra row; that is the one case skipped,
+    // and section 3 checks enough of them were made.
+    $emptied = [];
+    $mixed   = [];
+    foreach ($instructions as $i => $instruction) {
+        $table = (string) $instruction['table'];
+        if ((string) $instruction['action'] === 'anonymise' && $table !== 'tblUsers') {
+            $emptied[$table][$i] = (string) $instruction['userCol'];
+        } else {
+            $mixed[$table] = true;
+        }
+    }
+    $extra = [];
+    foreach ($emptied as $table => $columns) {
+        if (count($columns) < 2 || isset($mixed[$table]) === true) {
+            continue;
+        }
+        try {
+            $ref2   = ge_insert($table, array_fill_keys(array_values($columns), $person));
+            $rows[] = ['i' => (int) array_key_first($columns), 'kind' => 'R2', 'ref' => $ref2, 'cols' => array_values($columns)];
+            $allowed[ge_keyText($table, $ref2['key'])] = true;
+            ge_ensureParents($ref2);
+            // Every one of those instructions will report this row, so the
+            // audit check has to count it for each of them.
+            $extra[] = array_merge((array) ge_row($ref2), ['__table' => $table]);
+        } catch (mysqli_sql_exception $e) {
+            if ((int) $e->getCode() !== 1062) {
+                throw $e;
             }
         }
     }
@@ -754,6 +1002,17 @@ function ge_buildWorld(int $person, string $email, string $name): array
     file_put_contents($file, 'made-up statement');
     $GLOBALS['ge_files'][] = $file;
 
+    // 🖼️ A photo file in the uploads folder, a picture address from single
+    //    sign-on, a biography, and administrator rights: an erasure has to
+    //    take all of them off the account.
+    $photo = ge_file('_uploads/directory/' . $person . '.jpg');
+    ge_q(
+        "UPDATE tblUsers SET displayPhoto = ?, avatarPath = ?, displayBio = 'I have helped with the youth club since 2019.', "
+        . 'isAdmin = 1, isRootAdmin = 1, totpEnabled = 1 WHERE userID = ?',
+        'ssi',
+        ['directory/' . $person . '.jpg', 'https://sso.selftest.invalid/photo/' . $person, $person]
+    );
+
     // The kept giving-statement row has ONE column the erasure does empty
     // (the address it was mailed to), so that row is allowed to change; its
     // other columns are checked one by one in section 3.
@@ -766,14 +1025,167 @@ function ge_buildWorld(int $person, string $email, string $name): array
     $mysqli->query('SET FOREIGN_KEY_CHECKS = 1');
 
     return ['person' => $person, 'email' => $email, 'instructions' => $instructions, 'rows' => $rows,
-        'allowed' => $allowed, 'demo' => $demo, 'emailLog' => $emailLog, 'file' => $file];
+        'allowed' => $allowed, 'demo' => $demo, 'emailLog' => $emailLog, 'file' => $file, 'photo' => $photo,
+        'linkedBefore' => $extra];
+}
+
+/**
+ * 🤝 A small set of rows that really ARE linked to each other, around one
+ *    person about to be erased: other people's records that the person
+ *    worked on, and a few records that are the person's own.
+ *
+ * The loop in ge_buildWorld() gives every instruction a row, but each row
+ * stands alone. This is what real data looks like: a visitor with follow-up
+ * notes under it, a swap request on a rota slot, a gift towards a pledge.
+ *
+ * @return array{refs: array<string, array>, before: array<string, ?array>, mayChange: string[]}
+ */
+function ge_buildLinked(int $p): array
+{
+    global $mysqli;
+    $mysqli->query('SET FOREIGN_KEY_CHECKS = 0');
+    $r = [];
+
+    // 🚶 Visitors. One is somebody else, followed up by the person. One is
+    //    C, from before C had an account. One is the person themselves.
+    $r['visitor']        = ge_linked('tblVisitor', ['assignedToID' => $p, 'createdByID' => D], ['convertedUserID' => null, 'fullName' => 'Vera Visitor']);
+    $r['noteByPerson']   = ge_linked('tblVisitorContact', ['contactedByID' => $p], ['visitorID' => ge_id($r['visitor']), 'summary' => 'Rang Vera; she will come on Sunday.']);
+    $r['noteByOther']    = ge_linked('tblVisitorContact', ['contactedByID' => D], ['visitorID' => ge_id($r['visitor']), 'summary' => 'Vera came with her sister.']);
+    $r['visitorIsC']     = ge_linked('tblVisitor', ['assignedToID' => $p, 'createdByID' => $p, 'convertedUserID' => C], ['fullName' => 'Cal Control']);
+    $r['visitorIsP']     = ge_linked('tblVisitor', ['assignedToID' => D, 'createdByID' => D, 'convertedUserID' => $p], ['fullName' => 'Pat Erased']);
+    $r['noteAboutP']     = ge_linked('tblVisitorContact', ['contactedByID' => D], ['visitorID' => ge_id($r['visitorIsP']), 'summary' => 'Pat asked about joining.']);
+
+    // 🕊️ A salvation card about C, given to the person to follow up.
+    $r['card']           = ge_linked('tblSalvationCards', ['assignedToID' => $p], ['fullName' => 'Cal Control', 'email' => 'cal.control@selftest.invalid']);
+
+    // ✅ Tasks: one given to the person, one the person created for C.
+    $r['taskGiven']      = ge_linked('tblTasks', ['assignedToID' => $p, 'createdByID' => D], ['title' => 'Ring the plumber', 'parentTaskID' => null]);
+    $r['taskMade']       = ge_linked('tblTasks', ['assignedToID' => C, 'createdByID' => $p], ['title' => 'Order the chairs', 'parentTaskID' => null]);
+
+    // 📅 Rota: the person's own slot; C's slot, which the person set up; and
+    //    three swap requests on C's slot.
+    $r['slotOfPerson']   = ge_linked('tblRotaSlot', ['assignedToID' => $p, 'createdByID' => D]);
+    $r['slotOfC']        = ge_linked('tblRotaSlot', ['assignedToID' => C, 'createdByID' => $p]);
+    $r['swapWaiting']    = ge_linked('tblRotaSwapRequest', ['requestedByID' => C, 'targetUserID' => $p], ['slotID' => ge_id($r['slotOfC']), 'status' => 'pending', 'requestMessage' => 'Could you cover me?']);
+    $r['swapAccepted']   = ge_linked('tblRotaSwapRequest', ['requestedByID' => D, 'targetUserID' => $p], ['slotID' => ge_id($r['slotOfC']), 'status' => 'accepted']);
+    $r['swapOfOthers']   = ge_linked('tblRotaSwapRequest', ['requestedByID' => C, 'targetUserID' => D], ['slotID' => ge_id($r['slotOfC']), 'status' => 'pending']);
+
+    // 🧒 C's child, checked in by C and checked OUT by the person.
+    $r['child']          = ge_linked('tblKidProfiles', ['parentUserID' => C], ['fullName' => 'Kit Control']);
+    $r['checkin']        = ge_linked('tblKidCheckins', ['checkedInByID' => C, 'checkedOutByID' => $p], ['childID' => ge_id($r['child'])]);
+
+    // 📝 A child's event registration that C submitted and the person only
+    //    REVIEWED. It holds the child's medical details, and a registration
+    //    is DELETED when whoever submitted it is erased - so it matters a
+    //    great deal that reviewing one is not treated the same way.
+    $r['registration']   = ge_linked('tblEventRegistrations', ['submittedByUserID' => C, 'reviewedByID' => $p], ['fullName' => 'Kit Control']);
+
+    // 🫶 A pastoral case about C: one visit the person made, and one D made
+    //    whose follow-up was given to the person.
+    $r['case']           = ge_linked('tblCareCase', ['personUserID' => C, 'openedByID' => D]);
+    $r['visitByPerson']  = ge_linked('tblCareVisit', ['visitedByID' => $p, 'followUpAssignedToID' => D], ['caseID' => ge_id($r['case']), 'notes' => 'Visited Cal at home.']);
+    $r['visitFollowUp']  = ge_linked('tblCareVisit', ['visitedByID' => D, 'followUpAssignedToID' => $p], ['caseID' => ge_id($r['case']), 'notes' => 'Cal asked for a call next week.']);
+
+    // 💷 Money. C's gift, C's Gift Aid declaration, C's expense claim with a
+    //    payment the person entered. And the person's own: a pledge, a gift
+    //    towards it, and a Gift Aid declaration.
+    $r['giftOfC']        = ge_linked('tblGivingEntry', ['donorID' => C, 'recordedByID' => D], ['pledgeID' => null, 'campaignID' => null]);
+    $r['giftAidOfC']     = ge_linked('tblGiftAidDeclaration', ['donorID' => C]);
+    $r['claimOfC']       = ge_linked('tblExpenseClaims', ['userID' => C]);
+    $r['payment']        = ge_linked('tblExpenseClaimPayments', ['paidByID' => $p], ['claimID' => ge_id($r['claimOfC'])]);
+    $r['pledge']         = ge_linked('tblPledges', ['userID' => $p]);
+    $pledge              = ge_row($r['pledge']);
+    $r['giftToPledge']   = ge_linked('tblGivingEntry', ['donorID' => $p, 'recordedByID' => D], ['pledgeID' => ge_id($r['pledge']), 'campaignID' => (int) $pledge['campaignID']]);
+    $r['giftAidOfPerson'] = ge_linked('tblGiftAidDeclaration', ['donorID' => $p]);
+
+    // ✉️ Invitations: one the person ACCEPTED (it is how they joined, and it
+    //    holds their own email address), and one they SENT to C.
+    $r['inviteAccepted'] = ge_linked('tblInvitation', ['acceptedByID' => $p, 'createdByID' => D, 'revokedByID' => D], ['email' => 'pat.erased@selftest.invalid']);
+    $r['inviteSent']     = ge_linked('tblInvitation', ['acceptedByID' => C, 'createdByID' => $p, 'revokedByID' => D], ['email' => 'cal.control@selftest.invalid']);
+
+    // 📅 Two swap requests the person ASKED for, on their own slot: one still
+    //    waiting for C's answer, one D accepted long ago.
+    $r['swapAsked']      = ge_linked('tblRotaSwapRequest', ['requestedByID' => $p, 'targetUserID' => C], ['slotID' => ge_id($r['slotOfPerson']), 'status' => 'pending', 'requestMessage' => 'I am away that week.']);
+    $r['swapAskedDone']  = ge_linked('tblRotaSwapRequest', ['requestedByID' => $p, 'targetUserID' => D], ['slotID' => ge_id($r['slotOfPerson']), 'status' => 'accepted']);
+
+    // 🏠 A room booking the person made, still waiting for a decision.
+    $r['booking']        = ge_linked('tblResourceBooking', ['bookedByID' => $p, 'approvedByID' => D], ['status' => 'pending', 'purpose' => 'Welcome team supper']);
+
+    // 🎥 Zoom: the person's own connection with a meeting made through it,
+    //    and a meeting the person made through C's connection.
+    $r['zoomOfPerson']   = ge_linked('tblZoomAccount', ['userID' => $p]);
+    $r['meetingViaPerson'] = ge_linked('tblZoomMeeting', ['createdByID' => D], ['accountID' => ge_id($r['zoomOfPerson'])]);
+    $r['zoomOfC']        = ge_linked('tblZoomAccount', ['userID' => C]);
+    $r['meetingViaC']    = ge_linked('tblZoomMeeting', ['createdByID' => $p], ['accountID' => ge_id($r['zoomOfC'])]);
+
+    $mysqli->query('SET FOREIGN_KEY_CHECKS = 1');
+
+    $before = [];
+    foreach ($r as $name => $ref) {
+        $before[$name] = ge_row($ref);
+    }
+
+    // Everything NOT named here must come through the erasure byte for byte:
+    // the whole-database comparison in section 4 holds it to that.
+    $mayChange = ['inviteAccepted', 'inviteSent', 'swapAsked', 'swapAskedDone', 'booking', 'registration', 'visitor', 'noteByPerson', 'visitorIsC', 'visitorIsP', 'noteAboutP', 'card', 'taskGiven', 'taskMade',
+        'slotOfPerson', 'slotOfC', 'swapWaiting', 'swapAccepted', 'checkin', 'visitByPerson', 'visitFollowUp', 'payment',
+        'pledge', 'giftToPledge', 'zoomOfPerson', 'meetingViaPerson', 'meetingViaC'];
+
+    return ['refs' => $r, 'before' => $before, 'mayChange' => $mayChange];
+}
+
+/**
+ * 🔢 Give EVERY person column in the database the person's number.
+ *
+ * ge_buildWorld() makes a row for each column an instruction matches on. This
+ * makes one for every OTHER column that can hold an account number - in every
+ * table, whether the written list knows the table or not - so that section 4c
+ * can say which of them an erasure leaves behind.
+ *
+ * Left out, and checked by name elsewhere: the account row itself, and the
+ * erasure request (a made-up one would be closed along with the real one).
+ *
+ * @return array{rows: array<int, array{where: string, ref: array}>, untried: string[]}
+ */
+function ge_buildEveryPersonColumn(int $person, array $instructions): array
+{
+    global $mysqli;
+    $matched = [];
+    foreach ($instructions as $instruction) {
+        $matched[(string) $instruction['table'] . '.' . (string) $instruction['userCol']] = true;
+    }
+
+    $mysqli->query('SET FOREIGN_KEY_CHECKS = 0');
+    $rows    = [];
+    $untried = [];
+    foreach (ge_q("SELECT TABLE_NAME AS t FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_TYPE = 'BASE TABLE' ORDER BY TABLE_NAME") as $one) {
+        $table = (string) $one['t'];
+        if (in_array($table, ['tblUsers', 'tblErasureRequest', 'tblErasureAudit'], true) === true) {
+            continue;
+        }
+        foreach (ge_personColumns($table) as $column) {
+            if (isset($matched[$table . '.' . $column]) === true) {
+                continue;
+            }
+            try {
+                $rows[] = ['where' => $table . '.' . $column, 'ref' => ge_insert($table, [$column => $person])];
+            } catch (mysqli_sql_exception | RuntimeException $e) {
+                // A unique key that will not take a second made-up row, or a
+                // table with no key to find the row again by.
+                $untried[] = $table . '.' . $column;
+            }
+        }
+    }
+    $mysqli->query('SET FOREIGN_KEY_CHECKS = 1');
+
+    return ['rows' => $rows, 'untried' => $untried];
 }
 
 /** Run the real erasure. Returns its answer, or the exception it threw. */
-function ge_execute(int $requestId, int $person): mixed
+function ge_execute(int $requestId, int $person, int $admin = ADMIN): mixed
 {
     try {
-        return GdprEraser::execute($requestId, $person, ADMIN);
+        return GdprEraser::execute($requestId, $person, $admin);
     } catch (Throwable $e) {
         return $e;
     }
@@ -854,11 +1266,27 @@ function ge_checkRows(array $world, array $before, array $expectStillNamed = [])
         // anonymise
         $listed = array_map('strval', (array) ($instruction['nullCols'] ?? []));
         $people = ge_personColumns($table);
+        // A column an instruction changes ON PURPOSE with a fixed piece of
+        // SQL (`sqlSets`): today only the status of a swap request, which is
+        // cancelled if it was waiting. This loop cannot work out what the
+        // new value should be, so it steps over that column - and section 3b
+        // checks the exact value by name, on a waiting request AND on an
+        // accepted one. tools/gdpr-coverage-selftest.php holds the list of
+        // such pieces to exactly that one.
+        $changedOnPurpose = [];
+        foreach ((array) ($instruction['sqlSets'] ?? []) as $piece) {
+            if (preg_match('/^`(\w+)`\s*=/', (string) $piece, $m) === 1) {
+                $changedOnPurpose[] = $m[1];
+            }
+        }
         foreach ($now as $name => $value) {
-            if (in_array($name, $onUpdate, true) === true) {
+            if (in_array($name, $onUpdate, true) === true || in_array($name, $changedOnPurpose, true) === true) {
                 continue;
             }
-            $mayEmpty = $name === $col || in_array($name, $listed, true) === true;
+            // An R2 row names the person in several columns, each emptied
+            // by its own instruction.
+            $mayEmpty = $name === $col || in_array($name, $listed, true) === true
+                || in_array($name, (array) ($tracked['cols'] ?? []), true) === true;
             $isPerson = in_array($name, $people, true) === true;
             if ($mayEmpty === true && ($isPerson === false || (int) $was[$name] === $person)) {
                 // The person's own number, or free text about them: must go,
@@ -908,7 +1336,24 @@ function ge_checkAudit(array $world, array $lines, bool $demoLine, array $failTa
     }
     $rowsFor = [];
     foreach ($world['rows'] as $tracked) {
-        $rowsFor[$tracked['i']] = ($rowsFor[$tracked['i']] ?? 0) + 1;
+        if ($tracked['kind'] === 'R1') {
+            $rowsFor[$tracked['i']] = ($rowsFor[$tracked['i']] ?? 0) + 1;
+        }
+    }
+    // The R2 rows (the person in several columns of one row) and the
+    // hand-built linked rows of section 3b are found by instructions too.
+    // Each is counted for every instruction whose column names the person on
+    // it, and each line's row count has to match EXACTLY: a count that is one
+    // too high would mean an instruction touched a row it should not.
+    foreach ($world['instructions'] as $i => $instruction) {
+        foreach ($world['linkedBefore'] ?? [] as $row) {
+            $column = (string) $instruction['userCol'];
+            if ($row !== null && $column !== '' && $row['__table'] === $instruction['table']
+                && array_key_exists($column, $row) === true && $row[$column] !== null && (int) $row[$column] === $world['person']
+            ) {
+                $rowsFor[$i] = ($rowsFor[$i] ?? 0) + 1;
+            }
+        }
     }
     foreach ($world['instructions'] as $i => $instruction) {
         $table  = (string) $instruction['table'];
@@ -927,6 +1372,7 @@ function ge_checkAudit(array $world, array $lines, bool $demoLine, array $failTa
     $expected[] = ['GivingStatementPdfFiles', ['delete']];
     $expected[] = ['tblGivingStatementLog', ['anonymise']];
     $expected[] = ['tblEmailLog', ['anonymise']];
+    $expected[] = ['ProfileImageFiles', ['delete'], '1 file(s)'];
     $expected[] = ['tblErasureRequest', [$lastAction]];
 
     if (count($lines) !== count($expected)) {
@@ -994,9 +1440,60 @@ ge_request(REQ_A, P_A, 'pat.erased@selftest.invalid', 'Pat Erased', 'processing'
 ge_request(REQ_A_DUP, P_A, 'pat.erased@selftest.invalid', 'Pat Erased', 'pending_review');
 ge_request(REQ_A_OLD, P_A, 'pat.old-address@selftest.invalid', 'Pat Erased', 'cancelled', 'Pat changed their mind.');
 ge_request(REQ_C, C, 'cal.control@selftest.invalid', 'Cal Control', 'pending_review', 'Cal\'s own request.');
-foreach ([REQ_A, REQ_A_DUP, REQ_A_OLD] as $requestId) {
+// Roll-out package A2a: three more requests around the same account.
+//  - one of P_A's own left at "processing" by a run that died;
+//  - one P_A filed at a SECOND organisation, still waiting there;
+//  - D's request, finished long ago, which P_A carried out as administrator.
+$mysqli->query('SET FOREIGN_KEY_CHECKS = 0');
+ge_insert('tblSites', [], ['siteID' => SITE_2]);
+$mysqli->query('SET FOREIGN_KEY_CHECKS = 1');
+ge_request(REQ_A_STUCK, P_A, 'pat.erased@selftest.invalid', 'Pat Erased', 'processing');
+ge_request(REQ_A_SITE2, P_A, 'pat.erased@selftest.invalid', 'Pat Erased', 'pending_review');
+ge_q('UPDATE tblErasureRequest SET siteID = ? WHERE requestID = ?', 'ii', [SITE_2, REQ_A_SITE2]);
+ge_request(REQ_D_DONE, null, 'deleted-' . REQ_D_DONE . '@example.invalid', '', 'completed');
+ge_q('UPDATE tblErasureRequest SET subjectName = NULL, processedAt = NOW(), processedByID = ? WHERE requestID = ?', 'ii', [P_A, REQ_D_DONE]);
+foreach ([REQ_A, REQ_A_DUP, REQ_A_OLD, REQ_A_STUCK, REQ_A_SITE2, REQ_D_DONE] as $requestId) {
     $worldA['allowed'][ge_keyText('tblErasureRequest', ['requestID' => $requestId])] = true;
 }
+$requestDoneWas = ge_one('SELECT * FROM tblErasureRequest WHERE requestID = ?', 'i', [REQ_D_DONE]);
+
+// 🤝 The linked rows of section 3b.
+$linkedA = ge_buildLinked(P_A);
+// Each linked row as it was, with its table's name beside it, so the audit
+// check can work out how many rows every instruction should report.
+foreach ($linkedA['before'] as $name => $row) {
+    $worldA['linkedBefore'][$name] = $row === null ? null : array_merge($row, ['__table' => $linkedA['refs'][$name]['table']]);
+}
+foreach ($linkedA['mayChange'] as $name) {
+    $worldA['allowed'][ge_keyText($linkedA['refs'][$name]['table'], $linkedA['refs'][$name]['key'])] = true;
+}
+
+// 🖼️ Photos. P_A's own file is made by ge_buildWorld(). Here: C's own photo,
+//    which must not be touched, and a file that P_A's account AND D's both
+//    point at, which must be kept because it is D's photo too.
+$controlPhoto = ge_file('_uploads/directory/' . C . '.jpg');
+ge_q('UPDATE tblUsers SET displayPhoto = ? WHERE userID = ?', 'si', ['directory/' . C . '.jpg', C]);
+$sharedPhoto = ge_file('_uploads/directory/shared-with-dee.png');
+ge_q("UPDATE tblUsers SET avatarPath = 'directory/shared-with-dee.png' WHERE userID = ?", 'i', [P_A]);
+ge_q("UPDATE tblUsers SET displayPhoto = 'directory/shared-with-dee.png' WHERE userID = ?", 'i', [D]);
+
+// 📧 The send log, for section 5c: P_A's address beside a LONGER address that
+//    contains it; that longer address on its own (must not be touched); and
+//    P_A's address written with capitals and no space after the comma.
+$logBesideLonger = ge_insert('tblEmailLog', [], ['toRecipients' => 'xpat.erased@selftest.invalid, pat.erased@selftest.invalid']);
+$logOnlyLonger   = ge_insert('tblEmailLog', [], ['toRecipients' => 'xpat.erased@selftest.invalid']);
+$logCapitals     = ge_insert('tblEmailLog', [], ['toRecipients' => 'Pat.Erased@SELFTEST.invalid,dee.control@selftest.invalid']);
+$worldA['allowed'][ge_keyText('tblEmailLog', $logBesideLonger['key'])] = true;
+$worldA['allowed'][ge_keyText('tblEmailLog', $logCapitals['key'])]     = true;
+
+// 🔢 The person's number in every OTHER person column of every table (4c).
+$everyColumnA = ge_buildEveryPersonColumn(P_A, $worldA['instructions']);
+
+// 📝 A step of an approval route given to the person by name: the one place
+//    an account number is kept as TEXT (see TEXT_THAT_CAN_HOLD_AN_ACCOUNT_NUMBER).
+$mysqli->query('SET FOREIGN_KEY_CHECKS = 0');
+$stepForPerson = ge_insert('tblWorkflowSteps', [], ['assigneeType' => 'user', 'assigneeValue' => (string) P_A]);
+$mysqli->query('SET FOREIGN_KEY_CHECKS = 1');
 
 $instructionCount = count($worldA['instructions']);
 $tablesCovered    = count($controlTables) + 1;
@@ -1031,8 +1528,8 @@ $ownRequest = static function (int $person): ?array {
 $heldA = $ownRequest(P_A);
 $heldC = $ownRequest(C);
 ge_ok('"what we hold about you" lists the person\'s own erasure requests, with the state of each',
-    $heldA !== null && $heldA['rows'] === 3 && $heldA['action'] === 'anonymise'
-    && str_contains($heldA['reason'], '1 processing') && str_contains($heldA['reason'], '1 pending review')
+    $heldA !== null && $heldA['rows'] === 5 && $heldA['action'] === 'anonymise'
+    && str_contains($heldA['reason'], '2 processing') && str_contains($heldA['reason'], '2 pending review')
     && str_contains($heldA['reason'], '1 cancelled')
     && $heldC !== null && $heldC['rows'] === 1 && str_contains($heldC['reason'], '1 pending review'),
     json_encode([$heldA, $heldC]));
@@ -1051,8 +1548,8 @@ if ($resultA instanceof Throwable || is_array($resultA) === false) {
     ge_finish();
 }
 ge_ok('it reports no failed step, and the number of steps it ran',
-    $resultA['failed'] === 0 && $resultA['changed'] === true && $resultA['steps'] === $instructionCount + 4,
-    json_encode($resultA) . ' (expected steps: ' . ($instructionCount + 4) . ')');
+    $resultA['failed'] === 0 && $resultA['changed'] === true && $resultA['steps'] === $instructionCount + 5,
+    json_encode($resultA) . ' (expected steps: ' . ($instructionCount + 5) . ')');
 
 $reqA = ge_one('SELECT * FROM tblErasureRequest WHERE requestID = ?', 'i', [REQ_A]);
 ge_ok('the request row still exists and is "completed"', $reqA !== null && $reqA['status'] === 'completed', json_encode($reqA));
@@ -1073,6 +1570,37 @@ $dupAudit = ge_audit(REQ_A_DUP);
 ge_ok('...with one line in its own audit trail naming the request that did the work',
     count($dupAudit) === 1 && $dupAudit[0]['action'] === 'completed' && str_contains((string) $dupAudit[0]['details'], '#' . REQ_A)
     && GdprEraser::verifyAuditChain(REQ_A_DUP) === true, json_encode($dupAudit));
+// Roll-out package A2a. One left at "processing" by a run that died used to
+// have its account number cleared and then stay at "processing" for ever.
+$reqStuck   = ge_one('SELECT * FROM tblErasureRequest WHERE requestID = ?', 'i', [REQ_A_STUCK]);
+$stuckAudit = ge_audit(REQ_A_STUCK);
+ge_ok('another request from the same account that was stuck at "processing" is closed with it too, with one line saying why',
+    $reqStuck !== null && $reqStuck['status'] === 'completed' && $reqStuck['userID'] === null
+    && $reqStuck['subjectEmail'] === 'deleted-' . REQ_A_STUCK . '@example.invalid'
+    && count($stuckAudit) === 1 && $stuckAudit[0]['action'] === 'completed' && str_contains((string) $stuckAudit[0]['details'], '#' . REQ_A),
+    json_encode([$reqStuck, $stuckAudit]));
+// A request at ANOTHER organisation is closed too. Its administrator cannot
+// open this organisation's report, so the line must not send them to it, nor
+// hand them this organisation's request number.
+$reqSite2   = ge_one('SELECT * FROM tblErasureRequest WHERE requestID = ?', 'i', [REQ_A_SITE2]);
+$site2Audit = ge_audit(REQ_A_SITE2);
+$site2Line  = (string) ($site2Audit[0]['details'] ?? '');
+ge_ok('a waiting request at ANOTHER organisation is closed too, and its line does not send that organisation to a report it cannot open',
+    $reqSite2 !== null && $reqSite2['status'] === 'completed' && $reqSite2['userID'] === null && (int) $reqSite2['siteID'] === SITE_2
+    && count($site2Audit) === 1 && str_contains($site2Line, 'another organisation')
+    && str_contains($site2Line, 'nothing more needs doing here')
+    && str_contains($site2Line, 'that request') === false && str_contains($site2Line, '#' . REQ_A) === false
+    && GdprEraser::verifyAuditChain(REQ_A_SITE2) === true,
+    json_encode([$reqSite2, $site2Audit]));
+// D's finished request, which the erased person carried out as administrator.
+$requestDoneNow = ge_one('SELECT * FROM tblErasureRequest WHERE requestID = ?', 'i', [REQ_D_DONE]);
+$closingLine    = ge_audit(REQ_A);
+$closingLine    = (string) ($closingLine[count($closingLine) - 1]['details'] ?? '');
+ge_ok('on somebody else\'s request that the erased person handled as administrator, only who handled it is cleared, and the closing line says so',
+    (int) $requestDoneWas['processedByID'] === P_A && $requestDoneNow !== null && $requestDoneNow['processedByID'] === null
+    && ge_same($requestDoneWas, $requestDoneNow, ['processedByID']) === true && count(ge_audit(REQ_D_DONE)) === 0
+    && str_contains($closingLine, 'On 1 other request(s) that this person handled as an administrator'),
+    json_encode([$requestDoneNow, $closingLine]));
 $reqOld = ge_one('SELECT * FROM tblErasureRequest WHERE requestID = ?', 'i', [REQ_A_OLD]);
 ge_ok('an older, cancelled request from the same account is cleared and stays "cancelled"',
     $reqOld !== null && $reqOld['status'] === 'cancelled' && $reqOld['userID'] === null && $reqOld['notes'] === null
@@ -1091,6 +1619,57 @@ ge_ok('the account row is emptied, never deleted',
     && $userA['emailAddress'] === 'deleted-' . REQ_A . '@example.invalid' && $userA['phoneNumber'] === null
     && $userA['displayAddress'] === null && $userA['latitude'] === null && $userA['totpSecret'] === null
     && (int) $userA['isActive'] === 0, json_encode($userA));
+// Roll-out package A2a. All of these were left on the "emptied" account.
+$userAWas = $beforeRowsA[ge_find($worldA, 'tblUsers', 'userID')['n']];
+
+// THE WHOLE ROW, against an exact list (see ACCOUNT_AFTER_ERASURE for why).
+$accountProblems = [];
+$sorted          = array_merge(array_keys(ACCOUNT_AFTER_ERASURE), ACCOUNT_COLUMNS_LEFT_AS_THEY_WERE);
+foreach (array_diff(array_keys((array) $userA), $sorted) as $column) {
+    $accountProblems[] = '`' . $column . '` is on neither list: decide whether an erasure must empty it';
+}
+foreach (array_diff($sorted, array_keys((array) $userA)) as $column) {
+    $accountProblems[] = '`' . $column . '` is on a list and is not a column of tblUsers';
+}
+foreach (ACCOUNT_AFTER_ERASURE as $column => $expected) {
+    $expected = $expected === '@request' ? 'deleted-' . REQ_A . '@example.invalid' : $expected;
+    $actual   = $userA[$column] ?? null;
+    if ($actual !== $expected) {
+        $accountProblems[] = '`' . $column . '` holds ' . json_encode($actual) . ', expected ' . json_encode($expected);
+    }
+    if (($userAWas[$column] ?? null) === $expected) {
+        $accountProblems[] = '`' . $column . '` already held ' . json_encode($expected) . ' before the run, so nothing was proven';
+    }
+}
+foreach (ACCOUNT_COLUMNS_LEFT_AS_THEY_WERE as $column) {
+    if (($userA[$column] ?? null) !== ($userAWas[$column] ?? null)) {
+        $accountProblems[] = '`' . $column . '` changed from ' . json_encode($userAWas[$column] ?? null) . ' to ' . json_encode($userA[$column] ?? null);
+    }
+}
+ge_ok('the emptied account matches an EXACT list, column by column: ' . count(ACCOUNT_AFTER_ERASURE) . ' columns hold exactly what they should, '
+    . count(ACCOUNT_COLUMNS_LEFT_AS_THEY_WERE) . ' are as they were, and no column of the account is on neither list',
+    $accountProblems === [], implode('; ', $accountProblems));
+ge_ok('the biography the person wrote is cleared, and so are the links to their photo',
+    $userAWas['displayBio'] !== null && $userAWas['displayPhoto'] !== null && $userAWas['avatarPath'] !== null
+    && $userA['displayBio'] === null && $userA['displayPhoto'] === null && $userA['avatarPath'] === null, json_encode($userA));
+ge_ok('an emptied account is no longer an administrator, and its two-step sign-in is switched off',
+    (int) $userAWas['isAdmin'] === 1 && (int) $userAWas['isRootAdmin'] === 1 && (int) $userAWas['totpEnabled'] === 1
+    && (int) $userA['isAdmin'] === 0 && (int) $userA['isRootAdmin'] === 0 && (int) $userA['totpEnabled'] === 0, json_encode($userA));
+// The key inside the person's private calendar-feed address. The feed looks
+// an account up by it without asking whether the account is still active, so
+// while it stayed on the emptied account that address went on answering.
+ge_ok('the key to the person\'s private calendar feed is cleared, so the feed address stops working; so are their notification choices',
+    $userAWas['calendarToken'] !== null && $userAWas['notifyPrefs'] !== null
+    && $userA['calendarToken'] === null && $userA['notifyPrefs'] === null
+    && ge_one('SELECT userID FROM tblUsers WHERE calendarToken = ?', 's', [(string) $userAWas['calendarToken']]) === null,
+    json_encode([$userA['calendarToken'], $userA['notifyPrefs']]));
+$photoLine = array_values(array_filter(ge_audit(REQ_A), static fn (array $l): bool => $l['tableName'] === 'ProfileImageFiles'));
+ge_ok('the photo FILE is deleted; another person\'s photo is still there; a file another account also uses is kept, and the line says so',
+    is_file($worldA['photo']) === false && is_file($controlPhoto) === true && is_file($sharedPhoto) === true
+    && count($photoLine) === 1 && $photoLine[0]['action'] === 'delete' && $photoLine[0]['recordKey'] === '1 file(s)'
+    && str_contains((string) $photoLine[0]['details'], '1 file(s) kept because another account uses the same one')
+    && str_contains((string) $photoLine[0]['details'], (string) P_A) === false,
+    json_encode([is_file($worldA['photo']), is_file($controlPhoto), is_file($sharedPhoto), $photoLine]));
 
 // =============================================================================
 ge_section('2', 'The audit trail: one line per instruction, in order, and sealed');
@@ -1099,8 +1678,8 @@ $auditA = ge_audit(REQ_A);
 $auditProblems = ge_checkAudit($worldA, $auditA, true, [], 'completed');
 ge_ok('exactly one line per instruction, each for the right table, with the right outcome and row count ('
     . count($auditA) . ' lines)', $auditProblems === [], implode('; ', array_slice($auditProblems, 0, 8)));
-ge_ok('the number of lines is the instructions, the Demo Data step, the three dedicated lines and the closing line',
-    count($auditA) === $instructionCount + 5, count($auditA) . ' lines for ' . $instructionCount . ' instructions');
+ge_ok('the number of lines is the instructions, the Demo Data step, the four dedicated lines and the closing line',
+    count($auditA) === $instructionCount + 6, count($auditA) . ' lines for ' . $instructionCount . ' instructions');
 ge_ok('the chain of the audit trail verifies', GdprEraser::verifyAuditChain(REQ_A) === true);
 $keptLines = array_values(array_filter($auditA, static fn (array $l): bool => $l['action'] === 'retain'));
 $keptCount = count(array_filter($worldA['instructions'], static fn (array $e): bool => $e['action'] === 'retain'));
@@ -1123,11 +1702,16 @@ foreach ($worldA['instructions'] as $instruction) {
 }
 ge_ok('every table the audit trail says "no column ties to an account" really has no such column in the database',
     $falselyUnlinked === [], implode('; ', $falselyUnlinked));
+// CHANGED by roll-out package A2a. This used to expect ONE "retain" line
+// saying the number stays because the column cannot be empty. Migration 208
+// made it emptiable, so there are now two lines, one per person column, each
+// saying the visit is kept and who is detached.
 $visitLine = array_values(array_filter($auditA, static fn (array $l): bool => $l['tableName'] === 'tblCareVisit'));
-ge_ok('tblCareVisit: the audit line says the visits the person made are kept and why their number stays, not that nothing ties it to an account',
-    count($visitLine) === 1 && $visitLine[0]['action'] === 'retain'
-    && str_contains((string) $visitLine[0]['details'], 'pastoral visits this person made are kept')
-    && str_contains((string) $visitLine[0]['details'], 'does not allow that column to be empty')
+ge_ok('tblCareVisit: two audit lines, one for who made a visit and one for who its follow-up was given to, each saying the visit is kept',
+    count($visitLine) === 2 && $visitLine[0]['action'] === 'anonymise' && $visitLine[1]['action'] === 'anonymise'
+    && str_contains((string) $visitLine[0]['details'], 'who made the visit is detached')
+    && str_contains((string) $visitLine[1]['details'], 'who its follow-up was given to is detached')
+    && str_contains((string) $visitLine[0]['details'], 'kept with the case')
     && str_contains((string) $visitLine[0]['details'], 'not searched') === false, json_encode($visitLine));
 
 // =============================================================================
@@ -1161,8 +1745,11 @@ foreach ($worldA['rows'] as $tracked) {
         $twoColumnTables[] = $tracked['ref']['table'];
     }
 }
-ge_ok('rows naming the person in TWO columns were tested too (' . implode(', ', $twoColumnTables) . ')',
-    $rowsA['r2'] >= 3 && $rowsA['r2'] === count($twoColumnTables), 'only ' . $rowsA['r2']);
+// CHANGED on 11 October 2026 (#492): "at least 3" became "at least 15", now
+// that every table with two or more "empty it" instructions gets such a row.
+ge_ok('rows naming the person in TWO OR MORE columns were tested too, each column emptied by its own instruction (' . count($twoColumnTables)
+    . ' tables: ' . implode(', ', $twoColumnTables) . ')',
+    $rowsA['r2'] >= 15 && $rowsA['r2'] === count($twoColumnTables), 'only ' . $rowsA['r2']);
 sort($rowsA['left']);
 ge_ok('the columns that could not be emptied are exactly the known list: ' . implode(', ', KNOWN_LEFT_IN_PLACE),
     $rowsA['left'] === KNOWN_LEFT_IN_PLACE, json_encode($rowsA['left']));
@@ -1170,6 +1757,114 @@ $leftLines = array_values(array_filter($auditA, static fn (array $l): bool => in
 ge_ok('...and each has an audit line saying why (' . count($leftLines) . ' line)',
     count($leftLines) === count(KNOWN_LEFT_IN_PLACE) && str_contains((string) ($leftLines[0]['details'] ?? ''), 'does not allow'),
     json_encode($leftLines));
+
+// =============================================================================
+ge_section('3b', 'Other people\'s records survive, with rows that really are linked (roll-out package A2a)');
+// =============================================================================
+// Until 11 October 2026 the first eight checks here would each have found the
+// row DELETED: an erasure deleted every visitor, salvation card, task and rota
+// slot that had been given to the person, and every swap request sent to them.
+$was = $linkedA['before'];
+$now = [];
+foreach ($linkedA['refs'] as $name => $ref) {
+    $now[$name] = ge_row($ref);
+}
+$linkedBuilt = array_keys(array_filter($was, static fn ($row): bool => $row === null));
+ge_ok('the linked rows were all built, and each named the person where it should before the run (' . count($was) . ' rows)',
+    $linkedBuilt === [] && (int) $was['visitor']['assignedToID'] === P_A && (int) $was['noteByPerson']['contactedByID'] === P_A
+    && (int) $was['card']['assignedToID'] === P_A && (int) $was['taskGiven']['assignedToID'] === P_A
+    && (int) $was['slotOfPerson']['assignedToID'] === P_A && (int) $was['swapWaiting']['targetUserID'] === P_A
+    && (int) $was['checkin']['checkedOutByID'] === P_A && (int) $was['visitByPerson']['visitedByID'] === P_A
+    && (int) $was['visitFollowUp']['followUpAssignedToID'] === P_A && (int) $was['payment']['paidByID'] === P_A
+    && (int) $was['visitorIsP']['convertedUserID'] === P_A && (int) $was['meetingViaC']['createdByID'] === P_A,
+    json_encode($linkedBuilt));
+
+ge_ok('a VISITOR the person was following up is kept, with their name, contact details and notes; only the worker is detached',
+    ge_same($was['visitor'], $now['visitor'], ['assignedToID']) === true && $now['visitor']['assignedToID'] === null
+    && $now['visitor']['fullName'] === 'Vera Visitor' && (int) $now['visitor']['createdByID'] === D,
+    json_encode($now['visitor']));
+ge_ok('...and so are the follow-up notes about that visitor: the person\'s own note stays with its words and loses only its author; a colleague\'s note is untouched',
+    ge_same($was['noteByPerson'], $now['noteByPerson'], ['contactedByID']) === true && $now['noteByPerson']['contactedByID'] === null
+    && $now['noteByPerson']['summary'] === 'Rang Vera; she will come on Sunday.'
+    && $now['noteByOther'] === $was['noteByOther'],
+    json_encode([$now['noteByPerson'], $now['noteByOther']]));
+ge_ok('ANOTHER PERSON\'S own visitor record (they later became a member) is kept; the erased person is detached as its worker and as who typed it',
+    ge_same($was['visitorIsC'], $now['visitorIsC'], ['assignedToID', 'createdByID']) === true
+    && (int) $now['visitorIsC']['convertedUserID'] === C && $now['visitorIsC']['assignedToID'] === null
+    && $now['visitorIsC']['createdByID'] === null, json_encode($now['visitorIsC']));
+ge_ok('the erased person\'s OWN visitor record is deleted, and the notes about them go with it',
+    $now['visitorIsP'] === null && $now['noteAboutP'] === null, json_encode([$now['visitorIsP'], $now['noteAboutP']]));
+ge_ok('a SALVATION CARD about somebody else is kept whole; only the worker is detached',
+    ge_same($was['card'], $now['card'], ['assignedToID']) === true && $now['card']['assignedToID'] === null
+    && $now['card']['fullName'] === 'Cal Control' && $now['card']['email'] === 'cal.control@selftest.invalid',
+    json_encode($now['card']));
+ge_ok('a TASK given to the person is kept and unassigned; a task they created for somebody else is kept, still assigned to that person',
+    ge_same($was['taskGiven'], $now['taskGiven'], ['assignedToID']) === true && $now['taskGiven']['assignedToID'] === null
+    && (int) $now['taskGiven']['createdByID'] === D && $now['taskGiven']['title'] === 'Ring the plumber'
+    && ge_same($was['taskMade'], $now['taskMade'], ['createdByID']) === true && $now['taskMade']['createdByID'] === null
+    && (int) $now['taskMade']['assignedToID'] === C, json_encode([$now['taskGiven'], $now['taskMade']]));
+ge_ok('a ROTA SLOT the person was filling is kept and unfilled; a slot they set up for somebody else is kept, still filled by that person',
+    ge_same($was['slotOfPerson'], $now['slotOfPerson'], ['assignedToID']) === true && $now['slotOfPerson']['assignedToID'] === null
+    && ge_same($was['slotOfC'], $now['slotOfC'], ['createdByID']) === true && $now['slotOfC']['createdByID'] === null
+    && (int) $now['slotOfC']['assignedToID'] === C, json_encode([$now['slotOfPerson'], $now['slotOfC']]));
+ge_ok('a SWAP REQUEST aimed at the person is kept and CANCELLED, not deleted: it still shows who asked, and their message',
+    ge_same($was['swapWaiting'], $now['swapWaiting'], ['targetUserID', 'status']) === true
+    && $now['swapWaiting']['status'] === 'cancelled' && $now['swapWaiting']['targetUserID'] === null
+    && (int) $now['swapWaiting']['requestedByID'] === C && $now['swapWaiting']['requestMessage'] === 'Could you cover me?',
+    json_encode($now['swapWaiting']));
+ge_ok('...one already accepted keeps its status (that is history), and a request between two other people is untouched',
+    ge_same($was['swapAccepted'], $now['swapAccepted'], ['targetUserID']) === true && $now['swapAccepted']['status'] === 'accepted'
+    && $now['swapAccepted']['targetUserID'] === null && $now['swapOfOthers'] === $was['swapOfOthers'],
+    json_encode([$now['swapAccepted'], $now['swapOfOthers']]));
+ge_ok('a CHILD\'S CHECK-IN made by somebody else and checked OUT by the person loses only the check-out number; the child\'s profile is untouched',
+    ge_same($was['checkin'], $now['checkin'], ['checkedOutByID']) === true && $now['checkin']['checkedOutByID'] === null
+    && (int) $now['checkin']['checkedInByID'] === C && $now['child'] === $was['child'], json_encode($now['checkin']));
+ge_ok('an INVITATION the person ACCEPTED, which holds their own email address, is deleted; one they only SENT to somebody else is kept whole, with only who sent it detached',
+    (int) $was['inviteAccepted']['acceptedByID'] === P_A && $now['inviteAccepted'] === null
+    && ge_same($was['inviteSent'], $now['inviteSent'], ['createdByID']) === true && $now['inviteSent']['createdByID'] === null
+    && (int) $now['inviteSent']['acceptedByID'] === C && $now['inviteSent']['email'] === 'cal.control@selftest.invalid',
+    json_encode([$now['inviteAccepted'], $now['inviteSent']]));
+ge_ok('a SWAP REQUEST the person ASKED for is kept with its message and cancelled if it was still waiting; one already accepted keeps its status; who asked is detached on both',
+    (int) $was['swapAsked']['requestedByID'] === P_A
+    && ge_same($was['swapAsked'], $now['swapAsked'], ['requestedByID', 'status']) === true && $now['swapAsked']['requestedByID'] === null
+    && $now['swapAsked']['status'] === 'cancelled' && (int) $now['swapAsked']['targetUserID'] === C && $now['swapAsked']['requestMessage'] === 'I am away that week.'
+    && ge_same($was['swapAskedDone'], $now['swapAskedDone'], ['requestedByID']) === true && $now['swapAskedDone']['requestedByID'] === null
+    && $now['swapAskedDone']['status'] === 'accepted', json_encode([$now['swapAsked'], $now['swapAskedDone']]));
+ge_ok('a ROOM BOOKING the person made is kept, with its times, purpose and status; only who booked it is detached',
+    (int) $was['booking']['bookedByID'] === P_A && ge_same($was['booking'], $now['booking'], ['bookedByID']) === true
+    && $now['booking']['bookedByID'] === null && $now['booking']['purpose'] === 'Welcome team supper' && $now['booking']['status'] === 'pending',
+    json_encode($now['booking']));
+ge_ok('a CHILD\'S EVENT REGISTRATION that somebody else submitted and the person only REVIEWED is kept, with the child\'s name and medical details; only the reviewer is detached',
+    (int) $was['registration']['reviewedByID'] === P_A && ge_same($was['registration'], $now['registration'], ['reviewedByID']) === true
+    && $now['registration']['reviewedByID'] === null && (int) $now['registration']['submittedByUserID'] === C
+    && $now['registration']['fullName'] === 'Kit Control' && $now['registration']['medicalNotes'] === $was['registration']['medicalNotes']
+    && $now['registration']['medicalNotes'] !== null, json_encode($now['registration']));
+ge_ok('a PASTORAL CASE about somebody else is untouched; a visit the person made is kept with its notes and no number; so is a visit whose follow-up was given to them',
+    $now['case'] === $was['case']
+    && ge_same($was['visitByPerson'], $now['visitByPerson'], ['visitedByID']) === true && $now['visitByPerson']['visitedByID'] === null
+    && $now['visitByPerson']['notes'] === 'Visited Cal at home.' && (int) $now['visitByPerson']['followUpAssignedToID'] === D
+    && ge_same($was['visitFollowUp'], $now['visitFollowUp'], ['followUpAssignedToID']) === true
+    && $now['visitFollowUp']['followUpAssignedToID'] === null && (int) $now['visitFollowUp']['visitedByID'] === D,
+    json_encode([$now['case'], $now['visitByPerson'], $now['visitFollowUp']]));
+ge_ok('ANOTHER PERSON\'S MONEY RECORDS are untouched, byte for byte: their gift, their Gift Aid declaration and their expense claim',
+    $now['giftOfC'] !== null && $now['giftOfC'] === $was['giftOfC'] && $now['giftAidOfC'] !== null
+    && $now['giftAidOfC'] === $was['giftAidOfC'] && $now['claimOfC'] !== null && $now['claimOfC'] === $was['claimOfC'],
+    json_encode([$now['giftOfC'], $now['giftAidOfC'], $now['claimOfC']]));
+ge_ok('a PAYMENT the person entered against somebody else\'s expense claim is kept, with its amount, method and reference; only who entered it is cleared',
+    ge_same($was['payment'], $now['payment'], ['paidByID']) === true && $now['payment']['paidByID'] === null
+    && $now['payment']['payAmount'] === $was['payment']['payAmount'] && $now['payment']['payAmount'] !== null,
+    json_encode($now['payment']));
+ge_ok('the person\'s own PLEDGE is deleted; the gift given towards it is kept with its amount, date and campaign, and loses the donor and the pledge link; their Gift Aid declaration is unchanged',
+    $now['pledge'] === null && ge_same($was['giftToPledge'], $now['giftToPledge'], ['donorID', 'pledgeID']) === true
+    && $now['giftToPledge']['donorID'] === null && $now['giftToPledge']['pledgeID'] === null
+    && $now['giftToPledge']['amountPence'] === $was['giftToPledge']['amountPence']
+    && $now['giftToPledge']['campaignID'] === $was['giftToPledge']['campaignID']
+    && $now['giftAidOfPerson'] !== null && $now['giftAidOfPerson'] === $was['giftAidOfPerson'],
+    json_encode([$now['pledge'], $now['giftToPledge'], $now['giftAidOfPerson']]));
+ge_ok('ZOOM: the person\'s own connection and the meeting made through it are gone; a meeting they made through somebody else\'s connection is kept, and that connection is untouched',
+    $now['zoomOfPerson'] === null && $now['meetingViaPerson'] === null && $now['zoomOfC'] === $was['zoomOfC']
+    && ge_same($was['meetingViaC'], $now['meetingViaC'], ['createdByID']) === true && $now['meetingViaC']['createdByID'] === null,
+    json_encode([$now['zoomOfPerson'], $now['meetingViaPerson'], $now['meetingViaC']]));
 
 // =============================================================================
 ge_section('4', 'Nothing else in the whole database changed');
@@ -1208,16 +1903,30 @@ ge_section('4b', 'No delete can cascade into a record that must be kept');
 $catalogueFile = require $coreDir . 'personal-data-catalogue.php';
 $mustKeep = ['tblUsers', 'tblErasureRequest', 'tblErasureAudit', 'tblGivingEntry', 'tblPayment', 'tblExpenseClaims', 'tblKidProfiles'];
 foreach ($catalogueFile as $table => $meta) {
-    if (($meta['decision'] ?? '') === 'retain') {
+    // CHANGED by roll-out package A2a: 'unlink' tables count as kept too.
+    // Only 'retain' did, and that is how the cascade from a person's Zoom
+    // connection into `tblZoomMeeting` (which the list said was kept) went
+    // unseen. A table that is BOTH deleted from and kept (group memberships:
+    // the person's own rows go, rows they merely added stay) is left out,
+    // because a delete "reaching" the table it is aimed at says nothing.
+    if (in_array(($meta['decision'] ?? ''), ['retain', 'unlink'], true) === true) {
         $mustKeep[] = (string) $table;
     }
 }
 $cascades = [];
+$emptied  = [];
 foreach (ge_q(
-    "SELECT REFERENCED_TABLE_NAME AS parent, TABLE_NAME AS child FROM information_schema.REFERENTIAL_CONSTRAINTS "
-    . "WHERE CONSTRAINT_SCHEMA = DATABASE() AND DELETE_RULE = 'CASCADE'"
+    "SELECT r.REFERENCED_TABLE_NAME AS parent, r.TABLE_NAME AS child, r.DELETE_RULE AS rule, k.COLUMN_NAME AS col "
+    . "FROM information_schema.REFERENTIAL_CONSTRAINTS r JOIN information_schema.KEY_COLUMN_USAGE k "
+    . "ON k.CONSTRAINT_SCHEMA = r.CONSTRAINT_SCHEMA AND k.CONSTRAINT_NAME = r.CONSTRAINT_NAME AND k.TABLE_NAME = r.TABLE_NAME "
+    . "WHERE r.CONSTRAINT_SCHEMA = DATABASE() AND r.DELETE_RULE IN ('CASCADE', 'SET NULL') "
+    . "ORDER BY r.REFERENCED_TABLE_NAME, r.TABLE_NAME, k.COLUMN_NAME"
 ) as $link) {
-    $cascades[$link['parent']][] = $link['child'];
+    if ($link['rule'] === 'CASCADE') {
+        $cascades[$link['parent']][$link['child']] = true;
+    } else {
+        $emptied[$link['parent']][] = $link['child'] . '.' . $link['col'];
+    }
 }
 $deleteFrom = [];
 foreach ($worldA['instructions'] as $instruction) {
@@ -1225,25 +1934,150 @@ foreach ($worldA['instructions'] as $instruction) {
         $deleteFrom[(string) $instruction['table']] = true;
     }
 }
-$reached = [];
+// Every table a delete can reach: the ones deleted from, and everything the
+// database then deletes below them, as far as it goes.
+$reached = $deleteFrom;
 $queue   = array_keys($deleteFrom);
 $dragged = [];
 while ($queue !== []) {
     $parent = array_shift($queue);
-    foreach ($cascades[$parent] ?? [] as $child) {
-        if (isset($reached[$child]) === true) {
-            continue;
+    foreach (array_keys($cascades[$parent] ?? []) as $child) {
+        if (in_array($child, $mustKeep, true) === true && isset($deleteFrom[$child]) === false) {
+            $dragged[$parent . ' -> ' . $child] = true;
         }
-        $reached[$child] = true;
-        $queue[]         = $child;
-        if (in_array($child, $mustKeep, true) === true) {
-            $dragged[] = $parent . ' -> ' . $child;
+        if (isset($reached[$child]) === false) {
+            $reached[$child] = true;
+            $queue[]         = $child;
         }
     }
 }
-ge_ok('the database\'s cascade rules were read (more than 100 of them)', array_sum(array_map('count', $cascades)) > 100);
-ge_ok('deleting from any of the ' . count($deleteFrom) . ' tables an instruction deletes from never cascades into a kept table',
-    $dragged === [], implode('; ', $dragged));
+$dragged = array_keys($dragged);
+sort($dragged);
+$allowedCascades = array_keys(CASCADES_INTO_KEPT_TABLES);
+sort($allowedCascades);
+$cascadeCount = array_sum(array_map('count', $cascades));
+ge_ok('the database\'s cascade rules were read (more than 100 of them)', $cascadeCount > 100, (string) $cascadeCount);
+ge_ok('a delete reaches a KEPT table (kept on purpose, or kept with the name removed) only in the ' . count($allowedCascades)
+    . ' named cases, each with its reason',
+    $dragged === $allowedCascades && in_array('', CASCADES_INTO_KEPT_TABLES, true) === false,
+    'not on the list: ' . implode('; ', array_diff($dragged, $allowedCascades)) . ' | on the list but no longer true: '
+    . implode('; ', array_diff($allowedCascades, $dragged)));
+// And the quieter kind: the row is kept, but the database empties a link on
+// it because the row it pointed at was deleted (a gift losing its pledge).
+$unlinked = [];
+foreach (array_keys($reached) as $parent) {
+    foreach ($emptied[$parent] ?? [] as $childColumn) {
+        $child = explode('.', $childColumn)[0];
+        if (in_array($child, $mustKeep, true) === true && isset($deleteFrom[$child]) === false) {
+            $unlinked[$parent . ' -> ' . $childColumn] = true;
+        }
+    }
+}
+$unlinked = array_keys($unlinked);
+sort($unlinked);
+$allowedUnlinks = array_keys(EMPTIED_LINKS_ON_KEPT_TABLES);
+sort($allowedUnlinks);
+ge_ok('a delete empties a link on a KEPT table\'s rows only in the ' . count($allowedUnlinks) . ' named cases, each with its reason',
+    $unlinked === $allowedUnlinks && in_array('', EMPTIED_LINKS_ON_KEPT_TABLES, true) === false,
+    'not on the list: ' . implode('; ', array_diff($unlinked, $allowedUnlinks)) . ' | on the list but no longer true: '
+    . implode('; ', array_diff($allowedUnlinks, $unlinked)));
+
+// -----------------------------------------------------------------------------
+ge_section('4c', 'No account number of the erased person is left anywhere, except where a named list says so');
+// -----------------------------------------------------------------------------
+// Every column that can hold an account number was given the person's: the
+// columns an instruction matches on by ge_buildWorld(), every other one by
+// ge_buildEveryPersonColumn(). Which of them still hold it?
+$stillNamed = [];
+foreach ($worldA['rows'] as $tracked) {
+    $instruction = $worldA['instructions'][$tracked['i']];
+    $column      = (string) $instruction['userCol'];
+    $row         = ge_row($tracked['ref']);
+    if ($tracked['kind'] === 'R1' && $instruction['table'] !== 'tblUsers' && $column !== '' && $row !== null
+        && $row[$column] !== null && (int) $row[$column] === P_A
+    ) {
+        $stillNamed[$instruction['table'] . '.' . $column] = true;
+    }
+}
+$unreachedGone = [];
+foreach ($everyColumnA['rows'] as $tracked) {
+    $column = explode('.', $tracked['where'])[1];
+    $row    = ge_row($tracked['ref']);
+    if ($row === null) {
+        $unreachedGone[] = $tracked['where'];
+    } elseif ($row[$column] !== null && (int) $row[$column] === P_A) {
+        $stillNamed[$tracked['where']] = true;
+    }
+}
+$stillNamed = array_keys($stillNamed);
+sort($stillNamed);
+$knownStillNamed = array_merge(...array_values(KNOWN_STILL_NAMED));
+sort($knownStillNamed);
+$untried = $everyColumnA['untried'];
+sort($untried);
+echo '   ' . count($everyColumnA['rows']) . ' more rows were made, one for each person column that no instruction matches on; '
+    . count($untried) . " column(s) could not be given one.\n";
+// How many different columns were given the person's number: one for each
+// column an instruction matches on, and one for each column nothing matches.
+// (CHANGED on 11 October 2026: this used to require at least 20 columns that
+// NOTHING matched on, which was true while #492 was open. Building #492 took
+// that to seven, so the floor is now on the total, which is what the check is
+// for: that the whole database was covered.)
+$columnsTried = [];
+foreach ($worldA['instructions'] as $instruction) {
+    if ((string) $instruction['userCol'] !== '') {
+        $columnsTried[$instruction['table'] . '.' . $instruction['userCol']] = true;
+    }
+}
+foreach ($everyColumnA['rows'] as $tracked) {
+    $columnsTried[$tracked['where']] = true;
+}
+ge_ok('the person\'s number was put in every person column of every table (' . count($columnsTried)
+    . ' columns), apart from an exact list of ' . count(COULD_NOT_BE_TRIED) . ' that could not be tried',
+    count($columnsTried) >= 190 && $untried === COULD_NOT_BE_TRIED && $unreachedGone === [],
+    'could not be tried: ' . json_encode($untried) . ' | rows that vanished: ' . json_encode($unreachedGone));
+// Found by the SHAPE of its name alone (not on GdprEraser's list, not linked
+// by the database): each such column must be a known look-alike, with its
+// reason. Anything else is a person column nobody has dealt with.
+$shapeOnly = [];
+$linked    = [];
+foreach (ge_q(
+    "SELECT TABLE_NAME AS t, COLUMN_NAME AS c FROM information_schema.KEY_COLUMN_USAGE "
+    . "WHERE TABLE_SCHEMA = DATABASE() AND REFERENCED_TABLE_NAME = 'tblUsers' AND REFERENCED_COLUMN_NAME = 'userID'"
+) as $row) {
+    $linked[$row['t'] . '.' . $row['c']] = true;
+}
+$shapedCount = 0;
+foreach (ge_q(
+    "SELECT TABLE_NAME AS t, COLUMN_NAME AS c FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() "
+    . "AND DATA_TYPE IN ('int', 'bigint', 'mediumint') ORDER BY TABLE_NAME, COLUMN_NAME"
+) as $row) {
+    if (preg_match(PERSON_COLUMN_SHAPE, (string) $row['c']) !== 1 || str_starts_with((string) $row['t'], 'selftest_') === true) {
+        continue;
+    }
+    $shapedCount++;
+    if (in_array($row['c'], GdprEraser::LINK_COLUMNS, true) === false && isset($linked[$row['t'] . '.' . $row['c']]) === false) {
+        $shapeOnly[] = $row['t'] . '.' . $row['c'];
+    }
+}
+sort($shapeOnly);
+$lookAlikes = array_keys(LOOKS_LIKE_A_PERSON_COLUMN_AND_IS_NOT);
+sort($lookAlikes);
+ge_ok('person columns are also looked for by the SHAPE of their name (' . $shapedCount . ' columns have it): the only ones that are on no list and have no link are the '
+    . count($lookAlikes) . ' named look-alikes',
+    $shapedCount > 150 && $shapeOnly === $lookAlikes,
+    'looks like a person column, on no list, no link, and not a named look-alike: ' . implode(', ', array_diff($shapeOnly, $lookAlikes))
+    . ' | named as a look-alike but no longer one: ' . implode(', ', array_diff($lookAlikes, $shapeOnly)));
+// The one place an account number is kept as TEXT. Pinned, not built.
+$stepNow = ge_row($stepForPerson);
+ge_ok('PINNED, not built: a step of an approval route given to the person by name still holds their number as text ('
+    . implode(', ', array_keys(TEXT_THAT_CAN_HOLD_AN_ACCOUNT_NUMBER)) . '). When that is decided and built, this check and its list must change',
+    array_keys(TEXT_THAT_CAN_HOLD_AN_ACCOUNT_NUMBER) === ['tblWorkflowSteps.assigneeValue'] && $stepNow !== null
+    && $stepNow['assigneeType'] === 'user' && $stepNow['assigneeValue'] === (string) P_A, json_encode($stepNow));
+ge_ok('after the erasure, the columns that still hold the person\'s number are EXACTLY the named list (' . count($knownStillNamed) . ' columns)',
+    $stillNamed === $knownStillNamed,
+    'still named and NOT on the list: ' . implode(', ', array_diff($stillNamed, $knownStillNamed))
+    . ' | on the list but no longer named: ' . implode(', ', array_diff($knownStillNamed, $stillNamed)));
 
 // =============================================================================
 ge_section('5', 'The tables #535 was about, each by name');
@@ -1289,11 +2123,21 @@ foreach ([['tblGivingEntry', 'donorID'], ['tblPayment', 'userID'], ['tblExpenseC
     ge_ok($table . ': the row and every amount on it stay; only the person\'s own number may go',
         $found !== null && $same === true, json_encode([$was, $now]));
 }
-foreach ([['tblDbsChecks', 'userID'], ['tblCareVisit', 'visitedByID'], ['tblAnonymousCheckins', '']] as [$table, $col]) {
+foreach ([['tblDbsChecks', 'userID'], ['tblAnonymousCheckins', '']] as [$table, $col]) {
     $found = ge_find($worldA, $table, $col);
     ge_ok($table . ': kept, and not one column changed',
         $found !== null && $found['action'] === 'retain' && ge_row($found['ref']) === $beforeRowsA[$found['n']]);
 }
+// CHANGED by roll-out package A2a. tblCareVisit was in the loop above ("kept,
+// and not one column changed"), because the visitor's number could not be
+// removed. It can now, so the check is: the visit and its notes are kept, and
+// the visitor's number - nothing else - is gone.
+$careVisit = ge_find($worldA, 'tblCareVisit', 'visitedByID');
+ge_ok('tblCareVisit: the visit is kept with its notes and its case; only the number of whoever made it is emptied',
+    $careVisit !== null && $careVisit['action'] === 'anonymise' && ge_row($careVisit['ref']) !== null
+    && ge_same($beforeRowsA[$careVisit['n']], ge_row($careVisit['ref']), ['visitedByID']) === true
+    && ge_row($careVisit['ref'])['visitedByID'] === null && ge_row($careVisit['ref'])['notes'] !== null,
+    json_encode($careVisit === null ? null : ge_row($careVisit['ref'])));
 // Roll-out decision 8 (Salem874, 11 October 2026): kept for tax reasons. It
 // was DELETED on erasure until then, so this is checked by name.
 $giftAid     = ge_find($worldA, 'tblGiftAidDeclaration', 'donorID');
@@ -1318,6 +2162,20 @@ ge_ok('tblKidProfiles: the child\'s record stays with its name and medical notes
     $kidNow !== null && $kidNow['parentUserID'] === null && $kidNow['fullName'] === $kidWas['fullName']
     && $kidNow['medicalNotes'] === $kidWas['medicalNotes'], json_encode($kidNow));
 
+// -----------------------------------------------------------------------------
+ge_section('5c', 'The send log: only an entry that IS the address is replaced (roll-out package A2a)');
+// -----------------------------------------------------------------------------
+// The step used to replace the text wherever it appeared, so erasing
+// pat.erased@... also rewrote somebody else's xpat.erased@... .
+$besideLonger = ge_row($logBesideLonger);
+$onlyLonger   = ge_row($logOnlyLonger);
+ge_ok('a LONGER address that merely contains the person\'s address is left exactly as it was, beside theirs and on its own',
+    ($besideLonger['toRecipients'] ?? '') === 'xpat.erased@selftest.invalid, [erased]'
+    && ($onlyLonger['toRecipients'] ?? '') === 'xpat.erased@selftest.invalid', json_encode([$besideLonger, $onlyLonger]));
+$capitals = ge_row($logCapitals);
+ge_ok('the person\'s address written with capitals, and with no space after the comma, is still found; the list keeps its shape',
+    ($capitals['toRecipients'] ?? '') === '[erased],dee.control@selftest.invalid', json_encode($capitals));
+
 // =============================================================================
 ge_section('6', 'A step that fails: recorded, the rest still run, and a second run finishes');
 // =============================================================================
@@ -1335,7 +2193,7 @@ ge_trigger('selftest_gdpr_fail_step', "CREATE TRIGGER `selftest_gdpr_fail_step` 
     . "FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'selftest: this update was made to fail'");
 $resultB1 = ge_execute(REQ_B, P_B);
 ge_ok('the run still ends without an exception, and reports exactly one failed step',
-    is_array($resultB1) === true && $resultB1['failed'] === 1 && $resultB1['steps'] === $instructionCount + 4,
+    is_array($resultB1) === true && $resultB1['failed'] === 1 && $resultB1['steps'] === $instructionCount + 5,
     $resultB1 instanceof Throwable ? get_class($resultB1) . ': ' . $resultB1->getMessage() : json_encode($resultB1));
 $reqB = ge_one('SELECT * FROM tblErasureRequest WHERE requestID = ?', 'i', [REQ_B]);
 ge_ok('the request is back at "pending review" with its account number, name, address and notes all still on it',
@@ -1348,7 +2206,7 @@ ge_ok('the audit trail has a line for EVERY instruction: one "failed", and nothi
     $auditB1Problems === [], implode('; ', array_slice($auditB1Problems, 0, 8)));
 $summary = $auditB1[count($auditB1) - 1] ?? ['details' => ''];
 ge_ok('its last line says how many steps failed and that the request can be run again',
-    str_contains((string) $summary['details'], '1 of ' . ($instructionCount + 4) . ' steps failed')
+    str_contains((string) $summary['details'], '1 of ' . ($instructionCount + 5) . ' steps failed')
     && str_contains((string) $summary['details'], 'back at pending review'), (string) $summary['details']);
 $rowsB1 = ge_checkRows($worldB, $beforeRowsB, ['tblExternalFeedRuns.triggeredByID']);
 ge_ok('the failed table\'s row is untouched, and every other instruction still did its work',
@@ -1377,9 +2235,9 @@ ge_ok('every instruction has now done its work, the one that failed included', $
 $auditB2   = array_slice(ge_audit(REQ_B), count($auditB1));
 $noneLines = count(array_filter($auditB2, static fn (array $l): bool => $l['action'] === 'none'));
 ge_ok('the second run also wrote one line per instruction, most of them "nothing held" (' . count($auditB2) . ' lines, ' . $noneLines . ' "none")',
-    count($auditB2) === $instructionCount + 4 && $noneLines > 100
+    count($auditB2) === $instructionCount + 5 && $noneLines > 100
     && ($auditB2[count($auditB2) - 1]['action'] ?? '') === 'completed',
-    count($auditB2) . ' lines, expected ' . ($instructionCount + 4));
+    count($auditB2) . ' lines, expected ' . ($instructionCount + 5));
 $lateNow = ge_row($lateLog);
 ge_ok('the second run still found the person\'s address: the message logged between the runs is scrubbed',
     $lateNow !== null && $lateNow['toRecipients'] === '[erased]', json_encode($lateNow));
@@ -1519,11 +2377,92 @@ ge_ok('the audit line names the column and does not call it a missing table; the
     && count($tableF) === 1 && $tableF[0]['action'] === 'skip' && $tableF[0]['details'] === 'table-missing',
     json_encode([$columnF, $tableF]));
 ge_q("UPDATE tblErasureRequest SET status = 'processing' WHERE requestID = ?", 'i', [REQ_F]);
-$resultF2 = ge_execute(REQ_F, P_F);
-$reqF2    = ge_one('SELECT status FROM tblErasureRequest WHERE requestID = ?', 'i', [REQ_F]);
+// This run is pressed by the person being erased (an administrator carrying
+// out their own request), for the check after next.
+$resultF2 = ge_execute(REQ_F, P_F, P_F);
+$reqF2    = ge_one('SELECT status, processedByID, processedAt FROM tblErasureRequest WHERE requestID = ?', 'i', [REQ_F]);
 ge_ok('once the column is back (the database upgraded), running the request again completes it',
     is_array($resultF2) === true && $resultF2['failed'] === 0 && $reqF2['status'] === 'completed',
     $resultF2 instanceof Throwable ? $resultF2->getMessage() : json_encode([$resultF2, $reqF2]));
+ge_ok('an administrator who carries out their OWN erasure is not written onto the request as who did it (that would put their number straight back)',
+    $reqF2['processedByID'] === null && $reqF2['processedAt'] !== null, json_encode($reqF2));
+
+// =============================================================================
+ge_section('7d', 'The person\'s photo: what is refused, and a file that cannot be deleted (roll-out package A2a)');
+// =============================================================================
+// A path kept in a database column must not be trusted with the right to
+// delete files. Three things are refused, and each must leave the file where
+// it is, leave the links on the account, and count as a FAILED step.
+$mysqli->query('SET FOREIGN_KEY_CHECKS = 0');
+ge_user(P_G, 'Gil Seventh', 'gil.seventh@selftest.invalid');
+$mysqli->query('SET FOREIGN_KEY_CHECKS = 1');
+ge_request(REQ_G, P_G, 'gil.seventh@selftest.invalid', 'Gil Seventh', 'processing');
+$photoStep  = new ReflectionMethod(GdprEraser::class, 'eraseProfileImages');
+$photoState = static fn (): array => ge_one('SELECT avatarPath, displayPhoto FROM tblUsers WHERE userID = ?', 'i', [P_G]);
+$lastAudit  = static function (int $requestId): array {
+    $lines = ge_audit($requestId);
+
+    return $lines[count($lines) - 1] ?? ['action' => '', 'tableName' => '', 'details' => ''];
+};
+
+// 1. An image, but OUTSIDE the uploads folder, reached with "..".
+$outside = ge_file('outside-the-uploads-folder.jpg');
+ge_q("UPDATE tblUsers SET avatarPath = NULL, displayPhoto = '../outside-the-uploads-folder.jpg' WHERE userID = ?", 'i', [P_G]);
+$outcomeOutside = $photoStep->invoke(null, REQ_G, P_G);
+ge_ok('a photo path that climbs OUT of the uploads folder is refused: a failed step, the file untouched, the link left on the account',
+    $outcomeOutside === 'failed' && is_file($outside) === true && $photoState()['displayPhoto'] === '../outside-the-uploads-folder.jpg'
+    && $lastAudit(REQ_G)['action'] === 'failed' && $lastAudit(REQ_G)['tableName'] === 'ProfileImageFiles'
+    && str_contains((string) $lastAudit(REQ_G)['details'], 'outside-the-uploads-folder') === false,
+    json_encode([$outcomeOutside, is_file($outside), $photoState(), $lastAudit(REQ_G)]));
+
+// 2. Inside the uploads folder, but NOT an image: another person's statement.
+ge_q("UPDATE tblUsers SET displayPhoto = ? WHERE userID = ?", 'si', ['giving/statements/1/statement-' . C . '-2025.pdf', P_G]);
+$outcomePdf = $photoStep->invoke(null, REQ_G, P_G);
+ge_ok('a photo path that points at a file which is not an image (another person\'s giving statement) is refused, and that file is untouched',
+    $outcomePdf === 'failed' && is_file($controlFile) === true && $photoState()['displayPhoto'] !== null
+    && $lastAudit(REQ_G)['action'] === 'failed', json_encode([$outcomePdf, is_file($controlFile), $photoState()]));
+
+// 2b. In the WEB folder. A photo address without "http" in front means a file
+//     under the web folder (Portal\Core\Avatar). Nothing in the web folder is
+//     ever deleted on the say-so of a column: that folder holds the portal's
+//     own pages and pictures. A file found there is refused, so that a person
+//     looks at it. (The web folder is wherever the web server says it is;
+//     here it is a made-up one inside the scratch folder.)
+$inWebFolder = ge_file('made-up-web-folder/uploads/avatars/' . P_G . '.jpg');
+$_SERVER['DOCUMENT_ROOT'] = PORTAL_ROOT . DIRECTORY_SEPARATOR . 'made-up-web-folder';
+ge_q("UPDATE tblUsers SET displayPhoto = NULL, avatarPath = ? WHERE userID = ?", 'si', ['uploads/avatars/' . P_G . '.jpg', P_G]);
+$outcomeWeb = $photoStep->invoke(null, REQ_G, P_G);
+unset($_SERVER['DOCUMENT_ROOT']);
+ge_ok('a photo that is a file in the WEB folder is refused too: a failed step, the file untouched, the link left on the account',
+    $outcomeWeb === 'failed' && is_file($inWebFolder) === true && $photoState()['avatarPath'] === 'uploads/avatars/' . P_G . '.jpg'
+    && $lastAudit(REQ_G)['action'] === 'failed', json_encode([$outcomeWeb, is_file($inWebFolder), $photoState()]));
+ge_q('UPDATE tblUsers SET avatarPath = NULL WHERE userID = ?', 'i', [P_G]);
+
+// 3. A real photo that cannot be deleted (its folder is read-only). Through
+//    the whole erasure this time, to show the request is NOT closed.
+$lockedPhoto = ge_file('_uploads/directory-locked/' . P_G . '.png');
+ge_q("UPDATE tblUsers SET displayPhoto = ? WHERE userID = ?", 'si', ['directory-locked/' . P_G . '.png', P_G]);
+chmod(dirname($lockedPhoto), 0500);
+$resultG1 = ge_execute(REQ_G, P_G);
+chmod(dirname($lockedPhoto), 0700);
+$reqG1    = ge_one('SELECT status, userID FROM tblErasureRequest WHERE requestID = ?', 'i', [REQ_G]);
+$failedG1 = $failedLines(REQ_G, 3);
+ge_ok('a photo file that cannot be deleted is a failed step: the request is NOT closed, the file is still there, and so is the link to it',
+    is_array($resultG1) === true && $resultG1['failed'] === 1 && count($failedG1) === 1
+    && $failedG1[0]['tableName'] === 'ProfileImageFiles' && str_contains((string) $failedG1[0]['details'], 'still on disk')
+    && $reqG1['status'] === 'pending_review' && (int) $reqG1['userID'] === P_G && is_file($lockedPhoto) === true
+    && $photoState()['displayPhoto'] === 'directory-locked/' . P_G . '.png',
+    ($isRoot === true ? 'THIS RUN IS ROOT, which a read-only folder cannot stop: run it as an ordinary user. ' : '')
+    . ($resultG1 instanceof Throwable ? $resultG1->getMessage() : json_encode([$resultG1, $failedG1, $reqG1, $photoState()])));
+
+// 4. Nothing in the way: the next run finds the file again and finishes.
+ge_q("UPDATE tblErasureRequest SET status = 'processing' WHERE requestID = ?", 'i', [REQ_G]);
+$resultG2 = ge_execute(REQ_G, P_G);
+$reqG2    = ge_one('SELECT status FROM tblErasureRequest WHERE requestID = ?', 'i', [REQ_G]);
+ge_ok('with the folder writable again the next run finds the file through the link it left, deletes it, empties the links and completes',
+    is_array($resultG2) === true && $resultG2['failed'] === 0 && $reqG2['status'] === 'completed' && is_file($lockedPhoto) === false
+    && $photoState()['displayPhoto'] === null && $photoState()['avatarPath'] === null && is_file($outside) === true,
+    $resultG2 instanceof Throwable ? $resultG2->getMessage() : json_encode([$resultG2, $reqG2, $photoState()]));
 
 // =============================================================================
 ge_section('8', 'The guards themselves can fail');
@@ -1543,7 +2482,182 @@ ge_ok('an instruction nobody recognises is refused: a failed step, a line saying
     $outcome === 'failed' && $controlRef !== null && ($stillThere[0] ?? null) === $controlRef
     && $lastLine['action'] === 'failed' && str_contains((string) $lastLine['details'], 'unrecognised instruction'),
     json_encode([$outcome, $lastLine]));
+// The guard that stops an instruction wiping ANOTHER person's number. When an
+// instruction lists a person column to empty beside the one it matches on,
+// that column is emptied only where it names the erased person. No
+// instruction lists one any more (each person column has an instruction of
+// its own since 11 October 2026, and tools/gdpr-coverage-selftest.php fails
+// if one comes back), so the made-up world no longer exercises this guard,
+// and a planted fault that removed it went unnoticed. It is still the last
+// thing standing between a careless instruction and somebody else's number,
+// so it is tested here directly, with an instruction of exactly that shape.
+$mysqli->query('SET FOREIGN_KEY_CHECKS = 0');
+$sharedTask = ge_insert('tblTasks', ['assignedToID' => C, 'createdByID' => D], ['parentTaskID' => null]);
+ge_ensureParents($sharedTask);
+$mysqli->query('SET FOREIGN_KEY_CHECKS = 1');
+$guardOutcome = $processEntry->invoke(null, $mysqli, REQ_PC, C, ['table' => 'tblTasks', 'userCol' => 'assignedToID', 'action' => 'anonymise',
+    'nullCols' => ['createdByID'], 'reason' => 'selftest: an instruction that lists a second person column']);
+$sharedNow = ge_row($sharedTask);
+ge_ok('an instruction that lists a second person column empties it ONLY where it names the erased person: somebody else\'s number on the same row is left alone',
+    $guardOutcome === 'changed' && $sharedNow !== null && $sharedNow['assignedToID'] === null && (int) $sharedNow['createdByID'] === D,
+    json_encode([$guardOutcome, $sharedNow]));
 ge_q("UPDATE tblErasureAudit SET details = 'edited afterwards' WHERE requestID = ? ORDER BY auditID LIMIT 1", 'i', [REQ_A]);
 ge_ok('an audit line edited afterwards breaks the chain, and verifying says so', GdprEraser::verifyAuditChain(REQ_A) === false);
+
+// =============================================================================
+ge_section('9', 'A request stuck at "processing" can be put back; one still running cannot (roll-out package A2a)');
+// =============================================================================
+// A run killed by the web host leaves its request at "processing", and the
+// erasure page only runs one that is at "pending review". Nothing could put
+// it back. Now something can, but only when the request has shown no sign of
+// a run for a quarter of an hour.
+$mysqli->query('SET FOREIGN_KEY_CHECKS = 0');
+ge_user(P_S, 'Sol Stuck', 'sol.stuck@selftest.invalid');
+$mysqli->query('SET FOREIGN_KEY_CHECKS = 1');
+ge_request(REQ_S_OLD, P_S, 'sol.stuck@selftest.invalid', 'Sol Stuck', 'processing');
+ge_request(REQ_S_LIVE, C, 'cal.control@selftest.invalid', 'Cal Control', 'processing');
+ge_request(REQ_S_NULL, D, 'dee.control@selftest.invalid', 'Dee Control', 'processing');
+ge_request(REQ_S_DONE, null, 'deleted-' . REQ_S_DONE . '@example.invalid', '', 'completed');
+$setClaimed = static function (int $requestId, ?int $minutesAgo): void {
+    if ($minutesAgo === null) {
+        ge_q('UPDATE tblErasureRequest SET claimedAt = NULL WHERE requestID = ?', 'i', [$requestId]);
+
+        return;
+    }
+    ge_q('UPDATE tblErasureRequest SET claimedAt = DATE_SUB(UTC_TIMESTAMP(), INTERVAL ? MINUTE) WHERE requestID = ?', 'ii', [$minutesAgo, $requestId]);
+};
+$requestRow = static fn (int $requestId): ?array => ge_one('SELECT status, claimedAt, userID, siteID FROM tblErasureRequest WHERE requestID = ?', 'i', [$requestId]);
+$putBack    = static function (int $requestId, int $siteId = 1): string {
+    try {
+        return GdprEraser::putBackStuckRequest($requestId, $siteId);
+    } catch (Throwable $e) {
+        return 'threw: ' . $e->getMessage();
+    }
+};
+
+// THE SERVER'S CLOCK MUST NOT MATTER. The connection is told it is thirteen
+// hours ahead of UTC, then eleven behind. Written with NOW() instead of
+// UTC_TIMESTAMP(), the first would put back a request that showed life a
+// minute ago, and the second would refuse one that has been dead for twenty.
+$setClaimed(REQ_S_LIVE, 1);
+$mysqli->query("SET time_zone = '+13:00'");
+$liveAhead = $putBack(REQ_S_LIVE);
+$mysqli->query("SET time_zone = '-11:00'");
+$liveBehind = $putBack(REQ_S_LIVE);
+$liveRow    = $requestRow(REQ_S_LIVE);
+ge_ok('a request that showed a sign of a run ONE minute ago is refused, whatever zone the database server keeps its clock in',
+    $liveAhead === 'still-going' && $liveBehind === 'still-going' && $liveRow['status'] === 'processing'
+    && $liveRow['claimedAt'] !== null && ge_audit(REQ_S_LIVE) === [], json_encode([$liveAhead, $liveBehind, $liveRow]));
+
+$setClaimed(REQ_S_OLD, 20);
+$oldBehind = $putBack(REQ_S_OLD);
+$mysqli->query("SET time_zone = 'SYSTEM'");
+$oldRow   = $requestRow(REQ_S_OLD);
+$oldAudit = ge_audit(REQ_S_OLD);
+ge_ok('one with no sign of a run for TWENTY minutes is put back to "pending review", with one audit line saying so and nothing else changed',
+    $oldBehind === 'put-back' && $oldRow['status'] === 'pending_review' && $oldRow['claimedAt'] === null && (int) $oldRow['userID'] === P_S
+    && count($oldAudit) === 1 && $oldAudit[0]['action'] === 'put-back' && str_contains((string) $oldAudit[0]['details'], 'safe to repeat')
+    && GdprEraser::verifyAuditChain(REQ_S_OLD) === true, json_encode([$oldBehind, $oldRow, $oldAudit]));
+
+$setClaimed(REQ_S_NULL, null);
+$wrongSite    = $putBack(REQ_S_NULL, SITE_2);
+$afterWrong   = $requestRow(REQ_S_NULL);
+$rightSite    = $putBack(REQ_S_NULL);
+$finished     = $putBack(REQ_S_DONE);
+$alreadyBack  = $putBack(REQ_S_OLD);
+ge_ok('another organisation\'s request is "not found" and untouched; one stuck from before the moment was recorded is put back; a finished one, and one already back, are left alone',
+    $wrongSite === 'not-found' && $afterWrong['status'] === 'processing'
+    && $rightSite === 'put-back' && $requestRow(REQ_S_NULL)['status'] === 'pending_review'
+    && $finished === 'not-processing' && $requestRow(REQ_S_DONE)['status'] === 'completed'
+    && $alreadyBack === 'not-processing' && count(ge_audit(REQ_S_OLD)) === 1,
+    json_encode([$wrongSite, $afterWrong, $rightSite, $finished, $alreadyBack]));
+
+// The sign of life itself: refreshed when a minute has gone by, and not before.
+$beat = new ReflectionMethod(GdprEraser::class, 'stillGoing');
+$setClaimed(REQ_S_LIVE, 10);
+$tooSoon   = $beat->invoke(null, $mysqli, REQ_S_LIVE, time() - 30);
+$agoBefore = (int) ge_one('SELECT TIMESTAMPDIFF(SECOND, claimedAt, UTC_TIMESTAMP()) AS s FROM tblErasureRequest WHERE requestID = ?', 'i', [REQ_S_LIVE])['s'];
+$refreshed = $beat->invoke(null, $mysqli, REQ_S_LIVE, time() - 61);
+$agoAfter  = (int) ge_one('SELECT TIMESTAMPDIFF(SECOND, claimedAt, UTC_TIMESTAMP()) AS s FROM tblErasureRequest WHERE requestID = ?', 'i', [REQ_S_LIVE])['s'];
+ge_ok('a run refreshes its sign of life once a minute has passed, in UTC, and not before',
+    $agoBefore >= 590 && $agoAfter >= 0 && $agoAfter <= 30 && $refreshed >= time() - 2 && $tooSoon < time() - 20,
+    json_encode([$agoBefore, $agoAfter]));
+
+// And the point of it all: a request that was put back can be run.
+ge_q("UPDATE tblErasureRequest SET status = 'processing', claimedAt = UTC_TIMESTAMP() WHERE requestID = ? AND status = 'pending_review'", 'i', [REQ_S_OLD]);
+$resultS = ge_execute(REQ_S_OLD, P_S);
+ge_ok('a request that was put back runs to completion, and its audit trail (the put-back line and the run) verifies',
+    is_array($resultS) === true && $resultS['failed'] === 0 && $requestRow(REQ_S_OLD)['status'] === 'completed'
+    && GdprEraser::verifyAuditChain(REQ_S_OLD) === true,
+    $resultS instanceof Throwable ? $resultS->getMessage() : json_encode([$resultS, $requestRow(REQ_S_OLD)]));
+
+// =============================================================================
+ge_section('10', 'Filing a request, and an administrator confirming one on the person\'s behalf (roll-out package A2a)');
+// =============================================================================
+// Before an administrator can run a request, somebody has to have confirmed
+// it is the person's. Three ways: the emailed link ("Request data erasure"),
+// the typed phrase ("Delete my account"), or an administrator who has checked.
+$mysqli->query('SET FOREIGN_KEY_CHECKS = 0');
+ge_user(P_T, 'Tam Tenth', 'tam.tenth@selftest.invalid');
+$mysqli->query('SET FOREIGN_KEY_CHECKS = 1');
+unset($_SERVER['HTTP_HOST']); // no address to build a link from, so no email is attempted here
+$fullRequest = static fn (int $requestId): ?array => ge_one('SELECT * FROM tblErasureRequest WHERE requestID = ?', 'i', [$requestId]);
+
+$ordinary    = GdprEraser::fileRequest(1, P_T);
+$ordinaryRow = $fullRequest($ordinary['requestID']);
+ge_ok('"Request data erasure" files a request that WAITS: "pending confirmation", with a link token, and no moment of confirmation',
+    $ordinary['confirmed'] === false && $ordinaryRow['status'] === 'pending_confirmation' && (int) $ordinaryRow['userID'] === P_T
+    && preg_match('/^[0-9a-f]{64}$/', (string) $ordinaryRow['confirmToken']) === 1 && $ordinaryRow['confirmedAt'] === null
+    && $ordinaryRow['subjectEmail'] === 'tam.tenth@selftest.invalid', json_encode([$ordinary, $ordinaryRow]));
+
+$typed    = GdprEraser::fileRequest(1, P_T, true);
+$typedRow = $fullRequest($typed['requestID']);
+ge_ok('"Delete my account" files a request that is ALREADY CONFIRMED: straight to "pending review", the moment recorded, no link token and no email',
+    $typed['confirmed'] === true && $typed['mailed'] === false && $typedRow['status'] === 'pending_review'
+    && $typedRow['confirmToken'] === null && $typedRow['confirmedAt'] !== null && (int) $typedRow['userID'] === P_T
+    && ge_audit($typed['requestID']) === [], json_encode([$typed, $typedRow]));
+
+$confirm = static function (int $requestId, int $siteId): string {
+    try {
+        return GdprEraser::confirmOnBehalf($requestId, $siteId, ADMIN);
+    } catch (Throwable $e) {
+        return 'threw: ' . $e->getMessage();
+    }
+};
+$otherOrganisation = $confirm($ordinary['requestID'], SITE_2);
+$afterOther        = $fullRequest($ordinary['requestID']);
+ge_ok('an administrator of ANOTHER organisation cannot confirm it: "not found", the request untouched, no audit line',
+    $otherOrganisation === 'not-found' && $afterOther === $ordinaryRow && ge_audit($ordinary['requestID']) === [],
+    json_encode([$otherOrganisation, $afterOther]));
+
+$onBehalf     = $confirm($ordinary['requestID'], 1);
+$confirmedRow = $fullRequest($ordinary['requestID']);
+$behalfAudit  = ge_audit($ordinary['requestID']);
+ge_ok('an administrator of ITS organisation can: it moves to "pending review", the emailed link stops working, and ONE audit line says who confirmed and that they state they checked the person\'s identity',
+    $onBehalf === 'confirmed' && $confirmedRow['status'] === 'pending_review' && $confirmedRow['confirmedAt'] !== null
+    && $confirmedRow['confirmToken'] === null && (int) $confirmedRow['userID'] === P_T
+    && count($behalfAudit) === 1 && $behalfAudit[0]['action'] === 'confirmed-on-behalf'
+    && str_contains((string) $behalfAudit[0]['details'], 'account #' . ADMIN)
+    && str_contains((string) $behalfAudit[0]['details'], 'states that they checked the person\'s identity')
+    && str_contains((string) $behalfAudit[0]['details'], 'Nothing has been erased by this')
+    && GdprEraser::verifyAuditChain($ordinary['requestID']) === true,
+    json_encode([$onBehalf, $confirmedRow, $behalfAudit]));
+
+$again        = $confirm($ordinary['requestID'], 1);
+$typedAgain   = $confirm($typed['requestID'], 1);
+$finishedOne  = $confirm(REQ_S_DONE, 1);
+ge_ok('only a request that is WAITING can be confirmed: a second press, a request already confirmed by the typed phrase, and a finished one are all left alone, with no new audit line',
+    $again === 'not-waiting' && $typedAgain === 'not-waiting' && $finishedOne === 'not-waiting'
+    && count(ge_audit($ordinary['requestID'])) === 1 && ge_audit($typed['requestID']) === []
+    && $fullRequest($typed['requestID']) === $typedRow && $fullRequest(REQ_S_DONE)['status'] === 'completed',
+    json_encode([$again, $typedAgain, $finishedOne]));
+
+ge_q("UPDATE tblErasureRequest SET status = 'processing', claimedAt = UTC_TIMESTAMP() WHERE requestID = ? AND status = 'pending_review'", 'i', [$ordinary['requestID']]);
+$resultT = ge_execute($ordinary['requestID'], P_T);
+ge_ok('a request confirmed on the person\'s behalf then runs to completion; the other request from the same account is closed with it; and the trail (the confirmation line, then the run) verifies',
+    is_array($resultT) === true && $resultT['failed'] === 0 && $fullRequest($ordinary['requestID'])['status'] === 'completed'
+    && $fullRequest($typed['requestID'])['status'] === 'completed' && GdprEraser::verifyAuditChain($ordinary['requestID']) === true
+    && (ge_audit($ordinary['requestID'])[0]['action'] ?? '') === 'confirmed-on-behalf',
+    $resultT instanceof Throwable ? $resultT->getMessage() : json_encode([$resultT, $fullRequest($ordinary['requestID'])]));
 
 ge_finish();

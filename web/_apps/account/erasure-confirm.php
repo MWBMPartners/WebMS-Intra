@@ -35,7 +35,8 @@ if ($stmt !== false) {
 </head><body>
 <?php if ($affected > 0): ?>
     <h1>Request confirmed</h1>
-    <p>Your data erasure request has been filed. We'll process it within one month and email you once complete.</p>
+    <?php // This used to end "and email you once complete". No such email is sent, so it does not say so. ?>
+    <p>Your data erasure request has been confirmed. An administrator will review it and carry it out within one month. Until then your account works exactly as it does now.</p>
 <?php else: ?>
     <h1>Link expired</h1>
     <p>This confirmation link is invalid, expired (24-hour window), or already used. Submit a new request from your account page.</p>

@@ -2976,7 +2976,7 @@ CREATE TABLE IF NOT EXISTS `tblCareCase` (
 CREATE TABLE IF NOT EXISTS `tblCareVisit` (
     `visitID`       INT      NOT NULL AUTO_INCREMENT,
     `caseID`        INT      NOT NULL,
-    `visitedByID`   INT      NOT NULL,
+    `visitedByID`   INT      DEFAULT NULL COMMENT 'Empty once this person has asked to be forgotten. The record is kept; only the name is removed.',
     `visitedAt`     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     `kind`          ENUM('visit','call','message','prayer','other') NOT NULL DEFAULT 'visit',
     `notes`         TEXT     DEFAULT NULL,
@@ -3047,7 +3047,7 @@ CREATE TABLE IF NOT EXISTS `tblVisitor` (
 CREATE TABLE IF NOT EXISTS `tblVisitorContact` (
     `contactID`     INT      NOT NULL AUTO_INCREMENT,
     `visitorID`     INT      NOT NULL,
-    `contactedByID` INT      NOT NULL,
+    `contactedByID` INT      DEFAULT NULL COMMENT 'Empty once this person has asked to be forgotten. The record is kept; only the name is removed.',
     `contactedAt`   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     `method`        ENUM('visit','call','email','text','other') NOT NULL DEFAULT 'call',
     `summary`       TEXT     DEFAULT NULL,
@@ -3155,7 +3155,7 @@ CREATE TABLE IF NOT EXISTS `tblRotaSlot` (
 CREATE TABLE IF NOT EXISTS `tblRotaSwapRequest` (
     `swapID`           INT      NOT NULL AUTO_INCREMENT,
     `slotID`           INT      NOT NULL,
-    `requestedByID`    INT      NOT NULL,
+    `requestedByID`    INT      DEFAULT NULL COMMENT 'Empty once this person has asked to be forgotten. The record is kept; only the name is removed.',
     `targetUserID`     INT      DEFAULT NULL,
     `status`           ENUM('pending','accepted','declined','cancelled') NOT NULL DEFAULT 'pending',
     `requestMessage`   VARCHAR(500) DEFAULT NULL,
@@ -3758,7 +3758,7 @@ CREATE TABLE IF NOT EXISTS `tblOffboarding` (
     `effectiveDate`  DATE         NOT NULL,
     `reason`         VARCHAR(500) DEFAULT NULL,
     `dataDisposition` ENUM('retain','anonymise','delete') NOT NULL DEFAULT 'retain',
-    `offboardedByID` INT          NOT NULL,
+    `offboardedByID` INT          DEFAULT NULL COMMENT 'Empty once this person has asked to be forgotten. The record is kept; only the name is removed.',
     `offboardedAt`   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     `rehiredAt`      DATETIME     DEFAULT NULL,
     `rehiredByID`    INT          DEFAULT NULL,
@@ -3814,7 +3814,7 @@ CREATE TABLE IF NOT EXISTS `tblResource` (
 CREATE TABLE IF NOT EXISTS `tblResourceBooking` (
     `bookingID`     INT          NOT NULL AUTO_INCREMENT,
     `resourceID`    INT          NOT NULL,
-    `bookedByID`    INT          NOT NULL,
+    `bookedByID`    INT          DEFAULT NULL COMMENT 'Empty once this person has asked to be forgotten. The record is kept; only the name is removed.',
     `startAt`       DATETIME     NOT NULL,
     `endAt`         DATETIME     NOT NULL,
     `purpose`       VARCHAR(255) DEFAULT NULL,
@@ -4936,6 +4936,7 @@ CREATE TABLE IF NOT EXISTS `tblErasureRequest` (
     `dueBy`            DATETIME     NOT NULL,
     `processedAt`      DATETIME     DEFAULT NULL,
     `processedByID`    INT          DEFAULT NULL,
+    `claimedAt`        DATETIME     DEFAULT NULL COMMENT 'A MOMENT IN UTC, not a time on the server clock: when a run of this request was started, refreshed while the run is still going. Written and compared with UTC_TIMESTAMP() only. Empty means no run is going.',
     `reasonRetained`   TEXT         DEFAULT NULL,
     `notes`            TEXT         DEFAULT NULL,
     PRIMARY KEY (`requestID`),
@@ -7184,7 +7185,7 @@ CREATE TABLE IF NOT EXISTS `tblAssetLoans` (
     `dueDate`              DATE     DEFAULT NULL,
     `dateIn`               DATETIME DEFAULT NULL,
     `parentLoanID`         INT      DEFAULT NULL COMMENT 'Self-FK — chained swap/renewal loans',
-    `requestedByID`        INT      NOT NULL,
+    `requestedByID`        INT      DEFAULT NULL COMMENT 'Empty once this person has asked to be forgotten. The record is kept; only the name is removed.',
     `notes`                TEXT     DEFAULT NULL,
     PRIMARY KEY (`loanID`),
     KEY `idx_astln_asset_status` (`assetID`, `status`),
@@ -7238,7 +7239,7 @@ CREATE TABLE IF NOT EXISTS `tblAssetResources` (
     `fileSize`       INT          DEFAULT NULL COMMENT 'Bytes',
     `mimeType`       VARCHAR(100) DEFAULT NULL,
     `isPublic`       TINYINT(1)   NOT NULL DEFAULT 0 COMMENT 'Visible on the public /a/{token} page when the asset itself is public',
-    `uploadedByID`   INT          NOT NULL,
+    `uploadedByID`   INT          DEFAULT NULL COMMENT 'Empty once this person has asked to be forgotten. The record is kept; only the name is removed.',
     `createdAt`      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (`resourceID`),
     KEY `idx_astres_site` (`siteID`),
@@ -7318,7 +7319,7 @@ CREATE TABLE IF NOT EXISTS `tblAssetLicenseAssignments` (
     `deviceName`     VARCHAR(255) DEFAULT NULL COMMENT 'Free-text device name when no tblAssets row exists for it',
     `status`         ENUM('active','released') NOT NULL DEFAULT 'active',
     `linkedAt`       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    `linkedByID`     INT      NOT NULL,
+    `linkedByID`     INT      DEFAULT NULL COMMENT 'Empty once this person has asked to be forgotten. The record is kept; only the name is removed.',
     `releasedAt`     DATETIME DEFAULT NULL,
     `releasedByID`   INT      DEFAULT NULL,
     `notes`          VARCHAR(500) DEFAULT NULL,
@@ -7854,7 +7855,7 @@ CREATE TABLE IF NOT EXISTS `tblVenueAgreementFiles` (
     `filePath`     VARCHAR(255) NOT NULL COMMENT 'Path relative to _uploads/venues/agreements/',
     `fileSize`     INT          DEFAULT NULL COMMENT 'Bytes',
     `mimeType`     VARCHAR(100) DEFAULT NULL,
-    `uploadedByID` INT          NOT NULL,
+    `uploadedByID` INT          DEFAULT NULL COMMENT 'Empty once this person has asked to be forgotten. The record is kept; only the name is removed.',
     `createdAt`    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (`fileID`),
     KEY `idx_venagf_site` (`siteID`),
@@ -9644,4 +9645,22 @@ INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
 ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`), `isProtected` = VALUES(`isProtected`);
 
 INSERT INTO `tblMigrations` (`filename`) VALUES ('207_calendar_feed_admin_pages.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- ── from 208_erasure_keeps_others_records.sql (roll-out package A2a) ─────────
+-- Nine "who did it" columns changed from "must always be filled in" to "may be
+-- empty", so that an erasure can keep the record and take the person's number
+-- off it: tblVisitorContact.contactedByID, tblAssetResources.uploadedByID,
+-- tblVenueAgreementFiles.uploadedByID, tblCareVisit.visitedByID,
+-- tblAssetLicenseAssignments.linkedByID, tblAssetLoans.requestedByID,
+-- tblOffboarding.offboardedByID, tblResourceBooking.bookedByID and
+-- tblRotaSwapRequest.requestedByID. And one new column,
+-- tblErasureRequest.claimedAt: the moment (in UTC) a run of the request was
+-- started, which is what lets a request left at "processing" by a run the
+-- web host killed be put back safely.
+--
+-- All ten are changed inline in their own tables above rather than repeated
+-- here. No data is changed and no link between tables is touched.
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('208_erasure_keeps_others_records.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;

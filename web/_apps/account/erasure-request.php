@@ -1,10 +1,23 @@
 <?php
-// Path: public_html/account/erasure-request.php
+// Path: _apps/account/erasure-request.php
 /**
- * Account — file a GDPR Article 17 erasure request. Sends a confirmation
- * email; click-through flips status to pending_review.
+ * Account — ask for your personal data to be erased (GDPR Article 17).
+ *
+ * Shows what would happen to each kind of record, then files the request and
+ * emails a link to confirm it. Clicking that link moves the request to
+ * "pending review", where an administrator carries it out.
+ *
+ * The filing itself is GdprEraser::fileRequest(), which "Delete my account"
+ * (/account/delete/confirm) calls too, so there is one way to file a request
+ * and one place for the words about what happens next. This page has no typed
+ * phrase, so its request needs the emailed link; if that email cannot be sent,
+ * an administrator can confirm the request from their list instead.
  *
  * @package   Portal\Account
+ * @author    MWBM Partners Ltd (t/a MWservices)
+ * @copyright 2026-present MWBM Partners Ltd (t/a MWservices)
+ * @license   All Rights Reserved
+ * @version   1.1.0
  * @link      https://github.com/MWBMPartners/webMS-Intra/issues/235
  */
 
@@ -13,7 +26,7 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\GdprEraser;
-use Portal\Core\Mailer;
+use Portal\Core\Logger;
 use Portal\Core\Site;
 
 Auth::ensureSession();
@@ -49,38 +62,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         exit('Bad request');
     }
 
-    $token = bin2hex(random_bytes(32));
-    $email = (string) $user['emailAddress'];
-    $name  = (string) $user['fullName'];
-
-    $stmt = $db->prepare(
-        'INSERT INTO tblErasureRequest (siteID, userID, subjectEmail, subjectName, confirmToken, status, dueBy) '
-        . 'VALUES (?, ?, ?, ?, ?, "pending_confirmation", DATE_ADD(NOW(), INTERVAL 1 MONTH))'
-    );
-    if ($stmt !== false) {
-        $stmt->bind_param('iisss', $siteId, $userId, $email, $name, $token);
-        $stmt->execute();
-        $stmt->close();
-    }
-
-    $scheme = (($_SERVER['HTTPS'] ?? '') !== '' && (string) ($_SERVER['HTTPS'] ?? '') !== 'off') ? 'https' : 'http';
-    $confirmUrl = $scheme . '://' . ((string) ($_SERVER['HTTP_HOST'] ?? 'localhost')) . '/account/erasure-confirm?token=' . $token;
-    $body = '<p>Hi ' . htmlspecialchars($name, ENT_QUOTES, 'UTF-8') . ',</p>'
-        . '<p>We received a request to erase your personal data on the portal.</p>'
-        . '<p>If this was you, click below to confirm. The link expires in 24 hours.</p>'
-        . '<p><a href="' . htmlspecialchars($confirmUrl, ENT_QUOTES, 'UTF-8') . '">Confirm erasure request</a></p>'
-        . '<p>If you didn\'t make this request you can safely ignore this email.</p>';
     try {
-        Mailer::send($email, 'Confirm your data erasure request', $body);
-    } catch (\Throwable $ignored) {
-        // Email failure shouldn't block the workflow — admin can find the request directly.
+        $filed = GdprEraser::fileRequest($siteId, $userId);
+    } catch (\Throwable $e) {
+        Logger::exception($e);
+        $_SESSION['flash_msg']  = 'Your request could not be recorded, and nothing was changed. Please try again; if it '
+            . 'keeps happening, ask an administrator for help.';
+        $_SESSION['flash_type'] = 'danger';
+        header('Location: /account/my-data');
+        exit();
     }
 
-    $_SESSION['flash_msg']  = 'A confirmation email has been sent to ' . $email . '. Click the link to file the request.';
-    $_SESSION['flash_type'] = 'info';
+    $next = GdprEraser::whatHappensNext($filed);
+    $_SESSION['flash_msg']  = $next['message'];
+    $_SESSION['flash_type'] = $next['type'];
     header('Location: /account/my-data');
     exit();
 }
+
+// What each instruction will do, in words. The page used to print the
+// instruction's own name followed by a "d", which reads well for "delete" and
+// gave "anonymised" and "retaind" for the other two.
+$inWords = [
+    'delete'    => 'deleted',
+    'anonymise' => 'kept, with your details removed',
+    'retain'    => 'kept',
+];
 
 $inventory = GdprEraser::inventory($userId);
 $csrf = Auth::csrfToken();
@@ -98,13 +105,14 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 </div>
 
 <div class="card mb-3"><div class="card-body">
-    <h5>What will happen to your data:</h5>
+    <?php // A second-level heading styled small: it used to be an h5 straight after the h1, which skips three levels. ?>
+    <h2 class="h5">What will happen to your data:</h2>
     <ul>
         <?php foreach ($inventory as $i): ?>
             <li>
                 <code><?php echo htmlspecialchars((string) $i['table'], ENT_QUOTES, 'UTF-8'); ?></code>
                 — <strong><?php echo (int) $i['rows']; ?></strong> row(s) will be
-                <strong><?php echo htmlspecialchars((string) $i['action'], ENT_QUOTES, 'UTF-8'); ?></strong>d.
+                <strong><?php echo htmlspecialchars($inWords[(string) $i['action']] ?? 'dealt with as set out beside it', ENT_QUOTES, 'UTF-8'); ?></strong>.
                 <?php if (($i['reason'] ?? '') !== ''): ?>
                     <span class="text-muted">— <?php echo htmlspecialchars((string) $i['reason'], ENT_QUOTES, 'UTF-8'); ?></span>
                 <?php endif; ?>

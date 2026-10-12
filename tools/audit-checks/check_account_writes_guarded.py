@@ -130,7 +130,6 @@ ALLOWED: dict[str, str] = {
     "_apps/auth/2fa/setup.php": "the signed-in person's own account",
     "_apps/auth/2fa/verify.php": "the person completing their own sign-in",
     "_apps/auth/account/change-password.php": "own account",
-    "_apps/auth/account/delete-confirm.php": "own account",
     "_apps/auth/account/notifications-save.php": "own account",
     "_apps/auth/account/save.php": "own account",
     "_apps/auth/account/webauthn-delete.php": "own account",
@@ -141,6 +140,13 @@ ALLOWED: dict[str, str] = {
     "_apps/calendar/account-feed.php": "own account",
     "_apps/directory/save.php": "own account",
     "_apps/invites/accept.php": "creates the invited person's new account; never sets portal-wide rights (#518)",
+    # Added 11 October 2026 (roll-out package A2a). The erasure engine has always
+    # written to tblUsers; this check could not see it, because that write is
+    # built from the engine's instruction list. Its new photo step empties two
+    # columns with a plain statement, which the check does see. (The entry for
+    # _apps/auth/account/delete-confirm.php went the same day: "Delete my
+    # account" no longer writes to any account table, it files a request.)
+    "_core/GdprEraser.php": "the erasure engine: it empties only the account named on an erasure request that the account's own holder filed while signed in. The request must also have been confirmed, in one of three ways: by the holder from a link sent to their address, by the holder typing a phrase on 'Delete my account', or by an administrator of the request's organisation, whose account number and claim to have checked the person's identity are written to the audit trail. admin/erasure/process.php runs a request only for the organisation it was filed at",
     "_core/Auth.php": "sign-in: updates the signed-in person's own record, links and devices, and adds a new single-sign-on account to the organisation where they signed in",
     "_core/I18n.php": "own language choice",
     "_core/Ical.php": "own calendar token",

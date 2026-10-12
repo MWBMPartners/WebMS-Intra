@@ -2,6 +2,109 @@
 
 
 ## [Unreleased] (alpha)
+- fix(erasure): erasing a person no longer deletes other people's records, and
+  "Delete my account" now files an ordinary erasure request (roll-out package
+  A2a; the owner's decisions of 11 October 2026). **Until this fix, erasing a
+  follow-up worker deleted every visitor, salvation card, task and rota slot
+  that had been given to them, and every swap request sent to them.**
+  - **Kept, with the worker taken off:** visitors, salvation cards, tasks and
+    rota slots. A swap request aimed at the erased person is kept and, if it
+    was still waiting, cancelled. `assignedToID` and `targetUserID` are now
+    classed as "acted on it", so the eraser refuses to delete on either.
+  - **A visitor record that IS the erased person** (they later became a
+    member) is deleted, with the follow-up notes under it. Nothing found it
+    before.
+  - **"Who did it" is cleared on thirteen tables that had no instruction at
+    all:** shared documents, approval steps, visitor follow-up notes, service
+    plans, project updates, event messages, the song-licence log, bank
+    imports and bank lines, files attached to equipment and to hire
+    agreements, expense payments, and children's check-ins. Also who made a
+    pastoral visit and who its follow-up was given to, and the administrator
+    named on an erasure request they handled. Every record itself stays.
+  - **And on 31 more columns, where a table has a SECOND "who did it" column
+    (#492).** An instruction used to match rows on one column only, so a gift
+    somebody else gave and the erased person recorded kept their number; so
+    did an event they last edited, a count they took, a prayer request given
+    to them. Each such column now has an instruction of its own. For a table
+    the eraser handles from the written list, naming the column in
+    `web/_core/personal-data-catalogue.php` is all it takes.
+  - **Migration 208** lets nine "who did it" columns be empty: who wrote a
+    visitor's follow-up note, who attached a file to equipment or to a hire
+    agreement, who made a pastoral visit, who gave out a licence seat, who
+    asked for an asset loan, who processed somebody's leaving, who made a
+    room booking, and who asked for a rota swap. It also adds
+    `tblErasureRequest.claimedAt`. **Run the database upgrade after
+    deploying:** until it has run, Execute refuses to start an erasure and
+    says so.
+  - **Kept records no longer vanish from the pages that list them** when the
+    person who made them is forgotten: a visitor's follow-up notes, the
+    visits on a pastoral case, a room booking (on the room's page and in the
+    approvals queue), and an approval on an expense claim (on its page and
+    its PDF). They show "Somebody no longer recorded", or "Approver's details
+    removed". Without this a room looked free for a time it was booked for,
+    and a claim looked as though nobody had approved it.
+  - **An accepted invitation is deleted with its person.** It holds their own
+    email address. An invitation they only sent to somebody else is kept,
+    with who sent it removed.
+  - **"Delete my account" no longer empties the account on the spot.** It
+    files an erasure request, and an administrator carries it out. Typing
+    DELETE MY ACCOUNT is the confirmation, so the request goes straight to
+    the administrators' list and no confirmation email is sent. The person
+    stays signed in and is told what happens next. There is now one way an
+    account is emptied. One difference people may notice: the old page
+    deleted leadership-only prayer requests; an erasure keeps their text and
+    removes the name.
+  - **An administrator can confirm a waiting request on the person's
+    behalf.** A request filed from "Request data erasure" waits for the person
+    to click an emailed link. If that email could not be sent, nobody could
+    move the request on. Admin, Erasure requests now has "Confirm on the
+    person's behalf" on such a request. The request's report records who
+    confirmed it and that they state they checked the person's identity.
+  - **The key to the person's private calendar feed is cleared**, so the feed
+    address stops answering. It used to go on working after the erasure. So
+    are their notification choices.
+  - **The person's photo and biography are cleared**, and a photo file kept
+    in the portal's uploads folder is deleted. An emptied account is no
+    longer an administrator. A photo path that points outside the uploads
+    folder, or at a file that is not an image, is refused and reported, not
+    followed.
+  - **Zoom:** a meeting made through the erased person's own Zoom connection
+    goes with that connection (it always did; the written list now says so).
+    One they made through somebody else's connection is kept.
+  - **A request stuck at "processing"** (its run was stopped by the web host)
+    can be put back from Admin, Erasure requests, once it has shown no sign
+    of a run for 15 minutes. Another open request from the same account that
+    was stuck is now closed together with the one that ran.
+  - **Smaller fixes:** the send-log step replaced text inside longer
+    addresses (erasing `ann@x.org` altered `joann@x.org`); Cancel could
+    cancel a completed request; a request closed at another organisation
+    pointed its administrator at a report they cannot open;
+    `/account/erasure-request` printed "retaind".
+  - **Also cleared:** who sent an event in for the calendar, who marked an
+    error as dealt with, and which administrator ran a database upgrade. The
+    database does not link those columns to an account, so nothing had found
+    them. The real-database test now also looks for person columns by the
+    shape of their name.
+  - **A second press of "Ask for my account to be deleted"** (a double-click)
+    is told the request is already recorded. It used to answer "Nothing was
+    changed. Please try again." a moment after filing the request.
+  - **Not done, and pinned by name in the test:** a step of an approval route
+    that is given to one named person keeps that person's account number
+    after they are erased (`tblWorkflowSteps.assigneeValue`). Emptying it
+    would leave a step nobody can approve, so what the step should become
+    needs a decision. The giver on a counted envelope waits for the
+    giving-records package.
+  - **Not done, and needs a change elsewhere:** an erased person who is still
+    signed in on some device stays signed in there until that session ends.
+    The portal keeps sessions as PHP's own files and does not check, page by
+    page, that the account behind one is still active. After the erasure the
+    session belongs to no organisation and has no administrator rights, and
+    the person cannot sign in again.
+  - New `tools/erasure-pages-selftest.php` drives the real pages, on the
+    model of `tools/access-pages-selftest.php`. Run it with the two erasure
+    self-tests; none of the three is wired into GitHub yet.
+  - Proven on MySQL 8.0.36 and 8.4.11, on a fresh install and on a database
+    upgraded from the previous release. Codex has not reviewed this.
 - fix(core,api): switching an app off now switches off its data endpoints
   and its stray pages too (#478). Before this, Admin → Apps hid an app's
   pages and left every `/api/…` address of that app answering, for a

@@ -45,9 +45,13 @@ if ($v === null) {
 
 $contacts = [];
 $stmt = $db->prepare(
+    // LEFT JOIN, not JOIN. `contactedByID` is emptied when the person who
+    // wrote a note asks to be forgotten (migration 208). With a plain JOIN
+    // such a note dropped out of this list altogether: still in the
+    // database, and invisible to the people following the visitor up.
     'SELECT c.contactID, c.contactedAt, c.method, c.summary, c.nextContactAt, '
     . '       u.fullName AS byName '
-    . 'FROM tblVisitorContact c JOIN tblUsers u ON u.userID = c.contactedByID '
+    . 'FROM tblVisitorContact c LEFT JOIN tblUsers u ON u.userID = c.contactedByID '
     . 'WHERE c.visitorID = ? ORDER BY c.contactedAt DESC'
 );
 if ($stmt !== false) {
@@ -198,7 +202,7 @@ $csrf = Auth::csrfToken();
             <div class="border-bottom py-2">
                 <p class="mb-1 small text-muted">
                     <?php echo htmlspecialchars(date('j M Y, H:i', strtotime((string) $c['contactedAt'])), ENT_QUOTES, 'UTF-8'); ?>
-                    &middot; <strong><?php echo htmlspecialchars((string) $c['byName'], ENT_QUOTES, 'UTF-8'); ?></strong>
+                    &middot; <strong><?php echo htmlspecialchars((string) ($c['byName'] ?? 'Somebody no longer recorded'), ENT_QUOTES, 'UTF-8'); ?></strong>
                     &middot; <?php echo htmlspecialchars((string) $c['method'], ENT_QUOTES, 'UTF-8'); ?>
                     <?php if ($c['nextContactAt'] !== null): ?>
                         &middot; <span class="badge bg-info text-dark">Next: <?php echo htmlspecialchars(date('j M', strtotime((string) $c['nextContactAt'])), ENT_QUOTES, 'UTF-8'); ?></span>

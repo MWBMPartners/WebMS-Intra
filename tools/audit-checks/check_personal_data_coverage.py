@@ -114,13 +114,24 @@ PERSONAL_COLUMNS = re.compile(
     # asset. Each is the ONLY personal column on its table, so without the
     # name here that table's catalogue entry could be deleted and this check
     # would still pass.
-    #
-    # `uploadedByID` is deliberately NOT here, although GdprEraser knows it.
-    # Three tables that use it have no catalogue entry at all, so adding it
-    # would fail this check for a gap that is a separate decision for the
-    # owner (twelve uncatalogued tables that link to an account). This check
-    # cannot see those tables until that is settled.
     r"|triggeredByID|viewerID|actorUserID"
+    # Added by roll-out package A2a (11 October 2026). Thirteen tables that
+    # only say WHO DID SOMETHING had no catalogue entry, and this check could
+    # not see them, because none of these names was here. Each now has an
+    # entry (decision: unlink), and each name is here so that removing one of
+    # those entries fails this check instead of passing silently.
+    #
+    # `uploadedByID` used to be left out on purpose: three tables that use it
+    # had no entry, and that gap was waiting for the owner's decision. The
+    # decision was "keep the record, clear who did it", the three have
+    # entries, and the name is in.
+    r"|uploadedByID|actedByID|contactedByID|preparedByID|postedByID|sentByID"
+    r"|operatorID|importedByID|matchedByID|paidByID|checkedInByID|checkedOutByID"
+    # Four the database does not link to the account table, found by the
+    # independent check of 12 October 2026. `executedByID` is why the
+    # upgrade record (tblMigrations) now has an entry: without the name here,
+    # that entry could be deleted and this check would still pass.
+    r"|submittedByID|statusChangedByID|resolvedByID|executedByID"
     r")$",
     re.IGNORECASE,
 )

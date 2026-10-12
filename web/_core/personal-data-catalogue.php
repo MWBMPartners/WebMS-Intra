@@ -82,6 +82,13 @@ declare(strict_types=1);
  *   reason    why, in plain words - shown to whoever reviews an erasure
  *   columns   the columns that made this table personal, so a reviewer can see
  *             what is actually at stake without going to the schema
+ *             NAMING A PERSON COLUMN HERE MATTERS (since 11 October 2026,
+ *             #492). For a table with no hand-written instruction in
+ *             GdprEraser::catalogue(), every person column named here gets an
+ *             instruction of its own: the first is what a delete or a "keep"
+ *             matches on, and every other "who did it" column is emptied
+ *             wherever it names the person. A person column left out is not
+ *             looked at.
  *   period    for 'retain' only: how long, and under what obligation
  */
 return [
@@ -181,12 +188,12 @@ return [
     'tblAssetLicenseAssignments' => [
         'decision' => 'unlink',
         'reason'   => 'Who a software licence seat was allotted to. The organisation still needs to know how many seats are in use.',
-        'columns'  => ['userID', 'notes'],
+        'columns'  => ['userID', 'notes', 'releasedByID', 'linkedByID'],
     ],
     'tblAssetLoans' => [
         'decision' => 'unlink',
         'reason'   => 'Who borrowed an item. Deleting the loan would erase the item\'s history, and the organisation still needs to know where its property went. The name goes, the loan stays.',
-        'columns'  => ['notes', 'counterpartyUserID'],
+        'columns'  => ['notes', 'counterpartyUserID', 'approvedByID', 'requestedByID'],
     ],
     'tblAssetOrgs' => [
         'decision' => 'retain',
@@ -247,7 +254,7 @@ return [
     'tblCountSessions' => [
         'decision' => 'unlink',
         'reason'   => 'A two-person offering count - a FINANCIAL control record, deliberately requiring two people. Deleting it on one person\'s request defeats the whole point of it.',
-        'columns'  => ['notes', 'createdByID'],
+        'columns'  => ['notes', 'createdByID', 'counter1ID', 'counter2ID', 'closedByID'],
     ],
     'tblDecisionMoments' => [
         'decision' => 'unlink',
@@ -305,20 +312,26 @@ return [
         //    GdprEraser::FINAL_STEP_TABLES and GdprEraser::closeRequest() does
         //    the work. tools/gdpr-coverage-selftest.php fails if any
         //    instruction ever deletes from this table or from tblErasureAudit.
+        //
+        //    `processedByID` (the administrator who handled a request) is
+        //    cleared by the same last step when that administrator is the
+        //    person being erased. Until 11 October 2026 nothing cleared it.
         'reason'   => 'The organisation\'s record that an erasure was asked for, when, and that it was done. The '
                     . 'request, its dates, its outcome and its audit lines are kept. The account number, name, email '
-                    . 'address and notes are cleared from it as the last step, once everything else has succeeded.',
-        'columns'  => ['userID', 'subjectEmail', 'subjectName', 'notes'],
+                    . 'address and notes are cleared from it as the last step, once everything else has succeeded. '
+                    . 'On other people\'s requests that this person handled as an administrator, only who handled '
+                    . 'it is cleared.',
+        'columns'  => ['userID', 'subjectEmail', 'subjectName', 'notes', 'processedByID'],
     ],
     'tblEventAttendance' => [
         'decision' => 'unlink',
         'reason'   => 'Attendance at an event. The record of who was there matters to the organisation, so the row stays and the name goes.',
-        'columns'  => ['userID', 'notes'],
+        'columns'  => ['userID', 'notes', 'markedByID'],
     ],
     'tblEventCoordinators' => [
         'decision' => 'erase',
         'reason'   => 'Holds information about the person themselves',
-        'columns'  => ['userID'],
+        'columns'  => ['userID', 'grantedByID'],
     ],
     'tblEventCrewMembers' => [
         'decision' => 'erase',
@@ -353,7 +366,7 @@ return [
     'tblEventRegistrations' => [
         'decision' => 'erase',
         'reason'   => 'Holds information about the person themselves',
-        'columns'  => ['fullName', 'dateOfBirth', 'gender', 'allergies', 'medicalNotes', 'parentName', 'parentPhone', 'parentEmail', 'emergencyContactName', 'emergencyContactPhone', 'submittedByUserID'],
+        'columns'  => ['fullName', 'dateOfBirth', 'gender', 'allergies', 'medicalNotes', 'parentName', 'parentPhone', 'parentEmail', 'emergencyContactName', 'emergencyContactPhone', 'submittedByUserID', 'reviewedByID'],
     ],
     // 🛑 tblExpenseClaimApprovals said "delete" until 11 September 2026, and
     //    the column it matched on is named userID - which everywhere else in
@@ -417,13 +430,25 @@ return [
     ],
     'tblGivingEntry' => [
         'decision' => 'unlink',
-        'reason'   => 'A contribution record. Financial records must be kept, so the entry stays and the donor\'s name is removed.',
-        'columns'  => ['donorID', 'donorName', 'notes'],
+        'reason'   => 'A contribution record. Financial records must be kept, so the entry stays and the donor\'s name is removed. If the gift was given towards a pledge, the pledge is deleted and the gift loses only its link to it.',
+        'columns'  => ['donorID', 'donorName', 'notes', 'recordedByID'],
     ],
     'tblInvitation' => [
-        'decision' => 'unlink',
-        'reason'   => 'An invitation for somebody else to join. It is about the person invited.',
-        'columns'  => ['email', 'createdByID'],
+        'decision' => 'erase',
+        // Salem874's decision of 12 October 2026. This said 'unlink' and only
+        // ever cleared who SENT an invitation. An invitation the erased
+        // person ACCEPTED was left exactly as it was: it holds their own
+        // email address (`email`, which may not be empty), tied to their
+        // account by `acceptedByID`. That one is deleted now. `acceptedByID`
+        // is the first of this table's person columns on GdprEraser's list,
+        // so it is the one the delete matches on; the other two below are
+        // "who did it" columns and are emptied on OTHER people's invitations.
+        //
+        // What erasure does NOT do: an invitation sent to the person's
+        // address that they never accepted is tied to no account, so it
+        // cannot be found.
+        'reason'   => 'An invitation to join. One this person ACCEPTED holds their own email address and is deleted with them. One they only SENT to somebody else, or revoked, is kept, with who sent or revoked it detached.',
+        'columns'  => ['email', 'acceptedByID', 'createdByID', 'revokedByID'],
     ],
     'tblKidProfiles' => [
         'decision' => 'unlink',
@@ -483,7 +508,7 @@ return [
     'tblOffboarding' => [
         'decision' => 'erase',
         'reason'   => 'Holds information about the person themselves',
-        'columns'  => ['userID'],
+        'columns'  => ['userID', 'rehiredByID', 'offboardedByID'],
     ],
     'tblPasswordResets' => [
         'decision' => 'erase',
@@ -493,12 +518,12 @@ return [
     'tblPathwayEnrolments' => [
         'decision' => 'erase',
         'reason'   => 'Holds information about the person themselves',
-        'columns'  => ['userID'],
+        'columns'  => ['userID', 'enrolledByID'],
     ],
     'tblPathwayProgress' => [
         'decision' => 'erase',
         'reason'   => 'Holds information about the person themselves',
-        'columns'  => ['userID', 'notes'],
+        'columns'  => ['userID', 'notes', 'markedByID', 'revokedByID'],
     ],
     'tblPayment' => [
         'decision' => 'unlink',
@@ -512,13 +537,18 @@ return [
     ],
     'tblPledges' => [
         'decision' => 'erase',
-        'reason'   => 'Holds information about the person themselves',
+        // Deleting a pledge empties `pledgeID` on the gifts given towards it
+        // (`fk_ge_pledge`, ON DELETE SET NULL). Kept as it is, on purpose: the
+        // gift keeps its campaign, amount, date and method, so no total
+        // changes. Written down on 11 October 2026 because the reasons here
+        // did not mention it.
+        'reason'   => 'A promise to give: about the person themselves, so it is deleted. The gifts already given towards it are kept; they lose only the link to the pledge, and keep their campaign, amount and date.',
         'columns'  => ['userID'],
     ],
     'tblPrayerRequests' => [
         'decision' => 'unlink',
         'reason'   => 'A prayer request. The request itself is kept for the people praying; the name and contact details are removed.',
-        'columns'  => ['submitterID'],
+        'columns'  => ['submitterID', 'moderatorID', 'assignedToUserID'],
     ],
     'tblProjectPledge' => [
         'decision' => 'erase',
@@ -543,21 +573,37 @@ return [
     'tblResourceBooking' => [
         'decision' => 'unlink',
         'reason'   => 'Who approved a room or equipment booking. The booking belongs to whoever made it. Deleting it because the approver left would cancel other people\'s bookings.',
-        'columns'  => ['notes', 'approvedByID'],
+        'columns'  => ['notes', 'approvedByID', 'bookedByID'],
     ],
+    // 🤝 The next three, and tblTasks and tblVisitor further down, said 'erase'
+    //    with the stock reason "Holds information about the person themselves"
+    //    until 11 October 2026 (roll-out package A2a). Not one of them is
+    //    about the person an erasure matches: the column that names them says
+    //    who the record was GIVEN to. So erasing a follow-up worker deleted
+    //    every rota slot, task, visitor and salvation card assigned to them,
+    //    and every swap request sent to them. Salem874's decision: keep the
+    //    record, clear the worker. GdprEraser now refuses to delete on
+    //    `assignedToID` or `targetUserID` at all, so setting one of these back
+    //    to 'erase' is refused rather than obeyed.
     'tblRotaSlot' => [
-        'decision' => 'erase',
-        'reason'   => 'Holds information about the person themselves',
+        'decision' => 'unlink',
+        'reason'   => 'A slot on the organisation\'s rota. It stays. Whoever was filling it is detached, so the slot is unfilled, and so is whoever created it.',
         'columns'  => ['assignedToID', 'notes', 'createdByID'],
     ],
     'tblRotaSwapRequest' => [
-        'decision' => 'erase',
-        'reason'   => 'Holds information about the person themselves',
-        'columns'  => ['targetUserID'],
+        'decision' => 'unlink',
+        // `requestedByID` (who asked) is cleared too since 12 October 2026,
+        // when migration 208 let the column be empty. What erasure does NOT
+        // do: `requestMessage` is the asker's own words and is kept.
+        'reason'   => 'A request to swap a rota slot. The record that it was asked for stays. Whoever asked, and whoever it was aimed at, are detached; a request still waiting when either of them is erased is cancelled, because nobody is left to ask or to answer.',
+        'columns'  => ['targetUserID', 'requestedByID'],
     ],
     'tblSalvationCards' => [
-        'decision' => 'erase',
-        'reason'   => 'Holds information about the person themselves',
+        'decision' => 'unlink',
+        // What erasure does NOT do: a card ABOUT the erased person cannot be
+        // found. The name, email and telephone on a card are typed by hand,
+        // and no column ties the card's subject to an account.
+        'reason'   => 'A response card filled in by, or about, somebody who came to an event. It is about THAT person, not the follow-up worker it was given to, so it stays and only the worker is detached. A card about the erased person themselves cannot be found: nothing ties a card\'s subject to an account.',
         'columns'  => ['fullName', 'email', 'phone', 'address', 'assignedToID', 'notes'],
     ],
     'tblServicePlanItem' => [
@@ -624,8 +670,10 @@ return [
         'columns'  => ['recipientUserID', 'recipientNumber'],
     ],
     'tblTasks' => [
-        'decision' => 'erase',
-        'reason'   => 'Holds information about the person themselves',
+        'decision' => 'unlink',
+        // See the note above tblRotaSlot. The title and description are the
+        // organisation's own words and are not searched for a name.
+        'reason'   => 'A task on the organisation\'s to-do list. It stays. Whoever it was given to is detached, so it is unassigned, and so is whoever created it.',
         'columns'  => ['assignedToID', 'createdByID'],
     ],
     'tblTotpBackupCodes' => [
@@ -731,8 +779,11 @@ return [
     ],
     'tblUsers' => [
         'decision' => 'unlink',
-        'reason'   => 'The account itself. It is emptied rather than deleted: hundreds of records point at it, and deleting the row would drag them all down with it. Name, email, telephone, address and coordinates are all cleared, and the account is left as a tombstone that names nobody.',
-        'columns'  => ['userID', 'fullName', 'emailAddress', 'displayAddress', 'latitude', 'longitude', 'what3words'],
+        // `avatarPath`, `displayPhoto` and `displayBio` were not named here, and
+        // were not cleared, until 11 October 2026: an erased account kept its
+        // photo and the biography its owner had written.
+        'reason'   => 'The account itself. It is emptied rather than deleted: hundreds of records point at it, and deleting the row would drag them all down with it. Name, email, telephone, address, coordinates, biography and photo are all cleared, a photo file held in the portal\'s uploads folder is deleted, and the account is left as a tombstone that names nobody.',
+        'columns'  => ['userID', 'fullName', 'emailAddress', 'displayAddress', 'displayBio', 'avatarPath', 'displayPhoto', 'latitude', 'longitude', 'what3words'],
     ],
     'tblVenueAgreements' => [
         'decision' => 'unlink',
@@ -785,7 +836,21 @@ return [
     ],
     'tblVisitor' => [
         'decision' => 'erase',
-        'reason'   => 'Holds information about the person themselves',
+        // 'erase' is right for ONE of this table's three person columns only,
+        // and GdprEraser::catalogue() carries a hand-written instruction for
+        // each (roll-out package A2a, 11 October 2026):
+        //   convertedUserID  the visitor became a member and this is them:
+        //                    their own record, deleted. Nothing found it
+        //                    before.
+        //   assignedToID     the follow-up worker: the record is KEPT and the
+        //                    worker detached. It used to be DELETED, which
+        //                    removed other people's records whenever a worker
+        //                    was erased.
+        //   createdByID      who typed it in: kept, detached.
+        // The decision stays 'erase' because that is what happens to the
+        // record of the person an erasure is about; tools/gdpr-coverage-selftest.php
+        // compares this word with the instruction for the record's subject.
+        'reason'   => 'A visitor\'s record: name, email, telephone and follow-up notes. The record of a visitor who later became this member is their own and is deleted. A record of SOMEBODY ELSE that this person followed up or typed in is kept, and only this person is detached from it.',
         'columns'  => ['fullName', 'email', 'phone', 'assignedToID', 'notes', 'convertedUserID', 'createdByID'],
     ],
     'tblWebAuthnCredentials' => [
@@ -795,7 +860,9 @@ return [
     ],
     'tblZoomAccount' => [
         'decision' => 'erase',
-        'reason'   => 'Holds information about the person themselves',
+        // The meetings made through this connection are deleted with it by
+        // the database (`fk_zm_account`). On purpose: see tblZoomMeeting.
+        'reason'   => 'The person\'s own connection to Zoom: their Zoom account\'s number and the keys that let the portal act as them. Deleted, and the meetings made through it go with it.',
         'columns'  => ['userID'],
     ],
 
@@ -827,7 +894,7 @@ return [
                     . ' row would destroy the organisation\'s own work because a'
                     . ' departed volunteer typed it in. The content stays; the name'
                     . ' goes',
-        'columns'  => ['createdByID'],
+        'columns'  => ['createdByID', 'revokedByID'],
     ],
     'tblAssetKioskTokens' => [
         'decision' => 'unlink',
@@ -843,7 +910,7 @@ return [
                     . ' row would destroy the organisation\'s own work because a'
                     . ' departed volunteer typed it in. The content stays; the name'
                     . ' goes',
-        'columns'  => ['createdByID'],
+        'columns'  => ['createdByID', 'performedByUserID'],
     ],
     'tblAssets' => [
         'decision' => 'unlink',
@@ -865,7 +932,7 @@ return [
         'reason'   => 'Kept for running and repairing the portal. The record stays;'
                     . ' the link to the person is cut, so it can no longer be traced'
                     . ' back to them',
-        'columns'  => ['userID', 'visitorIP', 'userAgent', 'requestHeaders'],
+        'columns'  => ['userID', 'visitorIP', 'userAgent', 'requestHeaders', 'resolvedByID'],
     ],
     'tblEventHubResources' => [
         'decision' => 'unlink',
@@ -889,7 +956,7 @@ return [
                     . ' row would destroy the organisation\'s own work because a'
                     . ' departed volunteer typed it in. The content stays; the name'
                     . ' goes',
-        'columns'  => ['createdByID', 'updatedByID'],
+        'columns'  => ['createdByID', 'updatedByID', 'moderatedByID', 'submittedByID', 'statusChangedByID'],
     ],
     'tblExternalEventApprovals' => [
         'decision' => 'unlink',
@@ -1039,7 +1106,7 @@ return [
                     . ' row would destroy the organisation\'s own work because a'
                     . ' departed volunteer typed it in. The content stays; the name'
                     . ' goes',
-        'columns'  => ['uploadedByUserID'],
+        'columns'  => ['uploadedByUserID', 'moderatedByID'],
     ],
     'tblPhotoAlbum' => [
         'decision' => 'unlink',
@@ -1147,11 +1214,113 @@ return [
     ],
     'tblZoomMeeting' => [
         'decision' => 'unlink',
-        'reason'   => 'Only records who created or last changed this. Deleting the'
-                    . ' row would destroy the organisation\'s own work because a'
-                    . ' departed volunteer typed it in. The content stays; the name'
-                    . ' goes',
+        // This said only "the content stays; the name goes" until 11 October
+        // 2026, which was untrue for one case: a meeting made through the
+        // erased person's OWN Zoom connection is deleted with that connection
+        // (the database does it; `fk_zm_account`). Salem874 decided to keep
+        // that behaviour and make the words true. Such a meeting is a room in
+        // their Zoom account, which the portal cannot open once the
+        // connection is gone. tools/gdpr-eraser-selftest.php names this as
+        // the one allowed case of a delete reaching a kept table.
+        'reason'   => 'A Zoom meeting set up from the portal. One made through SOMEBODY ELSE\'s Zoom connection stays, and only who created it is detached. One made through the erased person\'s own connection is a room in their Zoom account, and is deleted together with that connection.',
         'columns'  => ['createdByID'],
+    ],
+
+    // -------------------------------------------------------------------------
+    // 🖊️ Thirteen tables that only say WHO DID SOMETHING, added on 11 October
+    //    2026 (roll-out package A2a; Salem874's decision: keep the record,
+    //    clear who did it).
+    //
+    //    None of them was in this list at all. Each carries an account number
+    //    and had no instruction, so the number of somebody who had asked to be
+    //    forgotten stayed on it for ever. Twelve were found by package A's
+    //    count of tables that link to an account; expense payments and
+    //    children's check-ins by its independent check.
+    //
+    //    For three of them the column could not be emptied until migration 208
+    //    (visitor follow-up notes, and the two kinds of attached file).
+    // -------------------------------------------------------------------------
+    'tblAssetResources' => [
+        'decision' => 'unlink',
+        'reason'   => 'A file or link attached to a piece of equipment: a manual, a receipt, an insurance paper. It is the organisation\'s. It stays; who attached it is detached.',
+        'columns'  => ['uploadedByID'],
+    ],
+    'tblBankImports' => [
+        'decision' => 'unlink',
+        'reason'   => 'A bank statement that was imported. A FINANCIAL record: it stays; who imported it is detached.',
+        'columns'  => ['importedByID'],
+    ],
+    'tblBankTxns' => [
+        'decision' => 'unlink',
+        // What erasure does NOT do: `description` and `reference` are the
+        // bank's own text for the line and may spell a payer's name. Nothing
+        // ties that text to an account, so it is not searched.
+        'reason'   => 'One line of an imported bank statement. A FINANCIAL record: it stays, with its date, amount and the bank\'s description; who matched it to a gift is detached.',
+        'columns'  => ['matchedByID'],
+    ],
+    'tblCcliUsage' => [
+        'decision' => 'unlink',
+        'reason'   => 'A line in the song-licence log: which song was shown, and when. The organisation reports these to its licensing body, so the line stays; who was operating is detached.',
+        'columns'  => ['operatorID'],
+    ],
+    'tblDocuments' => [
+        'decision' => 'unlink',
+        'reason'   => 'A document shared with the organisation. It stays; who uploaded it is detached.',
+        'columns'  => ['uploadedByID'],
+    ],
+    'tblEventBroadcasts' => [
+        'decision' => 'unlink',
+        'reason'   => 'A message sent to the people coming to an event. The record that it was sent stays; who sent it is detached.',
+        'columns'  => ['sentByID'],
+    ],
+    'tblExpenseClaimPayments' => [
+        'decision' => 'unlink',
+        'reason'   => 'A payment made against an expense claim. A FINANCIAL record: it stays, with its amount, method and reference; who entered it is detached.',
+        'columns'  => ['paidByID'],
+    ],
+    'tblKidCheckins' => [
+        'decision' => 'unlink',
+        // Two person columns, so GdprEraser::catalogue() carries a
+        // hand-written instruction for each. What erasure does NOT do:
+        // `pickupName` is typed by hand and may spell the erased person's
+        // name; nothing ties it to an account.
+        'reason'   => 'A child being checked in to, and out of, a session. It is the CHILD\'S record and stays. Whichever helper checked the child in, and whichever checked them out, is detached.',
+        'columns'  => ['checkedInByID', 'checkedOutByID', 'pickupName'],
+    ],
+    'tblMigrations' => [
+        'decision' => 'unlink',
+        // Not in this list at all until the independent check of 12 October
+        // 2026 found it: the database does not link `executedByID` to the
+        // account table, so nothing that looked for links could see it.
+        'reason'   => 'The portal\'s own record of which database upgrades have been run. It must stay, or an upgrade would be run twice; which administrator pressed the button is detached.',
+        'columns'  => ['executedByID'],
+    ],
+    'tblProjectUpdate' => [
+        'decision' => 'unlink',
+        'reason'   => 'A progress update on one of the organisation\'s projects. The update stays; who posted it is detached.',
+        'columns'  => ['postedByID'],
+    ],
+    'tblServicePlan' => [
+        'decision' => 'unlink',
+        'reason'   => 'The plan for a service. It is the organisation\'s and stays; who prepared it is detached.',
+        'columns'  => ['preparedByID'],
+    ],
+    'tblVenueAgreementFiles' => [
+        'decision' => 'unlink',
+        'reason'   => 'A file attached to a hire agreement with a venue owner. Part of a contract, so it stays; who attached it is detached.',
+        'columns'  => ['uploadedByID'],
+    ],
+    'tblVisitorContact' => [
+        'decision' => 'unlink',
+        // A note about the erased person's OWN visitor record goes with that
+        // record (the database deletes a visitor's notes with the visitor).
+        'reason'   => 'A follow-up note about a visitor: how they were contacted and what was said. It is about the VISITOR, so it stays; who wrote it is detached.',
+        'columns'  => ['contactedByID', 'summary'],
+    ],
+    'tblWorkflowActions' => [
+        'decision' => 'unlink',
+        'reason'   => 'One step in an approval: approved, rejected or commented, with any comment written at the time. The organisation\'s record of how a decision was reached, so it stays; who acted is detached.',
+        'columns'  => ['actedByID', 'comment'],
     ],
 
     // =========================================================================
@@ -1167,29 +1336,32 @@ return [
         'columns'  => ['personName'],
     ],
     'tblCareVisit' => [
-        'decision' => 'retain',
-        // The columns were listed as `notes` alone until 11 October 2026.
-        // The table also has `visitedByID` (who made the visit; it may not
-        // be empty) and `followUpAssignedToID`. With neither named, every
-        // erasure's audit trail said that no column tied a pastoral visit to
-        // an account, which was untrue. GdprEraser::catalogue() now carries
-        // a hand-written "kept" instruction matched on `visitedByID`.
+        'decision' => 'unlink',
+        // This said 'retain' until 11 October 2026 (roll-out package A2a),
+        // because `visitedByID` could not be empty: the number of whoever
+        // made the visit was left in place, pointing at an emptied account.
+        // Migration 208 made the column emptiable and GdprEraser::catalogue()
+        // now empties it, and `followUpAssignedToID`, with an instruction
+        // each. The visit and its notes still stay with the case, for as long
+        // as safeguarding policy keeps the case.
         //
-        // WHAT ERASURE DOES NOT DO: it does not remove the person's number
-        // from the visits they made (the database forbids emptying that
-        // column), and it does not find a visit somebody else made whose
-        // follow-up was assigned to them.
+        // NOT DECIDED: whether the NAME of whoever made a visit should be
+        // kept on safeguarding grounds. That is for the organisation's
+        // safeguarding lead. As built, it is not kept.
         'reason'   => 'A pastoral visit. Safeguarding and pastoral record: the visit and its notes are kept with '
-                    . 'the case. The number of whoever made the visit stays on it, because that column may not be '
-                    . 'empty; their account is emptied, so the number names nobody',
-        'period'   => 'as required by safeguarding policy',
+                    . 'the case. Who made the visit, and who its follow-up was given to, are detached',
         'columns'  => ['visitedByID', 'followUpAssignedToID', 'notes'],
     ],
     'tblDbsChecks' => [
         'decision' => 'retain',
+        // `recordedByID` (who typed the check in) IS cleared, since 11 October
+        // 2026: the check itself, and whose it is, stay exactly as they are.
+        // Whether the name of whoever recorded a check should be kept on
+        // safeguarding grounds has NOT been decided; it is the same question
+        // as for pastoral visits, for the organisation's safeguarding lead.
         'reason'   => 'Safeguarding record. Kept and flagged, never quietly removed',
         'period'   => 'as required by safeguarding policy',
-        'columns'  => ['userID', 'notes'],
+        'columns'  => ['userID', 'notes', 'recordedByID'],
     ],
     'tblExpenseClaims' => [
         'decision' => 'unlink',

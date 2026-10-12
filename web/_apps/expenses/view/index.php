@@ -142,9 +142,13 @@ if ($stmt !== false) {
 // -----------------------------------------------------------------------------
 $approvals = [];
 $stmt = $mysqli->prepare(
+    // LEFT JOIN, not JOIN. An approver's number is emptied on their approvals
+    // when they ask to be forgotten (migration 192). With a plain JOIN the
+    // whole approval line dropped off this page: the claim looked as though
+    // nobody had ever approved it.
     'SELECT A.decision, A.comments, A.approverRole, A.decidedAt, U.fullName AS approverName '
     . 'FROM tblExpenseClaimApprovals A '
-    . 'JOIN tblUsers U ON U.userID = A.userID '
+    . 'LEFT JOIN tblUsers U ON U.userID = A.userID '
     . 'WHERE A.claimID = ? ORDER BY A.decidedAt'
 );
 if ($stmt !== false) {
@@ -354,7 +358,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     <div class="portal-data-row">
                         <div class="col-12 col-md-3">
                             <span class="d-md-none fw-semibold">Approver: </span>
-                            <strong><?php echo htmlspecialchars($a['approverName'], ENT_QUOTES, 'UTF-8'); ?></strong>
+                            <strong><?php echo htmlspecialchars((string) ($a['approverName'] ?? 'Approver\'s details removed'), ENT_QUOTES, 'UTF-8'); ?></strong>
                         </div>
                         <div class="col-12 col-md-2">
                             <span class="d-md-none fw-semibold">Role: </span>

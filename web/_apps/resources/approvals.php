@@ -30,7 +30,10 @@ $stmt = $db->prepare(
     . '       u.fullName AS bookedByName, u.emailAddress AS bookedByEmail '
     . 'FROM tblResourceBooking b '
     . 'JOIN tblResource r ON r.resourceID = b.resourceID '
-    . 'JOIN tblUsers u ON u.userID = b.bookedByID '
+    // LEFT JOIN, not JOIN: `bookedByID` is emptied when whoever asked for a
+    // booking is forgotten (migration 208). With a plain JOIN a booking
+    // still waiting for a decision dropped out of this queue for good.
+    . 'LEFT JOIN tblUsers u ON u.userID = b.bookedByID '
     . "WHERE r.siteID = ? AND b.status = 'pending' "
     . 'ORDER BY b.startAt'
 );
@@ -67,8 +70,12 @@ $csrf = Auth::csrfToken();
                             → <?php echo htmlspecialchars(date('H:i', strtotime((string) $r['endAt'])), ENT_QUOTES, 'UTF-8'); ?>
                             <br>
                             <span class="small text-muted">
-                                Requested by <?php echo htmlspecialchars((string) $r['bookedByName'], ENT_QUOTES, 'UTF-8'); ?>
-                                (<?php echo htmlspecialchars((string) $r['bookedByEmail'], ENT_QUOTES, 'UTF-8'); ?>)
+                                <?php if ($r['bookedByName'] === null): ?>
+                                    Requested by somebody no longer recorded
+                                <?php else: ?>
+                                    Requested by <?php echo htmlspecialchars((string) $r['bookedByName'], ENT_QUOTES, 'UTF-8'); ?>
+                                    (<?php echo htmlspecialchars((string) $r['bookedByEmail'], ENT_QUOTES, 'UTF-8'); ?>)
+                                <?php endif; ?>
                                 &middot; <?php echo htmlspecialchars(date('j M', strtotime((string) $r['createdAt'])), ENT_QUOTES, 'UTF-8'); ?>
                             </span>
                             <?php if (($r['purpose'] ?? '') !== ''): ?>

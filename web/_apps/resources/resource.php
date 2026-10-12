@@ -46,9 +46,13 @@ $endWindow = date('Y-m-d', strtotime('+' . $lookahead . ' days'));
 
 $bookings = [];
 $stmt = $db->prepare(
+    // LEFT JOIN, not JOIN. `bookedByID` is emptied when whoever made a
+    // booking asks to be forgotten (migration 208). With a plain JOIN that
+    // booking dropped off this list, and the room then LOOKED free for a
+    // time it was still booked for.
     'SELECT b.bookingID, b.startAt, b.endAt, b.purpose, b.status, '
     . '       u.fullName AS bookedByName '
-    . 'FROM tblResourceBooking b JOIN tblUsers u ON u.userID = b.bookedByID '
+    . 'FROM tblResourceBooking b LEFT JOIN tblUsers u ON u.userID = b.bookedByID '
     . 'WHERE b.resourceID = ? AND b.status IN (\'pending\',\'approved\') '
     . '  AND b.startAt >= NOW() AND b.startAt <= ? '
     . 'ORDER BY b.startAt'
@@ -105,7 +109,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                             <br>→ <?php echo htmlspecialchars(date('H:i', strtotime((string) $b['endAt'])), ENT_QUOTES, 'UTF-8'); ?>
                         </div>
                         <div class="col-md-5"><?php echo htmlspecialchars((string) ($b['purpose'] ?? '(no purpose given)'), ENT_QUOTES, 'UTF-8'); ?></div>
-                        <div class="col-md-2 text-muted"><?php echo htmlspecialchars((string) $b['bookedByName'], ENT_QUOTES, 'UTF-8'); ?></div>
+                        <div class="col-md-2 text-muted"><?php echo htmlspecialchars((string) ($b['bookedByName'] ?? 'Somebody no longer recorded'), ENT_QUOTES, 'UTF-8'); ?></div>
                         <div class="col-md-2">
                             <?php if ($b['status'] === 'pending'): ?>
                                 <span class="badge bg-warning text-dark">Pending approval</span>

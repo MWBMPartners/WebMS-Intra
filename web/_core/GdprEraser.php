@@ -63,11 +63,37 @@
  * ties to an account - see the entries marked "retain" for that reason in
  * personal-data-catalogue.php.
  *
+ * IT DOES NOT END AN OPEN SESSION. It deletes everything a person could sign
+ * in WITH (password, linked accounts, passkeys, trusted devices, reset
+ * tokens, the calendar-feed key), so nobody can sign in as them again. But if
+ * they are signed in on some device when the erasure runs, that session goes
+ * on working until it ends by itself. The portal keeps sessions as PHP's own
+ * files, not in a table this class can reach, and Portal\Core\Auth::check()
+ * only asks whether a session holds an account number - not whether that
+ * account is still active. Such a session belongs to no organisation and has
+ * no administrator rights, because those rows and flags ARE cleared. Ending
+ * it needs a change to Auth that runs on every page, which was deliberately
+ * not made here (found by the independent check of 12 October 2026).
+ *
+ * OTHER PEOPLE'S RECORDS ARE NEVER DELETED (roll-out package A2a, Salem874's
+ * decision of 11 October 2026)
+ * -------------------------------------------------------------------
+ * A record is deleted only when it is ABOUT the person being erased. A record
+ * they merely worked on - a visitor they followed up, a task or a rota slot
+ * given to them, a note they wrote, a payment they entered - is somebody
+ * else's, or the organisation's. It is kept, and only their account number is
+ * taken off it. Until that decision, erasing a follow-up worker deleted every
+ * visitor, salvation card, task and rota slot assigned to them.
+ *
+ * The rule is enforced in LINK_COLUMNS and ACTOR_COLUMNS below, not left to
+ * each instruction: a "delete" matched on a column that says the person acted
+ * on a record is refused by construction.
+ *
  * @package   Portal\Core
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2026-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.1.0
+ * @version   1.2.0
  * @link      https://github.com/MWBMPartners/webMS-Intra/issues/235
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/510
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/535
@@ -89,7 +115,14 @@ class GdprEraser
      *
      * Schema entry shape:
      *   ['table' => string, 'userCol' => string, 'action' => 'delete'|'anonymise'|'retain',
-     *    'nullCols' => string[]?, 'reason' => string?]
+     *    'nullCols' => string[]?, 'reason' => string?, 'sqlSets' => string[]?]
+     *
+     * `sqlSets` (anonymise only) is a list of extra `column = expression`
+     * pieces added to the UPDATE, for a change that is not "empty a column":
+     * cancelling a rota swap request that was still waiting, for example. Each
+     * piece is FIXED TEXT WRITTEN IN THIS FILE. It is put into the statement
+     * as it stands, so it must never be built from anything a person typed or
+     * anything read from the database.
      *
      * `userCol` is the column matched against the person's account number. It
      * is an empty string ONLY on a 'retain' entry for a table that no column
@@ -219,12 +252,13 @@ class GdprEraser
             // the row stays and only the person's number is detached.
             //
             // TWO entries each for the choice and rule tables, one per
-            // column, on purpose: the route this class derives from the
-            // written catalogue matches rows on ONE column and empties a
-            // second column only on those rows (`processEntry()`), so a choice
-            // somebody else created and this person last changed would keep
-            // their number. Each entry here empties its own column wherever
-            // it names this person.
+            // column, on purpose: an instruction matches rows on ONE column,
+            // so with a single one a choice somebody else created and this
+            // person last changed would keep their number. Each entry here
+            // empties its own column wherever it names this person. (When
+            // this was written the derived route built one instruction per
+            // table and had exactly that fault, #492; since 11 October 2026
+            // it builds one per column too.)
             //
             // The approvals entry was written because `decidedByID` was not
             // then one of the names the derived route recognised, so without
@@ -260,7 +294,19 @@ class GdprEraser
             //    Whether that is enough for HMRC is part of what an
             //    accountant needs to confirm.
             ['table' => 'tblGiftAidDeclaration','userCol' => 'donorID', 'action' => 'retain', 'nullCols' => [], 'reason' => 'a Gift Aid declaration is the evidence for tax already reclaimed. Kept for tax reasons: HMRC can ask to see it for six years after the last gift claimed under it'],
-            ['table' => 'tblZoomAccount',      'userCol' => 'userID', 'action' => 'delete'],
+            // The person's own connection to Zoom: their Zoom account's number
+            // and the keys that let the portal act as them. Deleted.
+            //
+            // THE MEETINGS MADE THROUGH IT GO TOO, and that is on purpose
+            // (Salem874, 11 October 2026). The database deletes every
+            // `tblZoomMeeting` row that used this connection
+            // (`fk_zm_account`, ON DELETE CASCADE). Such a meeting is a room
+            // in THEIR Zoom account, which the portal can no longer open once
+            // the keys are gone. Until this was written down, the written
+            // list said meetings were always kept, which was untrue.
+            // A meeting they merely created through SOMEBODY ELSE'S
+            // connection is kept, and only their number is taken off it.
+            ['table' => 'tblZoomAccount',      'userCol' => 'userID', 'action' => 'delete', 'reason' => 'the person\'s own connection to Zoom. The meetings made through it are rooms in their Zoom account and are deleted with it; a meeting they made through somebody else\'s connection is kept'],
             ['table' => 'tblUserTranslationPref','userCol' => 'userID', 'action' => 'delete'],
             // #322 Web Push — endpoint URL + p256dh/auth keys are device
             // credentials tied to a specific browser install, not history
@@ -269,9 +315,14 @@ class GdprEraser
             // immediately above, not the anonymise-and-keep pattern used
             // for content/authorship tables.
             ['table' => 'tblPushSubscriptions','userCol' => 'userID', 'action' => 'delete'],
-            // #303 Phase 2 — discipleship per-user tables. markedByID /
-            // enrolledByID / revokedByID attributions self-heal via
-            // ON DELETE SET NULL on the FKs, so a hard delete here is safe.
+            // #303 Phase 2 — discipleship per-user tables: the person's own
+            // enrolments and progress, deleted.
+            // (This used to say the "who enrolled / marked / revoked"
+            // numbers on OTHER people's rows "self-heal" through the
+            // database's ON DELETE SET NULL. They never did: that rule only
+            // acts when an account ROW is deleted, and an erasure empties
+            // the account and keeps the row. Those three columns now have
+            // instructions of their own, in the #492 block further down.)
             ['table' => 'tblPathwayEnrolments','userCol' => 'userID', 'action' => 'delete'],
             ['table' => 'tblPathwayProgress',  'userCol' => 'userID', 'action' => 'delete'],
             // Kids ministry — a child profile links to exactly ONE parent
@@ -299,6 +350,22 @@ class GdprEraser
             //    separately - emptying it wholesale would remove every OTHER
             //    authorised adult too, which would be unsafe.
             ['table' => 'tblKidProfiles',      'userCol' => 'parentUserID', 'action' => 'anonymise', 'nullCols' => ['parentUserID']],
+            // A child's check-in names TWO helpers: who checked the child in
+            // and who checked them out. The check-in is the child's record
+            // and stays. One instruction per column (the tblAssetStocktakes
+            // shape), so a check-in made by somebody else and checked OUT by
+            // this person is still found.
+            //
+            // The note above ("no separate catalogue entry is needed") was
+            // written when the child's profile was deleted and its check-ins
+            // went with it. The profile is kept now, so the check-ins are
+            // too, and until 11 October 2026 nothing took a helper's number
+            // off them. Neither column has a link to the account table, so
+            // nothing but these two lines ever would.
+            // What this does NOT do: `pickupName` is a name typed by hand and
+            // may spell this person's name. Nothing ties it to an account.
+            ['table' => 'tblKidCheckins',      'userCol' => 'checkedInByID',  'action' => 'anonymise', 'nullCols' => [], 'reason' => 'the check-in is the child\'s record and stays; who checked them in is detached'],
+            ['table' => 'tblKidCheckins',      'userCol' => 'checkedOutByID', 'action' => 'anonymise', 'nullCols' => [], 'reason' => 'the check-in is the child\'s record and stays; who checked them out is detached'],
 
             // #257 Pastoral Care Register. personUserID is the case SUBJECT
             // (the person being cared for) — anonymise rather than delete so
@@ -311,33 +378,28 @@ class GdprEraser
             // for authorship-attribution-detached, mirroring
             // tblAnnouncements/tblEvents/tblRecording above.
             //
-            // tblCareVisit.visitedByID and tblCareAccessLog.viewerID are
-            // BOTH NOT NULL with no ON DELETE SET NULL path (visitedByID
-            // is even FK'd ON DELETE RESTRICT), so neither column can be
-            // nulled by an UPDATE the way the nullable columns above can —
-            // same reasoning already applied throughout this catalogue to
-            // every other NOT NULL creator/actor column (e.g.
-            // tblAssetMaintenance.createdByID, tblAssetResources.uploadedByID
-            // are deliberately NOT catalogued either). tblCareVisit is KEPT,
-            // by the 'retain' entry below: the visitor's attribution is
-            // detached indirectly once the final tblUsers step tombstones
-            // their name/email, without needing to touch (or delete) the
-            // pastoral visit notes themselves — those stay attached to the
-            // (now-anonymised) case for institutional continuity.
+            // tblCareVisit: a pastoral visit names who MADE it (`visitedByID`)
+            // and who its follow-up was given to (`followUpAssignedToID`).
+            // The visit and its notes describe the person being cared for,
+            // not the visitor, so they stay with the case. Both numbers are
+            // taken off, one instruction per column.
             //
-            // 🛑 That entry was added on 11 October 2026, after the
-            //    independent check of #510/#535. Until then the table had no
-            //    entry here, the written list named only its `notes` column,
-            //    and so EVERY erasure's audit trail said of pastoral visits
-            //    that "no column ties a row of this table to an account" —
-            //    while the visits the person had made still carried their
-            //    account number. A sealed record saying something untrue.
-            //    The line now says what is true: the visits are kept, and
-            //    the number stays because the column may not be empty.
+            // 🛑 WHAT THIS USED TO DO, so nobody puts it back.
+            //    Until 11 October 2026 `visitedByID` could not be empty, and
+            //    a "retain" instruction left the number in place. That was
+            //    the worst of both: the number stayed, yet it pointed at an
+            //    emptied account, so it told a safeguarding review nothing.
+            //    And a visit somebody ELSE made, with the follow-up given to
+            //    this person, was matched by nothing at all. Migration 208
+            //    made the column emptiable (Salem874's decision).
+            //    Before that again, the table had no instruction, and every
+            //    erasure's sealed audit trail said "no column ties a row of
+            //    this table to an account", which was untrue.
             //
-            //    What this does NOT do: a visit somebody ELSE made, with the
-            //    follow-up assigned to this person (`followUpAssignedToID`),
-            //    is not matched by anything and keeps their number (#492).
+            //    NOT DECIDED HERE: whether the NAME of whoever made a visit
+            //    should be kept on safeguarding grounds. That is a question
+            //    for the organisation's safeguarding lead. As built, it is
+            //    not kept.
             // tblCareAccessLog is different: a "who viewed this case" audit
             // row attributed to a since-erased viewer carries no independent
             // value once that identity is gone (unlike the visit notes,
@@ -348,7 +410,8 @@ class GdprEraser
             // access-log rows or the case/visit history itself.
             ['table' => 'tblCareCase',       'userCol' => 'personUserID', 'action' => 'anonymise', 'nullCols' => ['personName'], 'reason' => 'case history retained for pastoral/safeguarding continuity; subject identity detached'],
             ['table' => 'tblCareCase',       'userCol' => 'openedByID',   'action' => 'anonymise', 'nullCols' => [], 'reason' => 'authorship attribution detached'],
-            ['table' => 'tblCareVisit',      'userCol' => 'visitedByID',  'action' => 'retain', 'nullCols' => [], 'reason' => 'the pastoral visits this person made are kept with the case, as safeguarding policy requires. Their account number stays on each visit, because the database does not allow that column to be empty; the account it points at is emptied, so it names nobody'],
+            ['table' => 'tblCareVisit',      'userCol' => 'visitedByID',          'action' => 'anonymise', 'nullCols' => [], 'reason' => 'the pastoral visit and its notes are kept with the case; who made the visit is detached'],
+            ['table' => 'tblCareVisit',      'userCol' => 'followUpAssignedToID', 'action' => 'anonymise', 'nullCols' => [], 'reason' => 'the pastoral visit and its notes are kept with the case; who its follow-up was given to is detached'],
             ['table' => 'tblCareAccessLog',  'userCol' => 'viewerID',     'action' => 'delete'],
 
             // #393 Asset Tracker. tblAssetFoundReports is deliberately
@@ -410,9 +473,9 @@ class GdprEraser
             // keys + literal filter values) is retained — it is metadata
             // about a query, not personal data about anyone other than its
             // author — only the authorship attribution is detached, mirroring
-            // tblAnnouncements/tblEvents/tblRecording above. updatedByID rides
-            // along via nullCols since processEntry()'s anonymise path only
-            // auto-nulls the matched userCol (createdByID) itself.
+            // tblAnnouncements/tblEvents/tblRecording above. (`updatedByID`
+            // used to "ride along" in this instruction's own list; see the
+            // note just above the two lines below for why it no longer does.)
             // RESIDUAL RISK (documented, not mechanically solvable): an admin
             // may have typed personal data — a name, an email address — into
             // a FILTER VALUE inside the JSON definition (e.g. `donorName eq
@@ -420,7 +483,13 @@ class GdprEraser
             // class as tblTasks.description, which existing erasure doesn't
             // scrub either. Report OUTPUT itself is never stored anywhere, so
             // there is no separate "results" table to catalogue.
-            ['table' => 'tblReportDefinitions', 'userCol' => 'createdByID', 'action' => 'anonymise', 'nullCols' => ['updatedByID'], 'reason' => 'saved report definitions retained (metadata, not personal data); authorship attribution detached'],
+            //
+            // Two instructions since 11 October 2026 (#492). The single
+            // one this replaced matched on `createdByID` and emptied
+            // `updatedByID` only on those rows, so a report somebody else
+            // created and this person last changed kept their number.
+            ['table' => 'tblReportDefinitions', 'userCol' => 'createdByID', 'action' => 'anonymise', 'nullCols' => [], 'reason' => 'saved report definitions retained (metadata, not personal data); authorship attribution detached'],
+            ['table' => 'tblReportDefinitions', 'userCol' => 'updatedByID', 'action' => 'anonymise', 'nullCols' => [], 'reason' => 'saved report definitions retained (metadata, not personal data); who last changed it is detached'],
             // 👥 Small Groups (#150). The membership row is the subject's
             // OWN personal data (which group, which role) so it is hard
             // DELETEd, not retained — unlike the attendance/authorship
@@ -433,6 +502,141 @@ class GdprEraser
             ['table' => 'tblSmallGroupMeetingAttendance', 'userCol' => 'markedByID',   'action' => 'anonymise', 'nullCols' => [], 'reason' => 'roll history retained; recorder identity detached'],
             ['table' => 'tblSmallGroupMeetings',          'userCol' => 'recordedByID', 'action' => 'anonymise', 'nullCols' => [], 'reason' => 'meeting history retained; recorder identity detached'],
             ['table' => 'tblSmallGroups',                 'userCol' => 'createdByID',  'action' => 'anonymise', 'nullCols' => [], 'reason' => 'group retained for the congregation; creator identity detached'],
+
+            // 🔁 THE SECOND "WHO DID IT" COLUMN (#492; built 11 October 2026
+            //    on Salem874's decision for every such column: keep the
+            //    record, clear who did it).
+            //
+            //    An instruction matches rows on ONE column. Each table below
+            //    already had an instruction, on a different column, so this
+            //    one was only ever reached when the same row happened to
+            //    match there too. A gift somebody else gave and this person
+            //    RECORDED kept their number; so did an event they last
+            //    edited, a prayer request given to them, a booking they
+            //    entered. One instruction per column puts that right. (For
+            //    tables with no hand-written instruction the same is done by
+            //    fromPersonalDataCatalogue(), from the columns the written
+            //    list names.)
+            //
+            //    Every one is a column that says what the person DID to a
+            //    record that is not theirs, and every one may be empty.
+            //
+            //    Six columns were left out when this block was written, and
+            //    pinned by name in the test, because nothing was to be
+            //    guessed. Salem874 decided all six on 12 October 2026:
+            //      - five could not be emptied because the database forbade
+            //        it. Migration 208 lifted that, and they are cleared like
+            //        the rest: who gave somebody a licence seat, who asked
+            //        for an asset loan, who processed somebody's leaving, who
+            //        made a room booking, who asked for a rota swap;
+            //      - tblInvitation.acceptedByID is the invited person's own
+            //        account, so an accepted invitation is DELETED with them
+            //        (the written list says "erase"; see LINK_COLUMNS).
+            //
+            //    What is still NOT reached, and pinned in the test:
+            //    `tblWorkflowSteps.assigneeValue`. It is text, and it holds
+            //    an account number only when a step of an approval route is
+            //    given to one named person. It does not say who DID
+            //    something; it says who MUST. Emptying it would leave a step
+            //    nobody can approve, so what the step should become is a
+            //    decision, and none has been taken.
+            ['table' => 'tblAnnouncements',           'userCol' => 'updatedByID',      'action' => 'anonymise', 'nullCols' => [], 'reason' => 'the announcement is the organisation\'s and stays; who last changed it is detached'],
+            ['table' => 'tblEvents',                  'userCol' => 'updatedByID',      'action' => 'anonymise', 'nullCols' => [], 'reason' => 'the event is the organisation\'s and stays; who last changed it is detached'],
+            ['table' => 'tblEvents',                  'userCol' => 'moderatedByID',    'action' => 'anonymise', 'nullCols' => [], 'reason' => 'the event is the organisation\'s and stays; who approved or declined it is detached'],
+            // Two the database does not link to the account table, so nothing
+            // found them until the independent check of 12 October 2026. An
+            // event somebody sent in while signed in carries no typed name or
+            // address (those are only stored for somebody NOT signed in), so
+            // the number is all there is to clear. Nothing writes
+            // `statusChangedByID` today; it is cleared for the day something
+            // does.
+            ['table' => 'tblEvents',                  'userCol' => 'submittedByID',    'action' => 'anonymise', 'nullCols' => [], 'reason' => 'the event is kept; who sent it in for the calendar is detached'],
+            ['table' => 'tblEvents',                  'userCol' => 'statusChangedByID', 'action' => 'anonymise', 'nullCols' => [], 'reason' => 'the event is the organisation\'s and stays; who last changed its status is detached'],
+            ['table' => 'tblEventAttendance',         'userCol' => 'markedByID',       'action' => 'anonymise', 'nullCols' => [], 'reason' => 'somebody else\'s attendance record stays; who marked it is detached'],
+            ['table' => 'tblGivingEntry',             'userCol' => 'recordedByID',     'action' => 'anonymise', 'nullCols' => [], 'reason' => 'somebody else\'s gift is a financial record and stays, with its donor, amount and date; who entered it is detached'],
+            ['table' => 'tblPrayerRequests',          'userCol' => 'moderatorID',      'action' => 'anonymise', 'nullCols' => [], 'reason' => 'somebody else\'s prayer request stays; who moderated it is detached'],
+            ['table' => 'tblPrayerRequests',          'userCol' => 'assignedToUserID', 'action' => 'anonymise', 'nullCols' => [], 'reason' => 'somebody else\'s prayer request stays; who it was given to is detached, so it is unassigned'],
+            ['table' => 'tblPathwayEnrolments',       'userCol' => 'enrolledByID',     'action' => 'anonymise', 'nullCols' => [], 'reason' => 'somebody else\'s enrolment stays; who enrolled them is detached'],
+            ['table' => 'tblPathwayProgress',         'userCol' => 'markedByID',       'action' => 'anonymise', 'nullCols' => [], 'reason' => 'somebody else\'s progress stays; who marked the step is detached'],
+            ['table' => 'tblPathwayProgress',         'userCol' => 'revokedByID',      'action' => 'anonymise', 'nullCols' => [], 'reason' => 'somebody else\'s progress stays; who revoked the step is detached'],
+            ['table' => 'tblAssetLoans',              'userCol' => 'approvedByID',     'action' => 'anonymise', 'nullCols' => [], 'reason' => 'loan history retained for the asset\'s custody chain; who approved the loan is detached'],
+            ['table' => 'tblAssetLoans',              'userCol' => 'requestedByID',    'action' => 'anonymise', 'nullCols' => [], 'reason' => 'loan history retained for the asset\'s custody chain; who asked for the loan is detached'],
+            ['table' => 'tblAssetLicenseAssignments', 'userCol' => 'releasedByID',     'action' => 'anonymise', 'nullCols' => [], 'reason' => 'seat-assignment history retained for licence compliance; who released the seat is detached'],
+            ['table' => 'tblAssetLicenseAssignments', 'userCol' => 'linkedByID',       'action' => 'anonymise', 'nullCols' => [], 'reason' => 'seat-assignment history retained for licence compliance; who gave out the seat is detached'],
+            ['table' => 'tblVenueBookings',           'userCol' => 'createdByID',      'action' => 'anonymise', 'nullCols' => [], 'reason' => 'booking history retained for the venue hire schedule; who entered the booking is detached'],
+            // A child's event registration. The first line is what the
+            // derived route already did (the registration holds a child's
+            // medical details and is deleted when whoever submitted it is
+            // erased; see DELETE_ON_ACTOR_COLUMN). It is written out by hand
+            // now for one reason: the table has a SECOND person column, who
+            // reviewed the registration, and the derived route picks the
+            // column to delete on by its place in LINK_COLUMNS. With both
+            // listed it would have picked `reviewedByID`, and deleted a
+            // child's registration because of who REVIEWED it. Hand-written,
+            // each column can only do what its own line says.
+            ['table' => 'tblEventRegistrations',      'userCol' => 'submittedByUserID', 'action' => 'delete', 'reason' => 'a child\'s registration, with their medical details, submitted by this person'],
+            ['table' => 'tblEventRegistrations',      'userCol' => 'reviewedByID',     'action' => 'anonymise', 'nullCols' => [], 'reason' => 'somebody else\'s registration stays; who reviewed it is detached'],
+
+            // 🤝 OTHER PEOPLE'S RECORDS, AND THE ORGANISATION'S WORK
+            //    (roll-out package A2a; Salem874's decision, 11 October 2026).
+            //
+            //    Until then all five of these tables were DELETED, on the
+            //    column naming the worker. Erasing a follow-up worker removed
+            //    every visitor and every salvation card they had been given,
+            //    every task and rota slot assigned to them, and every swap
+            //    request sent to them. None of those is theirs.
+            //
+            //    One instruction per column, because an instruction matches
+            //    rows on ONE column: a task somebody else created and this
+            //    person was given would otherwise be missed.
+            //
+            // A visitor record is about the VISITOR. Three columns can name
+            // the erased person, and they mean three different things:
+            //   convertedUserID  the visitor later became a member, and this
+            //                    IS that member. The record is their own
+            //                    (name, email, telephone, notes): deleted.
+            //                    Until now nothing found it at all.
+            //   assignedToID     who follows the visitor up: emptied.
+            //   createdByID      who typed the record in: emptied.
+            // The delete comes first, so the other two never look at a row
+            // that is about to go. What this cannot do: a visitor record
+            // about the erased person that was never tied to their account
+            // cannot be found.
+            ['table' => 'tblVisitor',          'userCol' => 'convertedUserID', 'action' => 'delete', 'reason' => 'this person\'s own visitor record, from before they had an account'],
+            ['table' => 'tblVisitor',          'userCol' => 'assignedToID',    'action' => 'anonymise', 'nullCols' => [], 'reason' => 'the visitor\'s record is about the visitor and stays; who was following them up is detached, so the visitor is unassigned'],
+            ['table' => 'tblVisitor',          'userCol' => 'createdByID',     'action' => 'anonymise', 'nullCols' => [], 'reason' => 'the visitor\'s record is about the visitor and stays; who entered it is detached'],
+            ['table' => 'tblTasks',            'userCol' => 'assignedToID',    'action' => 'anonymise', 'nullCols' => [], 'reason' => 'the task is the organisation\'s work and stays; who it was given to is detached, so it is unassigned'],
+            ['table' => 'tblTasks',            'userCol' => 'createdByID',     'action' => 'anonymise', 'nullCols' => [], 'reason' => 'the task is the organisation\'s work and stays; who created it is detached'],
+            ['table' => 'tblRotaSlot',         'userCol' => 'assignedToID',    'action' => 'anonymise', 'nullCols' => [], 'reason' => 'the rota slot is the organisation\'s and stays; who was filling it is detached, so the slot is unfilled'],
+            ['table' => 'tblRotaSlot',         'userCol' => 'createdByID',     'action' => 'anonymise', 'nullCols' => [], 'reason' => 'the rota slot is the organisation\'s and stays; who created it is detached'],
+            // A swap request belongs to whoever ASKED for the swap. One
+            // aimed at the erased person is kept, with their number taken
+            // off it. If it was still waiting for their answer it is
+            // CANCELLED, because nobody is left to answer it and a request
+            // left waiting would hold the asker's slot in limbo. One already
+            // accepted or declined keeps its status: that is history.
+            //
+            // 🛑 THE CANCEL IS NOT A NICETY. The page that answers a swap
+            //    (web/_apps/rota/swap-respond.php) treats a waiting request
+            //    with NO target as an OPEN swap that anybody may accept. A
+            //    request aimed at one person, left waiting with its target
+            //    emptied, would become exactly that. Cancelling it is what
+            //    stops an erasure quietly turning "could YOU cover me?" into
+            //    "could anybody?".
+            //
+            // A request the erased person MADE (`requestedByID`) is handled
+            // the same way since 12 October 2026 (Salem874's decision;
+            // migration 208 lets the column be empty): the request is kept,
+            // who asked is detached, and one still waiting is cancelled,
+            // because nobody is left who wanted the swap.
+            // What this does NOT do: `requestMessage` is the asker's own
+            // words and is kept as written.
+            ['table' => 'tblRotaSwapRequest',  'userCol' => 'targetUserID',    'action' => 'anonymise', 'nullCols' => [],
+             'sqlSets' => ["`status` = IF(`status` = 'pending', 'cancelled', `status`)"],
+             'reason' => 'the swap request belongs to whoever asked for it and stays; the person it was aimed at is detached, and a request still waiting for their answer is cancelled'],
+            ['table' => 'tblRotaSwapRequest',  'userCol' => 'requestedByID',   'action' => 'anonymise', 'nullCols' => [],
+             'sqlSets' => ["`status` = IF(`status` = 'pending', 'cancelled', `status`)"],
+             'reason' => 'the record that a swap was asked for stays; who asked is detached, and a request still waiting is cancelled because nobody is left who wanted it'],
 
             // Final step — anonymise the user row itself rather than delete,
             // so foreign keys with ON DELETE SET NULL don't cascade-blow
@@ -450,13 +654,36 @@ class GdprEraser
             // `visibilityCoords` is a NOT NULL ENUM (default 'private') so
             // it cannot be nulled via this generic mechanism — with lat/
             // lng/what3words all NULL there is nothing left for that tier
-            // to gate, so leaving its value untouched here is harmless
-            // (delete-confirm.php's self-deletion path DOES reset it to
-            // 'private' defensively, since that path builds its own
-            // literal SET list rather than using this nullCols mechanism).
+            // to gate, so leaving its value untouched here is harmless.
+            // (This used to add that "Delete my account" reset it to
+            // 'private' through a list of its own. That page no longer
+            // changes the account at all; see fileRequest().)
+            //
+            // 🖼️ `displayBio` added on 11 October 2026 (roll-out package A2a):
+            //    the biography a member writes about themselves for the
+            //    directory was left on the emptied account. `avatarPath` and
+            //    `displayPhoto` are NOT in this list on purpose: each may
+            //    name an image file, and eraseProfileImages() empties them
+            //    only once that file is dealt with. Emptying them here would
+            //    lose the only record of where the file is.
+            //
+            // 🔑 `isAdmin`, `isRootAdmin` and `totpEnabled` are switched off
+            //    since the same day. "Delete my account" used to empty the
+            //    account by its own short list, which did switch them off;
+            //    that page now files an ordinary erasure request, so this is
+            //    the only place left that can. An account that names nobody
+            //    should not still be counted as an administrator.
+            //
+            // 📅 `calendarToken` and `notifyPrefs` are cleared since the same
+            //    day. The token is the key inside the person's private
+            //    calendar-feed address, and the feed looks an account up by
+            //    it without asking whether the account is still active
+            //    (Portal\Core\Ical). Left in place, that address went on
+            //    answering after the erasure. `notifyPrefs` is the person's
+            //    own choices about what they are sent.
             ['table' => 'tblUsers', 'userCol' => 'userID', 'action' => 'anonymise',
-             'nullCols' => ['emailAddress','phoneNumber','displayAddress','displayPhone','latitude','longitude','what3words','locale','totpSecret'],
-             'overrides' => ['fullName' => self::TOMBSTONE_NAME, 'isActive' => 0],
+             'nullCols' => ['emailAddress','phoneNumber','displayAddress','displayPhone','displayBio','latitude','longitude','what3words','locale','totpSecret','calendarToken','notifyPrefs'],
+             'overrides' => ['fullName' => self::TOMBSTONE_NAME, 'isActive' => 0, 'isAdmin' => 0, 'isRootAdmin' => 0, 'totpEnabled' => 0],
              'reason' => 'user row retained for historical FK integrity; PII removed'],
         ];
 
@@ -485,12 +712,20 @@ class GdprEraser
      * here and not in the private copy, so the tables that used them were
      * passed over without a word. Everything now reads this constant.
      *
-     * THE ORDER MATTERS. The first nine names mean "this record is ABOUT the
+     * THE ORDER MATTERS. The first seven names mean "this record is ABOUT the
      * person". Every name after them means "the person ACTED on this record,
      * or is merely named on it" (those are repeated in ACTOR_COLUMNS). When a
      * table has both kinds, the derived route matches on the first name it
      * finds, so the person the record concerns wins. Add an "about" name
      * after `leaderID`, and an "acted on it" name at the end.
+     *
+     * 🛑 `assignedToID` AND `targetUserID` USED TO BE IN THE FIRST GROUP, and
+     *    that is how an erasure came to delete other people's records. A
+     *    visitor "assigned to" a follow-up worker is not about the worker; nor
+     *    is a task, a rota slot, a salvation card, or a swap request aimed at
+     *    them. Both names moved to the second group on 11 October 2026
+     *    (Salem874's decision), so a "delete" matched on either is now refused
+     *    by construction. Do not move them back.
      *
      * Being on this list also decides how a column is emptied. processEntry()
      * empties a listed column only on the rows where it names THIS person. A
@@ -502,15 +737,22 @@ class GdprEraser
     public const LINK_COLUMNS = [
         // Records ABOUT the person.
         'userID', 'memberID', 'donorID', 'submitterID', 'recipientUserID',
-        'assignedToID', 'targetUserID', 'convertedUserID', 'leaderID',
+        'convertedUserID', 'leaderID',
+        // `acceptedByID` moved UP here on 12 October 2026 (Salem874's
+        // decision). It is on one table, tblInvitation, and it is not "who
+        // did something to somebody else's record": it is the account of the
+        // person the invitation was FOR, and that row holds their own email
+        // address. An accepted invitation is deleted with its person.
+        'acceptedByID',
         // The person ACTED on this, or is merely named on it.
+        'assignedToID', 'targetUserID',
         'uploadedByUserID', 'approverID', 'reviewedByID', 'startedByID',
         'submittedByUserID', 'createdByID', 'updatedByID',
         'parentUserID', 'counterpartyUserID', 'recordedByID',
         'approvedByID', 'assignedByID',
         'addedByID', 'markedByID', 'openedByID', 'closedByID',
         'moderatedByID', 'moderatorID', 'presenterID', 'scannedByID',
-        'bookedByID', 'requestedByID', 'acceptedByID', 'revokedByID',
+        'bookedByID', 'requestedByID', 'revokedByID',
         'counter1ID', 'counter2ID', 'offboardedByID', 'rehiredByID',
         'grantedByID', 'enrolledByID', 'linkedByID', 'releasedByID',
         'processedByID',
@@ -525,6 +767,29 @@ class GdprEraser
         // was on any list, which is how the audit trail came to say that no
         // column tied a pastoral visit to an account.
         'visitedByID', 'followUpAssignedToID',
+        // Eleven more (roll-out package A2a, 11 October 2026). Each is on a
+        // table that had no instruction at all, so the person's number stayed
+        // on it for ever: who acted on an approval step, wrote a follow-up
+        // note, prepared a service plan, posted a project update, sent a
+        // message to an event's people, operated the song-licence log,
+        // imported a bank statement, matched a bank line, entered an expense
+        // payment, and checked a child in or out.
+        'actedByID', 'contactedByID', 'preparedByID', 'postedByID', 'sentByID',
+        'operatorID', 'importedByID', 'matchedByID', 'paidByID',
+        'checkedInByID', 'checkedOutByID',
+        // Two more, found by the test that puts the person's number in every
+        // column the database links to an account: who carried out a piece
+        // of maintenance, and who a prayer request was given to.
+        'performedByUserID', 'assignedToUserID',
+        // Four more, found by the independent check of 12 October 2026. The
+        // database does not link any of them to the account table, and none
+        // was on this list, so neither the eraser nor its test could see
+        // them: who sent an event in for the calendar, who last changed an
+        // event's status, who marked an error as dealt with, and who ran a
+        // database upgrade. The real-database test now also looks for person
+        // columns by the SHAPE OF THEIR NAME, so a column the database does
+        // not link can no longer hide.
+        'submittedByID', 'statusChangedByID', 'resolvedByID', 'executedByID',
     ];
 
     /**
@@ -552,6 +817,10 @@ class GdprEraser
      * @var string[]
      */
     public const ACTOR_COLUMNS = [
+        // Being GIVEN a record to work on, or being the person a request is
+        // aimed at, is not the record being about you. These two were classed
+        // as "about the person" until 11 October 2026; see LINK_COLUMNS.
+        'assignedToID', 'targetUserID',
         'uploadedByUserID', 'approverID', 'reviewedByID', 'startedByID',
         'submittedByUserID', 'createdByID', 'updatedByID',
         'parentUserID', 'counterpartyUserID', 'recordedByID',
@@ -561,7 +830,7 @@ class GdprEraser
         // somebody the record is about.
         'addedByID', 'markedByID', 'openedByID', 'closedByID',
         'moderatedByID', 'moderatorID', 'presenterID', 'scannedByID',
-        'bookedByID', 'requestedByID', 'acceptedByID', 'revokedByID',
+        'bookedByID', 'requestedByID', 'revokedByID',
         'counter1ID', 'counter2ID', 'offboardedByID', 'rehiredByID',
         'grantedByID', 'enrolledByID', 'linkedByID', 'releasedByID',
         'processedByID',
@@ -570,6 +839,13 @@ class GdprEraser
         // And the two pastoral-visit names: making a visit, and being given
         // its follow-up, are things a person DID or was asked to do.
         'visitedByID', 'followUpAssignedToID',
+        // The eleven added by roll-out package A2a. Every one says what
+        // somebody DID to a record that is not theirs.
+        'actedByID', 'contactedByID', 'preparedByID', 'postedByID', 'sentByID',
+        'operatorID', 'importedByID', 'matchedByID', 'paidByID',
+        'checkedInByID', 'checkedOutByID',
+        'performedByUserID', 'assignedToUserID',
+        'submittedByID', 'statusChangedByID', 'resolvedByID', 'executedByID',
     ];
 
     /**
@@ -610,9 +886,26 @@ class GdprEraser
      * erasure page would find no account on the request and it could never be
      * run again.
      *
+     * The same goes for `processedByID` on OTHER people's requests, which
+     * names the erased person when they were the administrator who handled
+     * one. closeRequest() empties that too, in the same last step, rather
+     * than an instruction of its own: an instruction on this table would
+     * break the rule above, and would show the person a second, confusing
+     * line for this table under "what we hold about you".
+     *
      * @var string[]
      */
     public const FINAL_STEP_TABLES = ['tblErasureRequest'];
+
+    /**
+     * ⏱️ How long a request must have shown no sign of a run before it may be
+     *    put back from "processing" (putBackStuckRequest()).
+     *
+     * A quarter of an hour. A run refreshes its sign of life at least once a
+     * minute (stillGoing()), and a web host kills a page long before fifteen
+     * minutes, so a request this quiet has no run behind it.
+     */
+    public const STUCK_AFTER_MINUTES = 15;
 
     /**
      * 🧪 Tables with no single column that can be matched against a person,
@@ -648,6 +941,24 @@ class GdprEraser
      * A table already handled by hand is left alone: the hand-written entry
      * wins, because it was written for a reason. So are the tables in
      * FINAL_STEP_TABLES and DEDICATED_STEP_TABLES.
+     *
+     * ONE INSTRUCTION PER PERSON COLUMN (#492, 11 October 2026). An
+     * instruction matches rows on one column. The derived route used to build
+     * ONE instruction per table, matched on the first person column the list
+     * named, and emptied the others only on the rows that matched there. So a
+     * room-hire poster somebody else created and this person last changed
+     * kept their number. Now:
+     *
+     *   unlink   one "empty it" instruction for EVERY person column listed;
+     *   erase    delete on the first, then "empty it" for every OTHER listed
+     *            column that says the person acted on the record (their own
+     *            rows go; rows they merely worked on stay);
+     *   retain   kept on the first, then "empty it" for every other listed
+     *            "acted on it" column. The record that must be kept is not
+     *            touched: only the number of whoever HANDLED it goes.
+     *
+     * So for a table handled here, naming a person column in the written
+     * list is all it takes for that column to be dealt with.
      *
      * EVERY OTHER TABLE GETS AN INSTRUCTION. Until 11 October 2026 (#535) a
      * table marked "erase" or "unlink" whose listed columns held no name this
@@ -698,14 +1009,28 @@ class GdprEraser
             $columns = (array) ($meta['columns'] ?? []);
             $reason  = (string) ($meta['reason'] ?? '');
 
-            // Which column ties this row to a person? The first name on the
-            // one shared list that this table has. "About the person" names
-            // come first on that list, so they win over "acted on it" names.
-            $link = '';
-            foreach (self::LINK_COLUMNS as $candidate) {
-                if (in_array($candidate, $columns, true) === true) {
-                    $link = $candidate;
-                    break;
+            // Which columns tie a row to a person? Every name on the one
+            // shared list that this table has, in that list's order. The
+            // FIRST is the one a delete or a "keep" matches on: "about the
+            // person" names come first on the list, so they win over "acted
+            // on it" names.
+            $links = array_values(array_intersect(self::LINK_COLUMNS, $columns));
+            $link  = $links[0] ?? '';
+
+            // The "acted on it" columns beyond the first: each gets its own
+            // "empty it" instruction after a delete or a keep (see this
+            // method's docblock). Built here once, used by both branches.
+            $alsoActedOn = [];
+            foreach (array_slice($links, 1) as $other) {
+                if (in_array($other, self::ACTOR_COLUMNS, true) === true) {
+                    $alsoActedOn[] = [
+                        'table'    => $table,
+                        'userCol'  => $other,
+                        'action'   => 'anonymise',
+                        'nullCols' => [],
+                        'reason'   => 'somebody else\'s record of this kind is kept as it is; only who handled it (`'
+                            . $other . '`) is detached',
+                    ];
                 }
             }
 
@@ -731,6 +1056,9 @@ class GdprEraser
                         ? ' (how long it is kept: ' . (string) $meta['period'] . ')'
                         : ''),
                 ];
+                foreach ($alsoActedOn as $entry) {
+                    $entries[] = $entry;
+                }
                 continue;
             }
 
@@ -779,20 +1107,30 @@ class GdprEraser
                     'nullCols' => [],
                     'reason'   => $reason,
                 ];
+                foreach ($alsoActedOn as $entry) {
+                    $entries[] = $entry;
+                }
                 continue;
             }
 
-            // 'unlink' - keep what was made, remove who made it. Every
-            //  person-linking column this table has is emptied, not only the
-            //  one matched on, or a second column would still name them.
-            $nullCols = array_values(array_intersect(self::LINK_COLUMNS, $columns));
-            $entries[] = [
-                'table'    => $table,
-                'userCol'  => $link,
-                'action'   => 'anonymise',
-                'nullCols' => $nullCols,
-                'reason'   => $reason,
-            ];
+            // 'unlink' - keep what was made, remove who made it. One
+            //  instruction for EVERY person column the list names, each
+            //  matching on its own column.
+            //
+            //  (This used to be one instruction, matched on the first column
+            //  and emptying the rest "only on those rows". The comment here
+            //  said that stopped a second column still naming the person. It
+            //  did the opposite for any row that matched the second column
+            //  and not the first: #492.)
+            foreach ($links as $column) {
+                $entries[] = [
+                    'table'    => $table,
+                    'userCol'  => $column,
+                    'action'   => 'anonymise',
+                    'nullCols' => [],
+                    'reason'   => $reason,
+                ];
+            }
         }
 
         return $entries;
@@ -895,11 +1233,15 @@ class GdprEraser
      *   1. Read the person's email address, while the account still has it.
      *   2. The Demo Data step (#498). It stops everything by itself if it
      *      fails, and puts the request back; see its own docblock.
-     *   3. Every instruction in catalogue(), then the two dedicated steps
-     *      (giving statements, the email send log). A step that fails is
-     *      written down and the rest still run.
+     *   3. Every instruction in catalogue(), then the dedicated steps
+     *      (giving statements, the email send log, the person's photo). A
+     *      step that fails is written down and the rest still run.
      *   4. LAST, the request itself: closed if no step failed, put back to
      *      `pending_review` untouched if any did.
+     *
+     * While it works it refreshes the request's "a run is going" moment about
+     * once a minute (stillGoing()), which is what lets a request whose run
+     * was killed by the web host be told apart from one still running.
      *
      * It used to return true or false for "did anything change", and its only
      * caller ignored the answer and reported success whatever had happened.
@@ -907,6 +1249,7 @@ class GdprEraser
      * @param int      $requestId     The erasure request being carried out.
      * @param int      $userId        The account to erase.
      * @param int|null $processedByID The administrator who pressed the button.
+     *   Not recorded on the request when it is the person being erased.
      *
      * @return array{changed: bool, steps: int, failed: int} `changed`: at
      *   least one row or file was deleted or emptied. `steps`: how many steps
@@ -946,11 +1289,13 @@ class GdprEraser
             // asOneStep()), so what a step changed and the audit line that
             // says so are saved together or not at all.
             $outcomes = [];
+            $lastBeat = time();
             foreach (self::catalogue() as $entry) {
                 $outcomes[] = self::asOneStep(
                     $db,
                     static fn (): string => self::processEntry($db, $requestId, $userId, $entry)
                 );
+                $lastBeat = self::stillGoing($db, $requestId, $lastBeat);
             }
             // 🧾 Giving statements (#440 Q5): the rendered PDFs, then the
             //    address each was mailed to. Two steps, two audit lines.
@@ -960,6 +1305,9 @@ class GdprEraser
             }
             // 📧 #234 — the address in the email send log.
             $outcomes[] = self::asOneStep($db, static fn (): string => self::eraseEmailLogRecipients($requestId, $erasedEmail));
+            // 🖼️ The person's photo: the image file, and the two columns on
+            //    the account that say where it is.
+            $outcomes[] = self::asOneStep($db, static fn (): string => self::eraseProfileImages($requestId, $userId));
 
             foreach ($outcomes as $outcome) {
                 $steps++;
@@ -1116,9 +1464,25 @@ class GdprEraser
      *
      * The same is done to every OTHER request from the same account, matched
      * on the account number and never on the text of an address. One of those
-     * still waiting (somebody pressed the button twice) is closed with this
-     * one, with a line in its own audit trail saying which request did the
-     * work: left open it would point at nobody and could never be run.
+     * still open (somebody pressed the button twice) is closed with this one,
+     * with a line in its own audit trail saying what did the work: left open
+     * it would point at nobody and could never be run.
+     *
+     * "Still open" includes one stuck at `processing`. It did not until
+     * 11 October 2026: such a request had its account number cleared and was
+     * then left at "processing" for ever, with no line to say why.
+     *
+     * A request from the same account at ANOTHER organisation is closed too
+     * (the account is one account, emptied everywhere), but its line is
+     * worded differently. It used to send that organisation's administrator
+     * to "that request's report", which they cannot open: each organisation
+     * sees only its own requests.
+     *
+     * Last, wherever the erased person was the ADMINISTRATOR who handled
+     * somebody else's request, their number is taken off it
+     * (`processedByID`). The request, its outcome and its dates all stay.
+     * For the same reason the administrator is not recorded on this request
+     * when they are the person being erased.
      *
      * The closing audit line and the changes to the request are ONE
      * transaction, so the trail can never say "closed" about a request that
@@ -1134,18 +1498,35 @@ class GdprEraser
         }
 
         try {
-            // Other requests from this account that are still waiting.
+            // Which organisation this request belongs to, to word the lines
+            // on other requests correctly.
+            $stmt = $db->prepare('SELECT siteID FROM tblErasureRequest WHERE requestID = ? LIMIT 1');
+            $stmt->bind_param('i', $requestId);
+            $stmt->execute();
+            $ownSite = (int) ($stmt->get_result()->fetch_row()[0] ?? 0);
+            $stmt->close();
+
+            // Other requests from this account that are still open.
             $others = [];
             $stmt = $db->prepare(
-                "SELECT requestID FROM tblErasureRequest WHERE userID = ? AND requestID <> ? "
-                . "AND status IN ('pending_confirmation', 'pending_review') ORDER BY requestID"
+                "SELECT requestID, siteID FROM tblErasureRequest WHERE userID = ? AND requestID <> ? "
+                . "AND status IN ('pending_confirmation', 'pending_review', 'processing') ORDER BY requestID"
             );
             $stmt->bind_param('ii', $userId, $requestId);
             $stmt->execute();
             $rs = $stmt->get_result();
             while ($r = $rs->fetch_row()) {
-                $others[] = (int) $r[0];
+                $others[(int) $r[0]] = (int) $r[1];
             }
+            $stmt->close();
+
+            // Requests this person HANDLED as an administrator. Done before
+            // the status update below, which writes the administrator of
+            // THIS run onto this request.
+            $stmt = $db->prepare('UPDATE tblErasureRequest SET processedByID = NULL WHERE processedByID = ?');
+            $stmt->bind_param('i', $userId);
+            $stmt->execute();
+            $handled = (int) $stmt->affected_rows;
             $stmt->close();
 
             self::logAudit(
@@ -1156,26 +1537,39 @@ class GdprEraser
                 null,
                 'All ' . $steps . ' steps ran and none failed. The request is closed, and the account number, '
                 . 'name, email address and notes are cleared from it'
-                . ($others === [] ? '.' : ' and from ' . count($others) . ' other waiting request(s) from the same account.')
+                . ($others === [] ? '.' : ' and from ' . count($others) . ' other open request(s) from the same account.')
+                . ($handled === 0 ? '' : ' On ' . $handled . ' other request(s) that this person handled as an '
+                    . 'administrator, who handled it is cleared; those requests are otherwise unchanged.')
             );
-            foreach ($others as $otherId) {
+            foreach ($others as $otherId => $otherSite) {
                 self::logAudit(
                     $db,
                     $otherId,
                     'completed',
                     'tblErasureRequest',
                     null,
-                    'Closed together with erasure request #' . $requestId . ', which erased the same account. '
-                    . 'The steps are listed on that request\'s report.'
+                    $otherSite === $ownSite
+                        ? 'Closed together with erasure request #' . $requestId . ', which erased the same account. '
+                            . 'The steps are listed on that request\'s report.'
+                        // Another organisation's administrator reads this
+                        // line. They cannot open the report of a request
+                        // that is not their organisation's, so they are not
+                        // sent to it, and are not given its number.
+                        : 'Closed: this account was erased under a request handled by another organisation on this '
+                            . 'installation. All ' . $steps . ' steps ran and none failed, so nothing more needs doing '
+                            . 'here. The list of steps is kept by the organisation that handled it.'
                 );
             }
 
-            // Status first, while `userID` can still find the waiting ones.
+            // Status first, while `userID` can still find the open ones.
+            // The administrator is not written down when they ARE the person
+            // being erased: that would put their number straight back.
+            $recordedAdmin = $processedByID === $userId ? null : $processedByID;
             $stmt = $db->prepare(
                 "UPDATE tblErasureRequest SET status = 'completed', processedAt = NOW(), processedByID = ? "
-                . "WHERE requestID = ? OR (userID = ? AND status IN ('pending_confirmation', 'pending_review'))"
+                . "WHERE requestID = ? OR (userID = ? AND status IN ('pending_confirmation', 'pending_review', 'processing'))"
             );
-            $stmt->bind_param('iii', $processedByID, $requestId, $userId);
+            $stmt->bind_param('iii', $recordedAdmin, $requestId, $userId);
             $stmt->execute();
             $stmt->close();
 
@@ -1240,6 +1634,417 @@ class GdprEraser
 
             return '';
         }
+    }
+
+    /**
+     * 💓 Show that this run is still going, about once a minute.
+     *
+     * Refreshes `tblErasureRequest.claimedAt`. That moment is what
+     * putBackStuckRequest() reads to tell a run the web host killed from one
+     * that is still working.
+     *
+     * Counted in exact seconds (PHP's time()), and written as a moment in UTC
+     * (UTC_TIMESTAMP()), so the two nights a year the clocks change cannot
+     * move it. A time on the server's own clock would jump an hour on the
+     * spring night and make a live run look fifteen minutes dead.
+     *
+     * A failure here is swallowed on purpose. This is only a sign of life: if
+     * it cannot be written, the worst outcome is that the request can be put
+     * back a little sooner, and every step is safe to repeat. Stopping an
+     * erasure half way because its heartbeat failed would be far worse. (A
+     * database not yet upgraded to migration 208 has no such column, and the
+     * erasure page refuses to start a run there in the first place.)
+     *
+     * @param int $lastBeat When the last sign of life was written (time()).
+     *
+     * @return int When the most recent one was written.
+     */
+    private static function stillGoing(\mysqli $db, int $requestId, int $lastBeat): int
+    {
+        if (time() - $lastBeat < 60) {
+            return $lastBeat;
+        }
+        try {
+            $stmt = $db->prepare("UPDATE tblErasureRequest SET claimedAt = UTC_TIMESTAMP() WHERE requestID = ? AND status = 'processing'");
+            if ($stmt !== false) {
+                $stmt->bind_param('i', $requestId);
+                $stmt->execute();
+                $stmt->close();
+            }
+        } catch (\Throwable $e) {
+            error_log('[WebMS-Intra] GdprEraser: could not refresh the sign of life for erasure #' . $requestId . ': ' . $e->getMessage());
+        }
+
+        return time();
+    }
+
+    /**
+     * ↩️ Put back a request that is stuck at "processing" because its run
+     *    stopped without finishing (the web host killed the page, say).
+     *
+     * Until 11 October 2026 nothing in the portal could do this. The erasure
+     * page only runs a request that is at "pending review", so a stuck one
+     * stayed stuck until somebody edited the database by hand.
+     *
+     * It is put back ONLY when all of this is true, checked by the database
+     * in one statement so that two administrators cannot both succeed:
+     *   - it belongs to the organisation given (another organisation's
+     *     request is "not found", never "not yours");
+     *   - it is at "processing";
+     *   - it has shown no sign of a run for STUCK_AFTER_MINUTES. An empty
+     *     `claimedAt` counts as "no run": that is every request that was
+     *     already stuck before this column existed.
+     *
+     * Both sides of that comparison are moments in UTC; see stillGoing() for
+     * why not the server's clock.
+     *
+     * Putting it back and the audit line that says so are saved together or
+     * not at all. Nothing is erased or un-erased here: every step of a run is
+     * safe to repeat, so the next run simply does whatever is left.
+     *
+     * What this cannot do: prove that no run is going. A run that went a
+     * full quarter of an hour without finishing one step would look dead. If
+     * that ever happened and the request were run again, two runs would do
+     * the same repeatable steps; nothing would be lost, but two closing lines
+     * would be written.
+     *
+     * @return string 'put-back' when it was put back; otherwise why not:
+     *   'not-found', 'not-processing' or 'still-going'.
+     *
+     * @throws \Throwable If the database refuses. Nothing is then changed.
+     */
+    public static function putBackStuckRequest(int $requestId, int $siteId): string
+    {
+        $db = App::db();
+
+        $moved = self::asOneStep($db, static function () use ($db, $requestId, $siteId): bool {
+            $stmt = $db->prepare(
+                "UPDATE tblErasureRequest SET status = 'pending_review', claimedAt = NULL "
+                . "WHERE requestID = ? AND siteID = ? AND status = 'processing' "
+                . 'AND (claimedAt IS NULL OR claimedAt < DATE_SUB(UTC_TIMESTAMP(), INTERVAL '
+                . self::STUCK_AFTER_MINUTES . ' MINUTE))'
+            );
+            if ($stmt === false) {
+                throw new \RuntimeException('the request could not be put back: ' . $db->error);
+            }
+            $stmt->bind_param('ii', $requestId, $siteId);
+            $stmt->execute();
+            $moved = (int) $stmt->affected_rows === 1;
+            $stmt->close();
+
+            if ($moved === true) {
+                self::logAudit(
+                    $db,
+                    $requestId,
+                    'put-back',
+                    'tblErasureRequest',
+                    null,
+                    'Put back to pending review by an administrator. It had been at "processing" with no sign of a '
+                    . 'run for more than ' . self::STUCK_AFTER_MINUTES . ' minutes, which means its run stopped before '
+                    . 'it finished. Nothing was erased or undone by this. Every step is safe to repeat, so running the '
+                    . 'request again does whatever is left.'
+                );
+            }
+
+            return $moved;
+        });
+        if ($moved === true) {
+            return 'put-back';
+        }
+
+        // It was not put back. Say why, from the request as it really is.
+        $stmt = $db->prepare('SELECT status FROM tblErasureRequest WHERE requestID = ? AND siteID = ? LIMIT 1');
+        if ($stmt === false) {
+            throw new \RuntimeException('the request could not be read: ' . $db->error);
+        }
+        $stmt->bind_param('ii', $requestId, $siteId);
+        $stmt->execute();
+        $row = $stmt->get_result()->fetch_row();
+        $stmt->close();
+        if ($row === null) {
+            return 'not-found';
+        }
+
+        return (string) $row[0] === 'processing' ? 'still-going' : 'not-processing';
+    }
+
+    /**
+     * 📨 File an erasure request for a signed-in person.
+     *
+     * THE ONE WAY A REQUEST IS FILED. Two pages offer it - "Request data
+     * erasure" (/account/erasure-request) and "Delete my account"
+     * (/account/delete/confirm) - and both call this, so they cannot drift
+     * apart.
+     *
+     * 🛑 "Delete my account" used to be a SECOND way to empty an account. It
+     *    ran its own short list of statements and never touched this class,
+     *    so it was reviewed by nobody, wrote no audit trail, and left behind
+     *    everything its list did not name. Salem874 decided on 11 October
+     *    2026 that there is one route only: that page now files a request
+     *    here, like any other, and an administrator's run of the request
+     *    (execute()) is the only thing that ever empties an account.
+     *
+     * HOW A REQUEST GETS CONFIRMED. Before an administrator can run a
+     * request, somebody has to have confirmed that it really is the
+     * person's. There are three ways, and only three:
+     *
+     *   1. $alreadyConfirmed = false (the "Request data erasure" page). The
+     *      request starts at "pending confirmation" and the person is
+     *      emailed a link; clicking it (/account/erasure-confirm) moves the
+     *      request to "pending review".
+     *   2. $alreadyConfirmed = true ("Delete my account"). On that page the
+     *      person is signed in and has just typed DELETE MY ACCOUNT, and
+     *      that IS the confirmation (Salem874, 11 October 2026). The request
+     *      starts at "pending review", with the moment it was confirmed, and
+     *      NO email is sent: there is nothing left to confirm. Pass true
+     *      only from a page that has itself checked such a typed phrase.
+     *   3. confirmOnBehalf(): an administrator, for a request stuck at way 1
+     *      because the email never arrived.
+     *
+     * What this cannot do: with way 1, if the email cannot be sent the
+     * request waits until an administrator confirms it (way 3); `mailed`
+     * says which happened so the page can tell the person the truth. It
+     * also does not stop somebody filing twice; closeRequest() closes any
+     * extra ones when the first is carried out.
+     *
+     * @param bool $alreadyConfirmed See "HOW A REQUEST GETS CONFIRMED".
+     *
+     * @return array{requestID: int, email: string, mailed: bool, confirmed: bool}
+     *   `email` is the address on the account now. `mailed`: the
+     *   confirmation link was sent to it (always false when `confirmed`).
+     *
+     * @throws \RuntimeException When the account cannot be found or the
+     *   request cannot be saved. Nothing is then filed.
+     */
+    public static function fileRequest(int $siteId, int $userId, bool $alreadyConfirmed = false): array
+    {
+        $db = App::db();
+
+        $stmt = $db->prepare('SELECT fullName, emailAddress FROM tblUsers WHERE userID = ? LIMIT 1');
+        if ($stmt === false) {
+            throw new \RuntimeException('the account could not be read: ' . $db->error);
+        }
+        $stmt->bind_param('i', $userId);
+        $stmt->execute();
+        $user = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+        if ($user === null) {
+            throw new \RuntimeException('there is no account #' . $userId . ' to file an erasure request for');
+        }
+        $email = (string) $user['emailAddress'];
+        $name  = (string) ($user['fullName'] ?? '');
+        // A confirmed request carries no token: there is no link to click,
+        // and a token left on it would be a second, unneeded way in.
+        $token  = $alreadyConfirmed === true ? null : bin2hex(random_bytes(32));
+        $status = $alreadyConfirmed === true ? 'pending_review' : 'pending_confirmation';
+
+        $stmt = $db->prepare(
+            'INSERT INTO tblErasureRequest (siteID, userID, subjectEmail, subjectName, confirmToken, status, confirmedAt, dueBy) '
+            . 'VALUES (?, ?, ?, ?, ?, ?, IF(? = 1, NOW(), NULL), DATE_ADD(NOW(), INTERVAL 1 MONTH))'
+        );
+        if ($stmt === false) {
+            throw new \RuntimeException('the erasure request could not be saved: ' . $db->error);
+        }
+        $confirmedFlag = $alreadyConfirmed === true ? 1 : 0;
+        $stmt->bind_param('iissssi', $siteId, $userId, $email, $name, $token, $status, $confirmedFlag);
+        $stmt->execute();
+        $requestId = (int) $stmt->insert_id;
+        $stmt->close();
+
+        if ($alreadyConfirmed === true) {
+            return ['requestID' => $requestId, 'email' => $email, 'mailed' => false, 'confirmed' => true];
+        }
+
+        // The link goes back to the address the person is using right now.
+        // No address is built in: with no host to go by, no link is sent.
+        $mailed = false;
+        $host   = (string) ($_SERVER['HTTP_HOST'] ?? '');
+        if ($host !== '') {
+            $https      = (string) ($_SERVER['HTTPS'] ?? '');
+            $scheme     = ($https !== '' && $https !== 'off') ? 'https' : 'http';
+            $confirmUrl = $scheme . '://' . $host . '/account/erasure-confirm?token=' . $token;
+            $body = '<p>Hi ' . htmlspecialchars($name, ENT_QUOTES, 'UTF-8') . ',</p>'
+                . '<p>We received a request to erase your personal data on the portal.</p>'
+                . '<p>If this was you, click below to confirm. The link expires in 24 hours.</p>'
+                . '<p><a href="' . htmlspecialchars($confirmUrl, ENT_QUOTES, 'UTF-8') . '">Confirm erasure request</a></p>'
+                . '<p>Nothing is erased until you confirm and an administrator has reviewed the request. '
+                . 'Until then your account carries on working as it does now.</p>'
+                . '<p>If you didn\'t make this request you can safely ignore this email.</p>';
+            try {
+                $mailed = Mailer::send($email, 'Confirm your data erasure request', $body) === true;
+            } catch (\Throwable $e) {
+                // The request is saved either way; the caller tells the
+                // person that the email did not go.
+                error_log('[WebMS-Intra] GdprEraser: the confirmation email for erasure #' . $requestId . ' could not be sent: ' . $e->getMessage());
+            }
+        }
+
+        return ['requestID' => $requestId, 'email' => $email, 'mailed' => $mailed, 'confirmed' => false];
+    }
+
+    /**
+     * 🔎 The person's own request at this organisation that is already on its
+     *    way to an administrator, if there is one.
+     *
+     * "On its way" means confirmed and not yet finished: at "pending review"
+     * or "processing". One still waiting for its emailed link does not count;
+     * it may never be confirmed.
+     *
+     * For "Delete my account". A second press of its button (a double-click,
+     * or the Back button) used to file a second request, or, worse, to answer
+     * "Nothing was changed. Please try again." about a press that HAD filed
+     * one: the form token is used up by the first press, so the second fails
+     * its token test. The page asks this first and says "already recorded".
+     *
+     * Reads only. It is given the signed-in person's own number by the page.
+     *
+     * @return int|null The newest such request's number, or null.
+     */
+    public static function openRequestFor(int $siteId, int $userId): ?int
+    {
+        $stmt = App::db()->prepare(
+            "SELECT requestID FROM tblErasureRequest WHERE siteID = ? AND userID = ? "
+            . "AND status IN ('pending_review', 'processing') ORDER BY requestID DESC LIMIT 1"
+        );
+        if ($stmt === false) {
+            return null;
+        }
+        $stmt->bind_param('ii', $siteId, $userId);
+        $stmt->execute();
+        $row = $stmt->get_result()->fetch_row();
+        $stmt->close();
+
+        return $row === null ? null : (int) $row[0];
+    }
+
+    /**
+     * ✅ Confirm a waiting request on the person's behalf (an administrator).
+     *
+     * A request filed from "Request data erasure" waits at "pending
+     * confirmation" until the person clicks the link emailed to them. If that
+     * email could not be sent, or never arrived, nobody could move the
+     * request on: the page told the person to ask an administrator, and an
+     * administrator had no way to help. This is that way.
+     *
+     * The email step exists to show the request really is the person's. An
+     * administrator who confirms in its place is saying THEY have checked
+     * that, and the audit trail records exactly that claim and who made it,
+     * by account number. It records the claim; it cannot test it.
+     *
+     * Done only when, in one statement:
+     *   - the request belongs to the organisation given (another
+     *     organisation's is "not found", never "not yours");
+     *   - it is still at "pending confirmation".
+     * The change and its audit line are saved together or not at all. The
+     * emailed link stops working, because the token is cleared.
+     *
+     * What this cannot do: carry the request out. It moves it to "pending
+     * review", where an administrator still has to press Execute. And the
+     * administrator's account number stays in this audit line even if that
+     * administrator is later erased: the trail is sealed, so no line in it
+     * is ever rewritten.
+     *
+     * @return string 'confirmed'; otherwise why not: 'not-found' or
+     *   'not-waiting'.
+     *
+     * @throws \Throwable If the database refuses. Nothing is then changed.
+     */
+    public static function confirmOnBehalf(int $requestId, int $siteId, int $adminId): string
+    {
+        $db = App::db();
+
+        $confirmed = self::asOneStep($db, static function () use ($db, $requestId, $siteId, $adminId): bool {
+            $stmt = $db->prepare(
+                "UPDATE tblErasureRequest SET status = 'pending_review', confirmedAt = NOW(), confirmToken = NULL "
+                . "WHERE requestID = ? AND siteID = ? AND status = 'pending_confirmation'"
+            );
+            if ($stmt === false) {
+                throw new \RuntimeException('the request could not be confirmed: ' . $db->error);
+            }
+            $stmt->bind_param('ii', $requestId, $siteId);
+            $stmt->execute();
+            $confirmed = (int) $stmt->affected_rows === 1;
+            $stmt->close();
+
+            if ($confirmed === true) {
+                self::logAudit(
+                    $db,
+                    $requestId,
+                    'confirmed-on-behalf',
+                    'tblErasureRequest',
+                    null,
+                    'Confirmed on the person\'s behalf by the administrator with account #' . $adminId . ', who states that '
+                    . 'they checked the person\'s identity and that the request is the person\'s own. The person did not '
+                    . 'confirm it from the link emailed to them. Nothing has been erased by this: the request is now at '
+                    . 'pending review, and an administrator still has to run it.'
+                );
+            }
+
+            return $confirmed;
+        });
+        if ($confirmed === true) {
+            return 'confirmed';
+        }
+
+        $stmt = $db->prepare('SELECT status FROM tblErasureRequest WHERE requestID = ? AND siteID = ? LIMIT 1');
+        if ($stmt === false) {
+            throw new \RuntimeException('the request could not be read: ' . $db->error);
+        }
+        $stmt->bind_param('ii', $requestId, $siteId);
+        $stmt->execute();
+        $row = $stmt->get_result()->fetch_row();
+        $stmt->close();
+
+        return $row === null ? 'not-found' : 'not-waiting';
+    }
+
+    /**
+     * 💬 What to tell somebody straight after their request has been filed.
+     *
+     * One place for the words, for both pages that file a request. Each of
+     * the three messages says what has happened, what (if anything) the
+     * person has to do, and that NOTHING IS ERASED YET - the old "Delete my
+     * account" page emptied the account on the spot and signed the person
+     * out, and somebody used to that must not think it has just happened
+     * again.
+     *
+     * @param array{requestID: int, email: string, mailed: bool, confirmed: bool} $filed
+     *   What fileRequest() returned.
+     *
+     * @return array{message: string, type: string} `type` is the colour of
+     *   the message box: 'info' or 'warning'.
+     */
+    public static function whatHappensNext(array $filed): array
+    {
+        if ($filed['confirmed'] === true) {
+            // "Delete my account": confirmed by the typed phrase, so there
+            // is no email and nothing more for the person to do.
+            return [
+                'type'    => 'info',
+                'message' => 'Your request is recorded, and nothing has been erased yet. You confirmed it by typing '
+                    . 'the words, so there is no email to wait for and nothing more for you to do. An administrator '
+                    . 'now reviews the request and carries it out, within one month. Until that happens your account '
+                    . 'works exactly as it does now.',
+            ];
+        }
+        if ($filed['mailed'] === true) {
+            return [
+                'type'    => 'info',
+                'message' => 'Your request is recorded, and nothing has been erased yet. We have sent an email to '
+                    . $filed['email'] . ': open it and click the link within 24 hours to confirm that the request is '
+                    . 'yours. An administrator then reviews it and carries it out, within one month. Until that '
+                    . 'happens your account works exactly as it does now.',
+            ];
+        }
+
+        return [
+            'type'    => 'warning',
+            'message' => 'Your request is recorded, but the email asking you to confirm it could not be sent to '
+                . $filed['email'] . ', so it is waiting. Nothing has been erased and your account works exactly as it '
+                . 'does now. Please ask an administrator to confirm it for you: they can do that from their list of '
+                . 'erasure requests, once they have checked that the request is yours. Tell them it is erasure '
+                . 'request #' . $filed['requestID'] . '.',
+        ];
     }
 
     /** One plain sentence saying where a request was left, from its real status. */
@@ -1632,6 +2437,11 @@ class GdprEraser
                     $sets[] = '`' . $c . "` = '" . $db->real_escape_string($v) . "'";
                 }
             }
+            // Extra fixed pieces written in catalogue() (see the `sqlSets`
+            // note there). Added exactly as written: never built from input.
+            foreach ((array) ($entry['sqlSets'] ?? []) as $piece) {
+                $sets[] = (string) $piece;
+            }
             // For tblUsers, the user-row anonymisation also nulls the email/etc.
             if ($table === 'tblUsers') {
                 $sets[] = "`emailAddress` = '" . $db->real_escape_string(str_replace('{rid}', (string) $requestId, self::TOMBSTONE_EMAIL)) . "'";
@@ -1816,21 +2626,40 @@ class GdprEraser
     }
 
     /**
-     * #234 — scrub the erased user's address out of `tblEmailLog.
-     * toRecipients`. Not a catalogue() entry: that column is a
-     * comma-joined free-text address LIST (one send can have many
-     * recipients), not a single `userCol` FK the generic anonymise/delete
-     * actions can target — this bespoke sweep does a targeted
-     * substring REPLACE instead, mirroring
-     * eraseGivingStatementFiles()'s "PII column scrubbed, row + other
-     * columns (provider/status/subject/httpCode) retained for the audit
-     * trail" convention immediately above.
+     * 📧 #234 — take the erased person's address out of the email send log
+     *    (`tblEmailLog.toRecipients`).
+     *
+     * Not a catalogue() entry: that column is a list of addresses separated
+     * by commas (one send can have many recipients, see Mailer), not a single
+     * account number the generic instructions can match. The row and its
+     * other columns (provider, status, subject, HTTP code) are kept.
+     *
+     * ONLY AN ENTRY THAT IS EXACTLY THIS ADDRESS IS REPLACED.
+     *
+     * 🛑 It used to run one statement over the whole table:
+     *    `REPLACE(toRecipients, address, '[erased]') WHERE toRecipients LIKE
+     *    '%address%'`. That replaced the text wherever it appeared, including
+     *    inside a longer address: erasing `ann@x.org` turned somebody else's
+     *    `joann@x.org` into `jo[erased]`. And because `_` and `%` mean "any
+     *    character" in a LIKE, an address containing one also matched
+     *    look-alikes. A third person's address was being damaged on a request
+     *    that was never theirs.
+     *
+     * Now the LIKE is only a first filter (with those characters escaped) to
+     * avoid reading the whole log. Each candidate list is split on commas
+     * here, and an entry is replaced only when, with the spaces around it
+     * removed, it equals the address. Capital letters are ignored, as they
+     * are when mail is delivered. Each changed row is written back by its
+     * own key.
      *
      * The address comes from execute(), which reads it before the table walk
      * empties it (see addressToScrub()).
      *
      * Exactly one audit line, including when there was nothing to do. A
-     * failed update is a FAILED step, not a crash.
+     * failed read or update is a FAILED step, not a crash.
+     *
+     * What this cannot do: an entry written as `Name <address>` is not
+     * matched. Mailer writes plain addresses only, so none is expected.
      *
      * @return string One of the STEP_ constants.
      */
@@ -1844,20 +2673,59 @@ class GdprEraser
             return self::STEP_UNCHANGED;
         }
 
-        $like        = '%' . $email . '%';
+        // `\`, `%` and `_` are escaped so the filter looks for the address as
+        // written. (Backslash is the LIKE escape character unless a server
+        // has NO_BACKSLASH_ESCAPES switched on; the exact comparison below is
+        // what decides, so a filter that is too wide costs time, not
+        // correctness.)
+        $like        = '%' . addcslashes($email, '\\%_') . '%';
+        $wanted      = mb_strtolower($email);
         $replacement = '[erased]';
 
         $affected = 0;
         $problem  = null;
         try {
-            $stmt = $db->prepare('UPDATE tblEmailLog SET toRecipients = REPLACE(toRecipients, ?, ?) WHERE toRecipients LIKE ?');
-            if ($stmt === false) {
+            $read = $db->prepare('SELECT emailLogID, toRecipients FROM tblEmailLog WHERE toRecipients LIKE ?');
+            if ($read === false) {
                 $problem = (string) $db->error;
             } else {
-                $stmt->bind_param('sss', $email, $replacement, $like);
-                $stmt->execute();
-                $affected = (int) $stmt->affected_rows;
-                $stmt->close();
+                $read->bind_param('s', $like);
+                $read->execute();
+                $candidates = $read->get_result()->fetch_all(MYSQLI_ASSOC);
+                $read->close();
+
+                $write = null;
+                foreach ($candidates as $row) {
+                    $entries = explode(',', (string) $row['toRecipients']);
+                    $changed = false;
+                    foreach ($entries as $i => $entry) {
+                        $bare = trim($entry);
+                        if ($bare !== '' && mb_strtolower($bare) === $wanted) {
+                            // Keeps whatever spaces were around the entry, so
+                            // the rest of the list reads exactly as before.
+                            $entries[$i] = str_replace($bare, $replacement, $entry);
+                            $changed     = true;
+                        }
+                    }
+                    if ($changed === false) {
+                        continue; // a longer address that merely contains it
+                    }
+                    if ($write === null) {
+                        $write = $db->prepare('UPDATE tblEmailLog SET toRecipients = ? WHERE emailLogID = ?');
+                        if ($write === false) {
+                            $problem = (string) $db->error;
+                            break;
+                        }
+                    }
+                    $list = implode(',', $entries);
+                    $id   = (int) $row['emailLogID'];
+                    $write->bind_param('si', $list, $id);
+                    $write->execute();
+                    $affected++;
+                }
+                if ($write instanceof \mysqli_stmt) {
+                    $write->close();
+                }
             }
         } catch (\Throwable $e) {
             $problem = $e->getMessage();
@@ -1875,6 +2743,223 @@ class GdprEraser
         self::logAudit($db, $requestId, 'none', 'tblEmailLog', null, 'the send log holds no message to this person\'s address');
 
         return self::STEP_UNCHANGED;
+    }
+
+    /**
+     * 🖼️ The person's photo: delete the image file, then empty the two columns
+     *    on their account that say where it is (`avatarPath`, `displayPhoto`).
+     *
+     * Until 11 October 2026 an erasure left both columns, and any file they
+     * named, exactly as they were, on an account that otherwise named nobody.
+     *
+     * WHY THIS IS A STEP OF ITS OWN and not two more columns on the account
+     * instruction. Emptying a column is the easy half. If the column were
+     * emptied first and the file then could not be deleted, the photo would
+     * still be on disk with nothing left pointing at it, and the next run
+     * could not find it. So here the file goes first, and a column is
+     * emptied only once its file is dealt with. A file that cannot be dealt
+     * with is a FAILED step: both columns stay, the request is not closed,
+     * and the next run finds the file again.
+     *
+     * WHAT IT WILL DELETE, AND WHAT IT REFUSES TO. A path stored in a
+     * database column is not to be trusted with the right to delete files.
+     * So a file is deleted only when ALL of this is true:
+     *   - it is a real file inside this portal's own `_uploads` folder, after
+     *     every `..` and shortcut in the path has been followed;
+     *   - its name ends like an image (PROFILE_IMAGE_TYPES);
+     *   - no OTHER account names the same file. Then it is somebody else's
+     *     photo as well: it is kept, and only this person's link goes.
+     * A file that exists anywhere else (the portal's code, the web folder,
+     * another person's giving statement) is never deleted here. It is
+     * reported as a failed step so that a person looks at it.
+     *
+     * An address on another service (the picture a Microsoft or Google
+     * sign-in supplies) is not a file on this server. The link is emptied
+     * and nothing is deleted.
+     *
+     * What this cannot do: delete a photo held by that other service; find a
+     * copy of the file that some other page made; or delete a file that
+     * lives outside `_uploads`. It notices another account using the same
+     * file only when that account's column holds exactly the same text; the
+     * same file written two ways (`a.jpg` and `_uploads/a.jpg`) would not be
+     * noticed. And today NO PAGE IN THE PORTAL STORES A
+     * PHOTO FILE AT ALL: `avatarPath` is only ever filled with an address by
+     * single sign-on, and nothing writes `displayPhoto`. This step is ready
+     * for the day one does, and for a path put there by hand or by an import.
+     *
+     * Exactly one audit line. It never contains the path, which may itself
+     * spell the person's name.
+     *
+     * @return string One of the STEP_ constants.
+     */
+    private static function eraseProfileImages(int $requestId, int $userId): string
+    {
+        $db = App::db();
+
+        $deleted = 0; // files removed from disk
+        $shared  = 0; // files kept because another account uses them too
+        $links   = 0; // columns that named something and are now emptied
+        $problem = null;
+
+        try {
+            $stmt = $db->prepare('SELECT avatarPath, displayPhoto FROM tblUsers WHERE userID = ? LIMIT 1');
+            if ($stmt === false) {
+                throw new \RuntimeException((string) $db->error);
+            }
+            $stmt->bind_param('i', $userId);
+            $stmt->execute();
+            $row = $stmt->get_result()->fetch_assoc() ?? [];
+            $stmt->close();
+
+            // Each stored value once, even when both columns hold the same.
+            $values = array_values(array_unique(array_filter(
+                [trim((string) ($row['avatarPath'] ?? '')), trim((string) ($row['displayPhoto'] ?? ''))],
+                static fn (string $value): bool => $value !== ''
+            )));
+            $links = count(array_filter(
+                [$row['avatarPath'] ?? null, $row['displayPhoto'] ?? null],
+                static fn ($value): bool => $value !== null
+            ));
+
+            foreach ($values as $value) {
+                $found = self::locateProfileImage($value);
+                if ($found['where'] === 'elsewhere') {
+                    throw new \RuntimeException(
+                        'this account\'s photo points at a file that exists but is not an image in the portal\'s '
+                        . 'uploads folder, so it was not deleted. Somebody needs to look at it: remove the file by '
+                        . 'hand if it is the person\'s photo, then run the request again'
+                    );
+                }
+                if ($found['where'] !== 'uploads') {
+                    continue; // an address on another service, or no file at all
+                }
+
+                // Is it somebody else's photo too?
+                $stmt = $db->prepare('SELECT COUNT(*) FROM tblUsers WHERE userID <> ? AND (avatarPath = ? OR displayPhoto = ?)');
+                if ($stmt === false) {
+                    throw new \RuntimeException((string) $db->error);
+                }
+                $stmt->bind_param('iss', $userId, $value, $value);
+                $stmt->execute();
+                $alsoUsed = (int) ($stmt->get_result()->fetch_row()[0] ?? 0);
+                $stmt->close();
+                if ($alsoUsed > 0) {
+                    $shared++;
+                    continue;
+                }
+
+                if (@unlink($found['path']) === false) {
+                    throw new \RuntimeException('this account\'s photo file could not be deleted and is still on disk');
+                }
+                $deleted++;
+            }
+
+            if ($links > 0) {
+                $stmt = $db->prepare('UPDATE tblUsers SET avatarPath = NULL, displayPhoto = NULL WHERE userID = ?');
+                if ($stmt === false) {
+                    throw new \RuntimeException((string) $db->error);
+                }
+                $stmt->bind_param('i', $userId);
+                $stmt->execute();
+                $stmt->close();
+            }
+        } catch (\Throwable $e) {
+            $problem = $e->getMessage();
+        }
+
+        // Not a real table name, like 'GivingStatementPdfFiles' above.
+        if ($problem !== null) {
+            self::logAudit($db, $requestId, 'failed', 'ProfileImageFiles', (string) $deleted . ' file(s)', mb_substr($problem . '. The links to it are left on the account so the next run can find it.', 0, 400));
+
+            return self::STEP_FAILED;
+        }
+        if ($links === 0) {
+            self::logAudit($db, $requestId, 'none', 'ProfileImageFiles', null, 'the account names no photo');
+
+            return self::STEP_UNCHANGED;
+        }
+        self::logAudit(
+            $db,
+            $requestId,
+            $deleted > 0 ? 'delete' : 'anonymise',
+            'ProfileImageFiles',
+            (string) $deleted . ' file(s)',
+            'the account\'s photo: ' . $deleted . ' image file(s) deleted from the uploads folder; the links to a photo '
+            . 'are emptied on the account'
+            . ($shared === 0 ? '' : '; ' . $shared . ' file(s) kept because another account uses the same one')
+            . ($deleted === 0 && $shared === 0
+                ? '. No file was found in the uploads folder (the photo was an address on another service, or its file '
+                    . 'was already gone)'
+                : '')
+        );
+
+        return self::STEP_CHANGED;
+    }
+
+    /**
+     * 📂 The endings a profile photo's file name may have. A file with any
+     *    other ending is never deleted by eraseProfileImages(), whatever a
+     *    column says, so a path that wanders onto a document or a statement
+     *    cannot take it with it.
+     *
+     * @var string[]
+     */
+    private const PROFILE_IMAGE_TYPES = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'avif', 'bmp', 'heic', 'svg'];
+
+    /**
+     * 🔎 Work out what a stored photo value points at. Deletes nothing.
+     *
+     * @return array{where: string, path: string} `where` is one of:
+     *   'remote'    an address on another service (anything with a scheme,
+     *               or starting `//`);
+     *   'uploads'   an image file inside this portal's `_uploads` folder:
+     *               `path` is its real location, and it may be deleted;
+     *   'elsewhere' a file that exists but is not that. Never deleted;
+     *   'missing'   nothing was found.
+     */
+    private static function locateProfileImage(string $value): array
+    {
+        if (preg_match('#^(?:[a-z][a-z0-9+.\-]*:|//)#i', $value) === 1) {
+            return ['where' => 'remote', 'path' => ''];
+        }
+
+        $relative = ltrim(str_replace('\\', '/', $value), '/');
+        $uploads  = realpath(PORTAL_ROOT . DIRECTORY_SEPARATOR . '_uploads');
+        if ($relative === '' || str_contains($relative, "\0") === true) {
+            return ['where' => 'missing', 'path' => ''];
+        }
+        $relative = str_replace('/', DIRECTORY_SEPARATOR, $relative);
+
+        // Where the value could mean. `displayPhoto` is a path under
+        // `_uploads`; `avatarPath` is a path under the web folder (Avatar).
+        // The web folder is looked in ONLY to notice a file that is there:
+        // nothing in it is ever deleted.
+        $candidates = [
+            PORTAL_ROOT . DIRECTORY_SEPARATOR . '_uploads' . DIRECTORY_SEPARATOR . $relative,
+            PORTAL_ROOT . DIRECTORY_SEPARATOR . $relative,
+        ];
+        $webFolder = (string) ($_SERVER['DOCUMENT_ROOT'] ?? '');
+        if ($webFolder !== '') {
+            $candidates[] = rtrim($webFolder, '/\\') . DIRECTORY_SEPARATOR . $relative;
+        }
+
+        $elsewhere = false;
+        foreach ($candidates as $candidate) {
+            // realpath() follows every `..` and shortcut, so what is tested
+            // below is where the file REALLY is, not what the text says.
+            $real = realpath($candidate);
+            if ($real === false || is_file($real) === false) {
+                continue;
+            }
+            $isImage   = in_array(strtolower(pathinfo($real, PATHINFO_EXTENSION)), self::PROFILE_IMAGE_TYPES, true);
+            $inUploads = $uploads !== false && str_starts_with($real, $uploads . DIRECTORY_SEPARATOR) === true;
+            if ($isImage === true && $inUploads === true) {
+                return ['where' => 'uploads', 'path' => $real];
+            }
+            $elsewhere = true;
+        }
+
+        return ['where' => $elsewhere === true ? 'elsewhere' : 'missing', 'path' => ''];
     }
 
     /**

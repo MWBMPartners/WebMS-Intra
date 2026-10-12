@@ -4336,10 +4336,98 @@ audit trail cannot be written the run stops and throws.
   give it a throwaway MySQL database built from `full_schema.sql`, named
   `selftest_…`, through `SELFTEST_DB_PORT`, `SELFTEST_DB_PASS` and
   `SELFTEST_DB_NAME`. Run it after any change to the catalogue or the
-  eraser. Proven on MySQL 8.0.36 only.
-- **Still not handled:** a second person column no instruction matches on
-  (#492), names typed as free text, and twelve tables that link to an
-  account but are not in the catalogue.
+  eraser, as an ordinary user (not root). Proven on MySQL 8.0.36 and 8.4.11.
+- **Three tests, run them together.** The third is
+  `tools/erasure-pages-selftest.php`, which drives the real pages (same
+  environment variables, plus `SELFTEST_WEB_DIR` for its scratch copy).
+  The real-database test alone passes when an instruction wrongly deletes on
+  a "who did it" column; only the coverage test catches that.
+- **Still not handled:** names typed as free text, and ONE place pinned by
+  name in the real-database test (`TEXT_THAT_CAN_HOLD_AN_ACCOUNT_NUMBER`):
+  `tblWorkflowSteps.assigneeValue`, the account number of the one named
+  person an approval step is given to. What that step should become when
+  the person is erased needs a decision. (#492 was 37 columns on 11 October
+  2026; all 37 are now built. `tblInvitation.acceptedByID` is the invited
+  person's own account, so an accepted invitation is deleted with them.)
+- **The test finds person columns three ways:** by `GdprEraser::LINK_COLUMNS`,
+  by the database's links to `tblUsers`, and by the shape of the column's
+  name (`PERSON_COLUMN_SHAPE`). The third was added after three columns with
+  no link and no place on the list were found by hand. A new column with a
+  person-shaped name must be dealt with or added to the test's list of
+  look-alikes, with its reason.
+- **An erasure does not end an open session.** Sessions are PHP's own files;
+  `Auth::check()` only asks whether the session holds an account number. To
+  end an erased (or deactivated) person's session, `Auth::check()` would have
+  to confirm, once per request, that `tblUsers.isActive` is still 1 for that
+  number and destroy the session when it is not. That change runs on every
+  page, so it belongs in an access package, not here.
+
+#### Other people's records, and one route to an erasure (roll-out package A2a, 11 October 2026)
+
+- **A record is deleted only when it is ABOUT the erased person.** Being
+  GIVEN a record (`assignedToID`) or being who a request is aimed at
+  (`targetUserID`) is not that. Both names are in
+  `GdprEraser::ACTOR_COLUMNS`, so a delete on either is refused by
+  construction. They used to be classed as "about the person", and erasing
+  a follow-up worker deleted the visitors, salvation cards, tasks and rota
+  slots given to them. Do not move them back.
+- **One instruction per person column (#492).** An instruction matches rows
+  on ONE column. For a table the eraser handles from the written list, every
+  person column named in `personal-data-catalogue.php` gets its own
+  instruction: name the column there and it is dealt with; leave it out and
+  it is not looked at. For a table with hand-written lines in
+  `GdprEraser::catalogue()`, write one line per column. Never put a second
+  person column in an instruction's `nullCols`: that empties it only on rows
+  that also match the first column. The coverage test fails on either slip.
+- **A table that may be deleted on a "who did it" column** (a child's event
+  registration, on who submitted it) must be hand-written once it has a
+  second such column. The derived route picks the column to delete on by its
+  place in `LINK_COLUMNS`, and would have picked who REVIEWED the
+  registration. The coverage test names the one column each such table may
+  be deleted on.
+- **A kept ("retain") table** may carry one other kind of instruction: one
+  that empties a single "who did it" column and nothing else (who typed in a
+  DBS check, who ran a giving statement). The coverage test allows exactly
+  that and nothing wider.
+- **`sqlSets`** on an instruction adds a fixed piece of SQL to its UPDATE.
+  One use: a swap request still waiting is cancelled. The text goes into the
+  statement as written, so it must never come from input; the coverage test
+  holds the list to exactly that one.
+- **`tblErasureRequest.claimedAt` is a moment in UTC.** Execute writes it
+  with `UTC_TIMESTAMP()`, a run refreshes it about once a minute, and
+  `GdprEraser::putBackStuckRequest()` compares it with `UTC_TIMESTAMP()`.
+  Never `NOW()`: the server's own clock jumps an hour twice a year, and on
+  the spring night that would let a request be put back while still running.
+  The coverage test fails on any other clock.
+- **One way to file a request: `GdprEraser::fileRequest()`.** Both
+  `/account/erasure-request` and `/account/delete/confirm` call it. "Delete
+  my account" used to empty the account itself with its own short list; it
+  must never write to an account table again (the coverage test checks).
+- **Three ways a request gets confirmed, and only three.** The emailed link
+  ("Request data erasure"); the typed phrase ("Delete my account", which
+  passes `true` to `fileRequest()` so the request starts at "pending review"
+  and no email is sent); and `GdprEraser::confirmOnBehalf()`, the
+  administrator's button for a request whose email never arrived. Only a
+  page that has itself checked a typed phrase may pass `true`; the coverage
+  test holds the callers to exactly those two pages.
+- **`calendarToken` is cleared on erasure.** `Portal\Core\Ical` looks an
+  account up by that key without asking whether the account is active, so a
+  key left on an emptied account kept the feed address working.
+- **The person's photo.** `eraseProfileImages()` deletes a file only when it
+  is an image inside `_uploads` that no other account also names, and only
+  then empties `avatarPath` and `displayPhoto`. Those two columns are NOT in
+  the account instruction's list on purpose: emptying the link before the
+  file is gone would orphan the file. Today no page stores a photo file
+  (`avatarPath` is only ever an address from single sign-on; nothing writes
+  `displayPhoto`), so this is exercised by the test's own files.
+- **Two named lists in the real-database test** say where a delete is
+  allowed to reach a kept table: `CASCADES_INTO_KEPT_TABLES` (a person's own
+  visitor record takes its notes; their own Zoom connection takes its
+  meetings) and `EMPTIED_LINKS_ON_KEPT_TABLES` (a deleted pledge empties the
+  link on the gifts given towards it). Anything else fails.
+- **Deploy order.** Migration 208 must run before an erasure can be started:
+  Execute refuses on a database with no `claimedAt` column and says to run
+  the upgrade.
 
 ### User reminders cron (#439, migration 171)
 
@@ -5470,6 +5558,10 @@ without its export/erasure wiring in the same commit):
    `displayPhone` (a separate pre-existing miss, found while auditing
    this column family) — both now null alongside the three new PII
    columns; `visibilityCoords` resets to `'private'` defensively.
+   **No longer true since 11 October 2026:** that page no longer empties
+   anything. It files an ordinary erasure request, and the catalogue in
+   point 3 is the only route ("Other people's records, and one route to
+   an erasure" above).
 3. **Admin erasure catalogue** (`Portal\Core\GdprEraser::catalogue()`) —
    the final `tblUsers` entry's `nullCols` gained `latitude`/`longitude`/
    `what3words`. `visibilityCoords` is a `NOT NULL` ENUM so it can't go

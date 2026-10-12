@@ -54,7 +54,7 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2026 MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.1.0
+ * @version   1.2.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/479
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/510
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/535
@@ -68,7 +68,7 @@ $eraserFile    = __DIR__ . '/../web/_core/GdprEraser.php';
 $schemaFile    = __DIR__ . '/../web/_sql/full_schema.sql';
 
 // 🔢 How many checks this file makes — EXACTLY. See the end of the file.
-const EXPECTED_CHECKS = 26;
+const EXPECTED_CHECKS = 43;
 
 $failures = 0;
 $passes   = 0;
@@ -404,21 +404,43 @@ check(
 );
 
 // -----------------------------------------------------------------------------
-// 7e. A record the list says to KEEP must have nothing but "keep" instructions.
+// 7e. A record the list says to KEEP must be kept: it has a "keep" instruction,
+//     and nothing may delete it or empty anything on it.
+//
+//     NARROWED on 11 October 2026 (roll-out package A2a, #492), and exactly
+//     this far. This used to demand NOTHING BUT "keep" instructions. A kept
+//     table can also name who HANDLED the record - who typed in a DBS check,
+//     who ran a giving statement - and that person has the same right to be
+//     forgotten as anybody. So one other kind of instruction is allowed on a
+//     kept table: one that empties a single "acted on it" column and nothing
+//     else (no other column, no fixed value, no extra SQL). It cannot touch
+//     the record of the person it is kept about: it only ever matches a row
+//     where THAT column names the erased person, and only empties that
+//     column. Anything wider still fails here.
 // -----------------------------------------------------------------------------
 $keptButChanged = [];
 foreach ($catalogue as $table => $meta) {
     if ((string) ($meta['decision'] ?? '') !== 'retain') {
         continue;
     }
-    $kept = $byTable[(string) $table] ?? [];
-    if ($kept === []) {
-        $keptButChanged[] = (string) $table . ' (no instruction, so the audit trail would not say it was kept)';
-    }
+    $kept  = $byTable[(string) $table] ?? [];
+    $keeps = 0;
     foreach ($kept as $instruction) {
-        if ((string) $instruction['action'] !== 'retain') {
-            $keptButChanged[] = (string) $table . ' (' . (string) $instruction['action'] . ')';
+        if ((string) $instruction['action'] === 'retain') {
+            $keeps++;
+            continue;
         }
+        $onlyDetachesWhoHandledIt = (string) $instruction['action'] === 'anonymise'
+            && in_array((string) $instruction['userCol'], $actorColumns, true) === true
+            && (array) ($instruction['nullCols'] ?? []) === []
+            && (array) ($instruction['overrides'] ?? []) === []
+            && (array) ($instruction['sqlSets'] ?? []) === [];
+        if ($onlyDetachesWhoHandledIt === false) {
+            $keptButChanged[] = (string) $table . '.' . (string) $instruction['userCol'] . ' (' . (string) $instruction['action'] . ')';
+        }
+    }
+    if ($keeps === 0) {
+        $keptButChanged[] = (string) $table . ' (no "keep" instruction, so the audit trail would not say it was kept)';
     }
 }
 check(
@@ -507,6 +529,79 @@ check(
     'the code never deletes a record just because somebody acted on it',
     $actorDeletes === [],
     implode(', ', $actorDeletes)
+);
+
+// GdprEraser::DELETE_ON_ACTOR_COLUMN lets two TABLES be deleted from on a column
+// that says the person acted on the record. It names the table, not the
+// column, and one of those tables now has a second such column: who REVIEWED
+// a child's event registration. A delete on that would destroy a child's
+// record, medical details and all, because of who looked it over. So the one
+// column each of those tables may be deleted on is written out here, exactly.
+$mayOnlyDeleteOn = [
+    'tblEventRegistrations' => 'submittedByUserID', // whoever signed the child up
+    'tblCareAccessLog'      => 'viewerID',          // a line saying this person opened a file
+];
+$wrongDelete = array_diff(array_keys($deliberateDeletes), array_keys($mayOnlyDeleteOn));
+foreach ($instructions as $instruction) {
+    $table = (string) $instruction['table'];
+    if ((string) $instruction['action'] === 'delete' && isset($deliberateDeletes[$table]) === true
+        && (string) $instruction['userCol'] !== ($mayOnlyDeleteOn[$table] ?? '')
+    ) {
+        $wrongDelete[] = $table . ' is deleted on `' . (string) $instruction['userCol'] . '`';
+    }
+}
+check(
+    'where a whole record MAY be deleted because of what somebody did, it is only on the one column decided: a child\'s registration on who submitted it, never on who reviewed it',
+    $wrongDelete === [],
+    implode('; ', $wrongDelete)
+);
+
+// -----------------------------------------------------------------------------
+// 8b. THE #492 SHAPE: A SECOND PERSON COLUMN THAT NOTHING MATCHES ON.
+//
+//     An instruction matches rows on ONE column. For years a table with two
+//     person columns got one instruction, matched on the first, which emptied
+//     the second "only on those rows". A gift somebody else gave and the
+//     erased person RECORDED therefore kept their number; so did 36 other
+//     columns, counted on a real database on 11 October 2026.
+//
+//     Two rules stop it coming back. The real-database test proves the same
+//     thing on rows (its section 4c); these fail without a database.
+// -----------------------------------------------------------------------------
+$noInstructionOfItsOwn = [];
+foreach ($catalogue as $table => $meta) {
+    $table = (string) $table;
+    if ((string) ($meta['decision'] ?? '') === 'not-personal'
+        || isset($dedicatedSteps[$table]) === true || in_array($table, $finalStepTables, true) === true
+    ) {
+        continue;
+    }
+    $matchedOn = array_map(static fn (array $e): string => (string) $e['userCol'], $byTable[$table] ?? []);
+    foreach (array_intersect($linkColumns, (array) ($meta['columns'] ?? [])) as $column) {
+        if (in_array($column, $matchedOn, true) === false) {
+            $noInstructionOfItsOwn[] = $table . '.' . $column;
+        }
+    }
+}
+check(
+    'every person column the written list names has an instruction that matches on THAT column',
+    $noInstructionOfItsOwn === [],
+    implode(', ', $noInstructionOfItsOwn) . ' -- named in the list, and only reached when the same row also matches another column'
+);
+
+$emptiedInPassing = [];
+foreach ($instructions as $instruction) {
+    foreach ((array) ($instruction['nullCols'] ?? []) as $column) {
+        if (in_array((string) $column, $linkColumns, true) === true && (string) $column !== (string) $instruction['userCol']) {
+            $emptiedInPassing[] = (string) $instruction['table'] . ': `' . (string) $column . '` is emptied only on rows matched by `'
+                . (string) $instruction['userCol'] . '`';
+        }
+    }
+}
+check(
+    'no instruction empties a second person column "in passing": each such column has to be matched on in its own right',
+    $emptiedInPassing === [],
+    implode('; ', $emptiedInPassing) . ' -- give that column an instruction of its own'
 );
 
 // -----------------------------------------------------------------------------
@@ -641,6 +736,334 @@ check(
     'every table erased by a dedicated step is erased, in time, and exported',
     $dedicatedFaults === [],
     implode('; ', $dedicatedFaults)
+);
+
+// -----------------------------------------------------------------------------
+// 11. OTHER PEOPLE'S RECORDS ARE NEVER DELETED (roll-out package A2a,
+//     Salem874's decision of 11 October 2026).
+//
+//     Until then, erasing a follow-up worker deleted every visitor, salvation
+//     card, task and rota slot that had been GIVEN to them, and every swap
+//     request aimed at them. The cause was two column names classed as "this
+//     record is about the person". Check 8 could not see it, because check 8
+//     trusts that classing.
+//
+//     Checked twice, like check 8: the classing itself, and then each table
+//     by name, so that putting either back fails here.
+// -----------------------------------------------------------------------------
+$givenTo = ['assignedToID', 'targetUserID'];
+check(
+    'being given a record, or being who a request is aimed at, is classed as "acted on it", so nothing is deleted on it',
+    array_diff($givenTo, $actorColumns) === [],
+    implode(', ', array_diff($givenTo, $actorColumns)) . ' is back among the "about the person" names in GdprEraser::LINK_COLUMNS'
+);
+
+// Table => the only column a whole row may be deleted on ('' = none at all).
+$keepOthersRecords = [
+    'tblVisitor'         => 'convertedUserID', // the erased person's OWN visitor record
+    'tblSalvationCards'  => '',
+    'tblTasks'           => '',
+    'tblRotaSlot'        => '',
+    'tblRotaSwapRequest' => '',
+];
+$deletesOthers = [];
+foreach ($keepOthersRecords as $table => $onlyDeleteOn) {
+    $found = false;
+    foreach ($byTable[$table] ?? [] as $instruction) {
+        $found = true;
+        if ((string) $instruction['action'] === 'delete' && (string) $instruction['userCol'] !== $onlyDeleteOn) {
+            $deletesOthers[] = $table . ' is deleted on `' . (string) $instruction['userCol'] . '`';
+        }
+        if (in_array((string) $instruction['action'], ['delete', 'anonymise'], true) === false) {
+            $deletesOthers[] = $table . '.' . (string) $instruction['userCol'] . ' is "' . (string) $instruction['action'] . '"';
+        }
+    }
+    if ($found === false) {
+        $deletesOthers[] = $table . ' has no instruction at all';
+    }
+}
+check(
+    'a visitor, salvation card, task, rota slot or swap request is never deleted because of who it was given to',
+    $deletesOthers === [],
+    implode('; ', $deletesOthers)
+);
+
+// -----------------------------------------------------------------------------
+// 12. An instruction may carry extra changes as fixed SQL text (`sqlSets`).
+//     That text goes into the statement as it stands, so the list of them is
+//     EXACT: one, the swap-request cancel. Adding another has to be done here
+//     too, on purpose, by somebody who has read it.
+// -----------------------------------------------------------------------------
+$extraChanges = [];
+foreach ($instructions as $instruction) {
+    foreach ((array) ($instruction['sqlSets'] ?? []) as $piece) {
+        $extraChanges[] = (string) $instruction['table'] . '.' . (string) $instruction['userCol'] . ' ('
+            . (string) $instruction['action'] . '): ' . (string) $piece;
+    }
+}
+// Two since 12 October 2026: the same fixed piece, on the same table, once
+// for the person a request was aimed at and once for the person who asked.
+check(
+    'the only extra change any instruction makes is cancelling a swap request that was still waiting',
+    $extraChanges === [
+        "tblRotaSwapRequest.targetUserID (anonymise): `status` = IF(`status` = 'pending', 'cancelled', `status`)",
+        "tblRotaSwapRequest.requestedByID (anonymise): `status` = IF(`status` = 'pending', 'cancelled', `status`)",
+    ],
+    implode(' | ', $extraChanges)
+);
+
+// -----------------------------------------------------------------------------
+// 13. TIME. `tblErasureRequest.claimedAt` says when a run was started, and is
+//     what lets a request whose run was killed be put back. It is a moment in
+//     UTC. Written or compared with the server's own clock (NOW()) it would be
+//     an hour wrong on the two nights a year the clocks change, and on the
+//     spring night that would let a request be put back while still running.
+// -----------------------------------------------------------------------------
+$processFile = __DIR__ . '/../web/_apps/admin/erasure/process.php';
+$process     = is_readable($processFile) === true ? (string) file_get_contents($processFile) : '';
+$clockFaults = [];
+$utcUses     = 0;
+foreach (['GdprEraser.php' => $eraser, 'process.php' => $process] as $name => $source) {
+    preg_match_all('/claimedAt\s*(?:=|<|>|<=|>=)\s*([A-Za-z_]+(?:\([A-Za-z_]*)?)/', $source, $uses);
+    foreach ($uses[1] as $rightHandSide) {
+        if (in_array($rightHandSide, ['UTC_TIMESTAMP(', 'DATE_SUB(UTC_TIMESTAMP', 'NULL'], true) === true) {
+            $utcUses++;
+        } else {
+            $clockFaults[] = $name . ': claimedAt is set or compared with ' . $rightHandSide;
+        }
+    }
+}
+check(
+    'the moment a run was started is only ever written and compared in UTC, never on the server\'s own clock',
+    $clockFaults === [] && $utcUses >= 4,
+    $clockFaults === [] ? 'only ' . $utcUses . ' uses were found; four are expected, so the pattern has stopped matching' : implode('; ', $clockFaults)
+);
+
+// -----------------------------------------------------------------------------
+// 14. ONE ROUTE ONLY (Salem874, 11 October 2026). "Delete my account" used to
+//     empty the account itself, on the spot, with its own short list of
+//     statements: no review, no audit trail, nothing kept that has to be
+//     kept. It now files an ordinary erasure request, and so does "Request
+//     data erasure", through one function.
+// -----------------------------------------------------------------------------
+$deletePage  = (string) @file_get_contents(__DIR__ . '/../web/_apps/auth/account/delete-confirm.php');
+$requestPage = (string) @file_get_contents(__DIR__ . '/../web/_apps/account/erasure-request.php');
+// The code of a page without its comments, so that a comment describing what
+// the page USED to do cannot fail (or satisfy) a check on what it does.
+$codeOnly = static function (string $source): string {
+    $code = '';
+    foreach (token_get_all($source) as $token) {
+        if (is_array($token) === true && in_array($token[0], [T_COMMENT, T_DOC_COMMENT], true) === true) {
+            continue;
+        }
+        $code .= is_array($token) === true ? $token[1] : $token;
+    }
+
+    return $code;
+};
+$deleteCode = $codeOnly($deletePage);
+
+$filers = [];
+$webDir = new RecursiveIteratorIterator(new RecursiveDirectoryIterator(__DIR__ . '/../web', FilesystemIterator::SKIP_DOTS));
+foreach ($webDir as $file) {
+    if ($file->getExtension() === 'php'
+        && preg_match('/INSERT\s+INTO\s+`?tblErasureRequest`?/i', $codeOnly((string) file_get_contents($file->getPathname()))) === 1
+    ) {
+        $filers[] = basename($file->getPathname());
+    }
+}
+check(
+    'there is one way to file an erasure request, and both pages that offer it use it',
+    $filers === ['GdprEraser.php']
+        && str_contains($deleteCode, 'GdprEraser::fileRequest(') === true
+        && str_contains($codeOnly($requestPage), 'GdprEraser::fileRequest(') === true,
+    'files that insert a request: ' . implode(', ', $filers)
+);
+
+$touches = [];
+foreach (['UPDATE ', 'DELETE FROM', 'beginTransaction', 'session_destroy', '$mysqli', 'App::db('] as $sign) {
+    if (stripos($deleteCode, $sign) !== false) {
+        $touches[] = $sign;
+    }
+}
+check(
+    '"Delete my account" files a request and changes nothing itself: no statement of its own, and nobody is signed out',
+    $deleteCode !== '' && $touches === [],
+    $deleteCode === '' ? 'the page could not be read' : 'it contains: ' . implode(', ', $touches)
+);
+
+// What the person is told straight after filing, whichever page they used and
+// whether or not the confirmation email could be sent. Both messages have to
+// say that nothing has been erased: somebody used to the old "Delete my
+// account" page, which emptied the account on the spot and signed them out,
+// must not think that has just happened.
+$told = static fn (bool $mailed, bool $confirmed): array => \Portal\Core\GdprEraser::whatHappensNext(
+    ['requestID' => 7, 'email' => 'a@selftest.invalid', 'mailed' => $mailed, 'confirmed' => $confirmed]
+);
+$toldWhenMailed    = $told(true, false);
+$toldWhenNotMailed = $told(false, false);
+$toldWhenConfirmed = $told(false, true);
+check(
+    'after filing, the person is told what happens next and that nothing has been erased, on all three routes',
+    str_contains($toldWhenMailed['message'], 'nothing has been erased yet') === true
+        && str_contains($toldWhenMailed['message'], 'click the link within 24 hours') === true
+        && str_contains($toldWhenMailed['message'], 'An administrator then reviews it') === true
+        && str_contains($toldWhenNotMailed['message'], 'Nothing has been erased') === true
+        && str_contains($toldWhenNotMailed['message'], 'could not be sent') === true
+        && str_contains($toldWhenNotMailed['message'], 'ask an administrator to confirm it for you') === true
+        && str_contains($toldWhenNotMailed['message'], 'erasure request #7') === true
+        // "Delete my account": confirmed by the typed words, so the message
+        // must NOT send the person looking for an email that was never sent.
+        && str_contains($toldWhenConfirmed['message'], 'nothing has been erased yet') === true
+        && str_contains($toldWhenConfirmed['message'], 'there is no email to wait for') === true
+        && str_contains($toldWhenConfirmed['message'], 'click the link') === false
+        && str_contains($toldWhenConfirmed['message'], 'a@selftest.invalid') === false
+        && $toldWhenMailed['type'] === 'info' && $toldWhenNotMailed['type'] === 'warning' && $toldWhenConfirmed['type'] === 'info',
+    json_encode([$toldWhenMailed, $toldWhenNotMailed, $toldWhenConfirmed])
+);
+
+// Which page may file a request as ALREADY CONFIRMED. Only "Delete my account",
+// where the person has typed the confirming phrase; "Request data erasure" has
+// no phrase and must go through the emailed link. A third caller, or the flag
+// on the wrong page, would let a request reach an administrator's queue that
+// nobody confirmed.
+$filingCalls = [];
+foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator(__DIR__ . '/../web', FilesystemIterator::SKIP_DOTS)) as $file) {
+    if ($file->getExtension() !== 'php') {
+        continue;
+    }
+    preg_match_all('/GdprEraser::fileRequest\(([^;]*)\);/', $codeOnly((string) file_get_contents($file->getPathname())), $calls);
+    foreach ($calls[1] as $arguments) {
+        $filingCalls[] = basename($file->getPathname()) . ': ' . preg_replace('/\s+/', ' ', trim($arguments));
+    }
+}
+sort($filingCalls);
+check(
+    'only "Delete my account", which checks a typed phrase, files a request as already confirmed; "Request data erasure" does not',
+    $filingCalls === ['delete-confirm.php: Site::id(), $userId, true', 'erasure-request.php: $siteId, $userId']
+        && str_contains($deleteCode, "!== 'DELETE MY ACCOUNT'") === true,
+    implode(' | ', $filingCalls)
+);
+
+// An administrator can confirm a waiting request on the person's behalf. The
+// button must carry the form token and a prompt that makes the administrator
+// say they have checked who is asking; the handler must go through the one
+// function that writes the audit line.
+$listPage    = (string) @file_get_contents(__DIR__ . '/../web/_apps/admin/erasure/index.php');
+$confirmForm = preg_match('/<form[^>]*>(?:(?!<\/form>).)*name="action" value="confirm"(?:(?!<\/form>).)*<\/form>/s', $listPage, $form) === 1 ? $form[0] : '';
+check(
+    'the "Confirm on the person\'s behalf" button carries the form token and a prompt about checking identity, and its handler writes the audit line',
+    $confirmForm !== '' && str_contains($confirmForm, 'name="csrf_token"') === true
+        && preg_match('/data-confirm="[^"]*checked, yourself, that the request really comes from them[^"]*"/', $confirmForm) === 1
+        && str_contains($codeOnly($process), 'GdprEraser::confirmOnBehalf($requestId, $siteId, $adminId)') === true
+        && str_contains($codeOnly($process), "Auth::verifyCsrf(\$_POST['csrf_token'] ?? '') === false") === true,
+    $confirmForm === '' ? 'no such form on the list page' : 'the form, the prompt or the handler is not as expected'
+);
+
+// -----------------------------------------------------------------------------
+// 15. Migration 208. Four "who did it" columns have to be emptiable, or the
+//     instruction that empties them does nothing and says "left in place". And
+//     the two pages that list those records must not drop a row whose number
+//     has been emptied.
+// -----------------------------------------------------------------------------
+$schemaText  = (string) file_get_contents($schemaFile);
+$migration   = (string) @file_get_contents(__DIR__ . '/../web/_sql/208_erasure_keeps_others_records.sql');
+// Nine since 12 October 2026: the last five were the columns an erasure could
+// not clear only because the database forbade it (Salem874's decision).
+$mustBeEmptiable = [
+    'tblVisitorContact' => 'contactedByID', 'tblAssetResources' => 'uploadedByID',
+    'tblVenueAgreementFiles' => 'uploadedByID', 'tblCareVisit' => 'visitedByID',
+    'tblAssetLicenseAssignments' => 'linkedByID', 'tblAssetLoans' => 'requestedByID',
+    'tblOffboarding' => 'offboardedByID', 'tblResourceBooking' => 'bookedByID',
+    'tblRotaSwapRequest' => 'requestedByID',
+];
+$stillRequired = [];
+foreach ($mustBeEmptiable as $table => $column) {
+    $definition = preg_match('/CREATE TABLE IF NOT EXISTS\s+`' . $table . '`(.*?)\n\)\s*ENGINE/s', $schemaText, $found) === 1
+        && preg_match('/^\s+`' . $column . '`\s+([^\n]*)$/m', $found[1], $line) === 1 ? $line[1] : '';
+    if ($definition === '' || stripos($definition, 'NOT NULL') !== false || stripos($definition, 'DEFAULT NULL') === false) {
+        $stillRequired[] = $table . '.' . $column . ' in the fresh-install script (' . trim(substr($definition, 0, 40)) . ')';
+    }
+    if (preg_match('/ALTER TABLE `' . $table . '` MODIFY COLUMN `' . $column . '` INT DEFAULT NULL/', $migration) !== 1) {
+        $stillRequired[] = $table . '.' . $column . ' in migration 208';
+    }
+}
+check(
+    'the nine "who did it" columns migration 208 frees may be empty, in the fresh-install script and in the migration',
+    $stillRequired === [],
+    implode('; ', $stillRequired)
+);
+
+$hidesKeptRecords = [];
+foreach ([
+    '_apps/visitors/profile.php'    => 'LEFT JOIN tblUsers u ON u.userID = c.contactedByID',
+    '_apps/care/case.php'           => 'LEFT JOIN tblUsers u ON u.userID = v.visitedByID',
+    // Added 12 October 2026: a room booking whose booker was forgotten, and
+    // an approval on an expense claim whose approver was (page and PDF).
+    '_apps/resources/resource.php'  => 'LEFT JOIN tblUsers u ON u.userID = b.bookedByID',
+    '_apps/resources/approvals.php' => 'LEFT JOIN tblUsers u ON u.userID = b.bookedByID',
+    '_apps/expenses/view/index.php' => 'LEFT JOIN tblUsers U ON U.userID = A.userID',
+    '_core/ExpensePdf.php'          => 'LEFT JOIN tblUsers U ON U.userID = A.userID',
+] as $page => $join) {
+    // The pieces of a statement are joined up first, so that a join split
+    // over two lines of PHP, or with a comment between them, is still read.
+    $joinedUp = (string) preg_replace("/'\s*\.\s*'/", '', $codeOnly((string) @file_get_contents(__DIR__ . '/../web/' . $page)));
+    if (str_contains($joinedUp, $join) === false) {
+        $hidesKeptRecords[] = $page;
+    }
+}
+check(
+    'the pages that list follow-up notes, pastoral visits, room bookings and claim approvals still show one whose author has been forgotten',
+    $hidesKeptRecords === [],
+    implode(', ', $hidesKeptRecords) . ' joins the account table without LEFT, so a kept record with an emptied number drops off the page'
+);
+
+// -----------------------------------------------------------------------------
+// 16. Two things the pages got wrong in use (independent check, 12 October 2026).
+// -----------------------------------------------------------------------------
+// A double-click on "Ask for my account to be deleted" sends the form twice.
+// The first press files the request and uses up the form token, so the second
+// fails the token test - and was answered "Nothing was changed. Please try
+// again." a moment after the request had been filed. The page must look for
+// a request already on its way BEFORE it tests the token.
+$alreadyAt = strpos($deleteCode, 'GdprEraser::openRequestFor(');
+$tokenAt   = strpos($deleteCode, "Auth::verifyCsrf(\$_POST['csrf_token'] ?? '')");
+$filingAt  = strpos($deleteCode, 'GdprEraser::fileRequest(');
+check(
+    '"Delete my account" looks for a request already on its way before it tests the form token, so a second press is told the truth and files nothing',
+    $alreadyAt !== false && $tokenAt !== false && $filingAt !== false && $alreadyAt < $tokenAt && $tokenAt < $filingAt,
+    'order found: already-asked at ' . json_encode($alreadyAt) . ', token test at ' . json_encode($tokenAt) . ', filing at ' . json_encode($filingAt)
+);
+
+// A loan of a kit copies who asked for it onto each item's own loan. That
+// number is emptied when the asker is forgotten (migration 208). Turned into
+// a number, an empty value became account "0", which does not exist, and the
+// database refused the whole loan. Read as text only: nothing here runs it.
+$assetRegister = (string) @file_get_contents(__DIR__ . '/../web/_core/AssetRegister.php');
+check(
+    'copying a loan onto a kit\'s items passes an empty "who asked" on as empty, not as account 0',
+    str_contains($codeOnly($assetRegister), "'requestedByID'        => [\$parentLoan['requestedByID'] !== null ? (int) \$parentLoan['requestedByID'] : null, 'i'],") === true
+        && str_contains($codeOnly($assetRegister), "'requestedByID'        => [(int) \$parentLoan['requestedByID'], 'i'],") === false,
+    'web/_core/AssetRegister.php turns an empty requestedByID into the number 0 again'
+);
+
+// Words that promised or stated more than is true.
+$deleteForm  = (string) @file_get_contents(__DIR__ . '/../web/_apps/auth/account/delete.php');
+$confirmPage = (string) @file_get_contents(__DIR__ . '/../web/_apps/account/erasure-confirm.php');
+$untrueWords = [];
+if (stripos($codeOnly($confirmPage), 'email you once') !== false) {
+    $untrueWords[] = 'erasure-confirm.php promises an email when the erasure is done; none is sent';
+}
+if (stripos($codeOnly($deleteForm), 'because the law requires it') !== false) {
+    $untrueWords[] = 'delete.php states "because the law requires it" as fact, for every country';
+}
+if (stripos($deleteForm, 'you stay signed in') === false) {
+    $untrueWords[] = 'delete.php no longer says the person stays signed in until the request is carried out';
+}
+check(
+    'the pages do not promise an email that is never sent, do not state one country\'s law as fact, and say the person stays signed in',
+    $deleteForm !== '' && $confirmPage !== '' && $untrueWords === [],
+    implode('; ', $untrueWords)
 );
 
 // -----------------------------------------------------------------------------

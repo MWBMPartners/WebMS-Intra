@@ -63,9 +63,13 @@ try {
 
 $visits = [];
 $stmt = $db->prepare(
+    // LEFT JOIN, not JOIN. `visitedByID` is emptied when the person who made
+    // a visit asks to be forgotten (migration 208). With a plain JOIN that
+    // visit, and its notes, dropped off this page altogether: kept in the
+    // database as safeguarding requires, and invisible to the team.
     'SELECT v.visitID, v.visitedAt, v.kind, v.notes, v.followUpAt, '
     . '       u.fullName AS visitorName '
-    . 'FROM tblCareVisit v JOIN tblUsers u ON u.userID = v.visitedByID '
+    . 'FROM tblCareVisit v LEFT JOIN tblUsers u ON u.userID = v.visitedByID '
     . 'WHERE v.caseID = ? ORDER BY v.visitedAt DESC'
 );
 if ($stmt !== false) {
@@ -134,7 +138,7 @@ $csrf = Auth::csrfToken();
                 <div class="border-bottom py-2">
                     <p class="mb-1 small text-muted">
                         <?php echo htmlspecialchars(date('j M Y, H:i', strtotime((string) $v['visitedAt'])), ENT_QUOTES, 'UTF-8'); ?>
-                        &middot; <strong><?php echo htmlspecialchars((string) $v['visitorName'], ENT_QUOTES, 'UTF-8'); ?></strong>
+                        &middot; <strong><?php echo htmlspecialchars((string) ($v['visitorName'] ?? 'Somebody no longer recorded'), ENT_QUOTES, 'UTF-8'); ?></strong>
                         &middot; <?php echo htmlspecialchars((string) $v['kind'], ENT_QUOTES, 'UTF-8'); ?>
                         <?php if ($v['followUpAt'] !== null): ?>
                             &middot; <span class="badge bg-info text-dark">Follow up: <?php echo htmlspecialchars(date('j M', strtotime((string) $v['followUpAt'])), ENT_QUOTES, 'UTF-8'); ?></span>
