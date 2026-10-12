@@ -35,7 +35,23 @@ administrator may see; a line saying when the list was made, since an event can 
 and no title in any log. The owner said yes to adding P9's self-test to `calendar-selftests.yml` (the exact step is in the plan's
 section 6).
 
-**The owner added two faults to the roll-out set (12 October): #587 and #580.** Their plan is being written (H).
+**The owner added two faults to the roll-out set (12 October): #587 and #580. Their plan is written:
+`.claude-work/resume/rollout-H--plan.md`** (two packages that share no file; no workflow change). The owner's answers, final:
+
+1. A withdrawn expense claim is a status of its own, final: the claimant only, only while pending; an approved, paid, rejected or
+   already-withdrawn claim is refused; no undo; the record, receipts and approvals are kept.
+2. It counts in Admin, Reports' "Total claims" and "Total value", as a rejected claim does, with its own bar under "by status".
+3. The migration turns an EMPTY status into Withdrawn (an empty one can only have come from this button on a loosely set server).
+4. A sign-in block ends 15 minutes after the fifth failure; further tries while blocked do not extend it.
+5. A blocked person may still ask for and use a reset link, under a limit of its own (5 requests and 10 uses per address per 15
+   minutes).
+6. **An SMTP mail route IS needed for roll-out** (the portal has only Microsoft 365 and Google; the pages that offer SMTP are not
+   wired to anything). Its plan is being written (S). It must fit with H2, which adds `Mailer::canSend()`.
+
+**When each can start:** H1 (#587; one migration and `full_schema.sql`; Opus) after B2a, B2b and E are committed, and BEFORE F1
+(H1 is a two-line change to the install script; F1 holds that file longest). H2 (#580; `auth/login/index.php`, `Mailer.php`,
+`forgot-password/save.php`, the health page; Opus) after G is committed, and before F4. Neither touches `Auth.php` or `Site.php`.
+Migration numbers are given at build time in commit order: E 210, then H1, then F1, F4, the calendar's part 9, and S if it needs one.
 
 **Package D is committed and pushed as `ce66fc1`** (#488; eight files). It had a full check, a fix round, a narrow check of the
 fix round, and four last small fixes made on proofs in `.claude-work/resume/rollout-D--fix2-evidence/` (run them again with the two
@@ -52,11 +68,11 @@ script loads Babel with no fingerprint) and #576 (small follow-ups).
 
 | Package | What | Where it works | Report |
 | --- | --- | --- | --- |
-| B2a + B2b | access gaps — fix round DONE and B2b built: commits `9cdf50e` (fixes, 19 files) and `b6c1b67` (B2b, 11 files) on `ro-b2a-build`, after `1953360`. A NARROW check of those two commits is running. Bring all three across together | its own checkout `.claude-work/worktrees/b2a` | `rollout-B2a--fix.md`, `rollout-B2a--check2.md` |
-| E | older databases (#553, #555, #554) — fix round DONE: commit `917382c` on `ro-e-build`, after `28ff8f3` (the install script now carries 210's UPDATE and ALTER; the migration test gained five rules). A NARROW check of that commit is running. **Release only together with G** | its own checkout `.claude-work/worktrees/e` | `rollout-E--fix.md`, `rollout-E--check2.md` |
-| G | the backup faults (#577, #578, #579 and more) — its one check came back NOT CLEAN with NOTHING HIGH: data came back exactly, a failed or killed restore left the database identical, the rehearsal always undid itself. Five medium, eight small. ONE FIX ROUND is running (a commit after `daeb31e`); then a NARROW check, because this is the data-loss code | its own checkout `.claude-work/worktrees/g` | `rollout-G--check.md` (the work list), `rollout-G--fix.md` |
-| F6 part 1 | the zip package's build script and guards (#499) — fix round DONE: commit `0089a78` on `ro-f6-build`, after `84c6180` (the guard turned round into an allow list of 17 kinds tied to places; the PDF library compared file by file; a committed self-test, 128 checks). A NARROW check of that commit is running. Corrected `package.yml` is in `rollout-F6--fix-evidence/` | its own checkout `.claude-work/worktrees/f6` | `rollout-F6--fix.md`, `rollout-F6--check2.md` |
-| H (plan only) | the two faults the owner added: #587 expense withdraw, #580 sign-in lockout and reset e-mails | reads the MAIN folder and the b2a checkout; changes nothing | `rollout-H--plan.md` |
+| B2a + B2b | access gaps — the narrow check found NO security gap and no wrong behaviour; LOW only (untrue comment sentences, seven planted faults the tests let through, three shapes the address check misses). A LAST small fix round is running: one more commit after `b6c1b67`. **No further check: commit on its proofs.** Then bring all four commits across as one, with the `DOC-ENTRIES.md` it writes for the whole of B2a and B2b | its own checkout `.claude-work/worktrees/b2a` | `rollout-B2a--check2.md`, `rollout-B2a--fix2.md` |
+| E | older databases (#553, #555, #554) — the narrow check found three MEDIUM (with the events table missing the install script emptied every session's pointer, silently; the test passed when the install script's own guard was broken; the data check passed an UPDATE that also soft-deleted sessions). SECOND fix round running: one more commit after `917382c`. **No further check: commit on its proofs**, after reading the install script's block myself. Release only together with G | its own checkout `.claude-work/worktrees/e` | `rollout-E--check2.md`, `rollout-E--fix2.md` |
+| G | the backup faults (#577, #578, #579 and more) — fix round DONE: commit `23b5440` on `ro-g-build`, after `daeb31e` (11 files). A NARROW check of that commit is running, because the fix changed how every restore talks to the database (it replaces the session's strictness setting and treats any warning as a failure). Corrected notes to place are in `rollout-G--fix-evidence/` | its own checkout `.claude-work/worktrees/g` | `rollout-G--fix.md`, `rollout-G--check2.md` |
+| F6 part 1 | the zip package's guards (#499) — the narrow check found two HIGH (a secret inside an `.svg`, `.gif` or `.woff2`, or after a picture's first bytes, still shipped, because the secrets search skips those kinds; PHP could reach the web folder under a double ending or through a planted `.htaccess`). SECOND fix round running: one more commit after `0089a78`. **No further check for part 1**: nothing can be published until part 2 (the guide, after F5), and part 2's check looks at the whole guard again | its own checkout `.claude-work/worktrees/f6` | `rollout-F6--check2.md`, `rollout-F6--fix2.md` |
+| S (plan only) | a plain SMTP mail route, which the owner decided is needed for roll-out | reads the MAIN folder; changes nothing | `rollout-S--plan.md` |
 
 B2a and E each make ONE commit on their own branch and do not push. Bring each across with `git cherry-pick <hash>` onto
 `claude/alpha-wip` after its one check, then remove the checkout (`git worktree remove`) and delete its branch. B2b (plan item 10, the
