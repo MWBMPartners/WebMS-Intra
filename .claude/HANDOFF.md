@@ -144,6 +144,20 @@ organisation's years; a country PER ORGANISATION (`giving.retention.countryCode`
 cleared before "confirmed" or while on hold; statement files kept with the evidence; the page Admin → Giving records
 (`/admin/settings/giving-records`); research copied to `docs/research/giving-retention/`. 54 + 53 + 188 + 48 checks on 8.0.36 and
 8.4.11; 71 faults caught. The builder left the plan in twelve places (its report) — the checker judges them.
+**A2b's ONE CHECK (12 Oct ~04:15): NOT CLEAN — one MEDIUM, three LOW** (end of `.claude-work/resume/rollout-A2b--check.md`; proofs
+`scenario2.php`, `scenario3.php` in its evidence). Held: nothing cleared early on any not-confirmed, hold, date, year-end, zone or
+other-organisation path (21 donors, 12 organisations; 997 instants in 15 zones); no name kept without a reason; the words never state
+a law as fact; data file sound; migration 209 right. **F1 MEDIUM:** a kept row made by a run that did NOT finish is never brought up
+to date and the clearing guard never checks the account was emptied — a gift recorded between a stopped run and its re-run is
+cleared a year early; and if the stopped request is cancelled, a LIVE member is treated as an erased donor (`isErasedDonor()` true)
+and the sweep took the donor off a five-day-old gift. F2 an untrue privacy-page sentence; F3 no test for "country change un-ticks
+confirmed"; F4 a changelog sentence.
+**NOW: A2b FIX ROUND (same Opus builder)** — F1-F4, plus: keep a self-downloaded statement when every gift on it is kept; lock the
+seven settings out of the general `/settings` editor; show the installation-wide and the organisation's hold separately; an open
+count's envelope keeps its giver for a kept donor; Uruguay's flag; a test for the "no request left" guard. Watchdog on
+`.claude-work/resume/rollout-A2b--build.md`. **THEN a NARROW independent check of the F1 fix only** (tax evidence cleared early
+cannot be undone — a check sized to that risk; everything else goes in on the builder's proofs) → commit → B2.
+
 **SEEN ON THE LIVE ADDRESS (12 Oct ~03:40, read-only curl): the example customer's live address answers EVERY path with the
 installer's "Install — Welcome" page** — so that installation is NOT installed (which answers "fresh install or upgrade?": fresh),
 and the install wizard is open to anybody who visits. Told the owner. Nothing was sent to the server.
