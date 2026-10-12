@@ -31,6 +31,7 @@ script loads Babel with no fingerprint) and #576 (small follow-ups).
 | D | recovery runbook and backup documents (#488) — build | MAIN folder (documents and one new check script) | `rollout-D--build.md` |
 | B2a | access gaps, plan items 1-9, 11, 12 — build | its own checkout `.claude-work/worktrees/b2a`, branch `ro-b2a-build` | `rollout-B2a--build.md` |
 | E | older databases that stop part-way through upgrading (#553, #555, #554) — build | its own checkout `.claude-work/worktrees/e`, branch `ro-e-build` | `rollout-E--build.md` |
+| F (plan only) | the next block: several organisations in one installation (#502, all three ways), no built-in address (#500), the zip package (#499), and how much of the link sweep (#536) and #515 belongs with them | reads the MAIN folder; changes nothing | `rollout-F--plan.md` |
 
 B2a and E each make ONE commit on their own branch and do not push. Bring each across with `git cherry-pick <hash>` onto
 `claude/alpha-wip` after its one check, then remove the checkout (`git worktree remove`) and delete its branch. B2b (plan item 10, the
