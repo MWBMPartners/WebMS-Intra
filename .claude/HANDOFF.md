@@ -19,6 +19,28 @@ package by ITS OWN file list — never from `git status`, which now mixes packag
 
 ## WHERE THINGS ARE, 12 OCTOBER 2026, 06:47 — package C committed; three jobs running; two owner answers; one trap
 
+**Packages E and G are committed and pushed: `49b8169` (E; #553, #554, #555; migration 210) and `73843b6` (G; #577, #578,
+#579; no database change; the runbook and off-site guide corrected in the same commit).** Each had two check rounds and a last
+fix round committed on its builder's proofs. On the merged branch I ran: the whole migration test on MySQL 8.0.36 (all phases
+passed), the backup's class-level self-test (23 proofs, 324 checks) and its page self-test (109 checks), every audit check and
+the package guard. Evidence: `.claude-work/resume/rollout-E--merge-evidence/` and `rollout-G--merge-evidence/`. The checkouts
+`worktrees/e` and `worktrees/g` and their branches can be removed.
+
+- **After this work reaches `main`, the first run of the migration test fails in phase 5, ON PURPOSE**: one named exception
+  (the minimum password length is 8 on a database built from today's `main`, 12 on a fresh install) stops being true. Delete
+  that line from `KNOWN_P5_VALUE_DIFFERENCES` in `tools/e2e-migrations/run.sh` then, in its own commit, not before. Written in
+  `DEV_NOTES.md` too. Say it in the pull request.
+- **Workflow pieces now waiting to be placed (all approved by the owner):** E's `rollout-E--fix2-evidence/PROPOSED-workflow-changes.diff`
+  (#556 and the test's new wording); G's `rollout-G--fix2-evidence/proposed-backup-selftest.yml` and
+  `proposed-pr-security.patch`; the three report-only blocks of W3 plus one for `check_docs_table_refs.py`; the new self-tests
+  of W4; the calendar's part 9 step; the mail self-tests. Place them as ONE change, apply each patch with `git apply --check`
+  first, and run `actionlint`. `deploy.yml` and `package.yml` wait for the owner to see their difference tables.
+- **So now:** H1 (#587) is building; F1 follows H1 (both change `full_schema.sql`; H1 took migration 211, so F1 takes 212 and
+  F4 213). H2 (#580) is building. K (strict mode) and M1 (mail library) are building. M2 follows H2.
+- Issues opened today from the builders' and checkers' "Found" lists: #575, #576, #577 to #591, #592 (mail, the tracking
+  issue for M1 to M6), #593 (strict mode, package K), #594 (installer and install-script gaps; for F5), #595 (backup
+  follow-ups; the lasting fix is recording column types in a snapshot), #596 (ten smaller findings).
+
 **F6 part 1 is committed and pushed as `bd1bfab`** (#499; nine files under `tools/` plus the documents). Two check rounds; the
 second fix round was committed on its builder's proofs with no third check, because nothing can be published until part 2. On the
 merged branch the tree check passes (all 1,201 files may be packaged). **For every package still to come:** adding or changing ANY
@@ -122,8 +144,8 @@ script loads Babel with no fingerprint) and #576 (small follow-ups).
 
 | Package | What | Where it works | Report |
 | --- | --- | --- | --- |
-| E | older databases (#553, #555, #554) — the narrow check found three MEDIUM (with the events table missing the install script emptied every session's pointer, silently; the test passed when the install script's own guard was broken; the data check passed an UPDATE that also soft-deleted sessions). SECOND fix round running: one more commit after `917382c`. **No further check: commit on its proofs**, after reading the install script's block myself. Release only together with G | its own checkout `.claude-work/worktrees/e` | `rollout-E--check2.md`, `rollout-E--fix2.md` |
-| G | the backup faults (#577, #578, #579 and more) — the narrow check found NOTHING HIGH and no way to lose data on a normally set up server; two medium and six small points. The LAST fix round is running: one more commit after `23b5440`. **No further check: commit on its proofs**, after running both self-tests myself on the merged branch. Use the notes in `rollout-G--fix2-evidence/` (they replace the earlier ones). **Commit E and G together or G first** | its own checkout `.claude-work/worktrees/g` | `rollout-G--check2.md` (the work list), `rollout-G--fix2.md` |
+| H1 | expense withdraw (#587): migration 211 and `full_schema.sql`, the places that read a claim's status, tests that read the stored status back. ONE check when built | its own checkout `.claude-work/worktrees/h1`, branch `ro-h1-build` | `rollout-H1--build.md` |
+| H2 | sign-in lockout and "Forgot password" (#580): one failure row per wrong password, the block fixed at the fifth, reset with its own limit, new `Mailer::canSend()`. No database change. ONE check when built | its own checkout `.claude-work/worktrees/h2`, branch `ro-h2-build` | `rollout-H2--build.md` |
 | M1 | the mail library's core and its own SMTP route (new files only: `web/_core/maillib/`, namespace `MWBM\Mail`, tests and README in `tools/maillib/`); nothing in the portal calls it yet | its own checkout `.claude-work/worktrees/m1`, branch `ro-m1-build` | `rollout-M1--build.md` |
 | K | the portal makes its own database connection strict (owner, 12 October: yes, as a small package of its own). It changes `web/_core/bootstrap.php` and the installer's two connections, adds `tools/db-strict-mode-selftest.php`, and gets ONE check. It must be committed before F1 and F3 take `bootstrap.php`, and before F5 takes the installer | its own checkout `.claude-work/worktrees/k`, branch `ro-k-build` | `rollout-K--build.md` |
 
