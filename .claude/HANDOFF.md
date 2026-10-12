@@ -121,7 +121,21 @@ a request stuck at "processing" can be put back (15 minutes, `claimedAt` in UTC)
 — a migration); `tblInvitation.acceptedByID` (the row holds the invited person's own email address — delete an accepted invitation
 with its person?). **For the owner's safeguarding lead:** who made a pastoral visit, and who recorded a DBS check, are now cleared.
 Builder's other Found items: its report, list items 2, 4, 6-13, 16, 17.
-**A2a's ONE CHECK (12 Oct ~01:15): NOT CLEAN on three small points, no data loss** (end of `.claude-work/resume/rollout-A2a--check.md`):
+**PACKAGE A2a IS COMMITTED: `f58fdd2` (12 Oct ~02:10), pushed; issue #574 opened for it (and for A2b).** 26 files; migration 208
+(nine "who did it" columns emptiable; `tblErasureRequest.claimedAt`); 132 + 43 + 38 checks on 8.0.36 and 8.4.11; migration test on
+both; upgrade from `6223e2e` equals a fresh install; 115 faults caught. No second check (owner's instruction).
+**NOT BUILT, moved to package B2:** ending an erased person's open session — the portal keeps sessions as PHP's own files, and
+`Auth::check()` (`web/_core/Auth.php:556`) asks only whether the session holds an account number; it must also confirm
+`tblUsers.isActive = 1` once per request and destroy the session when not. **Also for B2:** the erasure pages write bare addresses
+(`/admin/erasure-requests/...`, `/account/...`) instead of `Site::url()`, so in first-part-of-the-address mode their buttons reach
+the default organisation (read, not run; #536's family). **Decisions still open:** `tblWorkflowSteps.assigneeValue` (an approval
+step given to one named person — what should it become when they are erased?); the safeguarding names (cleared as built).
+**NOW: PACKAGE A2b BUILD** (giving records, country-neutral; fresh Opus builder; brief `.claude-work/briefs/rollout-A2-decisions.md`
+sections 3 and 5 + the plan's section 2; migration 209; the four research files merged into a JSON data file with a schema and copied
+to `docs/research/giving-retention/`; report `.claude-work/resume/rollout-A2b--build.md`; watchdog). Then ONE check → commit → B2 → C
+→ D → E → #499/#500/#502 → #514 parts 9-11 → the workflow edit → documentation sweep → Codex pass.
+
+**(history)** A2a's ONE CHECK (12 Oct ~01:15): NOT CLEAN on three small points, no data loss (end of `.claude-work/resume/rollout-A2a--check.md`):
 its own erasure on linked data deleted eight rows, all the person's own (the old code lost 18, most of them other people's); 34 of 34
 page attacks refused; migration 208 right. Findings: three unlinked "who did it" columns never reached (`tblEvents.submittedByID`,
 `tblErrors.resolvedByID`, `tblMigrations.executedByID`) with four untrue sentences; the emptied account checked against 15 named
