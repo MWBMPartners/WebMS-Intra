@@ -50,9 +50,21 @@ summary and its section 4.1, "what runs beside what"). The short of it:
 - The planner ran it: session mode puts everybody on organisation 1 (#502 is real); in the two address ways a member of one
   organisation could open another's dashboard (#511); the installer has no proof of ownership; the bare addresses number about
   2,000 in 495 files, not 905.
-- **Eight decisions are with the owner** (the plan's section 8), asked on 12 October at about 07:15. Until answered, builders follow
-  the plan's recommendation. **No file under `.github/workflows/` is created, changed or deleted without the owner's yes**: F6 and
-  F7 write their proposed workflow text into their evidence folders only.
+- **The owner answered the plan's decisions on 12 October at about 07:20 (final; do not reopen):**
+  1. **One way per installation**, chosen on a set-up page and changeable later; all three ways built and proved. Not mixed.
+  2. **The members-only gate (F2, #511's main hole) is IN this block, and strict**: a signed-in person who is not a member sees the
+     refusal page on every address of that organisation, public pages included.
+  3. **The staff web folder is `admin_html`** in the zip package and on the server (the repository folder keeps its name).
+  4. **The four workflow changes W1 to W4 (the plan's section 5) are APPROVED OUTRIGHT**: replace `deploy.yml`; new `package.yml`
+     and delete `release.yml`; three report-only blocks in `pr-security.yml`; the new self-tests in the test workflow. The owner
+     chose this over "read the two big files first". Place each only as the plan describes it, only after its package has passed
+     its check, and `deploy.yml` not before F3 is committed (it reads a field F3 adds). Change nothing else in any workflow file,
+     and no `continue-on-error`. Placing a file is not running it: the first real deploy is a dry run the owner starts.
+  5. **The app-folder link sweep (F9) finishes before roll-out, but last.** Until then the set-up page marks "first part of the
+     address" as not ready and refuses it.
+  6. **Session mode and signed-out visitors: accepted.** They see the default organisation's sign-in and public pages; the set-up
+     page and the help say so. Two organisations that both need public pages use one of the address ways.
+  Still with the owner, not a decision: the live address shows the installer to anyone until it is restricted in the hosting panel.
 
 **Trap, learned the hard way today:** the Agent tool's own "separate checkout" option (`isolation: worktree`) cuts the checkout from
 `main`, which is about 400 commits behind the working branch, and refuses writes to the main folder. A builder started that way found
